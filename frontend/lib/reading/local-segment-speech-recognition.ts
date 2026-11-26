@@ -112,7 +112,10 @@ const INTERIM_STEP_MS = 440;
 const PAUSE_INTERIM_SILENCE_MS = 100;
 const MIN_NEW_VOICED_INTERIM_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.08);
 const WS_PCM_CHUNK_SAMPLES = 1024; // 64ms @ 16kHz mono Int16 LE (2048 bytes)
-const WS_FLUSH_FALLBACK_TIMEOUT_MS = 3_500;
+const WS_FLUSH_FALLBACK_TIMEOUT_MS = 5_500;
+const INTERIM_HTTP_TIMEOUT_MS = 6_500;
+const ANDROID_STT_RESTART_DELAY_MS = 120;
+const ANDROID_STT_BUSY_RESTART_DELAY_MS = 350;
 const PRE_ROLL_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.45);
 const QUIET_TAIL_CARRY_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.35);
 const MAX_FLUSH_TRAILING_SILENCE_SAMPLES = Math.floor(
@@ -425,21 +428,31 @@ function isImmediateLocalOutageError(error: unknown): boolean {
   return combined.includes("máy chủ giọng nói cục bộ chưa được bật");
 }
 
+function isAndroidNativeSttReady(): boolean {
+  if (!isAndroidNativeSpeechAvailable()) return false;
+  const caps = getCachedAndroidSpeechCapabilities();
+  return caps ? caps.sttAvailable : true;
+}
+
 /**
  * Returns `true` when Android native `SpeechRecognizer` should handle STT
  * exclusively (skipping parallel WebView `getUserMedia`/`MediaRecorder` to
  * avoid Android audio HAL microphone contention).
  */
 export function shouldPreferAndroidNativeStt(): boolean {
-  if (!isAndroidNativeSpeechAvailable()) return false;
-  const caps = getCachedAndroidSpeechCapabilities();
-  if (caps && !caps.sttAvailable) return false;
+  if (!isAndroidNativeSttReady()) return false;
+  const policy = getVoicePolicyPreferences();
   const freshHealth = getFreshVoiceEngineHealth();
   if (freshHealth) {
     if (freshHealth.local.available && freshHealth.local.stt_ready) {
       return false;
     }
-    if (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown) {
+    if (
+      policy.providerMode === "local_only" ||
+      !policy.allowGoogleSttFallback ||
+      !freshHealth.google.stt_configured ||
+      freshHealth.google.stt_cooldown
+    ) {
       return true;
     }
   }
@@ -609,6 +622,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private pendingUploads: Set<Promise<void>> = new Set();
   private uploadChain: Promise<void> = Promise.resolve();
   private browserFallbackRec: SegmentSpeechRecognitionLike | null = null;
+  private browserRestartTimer: ReturnType<typeof setTimeout> | null = null;
   private usingBrowserFallback = false;
   private usingWasmStt = false;
   private wasmFallbackReason: string | null = null;
@@ -687,6 +701,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         freshHealth !== null &&
         (!freshHealth.local.available || !freshHealth.local.stt_ready);
       const now = Date.now();
+      const androidSttReady = isAndroidNativeSttReady();
+      const confirmedLocalDownNoGoogle =
+        confirmedLocalDown &&
+        (policy.providerMode === "local_only" ||
+          !policy.allowGoogleSttFallback ||
+          !freshHealth.google.stt_configured ||
+          freshHealth.google.stt_cooldown);
+      const withinEmergencyCooldown =
+        lastLocalSttOutageAt > 0 &&
+        now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
+        (getVoiceEngineStatus().stt.tier === "browser_default" ||
+          getVoiceEngineStatus().stt.tier === "android_native");
       const withinWasmCooldown =
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
@@ -695,6 +721,19 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           getVoiceEngineStatus().stt.tier === "android_native");
 
       if (
+        androidSttReady &&
+        (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
+      ) {
+        if (confirmedLocalDownNoGoogle) {
+          lastLocalSttOutageAt = now;
+        }
+        if (this.tryActivateBrowserFallback()) {
+          return;
+        }
+      }
+
+      if (
+        !androidSttReady &&
         (confirmedLocalDown || withinWasmCooldown) &&
         detectBrowserWasmSttSupport().supported
       ) {
@@ -715,20 +754,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           .init(this.abortController.signal)
           .catch(() => undefined);
       } else if (
-        isAndroidNativeSpeechAvailable() ||
-        (policy.providerMode === "local_with_google_fallback" &&
-          policy.allowGoogleSttFallback)
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback
       ) {
-        const confirmedLocalDownNoGoogle =
-          confirmedLocalDown &&
-          (!freshHealth.google.stt_configured ||
-            freshHealth.google.stt_cooldown);
-        const withinEmergencyCooldown =
-          lastLocalSttOutageAt > 0 &&
-          now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
-          (getVoiceEngineStatus().stt.tier === "browser_default" ||
-            getVoiceEngineStatus().stt.tier === "android_native");
-
         if (confirmedLocalDownNoGoogle || withinEmergencyCooldown) {
           if (confirmedLocalDownNoGoogle) {
             lastLocalSttOutageAt = now;
@@ -754,12 +782,29 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     void this.openAudioGraph(audioTrack);
   }
 
+  private clearBrowserRestartTimer(): void {
+    if (this.browserRestartTimer !== null) {
+      clearTimeout(this.browserRestartTimer);
+      this.browserRestartTimer = null;
+    }
+  }
+
   stop(): void {
     if (!this.active || this.stopping) return;
     this.stopping = true;
+    const hadPendingRestart = this.browserRestartTimer !== null;
+    this.clearBrowserRestartTimer();
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     if (this.usingBrowserFallback && this.browserFallbackRec) {
+      if (hadPendingRestart) {
+        this.browserFallbackRec = null;
+        this.usingBrowserFallback = false;
+        this.active = false;
+        this.stopping = false;
+        this.onend?.();
+        return;
+      }
       try {
         this.browserFallbackRec.stop();
       } catch {
@@ -802,6 +847,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.epoch += 1;
     this.active = false;
     this.stopping = false;
+    this.clearBrowserRestartTimer();
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     this.abortController?.abort();
@@ -845,6 +891,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.sttCircuitOpen = true;
     this.active = false;
     this.stopping = false;
+    this.clearBrowserRestartTimer();
     this.abortController?.abort();
     this.closeSttWebSocket();
     const fallbackRec = this.browserFallbackRec;
@@ -884,6 +931,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
     ) {
       lastLocalSttOutageAt = Date.now();
+      if (isAndroidNativeSttReady() && this.tryActivateBrowserFallback()) {
+        return true;
+      }
       if (detectBrowserWasmSttSupport().supported) {
         this.usingWasmStt = true;
         this.wsDisabledForRun = true;
@@ -958,7 +1008,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       : this.maxAlternatives;
     this.browserFallbackRec = nativeRec;
     this.browserBaseOffset = this.resultsHistory.length;
+    this.clearBrowserRestartTimer();
     let fatalFallbackError = false;
+    let lastFallbackError: string | null = null;
 
     nativeRec.onresult = (ev: SegmentSpeechEvent) => {
       if (!this.active || this.browserFallbackRec !== nativeRec) return;
@@ -1009,6 +1061,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       ) {
         return;
       }
+      lastFallbackError = ev.error ?? null;
       if (
         ev.error === "not-allowed" ||
         ev.error === "service-not-allowed" ||
@@ -1030,7 +1083,38 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         this.continuous &&
         !fatalFallbackError
       ) {
+        if (useAndroidNative) {
+          const restartDelayMs =
+            lastFallbackError === "aborted"
+              ? ANDROID_STT_BUSY_RESTART_DELAY_MS
+              : ANDROID_STT_RESTART_DELAY_MS;
+          lastFallbackError = null;
+          this.clearBrowserRestartTimer();
+          this.browserRestartTimer = setTimeout(() => {
+            this.browserRestartTimer = null;
+            if (
+              !this.active ||
+              this.stopping ||
+              this.browserFallbackRec !== nativeRec ||
+              fatalFallbackError
+            ) {
+              return;
+            }
+            try {
+              this.browserBaseOffset = this.resultsHistory.length;
+              nativeRec.start();
+            } catch {
+              this.browserFallbackRec = null;
+              this.usingBrowserFallback = false;
+              this.active = false;
+              this.stopping = false;
+              this.onend?.();
+            }
+          }, restartDelayMs);
+          return;
+        }
         try {
+          lastFallbackError = null;
           this.browserBaseOffset = this.resultsHistory.length;
           nativeRec.start();
           return;
@@ -1038,6 +1122,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           // Fall through to clean termination
         }
       }
+      this.clearBrowserRestartTimer();
       this.browserFallbackRec = null;
       this.usingBrowserFallback = false;
       this.active = false;
@@ -1792,6 +1877,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.wsReady &&
       !this.wsDisabledForRun,
     );
+    const wsConnecting = Boolean(
+      this.ws &&
+      this.ws.readyState === WebSocket.CONNECTING &&
+      !this.wsDisabledForRun,
+    );
     const canDispatchHttpInterim = !this.interimInFlight;
     const deltaSamples = this.speechSamples - this.lastInterimSpeechSamples;
     const newVoicedSamples = this.voicedSamples - this.lastInterimVoicedSamples;
@@ -1817,6 +1907,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.flushCurrentSegment(true);
     } else if (
       !wsStreamingActive &&
+      !wsConnecting &&
       this.interimResults &&
       canDispatchHttpInterim &&
       (isPauseBoundaryInterim || isRegularInterimStep)
@@ -1906,7 +1997,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           turnId: interimTurnId,
           source: "local_live_interim",
           signal: interimCtrl.signal,
-          timeoutMs: 3_500,
+          timeoutMs: INTERIM_HTTP_TIMEOUT_MS,
         });
 
     void interimPromise
@@ -2238,10 +2329,31 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         deliverFinalText(text);
       })
       .catch((err) => {
-        if (
-          isTechnicalSttUnavailabilityError(err) &&
-          !this.usingBrowserFallback
-        ) {
+        if (signal?.aborted || this.usingBrowserFallback) return;
+        if (this.usingWasmStt) {
+          this.usingWasmStt = false;
+          if (this.tryActivateBrowserFallback()) {
+            return;
+          }
+          this.active = false;
+          this.stopping = false;
+          this.closeSttWebSocket();
+          this.teardownAudioGraph();
+          this.onerror?.({ error: "stt-unavailable" });
+          this.onend?.();
+          return;
+        }
+        if (isTechnicalSttUnavailabilityError(err)) {
+          // Both attempts in transcribeWithRetry already failed for this segment;
+          // force failover evaluation when an emergency fallback (e.g. Android Native STT)
+          // is available so a mixed attempt-1/attempt-2 failure still fails over cleanly.
+          if (
+            this.recordTechnicalFailureAndMaybeFallback(
+              this.canActivateBrowserFallback() ? true : err,
+            )
+          ) {
+            return;
+          }
           if (
             !this.canActivateBrowserFallback() &&
             !detectBrowserWasmSttSupport().supported
@@ -2249,9 +2361,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             this.tripServiceCircuitBreaker();
           } else {
             this.active = false;
+            this.stopping = false;
             this.closeSttWebSocket();
             this.teardownAudioGraph();
             this.onerror?.({ error: "stt-unavailable" });
+            this.onend?.();
           }
         }
       })

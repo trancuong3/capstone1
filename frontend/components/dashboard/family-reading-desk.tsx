@@ -97,15 +97,18 @@ export function FamilyReadingDesk({
       className="family-reading-desk order-2 md:order-1"
       aria-labelledby="desk-title"
     >
-      <div className="desk-copy">
-        <div className="desk-label">
-          <BookOpen aria-hidden="true" size={17} />
+      <div className="desk-copy max-md:p-3.5!">
+        <div className="desk-label max-md:text-xs!">
+          <BookOpen aria-hidden="true" size={16} />
           {recent?.resumable ? "Tiếp tục đọc" : "Tủ sách gia đình"}
         </div>
-        <h2 id="desk-title">
+        <h2
+          id="desk-title"
+          className="max-md:my-1.5! max-md:text-xl!"
+        >
           {recent?.resumable ? recent.title : "Hôm nay bé đọc gì?"}
         </h2>
-        <p>
+        <p className="max-md:text-sm!">
           {recent?.resumable
             ? `Cùng ${child?.alias} tiếp tục buổi đọc còn dở.`
             : child
@@ -116,21 +119,21 @@ export function FamilyReadingDesk({
                   ? "Chọn hồ sơ của bé để mở tủ sách riêng."
                   : "Tạo hồ sơ cho bé để mở cuốn sách đầu tiên."}
         </p>
-        <div className="desk-actions">
+        <div className="desk-actions max-md:mt-3!">
           {recent?.resumable ? (
-            <ButtonLink href={recent.href} className="desk-primary">
+            <ButtonLink href={recent.href} className="desk-primary min-h-11">
               Đọc tiếp <ArrowRight aria-hidden="true" size={18} />
             </ButtonLink>
           ) : hasProfiles || isLoadingProfiles ? (
             <Button
               onClick={onChooseBook}
-              className="desk-primary"
+              className="desk-primary min-h-11"
               disabled={isLoadingProfiles && !child}
             >
               Chọn sách <ArrowRight aria-hidden="true" size={18} />
             </Button>
           ) : (
-            <ButtonLink href="/children/new" className="desk-primary">
+            <ButtonLink href="/children/new" className="desk-primary min-h-11">
               Tạo hồ sơ đầu tiên <ArrowRight aria-hidden="true" size={18} />
             </ButtonLink>
           )}
@@ -145,12 +148,15 @@ export function FamilyReadingDesk({
           ) : null}
         </div>
         {recent && !recent.resumable ? (
-          <Link className="desk-recent" href={recent.href}>
+          <Link
+            className="desk-recent inline-flex! min-h-11 items-center max-md:mt-1.5!"
+            href={recent.href}
+          >
             Lần đọc gần nhất · {recent.title}
           </Link>
         ) : null}
       </div>
-      <div className="desk-illustration">
+      <div className="desk-illustration max-md:min-h-[84px]! max-md:max-h-[92px]!">
         <Image
           alt=""
           src="/images/reading-studio.webp"

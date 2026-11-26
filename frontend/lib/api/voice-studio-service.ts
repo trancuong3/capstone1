@@ -281,18 +281,24 @@ export function createVoiceStudioService(): VoiceStudioService {
       if (!parsed.success || parsed.data.words.length !== words.length) {
         throw failure(502);
       }
+      const durationLimit = parsed.data.duration_seconds + 0.15;
       let previousEnd = 0;
       for (const [index, word] of parsed.data.words.entries()) {
         if (
           word.index !== index ||
           word.start < previousEnd ||
           word.end < word.start ||
-          word.end > parsed.data.duration_seconds
+          word.end > durationLimit
         ) {
           throw failure(502);
         }
         previousEnd = word.end;
       }
+      const normalizedWords: WordTiming[] = parsed.data.words.map((word) => ({
+        index: word.index,
+        start: Math.min(word.start, parsed.data.duration_seconds),
+        end: Math.min(word.end, parsed.data.duration_seconds),
+      }));
       let audio: Blob;
       try {
         audio = base64ToBlob(
@@ -320,7 +326,7 @@ export function createVoiceStudioService(): VoiceStudioService {
       return {
         audio,
         durationSeconds: parsed.data.duration_seconds,
-        words: parsed.data.words,
+        words: normalizedWords,
         provider: parsed.data.provider ?? "local",
         resolvedVoiceId: parsed.data.resolved_voice_id ?? null,
         region: parsed.data.region ?? null,

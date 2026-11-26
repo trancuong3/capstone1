@@ -9,6 +9,7 @@ interface BookChildHeaderProps {
   backHref?: string;
   child: ChildProfileDTO | null;
   fullBleedDesktop?: boolean;
+  hideOnMobile?: boolean;
   mobileLabel?: string;
 }
 
@@ -16,6 +17,7 @@ export function BookChildHeader({
   backHref = "/dashboard",
   child,
   fullBleedDesktop = false,
+  hideOnMobile = false,
   mobileLabel,
 }: BookChildHeaderProps) {
   const contextLabel = mobileLabel ?? "Chọn sách cho bé";
@@ -23,7 +25,8 @@ export function BookChildHeader({
   return (
     <header
       className={cn(
-        "catalog-header flex min-h-16 w-full items-center justify-between gap-2 rounded-card bg-white p-3 sm:min-h-24 sm:gap-8 sm:px-8",
+        "catalog-header min-h-16 w-full items-center justify-between gap-2 rounded-card bg-white p-3 sm:min-h-24 sm:gap-8 sm:px-8",
+        hideOnMobile ? "hidden xl:flex" : "flex",
         fullBleedDesktop && "sm:-mx-8 sm:-mt-8 sm:px-10",
       )}
     >

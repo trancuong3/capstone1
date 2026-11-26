@@ -512,7 +512,7 @@ def open_local_stt_ws(url: str, headers: dict[str, str]):
     return websockets.connect(
         url,
         additional_headers=headers or None,
-        open_timeout=3.0,
+        open_timeout=6.0,
         ping_interval=20.0,
         ping_timeout=20.0,
         close_timeout=2.0,

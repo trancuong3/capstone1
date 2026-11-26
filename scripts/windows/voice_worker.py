@@ -149,6 +149,8 @@ QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_QUEUE_WAIT_SECONDS", "25
 STT_QUEUE_WAIT_SECONDS = float(os.environ.get("VIREAD_VOICE_STT_QUEUE_WAIT_SECONDS", "15.0"))
 TTS_MEM_CACHE_MAX_ENTRIES = 128
 _TTS_MEM_CACHE: OrderedDict[str, tuple[bytes, float]] = OrderedDict()
+TTS_TIMED_MEM_CACHE_MAX_ENTRIES = 64
+_TTS_TIMED_MEM_CACHE: OrderedDict[str, dict[str, Any]] = OrderedDict()
 # Precompute 80Hz high-pass SOS filter once instead of solving filter design per STT call.
 _HIGHPASS_80HZ_SOS = scipy_signal.butter(
     2, 80.0, btype="highpass", fs=16000.0, output="sos"
@@ -169,6 +171,20 @@ def _mem_cache_put(key: str, value: tuple[bytes, float]) -> None:
     _TTS_MEM_CACHE.move_to_end(key)
     while len(_TTS_MEM_CACHE) > TTS_MEM_CACHE_MAX_ENTRIES:
         _TTS_MEM_CACHE.popitem(last=False)
+
+
+def _timed_mem_cache_get(key: str) -> dict[str, Any] | None:
+    hit = _TTS_TIMED_MEM_CACHE.get(key)
+    if hit is not None:
+        _TTS_TIMED_MEM_CACHE.move_to_end(key)
+    return hit
+
+
+def _timed_mem_cache_put(key: str, value: dict[str, Any]) -> None:
+    _TTS_TIMED_MEM_CACHE[key] = value
+    _TTS_TIMED_MEM_CACHE.move_to_end(key)
+    while len(_TTS_TIMED_MEM_CACHE) > TTS_TIMED_MEM_CACHE_MAX_ENTRIES:
+        _TTS_TIMED_MEM_CACHE.popitem(last=False)
 
 
 def _touch_cache_files(*paths: Path) -> None:
@@ -1714,6 +1730,23 @@ async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str
     preferred_media_type = resolve_preferred_audio_media_type(
         request.headers.get("accept"), req.audio_format
     )
+    timed_mem_key = (
+        f"{make_cache_key(voice_id=preset.voice_id, speed=speed, mode='timed_passage', payload=text_nfc, precision=TTS_PRECISION)}"
+        f":{preferred_media_type}"
+    )
+
+    # Ultra-fast in-memory LRU cache (< 10ms TTFA, never blocks TTS semaphore)
+    mem_hit = _timed_mem_cache_get(timed_mem_key)
+    if mem_hit is not None:
+        logger.info(
+            "tts_timed_cache_hit voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
+            preset.voice_id,
+            preset.region,
+            speed,
+            len(mem_hit.get("words") or []),
+            float(mem_hit.get("duration_seconds") or 0.0),
+        )
+        return dict(mem_hit)
 
     try:
         await asyncio.wait_for(
@@ -1739,6 +1772,7 @@ async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str
             speed,
             preferred_media_type=preferred_media_type,
         )
+        _timed_mem_cache_put(timed_mem_key, result)
         logger.info(
             "tts_timed_ok voice=%s region=%s speed=%.2f words=%d duration_s=%.3f",
             preset.voice_id,
@@ -1747,7 +1781,7 @@ async def post_tts_timed(req: TtsSynthesisRequest, request: Request) -> dict[str
             len(result.get("words") or []),
             float(result.get("duration_seconds") or 0.0),
         )
-        return result
+        return dict(result)
     finally:
         runtime.active_tts_jobs -= 1
         runtime.tts_semaphore.release()

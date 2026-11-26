@@ -81,7 +81,7 @@ interface IndexedBookWord {
 /** How far behind the cursor a re-read may start (restart / self-correction). */
 const REWIND_WINDOW = 16;
 /** How far ahead two consecutive spoken words may re-anchor (line jump). */
-const REANCHOR_WINDOW = 30;
+const REANCHOR_WINDOW = 12;
 
 /**
  * Chuẩn hóa từ để so sánh.
@@ -210,6 +210,16 @@ export class RealtimeAlignmentEngine {
     seq: number;
   } | null = null;
 
+  /**
+   * Giữ lại một từ khớp phía trước trong lookahead để yêu cầu thêm 1 từ kế tiếp
+   * xác nhận trước khi đánh dấu DELETE (tránh tô đỏ nhảy cóc trên 1 tiếng nhiễu).
+   */
+  private pendingSkip: {
+    matchedIndex: number;
+    token: string;
+    spokenIndex: number;
+  } | null = null;
+
   private readonly statusByWordId = new Map<string, RealtimeWordState>();
 
   private readonly repeatedWordIds = new Set<string>();
@@ -247,6 +257,7 @@ export class RealtimeAlignmentEngine {
   markUncertain(): void {
     this.uncertain = true;
     this.pendingToken = null;
+    this.pendingSkip = null;
     this.spellingBuffer = null;
     this.spellingInProgress = false;
     this.trailingMismatch = null;
@@ -299,6 +310,7 @@ export class RealtimeAlignmentEngine {
       if (combinedPhonics) {
         this.spellingBuffer = null;
         this.pendingToken = null;
+        this.pendingSkip = null;
         this.replayPos = null;
         this.spellingInProgress = false;
         this.trailingMismatch = null;
@@ -315,6 +327,7 @@ export class RealtimeAlignmentEngine {
           wordId: target.wordId,
           tokens: combined,
         };
+        this.pendingSkip = null;
         this.spellingInProgress = true;
         this.trailingMismatch = null;
         return this.getSnapshot();
@@ -336,6 +349,7 @@ export class RealtimeAlignmentEngine {
         ) {
           this.spellingBuffer = null;
           this.pendingToken = null;
+          this.pendingSkip = null;
           this.replayPos = null;
           this.spellingInProgress = false;
           this.trailingMismatch = null;
@@ -351,6 +365,7 @@ export class RealtimeAlignmentEngine {
         if (phonics) {
           this.spellingBuffer = null;
           this.pendingToken = null;
+          this.pendingSkip = null;
           this.replayPos = null;
           this.spellingInProgress = false;
           this.trailingMismatch = null;
@@ -371,6 +386,7 @@ export class RealtimeAlignmentEngine {
             wordId: target.wordId,
             tokens: [...remaining],
           };
+          this.pendingSkip = null;
           this.spellingInProgress = true;
           this.trailingMismatch = null;
           break;
@@ -385,6 +401,7 @@ export class RealtimeAlignmentEngine {
         );
         if (aheadConsumed > 0) {
           this.pendingToken = null;
+          this.pendingSkip = null;
           this.spellingInProgress = true;
           this.trailingMismatch = null;
           index += aheadConsumed;
@@ -394,6 +411,7 @@ export class RealtimeAlignmentEngine {
           this.isMultiWordPhonicsCueAt(tokens, index, this.currentBookIndex)
         ) {
           this.pendingToken = null;
+          this.pendingSkip = null;
           this.spellingInProgress = true;
           this.trailingMismatch = null;
           index += 1;
@@ -784,34 +802,28 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3. Tìm từ ở phía trước.
+      // 3. Tìm từ ở phía trước: yêu cầu 2 từ liên tiếp khớp để tránh nhảy cóc con trỏ preview.
       const matchedIndex = this.findAheadFrom(cursor, token);
 
-      if (matchedIndex !== -1) {
-        // Kiểm tra từ hiện tại đã được nhận diện là đọc sai trước đó chưa.
-        const previousStatus = statusByWordId.get(currentWord.wordId);
-
-        if (previousStatus?.status !== "SUBSTITUTE") {
-          // Chưa có bằng chứng đọc sai: đánh dấu từ bị bỏ qua.
-          for (let index = cursor; index < matchedIndex; index += 1) {
-            setPreviewStatus(index, "DELETE");
-          }
-        }
-
+      if (
+        matchedIndex !== -1 &&
+        tokenIndex + 1 < tokens.length &&
+        matchedIndex + 1 < this.bookWords.length &&
+        this.bookWords[matchedIndex + 1].normalizedText ===
+          tokens[tokenIndex + 1]
+      ) {
         setPreviewStatus(matchedIndex, "MATCH");
+        setPreviewStatus(matchedIndex + 1, "MATCH");
         previewSpelling = false;
 
-        cursor = matchedIndex + 1;
-        targetIndex = cursor < this.bookWords.length ? cursor : matchedIndex;
+        cursor = matchedIndex + 2;
+        targetIndex =
+          cursor < this.bookWords.length ? cursor : matchedIndex + 1;
+        tokenIndex += 1;
         continue;
       }
 
-      // 4. Từ không khớp ở cuối interim: có thể bé đang ghép vần hoặc sắp tự sửa
-      // ("bàn... bạn") → chỉ đánh dấu SUBSTITUTE tạm khi còn từ kế tiếp xác nhận,
-      // không vội nháy đỏ ở âm tiết cuối cùng của interim.
-      if (tokenIndex < tokens.length - 1) {
-        setPreviewStatus(cursor, "SUBSTITUTE");
-      }
+      // 4. Từ không khớp trong interim: giữ con trỏ tại vị trí hiện tại, không nháy đỏ sớm.
       previewSpelling = false;
 
       targetIndex = cursor;
@@ -909,6 +921,93 @@ export class RealtimeAlignmentEngine {
     }
 
     /*
+     * Nếu đang có một từ khớp phía trước (pendingSkip), yêu cầu thêm một từ xác nhận
+     * trước khi tô đỏ DELETE để tránh một tiếng nhiễu/lặp từ gây nhảy cóc hàng loạt.
+     */
+    if (this.pendingSkip) {
+      const skip = this.pendingSkip;
+      this.pendingSkip = null;
+
+      if (token === currentWord.normalizedText) {
+        this.processConfirmedMatch(spokenIndex, this.currentBookIndex);
+        return;
+      }
+
+      if (
+        skip.matchedIndex + 1 < this.bookWords.length &&
+        token === this.bookWords[skip.matchedIndex + 1].normalizedText
+      ) {
+        for (
+          let index = this.currentBookIndex;
+          index < skip.matchedIndex;
+          index += 1
+        ) {
+          this.setWordStatus(index, "DELETE");
+        }
+        this.setWordStatus(skip.matchedIndex, "MATCH");
+        this.spokenToBookIndex.set(skip.spokenIndex, skip.matchedIndex);
+        this.setWordStatus(skip.matchedIndex + 1, "MATCH");
+        this.spokenToBookIndex.set(spokenIndex, skip.matchedIndex + 1);
+        this.trailingMismatch = null;
+        this.currentBookIndex = skip.matchedIndex + 2;
+        return;
+      }
+
+      if (token === skip.token) {
+        for (
+          let index = this.currentBookIndex;
+          index < skip.matchedIndex;
+          index += 1
+        ) {
+          this.setWordStatus(index, "DELETE");
+        }
+        this.setWordStatus(skip.matchedIndex, "MATCH");
+        this.spokenToBookIndex.set(skip.spokenIndex, skip.matchedIndex);
+        this.trailingMismatch = null;
+        this.currentBookIndex = skip.matchedIndex + 1;
+        this.tryMarkRepeatedWord(token, spokenIndex);
+        return;
+      }
+
+      if (this.findAheadFrom(skip.matchedIndex, token) !== -1) {
+        for (
+          let index = this.currentBookIndex;
+          index < skip.matchedIndex;
+          index += 1
+        ) {
+          this.setWordStatus(index, "DELETE");
+        }
+        this.setWordStatus(skip.matchedIndex, "MATCH");
+        this.spokenToBookIndex.set(skip.spokenIndex, skip.matchedIndex);
+        this.trailingMismatch = null;
+        this.currentBookIndex = skip.matchedIndex + 1;
+        this.processTokenAtCurrentPosition(token, spokenIndex);
+        return;
+      }
+
+      const anchor = this.findReanchor(
+        this.currentBookIndex,
+        skip.token,
+        token,
+      );
+      if (anchor !== -1) {
+        this.jumpTo(anchor, skip.spokenIndex, spokenIndex);
+        return;
+      }
+
+      if (this.tryStartReplay(token)) return;
+
+      this.recordSubstitute(
+        this.currentBookIndex,
+        skip.token,
+        skip.spokenIndex,
+      );
+      this.currentBookIndex += 1;
+      this.processTokenAtCurrentPosition(token, spokenIndex);
+      return;
+    }
+
+    /*
      * Nếu đang có một từ chưa khớp:
      * - Từ mới khớp vị trí hiện tại: bỏ từ pending (có thể là nhiễu
      *   hoặc lỗi nhận dạng), không làm lệch con trỏ.
@@ -991,29 +1090,38 @@ export class RealtimeAlignmentEngine {
 
     if (this.tryStartReplay(token)) return;
 
-    // Từ xuất hiện ở phía trước: chỉ xác nhận bỏ sót khi đã có từ
-    // tiếp theo làm bằng chứng, tránh kết luận DELETE quá sớm.
+    // Từ xuất hiện ở phía trước: giữ tạm ở pendingSkip và yêu cầu từ tiếp theo
+    // xác nhận trước khi tô đỏ DELETE để không nhảy cóc trên 1 từ nhiễu/lặp.
+    // Ngoại lệ duy nhất: nếu khớp đúng từ cuối cùng của trang (không còn từ
+    // tiếp theo để xác nhận chuỗi 2 từ), chốt ngay.
     const matchedIndex = this.findAhead(token);
 
     if (matchedIndex !== -1) {
-      for (
-        let index = this.currentBookIndex;
-        index < matchedIndex;
-        index += 1
-      ) {
-        this.setWordStatus(index, "DELETE");
-      }
-
-      this.setWordStatus(matchedIndex, "MATCH");
-      this.trailingMismatch = null;
-      this.spokenToBookIndex.set(spokenIndex, matchedIndex);
-      this.currentBookIndex = matchedIndex + 1;
+      this.stageOrCommitAheadSkip(matchedIndex, token, spokenIndex);
       return;
     }
 
     // Chưa đủ bằng chứng để kết luận SUBSTITUTE. Chờ thêm một từ.
     this.mismatchSeq += 1;
     this.pendingToken = { token, spokenIndex, seq: this.mismatchSeq };
+  }
+
+  private stageOrCommitAheadSkip(
+    matchedIndex: number,
+    token: string,
+    spokenIndex: number,
+  ): void {
+    if (matchedIndex === this.bookWords.length - 1) {
+      for (let index = this.currentBookIndex; index < matchedIndex; index += 1) {
+        this.setWordStatus(index, "DELETE");
+      }
+      this.setWordStatus(matchedIndex, "MATCH");
+      this.spokenToBookIndex.set(spokenIndex, matchedIndex);
+      this.trailingMismatch = null;
+      this.currentBookIndex = matchedIndex + 1;
+      return;
+    }
+    this.pendingSkip = { matchedIndex, token, spokenIndex };
   }
 
   private processTokenAtCurrentPosition(
@@ -1043,18 +1151,7 @@ export class RealtimeAlignmentEngine {
     const matchedIndex = this.findAhead(token);
 
     if (matchedIndex !== -1) {
-      for (
-        let index = this.currentBookIndex;
-        index < matchedIndex;
-        index += 1
-      ) {
-        this.setWordStatus(index, "DELETE");
-      }
-
-      this.setWordStatus(matchedIndex, "MATCH");
-      this.trailingMismatch = null;
-      this.spokenToBookIndex.set(spokenIndex, matchedIndex);
-      this.currentBookIndex = matchedIndex + 1;
+      this.stageOrCommitAheadSkip(matchedIndex, token, spokenIndex);
       return;
     }
 
@@ -1094,6 +1191,7 @@ export class RealtimeAlignmentEngine {
     const behind = this.findBehindFrom(this.currentBookIndex, token);
     if (behind === -1) return false;
     this.pendingToken = null;
+    this.pendingSkip = null;
     this.trailingMismatch = null;
     this.applyReplayMatch(behind);
     return true;
@@ -1211,6 +1309,23 @@ export class RealtimeAlignmentEngine {
    * Gọi trước khi đánh dấu các từ còn lại là DELETE.
    */
   private flushPendingToken(): void {
+    if (this.pendingSkip) {
+      const skip = this.pendingSkip;
+      this.pendingSkip = null;
+      if (this.currentBookIndex < this.bookWords.length) {
+        for (
+          let index = this.currentBookIndex;
+          index < skip.matchedIndex;
+          index += 1
+        ) {
+          this.setWordStatus(index, "DELETE");
+        }
+        this.setWordStatus(skip.matchedIndex, "MATCH");
+        this.spokenToBookIndex.set(skip.spokenIndex, skip.matchedIndex);
+        this.currentBookIndex = skip.matchedIndex + 1;
+      }
+    }
+
     if (!this.pendingToken) return;
 
     const pending = this.pendingToken;
@@ -1340,6 +1455,7 @@ export class RealtimeAlignmentEngine {
     const index = this.bookWords.findIndex((word) => word.wordId === wordId);
     if (index === -1) return this.getSnapshot();
     this.pendingToken = null;
+    this.pendingSkip = null;
     this.replayPos = null;
     this.spellingBuffer = null;
     this.spellingInProgress = false;
@@ -1389,6 +1505,7 @@ export class RealtimeAlignmentEngine {
     this.finalSegmentIds.clear();
     this.spokenWords = [];
     this.pendingToken = null;
+    this.pendingSkip = null;
 
     this.statusByWordId.clear();
     this.repeatedWordIds.clear();

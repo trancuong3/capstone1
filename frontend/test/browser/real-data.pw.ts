@@ -140,6 +140,7 @@ test("Parent empty catalog and detail route require a selected child", async ({
   await expect(
     page.getByRole("heading", { name: "Thư viện đang được cập nhật" }),
   ).toBeVisible();
+  await page.evaluate(() => window.localStorage.clear());
   await page.goto(`/books/${ids.page}`);
   await expect(page).toHaveURL(
     /\/dashboard\?focus=child-selection&reason=missing$/,
@@ -566,11 +567,16 @@ test("Reading management editor pages keep fields readable at all requested widt
   ).toBeVisible();
   for (const width of [390, 768, 1024, 1440]) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 });
-    for (const [action, title] of [
-      ["Thêm kế hoạch", "Thiết lập kế hoạch đọc"],
-      ["Thêm mục tiêu", "Thiết lập mục tiêu"],
-      ["Thêm lịch nhắc", "Thiết lập lịch nhắc"],
+    for (const [tabLabel, action, title] of [
+      ["Kế hoạch", "Thêm kế hoạch", "Thiết lập kế hoạch đọc"],
+      ["Mục tiêu", "Thêm mục tiêu", "Thiết lập mục tiêu"],
+      ["Lịch nhắc", "Thêm lịch nhắc", "Thiết lập lịch nhắc"],
     ]) {
+      if (width < 768) {
+        await page
+          .getByRole("tab", { name: new RegExp(`^${tabLabel}`) })
+          .click();
+      }
       await page.getByRole("button", { name: action, exact: true }).click();
       const dialog = page.locator(".figma-form-page");
       await expect(
@@ -887,6 +893,15 @@ for (const routeGroup of ["parent", "admin"] as const) {
     for (const path of routesToVisit) {
       activePath = path;
       await setRole(page, path.startsWith("/admin") ? "admin" : "parent");
+      const targetPathname = new URL(path, "http://localhost").pathname;
+      if (
+        page.url().startsWith("http") &&
+        (/^\/karaoke(?:\/|$)/.test(targetPathname) ||
+          targetPathname === "/entertainment/picture-description" ||
+          targetPathname === "/entertainment/sentence-shooter")
+      ) {
+        await page.evaluate(() => window.localStorage.clear());
+      }
       const response = await page.goto(path, { waitUntil: "domcontentloaded" });
       expect(response?.status(), path).toBe(200);
       const expectedPath = new URL(path, "http://localhost").pathname;

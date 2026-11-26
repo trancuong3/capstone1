@@ -68,7 +68,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
   };
 }
 
-export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_HEALTH_FRESHNESS_MS = 45_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),

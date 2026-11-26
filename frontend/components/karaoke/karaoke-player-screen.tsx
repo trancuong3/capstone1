@@ -48,10 +48,14 @@ function Song({
     attempt: 0,
   });
   return (
-    <section className="mx-auto grid w-full max-w-[960px] gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+    <section className="mx-auto grid w-full max-w-[960px] gap-3.5 md:gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3 md:gap-4">
         <SelectedChildIdentity child={child} />
-        <ButtonLink href="/karaoke" variant="secondary" className="sm:w-auto">
+        <ButtonLink
+          href="/karaoke"
+          variant="secondary"
+          className="min-h-11 w-auto px-3 py-2 text-xs md:px-5 md:text-label"
+        >
           Về thư viện bài hát
         </ButtonLink>
       </div>

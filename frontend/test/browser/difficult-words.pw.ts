@@ -201,6 +201,37 @@ async function installDifficultWordsE2EFixture(
     const pathname = url.pathname;
     const method = route.request().method();
 
+    if (pathname === "/profiles/dashboard-summary") {
+      return jsonRespond(route, {
+        profile: {
+          id: ids.parent,
+          role: "parent",
+          display_name: "Ba mẹ API",
+          created_at: now,
+          email: "parent@example.test",
+          contact_phone: "+84900000000",
+          email_verified: true,
+          contact_info_status: "available",
+          avatar_url: null,
+          children,
+        },
+        children,
+        latest_sessions_by_child: {},
+      });
+    }
+    if (pathname === "/profiles/me") {
+      return jsonRespond(route, {
+        id: ids.parent,
+        role: "parent",
+        display_name: "Ba mẹ API",
+        created_at: now,
+        email: "parent@example.test",
+        contact_phone: "+84900000000",
+        email_verified: true,
+        contact_info_status: "available",
+        children,
+      });
+    }
     if (pathname === "/profiles/children") {
       return jsonRespond(route, children);
     }
@@ -509,7 +540,19 @@ test("Difficult words end-to-end flow: select child, practice, evaluate, persist
   });
 
   // Switch child profile -> isolates Bé Bình data
-  await page.getByLabel("Chọn hồ sơ bé để xem dữ liệu").selectOption(childBId);
+  if (testInfo.project.name === "mobile") {
+    await page
+      .getByRole("button", { name: /Bé đang chọn: Bé An|Đổi nhanh bé/ })
+      .click();
+    await page
+      .getByRole("listbox", { name: "Chuyển nhanh hồ sơ bé" })
+      .getByRole("option", { name: /Bé Bình/ })
+      .click();
+  } else {
+    await page
+      .getByLabel("Chọn hồ sơ bé để xem dữ liệu")
+      .selectOption(childBId);
+  }
   await expect(
     page.getByRole("heading", { name: "Từ cần luyện của Bé Bình" }),
   ).toBeVisible();
@@ -518,7 +561,19 @@ test("Difficult words end-to-end flow: select child, practice, evaluate, persist
   ).toBeVisible();
 
   // Switch back to Bé An
-  await page.getByLabel("Chọn hồ sơ bé để xem dữ liệu").selectOption(ids.child);
+  if (testInfo.project.name === "mobile") {
+    await page
+      .getByRole("button", { name: /Bé đang chọn: Bé Bình|Đổi nhanh bé/ })
+      .click();
+    await page
+      .getByRole("listbox", { name: "Chuyển nhanh hồ sơ bé" })
+      .getByRole("option", { name: /Bé An/ })
+      .click();
+  } else {
+    await page
+      .getByLabel("Chọn hồ sơ bé để xem dữ liệu")
+      .selectOption(ids.child);
+  }
   await expect(
     page.getByRole("heading", { name: "Chào ngày mới", exact: true }),
   ).toBeVisible();

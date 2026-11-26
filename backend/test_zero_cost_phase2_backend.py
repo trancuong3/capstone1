@@ -293,7 +293,7 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         clear_tts_cache_runtime_metrics()
         app.dependency_overrides.clear()
 
-    def test_transaction_pooler_selects_nullpool_and_disables_caches(self) -> None:
+    def test_transaction_pooler_selects_bounded_queuepool_and_disables_caches(self) -> None:
         import certifi
 
         env = os.environ.copy()
@@ -304,14 +304,21 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         env["DATABASE_URL"] = "postgresql+asyncpg://u:p@db.example.com:6543/postgres"
         env["SUPABASE_URL"] = "https://x.supabase.co"
         env["SUPABASE_KEY"] = "test-key"
+        env.pop("DATABASE_CONCURRENCY_LIMIT", None)
         code = (
             "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
-            "from sqlalchemy.pool import NullPool;"
+            "from sqlalchemy.pool import NullPool, QueuePool;"
             "from app.database import session;"
-            "assert isinstance(session.engine.pool, NullPool), type(session.engine.pool);"
+            "pool = session.engine.pool;"
+            "assert isinstance(pool, QueuePool) and not isinstance(pool, NullPool), type(pool);"
+            "assert pool.size() == 4, pool.size();"
+            "assert pool._max_overflow == 4, pool._max_overflow;"
+            "assert pool._recycle == 300, pool._recycle;"
+            "assert pool._pre_ping is True;"
+            "assert pool._pool.use_lifo is True;"
             "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
             "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
-            "print('NULLPOOL_OK')"
+            "print('QUEUEPOOL_OK')"
         )
         proc = subprocess.run(
             [sys.executable, "-c", code],
@@ -321,7 +328,7 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
             check=False,
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
-        self.assertIn("NULLPOOL_OK", proc.stdout)
+        self.assertIn("QUEUEPOOL_OK", proc.stdout)
 
     def test_diagnostic_logging_extracts_safe_pgcode_without_pii(self) -> None:
         buf = io.StringIO()
@@ -1854,6 +1861,275 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
                     )
                 self.assertIsNone(miss)
                 self.assertEqual(repo.entries[timed_entry_id].Status, "STALE")
+
+    async def test_single_tx_lookup_timeout_background_writes_daily_ttl_and_privacy_isolation(self) -> None:
+        import asyncio
+        import time
+        from fastapi import HTTPException
+        from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+        from app.services.tts_audio_cache_service import (
+            flush_tts_cache_background_tasks,
+            get_tts_cache_lookup_timeout_seconds,
+        )
+
+        parent_a = uuid4()
+        parent_b = uuid4()
+        catalog_book = uuid4()
+        catalog_page = uuid4()
+        private_book = uuid4()
+        private_page = uuid4()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo = _InMemoryTtsRepo(
+                books={
+                    catalog_book: {
+                        "book_id": catalog_book,
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                    private_book: {
+                        "book_id": private_book,
+                        "visibility_scope": "PARENT_PRIVATE",
+                        "owner_parent_id": parent_a,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                },
+                pages={
+                    catalog_page: {
+                        "page_id": catalog_page,
+                        "book_id": catalog_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "CATALOG",
+                        "owner_parent_id": None,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                    private_page: {
+                        "page_id": private_page,
+                        "book_id": private_book,
+                        "page_lifecycle_status": "ACTIVE",
+                        "visibility_scope": "PARENT_PRIVATE",
+                        "owner_parent_id": parent_a,
+                        "lifecycle_status": "ACTIVE",
+                        "moderation_status": "ACTIVE",
+                        "is_deleted": False,
+                    },
+                },
+                verified_texts={catalog_page: [("Con mèo", [("con", "Con"), ("mèo", "mèo")])]},
+            )
+            with patch.dict(os.environ, {"VIREAD_LOCAL_STORAGE_DIR": tmpdir}, clear=False):
+                # 1. Single read transaction: resolve_target + lookup_cached_audio commit ONCE before download,
+                #    and record_hit runs off the HTTP critical path.
+                events: list[str] = []
+                fake_db = MagicMock(spec=AsyncSession)
+                fake_db.commit = AsyncMock(side_effect=lambda: events.append("db_commit"))
+                fake_db.rollback = AsyncMock(side_effect=lambda: events.append("db_rollback"))
+
+                seed_svc = TtsAudioCacheService(fake_db)
+                seed_svc.repo = repo  # type: ignore[assignment]
+                await seed_svc.store_cached_audio(
+                    target=ResolvedCacheTarget("CATALOG", None, catalog_book, catalog_page, None, True),
+                    normalized_text="Con mèo",
+                    voice_id=DEFAULT_LOCAL_VOICE_ID,
+                    model_version=LOCAL_TTS_MODEL_VERSION,
+                    speed=1.0,
+                    audio_bytes=b"ID3\x04\x00cat-single-tx",
+                    source_content_type="audio/mpeg",
+                )
+                events.clear()
+
+                daily_usage_calls = {"count": 0}
+                orig_daily = repo.get_daily_usage
+
+                async def _counting_daily(usage_day=None):
+                    daily_usage_calls["count"] += 1
+                    return await orig_daily(usage_day)
+
+                repo.get_daily_usage = _counting_daily  # type: ignore[method-assign]
+
+                orig_hit = repo.record_hit
+
+                async def _slow_bg_hit(entry_id: UUID, *, byte_size: int, now=None):
+                    await asyncio.sleep(0.05)
+                    events.append("bg_record_hit")
+                    return await orig_hit(entry_id, byte_size=byte_size, now=now)
+
+                repo.record_hit = _slow_bg_hit  # type: ignore[method-assign]
+
+                def _make_svc(db_arg):
+                    s = TtsAudioCacheService(db_arg)
+                    s.repo = repo  # type: ignore[assignment]
+                    return s
+
+                local_mock = MagicMock()
+                local_mock.synthesize = AsyncMock(
+                    return_value=LocalSynthesizedAudio(
+                        content=b"ID3\x04\x00live-synth",
+                        content_type="audio/mpeg",
+                        resolved_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        region="north",
+                        model_version=LOCAL_TTS_MODEL_VERSION,
+                        provider="local",
+                    )
+                )
+                orch = VoiceOrchestrator(local_provider=local_mock)
+
+                with patch("app.services.voice_orchestrator.TtsAudioCacheService", side_effect=_make_svc):
+                    t0 = time.perf_counter()
+                    hit_audio = await orch.synthesize(
+                        text="Con mèo",
+                        requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=1.0,
+                        policy=VoicePolicyContext(
+                            actor_id=parent_a,
+                            book_id=catalog_book,
+                            page_id=str(catalog_page),
+                        ),
+                        db=fake_db,
+                    )
+                    elapsed_hit = time.perf_counter() - t0
+                    self.assertTrue(hit_audio.cache_hit)
+                    # Only ONE read transaction commit happened on the critical path; bg_record_hit has not blocked!
+                    self.assertEqual(events, ["db_commit"])
+                    self.assertLess(elapsed_hit, 0.045)
+
+                    # Second lookup within 60s reuses in-memory daily_usage cache (0 extra DB daily queries)
+                    hit_audio_2 = await orch.synthesize(
+                        text="Con mèo",
+                        requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=1.0,
+                        policy=VoicePolicyContext(
+                            actor_id=parent_a,
+                            book_id=catalog_book,
+                            page_id=str(catalog_page),
+                        ),
+                        db=fake_db,
+                    )
+                    self.assertTrue(hit_audio_2.cache_hit)
+                    self.assertEqual(daily_usage_calls["count"], 1)
+
+                    await flush_tts_cache_background_tasks()
+                    self.assertEqual(events.count("bg_record_hit"), 2)
+
+                    # 2. Slow cache lookup exceeds budget (<= 2.0s) -> falls through cleanly to live synthesis
+                    self.assertLessEqual(get_tts_cache_lookup_timeout_seconds(), 2.0)
+
+                    orig_get_page = repo.get_page_book_scope_info
+
+                    async def _slow_scope(pid: UUID):
+                        await asyncio.sleep(0.3)
+                        return await orig_get_page(pid)
+
+                    repo.get_page_book_scope_info = _slow_scope  # type: ignore[method-assign]
+                    with patch.dict(os.environ, {"VIREAD_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS": "0.08"}, clear=False):
+                        t_to = time.perf_counter()
+                        live_res = await orch.synthesize(
+                            text="Con mèo",
+                            requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                            speed=1.0,
+                            policy=VoicePolicyContext(
+                                actor_id=parent_a,
+                                book_id=catalog_book,
+                                page_id=str(catalog_page),
+                            ),
+                            db=fake_db,
+                        )
+                        elapsed_to = time.perf_counter() - t_to
+                    self.assertFalse(live_res.cache_hit)
+                    self.assertEqual(live_res.content, b"ID3\x04\x00live-synth")
+                    self.assertLess(elapsed_to, 0.25)
+                    self.assertIn("db_rollback", events)
+                    repo.get_page_book_scope_info = orig_get_page  # type: ignore[method-assign]
+
+                    # 3. Private book cache miss stores in background strictly in private bucket, never public
+                    priv_live = await orch.synthesize(
+                        text="Câu riêng tư mới",
+                        requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                        speed=1.0,
+                        policy=VoicePolicyContext(
+                            actor_id=parent_a,
+                            book_id=private_book,
+                            page_id=str(private_page),
+                        ),
+                        db=fake_db,
+                    )
+                    self.assertFalse(priv_live.cache_hit)
+                    await flush_tts_cache_background_tasks()
+                    priv_entries = [e for e in repo.entries.values() if e.Scope == "PRIVATE"]
+                    self.assertEqual(len(priv_entries), 1)
+                    self.assertEqual(priv_entries[0].OwnerParentId, parent_a)
+                    self.assertEqual(priv_entries[0].StorageBucket, SUPABASE_PRIVATE_BOOKS_BUCKET)
+                    self.assertNotIn("viread-catalog-tts", priv_entries[0].StorageBucket)
+                    self.assertTrue(priv_entries[0].StoragePath.startswith(f"private-books/{parent_a}/{private_book}/tts-cache/"))
+
+                    # Cross-family parent_b still gets strict 404 (never falls through to live synth)
+                    with self.assertRaises(HTTPException) as cross_err:
+                        await orch.synthesize(
+                            text="Câu riêng tư mới",
+                            requested_voice_id=DEFAULT_LOCAL_VOICE_ID,
+                            speed=1.0,
+                            policy=VoicePolicyContext(
+                                actor_id=parent_b,
+                                book_id=private_book,
+                                page_id=str(private_page),
+                            ),
+                            db=fake_db,
+                        )
+                    self.assertEqual(cross_err.exception.status_code, 404)
+
+                # 4. Real-DB background tasks open short-lived AsyncSessionLocal and log failures safely
+                bg_sessions_entered = {"count": 0}
+                bg_db = MagicMock(spec=AsyncSession)
+                bg_db.commit = AsyncMock()
+                bg_db.rollback = AsyncMock()
+
+                class _FakeBgSessionCtx:
+                    async def __aenter__(self):
+                        bg_sessions_entered["count"] += 1
+                        return bg_db
+
+                    async def __aexit__(self, *_args):
+                        return False
+
+                real_svc = TtsAudioCacheService(fake_db)
+                self.assertIsInstance(real_svc.repo, TtsAudioCacheRepository)
+                with (
+                    patch("app.services.tts_audio_cache_service.AsyncSessionLocal", return_value=_FakeBgSessionCtx()),
+                    patch.object(TtsAudioCacheRepository, "record_hit", new=AsyncMock(side_effect=RuntimeError("db blip"))),
+                    self.assertLogs("app.services.tts_audio_cache_service", level="WARNING") as captured_logs,
+                ):
+                    task = real_svc.schedule_record_hit(uuid4(), byte_size=128)
+                    self.assertIsNotNone(task)
+                    await flush_tts_cache_background_tasks()
+                self.assertEqual(bg_sessions_entered["count"], 1)
+                self.assertIn("tts_cache_background_task_failed", "\n".join(captured_logs.output))
+
+                # 5. Monotonic daily_usage refresh: stale DB read after TTL expiry must never roll back
+                #    higher live bumped egress counters before bg record_hit commits.
+                stale_repo = _InMemoryTtsRepo()
+                stale_repo.daily = {"bytes_served": 100, "hit_count": 1, "miss_count": 0}
+                mono_svc = TtsAudioCacheService(fake_db)
+                mono_svc.repo = stale_repo  # type: ignore[assignment]
+                with patch.dict(
+                    os.environ,
+                    {"VIREAD_TTS_CACHE_DAILY_USAGE_TTL_SECONDS": "0.02"},
+                    clear=False,
+                ):
+                    initial_usage = await mono_svc._get_daily_usage_cached()
+                    self.assertEqual(initial_usage["bytes_served"], 100)
+                    mono_svc._bump_cached_daily_usage(bytes_delta=500, hit_delta=1)
+                    await asyncio.sleep(0.03)
+                    # DB still returns pre-commit 100, but merged cache must stay >= 600!
+                    refreshed_usage = await mono_svc._get_daily_usage_cached()
+                    self.assertEqual(refreshed_usage["bytes_served"], 600)
+                    self.assertEqual(refreshed_usage["hit_count"], 2)
 
 
 if __name__ == "__main__":

@@ -121,23 +121,23 @@ export default function ReadingReportPage() {
   }, [reloadKey, sessionId]);
 
   const reportHeading = (
-    <header className="flex flex-col justify-between gap-3 border-b border-border pb-5 sm:flex-row sm:items-end">
+    <header className="flex flex-col justify-between gap-2 border-b border-border pb-3 md:gap-3 md:pb-5 sm:flex-row sm:items-end">
       <div className="space-y-1">
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 md:gap-4">
           <Link
-            className="family-inline-link min-h-0"
+            className="family-inline-link min-h-11"
             href={`/sessions/${encodeURIComponent(sessionId)}`}
           >
             <ArrowLeft aria-hidden="true" size={16} /> Chi tiết buổi đọc
           </Link>
           <Link
-            className="text-sm font-semibold text-muted hover:text-primary"
+            className="inline-flex min-h-11 items-center text-sm font-semibold text-muted hover:text-primary"
             href="/sessions"
           >
             Lịch sử đọc
           </Link>
         </div>
-        <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+        <h1 className="book-title text-xl text-ink sm:text-3xl md:text-[38px]">
           Báo cáo đọc
         </h1>
       </div>
@@ -254,7 +254,7 @@ export default function ReadingReportPage() {
                 aria-current={idx === safeGroupIndex ? "page" : undefined}
                 aria-label={`Trang ${idx + 1}`}
                 className={cn(
-                  "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
+                  "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
                   idx === safeGroupIndex
                     ? "bg-primary text-white"
                     : "border border-border bg-white text-ink hover:bg-canvas",

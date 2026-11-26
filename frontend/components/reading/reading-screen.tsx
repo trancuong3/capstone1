@@ -301,6 +301,14 @@ function ReadingSessionScreen({
   const [loadKey, setLoadKey] = useState(0);
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [uiState, setUiState] = useState<ReadingUiState>(initialUiState);
+  const uiStateRef = useRef<ReadingUiState>(uiState);
+  const updateUiState = useCallback((next: ReadingUiState) => {
+    uiStateRef.current = next;
+    setUiState(next);
+  }, []);
+  const [isPlayingPageSample, setIsPlayingPageSample] = useState(false);
+  const isPlayingPageSampleRef = useRef(false);
+  const pageSampleRunIdRef = useRef(0);
   const [canonicalState, setCanonicalState] =
     useState<ReadingSessionState>("CREATED");
   const [page, setPage] = useState<ReadingPageDTO | null>(null);
@@ -545,6 +553,7 @@ function ReadingSessionScreen({
   const assistantAudioPlayingRef = useRef(false);
   const assistantAudioGenerationRef = useRef(0);
   const assistantAudioResumeRequestedRef = useRef(false);
+  const assistantAudioHeldAutomationIdleRef = useRef(false);
   const pageCompletionStartedRef = useRef<string | null>(null);
   const resumeCaptureAfterPageTurnRef = useRef(false);
 
@@ -630,7 +639,19 @@ function ReadingSessionScreen({
   );
 
   async function handleWordClick(word: ReadingPageWordDTO): Promise<void> {
+    setPreviewSnapshot(null);
     setCurrentWordId(word.word_id);
+    // Invalidate any in-flight page sample BEFORE stopping playback so its
+    // finally block cannot overwrite the word the child just tapped, and
+    // immediately release sample busy state so controls never lock permanently.
+    const wasPlayingPageSample = isPlayingPageSampleRef.current;
+    assistantAudioGenerationRef.current += 1;
+    if (wasPlayingPageSample) {
+      pageSampleRunIdRef.current += 1;
+      isPlayingPageSampleRef.current = false;
+      setIsPlayingPageSample(false);
+      setIsBusy(false);
+    }
 
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
@@ -1025,7 +1046,7 @@ function ReadingSessionScreen({
           retryCandidatesRef.current = candidates;
           setRetryCandidates(candidates);
           if (session.state !== "FINISHED" && session.state !== "ABORTED") {
-            setUiState("reading");
+            updateUiState("reading");
             setRetryPrompt(candidates.length > 0);
             setConfirmFinish(candidates.length === 0);
             setLatestTranscript(
@@ -1035,7 +1056,7 @@ function ReadingSessionScreen({
         }
         if (session.state === "FINISHED" || session.state === "ABORTED") {
           setSessionSummary(completion);
-          setUiState("complete");
+          updateUiState("complete");
         }
 
         setPage(currentPage);
@@ -1067,7 +1088,7 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId]);
+  }, [initialPageId, loadKey, services, sessionId, updateUiState]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -1111,14 +1132,14 @@ function ReadingSessionScreen({
         resumeCaptureAfterPageTurnRef.current = false;
         setCurrentWordId(matchedPage.words[0]?.word_id ?? null);
         setCanonicalState("LISTENING");
-        setUiState("reading");
+        updateUiState("reading");
       })
       .catch(() => {
         if (!active) return;
         setPageNavigationError(
           "Chưa chuyển được sang trang tiếp theo. Bé có thể thử lại bằng nút Trang tiếp theo.",
         );
-        setUiState("reading");
+        updateUiState("reading");
       });
 
     return () => {
@@ -1132,6 +1153,7 @@ function ReadingSessionScreen({
     services.readingService,
     sessionId,
     uiState,
+    updateUiState,
   ]);
 
   function applyRealtimeSnapshot(snapshot: RealtimeAlignmentSnapshot) {
@@ -1288,11 +1310,9 @@ function ReadingSessionScreen({
   }
 
   function applyPreviewSnapshot(snapshot: RealtimeAlignmentSnapshot) {
-    // Không ghi preview vào các ref thống kê chính thức.
+    // Không ghi preview vào các ref thống kê chính thức và không ghi đè
+    // currentWordId đã chốt để tránh nhấp nháy con trỏ khi interim thay đổi.
     setPreviewSnapshot(snapshot);
-
-    // Cập nhật từ đang đọc ngay cả khi chưa có final transcript.
-    setCurrentWordId(snapshot.currentWordId);
   }
 
   function markCaptureUncertain(
@@ -1509,7 +1529,15 @@ function ReadingSessionScreen({
         playModel: async (effect) => {
           const engine = alignmentEngineRef.current;
           const activePage = page;
-          if (!engine || !activePage || !mountedRef.current) return;
+          if (
+            !engine ||
+            !activePage ||
+            !mountedRef.current ||
+            assistantAudioPendingRef.current ||
+            assistantAudioPlayingRef.current
+          ) {
+            return;
+          }
           if (
             effect.kind !== "encourage" &&
             effect.kind !== "clarify" &&
@@ -1590,6 +1618,7 @@ function ReadingSessionScreen({
     if (
       !isListeningActiveRef.current ||
       assistantAudioPendingRef.current ||
+      assistantAudioPlayingRef.current ||
       listeningStopRef.current
     ) {
       return;
@@ -1914,6 +1943,7 @@ function ReadingSessionScreen({
       pageAudioMeta?.tts_word_timings ??
       undefined;
     const mergedOptions: WordTimedPlayOptions = {
+      audioKind: "sample",
       ...options,
       ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
       ...(precomputedTimings
@@ -1925,6 +1955,7 @@ function ReadingSessionScreen({
     return speechPlayer
       .playWithWordTimings(words, mergedOptions, () =>
         speechPlayer.play(sampleText, {
+          audioKind: "sample",
           ...(precomputedUrl ? { precomputedAudioUrl: precomputedUrl } : {}),
           bookId: options.bookId,
           pageId: options.pageId,
@@ -2298,7 +2329,7 @@ function ReadingSessionScreen({
         if (!message.toLowerCase().includes("not supported")) {
           if (mountedRef.current) {
             setConnectionState("reconnecting");
-            setUiState("microphone-denied");
+            updateUiState("microphone-denied");
           }
           return false;
         }
@@ -2407,7 +2438,7 @@ function ReadingSessionScreen({
               alignmentEngineRef.current !== captureEngine ||
               recognitionRef.current !== rec ||
               retryModeRef.current ||
-              uiState !== "reading"
+              uiStateRef.current !== "reading"
             ) {
               return;
             }
@@ -2862,6 +2893,7 @@ function ReadingSessionScreen({
               applyPreviewSnapshot(preview);
             } else {
               setPreviewSnapshot(null);
+              setCurrentWordId(engine.getSnapshot().currentWordId);
             }
 
             // 3b. Giao cho ReadingAutomationRuntime theo dõi lỗi chưa tự sửa (G27):
@@ -2945,19 +2977,35 @@ function ReadingSessionScreen({
                 (event.error === "service-not-allowed" ||
                   event.error === "language-not-supported"))
             ) {
-              automationRuntimeRef.current?.dispatch({
-                type: "PERMISSION",
-                granted: false,
-              });
+              const isSttServiceError =
+                event.error === "language-not-supported" ||
+                (event.error === "service-not-allowed" &&
+                  isAndroidNativeSpeechAvailable());
+              if (!isSttServiceError) {
+                automationRuntimeRef.current?.dispatch({
+                  type: "PERMISSION",
+                  granted: false,
+                });
+              }
+              recognitionRef.current = null;
               isListeningActiveRef.current = false;
               isUsingRecorderRef.current = false;
               speechRecorder.cancel();
+              setPreviewSnapshot(null);
               setIsMicRecording(false);
-              setUiState(
-                event.error === "language-not-supported"
-                  ? "stt-error"
-                  : "microphone-denied",
+              updateUiState(
+                isSttServiceError ? "stt-error" : "microphone-denied",
               );
+            } else if (event.error === "stt-unavailable") {
+              // Stop zombie recognizer cleanly so rec.onend does not spin
+              // rec.start() in an endless failure loop.
+              recognitionRef.current = null;
+              isListeningActiveRef.current = false;
+              isUsingRecorderRef.current = false;
+              speechRecorder.cancel({ retainStream: false });
+              setPreviewSnapshot(null);
+              setIsMicRecording(false);
+              updateUiState("stt-error");
             } else if (
               event.error === "service-not-allowed" ||
               event.error === "language-not-supported"
@@ -3009,7 +3057,7 @@ function ReadingSessionScreen({
       isListeningActiveRef.current = false;
       if (mountedRef.current) {
         setConnectionState("reconnecting");
-        setUiState("stt-error");
+        updateUiState("stt-error");
       }
       return false;
     }
@@ -3023,6 +3071,9 @@ function ReadingSessionScreen({
   }
 
   async function stopBrowserRecognition(): Promise<void> {
+    if (mountedRef.current) {
+      setPreviewSnapshot(null);
+    }
     const recognition = recognitionRef.current;
     if (!recognition) {
       browserTranscriptCollectorRef.current.completeRecognitionCycle();
@@ -3131,6 +3182,7 @@ function ReadingSessionScreen({
       finishAlignment?: boolean;
       preserveAlignment?: boolean;
       forPassageHelp?: boolean;
+      forAssistantInterrupt?: boolean;
     } = {},
   ): Promise<string> {
     if (listeningStopRef.current) return listeningStopRef.current;
@@ -3147,30 +3199,54 @@ function ReadingSessionScreen({
     finishAlignment?: boolean;
     preserveAlignment?: boolean;
     forPassageHelp?: boolean;
+    forAssistantInterrupt?: boolean;
   }): Promise<string> {
     // Snapshot the page before waiting for asynchronous recorder/provider work.
     const targetPage = page;
     const targetEngine = alignmentEngineRef.current;
+    const recorderQualityBeforeStop = speechRecorder.getQuality?.();
+    const recorderSpeakingBeforeStop = Boolean(
+      speechRecorder.getIsSpeaking?.() ||
+      speechRecorder.isSpeaking ||
+      (recorderQualityBeforeStop &&
+        recorderQualityBeforeStop.speechDurationMs >= 150 &&
+        !hasUnusableAudio(recorderQualityBeforeStop)),
+    );
     isListeningActiveRef.current = false;
     await stopBrowserRecognition();
 
+    const browserTextAfterStop = browserTranscriptCollectorRef.current
+      .getTranscript()
+      .trim();
+
     let recording: Blob | null = null;
     if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-      try {
-        recording = await speechRecorder.stop();
-      } catch (error) {
-        speechRecorder.cancel();
-        console.error("Lỗi khi dừng ghi âm:", error);
-      } finally {
+      if (
+        options.forAssistantInterrupt &&
+        !browserTextAfterStop &&
+        recorderQualityBeforeStop !== undefined &&
+        !recorderSpeakingBeforeStop
+      ) {
+        // When the child taps "Nghe mẫu" / a word / "Đánh vần" while the real
+        // AudioQualityMonitor confirms the mic has been silent, cancel
+        // immediately instead of blocking up to 4s uploading silence.
+        speechRecorder.cancel({ retainStream: false });
         isUsingRecorderRef.current = false;
+      } else {
+        try {
+          recording = await speechRecorder.stop();
+        } catch (error) {
+          speechRecorder.cancel();
+          console.error("Lỗi khi dừng ghi âm:", error);
+        } finally {
+          isUsingRecorderRef.current = false;
+        }
       }
     }
 
     // This text already passed the browser evidence checks and was aligned
     // live. A subsequent recorder failure cannot invalidate it.
-    const browserText = browserTranscriptCollectorRef.current
-      .getTranscript()
-      .trim();
+    const browserText = browserTextAfterStop;
     const handoff = options.preserveAlignment || options.forPassageHelp;
     let elevenLabsResult: {
       text: string;
@@ -3229,7 +3305,8 @@ function ReadingSessionScreen({
     if (
       !resolvedText &&
       !passageContainsHelpRef.current &&
-      !options.forPassageHelp
+      !options.forPassageHelp &&
+      !options.forAssistantInterrupt
     ) {
       markCaptureUncertain(targetEngine, targetPage);
       setComparisonError(
@@ -3303,6 +3380,18 @@ function ReadingSessionScreen({
     assistantAudioPendingRef.current = true;
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
+    const automationRuntime = automationRuntimeRef.current;
+    const heldAutomationIdle = Boolean(
+      automationRuntime && automationRuntime.getState().phase !== "modeling",
+    );
+    if (heldAutomationIdle && automationRuntime) {
+      assistantAudioHeldAutomationIdleRef.current = true;
+      automationRuntime.dispatch({
+        type: "SPEECH_ACTIVITY",
+        runId: automationRuntime.getState().runId,
+        holdMs: 120_000,
+      });
+    }
     setCountdown(null);
     let playbackFailed = false;
     let playAborted = false;
@@ -3331,6 +3420,7 @@ function ReadingSessionScreen({
             finishAlignment: false,
             preserveAlignment: !alignBeforePassageHelp,
             forPassageHelp: alignBeforePassageHelp,
+            forAssistantInterrupt: !alignBeforePassageHelp,
           });
         } catch {
           speechRecorder.cancel({ retainStream: false });
@@ -3364,6 +3454,18 @@ function ReadingSessionScreen({
       if (generation === assistantAudioGenerationRef.current) {
         assistantAudioPlayingRef.current = false;
         assistantAudioPendingRef.current = false;
+        if (
+          heldAutomationIdle &&
+          assistantAudioHeldAutomationIdleRef.current &&
+          automationRuntimeRef.current
+        ) {
+          assistantAudioHeldAutomationIdleRef.current = false;
+          automationRuntimeRef.current.dispatch({
+            type: "SPEECH_ACTIVITY",
+            runId: automationRuntimeRef.current.getState().runId,
+            holdMs: 0,
+          });
+        }
 
         const retryCandidate = retryResumeAfterAssistantAudioRef.current;
         retryResumeAfterAssistantAudioRef.current = null;
@@ -3390,7 +3492,7 @@ function ReadingSessionScreen({
           resumeAfterPlayback &&
           shouldResume &&
           mountedRef.current &&
-          uiState === "reading" &&
+          uiStateRef.current === "reading" &&
           !retryModeRef.current
         ) {
           const resumed = await startListening();
@@ -3417,15 +3519,36 @@ function ReadingSessionScreen({
 
   function preventAssistantAudioResume(): void {
     assistantAudioGenerationRef.current += 1;
+    pageSampleRunIdRef.current += 1;
     assistantAudioResumeRequestedRef.current = false;
     retryResumeAfterAssistantAudioRef.current = null;
     assistantAudioPendingRef.current = false;
     assistantAudioPlayingRef.current = false;
+    isPlayingPageSampleRef.current = false;
+    setIsPlayingPageSample(false);
+    if (
+      assistantAudioHeldAutomationIdleRef.current &&
+      automationRuntimeRef.current
+    ) {
+      assistantAudioHeldAutomationIdleRef.current = false;
+      automationRuntimeRef.current.dispatch({
+        type: "SPEECH_ACTIVITY",
+        runId: automationRuntimeRef.current.getState().runId,
+        holdMs: 0,
+      });
+    }
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
     return playAssistantAudio(() =>
-      speechPlayer.playWithWordTimings(sample.split(" "), {}),
+      speechPlayer.playWithWordTimings(sample.split(" "), {
+        cacheScope: "COACHING",
+        bookId: null,
+        pageId: null,
+        pageRevisionId: null,
+        isPrivateBook: false,
+        audioKind: "coaching",
+      }),
     );
   }
 
@@ -3496,12 +3619,22 @@ function ReadingSessionScreen({
       void playRetryInstructionAndListen(candidate, speechRecorder.prepare());
       return;
     }
-    if (isBusy && !speechPlayer.isPlaying) return;
-    if (speechPlayer.isPlaying) {
+    const isSampleCurrentlyActive =
+      isPlayingPageSampleRef.current ||
+      speechPlayer.activeAudioKind === "sample";
+    if (isBusy && !speechPlayer.isPlaying && !isSampleCurrentlyActive) return;
+    if (isSampleCurrentlyActive && (speechPlayer.isPlaying || isBusy)) {
+      preventAssistantAudioResume();
       speechPlayer.stop();
       setIsReadingWord(false);
       setIsBusy(false);
       return;
+    }
+    if (speechPlayer.isPlaying) {
+      // Preempt non-sample audio (idle coaching, word sample, phonics, voice preview)
+      // so pressing "Nghe mẫu" always starts reading the page immediately.
+      speechPlayer.stop();
+      setIsReadingWord(false);
     }
     if (!page) return;
 
@@ -3512,8 +3645,12 @@ function ReadingSessionScreen({
     const words = page.words;
     if (!words.length) return;
 
+    setPreviewSnapshot(null);
+    const sampleRunId = ++pageSampleRunIdRef.current;
     setIsBusy(true);
     setIsReadingWord(false);
+    isPlayingPageSampleRef.current = true;
+    setIsPlayingPageSample(true);
     const readingCursorBeforeSample =
       alignmentEngineRef.current?.getSnapshot().currentWordId ??
       currentWordId ??
@@ -3559,15 +3696,21 @@ function ReadingSessionScreen({
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") return;
       if (isCurrentSample()) {
-        setUiState("tts-error");
+        updateUiState("tts-error");
       }
     } finally {
-      if (isCurrentSample()) {
-        setCurrentWordId(
-          alignmentEngineRef.current?.getSnapshot().currentWordId ??
-            readingCursorBeforeSample,
-        );
-        setIsBusy(false);
+      if (mountedRef.current) {
+        if (sampleRunId === pageSampleRunIdRef.current) {
+          isPlayingPageSampleRef.current = false;
+          setIsPlayingPageSample(false);
+          setIsBusy(false);
+        }
+        if (isCurrentSample()) {
+          setCurrentWordId(
+            alignmentEngineRef.current?.getSnapshot().currentWordId ??
+              readingCursorBeforeSample,
+          );
+        }
       }
     }
   }
@@ -3584,8 +3727,11 @@ function ReadingSessionScreen({
       }
       return;
     }
-    if (isBusy && !speechPlayer.isPlaying) return;
-    if (speechPlayer.isPlaying) {
+    if (isBusy && !speechPlayer.isPlaying && !isPlayingPageSampleRef.current) {
+      return;
+    }
+    if (speechPlayer.isPlaying || isPlayingPageSampleRef.current) {
+      preventAssistantAudioResume();
       speechPlayer.stop();
       setIsReadingWord(false);
       setIsBusy(false);
@@ -3639,7 +3785,7 @@ function ReadingSessionScreen({
 
       setCanonicalState(nextState);
       setConnectionState("connected");
-      setUiState("reading");
+      updateUiState("reading");
       setIsMicRecording(false);
 
       // Xóa dữ liệu transcript của buổi đọc mới.
@@ -3722,7 +3868,7 @@ function ReadingSessionScreen({
     if (isBusy) return;
     if (retryModeRef.current && retryPausedRef.current) {
       retryPausedRef.current = false;
-      setUiState("reading");
+      updateUiState("reading");
       setCanonicalState("LISTENING");
       if (pendingRetryEventRef.current) await retryPendingRetryEvent();
       else
@@ -3740,7 +3886,7 @@ function ReadingSessionScreen({
     if (!mountedRef.current) return;
     setCanonicalState(nextState);
     setConnectionState("connected");
-    setUiState("reading");
+    updateUiState("reading");
     setIsMicRecording(false);
     setIsBusy(false);
   }
@@ -3754,14 +3900,16 @@ function ReadingSessionScreen({
       speechPlayer.stop();
       speechRecorder.cancel();
       setIsMicRecording(false);
+      setPreviewSnapshot(null);
       setCountdown(null);
       setCanonicalState("PAUSED");
-      setUiState("paused");
+      updateUiState("paused");
       setIsBusy(false);
       return;
     }
     if (isBusy && !speechPlayer.isPlaying) return;
     setIsBusy(true);
+    setPreviewSnapshot(null);
     setCountdown(null);
     listeningGenerationRef.current += 1;
     preventAssistantAudioResume();
@@ -3790,7 +3938,7 @@ function ReadingSessionScreen({
     if (!mountedRef.current) return;
     speechRecorder.cancel();
     setCanonicalState("PAUSED");
-    setUiState("paused");
+    updateUiState("paused");
     setIsBusy(false);
   }
 
@@ -3803,12 +3951,17 @@ function ReadingSessionScreen({
     setIsBusy(true);
     await services.devicePermissionService.retry("microphone");
     if (!mountedRef.current) return;
+    const prevUiState = uiStateRef.current;
+    uiStateRef.current = "reading";
     if (!(await startListening())) {
+      if (uiStateRef.current === "reading") {
+        uiStateRef.current = prevUiState;
+      }
       if (mountedRef.current) setIsBusy(false);
       return;
     }
     setConnectionState("connected");
-    setUiState("reading");
+    updateUiState("reading");
     setCanonicalState("LISTENING");
     setIsMicRecording(true);
     setIsBusy(false);
@@ -3850,7 +4003,7 @@ function ReadingSessionScreen({
     setPickerIndex(null);
     setPageNavigationError(null);
     if (pickerShouldReturnToReading.current && uiState === "paused") {
-      setUiState("reading");
+      updateUiState("reading");
       setCanonicalState("PAGE_READY");
     }
   }
@@ -3873,7 +4026,7 @@ function ReadingSessionScreen({
       if (confirmSelection) {
         setPickerIndex(null);
         setPageNavigationError(null);
-        setUiState("reading");
+        updateUiState("reading");
         setCanonicalState("PAGE_READY");
       }
       return;
@@ -3930,7 +4083,7 @@ function ReadingSessionScreen({
         setCanonicalState("PAGE_READY");
       }
       setCountdown(null);
-      setUiState("reading");
+      updateUiState("reading");
     } catch {
       if (mountedRef.current) {
         setPageNavigationError(
@@ -3984,7 +4137,7 @@ function ReadingSessionScreen({
       if (!mountedRef.current) return;
       setPageProgress(progress);
       if (progress.current_index + 1 < progress.total_pages) {
-        setUiState("page-turn");
+        updateUiState("page-turn");
       }
     } catch {
       if (mountedRef.current) {
@@ -4026,7 +4179,7 @@ function ReadingSessionScreen({
       assistantAudioPendingRef.current ||
       assistantAudioPlayingRef.current ||
       tutorOpen ||
-      uiState !== "reading" ||
+      uiStateRef.current !== "reading" ||
       isBusy ||
       progress.pages[progress.current_index]?.status === "COMPLETED" ||
       pageCompletionStartedRef.current === completedPage.page_id
@@ -4065,7 +4218,7 @@ function ReadingSessionScreen({
       setIsMicRecording(false);
       setPageProgress(nextProgress);
       if (nextProgress.current_index + 1 < nextProgress.total_pages) {
-        setUiState("page-turn");
+        updateUiState("page-turn");
       }
     } catch {
       resumeCaptureAfterPageTurnRef.current = false;
@@ -4099,7 +4252,7 @@ function ReadingSessionScreen({
     setPageNavigationError(null);
     setCanonicalState("LISTENING");
     setConnectionState("connected");
-    setUiState("reading");
+    updateUiState("reading");
     setIsBusy(false);
   }
 
@@ -4115,12 +4268,20 @@ function ReadingSessionScreen({
     if (!mountedRef.current) return;
     setConnectionState(nextConnection);
     if (nextConnection === "recovered") {
-      if (resumeMicrophone && !(await startListening())) {
-        if (mountedRef.current) setIsBusy(false);
-        return;
+      const prevUiState = uiStateRef.current;
+      uiStateRef.current = "reading";
+      if (resumeMicrophone) {
+        if (!(await startListening())) {
+          if (uiStateRef.current === "reading") {
+            uiStateRef.current = prevUiState;
+          }
+          if (mountedRef.current) setIsBusy(false);
+          return;
+        }
+        setIsMicRecording(true);
       }
       setCanonicalState("LISTENING");
-      setUiState("reading");
+      updateUiState("reading");
     }
     setIsBusy(false);
   }
@@ -4179,7 +4340,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !(error instanceof Error && error.name === "AbortError")
       ) {
-        setUiState("tts-error");
+        updateUiState("tts-error");
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -4232,7 +4393,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current
       ) {
         setTutorAction(nextAction);
-        setUiState("reading");
+        updateUiState("reading");
       }
     } catch (error) {
       if (
@@ -4240,7 +4401,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !(error instanceof Error && error.name === "AbortError")
       ) {
-        setUiState("tts-error");
+        updateUiState("tts-error");
       }
     } finally {
       if (mountedRef.current) setIsBusy(false);
@@ -4253,7 +4414,7 @@ function ReadingSessionScreen({
     tutorPlaybackGenerationRef.current += 1;
     speechPlayer.stop();
     setTutorOpen(false);
-    setUiState("reading");
+    updateUiState("reading");
 
     if (shouldResumeListening) {
       if (
@@ -4419,7 +4580,7 @@ function ReadingSessionScreen({
       );
     } else {
       setConnectionState("reconnecting");
-      setUiState("microphone-denied");
+      updateUiState("microphone-denied");
     }
   }
 
@@ -6008,7 +6169,7 @@ function ReadingSessionScreen({
       } else {
         automationRuntimeRef.current?.dispatch({ type: "SESSION_END" });
       }
-      setUiState(postFinishState);
+      updateUiState(postFinishState);
     } catch (error) {
       console.error("Lỗi khi kết thúc buổi đọc:", error);
       finishStartedRef.current = false;
@@ -6405,7 +6566,7 @@ function ReadingSessionScreen({
         child={child}
         onComplete={() => {
           automationRuntimeRef.current?.dispatch({ type: "QUIZ_END" });
-          setUiState("complete");
+          updateUiState("complete");
         }}
         sessionId={sessionId}
       />
@@ -6438,9 +6599,9 @@ function ReadingSessionScreen({
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="flex flex-col gap-1 border-b border-border/80 pb-1.5">
+    <div className="flex flex-col gap-1 sm:border-b sm:border-border/80 sm:pb-1.5">
       {pageProgress ? (
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
+        <div className="hidden flex-wrap items-center gap-1 sm:flex sm:gap-2.5">
           <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
             <Button
               aria-label="Trang trước"
@@ -6556,15 +6717,17 @@ function ReadingSessionScreen({
         </div>
       ) : null}
       {speechPlayer.fallbackNotice ? (
-        <StatusMessage tone="warning">
-          {speechPlayer.fallbackNotice}
-        </StatusMessage>
+        <div className="hidden sm:block">
+          <StatusMessage tone="warning">
+            {speechPlayer.fallbackNotice}
+          </StatusMessage>
+        </div>
       ) : null}
       {pageProgress &&
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
         <p
           data-reading-end-hint="true"
-          className="text-xs font-semibold text-primary sm:text-sm"
+          className="hidden text-xs font-semibold text-primary sm:block sm:text-sm"
           role="status"
         >
           Bé đã đến trang cuối của phạm vi. Có thể kết thúc buổi đọc khi sẵn
@@ -6585,6 +6748,52 @@ function ReadingSessionScreen({
     >
       <ReadingLayout
         topBar={readingTopBar}
+        totalPages={pageProgress?.total_pages}
+        pageRangeLabel={
+          pageProgress
+            ? `Phạm vi: Trang ${pageProgress.start_page_number}–${pageProgress.end_page_number}`
+            : undefined
+        }
+        onPrevPage={
+          pageProgress
+            ? () => void navigateWithinRange(pageProgress.current_index - 1)
+            : undefined
+        }
+        onNextPage={
+          pageProgress
+            ? () => void navigateWithinRange(pageProgress.current_index + 1)
+            : undefined
+        }
+        canPrevPage={Boolean(
+          pageProgress &&
+          pageProgress.current_index > 0 &&
+          !(isBusy && !speechPlayer.isPlaying) &&
+          uiState === "reading",
+        )}
+        canNextPage={Boolean(
+          pageProgress &&
+          pageProgress.current_index < pageProgress.total_pages - 1 &&
+          !(isBusy && !speechPlayer.isPlaying) &&
+          uiState === "reading",
+        )}
+        onMarkPageCompleted={
+          pageProgress?.persisted &&
+          pageProgress.pages[pageProgress.current_index]?.status !== "COMPLETED"
+            ? () => void confirmCurrentPageCompleted()
+            : undefined
+        }
+        canMarkPageCompleted={Boolean(
+          pageProgress?.persisted &&
+          pageProgress.pages[pageProgress.current_index]?.status !==
+            "COMPLETED" &&
+          !isBusy &&
+          uiState === "reading",
+        )}
+        mobileFallbackNotice={speechPlayer.fallbackNotice}
+        hasMobileTopBarAlert={Boolean(
+          pageNavigationError && pickerIndex === null,
+        )}
+        voiceEngineBadge={<VoiceEngineBadge compact />}
         audioLevel={speechRecorder.audioLevel}
         book={book}
         child={child}
@@ -6645,11 +6854,18 @@ function ReadingSessionScreen({
         retryWordCount={retryCandidates.length}
         retryFeedback={retryFeedback}
         isPageTransitioning={uiState === "page-turn"}
-        isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
+        isPlayingSample={
+          retryMode
+            ? speechPlayer.isPlaying && !isReadingWord
+            : speechPlayer.isPlaying &&
+              (speechPlayer.activeAudioKind !== undefined
+                ? speechPlayer.activeAudioKind === "sample"
+                : isPlayingPageSample)
+        }
         isSamplePaused={speechPlayer.isPaused}
         onToggleSamplePause={() => {
           if (speechPlayer.isPaused)
-            void speechPlayer.resume().catch(() => setUiState("tts-error"));
+            void speechPlayer.resume().catch(() => updateUiState("tts-error"));
           else speechPlayer.pause();
         }}
         isReadingWord={isReadingWord}
@@ -6970,7 +7186,13 @@ function ReadingSessionScreen({
               ) : null}
             </div>
           }
-          onClose={() => undefined}
+          closeOnEscape={uiState === "stt-error"}
+          onClose={() => {
+            if (uiState === "stt-error") {
+              updateUiState("reading");
+              setConnectionState("connected");
+            }
+          }}
           primaryAction={{
             isLoading: isBusy,
             label: uiState === "stt-error" ? "Thử nghe lại" : "Kết nối lại",
@@ -6983,6 +7205,18 @@ function ReadingSessionScreen({
             label: "Kết thúc an toàn",
             onClick: () => setConfirmFinish(true),
           }}
+          tertiaryAction={
+            uiState === "stt-error"
+              ? {
+                  label: "Đóng, tự đọc tiếp",
+                  variant: "quiet",
+                  onClick: () => {
+                    updateUiState("reading");
+                    setConnectionState("connected");
+                  },
+                }
+              : undefined
+          }
           title={
             uiState === "stt-error"
               ? "Mình chưa nghe rõ"

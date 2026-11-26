@@ -306,19 +306,13 @@ test("dashboard → selected child → library → native player → leave stops
     });
   });
   await page.goto("/dashboard");
-  await page
-    .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/dashboard$/);
   await expect(
-    page.getByRole("region", { name: "Chọn hồ sơ trẻ" }),
-  ).toHaveClass(/family-profiles-prompt/);
-  await page
-    .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
-    .click();
+    page.getByRole("button", { name: `${child.alias}, lớp ${child.grade}` }),
+  ).toHaveAttribute("aria-pressed", "true");
   await page
     .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
     .click();
+  await expect(page).toHaveURL(/\/entertainment$/);
   await page.getByRole("link", { name: "Mở thư viện bài hát" }).click();
   await expect(
     page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
@@ -373,7 +367,7 @@ test("dashboard → selected child → library → native player → leave stops
   expect(state.unexpected).toEqual([]);
   expect(base.unexpected).toEqual([]);
 });
-test("refresh requires child reselection and ignores a foreign child_id in URL", async ({
+test("reload preserves persisted child selection and missing selection ignores a foreign child_id in URL", async ({
   page,
 }) => {
   const { state } = await fixture(page);
@@ -384,6 +378,11 @@ test("refresh requires child reselection and ignores a foreign child_id in URL",
   await expect(
     page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
   ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "Bài hát do admin xuất bản" }),
+  ).toBeVisible();
+  await page.evaluate(() => window.localStorage.clear());
   const before = state.requests.length;
   await page.goto(`/karaoke/${songId}?child_id=${lineId}`);
   await expect(page).toHaveURL(

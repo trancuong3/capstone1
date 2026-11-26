@@ -3,6 +3,7 @@
 import {
   Camera,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   FileImage,
   RefreshCw,
@@ -158,6 +159,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     "checking" | "ready" | "offline" | "unreachable"
   >("checking");
   const [ocrCheckNonce, setOcrCheckNonce] = useState(0);
+  const [showOcrStatusDetails, setShowOcrStatusDetails] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -572,19 +574,19 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   return (
     <section
       className={cn(
-        "mx-auto flex w-full flex-col gap-5 sm:gap-6",
+        "mx-auto flex w-full flex-col gap-3 md:gap-6",
         cameraStarted ? "max-w-[1120px]" : "max-w-[960px]",
       )}
     >
-      <header className="border-b border-border pb-4 sm:pb-5">
+      <header className="border-b border-border pb-2.5 md:pb-5">
         <div>
-          <p className="text-label font-semibold text-muted">
+          <p className="hidden text-label font-semibold text-muted md:block">
             {child.alias} · Lớp {child.grade}
           </p>
-          <h1 className="mt-1 text-2xl font-extrabold text-ink sm:text-heading">
+          <h1 className="book-title text-xl font-extrabold text-ink md:mt-1 md:text-heading">
             Đưa trang sách vào khung camera
           </h1>
-          <p className="mt-2 max-w-[720px] text-sm leading-6 text-muted sm:text-body sm:leading-7">
+          <p className="mt-2 hidden max-w-[720px] text-sm leading-6 text-muted md:block md:text-body md:leading-7">
             Đặt sách dọc ngay ngắn, đủ sáng trong khung 4 góc, hoặc chụp/chọn
             ảnh trang sách để nhận diện chữ tiếng Việt bằng OCR chuẩn xác.
           </p>
@@ -614,34 +616,83 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
       {ocrWorkerStatus === "offline" || ocrWorkerStatus === "unreachable" ? (
         <div
-          className="flex flex-col gap-3 rounded-card border border-amber-300 bg-amber-50/80 p-4"
+          className="flex flex-col gap-2 rounded-card border border-amber-300 bg-amber-50/85 px-3 py-2 md:gap-3 md:p-4"
           data-testid="ocr-worker-offline-banner"
         >
-          <StatusMessage
-            title={
-              ocrWorkerStatus === "offline"
-                ? "Máy trạm OCR hiện đang ngoại tuyến"
-                : "Máy chủ OCR đang khởi động hoặc tạm chưa phản hồi"
-            }
-            tone="warning"
+          <div className="flex items-center justify-between gap-2 md:hidden">
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-extrabold text-amber-950">
+              <WifiOff aria-hidden="true" className="size-4 shrink-0 text-amber-700" />
+              <span className="truncate">
+                {ocrWorkerStatus === "offline"
+                  ? "OCR đang ngoại tuyến"
+                  : "OCR tạm chưa phản hồi"}
+              </span>
+            </span>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                aria-controls="ocr-offline-details"
+                aria-expanded={showOcrStatusDetails}
+                className="inline-flex min-h-11 items-center gap-1 rounded-control px-2 text-xs font-bold text-amber-900 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-primary"
+                onClick={() => setShowOcrStatusDetails((open) => !open)}
+                type="button"
+              >
+                {showOcrStatusDetails ? "Ẩn" : "Chi tiết"}
+                <ChevronDown
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 transition-transform",
+                    showOcrStatusDetails && "rotate-180",
+                  )}
+                />
+              </button>
+              <button
+                aria-label="Kiểm tra lại kết nối OCR nhanh"
+                className="inline-flex min-h-11 items-center gap-1 rounded-control border border-amber-300 bg-white px-2.5 text-xs font-bold text-amber-950 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-primary"
+                onClick={() => {
+                  setOcrWorkerStatus("checking");
+                  setOcrCheckNonce((n) => n + 1);
+                }}
+                type="button"
+              >
+                <RefreshCw aria-hidden="true" className="size-3.5" />
+                Thử lại
+              </button>
+            </div>
+          </div>
+
+          <div
+            id="ocr-offline-details"
+            className={cn(
+              "flex flex-col gap-3",
+              !showOcrStatusDetails && "hidden md:flex",
+            )}
           >
-            {ocrWorkerStatus === "offline"
-              ? "Tính năng quét trang sách cần máy trạm OCR (remote worker) đang kết nối để nhận diện chữ tiếng Việt. Ba mẹ vẫn có thể đọc toàn bộ sách trong Thư viện bằng Wi-Fi mà không cần bật máy tính."
-              : "Chưa kiểm tra được trạng thái máy trạm OCR do máy chủ đang khởi động hoặc mạng chậm. Ba mẹ bấm kiểm tra lại sau vài giây, hoặc đọc sách trực tiếp trong Thư viện nhé."}
-          </StatusMessage>
-          <div className="flex flex-wrap gap-2">
-            <Button
-              className="min-h-11 sm:w-auto"
-              onClick={() => {
-                setOcrWorkerStatus("checking");
-                setOcrCheckNonce((n) => n + 1);
-              }}
-              size="compact"
-              variant="secondary"
+            <StatusMessage
+              title={
+                ocrWorkerStatus === "offline"
+                  ? "Máy trạm OCR hiện đang ngoại tuyến"
+                  : "Máy chủ OCR đang khởi động hoặc tạm chưa phản hồi"
+              }
+              tone="warning"
             >
-              <RefreshCw aria-hidden="true" className="size-4" />
-              Kiểm tra lại kết nối OCR
-            </Button>
+              {ocrWorkerStatus === "offline"
+                ? "Tính năng quét trang sách cần máy trạm OCR (remote worker) đang kết nối để nhận diện chữ tiếng Việt. Ba mẹ vẫn có thể đọc toàn bộ sách trong Thư viện bằng Wi-Fi mà không cần bật máy tính."
+                : "Chưa kiểm tra được trạng thái máy trạm OCR do máy chủ đang khởi động hoặc mạng chậm. Ba mẹ bấm kiểm tra lại sau vài giây, hoặc đọc sách trực tiếp trong Thư viện nhé."}
+            </StatusMessage>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                className="min-h-11 sm:w-auto"
+                onClick={() => {
+                  setOcrWorkerStatus("checking");
+                  setOcrCheckNonce((n) => n + 1);
+                }}
+                size="compact"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden="true" className="size-4" />
+                Kiểm tra lại kết nối OCR
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -923,24 +974,24 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           onPickDeviceImage={() => fileInputRef.current?.click()}
         />
       ) : (
-        <div className="flex min-h-[340px] flex-col items-center justify-center gap-4 rounded-card bg-desk p-5 text-center sm:min-h-[380px] sm:p-6">
+        <div className="flex min-h-0 flex-col items-center justify-center gap-3 rounded-card bg-desk p-4 text-center sm:min-h-[380px] sm:gap-4 sm:p-6">
           <Camera
             aria-hidden="true"
-            className="size-12 text-primary sm:size-14"
+            className="size-9 text-primary sm:size-14"
           />
           <div>
-            <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
+            <h2 className="text-lg font-extrabold text-ink sm:text-2xl">
               Camera đang tắt
             </h2>
-            <p className="mt-3 max-w-[620px] text-sm text-muted sm:mt-4 sm:text-body">
+            <p className="mt-1 max-w-[620px] text-xs leading-5 text-muted sm:mt-4 sm:text-body sm:leading-normal">
               Bật khung quét trực tiếp hoặc chụp nét bằng Camera gốc của điện
               thoại — ảnh tự động chuẩn hóa xoay dọc và giữ sắc nét dấu tiếng
               Việt.
             </p>
           </div>
-          <div className="grid w-full max-w-[680px] grid-cols-1 gap-3 sm:grid-cols-3">
+          <div className="grid w-full max-w-[680px] grid-cols-1 gap-2.5 sm:grid-cols-3 sm:gap-3">
             <Button
-              className="min-h-14 w-full"
+              className="min-h-12 w-full sm:min-h-14"
               onClick={() => {
                 setCameraUnavailable(false);
                 setCameraStarted(true);
@@ -950,7 +1001,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               Bật camera để quét
             </Button>
             <Button
-              className="min-h-14 w-full"
+              className="min-h-12 w-full sm:min-h-14"
               disabled={
                 ocrState.status === "processing" || ocrState.status === "queued"
               }
@@ -961,7 +1012,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               Chụp bằng Camera máy
             </Button>
             <Button
-              className="min-h-14 w-full"
+              className="min-h-12 w-full sm:min-h-14"
               disabled={
                 ocrState.status === "processing" || ocrState.status === "queued"
               }
@@ -976,7 +1027,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       )}
 
       {!cameraUnavailable ? (
-        <div className="rounded-card bg-sky p-4">
+        <div className="hidden rounded-card bg-sky p-4 sm:block">
           <h2 className="font-extrabold text-ink">Sau khi nhận diện</h2>
           <p className="mt-2 text-sm text-muted sm:text-body">
             ViRead mở chi tiết sách để ba mẹ chọn phạm vi trang. Microphone được
@@ -987,7 +1038,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
       {!cameraStarted || cameraUnavailable ? (
         <ButtonLink
-          className="min-h-14 sm:max-w-[400px]"
+          className="min-h-12 sm:min-h-14 sm:max-w-[400px]"
           href="/books"
           variant="secondary"
         >

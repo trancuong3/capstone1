@@ -114,7 +114,7 @@ export function DifficultWordItem({
             </span>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="inline-flex min-w-60 rounded-full bg-warning-surface px-3 py-1 text-label font-semibold text-primary">
+            <span className="inline-flex min-w-0 rounded-full bg-warning-surface px-3 py-1 text-label font-semibold text-primary sm:min-w-60">
               Điểm bằng chứng {word.difficulty_score}
             </span>
           </div>

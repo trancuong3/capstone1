@@ -14,6 +14,7 @@ Enforces:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from collections import OrderedDict
@@ -38,11 +39,13 @@ from app.providers.local_voice_provider import (
 )
 from app.request_context import get_request_id
 from app.services.tts_audio_cache_service import (
+    CachedTtsHit,
     ResolvedCacheTarget,
     TtsAudioCacheService,
     canonical_phonics_key,
     canonical_tts_text,
     folded_catalog_tts_text,
+    get_tts_cache_lookup_timeout_seconds,
     is_tts_cache_enabled,
 )
 
@@ -238,12 +241,23 @@ class VoiceOrchestrator:
                 return str(item.get("region") or "north")
         return "north"
 
+    @staticmethod
+    def _accepts_kwarg(fn: Any, kwarg: str) -> bool:
+        try:
+            params = inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            return False
+        return kwarg in params or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+
     async def _resolve_cache_target(
         self,
         db: Any,
         ctx: VoicePolicyContext,
         *,
         normalized_text: str | None = None,
+        end_read_tx: bool = True,
     ) -> tuple[TtsAudioCacheService | None, ResolvedCacheTarget | None]:
         if db is None or not is_tts_cache_enabled():
             return None, None
@@ -260,8 +274,73 @@ class VoiceOrchestrator:
             normalized_text=normalized_text,
             allow_cache_write=False,
             defer_allowlist_check=True,
+            end_read_tx=end_read_tx,
         )
         return svc, target
+
+    async def _resolve_and_lookup_cache(
+        self,
+        db: Any,
+        ctx: VoicePolicyContext,
+        *,
+        normalized_text: str,
+        voice_id: str,
+        speed: float,
+        require_word_timings: bool = False,
+    ) -> tuple[TtsAudioCacheService | None, ResolvedCacheTarget | None, CachedTtsHit | None]:
+        if db is None or not is_tts_cache_enabled():
+            return None, None, None
+        page_uuid = self._parse_optional_uuid(ctx.page_id)
+        if not (ctx.book_id or page_uuid or ctx.page_revision_id or ctx.cache_scope):
+            return None, None, None
+
+        budget = get_tts_cache_lookup_timeout_seconds()
+        svc_holder: list[TtsAudioCacheService] = []
+
+        async def _run() -> tuple[TtsAudioCacheService | None, ResolvedCacheTarget | None, CachedTtsHit | None]:
+            if self._accepts_kwarg(self._resolve_cache_target, "end_read_tx"):
+                cache_svc, cache_target = await self._resolve_cache_target(
+                    db, ctx, normalized_text=normalized_text, end_read_tx=False
+                )
+            else:
+                cache_svc, cache_target = await self._resolve_cache_target(
+                    db, ctx, normalized_text=normalized_text
+                )
+            if cache_svc is not None:
+                svc_holder.append(cache_svc)
+            if cache_svc is None or cache_target is None or not normalized_text:
+                if cache_svc is not None:
+                    await cache_svc._end_read_tx()
+                return cache_svc, cache_target, None
+            hit = await cache_svc.lookup_cached_audio(
+                target=cache_target,
+                normalized_text=normalized_text,
+                voice_id=voice_id,
+                speed=speed,
+                accept=ctx.accept,
+                audio_format=ctx.audio_format,
+                require_word_timings=require_word_timings,
+                background_metrics=True,
+            )
+            return cache_svc, cache_target, hit
+
+        try:
+            return await asyncio.wait_for(_run(), timeout=budget)
+        except TimeoutError:
+            if svc_holder:
+                await svc_holder[0]._safe_rollback()
+            elif db is not None and callable(getattr(db, "rollback", None)):
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
+            logger.warning(
+                "tts_cache_lookup_timeout timeout_s=%.2f voice=%s request_id=%s",
+                budget,
+                voice_id,
+                get_request_id(),
+            )
+            return None, None, None
 
     def _can_fallback_unlocked_tts(self, policy: VoicePolicyContext) -> bool:
         return (
@@ -301,39 +380,35 @@ class VoiceOrchestrator:
             return audio
 
         normalized_text = canonical_tts_text(text)
-        cache_svc, cache_target = await self._resolve_cache_target(
-            db, ctx, normalized_text=normalized_text
+        cache_svc, cache_target, hit = await self._resolve_and_lookup_cache(
+            db,
+            ctx,
+            normalized_text=normalized_text,
+            voice_id=voice_id,
+            speed=speed,
+            require_word_timings=False,
         )
-        if cache_svc is not None and cache_target is not None and normalized_text:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=normalized_text,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
+        if hit is not None:
+            logger.info(
+                "tts_ok provider=precomputed_cache scope=%s voice=%s ms=%.1f session=%s request_id=%s",
+                hit.scope,
+                hit.resolved_voice_id,
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
             )
-            if hit is not None:
-                logger.info(
-                    "tts_ok provider=precomputed_cache scope=%s voice=%s ms=%.1f session=%s request_id=%s",
-                    hit.scope,
-                    hit.resolved_voice_id,
-                    (time.perf_counter() - t0) * 1000,
-                    ctx.session_id or "-",
-                    get_request_id(),
-                )
-                return LocalSynthesizedAudio(
-                    content=hit.content,
-                    content_type=hit.content_type,
-                    resolved_voice_id=hit.resolved_voice_id,
-                    region=self._voice_region(hit.resolved_voice_id),
-                    model_version=hit.model_version,
-                    provider="precomputed_cache",
-                    used_fallback_voice=False,
-                    cache_hit=True,
-                    cache_scope=hit.scope,
-                    cached_speed=hit.cached_speed,
-                )
+            return LocalSynthesizedAudio(
+                content=hit.content,
+                content_type=hit.content_type,
+                resolved_voice_id=hit.resolved_voice_id,
+                region=self._voice_region(hit.resolved_voice_id),
+                model_version=hit.model_version,
+                provider="precomputed_cache",
+                used_fallback_voice=False,
+                cache_hit=True,
+                cache_scope=hit.scope,
+                cached_speed=hit.cached_speed,
+            )
 
         # Local voice locked: NEVER switch to Google or to another local voice!
         try:
@@ -350,7 +425,7 @@ class VoiceOrchestrator:
                 and cache_target.can_store_on_miss
                 and normalized_text
             ):
-                await cache_svc.store_cached_audio(
+                cache_svc.schedule_store_cached_audio(
                     target=cache_target,
                     normalized_text=normalized_text,
                     voice_id=audio.resolved_voice_id,
@@ -481,51 +556,46 @@ class VoiceOrchestrator:
             return speech
 
         normalized_text = canonical_tts_text(" ".join(words))
-        cache_svc, cache_target = await self._resolve_cache_target(
-            db, ctx, normalized_text=normalized_text
+        cache_svc, cache_target, hit = await self._resolve_and_lookup_cache(
+            db,
+            ctx,
+            normalized_text=normalized_text,
+            voice_id=voice_id,
+            speed=speed,
+            require_word_timings=True,
         )
-        if cache_svc is not None and cache_target is not None and normalized_text:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=normalized_text,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
-                require_word_timings=True,
+        if hit is not None and isinstance(hit.word_timings_json, list):
+            timings = self._align_cached_word_timings(
+                words=words,
+                raw_timings=hit.word_timings_json,
+                cached_text=getattr(hit, "normalized_text", None),
             )
-            if hit is not None and isinstance(hit.word_timings_json, list):
-                timings = self._align_cached_word_timings(
-                    words=words,
-                    raw_timings=hit.word_timings_json,
-                    cached_text=getattr(hit, "normalized_text", None),
-                )
-            else:
-                timings = None
-            if hit is not None and timings is not None:
-                logger.info(
-                    "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
-                    hit.scope,
-                    hit.resolved_voice_id,
-                    len(words),
-                    (time.perf_counter() - t0) * 1000,
-                    ctx.session_id or "-",
-                    get_request_id(),
-                )
-                return LocalTimedSpeech(
-                    audio=hit.content,
-                    content_type=hit.content_type,
-                    duration_seconds=float(hit.duration_seconds or 0.0),
-                    words=timings,
-                    resolved_voice_id=hit.resolved_voice_id,
-                    region=self._voice_region(hit.resolved_voice_id),
-                    model_version=hit.model_version,
-                    provider="precomputed_cache",
-                    used_fallback_voice=False,
-                    cache_hit=True,
-                    cache_scope=hit.scope,
-                    cached_speed=hit.cached_speed,
-                )
+        else:
+            timings = None
+        if hit is not None and timings is not None:
+            logger.info(
+                "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
+                hit.scope,
+                hit.resolved_voice_id,
+                len(words),
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
+            )
+            return LocalTimedSpeech(
+                audio=hit.content,
+                content_type=hit.content_type,
+                duration_seconds=float(hit.duration_seconds or 0.0),
+                words=timings,
+                resolved_voice_id=hit.resolved_voice_id,
+                region=self._voice_region(hit.resolved_voice_id),
+                model_version=hit.model_version,
+                provider="precomputed_cache",
+                used_fallback_voice=False,
+                cache_hit=True,
+                cache_scope=hit.scope,
+                cached_speed=hit.cached_speed,
+            )
 
         try:
             speech = await self.local.synthesize_timed(
@@ -540,7 +610,7 @@ class VoiceOrchestrator:
                 and cache_target.can_store_on_miss
                 and normalized_text
             ):
-                await cache_svc.store_cached_audio(
+                cache_svc.schedule_store_cached_audio(
                     target=cache_target,
                     normalized_text=normalized_text,
                     voice_id=speech.resolved_voice_id,
@@ -615,55 +685,50 @@ class VoiceOrchestrator:
             return speech
 
         phonics_key, _ = canonical_phonics_key(steps)
-        cache_svc, cache_target = await self._resolve_cache_target(
-            db, ctx, normalized_text=phonics_key
+        cache_svc, cache_target, hit = await self._resolve_and_lookup_cache(
+            db,
+            ctx,
+            normalized_text=phonics_key,
+            voice_id=voice_id,
+            speed=speed,
+            require_word_timings=True,
         )
-        if cache_svc is not None and cache_target is not None:
-            hit = await cache_svc.lookup_cached_audio(
-                target=cache_target,
-                normalized_text=phonics_key,
-                voice_id=voice_id,
-                speed=speed,
-                accept=ctx.accept,
-                audio_format=ctx.audio_format,
-                require_word_timings=True,
+        if (
+            hit is not None
+            and isinstance(hit.word_timings_json, list)
+            and len(hit.word_timings_json) == len(steps)
+        ):
+            timings = [
+                LocalPhonicsStepTiming(
+                    id=str(item["id"]),
+                    index=int(item["index"]),
+                    start=float(item["start"]),
+                    end=float(item["end"]),
+                )
+                for item in hit.word_timings_json
+            ]
+            logger.info(
+                "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
+                hit.scope,
+                hit.resolved_voice_id,
+                len(steps),
+                (time.perf_counter() - t0) * 1000,
+                ctx.session_id or "-",
+                get_request_id(),
             )
-            if (
-                hit is not None
-                and isinstance(hit.word_timings_json, list)
-                and len(hit.word_timings_json) == len(steps)
-            ):
-                timings = [
-                    LocalPhonicsStepTiming(
-                        id=str(item["id"]),
-                        index=int(item["index"]),
-                        start=float(item["start"]),
-                        end=float(item["end"]),
-                    )
-                    for item in hit.word_timings_json
-                ]
-                logger.info(
-                    "tts_phonics_ok provider=precomputed_cache scope=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
-                    hit.scope,
-                    hit.resolved_voice_id,
-                    len(steps),
-                    (time.perf_counter() - t0) * 1000,
-                    ctx.session_id or "-",
-                    get_request_id(),
-                )
-                return LocalPhonicsSpeech(
-                    audio=hit.content,
-                    content_type=hit.content_type,
-                    duration_seconds=float(hit.duration_seconds or 0.0),
-                    step_timings=timings,
-                    resolved_voice_id=hit.resolved_voice_id,
-                    region=self._voice_region(hit.resolved_voice_id),
-                    model_version=hit.model_version,
-                    provider="precomputed_cache",
-                    cache_hit=True,
-                    cache_scope=hit.scope,
-                    cached_speed=hit.cached_speed,
-                )
+            return LocalPhonicsSpeech(
+                audio=hit.content,
+                content_type=hit.content_type,
+                duration_seconds=float(hit.duration_seconds or 0.0),
+                step_timings=timings,
+                resolved_voice_id=hit.resolved_voice_id,
+                region=self._voice_region(hit.resolved_voice_id),
+                model_version=hit.model_version,
+                provider="precomputed_cache",
+                cache_hit=True,
+                cache_scope=hit.scope,
+                cached_speed=hit.cached_speed,
+            )
 
         try:
             speech = await self.local.synthesize_phonics(
@@ -677,7 +742,7 @@ class VoiceOrchestrator:
                 and cache_target is not None
                 and cache_target.can_store_on_miss
             ):
-                await cache_svc.store_cached_audio(
+                cache_svc.schedule_store_cached_audio(
                     target=cache_target,
                     normalized_text=phonics_key,
                     voice_id=speech.resolved_voice_id,

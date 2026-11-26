@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import hashlib
@@ -10,7 +11,9 @@ import json
 import logging
 import os
 import threading
+import time
 import unicodedata
+import weakref
 from typing import Any
 from uuid import UUID
 
@@ -19,6 +22,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
+from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
 from app.services.storage_service import delete_object, download_object, upload_object
@@ -28,6 +32,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_TTS_CACHE_MAX_BYTES = 150 * 1024 * 1024  # 150 MiB
 DEFAULT_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES = 300 * 1024 * 1024  # 300 MiB/day
 DEFAULT_TTS_CACHE_BUCKET = "viread-tts-cache"
+DEFAULT_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS = 2.0
+DEFAULT_TTS_CACHE_DAILY_USAGE_TTL_SECONDS = 60.0
+DEFAULT_TTS_CACHE_MAX_BACKGROUND_TASKS = 16
 
 _EXTENSION_BY_MIME = {
     "audio/mpeg": "mp3",
@@ -44,6 +51,15 @@ _RUNTIME_METRICS: dict[str, Any] = {
     "quota_exhausted": False,
 }
 
+_DAILY_USAGE_CACHE_LOCK = threading.Lock()
+_DAILY_USAGE_CACHE: dict[date, tuple[float, dict[str, int]]] = {}
+_FAKE_REPO_DAILY_USAGE_CACHE: weakref.WeakKeyDictionary[
+    Any, dict[date, tuple[float, dict[str, int]]]
+] = weakref.WeakKeyDictionary()
+
+_BACKGROUND_TASKS_LOCK = threading.Lock()
+_BACKGROUND_TASKS: set[asyncio.Task[Any]] = set()
+
 
 def _reset_day_if_needed_locked(today: date) -> None:
     if _RUNTIME_METRICS["usage_date"] != today:
@@ -54,6 +70,13 @@ def _reset_day_if_needed_locked(today: date) -> None:
         _RUNTIME_METRICS["quota_exhausted"] = False
 
 
+def clear_tts_cache_daily_usage_cache() -> None:
+    """Clear the process-local daily egress usage TTL cache."""
+    with _DAILY_USAGE_CACHE_LOCK:
+        _DAILY_USAGE_CACHE.clear()
+        _FAKE_REPO_DAILY_USAGE_CACHE.clear()
+
+
 def clear_tts_cache_runtime_metrics() -> None:
     with _METRICS_LOCK:
         _RUNTIME_METRICS["usage_date"] = None
@@ -61,6 +84,125 @@ def clear_tts_cache_runtime_metrics() -> None:
         _RUNTIME_METRICS["misses"] = 0
         _RUNTIME_METRICS["bytes_served"] = 0
         _RUNTIME_METRICS["quota_exhausted"] = False
+    clear_tts_cache_daily_usage_cache()
+
+
+def get_tts_cache_lookup_timeout_seconds() -> float:
+    raw = (os.getenv("VIREAD_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS
+    try:
+        return max(0.05, min(DEFAULT_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS, float(raw)))
+    except ValueError:
+        return DEFAULT_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS
+
+
+def get_tts_cache_daily_usage_ttl_seconds() -> float:
+    raw = (os.getenv("VIREAD_TTS_CACHE_DAILY_USAGE_TTL_SECONDS") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_CACHE_DAILY_USAGE_TTL_SECONDS
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return DEFAULT_TTS_CACHE_DAILY_USAGE_TTL_SECONDS
+
+
+def get_tts_cache_max_background_tasks() -> int:
+    raw = (os.getenv("VIREAD_TTS_CACHE_MAX_BACKGROUND_TASKS") or "").strip()
+    if not raw:
+        return DEFAULT_TTS_CACHE_MAX_BACKGROUND_TASKS
+    try:
+        return max(1, min(64, int(raw)))
+    except ValueError:
+        return DEFAULT_TTS_CACHE_MAX_BACKGROUND_TASKS
+
+
+def get_active_tts_cache_background_task_count() -> int:
+    with _BACKGROUND_TASKS_LOCK:
+        done = [task for task in _BACKGROUND_TASKS if task.done()]
+        for task in done:
+            _BACKGROUND_TASKS.discard(task)
+        return len(_BACKGROUND_TASKS)
+
+
+async def flush_tts_cache_background_tasks(timeout: float = 5.0) -> None:
+    """Await all currently tracked TTS cache background tasks on the active event loop."""
+    loop = asyncio.get_running_loop()
+    with _BACKGROUND_TASKS_LOCK:
+        tasks = [
+            task
+            for task in _BACKGROUND_TASKS
+            if not task.done() and task.get_loop() is loop
+        ]
+    if not tasks:
+        return
+    await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=timeout)
+
+
+def _schedule_tts_cache_background_task(
+    coro_factory: Callable[[], Awaitable[Any]],
+    *,
+    task_name: str,
+) -> asyncio.Task[Any] | None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    max_tasks = get_tts_cache_max_background_tasks()
+    with _BACKGROUND_TASKS_LOCK:
+        done = [task for task in _BACKGROUND_TASKS if task.done()]
+        for task in done:
+            _BACKGROUND_TASKS.discard(task)
+        if len(_BACKGROUND_TASKS) >= max_tasks:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_background_queue_full",
+                stage="tts_cache",
+                task_name=task_name,
+                active_tasks=len(_BACKGROUND_TASKS),
+                max_tasks=max_tasks,
+            )
+            return None
+
+    async def _runner() -> Any:
+        try:
+            return await coro_factory()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_background_task_failed",
+                stage="tts_cache",
+                task_name=task_name,
+                exception=exc,
+            )
+            return None
+
+    task = loop.create_task(_runner(), name=f"tts_cache:{task_name}")
+    with _BACKGROUND_TASKS_LOCK:
+        _BACKGROUND_TASKS.add(task)
+
+    def _on_done(done_task: asyncio.Task[Any]) -> None:
+        with _BACKGROUND_TASKS_LOCK:
+            _BACKGROUND_TASKS.discard(done_task)
+        if not done_task.cancelled():
+            exc = done_task.exception()
+            if exc is not None:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="tts_cache_background_task_unhandled",
+                    stage="tts_cache",
+                    task_name=task_name,
+                    exception=exc,
+                )
+
+    task.add_done_callback(_on_done)
+    return task
 
 
 def is_tts_cache_enabled() -> bool:
@@ -418,6 +560,90 @@ class TtsAudioCacheService:
             except Exception:
                 await self._safe_rollback()
 
+    def _uses_real_db_repository(self) -> bool:
+        return isinstance(self.repo, TtsAudioCacheRepository)
+
+    def _get_daily_usage_bucket_locked(
+        self, *, create: bool
+    ) -> dict[date, tuple[float, dict[str, int]]] | None:
+        if self.repo is None:
+            return None
+        if self._uses_real_db_repository():
+            return _DAILY_USAGE_CACHE
+        try:
+            bucket = _FAKE_REPO_DAILY_USAGE_CACHE.get(self.repo)
+            if bucket is None and create:
+                bucket = {}
+                _FAKE_REPO_DAILY_USAGE_CACHE[self.repo] = bucket
+            return bucket
+        except TypeError:
+            return None
+
+    async def _get_daily_usage_cached(self) -> dict[str, int]:
+        if self.repo is None:
+            return {"bytes_served": 0, "hit_count": 0, "miss_count": 0}
+        ttl = get_tts_cache_daily_usage_ttl_seconds()
+        today = datetime.now(timezone.utc).date()
+        if ttl > 0:
+            now = time.monotonic()
+            with _DAILY_USAGE_CACHE_LOCK:
+                bucket = self._get_daily_usage_bucket_locked(create=False)
+                entry = bucket.get(today) if bucket is not None else None
+                if entry is not None and entry[0] > now:
+                    return dict(entry[1])
+
+        raw_usage = await self.repo.get_daily_usage()
+        usage = {
+            "bytes_served": int(raw_usage.get("bytes_served", 0)),
+            "hit_count": int(raw_usage.get("hit_count", 0)),
+            "miss_count": int(raw_usage.get("miss_count", 0)),
+        }
+        if ttl > 0:
+            now = time.monotonic()
+            with _DAILY_USAGE_CACHE_LOCK:
+                bucket = self._get_daily_usage_bucket_locked(create=True)
+                if bucket is not None:
+                    stale_days = [d for d in bucket if d != today]
+                    for d in stale_days:
+                        bucket.pop(d, None)
+                    prev_entry = bucket.get(today)
+                    if prev_entry is not None:
+                        prev_usage = prev_entry[1]
+                        usage = {
+                            "bytes_served": max(
+                                int(prev_usage.get("bytes_served", 0)),
+                                usage["bytes_served"],
+                            ),
+                            "hit_count": max(
+                                int(prev_usage.get("hit_count", 0)),
+                                usage["hit_count"],
+                            ),
+                            "miss_count": max(
+                                int(prev_usage.get("miss_count", 0)),
+                                usage["miss_count"],
+                            ),
+                        }
+                    bucket[today] = (now + ttl, dict(usage))
+        return dict(usage)
+
+    def _bump_cached_daily_usage(
+        self,
+        *,
+        bytes_delta: int = 0,
+        hit_delta: int = 0,
+        miss_delta: int = 0,
+    ) -> None:
+        today = datetime.now(timezone.utc).date()
+        with _DAILY_USAGE_CACHE_LOCK:
+            bucket = self._get_daily_usage_bucket_locked(create=False)
+            entry = bucket.get(today) if bucket is not None else None
+            if entry is None:
+                return
+            cached = entry[1]
+            cached["bytes_served"] = int(cached.get("bytes_served", 0)) + max(0, int(bytes_delta))
+            cached["hit_count"] = int(cached.get("hit_count", 0)) + max(0, int(hit_delta))
+            cached["miss_count"] = int(cached.get("miss_count", 0)) + max(0, int(miss_delta))
+
     async def _is_catalog_text_allowlisted(
         self,
         *,
@@ -478,6 +704,7 @@ class TtsAudioCacheService:
         normalized_text: str | None = None,
         allow_cache_write: bool = False,
         defer_allowlist_check: bool = False,
+        end_read_tx: bool = True,
     ) -> ResolvedCacheTarget | None:
         canonical_query = canonical_tts_text(normalized_text) if normalized_text else ""
         if self.repo is not None and (
@@ -531,7 +758,8 @@ class TtsAudioCacheService:
                 ):
                     await self._end_read_tx()
                     raise HTTPException(status_code=404, detail="Resource not found")
-                await self._end_read_tx()
+                if end_read_tx:
+                    await self._end_read_tx()
                 return ResolvedCacheTarget(
                     scope="PRIVATE",
                     owner_parent_id=actor_id,
@@ -542,7 +770,8 @@ class TtsAudioCacheService:
                 )
 
             if defer_allowlist_check and not allow_cache_write:
-                await self._end_read_tx()
+                if end_read_tx:
+                    await self._end_read_tx()
                 return ResolvedCacheTarget(
                     scope="CATALOG",
                     owner_parent_id=None,
@@ -563,7 +792,8 @@ class TtsAudioCacheService:
                     normalized_text=canonical_query,
                 )
             )
-            await self._end_read_tx()
+            if end_read_tx:
+                await self._end_read_tx()
             return ResolvedCacheTarget(
                 scope="CATALOG",
                 owner_parent_id=None,
@@ -639,6 +869,176 @@ class TtsAudioCacheService:
         path = f"catalog/{book_seg}/{page_seg}/{content_sha256}/{filename}"
         return get_tts_cache_bucket(), path
 
+    async def resolve_and_lookup_cached_audio(
+        self,
+        *,
+        actor_id: UUID | None,
+        book_id: UUID | None = None,
+        page_id: UUID | None = None,
+        page_revision_id: UUID | None = None,
+        cache_scope: str | None = None,
+        normalized_text: str,
+        voice_id: str,
+        model_version: str | None = None,
+        speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
+        allow_speed_fallback: bool = True,
+        require_word_timings: bool = False,
+        defer_allowlist_check: bool = True,
+        lookup_timeout_seconds: float | None = None,
+        background_metrics: bool = True,
+    ) -> tuple[ResolvedCacheTarget | None, CachedTtsHit | None]:
+        """Resolve scope and look up cached audio in ONE read transaction within a strict timeout budget."""
+        budget = (
+            get_tts_cache_lookup_timeout_seconds()
+            if lookup_timeout_seconds is None
+            else max(0.05, min(DEFAULT_TTS_CACHE_LOOKUP_TIMEOUT_SECONDS, float(lookup_timeout_seconds)))
+        )
+
+        async def _run() -> tuple[ResolvedCacheTarget | None, CachedTtsHit | None]:
+            target = await self.resolve_target(
+                actor_id=actor_id,
+                book_id=book_id,
+                page_id=page_id,
+                page_revision_id=page_revision_id,
+                cache_scope=cache_scope,
+                normalized_text=normalized_text,
+                allow_cache_write=False,
+                defer_allowlist_check=defer_allowlist_check,
+                end_read_tx=False,
+            )
+            if target is None or not normalized_text:
+                await self._end_read_tx()
+                return target, None
+            hit = await self.lookup_cached_audio(
+                target=target,
+                normalized_text=normalized_text,
+                voice_id=voice_id,
+                model_version=model_version,
+                speed=speed,
+                accept=accept,
+                audio_format=audio_format,
+                allow_speed_fallback=allow_speed_fallback,
+                require_word_timings=require_word_timings,
+                background_metrics=background_metrics,
+            )
+            return target, hit
+
+        try:
+            return await asyncio.wait_for(_run(), timeout=budget)
+        except TimeoutError:
+            await self._safe_rollback()
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_lookup_timeout",
+                stage="tts_cache",
+                timeout_seconds=budget,
+            )
+            return None, None
+
+    def schedule_record_hit(self, entry_id: UUID, *, byte_size: int) -> asyncio.Task[Any] | None:
+        """Persist cache hit telemetry asynchronously using a short-lived DB session."""
+        if self.repo is None:
+            return None
+        use_real_db = self._uses_real_db_repository()
+        repo_ref = self.repo
+        db_ref = self.db
+
+        async def _persist() -> None:
+            if use_real_db:
+                async with AsyncSessionLocal() as bg_db:
+                    bg_repo = TtsAudioCacheRepository(bg_db)
+                    await bg_repo.record_hit(entry_id, byte_size=byte_size)
+                    await bg_db.commit()
+            else:
+                await repo_ref.record_hit(entry_id, byte_size=byte_size)
+                if db_ref is not None:
+                    await db_ref.commit()
+
+        return _schedule_tts_cache_background_task(_persist, task_name="record_hit")
+
+    def schedule_record_miss(
+        self, *, stale_entry_id: UUID | None = None
+    ) -> asyncio.Task[Any] | None:
+        """Persist cache miss (and optional stale-entry) telemetry off the HTTP response path."""
+        if self.repo is None:
+            return None
+        use_real_db = self._uses_real_db_repository()
+        repo_ref = self.repo
+        db_ref = self.db
+
+        async def _persist() -> None:
+            if use_real_db:
+                async with AsyncSessionLocal() as bg_db:
+                    bg_repo = TtsAudioCacheRepository(bg_db)
+                    if stale_entry_id is not None:
+                        await bg_repo.mark_entries_status([stale_entry_id], status="STALE")
+                    await bg_repo.record_miss()
+                    await bg_db.commit()
+            else:
+                if stale_entry_id is not None:
+                    await repo_ref.mark_entries_status([stale_entry_id], status="STALE")
+                await repo_ref.record_miss()
+                if db_ref is not None:
+                    await db_ref.commit()
+
+        return _schedule_tts_cache_background_task(_persist, task_name="record_miss")
+
+    def schedule_store_cached_audio(
+        self,
+        *,
+        target: ResolvedCacheTarget,
+        normalized_text: str,
+        voice_id: str,
+        model_version: str,
+        speed: float,
+        audio_bytes: bytes,
+        source_content_type: str | None = None,
+        duration_seconds: float | None = None,
+        word_timings_json: list[dict[str, Any]] | dict[str, Any] | None = None,
+    ) -> asyncio.Task[Any] | None:
+        """Upload & index synthesized audio in a bounded background task with its own DB session."""
+        if (
+            not is_tts_cache_enabled()
+            or not target.can_store_on_miss
+            or not audio_bytes
+            or self.repo is None
+            or self.db is None
+        ):
+            return None
+        use_real_db = self._uses_real_db_repository()
+
+        async def _persist() -> bool:
+            if use_real_db:
+                async with AsyncSessionLocal() as bg_db:
+                    bg_svc = TtsAudioCacheService(bg_db)
+                    return await bg_svc.store_cached_audio(
+                        target=target,
+                        normalized_text=normalized_text,
+                        voice_id=voice_id,
+                        model_version=model_version,
+                        speed=speed,
+                        audio_bytes=audio_bytes,
+                        source_content_type=source_content_type,
+                        duration_seconds=duration_seconds,
+                        word_timings_json=word_timings_json,
+                    )
+            return await self.store_cached_audio(
+                target=target,
+                normalized_text=normalized_text,
+                voice_id=voice_id,
+                model_version=model_version,
+                speed=speed,
+                audio_bytes=audio_bytes,
+                source_content_type=source_content_type,
+                duration_seconds=duration_seconds,
+                word_timings_json=word_timings_json,
+            )
+
+        return _schedule_tts_cache_background_task(_persist, task_name="store_cached_audio")
+
     async def lookup_cached_audio(
         self,
         *,
@@ -651,6 +1051,7 @@ class TtsAudioCacheService:
         audio_format: str | None = None,
         allow_speed_fallback: bool = True,
         require_word_timings: bool = False,
+        background_metrics: bool = False,
     ) -> CachedTtsHit | None:
         if not is_tts_cache_enabled() or self.repo is None or self.db is None:
             return None
@@ -658,7 +1059,7 @@ class TtsAudioCacheService:
         formats = preferred_cache_formats(accept=accept, audio_format=audio_format)
         try:
             daily_limit = get_tts_cache_daily_egress_limit_bytes()
-            daily_usage = await self.repo.get_daily_usage()
+            daily_usage = await self._get_daily_usage_cached()
             if daily_limit > 0 and daily_usage["bytes_served"] >= daily_limit:
                 await self._end_read_tx()
                 self._set_quota_exhausted(True)
@@ -744,9 +1145,14 @@ class TtsAudioCacheService:
                 if entry is None and page_fallback_entry is not None:
                     entry = page_fallback_entry
             if entry is None:
-                await self.repo.record_miss()
-                await self.db.commit()
                 self._record_runtime_miss()
+                self._bump_cached_daily_usage(miss_delta=1)
+                if background_metrics:
+                    await self._end_read_tx()
+                    self.schedule_record_miss()
+                else:
+                    await self.repo.record_miss()
+                    await self.db.commit()
                 return None
 
             entry_id = entry.Id
@@ -778,9 +1184,8 @@ class TtsAudioCacheService:
                     bucket_name=entry_bucket,
                 )
             except Exception as exc:
-                if _is_storage_not_found_error(exc):
-                    await self.repo.mark_entries_status([entry_id], status="STALE")
-                else:
+                is_not_found = _is_storage_not_found_error(exc)
+                if not is_not_found:
                     log_diagnostic(
                         logger,
                         logging.WARNING,
@@ -788,15 +1193,27 @@ class TtsAudioCacheService:
                         stage="tts_cache",
                         exception=exc,
                     )
-                await self.repo.record_miss()
-                await self.db.commit()
                 self._record_runtime_miss()
+                self._bump_cached_daily_usage(miss_delta=1)
+                if background_metrics:
+                    self.schedule_record_miss(
+                        stale_entry_id=entry_id if is_not_found else None
+                    )
+                else:
+                    if is_not_found:
+                        await self.repo.mark_entries_status([entry_id], status="STALE")
+                    await self.repo.record_miss()
+                    await self.db.commit()
                 return None
 
             actual_type = detect_audio_content_type(audio_bytes, entry_format)
-            await self.repo.record_hit(entry_id, byte_size=len(audio_bytes))
-            await self.db.commit()
             self._record_runtime_hit(len(audio_bytes))
+            self._bump_cached_daily_usage(bytes_delta=len(audio_bytes), hit_delta=1)
+            if background_metrics:
+                self.schedule_record_hit(entry_id, byte_size=len(audio_bytes))
+            else:
+                await self.repo.record_hit(entry_id, byte_size=len(audio_bytes))
+                await self.db.commit()
             return CachedTtsHit(
                 content=audio_bytes,
                 content_type=actual_type,

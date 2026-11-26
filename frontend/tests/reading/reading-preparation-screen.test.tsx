@@ -272,4 +272,26 @@ describe("Shared reading preparation", () => {
     expect(screen.getByRole("button", { name: "Bắt đầu đọc" })).toBeDisabled();
     expect(createSessionMock).not.toHaveBeenCalled();
   });
+
+  it("auto-confirms microphone readiness on Android WebView when RECORD_AUDIO is already granted", async () => {
+    const win = window as unknown as {
+      ViReadNativeSpeech?: { postMessage: (msg: string) => void };
+    };
+    win.ViReadNativeSpeech = { postMessage: vi.fn() };
+    watchPermissionMock.mockImplementationOnce(async (onChange) => {
+      permissionChange = onChange;
+      onChange("granted");
+      return () => {
+        permissionChange = null;
+      };
+    });
+    try {
+      renderPreparation();
+      const start = await screen.findByRole("button", { name: "Bắt đầu đọc" });
+      await waitFor(() => expect(start).toBeEnabled());
+      expect(requestAccessMock).not.toHaveBeenCalled();
+    } finally {
+      delete win.ViReadNativeSpeech;
+    }
+  });
 });

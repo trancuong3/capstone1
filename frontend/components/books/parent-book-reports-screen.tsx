@@ -110,22 +110,22 @@ export function ParentBookReportsScreen() {
   const currentPage = Math.floor(offset / limit) + 1;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-label font-bold text-primary">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 md:gap-6">
+      <header className="flex flex-wrap items-center justify-between gap-2.5 md:items-start md:gap-4">
+        <div className="min-w-0">
+          <p className="hidden text-label font-bold text-primary md:block">
             ViRead · Phụ huynh
           </p>
-          <h1 className="mt-1 text-heading font-extrabold text-ink">
+          <h1 className="text-xl font-extrabold text-ink md:mt-1 md:text-heading">
             Báo cáo chất lượng sách
           </h1>
-          <p className="mt-2 max-w-2xl text-body text-muted">
+          <p className="mt-2 hidden max-w-2xl text-body text-muted md:block">
             Theo dõi các vấn đề ba mẹ đã gửi và trạng thái xử lý của Admin.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
-            className="w-auto"
+            className="min-h-11 w-auto"
             onClick={() => void load()}
             size="compact"
             variant="secondary"
@@ -133,7 +133,7 @@ export function ParentBookReportsScreen() {
             <RefreshCw aria-hidden className="size-4" />
             Tải lại
           </Button>
-          <ButtonLink className="w-auto" href="/books" size="compact">
+          <ButtonLink className="min-h-11 w-auto" href="/books" size="compact">
             Thư viện sách
           </ButtonLink>
         </div>
@@ -212,7 +212,7 @@ export function ParentBookReportsScreen() {
               ) : null}
               <div className="mt-3">
                 <Button
-                  className="h-9 px-3 text-xs"
+                  className="min-h-11 px-3 py-2 text-xs"
                   disabled={loadingDetailId === item.id}
                   fullWidth={false}
                   onClick={() => void toggleDetail(item.id)}

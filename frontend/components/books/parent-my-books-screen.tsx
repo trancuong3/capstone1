@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   BookMarked,
   BookOpen,
+  ChevronDown,
   Lock,
   Pencil,
   Plus,
@@ -115,6 +116,7 @@ function ParentMyBooksContent({
   const hasLoadedOnceRef = useRef(false);
 
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showPrivacyDetails, setShowPrivacyDetails] = useState(false);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
   const [minGrade, setMinGrade] = useState<number>(1);
@@ -363,35 +365,36 @@ function ParentMyBooksContent({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-3.5 py-1 md:gap-6 md:py-2">
+      <header className="flex flex-row items-center justify-between gap-2 border-b border-border pb-2.5 md:items-start md:gap-4 md:pb-5">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold uppercase tracking-wider text-primary">
+          <p className="hidden text-xs font-bold uppercase tracking-wider text-primary md:block">
             Không gian riêng của gia đình
           </p>
-          <h1 className="book-title mt-1 text-3xl text-ink sm:text-4xl">
+          <h1 className="book-title truncate text-xl text-ink md:mt-1 md:whitespace-normal md:text-4xl">
             Sách của tôi
           </h1>
-          <p className="mt-2 max-w-2xl text-body text-muted">
+          <p className="mt-2 hidden max-w-2xl text-body text-muted md:block">
             Tạo sách riêng và tải ảnh trang hoặc tài liệu (JPEG, PNG, WebP, BMP,
             TIFF, PDF, DOCX — tối đa 30 trang/tệp). Mỗi trang đều chạy OCR, rà
             chính tả và kiểm tra an toàn trước khi thêm vào sách đọc.
           </p>
         </div>
 
-        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+        <div className="flex shrink-0 flex-wrap items-center gap-1.5 md:gap-2">
           <Button
-            className="w-auto"
+            aria-label="Tải lại danh sách sách của tôi"
+            className="min-h-11 w-auto px-2.5 text-xs md:px-4 md:text-sm"
             fullWidth={false}
             onClick={() => void loadBooks()}
             variant="secondary"
             disabled={loading || fetching}
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            Tải lại
+            <span className="hidden sm:inline">Tải lại</span>
           </Button>
           <Button
-            className="w-auto"
+            className="min-h-11 w-auto px-3 text-xs md:px-4 md:text-sm"
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
           >
@@ -403,21 +406,47 @@ function ParentMyBooksContent({
 
       <div
         role="note"
-        className="flex items-start gap-3 rounded-card border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950"
+        className="rounded-card border border-emerald-200 bg-emerald-50/70 px-3.5 py-2 text-sm text-emerald-950 md:p-4"
       >
-        <Lock
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-emerald-700"
-        />
-        <div>
-          <p className="font-bold">Riêng tư tuyệt đối cho gia đình bạn</p>
-          <p className="mt-0.5 text-emerald-900">
-            Chỉ bạn và các hồ sơ trẻ thuộc tài khoản này có thể đọc sách riêng
-            sau khi trang hoàn tất kiểm tra. Sách riêng không bao giờ xuất hiện
-            trong thư viện chung và mặc định không được dùng để huấn luyện OCR.
-            Bạn có thể chủ động bật hoặc ngừng đóng góp mẫu OCR cho từng cuốn
-            sách bên trong trang quản lý sách.
-          </p>
+        <div className="flex items-center justify-between gap-2 md:items-start">
+          <div className="flex min-w-0 flex-1 items-center gap-2 md:items-start md:gap-3">
+            <Lock
+              aria-hidden="true"
+              className="size-4 shrink-0 text-emerald-700 md:mt-0.5 md:size-5"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-bold md:whitespace-normal md:text-sm">
+                Riêng tư tuyệt đối cho gia đình bạn
+              </p>
+              <p
+                id="my-books-privacy-details"
+                className={
+                  showPrivacyDetails
+                    ? "mt-1.5 text-xs leading-relaxed text-emerald-900 md:mt-0.5 md:text-sm"
+                    : "mt-0.5 hidden text-emerald-900 md:block"
+                }
+              >
+                Chỉ bạn và các hồ sơ trẻ thuộc tài khoản này có thể đọc sách
+                riêng sau khi trang hoàn tất kiểm tra. Sách riêng không bao giờ
+                xuất hiện trong thư viện chung và mặc định không được dùng để
+                huấn luyện OCR. Bạn có thể chủ động bật hoặc ngừng đóng góp mẫu
+                OCR cho từng cuốn sách bên trong trang quản lý sách.
+              </p>
+            </div>
+          </div>
+          <button
+            aria-controls="my-books-privacy-details"
+            aria-expanded={showPrivacyDetails}
+            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control px-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100/80 focus-visible:outline-3 focus-visible:outline-primary md:hidden"
+            onClick={() => setShowPrivacyDetails((open) => !open)}
+            type="button"
+          >
+            {showPrivacyDetails ? "Thu gọn" : "Tìm hiểu thêm"}
+            <ChevronDown
+              aria-hidden="true"
+              className={`size-4 shrink-0 transition-transform ${showPrivacyDetails ? "rotate-180" : ""}`}
+            />
+          </button>
         </div>
       </div>
 
@@ -698,7 +727,7 @@ function ParentMyBooksContent({
                     {book.readable_for_children && !isSuspended ? (
                       <Link
                         href={`/books/${encodeURIComponent(book.id)}`}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-primary bg-sky px-3 text-sm font-bold text-primary-hover hover:bg-primary/10"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-primary bg-sky px-3 text-sm font-bold text-primary-hover hover:bg-primary/10"
                       >
                         <BookOpen aria-hidden="true" className="size-4" />
                         Mở đọc cùng bé
@@ -706,7 +735,7 @@ function ParentMyBooksContent({
                     ) : (
                       <span
                         aria-disabled="true"
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-canvas px-3 text-xs font-semibold text-muted"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border bg-canvas px-3 text-xs font-semibold text-muted"
                       >
                         Chưa mở đọc cùng bé
                       </span>
@@ -715,7 +744,7 @@ function ParentMyBooksContent({
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         aria-label={`Sửa sách ${book.title}`}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-ink transition hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           isSuspended ||
                           savingBookId === book.id ||
@@ -733,7 +762,7 @@ function ParentMyBooksContent({
                       </button>
                       <button
                         aria-label={`Xóa sách ${book.title}`}
-                        className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-control border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
                         disabled={
                           savingBookId === book.id || deletingBookId === book.id
                         }
@@ -766,7 +795,7 @@ function ParentMyBooksContent({
                         Tên sách *
                         <input
                           aria-label="Tên sách chỉnh sửa"
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) => setEditTitle(event.target.value)}
                           required
                           type="text"
@@ -777,7 +806,7 @@ function ParentMyBooksContent({
                         Tác giả
                         <input
                           aria-label="Tác giả chỉnh sửa"
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
+                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-sm text-ink"
                           onChange={(event) =>
                             setEditAuthor(event.target.value)
                           }
@@ -790,7 +819,7 @@ function ParentMyBooksContent({
                           Từ lớp
                           <select
                             aria-label="Từ lớp chỉnh sửa"
-                            className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                            className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMinGrade(Number(event.target.value))
                             }
@@ -807,7 +836,7 @@ function ParentMyBooksContent({
                           Đến lớp
                           <select
                             aria-label="Đến lớp chỉnh sửa"
-                            className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                            className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
                             onChange={(event) =>
                               setEditMaxGrade(Number(event.target.value))
                             }
@@ -825,7 +854,7 @@ function ParentMyBooksContent({
                         Nguồn nội dung
                         <select
                           aria-label="Nguồn nội dung chỉnh sửa"
-                          className="min-h-10 rounded-control border border-border bg-white px-2 text-xs text-ink"
+                          className="min-h-11 rounded-control border border-border bg-white px-2 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceType(
                               event.target.value as SourceUsageType,
@@ -844,7 +873,7 @@ function ParentMyBooksContent({
                         Ghi chú nguồn
                         <input
                           aria-label="Ghi chú nguồn chỉnh sửa"
-                          className="min-h-10 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
+                          className="min-h-11 rounded-control border border-border bg-white px-2.5 text-xs text-ink"
                           onChange={(event) =>
                             setEditSourceNote(event.target.value)
                           }
@@ -854,7 +883,7 @@ function ParentMyBooksContent({
                       </label>
                       <div className="flex flex-wrap gap-2 pt-1">
                         <Button
-                          className="min-h-10 w-auto px-3 text-xs"
+                          className="min-h-11 w-auto px-3 text-xs"
                           fullWidth={false}
                           isLoading={savingBookId === book.id}
                           type="submit"
@@ -862,7 +891,7 @@ function ParentMyBooksContent({
                           Lưu & kiểm tra lại toàn bộ
                         </Button>
                         <Button
-                          className="min-h-10 w-auto px-3 text-xs"
+                          className="min-h-11 w-auto px-3 text-xs"
                           fullWidth={false}
                           onClick={() => setEditingBookId(null)}
                           type="button"
@@ -889,7 +918,7 @@ function ParentMyBooksContent({
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
-                          className="min-h-10 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
+                          className="min-h-11 w-auto bg-rose-700 px-3 text-xs text-white hover:bg-rose-800"
                           fullWidth={false}
                           isLoading={deletingBookId === book.id}
                           onClick={() => void handleDeleteBook(book)}
@@ -898,7 +927,7 @@ function ParentMyBooksContent({
                           Xác nhận xóa
                         </Button>
                         <Button
-                          className="min-h-10 w-auto px-3 text-xs"
+                          className="min-h-11 w-auto px-3 text-xs"
                           fullWidth={false}
                           onClick={() => setConfirmDeleteBookId(null)}
                           type="button"

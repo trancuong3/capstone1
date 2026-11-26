@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import Link from "next/link";
 import {
   BellRing,
@@ -22,11 +30,13 @@ import { InformationField } from "@/components/common/information-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { VerifiedBookPicker } from "./verified-book-picker";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingManagementService } from "@/hooks/use-reading-management-service";
 import { conflictMessage } from "@/lib/api/reading-management-messages";
+import { cn } from "@/lib/utils/cn";
 import {
   GoalInsights,
   PlanInsights,
@@ -70,7 +80,7 @@ const inputClass =
 const labelClass =
   "flex min-w-0 flex-col gap-1 text-label font-semibold text-ink";
 const actionClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
+  "inline-flex min-h-11 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
 
 function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -149,8 +159,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const childService = useChildService();
   const bookService = useBookService();
   const service = useReadingManagementService();
+  const appStore = useContext(AppStoreContext);
+  const initialStoreChildIdRef = useRef(appStore?.selectedChildId ?? "");
   const [children, setChildren] = useState<ChildProfileDTO[]>([]);
-  const [childId, setChildId] = useState(requestedChildId ?? "");
+  const [childId, setChildId] = useState(
+    requestedChildId ?? initialStoreChildIdRef.current ?? "",
+  );
+  const [mobileTab, setMobileTab] = useState<
+    "plans" | "goals" | "reminders" | "collections"
+  >("plans");
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
   const [plans, setPlans] = useState<ReadingPlanDTO[]>([]);
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
@@ -266,29 +283,37 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     safeDuePage * DUE_PAGE_SIZE,
   );
 
-  function handleSelectChild(nextChildId: string) {
-    if (nextChildId === childId) return;
-    requestIdRef.current += 1;
-    setChildId(nextChildId);
-    setGoals([]);
-    setPlans([]);
-    setCollections([]);
-    setReminders([]);
-    setDue([]);
-    setBooks([]);
-    setActiveForm(null);
-    setEditingGoalId("");
-    setEditingPlanId("");
-    setEditingReminderId("");
-    setError("");
-    setSuccess("");
-    setPlansPage(1);
-    setGoalsPage(1);
-    setCollectionsPage(1);
-    setCollectionFilter("ALL");
-    setRemindersPage(1);
-    setDuePage(1);
-  }
+  const selectStoreChild = appStore?.selectChild;
+  const setStoreValidatedChild = appStore?.setValidatedSelectedChild;
+  const syncStoreChildren = appStore?.syncAvailableChildren;
+  const syncedChildIdRef = useRef<string | null>(null);
+
+  const handleSelectChild = useCallback(
+    (nextChildId: string) => {
+      if (nextChildId === childId) return;
+      requestIdRef.current += 1;
+      setChildId(nextChildId);
+      setGoals([]);
+      setPlans([]);
+      setCollections([]);
+      setReminders([]);
+      setDue([]);
+      setBooks([]);
+      setActiveForm(null);
+      setEditingGoalId("");
+      setEditingPlanId("");
+      setEditingReminderId("");
+      setError("");
+      setSuccess("");
+      setPlansPage(1);
+      setGoalsPage(1);
+      setCollectionsPage(1);
+      setCollectionFilter("ALL");
+      setRemindersPage(1);
+      setDuePage(1);
+    },
+    [childId],
+  );
 
   useEffect(() => {
     let active = true;
@@ -297,13 +322,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       .then((items) => {
         if (!active) return;
         setChildren(items);
-        const requested = requestedChildId
-          ? items.find((child) => child.id === requestedChildId)
+        const preferredId =
+          requestedChildId ?? (initialStoreChildIdRef.current || undefined);
+        const preferred = preferredId
+          ? items.find((child) => child.id === preferredId)
           : undefined;
         setChildId((current) =>
           current && items.some((child) => child.id === current)
             ? current
-            : (requested?.id ?? items[0]?.id ?? ""),
+            : (preferred?.id ?? items[0]?.id ?? ""),
         );
       })
       .catch(() => {
@@ -316,6 +343,30 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       active = false;
     };
   }, [childService, requestedChildId]);
+
+  useEffect(() => {
+    if (children.length === 0) return;
+    syncStoreChildren?.(children);
+  }, [children, syncStoreChildren]);
+
+  useEffect(() => {
+    if (!selectedChild) return;
+    if (syncedChildIdRef.current === selectedChild.id) return;
+    syncedChildIdRef.current = selectedChild.id;
+    selectStoreChild?.(selectedChild.id);
+    setStoreValidatedChild?.(selectedChild);
+  }, [selectStoreChild, selectedChild, setStoreValidatedChild]);
+
+  useEffect(() => {
+    if (
+      !requestedChildId ||
+      requestedChildId === childId ||
+      !children.some((item) => item.id === requestedChildId)
+    ) {
+      return;
+    }
+    handleSelectChild(requestedChildId);
+  }, [childId, children, handleSelectChild, requestedChildId]);
 
   useEffect(() => {
     if (!childId) {
@@ -917,13 +968,13 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     );
 
   return (
-    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-4">
-      <header className="flex flex-wrap items-end justify-between gap-5">
+    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-3 md:gap-4">
+      <header className="flex items-center justify-between gap-2 border-b border-border pb-2.5 md:items-end md:gap-5 md:border-b-0 md:pb-0">
         <div className="min-w-0 flex-1">
-          <h1 className="text-heading font-extrabold leading-tight text-ink">
+          <h1 className="book-title truncate text-xl font-extrabold leading-tight text-ink md:whitespace-normal md:text-heading">
             Quản lý đọc sách
           </h1>
-          <p className="mt-1.5 max-w-3xl text-body leading-6 text-muted">
+          <p className="mt-1.5 hidden max-w-3xl text-body leading-6 text-muted md:block">
             Đặt mục tiêu, lưu sách và tạo lịch nhắc theo giờ địa phương của gia
             đình.
           </p>
@@ -931,7 +982,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <Button
           onClick={() => setReloadKey((value) => value + 1)}
           size="compact"
-          className="min-h-10! px-4! py-2! text-sm! sm:w-auto"
+          className="min-h-11! shrink-0 px-3! py-2! text-xs! md:px-4! md:text-sm! sm:w-auto"
           fullWidth={false}
           variant="secondary"
           disabled={isReadingDataLoading || !childId}
@@ -940,7 +991,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </Button>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="hidden gap-4 md:grid md:grid-cols-2">
         <label
           className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 text-label text-muted shadow-xs"
           htmlFor="management-child"
@@ -948,9 +999,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
           Hồ sơ bé
           <select
             id="management-child"
-            className="min-h-6 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-11 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
             value={childId}
-            onChange={(event) => handleSelectChild(event.target.value)}
+            onChange={(event) => {
+              const nextChildId = event.target.value;
+              const matched = children.find((item) => item.id === nextChildId);
+              selectStoreChild?.(nextChildId);
+              if (matched) setStoreValidatedChild?.(matched);
+              handleSelectChild(nextChildId);
+            }}
           >
             {children.map((child) => (
               <option key={child.id} value={child.id}>
@@ -994,7 +1051,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <>
           <section
             aria-label="Tổng quan thói quen đọc"
-            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="grid grid-cols-2 gap-2.5 md:gap-3 lg:grid-cols-4"
           >
             {[
               {
@@ -1025,27 +1082,31 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             ].map((item) => (
               <article
                 key={item.label}
-                className="rounded-card border border-border bg-white p-4 shadow-xs transition hover:border-primary/40"
+                className="rounded-card border border-border bg-white p-3 shadow-xs transition hover:border-primary/40 md:p-4"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-bold text-muted">{item.label}</p>
+                  <p className="text-xs font-bold text-muted md:text-sm">
+                    {item.label}
+                  </p>
                   <span
                     aria-hidden="true"
-                    className="shrink-0 rounded-xl bg-sky/60 p-2 text-primary"
+                    className="shrink-0 rounded-xl bg-sky/60 p-1.5 text-primary md:p-2"
                   >
                     {item.icon}
                   </span>
                 </div>
-                <p className="mt-2 text-heading font-extrabold tabular-nums text-primary">
+                <p className="mt-1 text-2xl font-extrabold tabular-nums text-primary md:mt-2 md:text-heading">
                   {item.value}
                 </p>
-                <p className="mt-0.5 text-xs text-muted">{item.detail}</p>
+                <p className="mt-0.5 hidden text-xs text-muted md:block">
+                  {item.detail}
+                </p>
               </article>
             ))}
           </section>
 
-          <details className="rounded-control border border-border bg-white px-4 py-3 shadow-xs transition hover:border-primary/40">
-            <summary className="cursor-pointer font-bold text-primary">
+          <details className="rounded-control border border-border bg-white px-3.5 py-1.5 shadow-xs transition hover:border-primary/40 md:px-4 md:py-2">
+            <summary className="flex min-h-11 cursor-pointer items-center font-bold text-primary">
               Hôm nay bé cần đọc gì?
             </summary>
             <TodaySummary
@@ -1055,11 +1116,67 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             />
           </details>
 
-          <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-            <div className="flex min-w-0 flex-col gap-6">
+          <div
+            role="tablist"
+            aria-label="Mục quản lý đọc"
+            className="grid grid-cols-4 gap-1 rounded-control border border-border bg-white p-1 shadow-xs md:hidden"
+          >
+            {(
+              [
+                { key: "plans", label: "Kế hoạch", count: plans.length },
+                { key: "goals", label: "Mục tiêu", count: goals.length },
+                { key: "reminders", label: "Lịch nhắc", count: reminders.length },
+                {
+                  key: "collections",
+                  label: "Sách lưu",
+                  count: collections.length,
+                },
+              ] as const
+            ).map((tab) => {
+              const active = mobileTab === tab.key;
+              return (
+                <button
+                  key={tab.key}
+                  role="tab"
+                  aria-selected={active}
+                  type="button"
+                  onClick={() => setMobileTab(tab.key)}
+                  className={cn(
+                    "flex min-h-11 flex-col items-center justify-center rounded-[10px] px-1 py-1 text-[11px] font-extrabold leading-tight transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    active
+                      ? "bg-primary text-white shadow-xs"
+                      : "text-ink hover:bg-canvas",
+                  )}
+                >
+                  <span className="truncate">{tab.label}</span>
+                  <span
+                    className={cn(
+                      "mt-0.5 text-[10px] font-bold tabular-nums",
+                      active ? "text-white/90" : "text-muted",
+                    )}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="grid gap-4 md:gap-6 lg:grid-cols-2 lg:items-start">
+            <div
+              className={cn(
+                "flex min-w-0 flex-col gap-4 md:gap-6",
+                mobileTab !== "plans" &&
+                  mobileTab !== "collections" &&
+                  "hidden md:flex",
+              )}
+            >
               <section
                 aria-label="Kế hoạch đọc trong tuần"
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className={cn(
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  mobileTab !== "plans" && "hidden md:block",
+                )}
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1088,7 +1205,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-11! shrink-0 px-3! py-1.5! text-xs!"
                     onClick={() => {
                       setEditingPlanId("");
                       setActiveForm("plan");
@@ -1165,7 +1282,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
                                 onClick={() => {
                                   setActiveForm("plan");
                                   setEditingPlanId(plan.id);
@@ -1185,7 +1302,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="quiet"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
+                                  className="min-h-11! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "PAUSED")
@@ -1198,7 +1315,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="secondary"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                  className="min-h-11! w-auto! px-2.5! py-1! text-xs!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "ACTIVE")
@@ -1211,7 +1328,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="secondary"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                className="min-h-11! w-auto! px-2.5! py-1! text-xs!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "COMPLETED")
@@ -1227,7 +1344,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "ENDED")
@@ -1256,7 +1373,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label="Sách yêu thích và danh sách muốn đọc"
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className={cn(
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  mobileTab !== "collections" && "hidden md:block",
+                )}
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1312,7 +1432,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           setCollectionFilter(tab.key);
                           setCollectionsPage(1);
                         }}
-                        className={`inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-bold transition ${
+                        className={`inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-bold transition ${
                           collectionFilter === tab.key
                             ? "border-primary bg-sky text-primary-hover"
                             : "border-border bg-white text-ink hover:bg-canvas"
@@ -1360,7 +1480,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
                             {entry.book.lifecycle_status === "ACTIVE" ? (
                               <Link
-                                className="inline-flex min-h-8 items-center rounded-control px-2 text-xs font-bold text-primary hover:bg-sky hover:underline"
+                                className="inline-flex min-h-11 items-center rounded-control px-2 text-xs font-bold text-primary hover:bg-sky hover:underline"
                                 href={`/books/${encodeURIComponent(entry.book_id)}?childId=${encodeURIComponent(childId)}`}
                               >
                                 Mở sách
@@ -1370,7 +1490,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               variant="quiet"
                               size="compact"
                               fullWidth={false}
-                              className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-primary"
+                              className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-primary"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void toggleCollection(
@@ -1412,10 +1532,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </section>
             </div>
 
-            <div className="flex min-w-0 flex-col gap-6">
+            <div
+              className={cn(
+                "flex min-w-0 flex-col gap-4 md:gap-6",
+                mobileTab !== "goals" &&
+                  mobileTab !== "reminders" &&
+                  "hidden md:flex",
+              )}
+            >
               <section
                 aria-label="Mục tiêu đọc"
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className={cn(
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  mobileTab !== "goals" && "hidden md:block",
+                )}
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1444,7 +1574,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-11! shrink-0 px-3! py-1.5! text-xs!"
                     onClick={() => setActiveForm("goal")}
                   >
                     Thêm mục tiêu
@@ -1503,7 +1633,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                             <div className="mt-3 flex flex-wrap items-center gap-2">
                               <input
                                 aria-label="Giá trị mục tiêu mới"
-                                className="min-h-9 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                                className="min-h-11 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
                                 type="number"
                                 min={1}
                                 value={editingTarget}
@@ -1514,7 +1644,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-9! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-11! w-auto! px-3! py-1.5! text-xs!"
                                 onClick={() => void saveEditedGoal(goal)}
                                 disabled={Boolean(busyKey)}
                               >
@@ -1523,7 +1653,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-9! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-11! w-auto! px-3! py-1.5! text-xs!"
                                 variant="secondary"
                                 onClick={() => setEditingGoalId("")}
                               >
@@ -1538,7 +1668,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
                                 onClick={() => {
                                   setEditingGoalId(goal.id);
                                   setEditingTarget(String(goal.target_value));
@@ -1551,7 +1681,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="quiet"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
+                                  className="min-h-11! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "PAUSED")
@@ -1564,7 +1694,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="secondary"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                  className="min-h-11! w-auto! px-2.5! py-1! text-xs!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "ACTIVE")
@@ -1577,7 +1707,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="secondary"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                className="min-h-11! w-auto! px-2.5! py-1! text-xs!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transition(goal, "COMPLETED")
@@ -1589,7 +1719,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
                                 disabled={Boolean(busyKey)}
                                 onClick={() => void transition(goal, "ENDED")}
                               >
@@ -1620,7 +1750,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label="Lịch nhắc đọc"
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className={cn(
+                  "min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5",
+                  mobileTab !== "reminders" && "hidden md:block",
+                )}
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1650,7 +1783,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-11! shrink-0 px-3! py-1.5! text-xs!"
                     onClick={() => {
                       setEditingReminderId("");
                       setActiveForm("reminder");
@@ -1700,7 +1833,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               variant="secondary"
                               size="compact"
                               fullWidth={false}
-                              className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                              className="min-h-11! w-auto! px-2.5! py-1! text-xs!"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void runAction(
@@ -1772,7 +1905,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </span>
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 pr-1 text-xs font-semibold text-ink">
+                              <label className="inline-flex min-h-11 shrink-0 cursor-pointer items-center gap-1.5 pr-1 text-xs font-semibold text-ink">
                                 <input
                                   type="checkbox"
                                   className="size-4 accent-primary"
@@ -1797,7 +1930,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
                                 onClick={() => {
                                   setEditingReminderId(reminder.id);
                                   setActiveForm("reminder");
@@ -1815,7 +1948,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-danger"
+                                className="min-h-11! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-danger"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void (

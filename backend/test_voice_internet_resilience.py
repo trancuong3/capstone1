@@ -271,6 +271,50 @@ class LocalVoiceProviderInternetResilienceTests(unittest.IsolatedAsyncioTestCase
         self.assertEqual(tts_req.headers.get("x-request-id"), "req-voice-abc-123")
         self.assertEqual(tts_req.headers.get("x-viread-voice-token"), "super-secret-voice-token")
 
+    async def test_health_probe_uses_extended_timeouts_for_remote_tunnel_and_fast_for_loopback(self) -> None:
+        captured: list[tuple[str, float, float, float]] = []
+
+        async def _capture_probe(base_url: str) -> None:
+            provider = LocalVoiceProvider(base_url=base_url, worker_token="tok")
+            seen_http_timeout: list[httpx.Timeout] = []
+            seen_outer_timeout: list[float] = []
+
+            class _SpyClient:
+                async def get(self, url: str, **kwargs):
+                    seen_http_timeout.append(kwargs["timeout"])
+                    return httpx.Response(
+                        200,
+                        json={"status": "ok", "stt": {"ready": True}, "tts": {"ready": True}},
+                    )
+
+            real_wait_for = __import__("asyncio").wait_for
+
+            async def _spy_wait_for(coro, timeout=None):
+                seen_outer_timeout.append(float(timeout))
+                return await real_wait_for(coro, timeout=timeout)
+
+            with (
+                patch.object(provider, "_get_client", return_value=_SpyClient()),
+                patch("app.providers.local_voice_provider.asyncio.wait_for", side_effect=_spy_wait_for),
+            ):
+                health = await provider.get_health()
+            self.assertTrue(health["available"])
+            captured.append(
+                (
+                    base_url,
+                    float(seen_http_timeout[0].connect),
+                    float(seen_http_timeout[0].read),
+                    seen_outer_timeout[0],
+                )
+            )
+
+        with patch.dict(os.environ, {"RENDER": "", "APP_ENVIRONMENT": "development"}, clear=False):
+            await _capture_probe("https://voice-tunnel.trycloudflare.com")
+            await _capture_probe("http://127.0.0.1:8010")
+
+        self.assertEqual(captured[0], ("https://voice-tunnel.trycloudflare.com", 4.0, 4.0, 4.5))
+        self.assertEqual(captured[1], ("http://127.0.0.1:8010", 2.0, 2.0, 2.5))
+
     async def test_fail_fast_on_connect_timeout_and_error_classification(self) -> None:
         provider = LocalVoiceProvider(
             base_url="https://voice-tunnel.trycloudflare.com",
@@ -582,6 +626,92 @@ class VoiceWorkerContractTests(unittest.TestCase):
             finally:
                 worker_logger.removeHandler(handler)
                 worker_logger.setLevel(old_level)
+        finally:
+            root_logger.handlers[:] = saved_handlers
+            root_logger.filters[:] = saved_filters
+
+    def test_worker_tts_timed_uses_in_memory_lru_cache_without_blocking_semaphore(self) -> None:
+        import asyncio
+
+        root_logger = logging.getLogger()
+        saved_handlers = list(root_logger.handlers)
+        saved_filters = list(root_logger.filters)
+        try:
+            worker = _load_voice_worker_module()
+            worker._TTS_TIMED_MEM_CACHE.clear()
+            synth_calls: list[tuple[str, str, float, str]] = []
+
+            def _fake_timed_sync(_engine, text_nfc, preset, speed, *, preferred_media_type="audio/wav"):
+                synth_calls.append((preset.voice_id, text_nfc, speed, preferred_media_type))
+                return {
+                    "audio_base64": "UklGRg==",
+                    "media_type": preferred_media_type,
+                    "provider": "local",
+                    "voice_id": preset.voice_id,
+                    "region": preset.region,
+                    "model_version": worker.TTS_MODEL_VERSION,
+                    "speed": speed,
+                    "duration_seconds": 1.25,
+                    "words": [{"word": w, "start": 0.0, "end": 0.5} for w in text_nfc.split()],
+                }
+
+            with (
+                patch.dict(os.environ, {"VIREAD_VOICE_WORKER_TOKEN": ""}, clear=False),
+                patch.object(worker, "_ensure_capability_loaded", AsyncMock()),
+                patch.object(worker, "synthesize_timed_passage_sync", side_effect=_fake_timed_sync),
+                patch.object(worker.runtime, "tts_engine", object()),
+            ):
+                client = TestClient(worker.app)
+                payload = {
+                    "text": "Con mèo nhỏ",
+                    "voice_id": "local_north_truc_ly",
+                    "speed": 1.0,
+                    "audio_format": "mp3",
+                }
+                r1 = client.post("/tts/timed", json=payload)
+                self.assertEqual(r1.status_code, 200)
+                self.assertEqual(len(synth_calls), 1)
+                self.assertEqual(r1.json()["media_type"], "audio/mpeg")
+
+                # Even if tts_semaphore is locked (busy), repeat request hits RAM cache immediately!
+                locked_sem = asyncio.Semaphore(0)
+                with (
+                    patch.object(worker.runtime, "tts_semaphore", locked_sem),
+                    patch.object(worker, "QUEUE_WAIT_SECONDS", 0.05),
+                ):
+                    r2 = client.post("/tts/timed", json=payload)
+                self.assertEqual(r2.status_code, 200)
+                self.assertEqual(r2.json(), r1.json())
+                self.assertEqual(len(synth_calls), 1)
+
+                # Changing format, speed, voice, text, or precision must miss cache
+                r_wav = client.post("/tts/timed", json={**payload, "audio_format": "wav"})
+                self.assertEqual(r_wav.status_code, 200)
+                self.assertEqual(len(synth_calls), 2)
+
+                r_spd = client.post("/tts/timed", json={**payload, "speed": 0.85})
+                self.assertEqual(r_spd.status_code, 200)
+                self.assertEqual(len(synth_calls), 3)
+
+                r_voice = client.post("/tts/timed", json={**payload, "voice_id": "local_south_thuc_doan"})
+                self.assertEqual(r_voice.status_code, 200)
+                self.assertEqual(len(synth_calls), 4)
+
+                with patch.object(worker, "TTS_PRECISION", "fp32"):
+                    r_prec = client.post("/tts/timed", json=payload)
+                self.assertEqual(r_prec.status_code, 200)
+                self.assertEqual(len(synth_calls), 5)
+
+            # Bounded LRU eviction
+            worker._TTS_TIMED_MEM_CACHE.clear()
+            with patch.object(worker, "TTS_TIMED_MEM_CACHE_MAX_ENTRIES", 2):
+                worker._timed_mem_cache_put("k1", {"v": 1})
+                worker._timed_mem_cache_put("k2", {"v": 2})
+                _ = worker._timed_mem_cache_get("k1")  # refresh k1
+                worker._timed_mem_cache_put("k3", {"v": 3})  # evicts k2
+                self.assertIsNotNone(worker._timed_mem_cache_get("k1"))
+                self.assertIsNone(worker._timed_mem_cache_get("k2"))
+                self.assertIsNotNone(worker._timed_mem_cache_get("k3"))
         finally:
             root_logger.handlers[:] = saved_handlers
             root_logger.filters[:] = saved_filters

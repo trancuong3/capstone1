@@ -36,6 +36,55 @@ function normalizeChildId(value: unknown): string | null {
   return trimmed || null;
 }
 
+function readPersistedChildId(userId: string | null): string | null {
+  const storageKey = getUserStorageKey(userId);
+  if (!storageKey || typeof window === "undefined") return null;
+  try {
+    return normalizeChildId(window.localStorage.getItem(storageKey));
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedChildId(
+  userId: string | null,
+  childId: string | null,
+): void {
+  const storageKey = getUserStorageKey(userId);
+  if (!storageKey || typeof window === "undefined") return;
+  try {
+    if (childId) {
+      window.localStorage.setItem(storageKey, childId);
+    } else {
+      window.localStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Ignore storage quota or private-mode restrictions; in-memory state stays authoritative.
+  }
+}
+
+function purgePersistedChildId(userId: string | null): void {
+  writePersistedChildId(userId, null);
+}
+
+function purgeAllPersistedChildIds(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(SELECTED_CHILD_STORAGE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    for (const key of keysToRemove) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Ignore restricted storage environments.
+  }
+}
+
 function broadcastChildSelection(
   userId: string | null,
   childId: string | null,
@@ -79,6 +128,7 @@ export interface AppStore {
   selectChild(childId: string): void;
   clearSelectedChild(): void;
   setValidatedSelectedChild(child: ChildProfileDTO): void;
+  syncAvailableChildren(children: readonly ChildProfileDTO[]): void;
 }
 
 export const AppStoreContext = createContext<AppStore | null>(null);
@@ -94,13 +144,20 @@ interface SelectionState {
   child: ChildProfileDTO | null;
 }
 
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
 export function AppStoreProvider({
   children,
   initialChildId = null,
 }: AppStoreProviderProps) {
   const authRuntime = useAuthRuntime();
-  const activeUserId = authRuntime.session?.user?.id ?? null;
+  const activeUserId =
+    authRuntime.lastEvent === "SIGNED_OUT"
+      ? null
+      : (authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null);
   const previousUserIdRef = useRef<string | null>(activeUserId);
+  const hydratedStorageUserRef = useRef<string | null>(null);
   const syncChannelRef = useRef<BroadcastChannel | null>(null);
 
   const [selection, setSelection] = useState<SelectionState>(() => ({
@@ -109,32 +166,74 @@ export function AppStoreProvider({
     child: null,
   }));
 
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const previousUserId = previousUserIdRef.current;
     previousUserIdRef.current = activeUserId;
 
-    if (
-      previousUserId &&
-      previousUserId !== activeUserId &&
-      (authRuntime.lastEvent === "SIGNED_OUT" || activeUserId === null)
-    ) {
-      broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+    if (authRuntime.lastEvent === "SIGNED_OUT") {
+      purgeAllPersistedChildIds();
+      if (previousUserId) {
+        broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+      }
+      hydratedStorageUserRef.current = null;
+      setSelection({ userId: null, childId: null, child: null });
+      return;
     }
 
     if (previousUserId !== activeUserId) {
+      if (previousUserId) {
+        purgePersistedChildId(previousUserId);
+        if (activeUserId === null) {
+          broadcastChildSelection(previousUserId, null, syncChannelRef.current);
+        }
+      }
+      hydratedStorageUserRef.current = activeUserId;
+
       setSelection((current) => {
         if (
           previousUserId === null &&
           activeUserId !== null &&
           (current.userId === null || current.userId === activeUserId)
         ) {
+          if (current.childId) {
+            writePersistedChildId(activeUserId, current.childId);
+            return {
+              userId: activeUserId,
+              childId: current.childId,
+              child: current.child,
+            };
+          }
+          const persisted = readPersistedChildId(activeUserId);
           return {
             userId: activeUserId,
-            childId: current.childId,
-            child: current.child,
+            childId: persisted,
+            child: null,
           };
         }
-        return { userId: activeUserId, childId: null, child: null };
+        const persisted = activeUserId
+          ? readPersistedChildId(activeUserId)
+          : null;
+        return { userId: activeUserId, childId: persisted, child: null };
+      });
+      return;
+    }
+
+    if (activeUserId && hydratedStorageUserRef.current !== activeUserId) {
+      hydratedStorageUserRef.current = activeUserId;
+      setSelection((current) => {
+        if (current.childId) {
+          writePersistedChildId(activeUserId, current.childId);
+          return current.userId === activeUserId
+            ? current
+            : {
+                userId: activeUserId,
+                childId: current.childId,
+                child: current.child,
+              };
+        }
+        const persisted = readPersistedChildId(activeUserId);
+        if (!persisted) return current;
+        return { userId: activeUserId, childId: persisted, child: null };
       });
     }
   }, [activeUserId, authRuntime.lastEvent]);
@@ -241,12 +340,17 @@ export function AppStoreProvider({
     return { childId: null, child: null };
   }, [activeUserId, selection.child, selection.childId, selection.userId]);
 
+  const effectiveChildIdRef = useRef<string | null>(effectiveSelection.childId);
+  useIsomorphicLayoutEffect(() => {
+    effectiveChildIdRef.current = effectiveSelection.childId;
+  }, [effectiveSelection.childId]);
+
   const previousCacheSelectionRef = useRef({
     userId: activeUserId,
     childId: effectiveSelection.childId,
   });
 
-  useLayoutEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     const previous = previousCacheSelectionRef.current;
     previousCacheSelectionRef.current = {
       userId: activeUserId,
@@ -269,17 +373,36 @@ export function AppStoreProvider({
     (childId: string) => {
       const normalized = normalizeChildId(childId);
       if (!normalized) return;
-      broadcastChildSelection(activeUserId, normalized, syncChannelRef.current);
+      const changed = effectiveChildIdRef.current !== normalized;
+      effectiveChildIdRef.current = normalized;
+      writePersistedChildId(activeUserId, normalized);
+      if (changed) {
+        broadcastChildSelection(
+          activeUserId,
+          normalized,
+          syncChannelRef.current,
+        );
+      }
       setSelection((current) =>
         current.userId === activeUserId && current.childId === normalized
           ? current
-          : { userId: activeUserId, childId: normalized, child: null },
+          : {
+              userId: activeUserId,
+              childId: normalized,
+              child:
+                current.userId === activeUserId &&
+                current.child?.id === normalized
+                  ? current.child
+                  : null,
+            },
       );
     },
     [activeUserId],
   );
 
   const clearSelectedChild = useCallback(() => {
+    effectiveChildIdRef.current = null;
+    purgePersistedChildId(activeUserId);
     broadcastChildSelection(activeUserId, null, syncChannelRef.current);
     setSelection({ userId: activeUserId, childId: null, child: null });
   }, [activeUserId]);
@@ -287,10 +410,67 @@ export function AppStoreProvider({
   const setValidatedSelectedChild = useCallback(
     (child: ChildProfileDTO) => {
       setSelection((current) => {
-        if (current.userId !== activeUserId || current.childId !== child.id) {
+        const sameActor =
+          current.userId === activeUserId ||
+          (current.userId === null && activeUserId !== null);
+        if (!sameActor || current.childId !== child.id) {
           return current;
         }
         return { userId: activeUserId, childId: current.childId, child };
+      });
+    },
+    [activeUserId],
+  );
+
+  const syncAvailableChildren = useCallback(
+    (availableChildren: readonly ChildProfileDTO[]) => {
+      if (availableChildren.length === 0) return;
+
+      const currentChildId = effectiveChildIdRef.current;
+      if (!currentChildId && availableChildren.length === 1) {
+        const onlyChild = availableChildren[0];
+        effectiveChildIdRef.current = onlyChild.id;
+        writePersistedChildId(activeUserId, onlyChild.id);
+        broadcastChildSelection(
+          activeUserId,
+          onlyChild.id,
+          syncChannelRef.current,
+        );
+        setSelection({
+          userId: activeUserId,
+          childId: onlyChild.id,
+          child: onlyChild,
+        });
+        return;
+      }
+
+      if (!currentChildId) return;
+      const matched = availableChildren.find(
+        (candidate) => candidate.id === currentChildId,
+      );
+      if (!matched) return;
+
+      setSelection((current) => {
+        const sameActor =
+          current.userId === activeUserId ||
+          (current.userId === null && activeUserId !== null);
+        if (!sameActor || current.childId !== matched.id) {
+          return current;
+        }
+        if (
+          current.userId === activeUserId &&
+          current.child?.id === matched.id &&
+          current.child.alias === matched.alias &&
+          current.child.grade === matched.grade &&
+          current.child.avatar_url === matched.avatar_url
+        ) {
+          return current;
+        }
+        return {
+          userId: activeUserId,
+          childId: matched.id,
+          child: matched,
+        };
       });
     },
     [activeUserId],
@@ -303,6 +483,7 @@ export function AppStoreProvider({
       selectChild,
       clearSelectedChild,
       setValidatedSelectedChild,
+      syncAvailableChildren,
     }),
     [
       clearSelectedChild,
@@ -310,6 +491,7 @@ export function AppStoreProvider({
       effectiveSelection.childId,
       selectChild,
       setValidatedSelectedChild,
+      syncAvailableChildren,
     ],
   );
 

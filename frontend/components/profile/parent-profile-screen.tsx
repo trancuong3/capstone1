@@ -190,7 +190,7 @@ export function ParentProfileScreen() {
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 md:gap-4">
       <PageHeader
         description="Quản lý hồ sơ ba mẹ và các hồ sơ bé liên kết."
         eyebrow="TÀI KHOẢN VIREAD"
@@ -201,24 +201,26 @@ export function ParentProfileScreen() {
           {saveNotice}
         </StatusMessage>
       ) : null}
-      <Card className="sm:px-8 sm:py-6">
-        <div className="flex flex-col items-start gap-4 sm:flex-row sm:gap-6">
-          <ProfileAvatar
-            ariaLabel={`Ảnh đại diện của ${displayName ?? "ba mẹ"}`}
-            displayName={displayName}
-            imageUrl={profile.avatar_url}
-            size="lg"
-          />
-          <div className="flex min-w-0 flex-col items-start gap-3">
-            <h2 className="max-w-full break-words text-2xl font-extrabold text-ink">
+      <Card className="p-4 sm:px-8 sm:py-6">
+        <div className="flex flex-row items-center gap-3.5 sm:items-start sm:gap-6">
+          <div className="shrink-0">
+            <ProfileAvatar
+              ariaLabel={`Ảnh đại diện của ${displayName ?? "ba mẹ"}`}
+              displayName={displayName}
+              imageUrl={profile.avatar_url}
+              size="lg"
+            />
+          </div>
+          <div className="flex min-w-0 flex-1 flex-col items-start gap-1.5 sm:gap-3">
+            <h2 className="max-w-full break-words text-lg font-extrabold text-ink md:text-2xl">
               {displayName || "Chưa cập nhật tên hiển thị"}
             </h2>
-            <p className="break-all text-body text-muted">
+            <p className="break-all text-sm text-muted md:text-body">
               {contactValue(profile.email, profile.contact_info_status)} ·{" "}
               {getRoleLabel(profile.role)}
             </p>
             <p
-              className={`rounded-control px-3 py-2 text-sm font-bold ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
+              className={`rounded-control px-2.5 py-1 text-xs font-bold md:px-3 md:py-2 md:text-sm ${profile.email_verified === true ? "bg-success-surface text-success-ink" : "bg-sky text-primary"}`}
             >
               {emailVerificationLabel(
                 profile.email,
@@ -238,7 +240,7 @@ export function ParentProfileScreen() {
         >
           Chỉnh sửa hồ sơ
         </Button>
-        <dl className="grid gap-4 sm:grid-cols-2">
+        <dl className="grid gap-3 sm:grid-cols-2 sm:gap-4">
           <InformationField label="Email">
             {contactValue(profile.email, profile.contact_info_status)}
             {profile.pending_email ? (
@@ -261,24 +263,24 @@ export function ParentProfileScreen() {
       </Card>
       <section
         aria-labelledby="parent-children-heading"
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-3 md:gap-4"
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 md:gap-3">
           <h2
-            className="text-2xl font-extrabold text-ink"
+            className="text-lg font-extrabold text-ink md:text-2xl"
             id="parent-children-heading"
           >
             Hồ sơ bé liên kết
           </h2>
           <Link
-            className="text-label font-bold text-primary hover:underline"
+            className="inline-flex min-h-11 items-center text-label font-bold text-primary hover:underline"
             href="/children"
           >
             Quản lý hồ sơ trẻ
           </Link>
         </div>
         {profile.children.length > 0 ? (
-          <div className="grid gap-6 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-2 md:gap-6">
             {profile.children.map((child) => (
               <ChildProfileCard
                 key={child.id}

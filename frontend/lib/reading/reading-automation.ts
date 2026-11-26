@@ -815,9 +815,11 @@ export function reduce(
           ...state,
           lastSpeechAt: at,
           waitUntilAt:
-            event.holdMs && event.holdMs > 0
-              ? Math.max(state.waitUntilAt ?? 0, at + event.holdMs)
-              : state.waitUntilAt,
+            event.holdMs === 0
+              ? null
+              : event.holdMs && event.holdMs > 0
+                ? Math.max(state.waitUntilAt ?? 0, at + event.holdMs)
+                : state.waitUntilAt,
           silenceReminders: 0,
           silencePauseOffered: false,
         },

@@ -274,7 +274,9 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
       expect(consoleErrors).toEqual([]);
       await waitFor(() =>
         expect(
-          within(container).getByRole("button", { name: "Đổi nhanh bé" }),
+          within(container).getByRole("button", {
+            name: "Bé đang chọn: Bé An, bấm để đổi",
+          }),
         ).toBeInTheDocument(),
       );
     } finally {
@@ -284,6 +286,53 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
       });
       container.remove();
     }
+  });
+
+  it("keeps MobileBottomNav and compact mobile topbar visible on /books and /books/[bookId] while hiding desktop footer", () => {
+    const authService = createAuthServiceFixture();
+
+    navigationState.pathname = "/books";
+    const { rerender } = render(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Thư viện sách</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    const mobileNav = screen.getByTestId("mobile-bottom-nav");
+    expect(mobileNav).toBeInTheDocument();
+    expect(within(mobileNav).getByRole("link", { name: "Sách" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("banner").className).toContain("xl:hidden");
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
+
+    navigationState.pathname = "/books/book-42";
+    rerender(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Chi tiết sách</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    const detailMobileNav = screen.getByTestId("mobile-bottom-nav");
+    expect(detailMobileNav).toBeInTheDocument();
+    expect(
+      within(detailMobileNav).getByRole("link", { name: "Sách" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("banner").className).toContain("xl:hidden");
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
   });
 
   it("renders AdminLayout compact mobile bottom nav and Admin More sheet while hiding footer below lg", async () => {

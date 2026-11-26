@@ -8,6 +8,7 @@ import { ServiceError } from "@/lib/api/service-error";
 import {
   buildSpeechServiceError,
   extractSpeechProviderCode,
+  isTimeoutError,
 } from "@/lib/api/speech-error";
 import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
@@ -227,7 +228,19 @@ async function speechRequest(
     }
     return response;
   } catch (error) {
-    if (error instanceof ServiceError || signal?.aborted) throw error;
+    if (error instanceof ServiceError) throw error;
+    if (isTimeoutError(error) || isTimeoutError(signal?.reason)) {
+      throw failure(
+        capabilityCode,
+        capabilityCode === "TTS_UNAVAILABLE" ? 504 : 408,
+        "",
+        true,
+        capabilityCode === "TTS_UNAVAILABLE"
+          ? "LOCAL_TTS_TIMEOUT"
+          : "STT_TIMEOUT",
+      );
+    }
+    if (signal?.aborted) throw error;
     throw failure(capabilityCode, 0, "", true);
   }
 }
@@ -339,122 +352,133 @@ export function createSpeechService(): SpeechService {
         }
       }
 
-      return withRequestDeadline(
-        async (signal) => {
-          const response = await speechRequest(
-            "/voice/text-to-speech",
-            "TTS_UNAVAILABLE",
-            {
-              method: "POST",
-              headers: {
-                Accept: getPreferredTtsAcceptHeader(options.audioFormat),
-                "Content-Type": "application/json",
+      try {
+        return await withRequestDeadline(
+          async (signal) => {
+            const response = await speechRequest(
+              "/voice/text-to-speech",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: getPreferredTtsAcceptHeader(options.audioFormat),
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  text: normalizedText,
+                  ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                  ...(options.speed !== undefined
+                    ? { speed: options.speed }
+                    : {}),
+                  ...(options.wordSample ? { word_sample: true } : {}),
+                  ...(options.audioFormat
+                    ? { audio_format: options.audioFormat }
+                    : {}),
+                  ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+                  ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+                  ...(sessionId ? { session_id: sessionId } : {}),
+                  ...(options.bookId ? { book_id: options.bookId } : {}),
+                  ...(options.pageId ? { page_id: options.pageId } : {}),
+                  ...(options.pageRevisionId
+                    ? { page_revision_id: options.pageRevisionId }
+                    : {}),
+                  ...(options.cacheScope
+                    ? { cache_scope: options.cacheScope }
+                    : {}),
+                }),
               },
-              body: JSON.stringify({
-                text: normalizedText,
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : {}),
-                ...(options.wordSample ? { word_sample: true } : {}),
-                ...(options.audioFormat
-                  ? { audio_format: options.audioFormat }
-                  : {}),
-                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
-                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
-                ...(sessionId ? { session_id: sessionId } : {}),
-                ...(options.bookId ? { book_id: options.bookId } : {}),
-                ...(options.pageId ? { page_id: options.pageId } : {}),
-                ...(options.pageRevisionId
-                  ? { page_revision_id: options.pageRevisionId }
-                  : {}),
-                ...(options.cacheScope
-                  ? { cache_scope: options.cacheScope }
-                  : {}),
-              }),
-            },
-            signal,
-          );
-          const contentType = response.headers.get("content-type") ?? "";
-          if (!contentType.toLowerCase().startsWith("audio/")) {
-            throw failure("TTS_UNAVAILABLE", response.status);
-          }
-          const audio = await response.blob();
-          signal.throwIfAborted();
-          if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
-          const resolvedVoiceId =
-            response.headers.get("x-resolved-voice-id")?.trim() || null;
-          const usedFallbackVoice =
-            response.headers.get("x-voice-fallback") === "1";
-          const ttsCacheHeader =
-            response.headers.get("x-tts-cache")?.trim().toUpperCase() || null;
-          const headerProvider =
-            response.headers.get("x-tts-provider")?.trim() ||
-            response.headers.get("x-voice-provider")?.trim() ||
-            "local";
-          const provider =
-            ttsCacheHeader === "HIT" && headerProvider === "local"
-              ? "precomputed_cache"
-              : headerProvider;
-          const fallbackReason =
-            response.headers.get("x-voice-fallback-reason")?.trim() || null;
-          const voiceGender = resolveVoiceGender(
-            resolvedVoiceId ?? options.voiceId,
-            response.headers.get("x-voice-gender"),
-          );
-          const cachedSpeed = parsePositiveSpeedHeader(
-            response.headers.get("x-tts-cached-speed"),
-          );
-          setSynthesizedAudioMeta(audio, {
-            resolvedVoiceId,
-            usedFallbackVoice,
-            provider,
-            region: response.headers.get("x-voice-region")?.trim() || null,
-            modelVersion:
-              response.headers.get("x-voice-model-version")?.trim() || null,
-            cachedSpeed,
-          });
-          recordTtsEngineUsage({
-            provider,
-            fallbackUsed: usedFallbackVoice,
-            fallbackReason,
-            voiceId: resolvedVoiceId ?? options.voiceId ?? null,
-            voiceGender,
-          });
-          const headerScopeRaw = response.headers
-            .get("x-tts-scope")
-            ?.trim()
-            .toUpperCase();
-          const effectiveScope: TtsCacheScope =
-            headerScopeRaw === "PRIVATE" ||
-            headerScopeRaw === "COACHING" ||
-            headerScopeRaw === "CATALOG"
-              ? headerScopeRaw
-              : cacheScope;
-          if (
-            browserCacheKey &&
-            !usedFallbackVoice &&
-            provider !== "google" &&
-            shouldPersistTtsCacheEntry({
-              scope: effectiveScope,
-              cacheControl: response.headers.get("cache-control"),
-              isPrivateBook: options.isPrivateBook,
-            })
-          ) {
-            void putCachedTtsAudio({
-              key: browserCacheKey,
-              audio,
-              scope: effectiveScope,
-              cacheControl: response.headers.get("cache-control"),
-              isPrivateBook: options.isPrivateBook,
+              signal,
+            );
+            const contentType = response.headers.get("content-type") ?? "";
+            if (!contentType.toLowerCase().startsWith("audio/")) {
+              throw failure("TTS_UNAVAILABLE", response.status);
+            }
+            const audio = await response.blob();
+            signal.throwIfAborted();
+            if (!audio.size) throw failure("TTS_UNAVAILABLE", response.status);
+            const resolvedVoiceId =
+              response.headers.get("x-resolved-voice-id")?.trim() || null;
+            const usedFallbackVoice =
+              response.headers.get("x-voice-fallback") === "1";
+            const ttsCacheHeader =
+              response.headers.get("x-tts-cache")?.trim().toUpperCase() || null;
+            const headerProvider =
+              response.headers.get("x-tts-provider")?.trim() ||
+              response.headers.get("x-voice-provider")?.trim() ||
+              "local";
+            const provider =
+              ttsCacheHeader === "HIT" && headerProvider === "local"
+                ? "precomputed_cache"
+                : headerProvider;
+            const fallbackReason =
+              response.headers.get("x-voice-fallback-reason")?.trim() || null;
+            const voiceGender = resolveVoiceGender(
+              resolvedVoiceId ?? options.voiceId,
+              response.headers.get("x-voice-gender"),
+            );
+            const cachedSpeed = parsePositiveSpeedHeader(
+              response.headers.get("x-tts-cached-speed"),
+            );
+            setSynthesizedAudioMeta(audio, {
+              resolvedVoiceId,
+              usedFallbackVoice,
+              provider,
+              region: response.headers.get("x-voice-region")?.trim() || null,
+              modelVersion:
+                response.headers.get("x-voice-model-version")?.trim() || null,
               cachedSpeed,
             });
-          }
-          return audio;
-        },
-        options.signal,
-        options.timeoutMs ?? 30_000,
-      );
+            recordTtsEngineUsage({
+              provider,
+              fallbackUsed: usedFallbackVoice,
+              fallbackReason,
+              voiceId: resolvedVoiceId ?? options.voiceId ?? null,
+              voiceGender,
+            });
+            const headerScopeRaw = response.headers
+              .get("x-tts-scope")
+              ?.trim()
+              .toUpperCase();
+            const effectiveScope: TtsCacheScope =
+              headerScopeRaw === "PRIVATE" ||
+              headerScopeRaw === "COACHING" ||
+              headerScopeRaw === "CATALOG"
+                ? headerScopeRaw
+                : cacheScope;
+            if (
+              browserCacheKey &&
+              !usedFallbackVoice &&
+              provider !== "google" &&
+              shouldPersistTtsCacheEntry({
+                scope: effectiveScope,
+                cacheControl: response.headers.get("cache-control"),
+                isPrivateBook: options.isPrivateBook,
+              })
+            ) {
+              void putCachedTtsAudio({
+                key: browserCacheKey,
+                audio,
+                scope: effectiveScope,
+                cacheControl: response.headers.get("cache-control"),
+                isPrivateBook: options.isPrivateBook,
+                cachedSpeed,
+              });
+            }
+            return audio;
+          },
+          options.signal,
+          options.timeoutMs ?? 30_000,
+        );
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? error;
+        }
+        if (error instanceof ServiceError) throw error;
+        if (isTimeoutError(error)) {
+          throw failure("TTS_UNAVAILABLE", 504, "", true, "LOCAL_TTS_TIMEOUT");
+        }
+        throw failure("TTS_UNAVAILABLE", 0, "", true);
+      }
     },
 
     async synthesizePhonics(steps, options = {}) {
@@ -467,104 +491,115 @@ export function createSpeechService(): SpeechService {
       const activeLock = getActiveSessionVoiceLock();
       const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
 
-      return withRequestDeadline(
-        async (signal) => {
-          const response = await speechRequest(
-            "/voice/text-to-speech/phonics",
-            "TTS_UNAVAILABLE",
-            {
-              method: "POST",
-              headers: {
-                Accept: options.audioFormat
-                  ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
-                  : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
-                "Content-Type": "application/json",
+      try {
+        return await withRequestDeadline(
+          async (signal) => {
+            const response = await speechRequest(
+              "/voice/text-to-speech/phonics",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: options.audioFormat
+                    ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
+                    : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  steps: steps.map((s) => ({
+                    id: s.id,
+                    spoken_text: s.spokenText.normalize("NFC").trim(),
+                    pause_after_ms: s.pauseAfterMs ?? 420,
+                  })),
+                  ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                  ...(options.speed !== undefined
+                    ? { speed: options.speed }
+                    : {}),
+                  ...(options.audioFormat
+                    ? { audio_format: options.audioFormat }
+                    : {}),
+                  ...(mode !== "local_only" ? { provider_mode: mode } : {}),
+                  ...(allowGoogleTts ? { allow_google_tts: true } : {}),
+                  ...(sessionId ? { session_id: sessionId } : {}),
+                  ...(options.bookId ? { book_id: options.bookId } : {}),
+                  ...(options.pageId ? { page_id: options.pageId } : {}),
+                  ...(options.pageRevisionId
+                    ? { page_revision_id: options.pageRevisionId }
+                    : {}),
+                  ...(options.cacheScope
+                    ? { cache_scope: options.cacheScope }
+                    : {}),
+                }),
               },
-              body: JSON.stringify({
-                steps: steps.map((s) => ({
-                  id: s.id,
-                  spoken_text: s.spokenText.normalize("NFC").trim(),
-                  pause_after_ms: s.pauseAfterMs ?? 420,
-                })),
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
-                ...(options.speed !== undefined
-                  ? { speed: options.speed }
-                  : {}),
-                ...(options.audioFormat
-                  ? { audio_format: options.audioFormat }
-                  : {}),
-                ...(mode !== "local_only" ? { provider_mode: mode } : {}),
-                ...(allowGoogleTts ? { allow_google_tts: true } : {}),
-                ...(sessionId ? { session_id: sessionId } : {}),
-                ...(options.bookId ? { book_id: options.bookId } : {}),
-                ...(options.pageId ? { page_id: options.pageId } : {}),
-                ...(options.pageRevisionId
-                  ? { page_revision_id: options.pageRevisionId }
-                  : {}),
-                ...(options.cacheScope
-                  ? { cache_scope: options.cacheScope }
-                  : {}),
-              }),
-            },
-            signal,
-          );
-          const payload: unknown = await response.json();
-          signal.throwIfAborted();
-          const parsed = phonicsSpeechSchema.safeParse(payload);
-          if (
-            !parsed.success ||
-            parsed.data.step_timings.length !== steps.length
-          ) {
-            throw failure("TTS_UNAVAILABLE", 502);
-          }
-          let audio: Blob;
-          try {
-            audio = base64ToBlob(
-              parsed.data.audio_base64,
-              parsed.data.content_type,
+              signal,
             );
-          } catch {
-            throw failure("TTS_UNAVAILABLE", 502);
-          }
-          if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
-          const phonicsProvider = parsed.data.provider ?? "local";
-          const phonicsUsedFallback =
-            phonicsProvider === "google" ||
-            (Boolean(options.voiceId) &&
-              parsed.data.resolved_voice_id !== options.voiceId);
-          const cachedSpeed =
-            parsed.data.cached_speed ??
-            parsePositiveSpeedHeader(
-              response.headers.get("x-tts-cached-speed"),
-            );
-          setSynthesizedAudioMeta(audio, {
-            resolvedVoiceId: parsed.data.resolved_voice_id,
-            usedFallbackVoice: phonicsUsedFallback,
-            provider: phonicsProvider,
-            region: parsed.data.region ?? "north",
-            modelVersion: parsed.data.model_version,
-            cachedSpeed,
-          });
-          recordTtsEngineUsage({
-            provider: phonicsProvider,
-            fallbackUsed: phonicsUsedFallback,
-            voiceId: parsed.data.resolved_voice_id,
-            voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
-          });
-          return {
-            audio,
-            durationSeconds: parsed.data.duration_seconds,
-            stepTimings: parsed.data.step_timings,
-            provider: parsed.data.provider ?? "local",
-            resolvedVoiceId: parsed.data.resolved_voice_id,
-            region: parsed.data.region ?? "north",
-            modelVersion: parsed.data.model_version,
-            ...(cachedSpeed !== null ? { cachedSpeed } : {}),
-          };
-        },
-        options.signal,
-        options.timeoutMs ?? 30_000,
-      );
+            const payload: unknown = await response.json();
+            signal.throwIfAborted();
+            const parsed = phonicsSpeechSchema.safeParse(payload);
+            if (
+              !parsed.success ||
+              parsed.data.step_timings.length !== steps.length
+            ) {
+              throw failure("TTS_UNAVAILABLE", 502);
+            }
+            let audio: Blob;
+            try {
+              audio = base64ToBlob(
+                parsed.data.audio_base64,
+                parsed.data.content_type,
+              );
+            } catch {
+              throw failure("TTS_UNAVAILABLE", 502);
+            }
+            if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
+            const phonicsProvider = parsed.data.provider ?? "local";
+            const phonicsUsedFallback =
+              phonicsProvider === "google" ||
+              (Boolean(options.voiceId) &&
+                parsed.data.resolved_voice_id !== options.voiceId);
+            const cachedSpeed =
+              parsed.data.cached_speed ??
+              parsePositiveSpeedHeader(
+                response.headers.get("x-tts-cached-speed"),
+              );
+            setSynthesizedAudioMeta(audio, {
+              resolvedVoiceId: parsed.data.resolved_voice_id,
+              usedFallbackVoice: phonicsUsedFallback,
+              provider: phonicsProvider,
+              region: parsed.data.region ?? "north",
+              modelVersion: parsed.data.model_version,
+              cachedSpeed,
+            });
+            recordTtsEngineUsage({
+              provider: phonicsProvider,
+              fallbackUsed: phonicsUsedFallback,
+              voiceId: parsed.data.resolved_voice_id,
+              voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
+            });
+            return {
+              audio,
+              durationSeconds: parsed.data.duration_seconds,
+              stepTimings: parsed.data.step_timings,
+              provider: parsed.data.provider ?? "local",
+              resolvedVoiceId: parsed.data.resolved_voice_id,
+              region: parsed.data.region ?? "north",
+              modelVersion: parsed.data.model_version,
+              ...(cachedSpeed !== null ? { cachedSpeed } : {}),
+            };
+          },
+          options.signal,
+          options.timeoutMs ?? 30_000,
+        );
+      } catch (error) {
+        if (options.signal?.aborted) {
+          throw options.signal.reason ?? error;
+        }
+        if (error instanceof ServiceError) throw error;
+        if (isTimeoutError(error)) {
+          throw failure("TTS_UNAVAILABLE", 504, "", true, "LOCAL_TTS_TIMEOUT");
+        }
+        throw failure("TTS_UNAVAILABLE", 0, "", true);
+      }
     },
 
     async transcribe(audio, options = {}) {

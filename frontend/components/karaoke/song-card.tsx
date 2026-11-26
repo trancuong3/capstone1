@@ -11,7 +11,7 @@ import { formatKaraokeTime } from "@/lib/karaoke/lyrics-timeline";
 export function SongCard({ song }: { song: KaraokeSongCard }) {
   const [coverFailed, setCoverFailed] = useState(false);
   return (
-    <Card className="song-cover h-full">
+    <Card className="song-cover h-full gap-3 p-4 md:gap-4 md:p-6">
       {song.cover_url && !coverFailed ? (
         <Image
           src={song.cover_url}
@@ -20,14 +20,16 @@ export function SongCard({ song }: { song: KaraokeSongCard }) {
           height={200}
           unoptimized
           onError={() => setCoverFailed(true)}
-          className="h-40 w-full rounded-control object-cover"
+          className="h-28 w-full rounded-control object-cover md:h-40"
         />
       ) : (
-        <div className="grid h-40 place-items-center rounded-control bg-sky">
-          <Music2 className="size-16 text-primary" aria-hidden />
+        <div className="grid h-28 place-items-center rounded-control bg-sky md:h-40">
+          <Music2 className="size-12 text-primary md:size-16" aria-hidden />
         </div>
       )}
-      <h2 className="break-words text-2xl font-extrabold">{song.title}</h2>
+      <h2 className="break-words text-lg font-extrabold md:text-2xl">
+        {song.title}
+      </h2>
       {song.author && (
         <details className="min-w-0 text-sm text-muted">
           <summary className="min-h-11 cursor-pointer content-center">

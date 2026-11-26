@@ -27,23 +27,27 @@ function Library({ child }: { child: ChildProfileDTO }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
   return (
-    <section className="mx-auto grid w-full max-w-[1280px] gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="mt-2 text-heading font-extrabold">
+    <section className="mx-auto grid w-full max-w-[1280px] gap-3.5 md:gap-6">
+      <div className="flex items-center justify-between gap-2 md:flex-wrap md:items-start md:gap-4">
+        <div className="min-w-0">
+          <h1 className="truncate text-xl font-extrabold md:mt-2 md:whitespace-normal md:text-heading">
             Hát vui cùng {child.alias}
           </h1>
-          <p className="mt-3 text-body text-muted">
+          <p className="mt-3 hidden text-body text-muted md:block">
             Chọn một bài bé thích, nghe nhạc và cùng hát theo chữ nhé!
           </p>
         </div>
-        <ButtonLink href="/dashboard" variant="secondary" className="sm:w-auto">
+        <ButtonLink
+          href="/dashboard"
+          variant="secondary"
+          className="min-h-11 w-auto shrink-0 px-3 py-2 text-xs md:px-5 md:text-label"
+        >
           Về Tổng quan
         </ButtonLink>
       </div>
       <SelectedChildIdentity child={child} />
       <form
-        className="flex flex-wrap items-end gap-3"
+        className="flex flex-wrap items-end gap-2.5 md:gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setQuery({
@@ -53,16 +57,20 @@ function Library({ child }: { child: ChildProfileDTO }) {
           });
         }}
       >
-        <label className="grid min-w-0 flex-1 gap-2 font-bold">
+        <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-bold md:gap-2 md:text-base">
           Tìm bài hát hoặc tác giả
           <input
-            className="min-h-12 w-full rounded-control border border-border bg-white px-4 focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-11 w-full rounded-control border border-border bg-white px-3.5 focus-visible:outline-3 focus-visible:outline-primary md:min-h-12 md:px-4"
             maxLength={120}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <Button className="sm:w-auto" type="submit" variant="secondary">
+        <Button
+          className="min-h-11 sm:w-auto"
+          type="submit"
+          variant="secondary"
+        >
           Tìm bài hát
         </Button>
       </form>
@@ -136,7 +144,7 @@ function Catalog({
   return (
     <>
       {data.items.length ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3.5 sm:grid-cols-2 md:gap-5 lg:grid-cols-3">
           {data.items.map((song) => (
             <SongCard key={`${song.song_id}:${song.version_id}`} song={song} />
           ))}

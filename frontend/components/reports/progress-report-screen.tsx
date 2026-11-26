@@ -2,11 +2,12 @@
 
 import { ArrowRight, History, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import {
   MetricCard,
   type MetricCardDelta,
@@ -159,6 +160,8 @@ function ProgressReportContent({
   requestedPeriodEnd,
 }: Props) {
   const { childService, reportService } = useReportServices();
+  const appStore = useContext(AppStoreContext);
+  const initialStoreChildIdRef = useRef(appStore?.selectedChildId ?? null);
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -186,12 +189,16 @@ function ProgressReportContent({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
+        const preferredChildId =
+          requestedChildId ?? initialStoreChildIdRef.current ?? undefined;
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
         const child = matchedChild
           ? matchedChild
-          : await childService.get(requestedChildId!);
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         if (!children.some((item) => item.id === child.id)) {
           if (active) setState({ status: "not-found" });
           return;
@@ -265,6 +272,28 @@ function ProgressReportContent({
     requestedPeriodStart,
     requestedPeriodEnd,
     retry,
+  ]);
+
+  const selectStoreChild = appStore?.selectChild;
+  const setStoreValidatedChild = appStore?.setValidatedSelectedChild;
+  const syncStoreChildren = appStore?.syncAvailableChildren;
+  const syncedChildIdRef = useRef<string | null>(null);
+  const loadedChild = state.status === "loaded" ? state.child : null;
+  const loadedChildren = state.status === "loaded" ? state.children : null;
+
+  useEffect(() => {
+    if (!loadedChild || !loadedChildren) return;
+    if (syncedChildIdRef.current === loadedChild.id) return;
+    syncedChildIdRef.current = loadedChild.id;
+    syncStoreChildren?.(loadedChildren);
+    selectStoreChild?.(loadedChild.id);
+    setStoreValidatedChild?.(loadedChild);
+  }, [
+    loadedChild,
+    loadedChildren,
+    selectStoreChild,
+    setStoreValidatedChild,
+    syncStoreChildren,
   ]);
 
   async function loadMore() {
@@ -399,14 +428,14 @@ function ProgressReportContent({
     : [];
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3 pb-4 md:gap-5">
       <ReportPageHeader
         eyebrow={`Đang theo dõi · ${child.alias} (Lớp ${child.grade})`}
         title={`Tiến bộ của ${child.alias}`}
         description="Tổng hợp kết quả đọc theo từng kỳ báo cáo đã lưu."
         action={
           <ButtonLink
-            className="sm:w-auto"
+            className="w-auto"
             href={`/sessions?childId=${encodeURIComponent(child.id)}`}
             variant="secondary"
           >
@@ -469,14 +498,17 @@ function ProgressReportContent({
         : null}
 
       {report ? (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-muted">
+        <div className="flex flex-col gap-3.5 md:gap-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-1 text-xs text-muted md:gap-2 md:text-sm">
             <p className="font-semibold text-ink">
               Kỳ: {report.period_start} → {report.period_end}
             </p>
-            <p className="text-xs">
-              Cập nhật lúc {formatProgressGeneratedAt(report.generated_at)} (giờ
-              Việt Nam), không tự tính lại sau mỗi buổi đọc.
+            <p className="text-[11px] md:text-xs">
+              Cập nhật lúc {formatProgressGeneratedAt(report.generated_at)}
+              <span className="hidden md:inline">
+                {" "}
+                (giờ Việt Nam), không tự tính lại sau mỗi buổi đọc.
+              </span>
             </p>
           </div>
 

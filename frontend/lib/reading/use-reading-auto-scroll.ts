@@ -19,6 +19,8 @@ export interface UseReadingAutoScrollOptions {
   readonly pageKey: string;
   /** Disable auto-scroll (e.g. read-only preview). Defaults to true. */
   readonly enabled?: boolean;
+  /** True while activeWordId is driven by an unstable interim preview. */
+  readonly isInterimPreview?: boolean;
 }
 
 export interface UseReadingAutoScrollResult {
@@ -88,12 +90,14 @@ export function useReadingAutoScroll({
   activeWordId,
   pageKey,
   enabled = true,
+  isInterimPreview = false,
 }: UseReadingAutoScrollOptions): UseReadingAutoScrollResult {
   const [isDetached, setIsDetached] = useState(false);
   const isDetachedRef = useRef(false);
   const getActiveElementRef = useRef(getActiveElement);
   const prevPageKeyRef = useRef<string | null>(null);
   const prevActiveWordIdRef = useRef<string | null | undefined>(undefined);
+  const lastActiveLineTopRef = useRef<number | null>(null);
   const programmaticStartRef = useRef(0);
   const programmaticUntilRef = useRef(0);
   const userInteractionAtRef = useRef(0);
@@ -123,6 +127,10 @@ export function useReadingAutoScroll({
 
       const relTop = activeRect.top - containerRect.top;
       const relBottom = activeRect.bottom - containerRect.top;
+      const docLineTop = Math.round(container.scrollTop + relTop);
+      const lineUnchanged =
+        lastActiveLineTopRef.current !== null &&
+        Math.abs(docLineTop - lastActiveLineTopRef.current) < 4;
       const bandTop = viewHeight * BAND_TOP_RATIO;
       const bandBottom = viewHeight * BAND_BOTTOM_RATIO;
 
@@ -131,7 +139,19 @@ export function useReadingAutoScroll({
           ? relTop >= bandTop && relBottom <= bandBottom
           : relTop >= 0 && relTop <= bandTop;
 
-      if (fitsInBand) return;
+      if (fitsInBand) {
+        lastActiveLineTopRef.current = docLineTop;
+        return;
+      }
+
+      if (
+        !forceInstant &&
+        lineUnchanged &&
+        relTop >= 0 &&
+        relBottom <= viewHeight
+      ) {
+        return;
+      }
 
       const desiredOffset =
         activeRect.height <= viewHeight * 0.62
@@ -143,6 +163,7 @@ export function useReadingAutoScroll({
         Math.min(maxScrollTop, container.scrollTop + relTop - desiredOffset),
       );
 
+      lastActiveLineTopRef.current = docLineTop;
       if (Math.abs(nextTop - container.scrollTop) < 2) return;
 
       const instant = forceInstant || prefersReducedMotion();
@@ -267,6 +288,7 @@ export function useReadingAutoScroll({
     if (pageChanged) {
       setDetachedState(false);
       prevActiveWordIdRef.current = activeWordId;
+      lastActiveLineTopRef.current = null;
       if (container) {
         const startedAt = nowMs();
         programmaticStartRef.current = startedAt;
@@ -280,12 +302,16 @@ export function useReadingAutoScroll({
     }
 
     if (isInitialMount) {
-      prevActiveWordIdRef.current = activeWordId;
-      // On initial mount, keep scrollTop = 0 unless an already-distant target
-      // word (e.g. restored retry word) is outside the visible area.
-      if (activeWordId) {
+      if (activeWordId && !isInterimPreview) {
+        prevActiveWordIdRef.current = activeWordId;
+        // On initial mount, keep scrollTop = 0 unless an already-distant target
+        // word (e.g. restored retry word) is outside the visible area.
         scrollActiveWordIntoView(true);
       }
+      return;
+    }
+
+    if (isInterimPreview) {
       return;
     }
 
@@ -303,6 +329,7 @@ export function useReadingAutoScroll({
     activeWordId,
     containerRef,
     enabled,
+    isInterimPreview,
     pageKey,
     scrollActiveWordIntoView,
     setDetachedState,

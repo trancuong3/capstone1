@@ -95,19 +95,12 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "mr-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+          "mr-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-1 py-1 transition-[background-color,color,box-shadow] duration-200 ease-out motion-reduce:transition-none sm:mr-1.5 sm:px-2 sm:py-0.5",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
-          isCurrent &&
-            presentationState !== "current" &&
-            (presentationState === "incorrect"
-              ? "shadow-xs"
-              : "font-semibold ring-2 ring-primary/45 shadow-xs"),
-          isCurrent && presentationState === "current" && "shadow-xs",
-          presentationState === "incorrect" &&
-            "font-semibold border-b-2 border-red-500",
+          isCurrent && "shadow-xs",
           presentationState === "unread" &&
             !readOnly &&
             "hover:bg-highlight/40",
@@ -141,32 +134,6 @@ const MemoWordToken = memo(function WordToken({
         {!readOnly ? (
           <span hidden id={`text-word-state-${pageRevisionId}-${word.word_id}`}>
             {getWordPresentationLabel(presentationState)}
-          </span>
-        ) : null}
-        {presentationState === "preview-correct" ? (
-          <span
-            aria-hidden="true"
-            className="ml-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
-          />
-        ) : null}
-        {presentationState === "self-corrected" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
-            ↺
-          </span>
-        ) : null}
-        {presentationState === "unresolved" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
-            ◇
-          </span>
-        ) : null}
-        {presentationState === "uncertain" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
-            ?
-          </span>
-        ) : null}
-        {presentationState === "assisted" ? (
-          <span aria-hidden="true" className="ml-1 text-sm">
-            {"\u266A"}
           </span>
         ) : null}
       </span>{" "}
@@ -233,6 +200,7 @@ export function BookPageContent(props: BookPageContentProps) {
     activeWordId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
     enabled: !isManagedByParent && !readOnly,
+    isInterimPreview: Boolean(previewSnapshot),
   });
 
   const handleSelectWord = useCallback(
@@ -259,7 +227,7 @@ export function BookPageContent(props: BookPageContentProps) {
       className="min-h-0 flex-1 py-2"
     >
       {hasWords ? (
-        <p className="w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]">
+        <p className="w-full max-w-[58ch] text-[21px] font-semibold leading-[1.72] tracking-[0.005em] text-ink sm:text-[30px] sm:font-bold sm:leading-[1.9] sm:tracking-[0.01em]">
           {layout.map((entry) => (
             <MemoWordToken
               key={entry.word.word_id}

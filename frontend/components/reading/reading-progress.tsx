@@ -15,28 +15,49 @@ export function ReadingProgress({
   readCount = 0,
   currentWord,
 }: ReadingProgressProps) {
+  const progressPercent =
+    wordCount > 0 ? Math.min(100, Math.round((readCount / wordCount) * 100)) : 0;
+
   return (
-    <div
-      className="mx-auto grid w-full max-w-[1104px] gap-2 border-t border-border px-1 pt-4 sm:grid-cols-[1fr_auto] sm:items-center"
-      role="status"
-    >
-      <span className="inline-flex items-center gap-2 font-bold text-ink">
-        <Circle
-          aria-hidden="true"
-          className="size-2.5 fill-current text-primary"
+    <div className="mx-auto w-full max-w-[1104px]">
+      <div
+        aria-hidden="true"
+        className="h-[3px] w-full overflow-hidden rounded-full bg-border/60 sm:hidden"
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-300"
+          style={{ width: `${progressPercent}%` }}
         />
-        {isListening ? "Mình đang nghe bé đọc" : "Mình đang chờ bé"}
-      </span>
-      <span className="text-sm tabular-nums text-muted">
-        Trang {pageNumber}
-        {wordCount > 0 && (
-          <>
-            {" "}
-            · Đã đọc {readCount}/{wordCount} từ
-          </>
-        )}
-        {currentWord && isListening && <> · Từ đang đọc: “{currentWord}”</>}
-      </span>
+      </div>
+      <div
+        className="flex items-center justify-between gap-2 px-0.5 pt-1 text-[11px] leading-tight sm:grid sm:grid-cols-[1fr_auto] sm:items-center sm:gap-2 sm:border-t sm:border-border sm:px-1 sm:pt-4 sm:text-sm"
+        role="status"
+      >
+        <span className="inline-flex min-w-0 items-center gap-1.5 truncate font-bold text-ink sm:gap-2">
+          <Circle
+            aria-hidden="true"
+            className="size-2 shrink-0 fill-current text-primary sm:size-2.5"
+          />
+          <span className="truncate">
+            {isListening ? "Mình đang nghe bé đọc" : "Mình đang chờ bé"}
+          </span>
+        </span>
+        <span className="shrink-0 text-[11px] tabular-nums text-muted sm:text-sm">
+          Trang {pageNumber}
+          {wordCount > 0 && (
+            <>
+              {" "}
+              · Đã đọc {readCount}/{wordCount} từ
+            </>
+          )}
+          {currentWord && isListening && (
+            <span className="hidden sm:inline">
+              {" "}
+              · Từ đang đọc: “{currentWord}”
+            </span>
+          )}
+        </span>
+      </div>
     </div>
   );
 }

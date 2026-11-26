@@ -1,7 +1,14 @@
 "use client";
 
 import { ArrowLeft, Mic, RefreshCw, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -9,6 +16,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
@@ -51,6 +59,8 @@ export function DifficultWordsScreen({
   readonly requestedPracticeWord?: string;
 }) {
   const { childService, difficultWordService } = useReportServices();
+  const appStore = useContext(AppStoreContext);
+  const initialStoreChildIdRef = useRef(appStore?.selectedChildId ?? null);
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
     DIFFICULT_WORD_DEFAULT_DAYS,
@@ -129,9 +139,16 @@ export function DifficultWordsScreen({
             setState({ status: "no-children" });
           return;
         }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
+        const preferredChildId =
+          requestedChildId ?? initialStoreChildIdRef.current ?? undefined;
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
+        const child = matchedChild
+          ? matchedChild
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(currentDateInReportTimezone(), periodDays),
@@ -164,6 +181,28 @@ export function DifficultWordsScreen({
     periodDays,
     requestKey,
     requestedChildId,
+  ]);
+
+  const selectStoreChild = appStore?.selectChild;
+  const setStoreValidatedChild = appStore?.setValidatedSelectedChild;
+  const syncStoreChildren = appStore?.syncAvailableChildren;
+  const syncedChildIdRef = useRef<string | null>(null);
+  const readyChild = state.status === "ready" ? state.child : null;
+  const readyChildren = state.status === "ready" ? state.children : null;
+
+  useEffect(() => {
+    if (!readyChild || !readyChildren) return;
+    if (syncedChildIdRef.current === readyChild.id) return;
+    syncedChildIdRef.current = readyChild.id;
+    syncStoreChildren?.(readyChildren);
+    selectStoreChild?.(readyChild.id);
+    setStoreValidatedChild?.(readyChild);
+  }, [
+    readyChild,
+    readyChildren,
+    selectStoreChild,
+    setStoreValidatedChild,
+    syncStoreChildren,
   ]);
 
   const applyAttemptToLocalState = useCallback(
@@ -370,16 +409,16 @@ export function DifficultWordsScreen({
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 sm:gap-5">
+    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-3 md:gap-5">
       <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
         <ReportPageHeader
           action={
             <ButtonLink
-              className="sm:w-auto"
+              className="w-auto"
               href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
               variant="secondary"
             >
-              <ArrowLeft aria-hidden="true" className="size-5" />
+              <ArrowLeft aria-hidden="true" className="size-4 md:size-5" />
               Báo cáo
             </ButtonLink>
           }
@@ -417,8 +456,8 @@ export function DifficultWordsScreen({
         />
       ) : (
         <>
-          <div className="grid w-full grid-cols-1 gap-3 rounded-[24px] border border-[#DCE8E4] bg-white p-3.5 sm:grid-cols-3 sm:gap-4 sm:p-5">
-            <div className="min-w-0 sm:col-span-1">
+          <div className="grid w-full grid-cols-1 gap-2.5 rounded-[20px] border border-[#DCE8E4] bg-white p-3 md:grid-cols-3 md:gap-4 md:rounded-[24px] md:p-5">
+            <div className="hidden min-w-0 md:col-span-1 md:block">
               <ChildSelector
                 childrenProfiles={state.children}
                 clearQueryKeys={["word"]}
@@ -426,10 +465,10 @@ export function DifficultWordsScreen({
               />
             </div>
 
-            <div className="flex flex-col gap-2.5 sm:hidden">
+            <div className="flex flex-col gap-2 md:hidden">
               <div
                 aria-label="Lọc nhanh theo trạng thái luyện"
-                className="flex items-center gap-2 overflow-x-auto pb-0.5"
+                className="flex flex-wrap items-center gap-1.5"
                 role="group"
               >
                 {(
@@ -445,7 +484,7 @@ export function DifficultWordsScreen({
                   return (
                     <button
                       aria-pressed={active}
-                      className={`min-h-11 shrink-0 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors ${
+                      className={`inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-full border px-3 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary ${
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"
@@ -480,7 +519,7 @@ export function DifficultWordsScreen({
               <option value="180">180 ngày gần nhất</option>
             </SelectField>
 
-            <div className="hidden sm:contents">
+            <div className="hidden md:contents">
               <SelectField
                 aria-label="Lọc theo trạng thái luyện"
                 label="Trạng thái luyện"
@@ -500,24 +539,24 @@ export function DifficultWordsScreen({
           </div>
 
           {state.words.length > 0 ? (
-            <div className="flex flex-col justify-between gap-4 rounded-[24px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-5 sm:flex-row sm:items-center">
-              <div className="flex flex-col gap-1">
-                <div className="inline-flex items-center gap-2 text-sm font-extrabold text-[#0E6D76]">
+            <div className="flex flex-col justify-between gap-2.5 rounded-[20px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-3.5 sm:flex-row sm:items-center md:gap-4 md:rounded-[24px] md:p-5">
+              <div className="flex flex-col gap-0.5 md:gap-1">
+                <div className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#0E6D76] md:gap-2 md:text-sm">
                   <Sparkles aria-hidden="true" className="size-4" />
                   Tiến độ luyện từ của {state.child.alias}
                 </div>
-                <p className="text-lg font-extrabold text-[#213C42]">
+                <p className="text-base font-extrabold text-[#213C42] md:text-lg">
                   {summaryStats.completed}/{summaryStats.total} từ đã đọc đúng (
                   {summaryStats.percent}%)
                 </p>
-                <p className="text-xs text-[#526970]">
+                <p className="hidden text-xs text-[#526970] md:block">
                   Chọn một từ trên thẻ sách hoặc bấm nút bên cạnh để bé bắt đầu
                   luyện nhanh bằng giọng nói.
                 </p>
               </div>
               {firstPendingGlobalWord ? (
                 <Button
-                  className="min-h-12 shrink-0 rounded-2xl px-6 text-base font-extrabold sm:w-auto"
+                  className="min-h-11 shrink-0 rounded-2xl px-4 text-sm font-extrabold sm:w-auto md:min-h-12 md:px-6 md:text-base"
                   onClick={() =>
                     openPracticeSession(
                       firstPendingGlobalWord.normalized_word,

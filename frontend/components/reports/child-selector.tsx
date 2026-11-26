@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useId } from "react";
+import { useContext, useId } from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import type { ChildProfileDTO } from "@/types/child";
 
 interface ChildSelectorProps {
@@ -20,6 +21,7 @@ export function ChildSelector({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const appStore = useContext(AppStoreContext);
   const selectId = useId();
 
   return (
@@ -35,8 +37,12 @@ export function ChildSelector({
         className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-white px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
         id={selectId}
         onChange={(event) => {
+          const nextChildId = event.target.value;
+          const matched = childrenProfiles.find((c) => c.id === nextChildId);
+          appStore?.selectChild(nextChildId);
+          if (matched) appStore?.setValidatedSelectedChild(matched);
           const next = new URLSearchParams(searchParams.toString());
-          next.set("childId", event.target.value);
+          next.set("childId", nextChildId);
           next.delete("page");
           if (clearQueryKeys) {
             for (const key of clearQueryKeys) {

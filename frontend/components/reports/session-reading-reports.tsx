@@ -152,7 +152,7 @@ function ReportCard({
                     aria-current={isSelected ? "page" : undefined}
                     aria-label={`Trang ${pageNum}`}
                     className={cn(
-                      "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "min-h-11 min-w-11 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "bg-primary text-white"
                         : "border border-border bg-white text-ink hover:bg-canvas",
@@ -320,7 +320,7 @@ function ReportCard({
 
       {group.additionalReports.length > 0 ? (
         <details className="group rounded-control border border-border bg-canvas/60 px-4 py-3">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
             <span>
               Các lượt đối chiếu khác của trang này (
               {group.additionalReports.length})
@@ -369,7 +369,7 @@ function ReportCard({
                   <div className="flex flex-wrap items-center gap-2">
                     {!selected ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="min-h-11 px-3 py-2 text-xs"
                         fullWidth={false}
                         onClick={() => onSelectReport(entry.report_id)}
                         type="button"
@@ -384,7 +384,7 @@ function ReportCard({
                       </span>
                     ) : onRequestDelete ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="min-h-11 px-3 py-2 text-xs"
                         disabled={deletingId !== null}
                         fullWidth={false}
                         isLoading={deletingId === entry.report_id}
@@ -589,19 +589,19 @@ export function SessionReadingReports({
   return (
     <section
       aria-labelledby="session-reading-reports-title"
-      className="flex flex-col gap-5 rounded-card border border-border bg-white p-4 sm:p-6"
+      className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-3.5 sm:gap-5 sm:p-6"
       data-testid="session-primary-reading-report"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
-          className="book-title text-2xl text-ink"
+          className="book-title text-xl text-ink md:text-2xl"
           id="session-reading-reports-title"
         >
           Báo cáo đọc
         </h2>
         {state.status !== "loading" && state.status !== "empty" ? (
           <Button
-            className="min-h-10 px-3 py-1.5 text-xs"
+            className="min-h-11 px-3 py-2 text-xs"
             fullWidth={false}
             onClick={() => setRequestKey((key) => key + 1)}
             variant="quiet"

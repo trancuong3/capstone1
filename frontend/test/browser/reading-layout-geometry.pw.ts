@@ -704,8 +704,21 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
       });
       expect(bottomScrollTop).toBeGreaterThan(1000);
 
-      // Pause button must be directly clickable right inside the viewport
-      const pauseBtn = page.getByRole("button", { name: "Tạm dừng buổi đọc" });
+      // On viewports < 640px, Tạm dừng lives inside the pinned compact mobile ⋮ menu
+      const menuBtn = page.getByTestId("mobile-reading-menu-btn");
+      const menuBox = await menuBtn.boundingBox();
+      expect(menuBox).not.toBeNull();
+      expect(menuBox!.y).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(vp.height + 2);
+      await menuBtn.click();
+
+      const optionsDialog = page.getByRole("dialog", {
+        name: "Tùy chọn buổi đọc",
+      });
+      await expect(optionsDialog).toBeVisible();
+      const pauseBtn = optionsDialog.getByRole("button", {
+        name: "Tạm dừng buổi đọc",
+      });
       const pauseBox = await pauseBtn.boundingBox();
       expect(pauseBox).not.toBeNull();
       expect(pauseBox!.y + pauseBox!.height).toBeLessThanOrEqual(vp.height + 2);
@@ -723,6 +736,31 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
       ).toHaveAttribute("aria-current", "true");
       const currentTop = await container.evaluate((el) => el.scrollTop);
       expect(Math.abs(currentTop - bottomScrollTop)).toBeLessThanOrEqual(4);
+    }
+  });
+
+  test("640px-767px viewports (667x375 & 720x360 landscape) keep Tạm dừng, Giọng đọc, and Chọn trang directly visible and clickable", async ({
+    page,
+  }) => {
+    for (const vp of [
+      { width: 667, height: 375 },
+      { width: 720, height: 360 },
+    ]) {
+      await page.setViewportSize(vp);
+      await installLongReadingSession(page, { mode: "prose", lineCount: 40 });
+
+      for (const name of ["Tạm dừng buổi đọc", "Giọng đọc", "Chọn trang"]) {
+        const btn = page.getByRole("button", { name });
+        await expect(btn).toBeVisible();
+        const box = await btn.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.y + box!.height).toBeLessThanOrEqual(vp.height + 2);
+      }
+
+      const overflow = await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      );
+      expect(overflow).toBeLessThanOrEqual(2);
     }
   });
 
@@ -797,16 +835,23 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
       withReferenceImage: true,
     });
 
-    // Open reference image disclosure
-    await page.getByText("Xem ảnh trang sách").click();
+    // Open reference image sheet via compact mobile header trigger (< 640px)
+    const imageBtn = page.locator('[data-landscape-image-btn="true"]');
+    await expect(imageBtn).toBeVisible();
+    await expect(imageBtn).toHaveAccessibleName("Mở ảnh trang sách");
+    await imageBtn.click();
+    const imageDialog = page.getByRole("dialog", { name: "Ảnh trang 1" });
+    await expect(imageDialog).toBeVisible();
     let controlsBox = await page
       .locator("[data-reading-controls]")
       .boundingBox();
     expect(controlsBox).not.toBeNull();
     expect(controlsBox!.y + controlsBox!.height).toBeLessThanOrEqual(846);
+    await page.keyboard.press("Escape");
+    await expect(imageDialog).not.toBeVisible();
 
-    // Open Phonics card -> controls still inside viewport; close Phonics card -> dismissed
-    await page.getByRole("button", { name: "Nghe đánh vần" }).click();
+    // Open Phonics card via mobile dock button -> controls still inside viewport; close Phonics card -> dismissed
+    await page.getByRole("button", { name: "Đánh vần từ này" }).click();
     await expect(page.getByTestId("phonics-lesson-card")).toBeVisible();
     controlsBox = await page.locator("[data-reading-controls]").boundingBox();
     expect(controlsBox).not.toBeNull();

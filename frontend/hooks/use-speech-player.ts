@@ -8,6 +8,7 @@ import { subscribeVoicePolicy } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   TtsPlayback,
+  type ActiveAudioKind,
   type PhonicsPlayOptions,
   type PlaybackState,
   type SpeechPlayOptions,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/reading/tts-playback";
 
 export type {
+  ActiveAudioKind,
   PhonicsPlayOptions,
   SpeechPlayOptions,
   TtsPlaybackCacheContext,
@@ -24,8 +26,11 @@ export type {
 
 export interface SpeechPlayer {
   readonly isPlaying: boolean;
+  readonly isLoading?: boolean;
+  readonly isActuallyPlaying?: boolean;
   readonly isPaused: boolean;
   readonly state: PlaybackState;
+  readonly activeAudioKind?: ActiveAudioKind;
   readonly fallbackNotice: string | null;
   setCacheContext?: (context: TtsPlaybackCacheContext | null) => void;
   play(text: string, options?: SpeechPlayOptions): Promise<void>;
@@ -53,6 +58,11 @@ export function useSpeechPlayer(): SpeechPlayer {
     player.subscribe,
     player.getState,
     () => "idle" as PlaybackState,
+  );
+  const activeAudioKind = useSyncExternalStore(
+    player.subscribe,
+    player.getActiveAudioKind,
+    () => "idle" as ActiveAudioKind,
   );
   const fallbackNotice = useSyncExternalStore(
     player.subscribe,
@@ -114,8 +124,11 @@ export function useSpeechPlayer(): SpeechPlayer {
   return {
     ...actions,
     state,
+    activeAudioKind,
     fallbackNotice,
     isPlaying: ["loading", "playing", "paused", "fallback"].includes(state),
+    isLoading: state === "loading",
+    isActuallyPlaying: state === "playing",
     isPaused: state === "paused",
     pause: player.pause,
     resume: player.resume,

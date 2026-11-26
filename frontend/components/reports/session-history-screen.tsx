@@ -1,7 +1,7 @@
 "use client";
 
 import { BarChart3, History, RefreshCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 
 import { ChildSelector } from "@/components/reports/child-selector";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
@@ -10,6 +10,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -45,6 +46,8 @@ export function SessionHistoryScreen({
   requestedChildId,
 }: SessionHistoryScreenProps) {
   const { childService, sessionService } = useReportServices();
+  const appStore = useContext(AppStoreContext);
+  const initialStoreChildIdRef = useRef(appStore?.selectedChildId ?? null);
   const currentPage =
     Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
   const [requestKey, setRequestKey] = useState(0);
@@ -60,12 +63,16 @@ export function SessionHistoryScreen({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
+        const preferredChildId =
+          requestedChildId ?? initialStoreChildIdRef.current ?? undefined;
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
         const child = matchedChild
           ? matchedChild
-          : await childService.get(requestedChildId!);
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
           limit: 10,
@@ -115,6 +122,28 @@ export function SessionHistoryScreen({
       active = false;
     };
   }, [childService, currentPage, requestKey, requestedChildId, sessionService]);
+
+  const syncAvailableChildren = appStore?.syncAvailableChildren;
+  const selectChildInStore = appStore?.selectChild;
+  const setValidatedSelectedChild = appStore?.setValidatedSelectedChild;
+  const syncedChildIdRef = useRef<string | null>(null);
+  const readyChild = state.status === "ready" ? state.child : null;
+  const readyChildren = state.status === "ready" ? state.children : null;
+
+  useEffect(() => {
+    if (!readyChild || !readyChildren) return;
+    if (syncedChildIdRef.current === readyChild.id) return;
+    syncedChildIdRef.current = readyChild.id;
+    syncAvailableChildren?.(readyChildren);
+    selectChildInStore?.(readyChild.id);
+    setValidatedSelectedChild?.(readyChild);
+  }, [
+    readyChild,
+    readyChildren,
+    selectChildInStore,
+    setValidatedSelectedChild,
+    syncAvailableChildren,
+  ]);
 
   if (state.status === "loading") {
     return (
@@ -201,11 +230,11 @@ export function SessionHistoryScreen({
   const dayGroups = groupSessionHistoryByDay(state.items);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-4 md:gap-5">
       <ReportPageHeader
         action={
           <ButtonLink
-            className="sm:w-auto"
+            className="min-h-11 w-auto px-3 py-2 text-xs md:px-5 md:text-label"
             href={`/reports?${childQuery}`}
             variant="secondary"
           >
@@ -218,8 +247,14 @@ export function SessionHistoryScreen({
         title="Lịch sử đọc"
       />
 
-      <div className="flex flex-col justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:flex-row sm:items-end sm:p-4">
-        <div className="w-full sm:max-w-sm">
+      <div
+        className={
+          state.items.length > 0
+            ? "flex flex-col justify-between gap-2 rounded-card border border-border bg-white px-3.5 py-2.5 md:flex-row md:items-end md:gap-3 md:p-4"
+            : "hidden flex-col justify-between gap-3 rounded-card border border-border bg-white p-3.5 md:flex md:flex-row md:items-end md:p-4"
+        }
+      >
+        <div className="hidden w-full md:block md:max-w-sm">
           <ChildSelector
             childrenProfiles={state.children}
             selectedChildId={state.child.id}
@@ -249,7 +284,7 @@ export function SessionHistoryScreen({
           }
         />
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3.5 md:gap-5">
           {dayGroups.map((group) => (
             <section
               aria-labelledby={`history-day-${group.dayKey}`}

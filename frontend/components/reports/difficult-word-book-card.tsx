@@ -73,7 +73,7 @@ export function DifficultWordBookCard({
 
   return (
     <article
-      className="flex min-w-0 flex-col justify-between gap-5 rounded-[24px] border border-[#DCE8E4] bg-white p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6"
+      className="flex min-w-0 flex-col justify-between gap-3.5 rounded-[20px] border border-[#DCE8E4] bg-white p-3.5 shadow-sm transition-shadow hover:shadow-md md:gap-5 md:rounded-[24px] md:p-6"
       data-book-group={group.key}
     >
       <div className="flex flex-col gap-4">
@@ -193,8 +193,8 @@ export function DifficultWordBookCard({
           })}
         </div>
 
-        <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-2.5 text-sm">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-bold text-[#213C42]">
+        <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-3.5 py-1.5 text-sm md:px-4 md:py-2.5">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between font-bold text-[#213C42]">
             <span>Chi tiết cho phụ huynh</span>
             <ChevronDown
               aria-hidden="true"

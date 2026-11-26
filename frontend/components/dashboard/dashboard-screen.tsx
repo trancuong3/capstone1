@@ -58,6 +58,7 @@ export function DashboardScreen() {
     selectChild,
     clearSelectedChild,
     setValidatedSelectedChild,
+    syncAvailableChildren,
   } = useAppStore();
 
   const [requestKey, setRequestKey] = useState(0);
@@ -136,6 +137,11 @@ export function DashboardScreen() {
       isActive = false;
     };
   }, [profileService, requestKey, userId]);
+
+  useEffect(() => {
+    if (state.status !== "ready" || state.children.length === 0) return;
+    syncAvailableChildren(state.children);
+  }, [state, syncAvailableChildren]);
 
   useEffect(() => {
     if (state.status !== "ready" || !selectedChildId) return;
@@ -227,13 +233,16 @@ export function DashboardScreen() {
 
   return (
     <section className="family-dashboard">
-      <header className="family-title">
-        <h1 className="book-title">Góc đọc gia đình</h1>
-        <Link href="/children" className="family-inline-link min-h-12">
-          <UsersRound aria-hidden="true" size={17} /> Quản lý hồ sơ
+      <header className="family-title max-md:mb-2.5! max-md:items-center!">
+        <h1 className="book-title max-md:text-xl!">Góc đọc gia đình</h1>
+        <Link
+          href="/children"
+          className="family-inline-link min-h-11 max-md:text-xs!"
+        >
+          <UsersRound aria-hidden="true" size={16} /> Quản lý hồ sơ
         </Link>
       </header>
-      <div className="family-spread">
+      <div className="family-spread max-md:gap-3!">
         <FamilyReadingDesk
           key={selectedChild?.id ?? "family"}
           child={selectedChild}
@@ -252,13 +261,18 @@ export function DashboardScreen() {
           aria-labelledby="child-selection-title"
           aria-busy={isLoading ? "true" : undefined}
           className={
-            "family-profiles order-1 md:order-2" +
+            "family-profiles order-1 max-md:gap-2! md:order-2" +
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2 id="child-selection-title">Chọn hồ sơ trẻ</h2>
+          <h2
+            id="child-selection-title"
+            className="max-md:text-base!"
+          >
+            Chọn hồ sơ trẻ
+          </h2>
           {selectionRequired && children.length > 0 ? (
-            <p role="status" className="family-selection-notice">
+            <p role="status" className="family-selection-notice max-md:text-xs!">
               {invalidSelection
                 ? "Hồ sơ đã thay đổi hoặc không còn khả dụng. Vui lòng chọn lại hồ sơ trẻ."
                 : "Vui lòng chọn hồ sơ trẻ trước khi bắt đầu đọc hoặc chơi."}
@@ -272,8 +286,8 @@ export function DashboardScreen() {
               <span className="sr-only" role="status">
                 Đang tải…
               </span>
-              <Skeleton className="h-[68px] w-full rounded-control" />
-              <Skeleton className="h-[68px] w-full rounded-control" />
+              <Skeleton className="h-[64px] w-full rounded-control" />
+              <Skeleton className="h-[64px] w-full rounded-control" />
             </div>
           ) : children.length ? (
             <>
@@ -294,7 +308,7 @@ export function DashboardScreen() {
               </div>
               <Link
                 href="/children/new"
-                className="family-inline-link min-h-12"
+                className="family-inline-link min-h-11 md:min-h-12"
               >
                 <Plus aria-hidden="true" size={17} /> Tạo hồ sơ bé
               </Link>
@@ -310,9 +324,9 @@ export function DashboardScreen() {
 
       {!isLoading && children.length > 0 ? (
         <>
-          <div className="mt-4 grid grid-cols-2 gap-2.5 md:hidden">
+          <div className="mt-3 grid grid-cols-2 gap-2 md:hidden">
             <Link
-              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="flex min-h-11 items-center gap-2 rounded-card border border-border bg-white px-3 py-2 text-xs font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
@@ -321,12 +335,12 @@ export function DashboardScreen() {
             >
               <BarChart3
                 aria-hidden="true"
-                className="size-5 shrink-0 text-primary"
+                className="size-4 shrink-0 text-primary"
               />
               <span className="truncate">Xem tiến bộ</span>
             </Link>
             <Link
-              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="flex min-h-11 items-center gap-2 rounded-card border border-border bg-white px-3 py-2 text-xs font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               href={
                 selectedChild
                   ? `/reports/difficult-words?childId=${encodeURIComponent(selectedChild.id)}`
@@ -335,7 +349,7 @@ export function DashboardScreen() {
             >
               <Volume2
                 aria-hidden="true"
-                className="size-5 shrink-0 text-warning"
+                className="size-4 shrink-0 text-warning"
               />
               <span className="truncate">Từ cần luyện</span>
             </Link>
@@ -343,17 +357,22 @@ export function DashboardScreen() {
 
           <section
             aria-labelledby="reading-actions-title"
-            className="family-tools"
+            className="family-tools max-md:mt-3!"
           >
-            <div className="family-tools-heading">
-              <h2 id="reading-actions-title">Hoạt động đọc sách</h2>
+            <div className="family-tools-heading max-md:items-center! max-md:pb-1.5!">
+              <h2
+                id="reading-actions-title"
+                className="max-md:text-lg!"
+              >
+                Hoạt động đọc sách
+              </h2>
               <Link
                 href={
                   selectedChild
                     ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
                     : "/sessions"
                 }
-                className="family-inline-link min-h-12"
+                className="family-inline-link min-h-11 max-md:text-xs!"
               >
                 <History aria-hidden="true" size={16} /> Lịch sử đọc
               </Link>
@@ -362,28 +381,37 @@ export function DashboardScreen() {
               <button
                 type="button"
                 aria-label="Quét sách"
+                className="max-md:min-h-12! max-md:py-2.5!"
                 onClick={() => handleReadingAction("/book-scanner")}
               >
                 <Camera aria-hidden="true" />
                 <span>
-                  <strong>Quét sách</strong>
-                  <small>Mở một trang sách giấy bằng camera.</small>
+                  <strong className="max-md:text-base!">Quét sách</strong>
+                  <small className="max-md:text-xs!">
+                    Mở một trang sách giấy bằng camera.
+                  </small>
                 </span>
                 <ArrowUpRight aria-hidden="true" />
               </button>
               <button
                 type="button"
                 aria-label="Trò chơi và âm nhạc"
+                className="max-md:min-h-12! max-md:py-2.5!"
                 onClick={() => handleReadingAction("/entertainment")}
               >
                 <Music2 aria-hidden="true" />
                 <span>
-                  <strong>Trò chơi và âm nhạc</strong>
-                  <small>Ghép câu, kể chuyện hoặc hát cùng bé.</small>
+                  <strong className="max-md:text-base!">
+                    Trò chơi và âm nhạc
+                  </strong>
+                  <small className="max-md:text-xs!">
+                    Ghép câu, kể chuyện hoặc hát cùng bé.
+                  </small>
                 </span>
                 <ArrowUpRight aria-hidden="true" />
               </button>
               <Link
+                className="max-md:min-h-12! max-md:py-2.5!"
                 href={
                   selectedChild
                     ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
@@ -392,8 +420,10 @@ export function DashboardScreen() {
               >
                 <BarChart3 aria-hidden="true" />
                 <span>
-                  <strong>Xem tiến bộ</strong>
-                  <small>Theo dõi kết quả qua từng buổi đọc.</small>
+                  <strong className="max-md:text-base!">Xem tiến bộ</strong>
+                  <small className="max-md:text-xs!">
+                    Theo dõi kết quả qua từng buổi đọc.
+                  </small>
                 </span>
                 <ArrowUpRight aria-hidden="true" />
               </Link>

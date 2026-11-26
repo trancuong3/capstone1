@@ -14,6 +14,7 @@ import { useChildService } from "@/hooks/use-child-service";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { MicrophonePermissionUiState } from "@/types/reading";
 import type { ChildProfileDTO } from "@/types/child";
@@ -270,7 +271,12 @@ export function ReadingPreparationScreen({
         const previousState = permissionStateRef.current;
         permissionStateRef.current = nextState;
         setPermissionState(nextState);
-        if (previousState === "granted" && nextState !== "granted") {
+        if (nextState === "granted" && isAndroidNativeSpeechAvailable()) {
+          // On Android APK WebView where RECORD_AUDIO is already granted by
+          // the OS, auto-confirm mic readiness to avoid an extra tap loop.
+          setMicrophoneVerified(true);
+          setPermissionMessage(null);
+        } else if (previousState === "granted" && nextState !== "granted") {
           setMicrophoneVerified(false);
           setPermissionMessage(
             "Quyền microphone đã thay đổi. Hãy xác minh lại trước khi bắt đầu đọc.",
@@ -514,17 +520,17 @@ export function ReadingPreparationScreen({
     !data.explicitPageInvalid;
 
   return (
-    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-heading font-extrabold leading-tight text-ink">
+    <section className="mx-auto flex w-full max-w-[800px] flex-col gap-3 sm:gap-4">
+      <header className="flex flex-col gap-1 sm:gap-2">
+        <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
           Chuẩn bị đọc sách
         </h1>
-        <p className="max-w-[760px] text-body leading-7 text-muted">
+        <p className="max-w-[760px] text-sm leading-6 text-muted sm:text-body sm:leading-7">
           Kiểm tra mic, rồi bé có thể bắt đầu đọc.
         </p>
       </header>
 
-      <article className="flex items-start gap-4 rounded-card border border-border bg-white p-4 sm:items-center">
+      <article className="flex items-start gap-3 rounded-card border border-border bg-white p-3.5 sm:items-center sm:gap-4 sm:p-4">
         <BookCover book={data.book} size="small" showTitle={false} />
         <div className="flex min-w-0 flex-col gap-1.5">
           <div>
@@ -569,26 +575,26 @@ export function ReadingPreparationScreen({
 
       <section
         aria-labelledby="microphone-check-title"
-        className="rounded-card border border-border bg-white p-4 sm:p-5"
+        className="rounded-card border border-border bg-white p-3.5 sm:p-5"
       >
         <h2
-          className="flex items-center gap-2 text-lg font-extrabold text-ink"
+          className="flex items-center gap-2 text-base font-extrabold text-ink sm:text-lg"
           id="microphone-check-title"
         >
           <Mic aria-hidden="true" className="size-5 text-primary" /> Kiểm tra
           microphone
         </h2>
-        <p className="mt-3 text-body text-muted">
+        <p className="mt-1.5 text-sm text-muted sm:mt-3 sm:text-body">
           ViRead chỉ ghi âm sau khi buổi đọc bắt đầu.
         </p>
         <div
           role="status"
-          className={`mt-3 rounded-control p-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
+          className={`mt-2.5 rounded-control p-3 sm:mt-3 ${microphoneVerified ? "bg-sky" : "bg-cream"}`}
         >
           <p className="font-bold text-ink">
             {isVerifying ? "Đang kiểm tra" : statusText}
           </p>
-          <p className="mt-2 text-body text-muted">
+          <p className="mt-1 text-sm text-muted sm:mt-2 sm:text-body">
             {permissionMessage ??
               microphoneDescription(permissionState, microphoneVerified)}
           </p>

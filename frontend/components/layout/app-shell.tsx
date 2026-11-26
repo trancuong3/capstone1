@@ -176,7 +176,12 @@ export function AppShell({ children }: AppShellProps) {
   const isChildOnboarding = pathname === "/children/new";
   const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
   const isReadingRoute = pathname.startsWith("/reading/");
-  const isImmersiveRoute = isBookRoute || isReadingRoute;
+
+  const syncAvailableChildren = appStore?.syncAvailableChildren;
+  useEffect(() => {
+    if (!syncAvailableChildren || availableChildren.length === 0) return;
+    syncAvailableChildren(availableChildren);
+  }, [availableChildren, syncAvailableChildren]);
 
   const displayName = resolveDisplayName(
     profile?.display_name,
@@ -359,6 +364,7 @@ export function AppShell({ children }: AppShellProps) {
     setIsSigningOut(true);
 
     try {
+      appStore?.clearSelectedChild();
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
       clearUserCache();
@@ -424,16 +430,6 @@ export function AppShell({ children }: AppShellProps) {
     );
   }
 
-  if (isBookRoute) {
-    return (
-      <AiTaskCenterProvider actorId={taskActorId} actorRole={taskActorRole}>
-        <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
-          {children}
-        </main>
-      </AiTaskCenterProvider>
-    );
-  }
-
   const autoSyncStudioTasks =
     pathname.startsWith("/my-books") || pathname.startsWith("/book-scanner");
 
@@ -452,7 +448,8 @@ export function AppShell({ children }: AppShellProps) {
         </a>
         <header
           className={cn(
-            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
+            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm max-xl:py-1! sm:px-6 xl:static xl:bg-white xl:px-8",
+            isBookRoute && "xl:hidden",
             isMobileImmersive && "hidden xl:block",
           )}
         >
@@ -528,6 +525,16 @@ export function AppShell({ children }: AppShellProps) {
                                     appStore.selectChild(child.id);
                                     appStore.setValidatedSelectedChild(child);
                                     setChildSwitcherOpenForPath(null);
+                                    if (
+                                      pathname === "/reports" ||
+                                      pathname === "/reports/difficult-words" ||
+                                      pathname === "/sessions" ||
+                                      pathname === "/reading-management"
+                                    ) {
+                                      router.push(
+                                        `${pathname}?childId=${encodeURIComponent(child.id)}`,
+                                      );
+                                    }
                                   }}
                                   role="option"
                                   type="button"
@@ -828,24 +835,29 @@ export function AppShell({ children }: AppShellProps) {
           id="main-content"
           tabIndex={-1}
           className={cn(
-            isImmersiveRoute
-              ? "w-full flex-1"
-              : "mx-auto w-full max-w-[1184px] px-4 sm:px-8",
-            !isImmersiveRoute && "min-w-0 flex-1",
-            !isImmersiveRoute &&
+            isBookRoute
+              ? "w-full min-w-0 flex-1 pb-24 xl:pb-0"
+              : "mx-auto w-full min-w-0 max-w-[1184px] flex-1 px-4 sm:px-8",
+            !isBookRoute &&
               (isChildOnboarding
                 ? "pb-8 pt-4 sm:pb-10"
                 : isMobileImmersive
                   ? "py-4 sm:py-6 xl:py-10"
-                  : "pb-24 pt-5 sm:pt-7 xl:py-10"),
+                  : "pb-24 pt-3 sm:pt-5 xl:py-10"),
           )}
         >
-          <ButtonSizeContext.Provider value="compact">
-            {children}
-          </ButtonSizeContext.Provider>
+          {isBookRoute ? (
+            children
+          ) : (
+            <ButtonSizeContext.Provider value="compact">
+              {children}
+            </ButtonSizeContext.Provider>
+          )}
         </main>
 
-        <SiteFooter className="hidden lg:block" variant="parent" />
+        {!isBookRoute ? (
+          <SiteFooter className="hidden lg:block" variant="parent" />
+        ) : null}
 
         {!isChildOnboarding && !isMobileImmersive ? (
           <MobileBottomNav pathname={pathname} />

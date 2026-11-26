@@ -1,6 +1,6 @@
 "use client";
 
-import { Send, ShieldCheck } from "lucide-react";
+import { ChevronDown, Send, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/common/button";
@@ -112,6 +112,7 @@ export function HelpSupportScreen() {
   const [hasEditedEmail, setHasEditedEmail] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showFeedbackEditor, setShowFeedbackEditor] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -312,7 +313,7 @@ export function HelpSupportScreen() {
     );
 
   return (
-    <section className="support-sheet mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="support-sheet mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 md:gap-4">
       <PageHeader
         description="Tìm câu trả lời về tài khoản, sách và buổi đọc của bé."
         title="Trợ giúp & hỗ trợ"
@@ -320,56 +321,86 @@ export function HelpSupportScreen() {
 
       <section
         aria-labelledby="support-faq-heading"
-        className="flex flex-col gap-4 rounded-card border border-border bg-white p-4 sm:px-8 sm:py-6"
+        className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:px-8 sm:py-6"
       >
         <div className="flex items-center gap-3">
           <div>
             <h2
-              className="text-2xl font-extrabold text-ink"
+              className="text-lg font-extrabold text-ink md:text-2xl"
               id="support-faq-heading"
             >
               Câu hỏi thường gặp
             </h2>
-            <p className="text-sm text-muted">
+            <p className="text-xs text-muted md:text-sm">
               Một số hướng dẫn nhanh khi sử dụng ViRead.
             </p>
           </div>
         </div>
 
-        {faqGroups.map((group) => (
-          <div className="flex flex-col gap-2" key={group.title}>
-            <h3 className="text-xl font-extrabold text-ink">{group.title}</h3>
-            <div className="flex flex-col gap-1">
-              {group.items.map((item) => (
-                <details className="group py-1" key={item.question}>
-                  <summary className="flex cursor-pointer list-none items-center gap-3 rounded-control py-2 text-left text-body text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden">
-                    <span>{item.question}</span>
-                    <span
-                      aria-hidden="true"
-                      className="shrink-0 text-lg text-primary transition-transform group-open:rotate-45"
-                    >
-                      +
-                    </span>
-                  </summary>
-                  <p className="pb-2 pt-1 text-sm leading-6 text-muted">
-                    {item.answer}
-                  </p>
-                </details>
-              ))}
+        {faqGroups.map((group) => {
+          const isGroupOpen = Boolean(openGroups[group.title]);
+          return (
+            <div
+              className="flex flex-col gap-1 border-b border-border/70 pb-1 last:border-b-0 last:pb-0 md:gap-2 md:border-b-0 md:pb-0"
+              key={group.title}
+            >
+              <h3 className="text-base font-extrabold text-ink md:text-xl">
+                <button
+                  aria-expanded={isGroupOpen}
+                  className="flex min-h-11 w-full items-center justify-between gap-2 text-left md:pointer-events-none md:min-h-0"
+                  onClick={() =>
+                    setOpenGroups((prev) => ({
+                      ...prev,
+                      [group.title]: !prev[group.title],
+                    }))
+                  }
+                  type="button"
+                >
+                  <span>{group.title}</span>
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={`size-4 shrink-0 text-muted transition-transform md:hidden ${isGroupOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+              </h3>
+              <div
+                className={
+                  isGroupOpen
+                    ? "flex flex-col gap-1"
+                    : "hidden flex-col gap-1 md:flex"
+                }
+              >
+                {group.items.map((item) => (
+                  <details className="group py-0.5 md:py-1" key={item.question}>
+                    <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-control py-2 text-left text-sm text-ink outline-none marker:hidden hover:text-primary focus-visible:ring-2 focus-visible:ring-primary md:text-body [&::-webkit-details-marker]:hidden">
+                      <span>{item.question}</span>
+                      <span
+                        aria-hidden="true"
+                        className="shrink-0 text-lg text-primary transition-transform group-open:rotate-45"
+                      >
+                        +
+                      </span>
+                    </summary>
+                    <p className="pb-2 pt-1 text-sm leading-6 text-muted">
+                      {item.answer}
+                    </p>
+                  </details>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </section>
 
       <section
         aria-labelledby="support-contact-heading"
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-3 md:gap-4"
       >
-        <Card>
+        <Card className="p-4 sm:p-6">
           <div className="flex items-center gap-3">
             <div>
               <h2
-                className="text-2xl font-extrabold text-ink"
+                className="text-lg font-extrabold text-ink md:text-2xl"
                 id="support-contact-heading"
               >
                 Liên hệ hỗ trợ
@@ -383,7 +414,7 @@ export function HelpSupportScreen() {
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
           <Button
-            className="mt-2 sm:max-w-72"
+            className="mt-1 sm:mt-2 sm:max-w-72"
             variant="secondary"
             onClick={() => setShowFeedbackEditor(true)}
           >

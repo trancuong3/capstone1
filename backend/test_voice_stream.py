@@ -327,6 +327,15 @@ class VoiceStreamProxyTests(unittest.TestCase):
         self.assertEqual(body["local"]["tts_precision"], "hybrid")
         self.assertEqual(len(body["local"]["active_voices"]), 8)
 
+    def test_open_local_stt_ws_uses_6s_open_timeout_for_remote_tunnels(self) -> None:
+        with patch("app.api.routes.voice.websockets.connect") as mock_connect:
+            voice_routes.open_local_stt_ws(
+                "wss://voice-tunnel.trycloudflare.com/stt/stream",
+                {"X-ViRead-Voice-Token": "tok"},
+            )
+        mock_connect.assert_called_once()
+        self.assertEqual(mock_connect.call_args.kwargs["open_timeout"], 6.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,7 +70,7 @@ function PasswordField({
               ? "Ẩn " + label.toLowerCase()
               : "Hiện " + label.toLowerCase()
           }
-          className="flex size-10 shrink-0 items-center justify-center rounded-control text-muted hover:bg-sky hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="flex size-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-sky hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           onClick={onToggle}
           type="button"
         >
@@ -334,23 +334,23 @@ export function AccountSettingsScreen() {
     );
 
   return (
-    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-4">
+    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-3.5 md:gap-4">
       <PageHeader
         description="Quản lý thông tin tài khoản, bảo mật và các tùy chọn sử dụng ViRead."
         eyebrow="Tài khoản ViRead"
         title="Cài đặt tài khoản"
       />
 
-      <Card>
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-lg font-extrabold text-ink md:text-2xl">
               Thông tin tài khoản
             </h2>
           </div>
         </div>
 
-        <dl className="grid gap-4 sm:grid-cols-2">
+        <dl className="grid gap-3 sm:grid-cols-2 sm:gap-4">
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               Tên hiển thị
@@ -407,31 +407,31 @@ export function AccountSettingsScreen() {
         Đổi mật khẩu
       </Button>
 
-      <Card>
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-lg font-extrabold text-ink md:text-2xl">
               Email và xác minh
             </h2>
           </div>
         </div>
-        <p className="text-body text-muted">
+        <p className="text-sm text-muted md:text-body">
           {profile.pending_email
             ? "Yêu cầu đổi email đang chờ xác minh. Email hiện tại vẫn là địa chỉ đã được xác nhận trước đó."
             : "Để đổi email hoặc gửi lại email xác minh, hãy sử dụng chức năng hiện có trong hồ sơ phụ huynh."}
         </p>
         <Link
-          className="font-semibold text-primary underline-offset-4 hover:underline"
+          className="inline-flex min-h-11 w-fit items-center font-semibold text-primary underline-offset-4 hover:underline"
           href="/profile"
         >
           Mở hồ sơ phụ huynh
         </Link>
       </Card>
 
-      <Card>
+      <Card className="p-4 sm:p-6">
         <div className="flex items-center gap-3">
           <div>
-            <h2 className="text-2xl font-extrabold text-ink">
+            <h2 className="text-lg font-extrabold text-ink md:text-2xl">
               Quản lý lịch nhắc đọc sách
             </h2>
             <p className="text-sm text-muted">

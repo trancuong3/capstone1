@@ -7,8 +7,9 @@ import {
   Trash2,
   UserRoundX,
 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 import { ChildProfileForm } from "@/components/children/child-profile-form";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -17,6 +18,7 @@ import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useChildService } from "@/hooks/use-child-service";
 import { ServiceError } from "@/lib/api/service-error";
 import type { ChildProfileCreateDTO, ChildProfileDTO } from "@/types/child";
@@ -55,6 +57,7 @@ export function ChildProfileScreen({
   mode,
 }: ChildProfileScreenProps) {
   const childService = useChildService();
+  const appStore = useContext(AppStoreContext);
   const router = useRouter();
 
   const [requestKey, setRequestKey] = useState(0);
@@ -231,6 +234,10 @@ export function ChildProfileScreen({
     try {
       await childService.delete(childId);
 
+      if (appStore?.selectedChildId === childId) {
+        appStore.clearSelectedChild();
+      }
+
       setIsDeleteModalOpen(false);
 
       router.replace("/children");
@@ -241,6 +248,9 @@ export function ChildProfileScreen({
         error instanceof ServiceError &&
         error.code === "RESOURCE_NOT_FOUND"
       ) {
+        if (appStore?.selectedChildId === childId) {
+          appStore.clearSelectedChild();
+        }
         setIsDeleteModalOpen(false);
 
         setLoadState({
@@ -332,14 +342,31 @@ export function ChildProfileScreen({
 
   return (
     <>
-      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-4">
+      <section className="mx-auto flex w-full max-w-[744px] flex-col gap-3 md:gap-4">
+        {!fromRegistration ? (
+          <div className="flex items-center justify-between gap-2">
+            <Link
+              className="-ml-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-control px-2 text-sm font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              href="/children"
+            >
+              <ArrowLeft aria-hidden="true" className="size-4 shrink-0" />
+              Quay lại
+            </Link>
+          </div>
+        ) : null}
         <div>
-          <h1 className="text-heading font-extrabold text-ink">{title}</h1>
+          <h1 className="text-xl font-extrabold text-ink md:text-heading">
+            {title}
+          </h1>
 
-          <p className="mt-2 text-body text-muted">{description}</p>
+          <p className="mt-2 hidden text-body text-muted md:block">
+            {description}
+          </p>
         </div>
-        <Card className="gap-4 sm:px-8 sm:py-8">
-          <h2 className="text-2xl font-extrabold text-ink">Thông tin của bé</h2>
+        <Card className="gap-3.5 p-4 sm:gap-4 sm:px-8 sm:py-8">
+          <h2 className="text-lg font-extrabold text-ink md:text-2xl">
+            Thông tin của bé
+          </h2>
           {saveNotice === "created" ? (
             <StatusMessage tone="success">Hồ sơ bé đã được tạo.</StatusMessage>
           ) : null}
@@ -425,11 +452,6 @@ export function ChildProfileScreen({
             </>
           ) : null}
         </Card>
-        {!fromRegistration ? (
-          <ButtonLink className="min-h-16" href="/children" variant="quiet">
-            Quay lại
-          </ButtonLink>
-        ) : null}
       </section>
 
       {child ? (

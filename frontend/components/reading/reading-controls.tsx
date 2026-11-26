@@ -1,6 +1,14 @@
 "use client";
 
-import { BookOpen, Check, Mic, Pause, Volume2, VolumeX } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  Mic,
+  Pause,
+  Sparkles,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "@/components/common/button";
@@ -23,7 +31,7 @@ interface ReadingControlsProps {
 }
 
 const dockButtonClass =
-  "min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
+  "min-h-12 min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
 
 export function ReadingControls({
   pauseDisabled,
@@ -34,17 +42,20 @@ export function ReadingControls({
   onHelp,
   onPause,
   onReadSample,
+  onSpellWord,
   onToggleListening,
   retryMode = false,
   onChoosePage,
   voiceSettings,
 }: ReadingControlsProps) {
   const finishDisabled = disabled;
+  const showMobileSpell = Boolean(onSpellWord) && !retryMode;
 
   return (
     <div className="mx-auto w-full max-w-[1104px]">
       <nav
         aria-label="Điều khiển buổi đọc"
+        data-mobile-dock-cols={showMobileSpell ? "4" : "3"}
         data-reading-controls
         className={cn(
           "grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3",
@@ -59,7 +70,8 @@ export function ReadingControls({
       >
         <Button
           aria-label="Tạm dừng buổi đọc"
-          className={dockButtonClass}
+          className={cn(dockButtonClass, "max-sm:hidden")}
+          data-desktop-only-control="true"
           disabled={pauseDisabled ?? disabled}
           onClick={onPause}
           size="compact"
@@ -103,7 +115,11 @@ export function ReadingControls({
           </span>
         </Button>
 
-        {voiceSettings}
+        {voiceSettings ? (
+          <div className="contents" data-voice-settings-wrap="true">
+            {voiceSettings}
+          </div>
+        ) : null}
 
         <Button
           aria-label={
@@ -136,10 +152,30 @@ export function ReadingControls({
           </span>
         </Button>
 
+        {showMobileSpell ? (
+          <Button
+            aria-label="Đánh vần từ này"
+            className={cn(dockButtonClass, "sm:hidden")}
+            disabled={disabled}
+            onClick={onSpellWord}
+            size="compact"
+            variant="quiet"
+          >
+            <Sparkles
+              aria-hidden="true"
+              className="size-5 shrink-0 text-primary"
+            />
+            <span className="max-w-full text-center whitespace-normal break-words">
+              Đánh vần
+            </span>
+          </Button>
+        ) : null}
+
         {!retryMode && (
           <Button
             aria-label="Chọn trang"
-            className={dockButtonClass}
+            className={cn(dockButtonClass, "max-sm:hidden")}
+            data-desktop-only-control="true"
             disabled={disabled || !onChoosePage}
             onClick={onChoosePage}
             size="compact"

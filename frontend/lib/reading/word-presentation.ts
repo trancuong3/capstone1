@@ -36,22 +36,19 @@ export const wordPresentationLabels: Record<WordPresentationState, string> = {
 export const wordPresentationClasses: Record<WordPresentationState, string> = {
   unread: "",
   current:
-    "bg-yellow-200/60 ring-2 ring-yellow-500 border-b-4 border-amber-600 font-semibold",
-  "preview-correct":
-    "bg-emerald-50 text-emerald-950 border-b-2 border-dashed border-emerald-500",
-  correct:
-    "bg-success-surface text-success-ink border-b-2 border-solid border-emerald-700/60",
-  incorrect: "bg-red-200 text-red-900 ring-1 ring-red-500",
-  omission: "bg-red-200 text-red-900 ring-1 ring-red-500",
-  repeated: "bg-purple-200 text-purple-900 ring-1 ring-purple-500",
-  hesitation: "bg-purple-200 text-purple-900 ring-1 ring-purple-500",
-  "self-corrected":
-    "bg-green-200 text-green-900 ring-2 ring-green-600 ring-offset-2",
-  unresolved: "bg-red-200 text-red-900 ring-2 ring-red-600",
+    "bg-amber-100/90 text-ink ring-yellow-500 shadow-[inset_0_-3px_0_0_#d97706]",
+  "preview-correct": "bg-emerald-50/75 text-emerald-950",
+  correct: "bg-success-surface text-success-ink",
+  incorrect: "bg-red-200 text-red-900",
+  omission: "bg-red-200 text-red-900",
+  repeated: "bg-purple-200 text-purple-900",
+  hesitation: "bg-purple-200 text-purple-900",
+  "self-corrected": "bg-green-200 text-green-900",
+  unresolved: "bg-red-200 text-red-900",
   // Not colour alone: dotted underline marks "the app read this one for you".
   assisted:
-    "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4",
-  uncertain: "bg-slate-100 text-slate-700 ring-1 ring-slate-400",
+    "bg-sky text-primary underline decoration-dotted decoration-1 underline-offset-4",
+  uncertain: "bg-slate-100/70 text-slate-700",
 };
 
 export function getWordPresentationLabel(state: WordPresentationState): string {

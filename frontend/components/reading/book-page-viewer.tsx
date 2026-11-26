@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Modal } from "@/components/common/modal";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import {
   fetchAuthenticatedBlobUrl,
@@ -41,6 +42,8 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustrationUrl?: string | null;
   illustrationTextFree?: boolean;
   initialReadingMode?: ReadingDisplayMode;
+  mobileImageSheetOpen?: boolean;
+  onCloseMobileImageSheet?: () => void;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
@@ -196,6 +199,8 @@ function PageSurface(
     illustrationUrl,
     illustrationTextFree,
     initialReadingMode,
+    mobileImageSheetOpen = false,
+    onCloseMobileImageSheet,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
@@ -330,7 +335,9 @@ function PageSurface(
         : selectedReadingMode;
 
   const shouldLoadOriginalSource =
-    !isV2ModeEnabled || effectiveReadingMode === "ORIGINAL";
+    !isV2ModeEnabled ||
+    effectiveReadingMode === "ORIGINAL" ||
+    mobileImageSheetOpen;
 
   useEffect(() => {
     if (!shouldLoadOriginalSource || !isPrivateSource || !activeImageUrl) {
@@ -490,6 +497,7 @@ function PageSurface(
     getActiveElement: getActiveNode,
     activeWordId: activeId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
+    isInterimPreview: Boolean(previewSnapshot),
   });
 
   const handleSelectWord = useCallback(
@@ -523,7 +531,13 @@ function PageSurface(
               : "none"
       }
     >
-      <header className="reader-bookplate">
+      <header
+        className={cn(
+          "reader-bookplate",
+          !isV2ModeEnabled && "hidden sm:flex",
+        )}
+        data-v2-mode={isV2ModeEnabled ? "true" : undefined}
+      >
         <div className="min-w-0">
           <p className="reader-folio">Trang {page.page_number}</p>
           <h1 className="book-title line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl">
@@ -727,10 +741,11 @@ function PageSurface(
                 </div>
               ) : (
                 <details
+                  data-reference-image-details="true"
                   onToggle={(event) =>
                     setReferenceOpen(event.currentTarget.open)
                   }
-                  className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
+                  className="mb-2 hidden rounded-control border border-border bg-white/70 p-1.5 sm:block"
                 >
                   <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
                     Xem ảnh trang sách
@@ -775,6 +790,33 @@ function PageSurface(
         Từ hiện tại:{" "}
         {page.words.find((word) => word.word_id === activeId)?.text}
       </p>
+      {mobileImageSheetOpen && onCloseMobileImageSheet ? (
+        <Modal
+          closeOnBackdropClick
+          isOpen
+          onClose={onCloseMobileImageSheet}
+          title={`Ảnh trang ${page.page_number}`}
+          tone="paper"
+        >
+          {source && image !== "failed" ? (
+            <Image
+              src={source}
+              alt={`Ảnh trang sách ${page.page_number}`}
+              width={Math.max(1, page.width)}
+              height={Math.max(1, page.height)}
+              unoptimized
+              className="mx-auto h-auto max-h-[68dvh] w-auto max-w-full rounded-control object-contain"
+              onError={handleImageLoadError}
+            />
+          ) : (
+            <p className="py-6 text-center text-sm text-muted">
+              {image === "failed"
+                ? "Không thể tải ảnh trang sách lúc này."
+                : "Đang tải ảnh trang sách…"}
+            </p>
+          )}
+        </Modal>
+      ) : null}
     </article>
   );
 }

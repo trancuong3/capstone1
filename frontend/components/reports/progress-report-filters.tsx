@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useId } from "react";
+import { useContext, useId } from "react";
 import { Button } from "@/components/common/button";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { progressHref } from "@/lib/utils/progress-report-state";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ProgressPeriodOptionDTO } from "@/types/reports";
@@ -30,6 +31,7 @@ export function ProgressReportFilters({
   onLoadMore,
 }: ProgressReportFiltersProps) {
   const router = useRouter();
+  const appStore = useContext(AppStoreContext);
   const childSelectId = useId();
   const periodSelectId = useId();
 
@@ -42,9 +44,9 @@ export function ProgressReportFilters({
 
   return (
     <div
-      className={`grid grid-cols-1 items-end gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`}
+      className={`grid grid-cols-1 items-end gap-2.5 rounded-card border border-border bg-white p-2.5 md:gap-3 md:p-4 ${hasMore ? "md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "md:grid-cols-2"}`}
     >
-      <div className="min-w-0">
+      <div className="hidden min-w-0 md:block">
         <label
           className="mb-1.5 block text-xs font-bold text-muted"
           htmlFor={childSelectId}
@@ -55,7 +57,13 @@ export function ProgressReportFilters({
           aria-label="Chọn hồ sơ bé để xem dữ liệu"
           className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           id={childSelectId}
-          onChange={(event) => router.push(progressHref(event.target.value))}
+          onChange={(event) => {
+            const nextChildId = event.target.value;
+            const matched = childrenProfiles.find((c) => c.id === nextChildId);
+            appStore?.selectChild(nextChildId);
+            if (matched) appStore?.setValidatedSelectedChild(matched);
+            router.push(progressHref(nextChildId));
+          }}
           value={childId}
         >
           {childrenProfiles.map((child) => (
@@ -68,13 +76,13 @@ export function ProgressReportFilters({
 
       <div className="min-w-0">
         <label
-          className="mb-1.5 block text-xs font-bold text-muted"
+          className="mb-1 block text-xs font-bold text-muted md:mb-1.5"
           htmlFor={periodSelectId}
         >
           Kỳ báo cáo đã lưu
         </label>
         <select
-          className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="min-h-11 w-full cursor-pointer rounded-control border border-border bg-cream px-3 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary md:min-h-12 md:px-3.5"
           id={periodSelectId}
           onChange={(event) => {
             const value = event.target.value;
@@ -107,7 +115,7 @@ export function ProgressReportFilters({
 
       {hasMore ? (
         <Button
-          className="min-h-12 whitespace-nowrap sm:w-auto"
+          className="min-h-11 whitespace-nowrap md:min-h-12 md:w-auto"
           disabled={loadingMore}
           onClick={onLoadMore}
           variant="secondary"

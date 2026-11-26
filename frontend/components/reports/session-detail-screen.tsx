@@ -315,9 +315,9 @@ export function SessionDetailScreen({
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 max-w-3xl space-y-2">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-4 md:gap-5">
+      <header className="flex flex-col justify-between gap-2.5 border-b border-border pb-3 md:gap-4 md:pb-5 lg:flex-row lg:items-end">
+        <div className="min-w-0 max-w-3xl space-y-1.5 md:space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
@@ -330,17 +330,17 @@ export function SessionDetailScreen({
               </span>
             ) : null}
           </div>
-          <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+          <h1 className="book-title text-xl text-ink md:text-3xl lg:text-[38px]">
             {pageTitle}
           </h1>
-          <p className="text-base font-bold text-ink">
+          <p className="text-sm font-bold text-ink md:text-base">
             {state.book.title}
             <span className="font-semibold text-muted">
               {" "}
               · {state.child.alias}
             </span>
           </p>
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
+          <dl className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-muted md:gap-x-6">
             <div className="flex gap-1.5">
               <dt>Bắt đầu:</dt>
               <dd className="tabular-nums text-ink">
@@ -360,7 +360,7 @@ export function SessionDetailScreen({
 
         <div className="flex shrink-0 flex-wrap gap-2">
           <ButtonLink
-            className="sm:w-auto"
+            className="min-h-11 w-auto px-3 py-2 text-xs md:px-5 md:text-label"
             href={returnHref}
             variant="secondary"
           >
@@ -420,7 +420,7 @@ export function SessionDetailScreen({
           {summaryItems.map(([label, value], index) => {
             const isMissing = value.startsWith("Chưa");
             const cellBorders = [
-              "border-border p-3.5 sm:px-6 sm:py-4",
+              "border-border p-3 sm:px-6 sm:py-4",
               index % 2 === 0 ? "border-r sm:border-r-0" : "",
               index >= 2 ? "border-t" : "",
               index === 2 ? "sm:border-t-0" : "",
@@ -436,7 +436,7 @@ export function SessionDetailScreen({
                   className={
                     isMissing
                       ? "mt-1 text-sm font-semibold text-muted"
-                      : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
+                      : "mt-1 text-lg font-extrabold leading-snug tabular-nums text-primary md:text-xl"
                   }
                 >
                   {value}

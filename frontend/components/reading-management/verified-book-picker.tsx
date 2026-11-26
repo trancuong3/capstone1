@@ -115,7 +115,7 @@ export function VerifiedBookPicker({
               className="pointer-events-none absolute left-3 top-3 size-4 text-muted"
             />
             <input
-              className="min-h-10 w-full rounded-control border border-border bg-cream py-2 pl-9 pr-3 text-sm text-ink"
+              className="min-h-11 w-full rounded-control border border-border bg-cream py-2 pl-9 pr-3 text-sm text-ink"
               type="search"
               placeholder="Tên sách hoặc tác giả"
               value={query}
@@ -170,7 +170,7 @@ export function VerifiedBookPicker({
                           aria-label={`${text} ${book.title}`}
                           disabled={busy}
                           onClick={() => onToggle(book.id, type)}
-                          className={`inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-semibold hover:bg-sky disabled:opacity-55 ${selected ? "bg-sky text-primary" : "text-ink"}`}
+                          className={`inline-flex min-h-11 items-center gap-1 rounded-control px-2.5 text-sm font-semibold hover:bg-sky disabled:opacity-55 ${selected ? "bg-sky text-primary" : "text-ink"}`}
                         >
                           <Icon
                             aria-hidden="true"
@@ -184,7 +184,7 @@ export function VerifiedBookPicker({
                   <Link
                     aria-label={`Mở sách ${book.title}`}
                     href={`/books/${encodeURIComponent(book.id)}?childId=${encodeURIComponent(childId)}`}
-                    className="inline-flex min-h-9 items-center gap-1 rounded-control px-2 text-sm font-bold text-primary hover:bg-sky"
+                    className="inline-flex min-h-11 items-center gap-1 rounded-control px-2.5 text-sm font-bold text-primary hover:bg-sky"
                   >
                     Mở sách{" "}
                     <ArrowUpRight

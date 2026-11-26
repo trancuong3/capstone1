@@ -6,44 +6,46 @@ import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-canno
 
 export function EntertainmentScreen() {
   return (
-    <section className="activity-library mx-auto flex w-full max-w-[1120px] flex-col gap-4">
+    <section className="activity-library mx-auto flex w-full max-w-[1120px] flex-col gap-3 md:gap-4">
       <header>
-        <h1 className="book-title border-b border-border pb-5 text-4xl text-ink">
+        <h1 className="book-title border-b border-border pb-2.5 text-xl text-ink md:pb-5 md:text-4xl">
           Giải trí
         </h1>
       </header>
-      <div className="grid items-stretch gap-4 md:grid-cols-2">
-        <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 sm:p-8">
+      <div className="grid items-stretch gap-3 md:grid-cols-2 md:gap-4">
+        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:p-8">
           <div
             aria-hidden="true"
-            className="flex min-h-52 flex-col items-center justify-center gap-5 rounded-card bg-sky p-6"
+            className="flex min-h-28 flex-col items-center justify-center gap-3 rounded-card bg-sky p-3.5 md:min-h-52 md:gap-5 md:p-6"
           >
-            <div className="flex flex-wrap justify-center gap-2">
+            <div className="flex flex-wrap justify-center gap-1.5 md:gap-2">
               {["Bé", "đang", "đọc", "sách."].map((word) => (
                 <span
-                  className="rounded-control bg-white px-4 py-2 text-xl font-extrabold text-ink"
+                  className="rounded-control bg-white px-2.5 py-1 text-sm font-extrabold text-ink md:px-4 md:py-2 md:text-xl"
                   key={word}
                 >
                   {word}
                 </span>
               ))}
             </div>
-            <ToyCannon className="size-24" />
+            <ToyCannon className="size-14 md:size-24" />
           </div>
-          <h2 className="text-2xl font-extrabold text-ink">Xạ thủ ghép câu</h2>
-          <p className="text-body leading-6 text-muted">
+          <h2 className="text-lg font-extrabold text-ink md:text-2xl">
+            Xạ thủ ghép câu
+          </h2>
+          <p className="text-sm leading-5 text-muted md:text-body md:leading-6">
             Chọn từ trong sách và ghép lại thành câu theo đúng thứ tự.
           </p>
           <ButtonLink
             href="/entertainment/sentence-shooter"
             size="compact"
-            className="mt-auto"
+            className="mt-auto min-h-11"
           >
             Bắt đầu chơi <ArrowRight aria-hidden="true" className="size-4" />
           </ButtonLink>
         </article>
-        <article className="flex flex-col gap-4 rounded-card border border-border bg-white p-6 sm:p-8">
-          <div className="relative min-h-52 overflow-hidden rounded-card bg-cream">
+        <article className="flex flex-col gap-3 rounded-card border border-border bg-white p-4 sm:gap-4 sm:p-8">
+          <div className="relative min-h-28 overflow-hidden rounded-card bg-cream md:min-h-52">
             <Image
               alt="Khu vườn đầy nắng để bé quan sát và kể chuyện"
               className="object-cover"
@@ -52,37 +54,43 @@ export function EntertainmentScreen() {
               src="/images/picture-description/sunny-garden.jpg"
             />
           </div>
-          <h2 className="text-2xl font-extrabold text-ink">
+          <h2 className="text-lg font-extrabold text-ink md:text-2xl">
             Kể chuyện qua tranh
           </h2>
-          <p className="text-body leading-6 text-muted">
+          <p className="text-sm leading-5 text-muted md:text-body md:leading-6">
             Quan sát tranh trong sách hoặc ảnh ba mẹ tải lên. Bé có thể kể bằng
             giọng nói hoặc câu văn để nhận gợi ý từ vựng.
           </p>
           <ButtonLink
             href="/entertainment/picture-description"
             size="compact"
-            className="mt-auto"
+            className="mt-auto min-h-11"
           >
             Chọn tranh <ArrowRight aria-hidden="true" className="size-4" />
           </ButtonLink>
         </article>
       </div>
-      <article className="flex flex-col items-start gap-4 rounded-card border border-border bg-cream p-6 sm:flex-row sm:items-center sm:p-8">
+      <article className="flex flex-col items-start gap-3 rounded-card border border-border bg-cream p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-8">
         <div
           aria-hidden="true"
-          className="grid size-16 shrink-0 place-items-center rounded-control bg-white text-primary"
+          className="grid size-12 shrink-0 place-items-center rounded-control bg-white text-primary md:size-16"
         >
-          <Music2 className="size-8" />
+          <Music2 className="size-6 md:size-8" />
         </div>
         <div className="min-w-0 flex-1">
-          <h2 className="text-2xl font-extrabold text-ink">Hát vui cùng bé</h2>
-          <p className="mt-2 text-body text-muted">
+          <h2 className="text-lg font-extrabold text-ink md:text-2xl">
+            Hát vui cùng bé
+          </h2>
+          <p className="mt-1 text-sm text-muted md:mt-2 md:text-body">
             Chọn bài hát yêu thích, nghe nhạc và cùng bé hát theo lời trên màn
             hình.
           </p>
         </div>
-        <ButtonLink href="/karaoke" size="compact" className="w-full sm:w-auto">
+        <ButtonLink
+          href="/karaoke"
+          size="compact"
+          className="min-h-11 w-full sm:w-auto"
+        >
           Mở thư viện bài hát{" "}
           <ArrowRight aria-hidden="true" className="size-4" />
         </ButtonLink>

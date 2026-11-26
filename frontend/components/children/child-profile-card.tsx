@@ -28,13 +28,15 @@ export function ChildProfileCard({
         size="md"
       />
       <span className="min-w-0 flex-1">
-        <span className="block break-words text-xl font-bold leading-tight text-ink">
+        <span className="block break-words text-base font-bold leading-tight text-ink md:text-xl">
           {child.alias}
         </span>
-        <span className="text-sm text-muted">Lớp {child.grade}</span>
+        <span className="text-xs text-muted md:text-sm">
+          Lớp {child.grade}
+        </span>
       </span>
       {selected ? (
-        <span className="inline-flex items-center gap-1 text-sm font-semibold text-primary">
+        <span className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary md:text-sm">
           <Check aria-hidden="true" className="size-4" /> Đang chọn
         </span>
       ) : showEditAction ? (
@@ -44,7 +46,7 @@ export function ChildProfileCard({
   );
 
   const className =
-    "group relative flex min-h-20 w-full items-center gap-4 rounded-control border px-4 py-3 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary " +
+    "group relative flex min-h-16 w-full items-center gap-3 rounded-control border px-3 py-2 text-left transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary md:min-h-20 md:gap-4 md:px-4 md:py-3 " +
     (selected
       ? "border-primary bg-sky"
       : "border-border bg-white hover:border-primary/60");

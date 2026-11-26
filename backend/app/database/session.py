@@ -218,14 +218,15 @@ _running_test_cli = any(
     runner in (sys.argv[0] if sys.argv else "")
     for runner in ("unittest", "pytest")
 )
+_is_loopback_host = (sqlalchemy_database_url.host or "").strip().lower() in {
+    "127.0.0.1",
+    "localhost",
+    "::1",
+}
 _use_null_pool = (
     APP_ENVIRONMENT == "test"
     or _running_test_cli
-    or DATABASE_POOLER_MODE == "transaction"
-    or (
-        DATABASE_POOLER_MODE == "local"
-        and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}
-    )
+    or _is_loopback_host
 )
 
 if _use_null_pool:
@@ -237,7 +238,7 @@ if _use_null_pool:
     )
 else:
     _base_pool_size = max(2, min(DATABASE_CONCURRENCY_LIMIT, 4))
-    _max_overflow = max(2, DATABASE_CONCURRENCY_LIMIT - _base_pool_size)
+    _max_overflow = max(2, min(4, DATABASE_CONCURRENCY_LIMIT - _base_pool_size))
     engine = create_async_engine(
         sqlalchemy_database_url,
         echo=False,

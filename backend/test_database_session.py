@@ -1,9 +1,12 @@
-"""Tests for NullPool, asyncpg settings, concurrency bounds and session lifecycle."""
+"""Tests for QueuePool/NullPool selection, asyncpg settings, concurrency bounds and session lifecycle."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -16,6 +19,8 @@ os.environ.setdefault("DATABASE_POOLER_MODE", "local")
 os.environ.setdefault("DATABASE_SSL_REQUIRED", "false")
 
 from sqlalchemy.pool import NullPool
+
+BACKEND_ROOT = Path(__file__).resolve().parent
 
 from app.database.config import (
     DATABASE_CONCURRENCY_LIMIT,
@@ -57,6 +62,84 @@ class DatabaseEngineConfigurationTests(unittest.TestCase):
     def test_concurrency_configuration_has_safe_bounds(self):
         self.assertGreaterEqual(DATABASE_CONCURRENCY_LIMIT, 1)
         self.assertGreaterEqual(DATABASE_CONCURRENCY_WAIT_TIMEOUT, 0.1)
+
+    def test_remote_transaction_pooler_uses_bounded_queue_pool(self):
+        import certifi
+
+        env = os.environ.copy()
+        env["APP_ENVIRONMENT"] = "production"
+        env["DATABASE_POOLER_MODE"] = "transaction"
+        env["DATABASE_SSL_REQUIRED"] = "true"
+        env["DATABASE_SSL_ROOT_CERT"] = certifi.where()
+        env["DATABASE_URL"] = "postgresql+asyncpg://u:p@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres"
+        env["SUPABASE_URL"] = "https://x.supabase.co"
+        env["SUPABASE_KEY"] = "test-key"
+        env.pop("DATABASE_CONCURRENCY_LIMIT", None)
+        code = (
+            "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
+            "from sqlalchemy.pool import NullPool, QueuePool;"
+            "from app.database import session;"
+            "pool = session.engine.pool;"
+            "assert isinstance(pool, QueuePool) and not isinstance(pool, NullPool), type(pool);"
+            "assert pool.size() == 4, pool.size();"
+            "assert pool._max_overflow == 4, pool._max_overflow;"
+            "assert pool._recycle == 300, pool._recycle;"
+            "assert pool._pre_ping is True, pool._pre_ping;"
+            "assert pool._pool.use_lifo is True, pool._pool.use_lifo;"
+            "assert session.asyncpg_connect_args['statement_cache_size'] == 0;"
+            "assert session.sqlalchemy_database_url.query['prepared_statement_cache_size'] == '0';"
+            "print('QUEUEPOOL_OK')"
+        )
+        proc = subprocess.run(
+            [sys.executable, "-c", code],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+        self.assertIn("QUEUEPOOL_OK", proc.stdout)
+
+    def test_test_env_and_local_loopback_keep_null_pool(self):
+        import certifi
+
+        # Case 1: APP_ENVIRONMENT=test even with remote transaction pooler -> NullPool
+        env_test = os.environ.copy()
+        env_test["APP_ENVIRONMENT"] = "test"
+        env_test["DATABASE_POOLER_MODE"] = "transaction"
+        env_test["DATABASE_SSL_REQUIRED"] = "true"
+        env_test["DATABASE_SSL_ROOT_CERT"] = certifi.where()
+        env_test["DATABASE_URL"] = "postgresql+asyncpg://u:p@db.example.com:6543/postgres"
+        env_test["SUPABASE_URL"] = "https://x.supabase.co"
+        env_test["SUPABASE_KEY"] = "test-key"
+
+        # Case 2: development + local loopback -> NullPool
+        env_local = os.environ.copy()
+        env_local["APP_ENVIRONMENT"] = "development"
+        env_local["DATABASE_POOLER_MODE"] = "local"
+        env_local["DATABASE_SSL_REQUIRED"] = "false"
+        env_local["DATABASE_URL"] = "postgresql+asyncpg://u:p@127.0.0.1:5432/postgres"
+        env_local["SUPABASE_URL"] = "https://x.supabase.co"
+        env_local["SUPABASE_KEY"] = "test-key"
+
+        code = (
+            "import sys; sys.path.insert(0, r'" + str(BACKEND_ROOT) + "');"
+            "from sqlalchemy.pool import NullPool;"
+            "from app.database import session;"
+            "assert isinstance(session.engine.pool, NullPool), type(session.engine.pool);"
+            "print('NULLPOOL_OK')"
+        )
+        for label, env in (("test_env", env_test), ("local_loopback", env_local)):
+            with self.subTest(case=label):
+                proc = subprocess.run(
+                    [sys.executable, "-c", code],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(proc.returncode, 0, msg=proc.stderr or proc.stdout)
+                self.assertIn("NULLPOOL_OK", proc.stdout)
 
 
 class DatabaseConcurrencyLimiterTests(unittest.IsolatedAsyncioTestCase):

@@ -632,13 +632,15 @@ class LocalVoiceProvider:
         started = time.perf_counter()
         try:
             client = self._get_client()
+            probe_http_timeout = 2.0 if self.is_loopback else 4.0
+            probe_outer_timeout = 2.5 if self.is_loopback else 4.5
             resp = await asyncio.wait_for(
                 client.get(
                     f"{self.base_url}/health",
                     headers=self._request_headers(include_auth=self.is_loopback),
-                    timeout=self._make_timeout(2.0, 2.0),
+                    timeout=self._make_timeout(probe_http_timeout, probe_http_timeout),
                 ),
-                timeout=2.5,
+                timeout=probe_outer_timeout,
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
             if resp.status_code == 200:
