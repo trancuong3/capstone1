@@ -118,9 +118,7 @@ export function AppStoreProvider({
       }
     } else if (previousUserId && previousUserId !== activeUserId) {
       clearPersistedSelectedChild();
-      if (activeUserId === null) {
-        broadcastChildSelection(previousUserId, null, syncChannelRef.current);
-      }
+      broadcastChildSelection(previousUserId, null, syncChannelRef.current);
     } else if (activeUserId) {
       clearPersistedSelectedChild(activeUserId);
     }

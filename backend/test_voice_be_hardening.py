@@ -1011,6 +1011,216 @@ class TestSessionVoiceLockAndBackendSttParity(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(words), 1)
         self.assertGreaterEqual(words[0]["start"], 0.45)
 
+    async def test_review_fixes_jsonb_null_phonics_parity_coaching_allowlist_and_hpf_silence_guard(
+        self,
+    ) -> None:
+        from types import SimpleNamespace
+        from sqlalchemy.dialects import postgresql
+        from app.models.tts_audio_cache import TtsAudioCacheEntry
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+        from app.services.tts_audio_cache_service import (
+            ALLOWED_COACHING_PHRASES,
+            TIMED_COACHING_PHRASES,
+            ResolvedCacheTarget,
+            TtsAudioCacheService,
+            canonical_phonics_key,
+            is_coaching_text_allowlisted,
+        )
+        from app.services.vietnamese_phonics import build_vietnamese_phonics_steps
+
+        # 1. JSONB(none_as_null=True) prevents storing JSON literal 'null'::jsonb
+        self.assertTrue(TtsAudioCacheEntry.WordTimingsJson.type.none_as_null)
+
+        # 2. PostgreSQL repo filters out legacy 'null'::jsonb when require_word_timings=True
+        compiled_sqls: list[str] = []
+
+        class _FakePgDb:
+            def get_bind(self):
+                return SimpleNamespace(dialect=postgresql.dialect())
+
+            async def scalar(self, stmt):
+                compiled_sqls.append(
+                    str(stmt.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
+                )
+                return None
+
+            async def get(self, *_args, **_kwargs):
+                return SimpleNamespace(Id=uuid4())
+
+        repo = TtsAudioCacheRepository(_FakePgDb())  # type: ignore[arg-type]
+        await repo.get_active_entry(
+            scope="COACHING",
+            owner_parent_id=None,
+            content_sha256="abc",
+            voice_id="local_north_truc_ly",
+            model_version=None,
+            speed=0.9,
+            audio_formats=["audio/mpeg"],
+            require_word_timings=True,
+        )
+        self.assertTrue(
+            any("jsonb_typeof" in sql and "'null'" in sql for sql in compiled_sqls),
+            msg=compiled_sqls,
+        )
+        compiled_sqls.clear()
+        await repo.upsert_active_entry(
+            scope="COACHING",
+            owner_parent_id=None,
+            book_id=None,
+            page_id=None,
+            page_revision_id=None,
+            content_sha256="abc",
+            normalized_text="Chào con",
+            voice_id="local_north_truc_ly",
+            model_version="v1",
+            speed=0.9,
+            audio_format="audio/mpeg",
+            storage_bucket="viread-tts-cache",
+            storage_path="coaching/abc/v.mp3",
+            byte_size=123,
+            duration_seconds=None,
+            word_timings_json=None,
+        )
+        self.assertTrue(
+            any("nullif(" in sql.lower() and "'null'::jsonb" in sql.lower() for sql in compiled_sqls),
+            msg=compiled_sqls,
+        )
+
+        # 3. Vietnamese phonics steps match frontend SGK format 1:1 & allowlist accepts 5-token compound rhymes
+        mot_steps = build_vietnamese_phonics_steps("mốt")
+        self.assertEqual(
+            mot_steps,
+            [
+                {"id": "rhyme_build", "spoken_text": "ô, tờ, ốt.", "pause_after_ms": 420},
+                {"id": "onset_blend", "spoken_text": "mờ, ốt.", "pause_after_ms": 420},
+                {"id": "tone_blend", "spoken_text": "sắc, mốt.", "pause_after_ms": 450},
+                {"id": "whole_syllable", "spoken_text": "mốt.", "pause_after_ms": 320},
+            ],
+        )
+        thuyet_steps = build_vietnamese_phonics_steps("thuyết")
+        self.assertEqual(thuyet_steps[0]["spoken_text"], "u, y, ê, tờ, uyết.")
+        thuyet_key, _ = canonical_phonics_key(thuyet_steps)
+        self.assertTrue(is_coaching_text_allowlisted(thuyet_key))
+        self.assertEqual(build_vietnamese_phonics_steps("SGK"), [])
+        self.assertEqual(build_vietnamese_phonics_steps("123"), [])
+
+        # 4. Complete coaching allowlist includes Voice Preview (Cô/Thầy, timed) + missing practice cues
+        self.assertIn(
+            "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+            TIMED_COACHING_PHRASES,
+        )
+        self.assertIn(
+            "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+            TIMED_COACHING_PHRASES,
+        )
+        for cue in (
+            "Chính xác rồi! Con giỏi lắm!",
+            "Con đọc từ trên màn hình nhé.",
+            "Cô đang nghe. Con thử đọc nhé.",
+            "Thầy đang nghe. Con thử đọc nhé.",
+            "Cô chưa nghe rõ. Con đọc lại nhé.",
+            "Thầy chưa nghe rõ. Con đọc lại nhé.",
+            "Theo con, đáp án nào đúng nào?",
+            "Con đọc xong bài rồi! Con có muốn cùng cô đọc lại vài từ khó không? Nói có hoặc không nhé!",
+            "Con đọc xong bài rồi! Con có muốn cùng thầy đọc lại vài từ khó không? Nói có hoặc không nhé!",
+        ):
+            self.assertIn(cue, ALLOWED_COACHING_PHRASES)
+
+        # 5. CATALOG phonics lookup falls back read-only to shared COACHING phonics (never PRIVATE)
+        lookup_scopes: list[str] = []
+        fake_entry = SimpleNamespace(
+            Id=uuid4(),
+            ByteSize=100,
+            StorageBucket="viread-tts-cache",
+            StoragePath="coaching/ph/v.mp3",
+            AudioFormat="audio/mpeg",
+            VoiceId="local_north_truc_ly",
+            ModelVersion="v1",
+            DurationSeconds=1.5,
+            WordTimingsJson=[{"id": "whole_syllable", "index": 0, "start": 0.0, "end": 1.5}],
+            Scope="COACHING",
+            Speed=0.9,
+            NormalizedText=thuyet_key,
+        )
+
+        class _FakePhonicsRepo:
+            async def get_daily_usage(self):
+                return {"bytes_served": 0}
+
+            async def get_active_entry(self, **kwargs):
+                lookup_scopes.append(kwargs["scope"])
+                return fake_entry if kwargs["scope"] == "COACHING" else None
+
+            async def get_nearest_active_entry(self, **_kwargs):
+                return None
+
+            async def record_hit(self, *_args, **_kwargs):
+                pass
+
+            async def record_miss(self, *_args, **_kwargs):
+                pass
+
+        svc = TtsAudioCacheService(None)
+        svc.db = AsyncMock()
+        svc.repo = _FakePhonicsRepo()  # type: ignore[assignment]
+        with patch("app.services.tts_audio_cache_service.download_object", return_value=b"ID3" + b"\x00" * 32):
+            hit = await svc.lookup_cached_audio(
+                target=ResolvedCacheTarget(
+                    scope="CATALOG",
+                    owner_parent_id=None,
+                    book_id=uuid4(),
+                    page_id=None,
+                    page_revision_id=None,
+                    can_store_on_miss=True,
+                ),
+                normalized_text=thuyet_key,
+                voice_id="local_north_truc_ly",
+                speed=0.9,
+                require_word_timings=True,
+            )
+            self.assertIsNotNone(hit)
+            self.assertEqual(lookup_scopes, ["CATALOG", "COACHING"])
+
+            # PRIVATE must NEVER fall back to COACHING (Invariant #48)
+            lookup_scopes.clear()
+            priv_hit = await svc.lookup_cached_audio(
+                target=ResolvedCacheTarget(
+                    scope="PRIVATE",
+                    owner_parent_id=uuid4(),
+                    book_id=uuid4(),
+                    page_id=None,
+                    page_revision_id=None,
+                    can_store_on_miss=True,
+                ),
+                normalized_text=thuyet_key,
+                voice_id="local_north_truc_ly",
+                speed=0.9,
+                require_word_timings=True,
+            )
+            self.assertIsNone(priv_hit)
+            self.assertEqual(lookup_scopes, ["PRIVATE"])
+
+        # 6. STT silence-after-HPF guard returns "" without invoking Sherpa even if voiced_duration_ms > 0
+        vw = _load_voice_worker_module()
+        sr = 16000
+        t = np.arange(int(0.5 * sr), dtype=np.float32) / sr
+        hum20 = (0.004 * np.sin(2 * np.pi * 20.0 * t)).astype(np.float32)
+        decode_calls = {"count": 0}
+
+        class _BoomRec:
+            def create_stream(self):
+                decode_calls["count"] += 1
+                raise AssertionError("Must not decode filtered sub-rumble silence")
+
+            def decode_stream(self, _s):
+                pass
+
+        with patch.object(vw.runtime, "stt_recognizer", _BoomRec()):
+            txt, words, _ms = vw.decode_stt_window_sync(hum20, voiced_duration_ms=300.0)
+        self.assertEqual(txt, "")
+        self.assertEqual(words, [])
+        self.assertEqual(decode_calls["count"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,5 +1,6 @@
 "use client";
 
+import "@/lib/zod-config";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 

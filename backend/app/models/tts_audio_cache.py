@@ -86,7 +86,9 @@ class TtsAudioCacheEntry(Base):
     StoragePath = Column("storage_path", Text, nullable=False)
     ByteSize = Column("byte_size", BigInteger, nullable=False)
     DurationSeconds = Column("duration_seconds", Float, nullable=True)
-    WordTimingsJson = Column("word_timings_json", JSONB, nullable=True)
+    WordTimingsJson = Column(
+        "word_timings_json", JSONB(none_as_null=True), nullable=True
+    )
     Status = Column(
         "status",
         Text,
