@@ -6,6 +6,7 @@ Use ``run_next_job_once`` from an interactive Colab Free session. The persistent
 polling entrypoint is retained for explicitly managed runtimes only.
 """
 
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from .artifact_store import assemble_shards, shard_file
 from .colab_state_store import LocalDriveJobStateStore, RemoteBackendJobStateStore
@@ -116,6 +118,7 @@ def build_remote_backend_state_store_factory(
 class ColabWorker:
     ARTIFACT_FETCH_MAX_ATTEMPTS = 5
     ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
+    ARTIFACT_DOWNLOAD_WORKERS = 4
     RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
     def __init__(
@@ -142,6 +145,7 @@ class ColabWorker:
         self.poll_seconds = max(5, poll_seconds)
         self.artifact_fetch_max_attempts = self.ARTIFACT_FETCH_MAX_ATTEMPTS
         self.artifact_fetch_retry_base_seconds = self.ARTIFACT_FETCH_RETRY_BASE_SECONDS
+        self.artifact_download_workers = self.ARTIFACT_DOWNLOAD_WORKERS
         has_resume_root = resume_root is not None and str(resume_root).strip() != ""
         if state_store_factory is None:
             if has_resume_root or self.drive_root is not None:
@@ -153,6 +157,9 @@ class ColabWorker:
         self.worker_id = f"colab-{uuid.uuid4()}"
         self.runtime_data: dict[str, Any] = {}
         self.session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=8, pool_maxsize=8)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
         self.session.headers.update({"X-ViRead-Training-Worker": token})
 
     def call(self, method: str, path: str, **kwargs):
@@ -441,27 +448,84 @@ class ColabWorker:
             local_drive_candidates=manifest_candidates,
         )
         image_root = run_dir / f"{prefix}-images"
-        rows = []
         total_items = len(items)
-        for idx, item in enumerate(items, start=1):
+        workers = max(1, int(self.artifact_download_workers))
+        progress_lock = threading.Lock()
+        completed_count = [0]
+        refresh_lock = threading.Lock()
+        refreshed_urls: dict[tuple[str, str], str] = {}
+        refresh_generation = [0]
+
+        def _refresh_image_urls(observed_gen: int, item_sample_id: str, item_sha: str) -> str | None:
+            with refresh_lock:
+                if refresh_generation[0] == observed_gen:
+                    _, fresh_items = self.dataset(job_id, locked_test=locked_test)
+                    for fresh in fresh_items:
+                        fresh_url = fresh.get("image_url")
+                        if not fresh_url:
+                            continue
+                        f_sha = str(fresh.get("image_sha256") or "")
+                        f_sid = str(fresh.get("sample_id") or "")
+                        refreshed_urls[(f_sid, f_sha)] = str(fresh_url)
+                        refreshed_urls.setdefault(("", f_sha), str(fresh_url))
+                    refresh_generation[0] += 1
+                return refreshed_urls.get((item_sample_id, item_sha)) or refreshed_urls.get(("", item_sha))
+
+        def _download_item(item: dict[str, Any]) -> None:
             image_path = image_root / item["image_sha256"]
             img_candidates: list[Path] = []
-            if self.drive_root:
-                img_sha = str(item["image_sha256"]).lower()
-                if locked_test:
-                    for cohort_sub in ("production", "pilot"):
-                        for ext in ("png", "jpg", "webp"):
-                            img_candidates.append(
-                                self.drive_root / "locked-tests" / cohort_sub / img_sha[:2] / f"{img_sha}.{ext}"
-                            )
-            self._fetch_artifact(
-                item.get("image_url"),
-                image_path,
-                item["image_sha256"],
-                local_drive_candidates=img_candidates,
-            )
-            if idx % 25 == 0 or idx == total_items:
-                print(f"Downloaded {prefix} images: {idx}/{total_items}", flush=True)
+            img_sha_lower = str(item["image_sha256"]).lower()
+            if self.drive_root and locked_test:
+                for cohort_sub in ("production", "pilot"):
+                    for ext in ("png", "jpg", "webp"):
+                        img_candidates.append(
+                            self.drive_root / "locked-tests" / cohort_sub / img_sha_lower[:2] / f"{img_sha_lower}.{ext}"
+                        )
+            item_sample_id = str(item.get("sample_id") or "")
+            item_sha = str(item.get("image_sha256") or "")
+            current_url = item.get("image_url")
+            with refresh_lock:
+                observed_gen = refresh_generation[0]
+                cached_fresh = refreshed_urls.get((item_sample_id, item_sha)) or refreshed_urls.get(("", item_sha))
+                if cached_fresh:
+                    current_url = cached_fresh
+            for refresh_cycle in range(3):
+                try:
+                    self._fetch_artifact(
+                        current_url,
+                        image_path,
+                        item["image_sha256"],
+                        local_drive_candidates=img_candidates,
+                    )
+                    break
+                except requests.HTTPError as exc:
+                    status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                    if status_code != 403 or refresh_cycle >= 2:
+                        raise
+                    fresh_url = _refresh_image_urls(observed_gen, item_sample_id, item_sha)
+                    with refresh_lock:
+                        observed_gen = refresh_generation[0]
+                    if not fresh_url or fresh_url == current_url:
+                        raise
+                    current_url = fresh_url
+            with progress_lock:
+                completed_count[0] += 1
+                completed = completed_count[0]
+                if completed % 25 == 0 or completed == total_items:
+                    print(f"Downloaded {prefix} images: {completed}/{total_items}", flush=True)
+
+        if workers > 1 and total_items > 1:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = [executor.submit(_download_item, item) for item in items]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+        else:
+            for item in items:
+                _download_item(item)
+
+        rows = []
+        for item in items:
+            image_path = image_root / item["image_sha256"]
             if locked_test:
                 rows.append({"sample_id": item.get("source_annotation_id") or item["sample_id"],
                              "group_id": item["group_id"], "reference": item["label"],
@@ -739,8 +803,8 @@ class ColabWorker:
             dataset, items = self.dataset(job_id)
             if not dataset or dataset["version_sha256"] != job["manifest_sha256"]:
                 raise ValueError("JOB_DATASET_MANIFEST_MISMATCH")
-            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
             parent = self.materialize_parent(job, run_dir)
+            manifest, receipt, _ = self.materialize_dataset(job_id, dataset, items, run_dir)
             progress.update(stage="training", completed_steps=0,
                             total_steps=int(config["steps"]))
             self.assert_runtime_capacity(run_dir)

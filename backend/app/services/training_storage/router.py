@@ -33,7 +33,7 @@ from app.services.training_storage.references import (
 )
 from app.services.training_storage.supabase_legacy_store import SupabaseLegacyTrainingStore
 
-DEFAULT_WORKER_STREAM_TOKEN_TTL = 1800  # 30 minutes
+DEFAULT_WORKER_STREAM_TOKEN_TTL = 7200  # 2 hours
 
 
 def flow2_storage_provider_setting() -> StorageProvider:
