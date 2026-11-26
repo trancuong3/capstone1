@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   OCR_CONTRIBUTION_NOTICE_VERSION,
   type ParentOcrContributionStateDTO,
@@ -28,6 +29,8 @@ export function ParentOcrContributionCard({
   disabled = false,
   onUpdate,
 }: ParentOcrContributionCardProps) {
+  const { formatDateTime } = useI18n();
+  const t = useTranslations("books");
   const [rightsChecked, setRightsChecked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,15 +47,11 @@ export function ParentOcrContributionCard({
         rights_confirmed: true,
         notice_version: OCR_CONTRIBUTION_NOTICE_VERSION,
       });
-      setNotice(
-        "Đã bật đóng góp mẫu OCR (Luồng 2) cho cuốn sách này. Các trang đủ điều kiện sẽ tự động được đưa vào hàng đợi Admin xác minh từng dòng chữ.",
-      );
+      setNotice(t("ocrContribution.enabledNotice"));
       setRightsChecked(false);
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Không thể cập nhật tùy chọn đóng góp mẫu OCR.",
+        err instanceof Error ? err.message : t("ocrContribution.enableError"),
       );
     } finally {
       setBusy(false);
@@ -70,14 +69,10 @@ export function ParentOcrContributionCard({
         notice_version: state.notice_version || OCR_CONTRIBUTION_NOTICE_VERSION,
         revoke_reason: "PARENT_OPTED_OUT",
       });
-      setNotice(
-        "Đã ngừng đóng góp mẫu OCR cho cuốn sách này. Hệ thống sẽ dừng tuyển mẫu mới và loại mẫu của cuốn sách khỏi các đợt tạo dataset tiếp theo.",
-      );
+      setNotice(t("ocrContribution.disabledNotice"));
     } catch (err) {
       setError(
-        err instanceof Error
-          ? err.message
-          : "Không thể ngừng đóng góp mẫu OCR lúc này.",
+        err instanceof Error ? err.message : t("ocrContribution.disableError"),
       );
     } finally {
       setBusy(false);
@@ -86,7 +81,7 @@ export function ParentOcrContributionCard({
 
   return (
     <section
-      aria-label={`Đóng góp mẫu để cải thiện OCR ViRead cho ${bookTitle}`}
+      aria-label={t("ocrContribution.cardAria", { title: bookTitle })}
       className="flex flex-col gap-3 rounded-card border border-border bg-white p-5 shadow-sm"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -98,7 +93,7 @@ export function ParentOcrContributionCard({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-extrabold text-ink">
-                Đóng góp mẫu để cải thiện OCR ViRead
+                {t("ocrContribution.title")}
               </h2>
               <span
                 className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-bold ${
@@ -110,12 +105,12 @@ export function ParentOcrContributionCard({
                 {state.enabled ? (
                   <>
                     <CheckCircle2 aria-hidden="true" className="size-3.5" />
-                    Đang bật đóng góp (Luồng 2)
+                    {t("ocrContribution.statusEnabled")}
                   </>
                 ) : (
                   <>
                     <XCircle aria-hidden="true" className="size-3.5" />
-                    Đang tắt — không dùng để huấn luyện
+                    {t("ocrContribution.statusDisabled")}
                   </>
                 )}
               </span>
@@ -126,20 +121,20 @@ export function ParentOcrContributionCard({
       </div>
 
       {error ? (
-        <StatusMessage title="Chưa thể cập nhật" tone="error">
+        <StatusMessage title={t("ocrContribution.errorTitle")} tone="error">
           {error}
         </StatusMessage>
       ) : null}
 
       {notice ? (
-        <StatusMessage title="Đã cập nhật lựa chọn đóng góp" tone="success">
+        <StatusMessage title={t("ocrContribution.successTitle")} tone="success">
           {notice}
         </StatusMessage>
       ) : null}
 
       {!state.rights_eligible_for_training && state.rights_ineligible_reason ? (
         <div className="rounded-control border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
-          <strong>Lưu ý về căn cứ quyền:</strong>{" "}
+          <strong>{t("ocrContribution.rightsNoteLabel")}</strong>{" "}
           {state.rights_ineligible_reason}
         </div>
       ) : null}
@@ -148,40 +143,52 @@ export function ParentOcrContributionCard({
         <div className="flex flex-col gap-3 rounded-control border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-emerald-950">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             <span>
-              <strong>Phiên bản thông báo:</strong> {state.notice_version}
+              <strong>{t("ocrContribution.noticeVersionLabel")}</strong>{" "}
+              {state.notice_version}
             </span>
             <span>
-              <strong>Phiên bản đồng ý:</strong> #{state.consent_version}
+              <strong>{t("ocrContribution.consentVersionLabel")}</strong> #
+              {state.consent_version}
             </span>
             {state.consented_at ? (
               <span>
-                <strong>Thời điểm bật:</strong>{" "}
-                {new Intl.DateTimeFormat("vi-VN", {
+                <strong>{t("ocrContribution.enabledAtLabel")}</strong>{" "}
+                {formatDateTime(state.consented_at, {
                   dateStyle: "medium",
                   timeStyle: "short",
-                }).format(new Date(state.consented_at))}
+                })}
               </span>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-3 font-semibold">
-            <span>Chờ Admin xác minh: {state.pending_verification_count}</span>
+            <span>
+              {t("ocrContribution.pendingVerificationCount", {
+                count: state.pending_verification_count,
+              })}
+            </span>
             <span>·</span>
-            <span>Chờ đồng bộ Drive: {state.sync_queued_count}</span>
+            <span>
+              {t("ocrContribution.syncQueuedCount", {
+                count: state.sync_queued_count,
+              })}
+            </span>
             <span>·</span>
-            <span>Đã đồng bộ Flow 2: {state.synced_count}</span>
+            <span>
+              {t("ocrContribution.syncedCount", { count: state.synced_count })}
+            </span>
             {state.rejected_count > 0 ? (
               <>
                 <span>·</span>
-                <span>Đã loại: {state.rejected_count}</span>
+                <span>
+                  {t("ocrContribution.rejectedCount", {
+                    count: state.rejected_count,
+                  })}
+                </span>
               </>
             ) : null}
           </div>
           <p className="text-emerald-900">
-            Sách vẫn giữ nguyên trong danh mục riêng của gia đình bạn. Khi bạn
-            bấm <strong>Ngừng đóng góp</strong>, hệ thống dừng tuyển mẫu mới và
-            loại mẫu của cuốn sách khỏi các đợt tạo dataset tiếp theo (thao tác
-            tắt không tự xóa ảnh hưởng khỏi các checkpoint mô hình đã huấn luyện
-            trước đó).
+            {t("ocrContribution.enabledExplainer")}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -191,20 +198,15 @@ export function ParentOcrContributionCard({
               type="button"
               variant="secondary"
             >
-              {busy ? "Đang ngừng đóng góp..." : "Ngừng đóng góp"}
+              {busy
+                ? t("ocrContribution.disabling")
+                : t("ocrContribution.disableAction")}
             </Button>
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3 rounded-control border border-border bg-surface-subtle p-4 text-xs text-ink">
-          <p>
-            Khi bạn bật tùy chọn này, ViRead có thể sử dụng{" "}
-            <strong>ảnh cắt từng dòng chữ và nhãn tương ứng</strong> từ các
-            trang đã qua kiểm tra của cuốn sách này cho bộ huấn luyện{" "}
-            <strong>OCR Luồng 2 (Admin Verified)</strong>. Hệ thống không sao
-            chép toàn bộ PDF/cuốn sách sang kho huấn luyện và không chia sẻ sách
-            của bạn cho gia đình khác.
-          </p>
+          <p>{t("ocrContribution.disabledExplainer")}</p>
           <label className="flex cursor-pointer items-start gap-2.5 font-semibold text-ink">
             <input
               checked={rightsChecked}
@@ -213,11 +215,7 @@ export function ParentOcrContributionCard({
               onChange={(event) => setRightsChecked(event.target.checked)}
               type="checkbox"
             />
-            <span>
-              Tôi xác nhận có quyền cho phép ViRead sử dụng ảnh cắt dòng chữ và
-              nhãn tương ứng của cuốn sách này cho mục đích huấn luyện OCR Luồng
-              2.
-            </span>
+            <span>{t("ocrContribution.consentCheckbox")}</span>
           </label>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <Button
@@ -227,11 +225,12 @@ export function ParentOcrContributionCard({
               type="button"
             >
               <ShieldCheck aria-hidden="true" className="size-4" />
-              {busy ? "Đang bật đóng góp..." : "Bật đóng góp mẫu OCR"}
+              {busy
+                ? t("ocrContribution.enabling")
+                : t("ocrContribution.enableAction")}
             </Button>
             <span className="text-[11px] text-muted">
-              Việc không bật hoặc tắt không ảnh hưởng quyền đọc sách hay tiến độ
-              của bé.
+              {t("ocrContribution.footerNote")}
             </span>
           </div>
         </div>

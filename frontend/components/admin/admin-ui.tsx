@@ -1,6 +1,9 @@
+"use client";
+
 import type { ReactNode } from "react";
 import { PageHeader } from "@/components/common/page-header";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 import type { OperationalHealthStatusUI } from "@/types/admin";
 import type { BookLifecycleStatus } from "@/types/book";
@@ -32,17 +35,8 @@ type Status =
   | BookLifecycleStatus
   | PageRevisionVerificationStatus
   | OperationalHealthStatusUI;
-const labels: Record<Status, string> = {
-  ACTIVE: "Đang hoạt động",
-  RETIRED: "Đã ngừng",
-  PROCESSING: "Đang xử lý",
-  NEEDS_REVIEW: "Cần kiểm tra",
-  VERIFIED: "Đã xác minh",
-  HEALTHY: "Bình thường",
-  DEGRADED: "Hạn chế",
-  UNAVAILABLE: "Không khả dụng",
-};
 export function AdminStatusBadge({ status }: { status: Status }) {
+  const t = useTranslations("admin");
   const tone =
     status === "ACTIVE" || status === "VERIFIED" || status === "HEALTHY"
       ? "bg-success-surface text-success-ink"
@@ -56,16 +50,14 @@ export function AdminStatusBadge({ status }: { status: Status }) {
         tone,
       )}
     >
-      {labels[status]}
+      {t(`statusBadges.${status}`)}
     </span>
   );
 }
 
-export function AdminLoading({
-  label = "Đang tải dữ liệu quản trị…",
-}: {
-  label?: string;
-}) {
+export function AdminLoading({ label }: { label?: string }) {
+  const t = useTranslations("admin");
+  const displayLabel = label ?? t("common.loadingLabel");
   return (
     <div
       aria-live="polite"
@@ -73,7 +65,7 @@ export function AdminLoading({
     >
       <div>
         <div className="mx-auto mb-4 size-10 animate-spin rounded-full border-4 border-sky border-t-primary" />
-        <p className="font-semibold text-muted">{label}</p>
+        <p className="font-semibold text-muted">{displayLabel}</p>
       </div>
     </div>
   );
@@ -92,9 +84,10 @@ export function AdminResultsPagination({
   itemLabel: string;
   onPageChange: (page: number) => void;
 }) {
+  const t = useTranslations("admin");
   return (
     <PaginationBar
-      ariaLabel={`Điều hướng danh sách ${itemLabel}`}
+      ariaLabel={t("common.paginationAria", { itemLabel })}
       compact
       itemLabel={itemLabel}
       onPageChange={onPageChange}

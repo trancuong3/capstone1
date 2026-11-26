@@ -9,15 +9,14 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { SessionEventList } from "@/components/reports/session-event-list";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import {
-  formatHistoryDateTime,
-  formatHistoryDuration,
   formatPercent,
   getHistoryStatePresentation,
-  historyStateLabel,
 } from "@/lib/utils/report-mappers";
+import { REPORT_TIMEZONE } from "@/lib/utils/report-state";
 import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ReadingSessionDetailDTO } from "@/types/reading";
@@ -43,6 +42,8 @@ export function SessionDetailScreen({
   readonly requestedChildId?: string;
   readonly page?: number;
 }) {
+  const { formatDateTime } = useI18n();
+  const t = useTranslations("reports");
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
@@ -87,7 +88,7 @@ export function SessionDetailScreen({
     return (
       <section
         aria-busy="true"
-        aria-label="Đang tải chi tiết buổi đọc"
+        aria-label={t("sessions.detail.loadingAria")}
         className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
       >
         <Skeleton className="h-28 rounded-card" />
@@ -100,25 +101,25 @@ export function SessionDetailScreen({
     return (
       <section className="mx-auto flex w-full max-w-[960px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink">
-          Dữ liệu đang chờ bổ sung
+          {t("sessions.pendingDataTitle")}
         </h1>
         <StatusMessage tone="info">
-          Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ
-          liệu mẫu thay thế.
+          {t("sessions.detail.pendingDesc")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
           onClick={() => setRequestKey((key) => key + 1)}
           variant="secondary"
         >
-          <RefreshCw aria-hidden="true" className="size-4" /> Thử lại
+          <RefreshCw aria-hidden="true" className="size-4" />{" "}
+          {t("sessions.retry")}
         </Button>
         <ButtonLink
           className="sm:w-auto sm:self-start"
           href="/children"
           variant="secondary"
         >
-          Quản lý hồ sơ bé
+          {t("sessions.manageChildren")}
         </ButtonLink>
       </section>
     );
@@ -127,18 +128,18 @@ export function SessionDetailScreen({
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink">
-          Không tìm thấy buổi đọc
+          {t("sessions.detail.notFoundTitle")}
         </h1>
         <StatusMessage tone="error">
-          Buổi đọc không tồn tại hoặc không thuộc tài khoản hiện tại.
+          {t("sessions.detail.notFoundDesc")}
         </StatusMessage>
         <ButtonLink
           className="sm:w-auto sm:self-start"
           href="/sessions"
           variant="secondary"
         >
-          <ArrowLeft aria-hidden="true" className="size-4" />
-          Về lịch sử
+          <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+          {t("sessions.detail.backToHistory")}
         </ButtonLink>
       </div>
     );
@@ -146,8 +147,8 @@ export function SessionDetailScreen({
   if (state.status === "error")
     return (
       <div className="mx-auto flex max-w-[960px] flex-col gap-4">
-        <StatusMessage title="Chưa tải được chi tiết" tone="error">
-          Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+        <StatusMessage title={t("sessions.detail.loadErrorTitle")} tone="error">
+          {t("sessions.loadErrorDesc")}
         </StatusMessage>
         <Button
           className="sm:w-auto sm:self-start sm:px-8"
@@ -155,7 +156,7 @@ export function SessionDetailScreen({
           variant="secondary"
         >
           <RefreshCw aria-hidden="true" className="size-4" />
-          Thử lại
+          {t("sessions.retry")}
         </Button>
       </div>
     );
@@ -176,52 +177,98 @@ export function SessionDetailScreen({
   const returnHref = `/sessions?childId=${encodeURIComponent(detail.child_id)}${returnPage === null ? "" : `&page=${returnPage}`}`;
   const availability = detail.availability;
   const statePresentation = getHistoryStatePresentation(detail.state);
+  const stateLabel = t(`sessions.states.${detail.state}`);
+
+  const durationLabel = (() => {
+    const durationMs = detail.duration_ms;
+    if (durationMs === null) return t("sessions.durationNoData");
+    const totalSeconds = Math.max(0, Math.floor(durationMs / 1000));
+    if (totalSeconds < 60) {
+      return t("sessions.durationSeconds", { seconds: totalSeconds });
+    }
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds === 0
+      ? t("sessions.durationMinutes", { minutes })
+      : t("sessions.durationMinutesSeconds", { minutes, seconds });
+  })();
+
+  const formatSessionDateTime = (isoValue: string): string =>
+    formatDateTime(isoValue, {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: REPORT_TIMEZONE,
+    });
 
   const pageTitle =
     detail.state === "FINISHED"
       ? rangeIsPartial
-        ? "Buổi đọc đã lưu"
-        : "Buổi đọc đã hoàn thành"
+        ? t("sessions.detail.savedSessionTitle")
+        : t("sessions.detail.finishedSessionTitle")
       : detail.state === "ABORTED"
-        ? "Buổi đọc đã dừng"
-        : `Buổi đọc: ${historyStateLabel(detail.state)}`;
+        ? t("sessions.detail.abortedSessionTitle")
+        : t("sessions.detail.otherStateTitle", { state: stateLabel });
 
   const showComprehensionSectionDirectly =
     detail.comprehension.length > 0 || availability.comprehension !== "absent";
 
-  const summaryItems: readonly (readonly [string, string])[] = [
-    ["Thời lượng phiên", formatHistoryDuration(detail.duration_ms)],
+  const summaryItems: readonly {
+    readonly label: string;
+    readonly value: string;
+    readonly isMissing: boolean;
+  }[] = [
+    {
+      label: t("sessions.detail.metricDuration"),
+      value: durationLabel,
+      isMissing: detail.duration_ms === null,
+    },
     ...(detail.selected_range_pages == null
       ? []
       : ([
-          ["Trang trong phạm vi", `${detail.selected_range_pages} trang`],
-          [
-            "Trang đã xác nhận hoàn thành",
-            detail.pages_completed == null
-              ? "Chưa ghi nhận"
-              : `${detail.pages_completed} trang`,
-          ],
+          {
+            label: t("sessions.detail.metricRangePages"),
+            value: t("sessions.detail.rangePagesValue", {
+              count: detail.selected_range_pages,
+            }),
+            isMissing: false,
+          },
+          {
+            label: t("sessions.detail.metricCompletedPages"),
+            value:
+              detail.pages_completed == null
+                ? t("sessions.detail.notRecorded")
+                : t("sessions.detail.rangePagesValue", {
+                    count: detail.pages_completed,
+                  }),
+            isMissing: detail.pages_completed == null,
+          },
         ] as const)),
-    [
-      "Độ chính xác",
-      metrics?.accuracy_percent == null
-        ? "Chưa ghi nhận"
-        : formatPercent(metrics.accuracy_percent),
-    ],
-    [
-      "Tốc độ đọc",
-      metrics?.reading_wpm == null
-        ? "Chưa ghi nhận"
-        : `${metrics.reading_wpm} từ/phút`,
-    ],
-    [
-      "Điểm trôi chảy",
-      detail.fluency_assessment?.score == null
-        ? availability.fluency === "absent"
-          ? "Chưa đánh giá"
-          : "Chưa có điểm hiển thị"
-        : String(detail.fluency_assessment.score),
-    ],
+    {
+      label: t("sessions.detail.metricAccuracy"),
+      value:
+        metrics?.accuracy_percent == null
+          ? t("sessions.detail.notRecorded")
+          : formatPercent(metrics.accuracy_percent),
+      isMissing: metrics?.accuracy_percent == null,
+    },
+    {
+      label: t("sessions.detail.metricWpm"),
+      value:
+        metrics?.reading_wpm == null
+          ? t("sessions.detail.notRecorded")
+          : t("sessions.detail.wpmValue", { count: metrics.reading_wpm }),
+      isMissing: metrics?.reading_wpm == null,
+    },
+    {
+      label: t("sessions.detail.metricFluency"),
+      value:
+        detail.fluency_assessment?.score == null
+          ? availability.fluency === "absent"
+            ? t("sessions.detail.notEvaluated")
+            : t("sessions.detail.noDisplayScore")
+          : String(detail.fluency_assessment.score),
+      isMissing: detail.fluency_assessment?.score == null,
+    },
   ];
 
   const comprehensionSection = (
@@ -233,21 +280,21 @@ export function SessionDetailScreen({
         className="text-xl font-extrabold text-ink"
         id="session-comprehension-heading"
       >
-        Câu hỏi đọc hiểu
+        {t("sessions.detail.comprehensionTitle")}
       </h2>
       {availability.comprehension === "unsupported" ||
       availability.comprehension === "partial" ? (
         <StatusMessage tone="info">
-          Có dữ liệu đọc hiểu đã lưu nhưng một phần định dạng chưa được hỗ trợ.{" "}
+          {t("sessions.detail.comprehensionPartial")}{" "}
           {availability.comprehension === "partial"
-            ? "Nội dung đọc được vẫn hiển thị bên dưới."
-            : "Chưa thể hiển thị nội dung của nhóm này."}
+            ? t("sessions.detail.comprehensionSupportedHint")
+            : t("sessions.detail.comprehensionUnsupportedHint")}
         </StatusMessage>
       ) : null}
       {detail.comprehension.length === 0 &&
       availability.comprehension === "absent" ? (
         <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
-          Buổi đọc này không có câu hỏi đọc hiểu.
+          {t("sessions.detail.noComprehensionQuestions")}
         </p>
       ) : (
         <>
@@ -260,10 +307,10 @@ export function SessionDetailScreen({
               .map(({ answer, question }) => {
                 const answerStatusLabel = answer
                   ? answer.is_correct === true
-                    ? "Đúng"
+                    ? t("sessions.detail.answerCorrect")
                     : answer.is_correct === false
-                      ? "Chưa đúng"
-                      : "Chưa chấm"
+                      ? t("sessions.detail.answerIncorrect")
+                      : t("sessions.detail.answerPending")
                   : null;
                 const answerBadgeClass =
                   answer?.is_correct === true
@@ -275,7 +322,11 @@ export function SessionDetailScreen({
                 return (
                   <li className="space-y-1.5 p-4" key={question.id}>
                     <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="break-words font-bold text-ink">
+                      <p
+                        className="viread-learning-content break-words font-bold text-ink"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {question.prompt}
                       </p>
                       {answerStatusLabel ? (
@@ -287,23 +338,30 @@ export function SessionDetailScreen({
                       ) : null}
                     </div>
                     <p className="text-xs font-semibold text-muted">
-                      Độ khó đã lưu: {question.difficulty ?? "Chưa ghi nhận"}
+                      {t("sessions.detail.difficultyLabel", {
+                        difficulty:
+                          question.difficulty ??
+                          t("sessions.detail.notRecorded"),
+                      })}
                     </p>
                     <p className="break-words text-sm text-ink">
                       {answer
-                        ? `Trả lời: ${answer.submitted_answer} · ${answerStatusLabel}`
+                        ? t("sessions.detail.answerDisplay", {
+                            answer: answer.submitted_answer,
+                            status: answerStatusLabel ?? "",
+                          })
                         : question.answered
-                          ? "Đã lưu câu trả lời nhưng định dạng chưa được hỗ trợ."
-                          : "Chưa có câu trả lời"}
+                          ? t("sessions.detail.answerUnsupported")
+                          : t("sessions.detail.noAnswer")}
                     </p>
                   </li>
                 );
               })}
           </ul>
           <PaginationBar
-            ariaLabel="Phân trang câu hỏi đọc hiểu"
+            ariaLabel={t("sessions.detail.questionsPaginationAria")}
             compact
-            itemLabel="câu hỏi"
+            itemLabel={t("sessions.detail.questionsPaginationItem")}
             onPageChange={setComprehensionPage}
             page={comprehensionPage}
             pageSize={COMPREHENSION_PAGE_SIZE}
@@ -322,11 +380,11 @@ export function SessionDetailScreen({
             <span
               className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
             >
-              {statePresentation.label}
+              {stateLabel}
             </span>
             {rangeIsPartial ? (
               <span className="inline-flex items-center rounded-control border border-warning/25 bg-warning-surface px-2.5 py-0.5 text-xs font-bold text-warning">
-                Hoàn thành một phần
+                {t("sessions.detail.partialCompleteBadge")}
               </span>
             ) : null}
           </div>
@@ -334,7 +392,9 @@ export function SessionDetailScreen({
             {pageTitle}
           </h1>
           <p className="text-base font-bold text-ink">
-            {state.book.title}
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {state.book.title}
+            </span>
             <span className="font-semibold text-muted">
               {" "}
               · {state.child.alias}
@@ -342,17 +402,17 @@ export function SessionDetailScreen({
           </p>
           <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
             <div className="flex gap-1.5">
-              <dt>Bắt đầu:</dt>
+              <dt>{t("sessions.detail.startedLabel")}</dt>
               <dd className="tabular-nums text-ink">
-                {formatHistoryDateTime(detail.started_at)}
+                {formatSessionDateTime(detail.started_at)}
               </dd>
             </div>
             <div className="flex gap-1.5">
-              <dt>Kết thúc:</dt>
+              <dt>{t("sessions.detail.endedLabel")}</dt>
               <dd className="tabular-nums text-ink">
                 {detail.ended_at === null
-                  ? "Chưa lưu giờ kết thúc"
-                  : formatHistoryDateTime(detail.ended_at)}
+                  ? t("sessions.detail.endedMissing")
+                  : formatSessionDateTime(detail.ended_at)}
               </dd>
             </div>
           </dl>
@@ -364,31 +424,36 @@ export function SessionDetailScreen({
             href={returnHref}
             variant="secondary"
           >
-            <ArrowLeft aria-hidden="true" className="size-4" />
-            Lịch sử
+            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+            {t("sessions.detail.historyLink")}
           </ButtonLink>
         </div>
       </header>
 
       {rangeIsPartial ? (
-        <StatusMessage title="Một phần phạm vi chưa hoàn thành" tone="info">
-          Phạm vi đã chọn có {detail.selected_range_pages} trang, mới có{" "}
-          {detail.pages_completed ?? 0} trang được xác nhận hoàn thành. Các
-          trang chưa đọc không được tính là hoàn thành.
+        <StatusMessage
+          title={t("sessions.detail.partialRangeTitle")}
+          tone="info"
+        >
+          {t("sessions.detail.partialRangeDesc", {
+            total: detail.selected_range_pages ?? 0,
+            completed: detail.pages_completed ?? 0,
+          })}
         </StatusMessage>
       ) : null}
 
       {detail.state !== "FINISHED" && detail.state !== "ABORTED" ? (
-        <StatusMessage title="Dữ liệu đang dở dang" tone="warning">
-          Buổi đọc chưa kết thúc nên thời lượng, chỉ số trôi chảy và báo cáo có
-          thể chưa đầy đủ.
+        <StatusMessage
+          title={t("sessions.detail.incompleteDataTitle")}
+          tone="warning"
+        >
+          {t("sessions.detail.inProgressDesc")}
         </StatusMessage>
       ) : null}
 
       {detail.state === "FINISHED" && detail.ended_at === null ? (
         <StatusMessage tone="info">
-          Buổi đọc đã hoàn thành nhưng chưa lưu giờ kết thúc; chưa có dữ liệu
-          thời lượng.
+          {t("sessions.detail.missingEndTimeDesc")}
         </StatusMessage>
       ) : null}
 
@@ -401,7 +466,7 @@ export function SessionDetailScreen({
             className="text-lg font-extrabold text-ink"
             id="session-overview-heading"
           >
-            Tóm tắt buổi đọc
+            {t("sessions.detail.summaryTitle")}
           </h2>
         </div>
 
@@ -409,23 +474,20 @@ export function SessionDetailScreen({
         availability.fluency === "partial" ? (
           <div className="px-4 pt-4 sm:px-6">
             <StatusMessage tone="info">
-              Có dữ liệu đánh giá đã lưu nhưng định dạng chưa được hỗ trợ đầy
-              đủ. Chỉ hiển thị điểm và chỉ số đọc được, không tự quy đổi dữ liệu
-              thiếu.
+              {t("sessions.detail.summaryPartialDesc")}
             </StatusMessage>
           </div>
         ) : null}
 
         <dl className="grid grid-cols-2 sm:grid-cols-3">
-          {summaryItems.map(([label, value], index) => {
-            const isMissing = value.startsWith("Chưa");
+          {summaryItems.map(({ label, value, isMissing }, index) => {
             const cellBorders = [
               "border-border p-3.5 sm:px-6 sm:py-4",
-              index % 2 === 0 ? "border-r sm:border-r-0" : "",
+              index % 2 === 0 ? "border-e sm:border-e-0" : "",
               index >= 2 ? "border-t" : "",
               index === 2 ? "sm:border-t-0" : "",
               index >= 3 ? "sm:border-t" : "",
-              index % 3 !== 2 ? "sm:border-r" : "sm:border-r-0",
+              index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
             ]
               .filter(Boolean)
               .join(" ");
@@ -453,7 +515,7 @@ export function SessionDetailScreen({
 
       <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
         <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
-          <span>Thông tin khác của buổi đọc</span>
+          <span>{t("sessions.detail.otherInfoTitle")}</span>
           <ChevronDown
             aria-hidden="true"
             className="size-4 shrink-0 transition-transform group-open:rotate-180"
@@ -462,14 +524,17 @@ export function SessionDetailScreen({
         <div className="mt-4 flex flex-col gap-5 border-t border-border pt-4">
           <section className="flex flex-col gap-3">
             <h2 className="text-xl font-extrabold text-ink">
-              Sự kiện trong buổi đọc
+              {t("sessions.detail.eventsTitle")}
             </h2>
             {availability.events === "unsupported" ||
             availability.events === "partial" ? (
               <StatusMessage tone="info">
-                Có sự kiện đã lưu nhưng{" "}
-                {availability.events === "partial" ? "một phần" : "định dạng"}{" "}
-                chưa được hỗ trợ. Không tự coi đây là lỗi đọc đã xác nhận.
+                {t("sessions.detail.eventsUnsupportedNotice", {
+                  scope:
+                    availability.events === "partial"
+                      ? t("sessions.detail.eventsPartialScope")
+                      : t("sessions.detail.eventsFormatScope"),
+                })}
               </StatusMessage>
             ) : null}
             {detail.events.length > 0 || availability.events === "absent" ? (
@@ -481,9 +546,9 @@ export function SessionDetailScreen({
                   )}
                 />
                 <PaginationBar
-                  ariaLabel="Phân trang sự kiện trong buổi đọc"
+                  ariaLabel={t("sessions.detail.eventsPaginationAria")}
                   compact
-                  itemLabel="sự kiện"
+                  itemLabel={t("sessions.detail.eventsPaginationItem")}
                   onPageChange={setEventsPage}
                   page={eventsPage}
                   pageSize={EVENTS_PAGE_SIZE}

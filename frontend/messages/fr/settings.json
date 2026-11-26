@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "Compte ViRead",
+    "title": "Paramètres du compte",
+    "description": "Gérez les informations du compte, la sécurité et les options d'utilisation de ViRead.",
+    "infoHeading": "Informations du compte",
+    "displayName": "Nom d'affichage",
+    "email": "E-mail du compte",
+    "role": "Rôle du compte",
+    "emailStatus": "Statut de l'e-mail",
+    "manageProfile": "Gérer le profil",
+    "changePassword": "Changer le mot de passe",
+    "emailVerificationHeading": "E-mail et vérification",
+    "readingRemindersHeading": "Gérer les rappels de lecture",
+    "readingRemindersDescription": "Ajustez les programmes de lecture et les rappels pour votre enfant.",
+    "loadingAria": "Chargement des paramètres du compte",
+    "loadErrorBody": "ViRead n'a pas pu charger les données du compte. Veuillez recharger la page ou vous reconnecter.",
+    "notUpdated": "Non mis à jour",
+    "pendingEmailNotice": "Nouvel e-mail en attente de confirmation :",
+    "emailStatusPending": "Nouvel e-mail en attente de confirmation",
+    "emailVerified": "Vérifié",
+    "emailUnverified": "Non vérifié",
+    "emailPendingBody": "La demande de changement d'e-mail est en attente de vérification. L'e-mail actuel reste l'adresse précédemment confirmée.",
+    "emailDefaultBody": "Pour changer votre e-mail ou renvoyer un e-mail de vérification, utilisez la fonction disponible dans le profil parent.",
+    "openParentProfile": "Ouvrir le profil parent"
+  },
+  "password": {
+    "title": "Changer le mot de passe",
+    "description": "Utilisez un mot de passe distinct pour protéger votre compte.",
+    "minLengthHint": "Le nouveau mot de passe doit comporter au moins {min} caractères.",
+    "noPasswordDescription": "Ce compte n'a pas encore de méthode de connexion par mot de passe. Les parents peuvent demander un lien de réinitialisation par e-mail.",
+    "requestRecoveryButton": "Pas de mot de passe ? Envoyer un lien de réinitialisation par e-mail",
+    "changedSuccess": "Mot de passe mis à jour. Votre session actuelle reste active.",
+    "currentInvalid": "Le mot de passe actuel est incorrect.",
+    "changeError": "Impossible de changer le mot de passe. Veuillez vérifier votre connexion et réessayer.",
+    "noEmailForRecovery": "Aucun e-mail associé au compte pour envoyer un lien de réinitialisation.",
+    "recoverySent": "Supabase Auth a reçu la demande de réinitialisation. Veuillez vérifier votre boîte de réception et vos courriers indésirables.",
+    "recoveryError": "Impossible d'envoyer le lien de réinitialisation du mot de passe. Veuillez réessayer plus tard.",
+    "showFieldAria": "Afficher {label}",
+    "hideFieldAria": "Masquer {label}"
+  },
+  "language": {
+    "heading": "Langue d'affichage",
+    "description": "Choisissez la langue pour la navigation et les paramètres. Le contenu des livres en vietnamien reste inchangé.",
+    "learningContentNote": "Le changement de langue affecte uniquement la barre de navigation, les boutons et les paramètres. Les livres vietnamiens, l'OCR, la reconnaissance vocale (STT) et la synthèse vocale (TTS) restent en vietnamien."
+  }
+}

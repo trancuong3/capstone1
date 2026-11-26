@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">ViRead ကို ဖွင့်နေပါသည်</string>
+    <string name="loading_subtitle">ViRead ကို ဖွင့်နေပါသည်…</string>
+    <string name="loading_hint_stage2">ဆာဗာသို့ ချိတ်ဆက်နေပါသည်…</string>
+    <string name="loading_hint_stage3">ဆာဗာ စတင်နေပါသည်၊ ခေတ္တစောင့်ပါ…</string>
+    <string name="loading_cold_start_hint">ဆာဗာ စတင်နေပါသည် (cold-start)၊ ခဏစောင့်ပေးပါ…</string>
+    <string name="error_title_network">ViRead ဆာဗာသို့ ချိတ်ဆက်၍မရပါ</string>
+    <string name="error_title_server">ViRead ဆာဗာ စတင်နေသည် သို့မဟုတ် အလုပ်များနေပါသည်</string>
+    <string name="error_title_timeout">ViRead သို့ ချိတ်ဆက်၍မရနိုင်ပါ</string>
+    <string name="error_title_tls">လုံခြုံရေးလက်မှတ် မမှန်ကန်ပါ</string>
+    <string name="offline_message">ViRead ဆာဗာသို့ ချိတ်ဆက်၍မရပါ။ သင့် Wi-Fi / မိုဘိုင်းဒေတာ သို့မဟုတ် ဆာဗာလိပ်စာကို စစ်ဆေးပြီး ထပ်စမ်းကြည့်မည် ကို နှိပ်ပါ။</string>
+    <string name="timeout_message">ViRead ဆာဗာ တုံ့ပြန်မှု နှေးနေပါသည်။ ကွန်ရက်ချိတ်ဆက်မှုကို စစ်ဆေးပြီး ထပ်စမ်းကြည့်မည် ကို နှိပ်ပါ။ ပထမဆုံးအကြိမ် ဖွင့်ပါက ဆာဗာစတင်ရန် 30–60 စက္ကန့် ကြာနိုင်ပါသည်။</string>
+    <string name="server_5xx_message">ViRead ဆာဗာ အလုပ်များနေသည် သို့မဟုတ် ပြန်လည်စတင်နေပါသည် (%1$d)။ စက္ကန့်အနည်းငယ်စောင့်ပြီး ထပ်စမ်းကြည့်မည် ကို နှိပ်ပါ။</string>
+    <string name="tls_error_message">ဆာဗာ၏ HTTPS လုံခြုံရေးလက်မှတ် မမှန်ကန်သောကြောင့် မိသားစုအကောင့်ကို ကာကွယ်ရန် ViRead က ချိတ်ဆက်မှုကို ပိတ်ဆို့ထားပါသည်။</string>
+    <string name="no_network_toast">စက်တွင် အင်တာနက် သို့မဟုတ် Wi-Fi ချိတ်ဆက်မှု မရှိသေးပါ။</string>
+    <string name="network_ready_toast">ကွန်ရက်ချိတ်ဆက်မှု တွေ့ရှိပါသည်။ ViRead ကို ပြန်လည်ဖွင့်နေပါသည်…</string>
+    <string name="retry_button">ထပ်စမ်းကြည့်မည်</string>
+    <string name="open_home_button">အကောင့်ဝင်ရန် စာမျက်နှာသို့</string>
+    <string name="check_connection_button">ချိတ်ဆက်မှု ထပ်မံစစ်ဆေးရန်</string>
+    <string name="configure_lan_server_button">LAN HTTPS ဆာဗာ ပြောင်းရန် (Debug)</string>
+    <string name="lan_dialog_title">LAN HTTPS ဆာဗာ သတ်မှတ်ရန် (Debug)</string>
+    <string name="lan_dialog_hint">တူညီသော Wi-Fi ပေါ်ရှိ Next.js ဆာဗာ၏ HTTPS လိပ်စာကို ထည့်ပါ (ဥပမာ- https://192.168.1.10:8443)။ HTTP သို့မဟုတ် localhost ကို လက်မခံပါ။</string>
+    <string name="lan_dialog_save">သိမ်းပြီး ချိတ်ဆက်မည်</string>
+    <string name="lan_dialog_reset">မူလအတိုင်း ပြန်ထားရန်</string>
+    <string name="lan_dialog_cancel">ပိတ်ရန်</string>
+    <string name="lan_invalid_url_toast">လိပ်စာ မမှန်ကန်ပါ။ မှန်ကန်သော LAN HTTPS မူရင်းလိပ်စာကိုသာ လက်ခံပါသည် (လမ်းကြောင်းခွဲ သို့မဟုတ် HTTP မရပါ)။</string>
+    <string name="file_chooser_title">စာအုပ်စာမျက်နှာပုံ ရွေးရန်၊ ဓာတ်ပုံရိုက်ရန် သို့မဟုတ် PDF/DOCX ရွေးရန်</string>
+    <string name="permission_denied_title">ဤလုပ်ဆောင်ချက်ကို အသုံးပြုရန် ခွင့်ပြုချက် လိုအပ်ပါသည်</string>
+    <string name="permission_denied_message">ViRead အတွက် ကင်မရာ သို့မဟုတ် မိုက်ခရိုဖုန်း ခွင့်ပြုချက်ကို ပိတ်ထားပါသည်။ အက်ပ်ဆက်တင်များကို ဖွင့်၍ အချိန်မရွေး ပြန်ဖွင့်နိုင်ပါသည်။</string>
+    <string name="open_app_settings_button">အက်ပ်ဆက်တင်များ ဖွင့်ရန်</string>
+    <string name="back_exit_confirm_toast">ViRead မှ ထွက်ရန် နောက်တစ်ကြိမ် ထပ်နှိပ်ပါ</string>
+</resources>

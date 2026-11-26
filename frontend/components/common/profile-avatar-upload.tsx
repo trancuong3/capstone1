@@ -4,9 +4,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { useI18n } from "@/hooks/use-i18n";
 
-const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+const MAX_AVATAR_MB = 5;
+const MAX_AVATAR_BYTES = MAX_AVATAR_MB * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+type UploadErrorKey = "empty" | "format" | "size";
 
 interface ProfileAvatarUploadProps {
   displayName: string;
@@ -27,9 +31,10 @@ export function ProfileAvatarUpload({
   onSelectFile,
   onRemove,
 }: ProfileAvatarUploadProps) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<UploadErrorKey | null>(null);
   const [isLowResolution, setIsLowResolution] = useState(false);
 
   useEffect(() => {
@@ -42,19 +47,19 @@ export function ProfileAvatarUpload({
     if (!file) return;
 
     if (file.size === 0) {
-      setError("Tệp ảnh đang trống. Ba mẹ vui lòng chọn ảnh khác.");
+      setErrorKey("empty");
       return;
     }
     if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
-      setError("Chỉ hỗ trợ ảnh PNG, JPG hoặc WEBP.");
+      setErrorKey("format");
       return;
     }
     if (file.size > MAX_AVATAR_BYTES) {
-      setError("Ảnh cần có dung lượng tối đa 5 MB.");
+      setErrorKey("size");
       return;
     }
 
-    setError(null);
+    setErrorKey(null);
     setIsLowResolution(false);
     setPreviewUrl(URL.createObjectURL(file));
     onSelectFile(file);
@@ -66,6 +71,15 @@ export function ProfileAvatarUpload({
     onRemove();
   }
 
+  const errorMessage =
+    errorKey === "empty"
+      ? t("validation.emptyImageFile")
+      : errorKey === "format"
+        ? t("validation.unsupportedImageFormat")
+        : errorKey === "size"
+          ? t("validation.imageMaxSize", { maxMb: MAX_AVATAR_MB })
+          : null;
+
   const visibleImageUrl = isRemoved
     ? null
     : selectedFile && previewUrl
@@ -74,7 +88,9 @@ export function ProfileAvatarUpload({
   return (
     <div className="flex flex-col items-start gap-4 bg-white">
       <ProfileAvatar
-        ariaLabel={`Ảnh xem trước của ${displayName || "tài khoản"}`}
+        ariaLabel={t("parent.avatar.previewAria", {
+          name: displayName || t("parent.avatar.accountFallback"),
+        })}
         displayName={displayName}
         imageUrl={visibleImageUrl}
         onImageLoad={(width, height) =>
@@ -87,7 +103,7 @@ export function ProfileAvatarUpload({
         <div className="grid w-full gap-4 sm:grid-cols-2">
           <input
             accept="image/jpeg,image/png,image/webp"
-            aria-label="Chọn ảnh đại diện PNG, JPG hoặc WEBP"
+            aria-label={t("parent.avatar.selectInputAria")}
             className="sr-only"
             onChange={(event) => {
               handleSelection(event.target.files?.[0]);
@@ -102,7 +118,9 @@ export function ProfileAvatarUpload({
             type="button"
             variant="secondary"
           >
-            {selectedFile ? "Thay đổi ảnh" : "Chọn ảnh"}
+            {selectedFile
+              ? t("parent.avatar.changeImage")
+              : t("parent.avatar.selectImage")}
           </Button>
           <Button
             className="px-4"
@@ -110,25 +128,29 @@ export function ProfileAvatarUpload({
             type="button"
             variant="quiet"
           >
-            {isRemoved ? "Khôi phục ảnh" : "Xóa ảnh"}
+            {isRemoved
+              ? t("parent.avatar.restoreImage")
+              : t("parent.avatar.removeImage")}
           </Button>
         </div>
         {showOptionalNote ? (
-          <p className="text-body text-muted">Ảnh đại diện là tùy chọn.</p>
+          <p className="text-body text-muted">
+            {t("parent.avatar.optionalNote")}
+          </p>
         ) : null}
         {isLowResolution ? (
           <p className="text-sm text-warning" role="status">
-            Ảnh có độ phân giải thấp và có thể hơi mờ khi hiển thị.
+            {t("parent.avatar.lowResolutionNotice")}
           </p>
         ) : null}
         {isRemoved ? (
           <p className="text-sm text-muted" role="status">
-            Ảnh sẽ được xóa khi ba mẹ lưu thay đổi.
+            {t("parent.avatar.pendingRemovalNotice")}
           </p>
         ) : null}
-        {error ? (
+        {errorMessage ? (
           <p className="text-sm text-danger" role="alert">
-            {error}
+            {errorMessage}
           </p>
         ) : null}
       </div>

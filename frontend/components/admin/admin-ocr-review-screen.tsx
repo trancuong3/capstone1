@@ -31,7 +31,12 @@ import { Modal } from "@/components/common/modal";
 import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateMessage } from "@/lib/i18n/formatter";
+import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
+import type { TranslateFn } from "@/lib/i18n/types";
+import { viMessages } from "@/messages/vi";
 import {
   AiCorrectionCancelledError,
   type AdminAiWorkflowDTO,
@@ -63,6 +68,16 @@ type AiTokenChange = {
   readonly original: string;
   readonly proposed: string;
 };
+
+const defaultTranslate: TranslateFn = (key, params, fallback) =>
+  translateMessage(
+    viMessages,
+    viMessages,
+    DEFAULT_LOCALE,
+    key.includes(".") && !key.startsWith("admin.") ? `admin.${key}` : key,
+    params,
+    fallback,
+  );
 
 function hasEngineDisagreementEvidence(word?: AdminRevisionWordDTO): boolean {
   const evidence = word?.ocr_evidence;
@@ -343,29 +358,30 @@ export function getWordReviewLabel(
   status: AdminOcrReviewStatus,
   word?: AdminRevisionWordDTO,
   _paddleLineScore?: number | null,
+  t: TranslateFn = defaultTranslate,
 ): string {
   void _paddleLineScore;
   const group = getWordReviewColorGroup(status, word);
   if (group === "green") {
-    if (status === "verified") return "Admin đã xác minh từ";
+    if (status === "verified") return t("ocrReview.reviewLabels.verified");
     if (word?.ocr_evidence?.verification_source)
-      return "Khớp reference của revision đã xác minh";
+      return t("ocrReview.reviewLabels.referenceMatch");
     if (hasEngineDisagreementEvidence(word))
-      return "Đã phân xử bằng crop của từ · nhiều lượt đọc độc lập đồng thuận · chưa đối chiếu reference";
-    return "Hai OCR đồng thuận · chưa đối chiếu reference";
+      return t("ocrReview.reviewLabels.cropAdjudicated");
+    return t("ocrReview.reviewLabels.dualConsensus");
   }
-  if (group === "red") return "Sai so với reference đã xác minh";
+  if (group === "red") return t("ocrReview.reviewLabels.red");
   if (
     hasEngineDisagreementEvidence(word) &&
     hasDiacriticOnlyEngineDisagreement(word)
   )
-    return "Hai OCR chỉ khác dấu tiếng Việt · cần đối chiếu ảnh";
+    return t("ocrReview.reviewLabels.diacriticDifference");
   if (hasEngineDisagreementEvidence(word)) {
-    return "Hai OCR bất đồng · chưa thể xác định candidate đúng";
+    return t("ocrReview.reviewLabels.disagreement");
   }
   return (
     word?.ocr_evidence?.review_reason?.trim() ||
-    "Chưa đủ bằng chứng OCR · cần Admin đối chiếu ảnh"
+    t("ocrReview.reviewLabels.insufficient")
   );
 }
 
@@ -386,24 +402,20 @@ export function getWordGeometryQuality(
   return evidence.crop_quality === "usable" ? "good" : "weak";
 }
 
-export function getWordGeometryLabel(word?: AdminRevisionWordDTO): string {
-  return {
-    good: "Box ôm đúng vùng chữ",
-    weak: "Box chạm biên hoặc crop yếu · nên căn chỉnh lại",
-    invalid: "Box không hợp lệ · cần căn chỉnh lại",
-    not_assessed: "Chưa đánh giá hình học của box",
-  }[getWordGeometryQuality(word)];
+export function getWordGeometryLabel(
+  word?: AdminRevisionWordDTO,
+  t: TranslateFn = defaultTranslate,
+): string {
+  return t(`ocrReview.geometryLabels.${getWordGeometryQuality(word)}`);
 }
 
-export function getWordPunctuationLabel(word?: AdminRevisionWordDTO): string {
-  return {
-    correct: "Dấu câu khớp reference đã xác minh",
-    incorrect: "Dấu câu khác reference đã xác minh",
-    uncertain: "Các engine đọc dấu câu khác nhau · cần đối chiếu ảnh",
-    consistent:
-      "Các engine tiếng Việt đọc cùng dấu câu · chưa đối chiếu reference",
-    not_assessed: "Chưa có căn cứ để đánh giá dấu câu",
-  }[word?.punctuation_status ?? "not_assessed"];
+export function getWordPunctuationLabel(
+  word?: AdminRevisionWordDTO,
+  t: TranslateFn = defaultTranslate,
+): string {
+  return t(
+    `ocrReview.punctuationLabels.${word?.punctuation_status ?? "not_assessed"}`,
+  );
 }
 
 export function getWordReviewColor(
@@ -436,6 +448,7 @@ function getEngineEvidenceDisplay(
   word: AdminRevisionWordDTO,
   engine: "paddleocr" | "vietocr" | "tesseract",
   metadata: Record<string, unknown>,
+  t: TranslateFn = defaultTranslate,
 ): string {
   const evidence = word.ocr_evidence;
   const line = getWordLineEvidence(word, metadata);
@@ -449,28 +462,33 @@ function getEngineEvidenceDisplay(
     (typeof rawPageStatus === "string" ? rawPageStatus : undefined);
   const candidate = evidence?.engine_outputs[engine];
   const statusLabels: Record<string, string> = {
-    not_installed: "chưa cài đặt",
-    not_initialized: "chưa khởi tạo",
-    not_run: "không chạy",
-    processing: "đang xử lý",
-    success: "đã chạy",
-    no_result: "đã chạy nhưng không nhận dạng được",
-    error: "lỗi inference",
-    disabled: "đã tắt cấu hình",
+    not_installed: t("ocrReview.engineStatus.not_installed"),
+    not_initialized: t("ocrReview.engineStatus.not_initialized"),
+    not_run: t("ocrReview.engineStatus.not_run"),
+    processing: t("ocrReview.engineStatus.processing"),
+    success: t("ocrReview.engineStatus.success"),
+    no_result: t("ocrReview.engineStatus.no_result"),
+    error: t("ocrReview.engineStatus.error"),
+    disabled: t("ocrReview.engineStatus.disabled"),
   };
   const statusLabel = status
     ? (statusLabels[status] ?? status)
-    : "trạng thái chưa được ghi trong revision cũ";
+    : t("ocrReview.engineStatus.unrecorded");
   if (typeof candidate === "string" && candidate.trim()) {
-    return `${candidate} · ${statusLabel}`;
+    return t("ocrReview.engineStatus.successWithText", {
+      candidate,
+      statusLabel,
+    });
   }
   if (status === "success")
-    return "Đã chạy · không có token căn chỉnh an toàn cho từ này";
-  if (status === "no_result") return "Đã chạy · không nhận dạng được text";
-  if (status === "not_installed") return "Chưa cài đặt";
-  if (status === "not_initialized") return "Chưa khởi tạo";
-  if (status === "not_run") return "Không chạy";
-  if (status === "processing") return "Đang xử lý";
+    return t("ocrReview.engineStatus.successNoAlignment");
+  if (status === "no_result") return t("ocrReview.engineStatus.capNoResult");
+  if (status === "not_installed")
+    return t("ocrReview.engineStatus.capNotInstalled");
+  if (status === "not_initialized")
+    return t("ocrReview.engineStatus.capNotInitialized");
+  if (status === "not_run") return t("ocrReview.engineStatus.capNotRun");
+  if (status === "processing") return t("ocrReview.engineStatus.capProcessing");
   if (status === "error") {
     const lineErrors = asRecord(line?.engine_errors);
     const pageReasons = asRecord(metadata.engine_status_reasons);
@@ -482,13 +500,18 @@ function getEngineEvidenceDisplay(
       (typeof pageReasons?.[engine] === "string"
         ? pageReasons[engine]
         : undefined);
-    return reason ? `Lỗi inference · ${reason}` : "Lỗi inference";
+    return reason
+      ? t("ocrReview.engineStatus.capErrorWithReason", { reason })
+      : t("ocrReview.engineStatus.capError");
   }
-  if (status === "disabled") return "Đã tắt cấu hình";
-  return "Không có trạng thái engine được ghi trong revision này";
+  if (status === "disabled") return t("ocrReview.engineStatus.capDisabled");
+  return t("ocrReview.engineStatus.capMissing");
 }
 
-export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
+export function getOcrScoreLabel(
+  word: AdminRevisionWordDTO,
+  t: TranslateFn = defaultTranslate,
+): string {
   if (
     word.ocr_score_source === null ||
     word.ocr_score_source === undefined ||
@@ -498,11 +521,11 @@ export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
     word.ocr_confidence < 0 ||
     word.ocr_confidence > 1
   ) {
-    return "Không có điểm OCR riêng cho từ này";
+    return t("ocrReview.scoreLabels.missingWordScore");
   }
   const score = Math.round(word.ocr_confidence * 100);
   if (word.ocr_score_source === "tesseract_raw_word_score_v1") {
-    return `Điểm thô Tesseract: ${score}/100 · raw recognition score, không phải xác suất đúng`;
+    return t("ocrReview.scoreLabels.tesseractRaw", { score });
   }
   if (word.ocr_score_source === "ocr_calibrated_word_accuracy_v1") {
     const probability = word.ocr_evidence?.calibrated_word_accuracy;
@@ -512,16 +535,18 @@ export function getOcrScoreLabel(word: AdminRevisionWordDTO): string {
       Number.isFinite(probability) &&
       probability >= 0 &&
       probability <= 1
-      ? `Xác suất nhận diện đúng: ${Math.round(probability * 100)}% · đã hiệu chuẩn`
-      : "Chưa có confidence cấp từ đã hiệu chuẩn";
+      ? t("ocrReview.scoreLabels.calibratedAccuracy", {
+          percent: Math.round(probability * 100),
+        })
+      : t("ocrReview.scoreLabels.missingCalibrated");
   }
   if (
     word.ocr_score_source === "dual_engine_consensus_v1" ||
     word.ocr_score_source === "paddle_line_score_v1"
   ) {
-    return "Điểm cũ chưa hiệu chuẩn · không hiển thị như xác suất";
+    return t("ocrReview.scoreLabels.uncalibratedLegacy");
   }
-  return "Chưa có confidence cấp từ đã hiệu chuẩn";
+  return t("ocrReview.scoreLabels.missingCalibrated");
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -554,26 +579,32 @@ function getLineEngineOutput(
   return typeof output === "string" && output.trim() ? output : null;
 }
 
-function formatRawOcrEvidence(value: unknown): string {
+function formatRawOcrEvidence(
+  value: unknown,
+  t: TranslateFn = defaultTranslate,
+): string {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   if (Array.isArray(value)) {
     return value
       .slice(0, 12)
       .map((item) =>
-        typeof item === "number" && Number.isFinite(item) ? String(item) : "—",
+        typeof item === "number" && Number.isFinite(item)
+          ? String(item)
+          : t("common.emptyDash"),
       )
       .join(", ");
   }
-  return "Not recorded";
+  return t("ocrReview.wordsPanel.notRecorded");
 }
 
 function getPaddleLineScoreLabel(
   metadata: Record<string, unknown>,
   lineIndex: number,
+  t: TranslateFn = defaultTranslate,
 ): string {
   const lineEvidence = metadata.line_evidence;
   if (!Array.isArray(lineEvidence)) {
-    return "PaddleOCR dòng: Not recorded";
+    return t("ocrReview.scoreLabels.paddleNotRecorded");
   }
   const line = lineEvidence
     .map(asRecord)
@@ -585,10 +616,15 @@ function getPaddleLineScoreLabel(
     rawScore < 0 ||
     rawScore > 1
   ) {
-    return "PaddleOCR dòng: Not recorded";
+    return t("ocrReview.scoreLabels.paddleNotRecorded");
   }
   const selectedWithVietOcr = line?.vietocr_output_used === true;
-  return `PaddleOCR dòng: ${Math.round(rawScore * 100)}/100 · điểm thô · không phải xác suất đúng${selectedWithVietOcr ? " · VietOCR được dùng nên không áp màu theo điểm này" : ""}`;
+  return t("ocrReview.scoreLabels.paddleRaw", {
+    score: Math.round(rawScore * 100),
+    vietOcrSuffix: selectedWithVietOcr
+      ? t("ocrReview.scoreLabels.paddleVietOcrSuffix")
+      : "",
+  });
 }
 
 function getPaddleLineScoreForWord(
@@ -628,10 +664,11 @@ function getPaddleLineScoreForWord(
 function getWordScoreLabel(
   word: AdminRevisionWordDTO,
   metadata: Record<string, unknown>,
+  t: TranslateFn = defaultTranslate,
 ): string {
   return getPaddleLineScoreForWord(metadata, word) !== null
-    ? getPaddleLineScoreLabel(metadata, word.line_index)
-    : getOcrScoreLabel(word);
+    ? getPaddleLineScoreLabel(metadata, word.line_index, t)
+    : getOcrScoreLabel(word, t);
 }
 
 function OcrImageViewer({
@@ -653,6 +690,8 @@ function OcrImageViewer({
   verificationStatus: AdminPageRevisionDetailDTO["verification_status"];
   words: readonly AdminRevisionWordDTO[];
 }) {
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const [isExpanded, setIsExpanded] = useState(false);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   const restoreExpandFocusRef = useRef(true);
@@ -674,6 +713,7 @@ function OcrImageViewer({
         className={`ocr-review-image-frame relative mx-auto overflow-hidden rounded-control bg-desk ${
           expanded ? "border border-white/30 shadow-2xl" : ""
         }`}
+        dir="ltr"
         style={
           {
             aspectRatio: `${image.width} / ${image.height}`,
@@ -684,7 +724,10 @@ function OcrImageViewer({
         }
       >
         <Image
-          alt={`Ảnh trang ${image.page_number} của ${book.title}`}
+          alt={t("ocrReview.canvas.imageAlt", {
+            pageNumber: formatNumber(image.page_number),
+            title: book.title,
+          })}
           className="object-contain"
           fill
           sizes={expanded ? "92vw" : "(max-width:1280px) 100vw, 55vw"}
@@ -692,8 +735,11 @@ function OcrImageViewer({
           unoptimized
         />
         <div
-          aria-label={`Bounding box từ OCR: ${words.length} từ`}
+          aria-label={t("ocrReview.canvas.bboxOverlayAria", {
+            count: formatNumber(words.length),
+          })}
           className="absolute inset-0"
+          dir="ltr"
           role="group"
         >
           {words.map((word) => {
@@ -707,8 +753,9 @@ function OcrImageViewer({
               reviewStatus,
               word,
               paddleLineScore,
+              t,
             );
-            const scoreLabel = getWordScoreLabel(word, ocrMetadata);
+            const scoreLabel = getWordScoreLabel(word, ocrMetadata, t);
             const selectedClass =
               word.word_index === selectedWord
                 ? "z-10 border-2 ring-2 ring-white"
@@ -717,10 +764,23 @@ function OcrImageViewer({
             const geometryNeedsRepair =
               geometryQuality === "weak" || geometryQuality === "invalid";
             const geometryNote = geometryNeedsRepair
-              ? ` ${getWordGeometryLabel(word)}.`
+              ? ` ${getWordGeometryLabel(word, t)}.`
               : "";
-            const boxLabel = `Từ ${word.word_index + 1}: ${word.text}. ${reviewLabel}. ${scoreLabel}.${geometryNote}`;
-            const boxTitle = `Từ ${word.word_index + 1}: ${word.text} · ${reviewLabel} · ${scoreLabel} · bản nháp: ${currentDraftToken ?? "chưa có"}`;
+            const boxLabel = t("ocrReview.canvas.wordAriaLabel", {
+              num: formatNumber(word.word_index + 1),
+              text: word.text,
+              reviewLabel,
+              scoreLabel,
+              geometryNote,
+            });
+            const boxTitle = t("ocrReview.canvas.wordTitle", {
+              num: formatNumber(word.word_index + 1),
+              text: word.text,
+              reviewLabel,
+              scoreLabel,
+              draftToken:
+                currentDraftToken ?? t("ocrReview.canvas.draftMissing"),
+            });
 
             return (
               <button
@@ -755,10 +815,15 @@ function OcrImageViewer({
   return (
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-semibold">Ảnh trang gốc</h2>
+        <h2 className="text-2xl font-semibold">
+          {t("ocrReview.canvas.originalImageHeading")}
+        </h2>
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm text-muted">
-            {image.width} × {image.height} px
+            {t("ocrReview.canvas.dimensions", {
+              width: formatNumber(image.width),
+              height: formatNumber(image.height),
+            })}
           </span>
           <button
             className="min-h-10 rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
@@ -766,7 +831,7 @@ function OcrImageViewer({
             ref={expandButtonRef}
             type="button"
           >
-            Phóng lớn ảnh
+            {t("ocrReview.canvas.zoomImage")}
           </button>
         </div>
       </div>
@@ -781,13 +846,16 @@ function OcrImageViewer({
               type="button"
               variant="secondary"
             >
-              Đóng ảnh
+              {t("ocrReview.canvas.closeImage")}
             </Button>
           </div>
         }
         isOpen={isExpanded}
         onClose={() => setIsExpanded(false)}
-        title={`Trang ${image.page_number} · ${book.title}`}
+        title={t("ocrReview.canvas.zoomModalTitle", {
+          pageNumber: formatNumber(image.page_number),
+          title: book.title,
+        })}
         tone="paper"
       >
         <div className="grid justify-items-center gap-3">
@@ -819,6 +887,8 @@ export function AdminOcrReviewScreen({
   pageId: string;
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatDateTime, formatNumber } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   // Next's compatibility layer can return null outside the App Router (e.g. tests).
@@ -836,7 +906,18 @@ export function AdminOcrReviewScreen({
   const [selectedWord, setSelectedWord] = useState<number | null>(null);
   const [wordFilter, setWordFilter] = useState<WordFilter>("all");
   const [error, setError] = useState<LoadError | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [noticeState, setNoticeState] = useState<{
+    message: string;
+    tone: "info" | "error";
+  } | null>(null);
+  const notice = noticeState?.message ?? null;
+  const noticeTone = noticeState?.tone ?? "info";
+  const setNotice = useCallback(
+    (value: string | null, tone: "info" | "error" = "info") => {
+      setNoticeState(value ? { message: value, tone } : null);
+    },
+    [],
+  );
   const [aiSuggestion, setAiSuggestion] = useState<string | null>(null);
   const [proofreadAudit, setProofreadAudit] = useState<
     AdminRevisionVerifyRequestDTO["proofread_audit"] | null
@@ -1024,9 +1105,7 @@ export function AdminOcrReviewScreen({
       setAiWorkflow(nextWorkflow);
       restoreWorkflowReview(nextWorkflow, nextDetail);
       if (preferredRevisionId && !preferredRevision) {
-        setNotice(
-          "Revision trong báo cáo không còn trong lịch sử trang. Đang hiển thị revision mới nhất.",
-        );
+        setNotice(t("ocrReview.notices.reportRevisionFallback"));
       }
     } catch (cause) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
@@ -1048,6 +1127,8 @@ export function AdminOcrReviewScreen({
     preferredRevisionId,
     revisions,
     restoreWorkflowReview,
+    setNotice,
+    t,
   ]);
 
   useEffect(() => {
@@ -1106,8 +1187,11 @@ export function AdminOcrReviewScreen({
           } catch {
             setNotice(
               isServiceError(cause)
-                ? "Không thể lưu Candidate cho Safety rescan: " + cause.message
-                : "Không thể lưu Candidate cho Safety rescan.",
+                ? t("ocrReview.notices.candidateSaveErrorWithMsg", {
+                    message: cause.message,
+                  })
+                : t("ocrReview.notices.candidateSaveError"),
+              "error",
             );
           }
         });
@@ -1116,7 +1200,16 @@ export function AdminOcrReviewScreen({
       globalThis.clearTimeout(timer);
       candidateSyncRequestRef.current += 1;
     };
-  }, [aiWorkflow, candidateEditPending, detail, draftText, ocr, pageId]);
+  }, [
+    aiWorkflow,
+    candidateEditPending,
+    detail,
+    draftText,
+    ocr,
+    pageId,
+    setNotice,
+    t,
+  ]);
 
   useEffect(() => {
     if (
@@ -1198,7 +1291,7 @@ export function AdminOcrReviewScreen({
         requestId !== revisionChoiceRequestIdRef.current
       )
         return;
-      setNotice("Không thể tải revision đã chọn.");
+      setNotice(t("ocrReview.notices.loadRevisionError"), "error");
     }
   }
 
@@ -1266,7 +1359,10 @@ export function AdminOcrReviewScreen({
       return;
     }
     setWordSyncError(
-      `Nội dung mới có ${result.actualTokenCount} từ nhưng danh sách đang có ${result.expectedWordCount} từ. Để không gán nhầm tọa độ, hệ thống giữ nguyên Words hiện tại. Hãy khôi phục số từ hoặc xử lý lại OCR/đối chiếu tọa độ trước khi lưu.`,
+      t("ocrReview.notices.syncTextBlockedCount", {
+        actual: formatNumber(result.actualTokenCount),
+        expected: formatNumber(result.expectedWordCount),
+      }),
     );
   }
 
@@ -1313,7 +1409,10 @@ export function AdminOcrReviewScreen({
       setWordSyncError(null);
     } else {
       setWordSyncError(
-        `Danh sách có ${result.expectedWordCount} từ, nhưng văn bản trang có ${result.actualTokenCount} từ hoặc một mục Word chứa nhiều từ. Hãy chỉnh lại trước khi lưu.`,
+        t("ocrReview.notices.syncWordsBlockedCount", {
+          expected: formatNumber(result.expectedWordCount),
+          actual: formatNumber(result.actualTokenCount),
+        }),
       );
     }
   }
@@ -1352,9 +1451,7 @@ export function AdminOcrReviewScreen({
       setWords([...result.words]);
       setWordSyncError(null);
     } else {
-      setWordSyncError(
-        "Không thể đồng bộ vì có từ rỗng hoặc một từ chứa nhiều token. Hãy chỉnh danh sách từ trước khi lưu.",
-      );
+      setWordSyncError(t("ocrReview.notices.syncEmptyOrMultiWord"));
     }
   }
 
@@ -1368,13 +1465,9 @@ export function AdminOcrReviewScreen({
     if (result.status === "synchronized") {
       setWords([...result.words]);
       setWordSyncError(null);
-      setNotice(
-        "Đã đồng bộ từ với văn bản. Việc đồng bộ không xác minh độ đúng OCR; hãy đối chiếu với ảnh trước khi xác minh trang.",
-      );
+      setNotice(t("ocrReview.notices.syncSuccess"));
     } else {
-      setWordSyncError(
-        "Số lượng từ giữa văn bản và danh sách bounding box chưa khớp để đối chiếu.",
-      );
+      setWordSyncError(t("ocrReview.notices.syncCountMismatch"));
     }
   }
 
@@ -1432,8 +1525,11 @@ export function AdminOcrReviewScreen({
         setAiCheckUnavailable(true);
         setNotice(
           workflow.error_code
-            ? `Proofreading thất bại (${workflow.error_code}). Nội dung OCR gốc vẫn được giữ nguyên; hãy thử lại.`
-            : "Workflow chưa có kết quả proofreading hợp lệ. Nội dung OCR gốc vẫn được giữ nguyên.",
+            ? t("ocrReview.notices.proofreadFailedWithCode", {
+                code: workflow.error_code,
+              })
+            : t("ocrReview.notices.proofreadInvalid"),
+          "error",
         );
         return;
       }
@@ -1444,9 +1540,7 @@ export function AdminOcrReviewScreen({
         result.tokens.length !== words.length
       ) {
         setAiCheckUnavailable(true);
-        setNotice(
-          "AI trả về kết quả không thể ghép chắc chắn với các vùng chữ. Văn bản và tọa độ được giữ nguyên; hãy thử lại hoặc tiếp tục xác minh thủ công có ghi audit.",
-        );
+        setNotice(t("ocrReview.notices.proofreadUnaligned"), "error");
         return;
       }
       const changes = result.tokens.flatMap((token, index) =>
@@ -1460,8 +1554,8 @@ export function AdminOcrReviewScreen({
         });
         setNotice(
           workflow.safety_status === "FAILED"
-            ? "Proofreading hoàn tất; Child Safety gặp lỗi và có thể thử lại riêng."
-            : "AI chưa phát hiện lỗi chính tả cần chỉnh sửa. Child Safety đã chạy tự động; hãy kiểm tra hai kết quả trước khi xác nhận.",
+            ? t("ocrReview.notices.proofreadNoneSafetyFailed")
+            : t("ocrReview.notices.proofreadNoneSafetyOk"),
         );
         return;
       }
@@ -1469,8 +1563,12 @@ export function AdminOcrReviewScreen({
       setAiAcceptedChanges(new Set());
       setNotice(
         workflow.safety_status === "FAILED"
-          ? `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety gặp lỗi; kết quả proofreading vẫn được giữ và có thể thử lại Safety.`
-          : `AI đưa ra ${changes.length} thay đổi để rà soát. Child Safety đã quét Candidate; chưa có thay đổi nào được chọn.`,
+          ? t("ocrReview.notices.proofreadChangesSafetyFailed", {
+              count: formatNumber(changes.length),
+            })
+          : t("ocrReview.notices.proofreadChangesSafetyOk", {
+              count: formatNumber(changes.length),
+            }),
       );
     } catch (cause) {
       if (
@@ -1484,19 +1582,20 @@ export function AdminOcrReviewScreen({
         controller.signal.aborted ||
         cause instanceof AiCorrectionCancelledError
       ) {
-        setNotice("Đã dừng theo dõi. Workflow bền vững tiếp tục ở Backend.");
+        setNotice(t("ocrReview.notices.stoppedTracking"));
       } else {
         setAiCheckUnavailable(true);
         const safeMessage = isServiceError(cause)
           ? cause.message
           : cause instanceof Error
             ? cause.message
-            : "văn bản và tọa độ hiện tại được giữ nguyên.";
+            : t("ocrReview.notices.aiErrorKeepCurrent");
         setNotice(
           safeMessage.startsWith("Không thể") ||
             safeMessage.startsWith("AI OCR")
             ? safeMessage
-            : "Không thể kiểm tra văn bản bằng AI: " + safeMessage,
+            : t("ocrReview.notices.aiErrorPrefix", { message: safeMessage }),
+          "error",
         );
       }
     } finally {
@@ -1520,9 +1619,7 @@ export function AdminOcrReviewScreen({
       Boolean(aiWorkflow.findings.length) ||
       aiWorkflow.suitability !== "SUITABLE";
     if (confirmed && reasonRequired && !reason) {
-      setNotice(
-        "Hãy ghi lý do Admin xem xét trước khi xác nhận kết quả Safety.",
-      );
+      setNotice(t("ocrReview.notices.safetyReasonRequired"), "error");
       return;
     }
     setBusy("workflow");
@@ -1540,8 +1637,11 @@ export function AdminOcrReviewScreen({
     } catch (cause) {
       setNotice(
         isServiceError(cause)
-          ? "Không thể lưu quyết định Safety: " + cause.message
-          : "Không thể lưu quyết định Safety. Hãy tải lại kết quả rồi thử lại.",
+          ? t("ocrReview.notices.safetyDecisionErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.safetyDecisionError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1554,9 +1654,7 @@ export function AdminOcrReviewScreen({
     if (!aiWorkflow || busy !== null || !ocr.decideWorkflowImageSafety) return;
     const reason = imageSafetyReason.trim();
     if (status === "ADMIN_FLAGGED_UNSAFE" && !reason) {
-      setNotice(
-        "Hãy ghi rõ lý do trước khi đánh dấu hình ảnh không phù hợp với trẻ em.",
-      );
+      setNotice(t("ocrReview.notices.imageFlagReasonRequired"), "error");
       return;
     }
     setBusy("workflow");
@@ -1573,14 +1671,17 @@ export function AdminOcrReviewScreen({
       );
       setNotice(
         status === "ADMIN_CONFIRMED_SAFE"
-          ? "Đã ghi nhận Admin xác nhận hình ảnh trang phù hợp với trẻ em."
-          : "Đã gắn cờ hình ảnh không phù hợp; trang này sẽ bị chặn xác minh.",
+          ? t("ocrReview.notices.imageMarkedSafe")
+          : t("ocrReview.notices.imageFlaggedUnsafe"),
       );
     } catch (cause) {
       setNotice(
         isServiceError(cause)
-          ? "Không thể lưu quyết định an toàn hình ảnh: " + cause.message
-          : "Không thể lưu quyết định an toàn hình ảnh. Hãy tải lại trang rồi thử lại.",
+          ? t("ocrReview.notices.imageSafetyErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.imageSafetyError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1601,14 +1702,17 @@ export function AdminOcrReviewScreen({
       setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
       setNotice(
         retryingSafety || aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-          ? "Đã đưa riêng Child Safety vào hàng đợi; Proofreading và OCR được giữ nguyên."
-          : "Đã đưa riêng Proofreading vào hàng đợi thử lại.",
+          ? t("ocrReview.notices.retrySafetyQueued")
+          : t("ocrReview.notices.retryProofreadQueued"),
       );
     } catch (cause) {
       setNotice(
         isServiceError(cause)
-          ? "Không thể thử lại workflow: " + cause.message
-          : "Không thể đưa workflow vào hàng đợi thử lại.",
+          ? t("ocrReview.notices.retryWorkflowErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.retryWorkflowError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1652,7 +1756,10 @@ export function AdminOcrReviewScreen({
     });
     setAiCheckUnavailable(false);
     setNotice(
-      `Đã ghi nhận ${selected.length} gợi ý được Admin chấp nhận và ${suggestions.length - selected.length} gợi ý bị từ chối. Hãy rà soát rồi xác nhận VERIFIED.`,
+      t("ocrReview.notices.aiConfirmedCount", {
+        accepted: formatNumber(selected.length),
+        rejected: formatNumber(suggestions.length - selected.length),
+      }),
     );
   }
 
@@ -1664,9 +1771,7 @@ export function AdminOcrReviewScreen({
       reason_code: "AI_CHECK_UNAVAILABLE",
     });
     setAiCheckUnavailable(false);
-    setNotice(
-      "AI không khả dụng. Bạn đang tiếp tục xác minh thủ công; nội dung này được ghi nhận trong audit.",
-    );
+    setNotice(t("ocrReview.notices.manualContinueAudit"));
   }
 
   async function resumePendingDraft(
@@ -1693,16 +1798,12 @@ export function AdminOcrReviewScreen({
     if (
       existingDraft.ocr_metadata.source_revision_id !== expectedSourceRevisionId
     ) {
-      setNotice(
-        "Trang đã có bản nháp chờ duyệt từ revision khác. Hãy chọn revision NEEDS_REVIEW trong lịch sử trước khi tiếp tục.",
-      );
+      setNotice(t("ocrReview.notices.draftConflictOther"), "error");
       return true;
     }
 
     applyDetail(existingDraft);
-    setNotice(
-      "Bản nháp từ revision này đã tồn tại. Đã mở lại để bạn tiếp tục chỉnh sửa.",
-    );
+    setNotice(t("ocrReview.notices.draftReopened"));
     return true;
   }
 
@@ -1751,9 +1852,7 @@ export function AdminOcrReviewScreen({
       } catch {
         // The new revision remains usable if history refresh fails.
       }
-      setNotice(
-        "Đã tạo revision nháp từ nội dung đã xác minh. Hãy sửa, lưu bản nháp và xác minh để áp dụng cho lượt đọc mới.",
-      );
+      setNotice(t("ocrReview.notices.draftCreatedFromVerified"));
     } catch (cause) {
       if (isServiceError(cause) && cause.status === 409) {
         try {
@@ -1780,8 +1879,11 @@ export function AdminOcrReviewScreen({
       }
       setNotice(
         isServiceError(cause)
-          ? "Không thể tạo bản nháp: " + cause.message
-          : "Không thể tạo bản nháp chỉnh sửa. Dữ liệu hiện tại vẫn được giữ nguyên.",
+          ? t("ocrReview.notices.draftCreateErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.draftCreateError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1796,9 +1898,7 @@ export function AdminOcrReviewScreen({
       return;
     }
     if (candidateEditPending && aiWorkflow?.proofread_text) {
-      setNotice(
-        "Đang đồng bộ Candidate và lên lịch Safety rescan. Hãy lưu lại sau khi hoàn tất bước này.",
-      );
+      setNotice(t("ocrReview.notices.candidateSyncingNotice"));
       return;
     }
     const requestedRevisionId = detail.page_revision_id;
@@ -1827,11 +1927,11 @@ export function AdminOcrReviewScreen({
       applyDetail(saved);
       setAiWorkflow(latestWorkflow);
       restoreWorkflowReview(latestWorkflow, saved);
-      setNotice("Đã lưu bản nháp vào database.");
+      setNotice(t("ocrReview.notices.draftSaved"));
       try {
         setHistory(await revisions.list(pageId));
       } catch {
-        setNotice("Đã lưu bản nháp, nhưng chưa tải lại được lịch sử revision.");
+        setNotice(t("ocrReview.notices.draftSavedHistoryError"), "error");
       }
     } catch (cause) {
       if (
@@ -1843,8 +1943,11 @@ export function AdminOcrReviewScreen({
       }
       setNotice(
         isServiceError(cause)
-          ? "Không thể lưu bản nháp: " + cause.message
-          : "Không thể lưu bản nháp. Văn bản hiện tại được giữ nguyên.",
+          ? t("ocrReview.notices.draftSaveErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.draftSaveError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1860,9 +1963,7 @@ export function AdminOcrReviewScreen({
       return;
     }
     if (aiSuggestion !== null) {
-      setNotice(
-        "Hãy xác nhận lựa chọn với các gợi ý AI trước khi hoàn tất VERIFIED.",
-      );
+      setNotice(t("ocrReview.notices.confirmAiBeforeVerify"), "error");
       return;
     }
     let finalProofreadAudit = proofreadAudit;
@@ -1878,9 +1979,7 @@ export function AdminOcrReviewScreen({
       return;
     }
     if (candidateEditPending && aiWorkflow?.proofread_text) {
-      setNotice(
-        "Candidate đang được lưu và Child Safety sẽ tự chạy lại. Vui lòng đợi hash được cập nhật.",
-      );
+      setNotice(t("ocrReview.notices.waitCandidateHash"));
       return;
     }
     const requestedRevisionId = detail.page_revision_id;
@@ -1905,13 +2004,11 @@ export function AdminOcrReviewScreen({
         return;
       }
       applyDetail(verifiedResult);
-      setNotice(
-        "Đã xác minh revision. Revision này có thể làm ground truth cho session mới nếu trang đang ACTIVE.",
-      );
+      setNotice(t("ocrReview.notices.verifiedSaved"));
       try {
         setHistory(await revisions.list(pageId));
       } catch {
-        setNotice("Đã xác minh revision, nhưng chưa tải lại được lịch sử.");
+        setNotice(t("ocrReview.notices.verifiedSavedHistoryError"), "error");
       }
     } catch (cause) {
       if (
@@ -1923,8 +2020,11 @@ export function AdminOcrReviewScreen({
       }
       setNotice(
         isServiceError(cause)
-          ? "Không thể xác minh: " + cause.message
-          : "Không thể xác minh. Hãy đồng bộ văn bản với danh sách từ, kiểm tra bbox và thử lại.",
+          ? t("ocrReview.notices.verifyErrorWithMsg", {
+              message: cause.message,
+            })
+          : t("ocrReview.notices.verifyError"),
+        "error",
       );
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -1952,13 +2052,9 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
-      setNotice(
-        "Đã tạo revision mới từ ảnh trong Supabase Storage. Revision cũ vẫn được giữ nguyên.",
-      );
+      setNotice(t("ocrReview.notices.reprocessCreated"));
     } catch {
-      setNotice(
-        "Không thể chạy lại OCR. Kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
-      );
+      setNotice(t("ocrReview.notices.reprocessError"), "error");
     } finally {
       setBusy(null);
     }
@@ -1975,11 +2071,11 @@ export function AdminOcrReviewScreen({
     if (
       !["image/jpeg", "image/png", "image/webp"].includes(replacementFile.type)
     ) {
-      setNotice("Chỉ hỗ trợ ảnh JPEG, PNG hoặc WebP.");
+      setNotice(t("ocrReview.notices.invalidImageType"), "error");
       return;
     }
     if (replacementFile.size <= 0 || replacementFile.size > 12 * 1024 * 1024) {
-      setNotice("Ảnh phải có dung lượng lớn hơn 0 và không quá 12 MB.");
+      setNotice(t("ocrReview.notices.invalidImageSize"), "error");
       return;
     }
     setBusy("reupload");
@@ -2010,13 +2106,9 @@ export function AdminOcrReviewScreen({
         "replacement-page-image",
       ) as HTMLInputElement | null;
       if (input) input.value = "";
-      setNotice(
-        "Đã OCR ảnh mới cho đúng trang này. Bản mới đang chờ duyệt; ảnh và nội dung dùng cho lượt đọc chỉ chuyển sang bản mới sau khi xác minh.",
-      );
+      setNotice(t("ocrReview.notices.reuploadCreated"));
     } catch {
-      setNotice(
-        "Không thể tải ảnh mới hoặc chạy OCR. Dữ liệu hiện tại được giữ lại; hãy kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
-      );
+      setNotice(t("ocrReview.notices.reuploadError"), "error");
     } finally {
       setBusy(null);
     }
@@ -2177,28 +2269,28 @@ export function AdminOcrReviewScreen({
         headingLevel={1}
         title={
           error === "not-found"
-            ? "Không tìm thấy trang"
+            ? t("ocrReview.errors.notFoundTitle")
             : error === "unavailable"
-              ? "Dữ liệu OCR chưa khả dụng"
-              : "Không thể tải OCR"
+              ? t("ocrReview.errors.unavailableTitle")
+              : t("ocrReview.errors.loadErrorTitle")
         }
         description={
           error === "not-found"
-            ? "Trang không thuộc sách hoặc dữ liệu quản trị hiện tại."
+            ? t("ocrReview.errors.notFoundDesc")
             : error === "unavailable"
-              ? "Ảnh hoặc revision chưa đáp ứng contract hiện tại. Không sử dữ liệu mẫu thay thế."
-              : "Vui lòng thử lại sau."
+              ? t("ocrReview.errors.unavailableDesc")
+              : t("ocrReview.errors.genericDesc")
         }
         action={
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => void load()} variant="secondary">
-              Thử lại
+              {t("common.retry")}
             </Button>
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold text-primary underline"
               href={`/admin/books/${bookId}`}
             >
-              Quay lại sách
+              {t("ocrReview.errors.backToBook")}
             </Link>
           </div>
         }
@@ -2206,7 +2298,7 @@ export function AdminOcrReviewScreen({
     );
   }
   if (!book || !image || !history || !detail)
-    return <AdminLoading label="Đang tải ảnh và revision…" />;
+    return <AdminLoading label={t("ocrReview.loading")} />;
 
   const runtimeEvidence = safeOcrRuntimeProvenance(detail.ocr_metadata);
   const pagePath = `/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(pageId)}`;
@@ -2226,6 +2318,7 @@ export function AdminOcrReviewScreen({
         busy={busy !== null}
         onAddWord={() => {
           if (detail.verification_status !== "NEEDS_REVIEW") return;
+          const newWordText = t("ocrReview.newWordPlaceholder");
           const nextIndex =
             words.reduce(
               (maximum, word) => Math.max(maximum, word.word_index),
@@ -2234,14 +2327,14 @@ export function AdminOcrReviewScreen({
           const nextWord: AdminRevisionWordDTO = {
             word_index: nextIndex,
             line_index: words.at(-1)?.line_index ?? 0,
-            text: "Từ mới",
-            normalized_text: normalizeVietnameseWord("Từ mới"),
+            text: newWordText,
+            normalized_text: normalizeVietnameseWord(newWordText),
             bbox: [0.1, 0.1, 0.1, 0.05],
             ocr_confidence: null,
             ocr_review_status: "needs_review",
           };
           setWords((current) => [...current, nextWord]);
-          setDraftText((current) => `${current.trim()} Từ mới`.trim());
+          setDraftText((current) => `${current.trim()} ${newWordText}`.trim());
           setSelectedWord(nextIndex);
           setWordSyncError(null);
           draftEditVersionRef.current += 1;
@@ -2266,9 +2359,7 @@ export function AdminOcrReviewScreen({
             .map((word, index) => ({ ...word, word_index: index }));
           const synced = syncPageTextToWords(nextText, nextWords);
           if (synced.status !== "synchronized") {
-            setWordSyncError(
-              "Không thể đồng bộ văn bản sau khi xóa từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu.",
-            );
+            setWordSyncError(t("ocrReview.notices.wordDeleteSyncError"));
             return;
           }
           setWords([...synced.words]);
@@ -2299,6 +2390,7 @@ export function AdminOcrReviewScreen({
         detail={detail}
         history={history}
         notice={notice}
+        noticeTone={noticeTone}
         onChooseRevision={(revisionId) => void chooseRevision(revisionId)}
         onReload={() => void load()}
         onReprocess={() => void reprocess()}
@@ -2313,40 +2405,42 @@ export function AdminOcrReviewScreen({
   return (
     <>
       <AdminPageHeader
-        eyebrow={`${book.title} · Trang ${image.page_number}`}
-        title={`Kiểm tra OCR · R${detail.revision_no}`}
-        description="Sửa nội dung và vị trí từ, lưu nháp, xác minh hoặc tạo revision OCR mới."
+        eyebrow={t("ocrReview.header.eyebrow", {
+          title: book.title,
+          pageNumber: formatNumber(image.page_number),
+        })}
+        title={t("ocrReview.header.title", {
+          revisionNo: formatNumber(detail.revision_no),
+        })}
+        description={t("ocrReview.header.description")}
         actions={<OcrRevisionStatus status={detail.verification_status} />}
       />
       <Link
         className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-md px-1 font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary"
         href={`/admin/books/${bookId}`}
       >
-        <ArrowLeft aria-hidden className="size-5" /> Chi tiết sách
+        <ArrowLeft aria-hidden className="size-5 rtl:rotate-180" />{" "}
+        {t("ocrReview.header.backToDetail")}
       </Link>
       {detail.verification_status === "VERIFIED" ? (
         <StatusMessage
           className="mb-6"
-          title="Đã xác minh revision"
+          title={t("ocrReview.header.verifiedBannerTitle")}
           tone="success"
         >
-          Revision này có thể làm ground truth cho session mới nếu trang đang
-          ACTIVE.
+          {t("ocrReview.header.verifiedBannerDesc", { status: "ACTIVE" })}
         </StatusMessage>
       ) : detail.verification_status === "PROCESSING" ? (
-        <StatusMessage className="mb-6" title="PROCESSING" tone="info">
-          Đang tạo revision mới. Revision cũ vẫn được giữ nguyên.
+        <StatusMessage
+          className="mb-6"
+          title={t("ocrReview.header.processingBannerTitle")}
+          tone="info"
+        >
+          {t("ocrReview.header.processingBannerDesc")}
         </StatusMessage>
       ) : null}
       {notice ? (
-        <StatusMessage
-          className="mb-6"
-          tone={
-            notice.startsWith("Không thể") || notice.startsWith("Lỗi")
-              ? "error"
-              : "info"
-          }
-        >
+        <StatusMessage className="mb-6" tone={noticeTone}>
           {notice}
         </StatusMessage>
       ) : null}
@@ -2363,30 +2457,35 @@ export function AdminOcrReviewScreen({
             words={words}
           />
           <section
-            aria-label="Chẩn đoán checkpoint VietOCR runtime"
+            aria-label={t("ocrReview.diagnostics.ariaLabel")}
             className="mt-4 rounded-control border border-border bg-canvas p-4"
           >
             <h2 className="font-extrabold text-ink">
-              Admin OCR Diagnostics · runtime checkpoint
+              {t("ocrReview.diagnostics.heading")}
             </h2>
             <p className="mt-1 text-xs text-muted">
-              Bằng chứng ghi tại lượt Scan từ Predictor thực sự đã nạp; không
-              lấy SHA từ lựa chọn model trên Supabase.
+              {t("ocrReview.diagnostics.subtitle")}
             </p>
             <dl className="mt-3 grid gap-2 text-sm">
               <div>
-                <dt className="font-semibold">Model thực tế</dt>
+                <dt className="font-semibold">
+                  {t("ocrReview.diagnostics.actualModel")}
+                </dt>
                 <dd>{runtimeEvidence.modelProfile}</dd>
               </div>
               <div>
-                <dt className="font-semibold">Checkpoint SHA256 đã xác minh</dt>
+                <dt className="font-semibold">
+                  {t("ocrReview.diagnostics.verifiedSha")}
+                </dt>
                 <dd className="break-all font-mono text-xs">
                   {runtimeEvidence.checkpointSha256 ??
-                    "Không có bằng chứng checkpoint được dùng"}
+                    t("ocrReview.diagnostics.noCheckpointEvidence")}
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold">Trạng thái nạp / inference</dt>
+                <dt className="font-semibold">
+                  {t("ocrReview.diagnostics.loadInferenceStatus")}
+                </dt>
                 <dd>
                   {runtimeEvidence.modelLoadStatus}
                   {" · "}
@@ -2394,39 +2493,53 @@ export function AdminOcrReviewScreen({
                 </dd>
               </div>
               <div>
-                <dt className="font-semibold">Fallback</dt>
-                <dd>{runtimeEvidence.fallbackReason ?? "Không ghi nhận"}</dd>
+                <dt className="font-semibold">
+                  {t("ocrReview.diagnostics.fallbackLabel")}
+                </dt>
+                <dd>
+                  {runtimeEvidence.fallbackReason ??
+                    t("ocrReview.diagnostics.noFallbackRecorded")}
+                </dd>
               </div>
               <div>
-                <dt className="font-semibold">VietOCR package</dt>
-                <dd>{runtimeEvidence.engineVersion ?? "Chưa xác định"}</dd>
+                <dt className="font-semibold">
+                  {t("ocrReview.diagnostics.vietocrPackageLabel")}
+                </dt>
+                <dd>
+                  {runtimeEvidence.engineVersion ??
+                    t("ocrReview.diagnostics.unknownEngineVersion")}
+                </dd>
               </div>
             </dl>
             {!runtimeEvidence.verified ? (
               <p className="mt-2 text-xs text-muted">
-                Scan này chưa chứng minh checkpoint VietOCR được nạp. Không suy
-                diễn từ profile đang active hoặc revision cũ.
+                {t("ocrReview.diagnostics.unverifiedRuntimeWarning")}
               </p>
             ) : null}
           </section>
           <section className="mt-4 rounded-control border border-border bg-canvas p-4">
-            <h2 className="font-extrabold text-ink">OCR gốc (bất biến)</h2>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-ink">
-              {detail.original_ocr_text ??
-                "Revision cũ chưa có bản chụp OCR gốc riêng. Các revision mới sẽ lưu OCR gốc bất biến."}
-            </p>
+            <h2 className="font-extrabold text-ink">
+              {t("ocrReview.originalOcr.heading")}
+            </h2>
+            {detail.original_ocr_text ? (
+              <p
+                className="viread-learning-content mt-2 whitespace-pre-wrap text-sm leading-7 text-ink"
+                dir="ltr"
+                lang="vi"
+              >
+                {detail.original_ocr_text}
+              </p>
+            ) : (
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-muted">
+                {t("ocrReview.originalOcr.missingSnapshot")}
+              </p>
+            )}
           </section>
           <p className="mt-3 text-sm leading-6 text-muted">
-            Xanh biểu thị Admin/reference đã xác minh hoặc hai OCR đồng thuận
-            chính xác ở cấp từ với alignment, token mapping và bbox/crop hợp lệ;
-            đồng thuận là evidence tốt, không đồng nghĩa Admin verified. Vàng
-            dành cho từ thiếu evidence, bất đồng hoặc mapping/chất lượng chưa an
-            toàn. Đỏ chỉ xuất hiện khi candidate không khớp reference đã xác
-            minh trong alignment một-một rõ ràng. Raw OCR score và similarity
-            heuristic không được sử dụng như xác suất đúng.
+            {t("ocrReview.legend.description")}
           </p>
           <div
-            aria-label="Thống kê trạng thái từ OCR"
+            aria-label={t("ocrReview.legend.countsAria")}
             className="mt-4 grid grid-cols-3 gap-2"
             role="group"
           >
@@ -2434,19 +2547,19 @@ export function AdminOcrReviewScreen({
               [
                 {
                   id: "green",
-                  label: "Xanh · evidence tốt",
+                  label: t("ocrReview.legend.green"),
                   count: colorCounts.green,
                   cardClass: "border-green-600/50 bg-green-50 text-green-900",
                 },
                 {
                   id: "yellow",
-                  label: "Vàng · cần kiểm tra",
+                  label: t("ocrReview.legend.yellow"),
                   count: colorCounts.yellow,
                   cardClass: "border-amber-600/50 bg-amber-50 text-amber-950",
                 },
                 {
                   id: "red",
-                  label: "Đỏ · reference xác nhận sai",
+                  label: t("ocrReview.legend.red"),
                   count: colorCounts.red,
                   cardClass: "border-red-600/50 bg-red-50 text-red-900",
                 },
@@ -2456,54 +2569,56 @@ export function AdminOcrReviewScreen({
                 className={`grid min-h-20 content-center gap-1 rounded-control border p-2 text-center text-xs font-semibold ${state.cardClass}`}
                 key={state.id}
               >
-                <strong className="text-xl leading-none">{state.count}</strong>
+                <strong className="text-xl leading-none">
+                  {formatNumber(state.count)}
+                </strong>
                 <span>{state.label}</span>
               </div>
             ))}
           </div>
           <div
-            aria-label="Chi tiết trạng thái evidence OCR"
+            aria-label={t("ocrReview.legend.detailsAria")}
             className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted"
           >
             <span>
-              Đã xác minh:{" "}
-              {
+              {t("ocrReview.legend.verifiedCount")}{" "}
+              {formatNumber(
                 words.filter((word) => {
                   const status = getWordReviewStatus(
                     word,
                     detail.verification_status,
                   );
                   return status === "verified" || status === "reference_match";
-                }).length
-              }
+                }).length,
+              )}
             </span>
             <span>
-              Engine đồng ý, chưa xác minh:{" "}
-              {
+              {t("ocrReview.legend.consensusCount")}{" "}
+              {formatNumber(
                 words.filter(
                   (word) =>
                     getWordReviewStatus(word, detail.verification_status) ===
                     "engine_agreement",
-                ).length
-              }
+                ).length,
+              )}
             </span>
             <span>
-              Engine bất đồng:{" "}
-              {
+              {t("ocrReview.legend.disagreementCount")}{" "}
+              {formatNumber(
                 words.filter(
                   (word) =>
                     getWordReviewStatus(word, detail.verification_status) ===
                     "engine_disagreement",
-                ).length
-              }
+                ).length,
+              )}
             </span>
             <span>
-              Chưa có calibrated accuracy:{" "}
-              {
+              {t("ocrReview.legend.uncalibratedCount")}{" "}
+              {formatNumber(
                 words.filter(
                   (word) => word.ocr_evidence?.calibrated_word_accuracy == null,
-                ).length
-              }
+                ).length,
+              )}
             </span>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -2517,12 +2632,15 @@ export function AdminOcrReviewScreen({
               }}
               type="button"
             >
-              Đi tới từ cần kiểm tra
+              {t("ocrReview.legend.goToReviewBtn")}
             </button>
             <span className="text-xs font-semibold text-muted">
               {nextWordToReview
-                ? `Tiếp theo ${nextReviewPosition}/${wordsNeedingReview.length} từ cần xem`
-                : "Không còn từ cần kiểm tra"}
+                ? t("ocrReview.legend.nextReviewPosition", {
+                    current: formatNumber(nextReviewPosition),
+                    total: formatNumber(wordsNeedingReview.length),
+                  })
+                : t("ocrReview.legend.noWordsToReview")}
             </span>
           </div>
         </Card>
@@ -2531,33 +2649,33 @@ export function AdminOcrReviewScreen({
           <Card className="bg-white">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-2xl font-semibold">Văn bản nháp</h2>
+                <h2 className="text-2xl font-semibold">
+                  {t("ocrReview.draft.heading")}
+                </h2>
                 <p className="mt-1 text-sm text-muted">
-                  Chỉnh nội dung tại đây; các vùng từ và ảnh sẽ được đồng bộ.
+                  {t("ocrReview.draft.subtitle")}
                 </p>
               </div>
             </div>
             <label className="grid gap-2 font-semibold" htmlFor="ocr-text">
-              Nội dung trang
+              {t("ocrReview.draft.label")}
               <textarea
                 aria-describedby="ocr-help"
-                className="min-h-60 max-h-[32rem] resize-y rounded-control border border-border bg-white p-4 font-normal leading-7 outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
+                className="viread-learning-content min-h-60 max-h-[32rem] resize-y rounded-control border border-border bg-white p-4 font-normal leading-7 outline-none focus:border-primary focus:outline-3 focus:outline-primary/30 disabled:bg-canvas"
+                dir="ltr"
                 disabled={
                   verified ||
                   detail.lifecycle_status !== "ACTIVE" ||
                   busy !== null
                 }
                 id="ocr-text"
+                lang="vi"
                 onChange={(event) => handleDraftTextChange(event.target.value)}
                 value={draftText}
               />
             </label>
             <p className="mt-2 text-sm text-muted" id="ocr-help">
-              Khi bấm “XÁC NHẬN & CHẠY AI”, Backend bắt đầu Proofreading và
-              Child Safety song song trên cùng OCR snapshot. Nếu Proofreading
-              đổi nội dung, Safety tự quét lại Candidate theo hash mới. Ollama
-              chỉ được dùng cuối cùng khi cloud không trả được inference hợp lệ.
-              AI chỉ đề xuất; Admin quyết định nội dung VERIFIED.
+              {t("ocrReview.draft.aiHint")}
             </p>
             {busy === "ai_correct" ? (
               <div
@@ -2568,16 +2686,23 @@ export function AdminOcrReviewScreen({
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="font-semibold">
                     {aiProgress?.status === "QUEUED"
-                      ? "Workflow đang chờ worker"
+                      ? t("ocrReview.draft.statusQueued")
                       : aiProgress?.status === "PROOFREADING"
-                        ? `Proofreading · đoạn ${aiProgress.progress.completed_chunks}/${aiProgress.progress.total_chunks}`
+                        ? t("ocrReview.draft.statusProofreadingChunk", {
+                            completed: formatNumber(
+                              aiProgress.progress.completed_chunks,
+                            ),
+                            total: formatNumber(
+                              aiProgress.progress.total_chunks,
+                            ),
+                          })
                         : aiProgress?.status === "CHILD_SAFETY_SCANNING"
-                          ? "Proofreading xong · Child Safety đang quét"
+                          ? t("ocrReview.draft.statusSafetyRunning")
                           : aiProgress?.status === "FAILED"
-                            ? "Workflow gặp lỗi"
+                            ? t("ocrReview.draft.statusFailed")
                             : aiProgress?.status === "READY_FOR_ADMIN_REVIEW"
-                              ? "Proofreading và Child Safety hoàn tất"
-                              : "Đang chuẩn bị workflow bền vững…"}
+                              ? t("ocrReview.draft.statusCompleted")
+                              : t("ocrReview.draft.statusPreparing")}
                   </span>
                   <Button
                     className="min-h-9 w-auto border-red-300 px-3 text-red-800 hover:bg-red-50"
@@ -2585,18 +2710,18 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <X aria-hidden className="size-4" /> Dừng theo dõi
+                    <X aria-hidden className="size-4" />{" "}
+                    {t("ocrReview.draft.stopTrackingBtn")}
                   </Button>
                 </div>
                 <progress
-                  aria-label="Tiến độ AI OCR"
+                  aria-label={t("ocrReview.draft.progressAria")}
                   className="h-2 w-full accent-purple-700"
                   max={aiProgress?.progress.total_chunks ?? 1}
                   value={aiProgress?.progress.completed_chunks ?? 0}
                 />
                 <span className="text-xs text-purple-900">
-                  Kết quả chỉ là gợi ý. Bản nháp sẽ không đổi cho đến khi bạn áp
-                  dụng.
+                  {t("ocrReview.draft.suggestionOnlyNote")}
                 </span>
               </div>
             ) : null}
@@ -2620,20 +2745,21 @@ export function AdminOcrReviewScreen({
                     className="text-lg font-semibold text-purple-950"
                     id="ai-correction-review-title"
                   >
-                    Rà soát đề xuất AI
+                    {t("ocrReview.draft.diffHeading")}
                   </h3>
                   <p className="mt-1 text-sm text-purple-900">
-                    Có {aiChanges.length} gợi ý chính tả/OCR. Các bbox được giữ
-                    nguyên; gợi ý chưa được lưu. AI không cung cấp điểm tin cậy
-                    cấp từ; Admin cần đối chiếu từng gợi ý với ảnh. Từ được chọn
-                    sẽ chấp nhận; từ bỏ chọn sẽ bị từ chối.
+                    {t("ocrReview.draft.diffSubtitle", {
+                      count: formatNumber(aiChanges.length),
+                    })}
                   </p>
                   <p
                     aria-live="polite"
                     className="mt-1 text-sm font-semibold text-purple-950"
                   >
-                    Đã chọn {aiAcceptedChanges.size} / {aiChanges.length} đề
-                    xuất. Chọn thay đổi bên dưới hoặc dùng “Chọn tất cả”.
+                    {t("ocrReview.draft.diffSelectionCount", {
+                      selected: formatNumber(aiAcceptedChanges.size),
+                      total: formatNumber(aiChanges.length),
+                    })}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -2647,7 +2773,7 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    Chọn tất cả
+                    {t("ocrReview.draft.selectAll")}
                   </Button>
                   <Button
                     className="min-h-9 w-auto px-3"
@@ -2655,7 +2781,7 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    Bỏ chọn tất cả
+                    {t("ocrReview.draft.deselectAll")}
                   </Button>
                   <Button
                     className="min-h-9 w-auto px-3"
@@ -2663,24 +2789,28 @@ export function AdminOcrReviewScreen({
                       setAiSuggestion(null);
                       setAiAcceptedChanges(new Set());
                       setAiDiffPage(0);
-                      setNotice(
-                        "Đã bỏ đề xuất AI. Bản nháp hiện tại được giữ nguyên.",
-                      );
+                      setNotice(t("ocrReview.notices.aiRejectedAll"));
                     }}
                     type="button"
                     variant="quiet"
                   >
-                    Bỏ đề xuất
+                    {t("ocrReview.draft.rejectSuggestions")}
                   </Button>
                 </div>
                 <div
                   aria-live="polite"
                   className="text-xs font-semibold text-muted"
                 >
-                  Trang {Math.min(aiDiffPage + 1, aiDiffPageCount)} /{" "}
-                  {aiDiffPageCount}
+                  {t("common:pagination.pageStatus", {
+                    page: formatNumber(
+                      Math.min(aiDiffPage + 1, aiDiffPageCount),
+                    ),
+                    totalPages: formatNumber(aiDiffPageCount),
+                  })}
                   {aiChanges.length > aiDiffPageSize
-                    ? ` · hiển thị tối đa ${aiDiffPageSize} thay đổi mỗi trang`
+                    ? t("ocrReview.draft.diffPageSizeSuffix", {
+                        size: formatNumber(aiDiffPageSize),
+                      })
                     : ""}
                 </div>
                 <ul className="grid gap-2">
@@ -2699,8 +2829,8 @@ export function AdminOcrReviewScreen({
                         )
                       : null;
                     const originalScoreLabel = originalWord
-                      ? getWordScoreLabel(originalWord, detail.ocr_metadata)
-                      : "Không có điểm OCR riêng cho từ này";
+                      ? getWordScoreLabel(originalWord, detail.ocr_metadata, t)
+                      : t("ocrReview.scoreLabels.missingWordScore");
                     return (
                       <li
                         className="rounded-control border border-purple-200 bg-white p-3"
@@ -2708,7 +2838,9 @@ export function AdminOcrReviewScreen({
                       >
                         <label className="flex cursor-pointer items-start gap-3">
                           <input
-                            aria-label={`Duyệt đề xuất cho từ ${change.index + 1}`}
+                            aria-label={t("ocrReview.draft.reviewChangeAria", {
+                              num: formatNumber(change.index + 1),
+                            })}
                             checked={aiAcceptedChanges.has(change.index)}
                             className="mt-1 size-4 accent-purple-700"
                             onChange={(event) => {
@@ -2724,9 +2856,15 @@ export function AdminOcrReviewScreen({
                           />
                           <span className="min-w-0 text-sm">
                             <span className="block text-xs text-muted">
-                              Từ {change.index + 1}
+                              {t("ocrReview.draft.wordNumber", {
+                                num: formatNumber(change.index + 1),
+                              })}
                             </span>
-                            <span className="flex flex-wrap items-center gap-2 break-words">
+                            <span
+                              className="viread-learning-content flex flex-wrap items-center gap-2 break-words"
+                              dir="ltr"
+                              lang="vi"
+                            >
                               <del
                                 className={`rounded border px-1.5 py-0.5 ${getWordReviewBadgeColor(originalStatus, originalWord, originalPaddleLineScore)}`}
                               >
@@ -2741,18 +2879,17 @@ export function AdminOcrReviewScreen({
                             </span>
                             <span className="mt-2 grid gap-1 text-xs">
                               <span>
-                                Từ OCR:{" "}
+                                {t("ocrReview.draft.ocrWordPrefix")}{" "}
                                 {getWordReviewLabel(
                                   originalStatus,
                                   originalWord,
                                   originalPaddleLineScore,
+                                  t,
                                 )}{" "}
                                 · {originalScoreLabel}
                               </span>
                               <span className="text-amber-900">
-                                Vì sao AI gợi ý: nội dung khác với bản OCR khi
-                                đối chiếu ảnh và ngữ cảnh. Đây chỉ là gợi ý;
-                                không có điểm tin cậy riêng cho từ này.
+                                {t("ocrReview.draft.whyAiSuggested")}
                               </span>
                             </span>
                           </span>
@@ -2772,7 +2909,11 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      <ChevronLeft aria-hidden className="size-4" /> Trang trước
+                      <ChevronLeft
+                        aria-hidden
+                        className="size-4 rtl:rotate-180"
+                      />{" "}
+                      {t("ocrReview.draft.prevDiffPage")}
                     </Button>
                     <Button
                       className="min-h-9 w-auto px-3"
@@ -2785,7 +2926,11 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      Trang sau <ChevronRight aria-hidden className="size-4" />
+                      {t("ocrReview.draft.nextDiffPage")}{" "}
+                      <ChevronRight
+                        aria-hidden
+                        className="size-4 rtl:rotate-180"
+                      />
                     </Button>
                   </div>
                 ) : null}
@@ -2795,8 +2940,8 @@ export function AdminOcrReviewScreen({
                     onClick={applySelectedAiChanges}
                     type="button"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận lựa
-                    chọn gợi ý
+                    <CheckCircle2 aria-hidden className="size-4" />{" "}
+                    {t("ocrReview.draft.confirmAiSelectionBtn")}
                   </Button>
                 </div>
               </section>
@@ -2814,8 +2959,8 @@ export function AdminOcrReviewScreen({
                   onClick={() => void createEditDraft()}
                   variant="secondary"
                 >
-                  <Save aria-hidden className="size-4" /> Tạo bản nháp để sửa
-                  nội dung
+                  <Save aria-hidden className="size-4" />{" "}
+                  {t("ocrReview.draft.createDraftToEditBtn")}
                 </Button>
               ) : (
                 <>
@@ -2830,7 +2975,8 @@ export function AdminOcrReviewScreen({
                     onClick={() => void saveDraft()}
                     variant="secondary"
                   >
-                    <Save aria-hidden className="size-4" /> Lưu bản nháp
+                    <Save aria-hidden className="size-4" />{" "}
+                    {t("ocrReview.draft.saveDraftBtn")}
                   </Button>
 
                   <Button
@@ -2860,10 +3006,10 @@ export function AdminOcrReviewScreen({
                       <Sparkles aria-hidden className="size-4" />
                     )}
                     {busy === "ai_correct"
-                      ? "Proofreading và Child Safety đang chạy…"
+                      ? t("ocrReview.draft.runningAiBtn")
                       : proofreadAudit || aiWorkflow?.proofread_text
-                        ? "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG"
-                        : "XÁC NHẬN & CHẠY AI"}
+                        ? t("ocrReview.draft.verifyFinalBtn")
+                        : t("ocrReview.draft.confirmRunAiBtn")}
                   </Button>
                   {aiWorkflow?.proofread_text &&
                   workflowFinalApprovalBlocked ? (
@@ -2872,15 +3018,15 @@ export function AdminOcrReviewScreen({
                       role="status"
                     >
                       {workflowHasHighRisk
-                        ? "Safety có cảnh báo mức HIGH hoặc NOT_RECOMMENDED. Luồng hiện tại chưa có chính sách Admin override cho trường hợp này nên chưa thể lưu VERIFIED."
+                        ? t("ocrReview.draft.blockedHighSafety")
                         : workflowImageFlaggedUnsafe
-                          ? "Hình ảnh trang đã bị Admin đánh dấu không phù hợp nên không thể xác minh."
+                          ? t("ocrReview.draft.blockedUnsafeImage")
                           : workflowImageUnassessed
-                            ? "Chưa có AI kiểm tra an toàn hình ảnh. Admin cần kiểm tra trực tiếp ảnh trang và xác nhận an toàn hình ảnh trước khi xác minh."
+                            ? t("ocrReview.draft.blockedUnassessedImage")
                             : aiWorkflow.safety_status !== "CONFIRMED" &&
                                 !workflowCanAutoConfirmSafety
-                              ? "Cần Child Safety hoàn tất cho Candidate hiện tại; tự xác nhận chỉ áp dụng khi kết quả SUITABLE và không có finding."
-                              : "Safety hash chưa khớp Candidate hiện tại; hãy chờ quét lại trước khi lưu VERIFIED."}
+                              ? t("ocrReview.draft.blockedIncompleteSafety")
+                              : t("ocrReview.draft.blockedStaleSafety")}
                     </p>
                   ) : null}
                   {aiCheckUnavailable && proofreadAudit === null ? (
@@ -2891,7 +3037,7 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      Tiếp tục xác minh thủ công
+                      {t("ocrReview.draft.continueManualVerify")}
                     </Button>
                   ) : null}
                 </>
@@ -2904,36 +3050,40 @@ export function AdminOcrReviewScreen({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="text-2xl font-black">
-                    Child Safety · GRADE_1_TO_5
+                    {t("ocrReview.safetyPanel.heading")}
                   </h2>
                   <p className="mt-1 text-sm text-muted">
-                    Quét văn bản Candidate sau Proofreading. Kết quả là
-                    provisional cho đến khi Admin xác nhận.
+                    {t("ocrReview.safetyPanel.subtitle")}
                   </p>
                 </div>
                 <span className="rounded-full border border-border px-3 py-1 text-sm font-bold">
                   {aiWorkflow.status === "READY_FOR_ADMIN_REVIEW"
-                    ? "Sẵn sàng Admin review"
+                    ? t("ocrReview.safetyPanel.readyForReview")
                     : aiWorkflow.status === "FAILED"
-                      ? `Lỗi · ${aiWorkflow.error_code ?? "UNKNOWN"}`
+                      ? t("ocrReview.safetyPanel.errorStatus", {
+                          code: aiWorkflow.error_code ?? "UNKNOWN",
+                        })
                       : aiWorkflow.stage === "PROOFREADING"
-                        ? "Đang Proofreading"
+                        ? t("ocrReview.safetyPanel.proofreadingRunning")
                         : aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
-                          ? "Đang quét Safety"
-                          : "Đang chờ xử lý"}
+                          ? t("ocrReview.safetyPanel.safetyRunning")
+                          : t("ocrReview.safetyPanel.pendingStatus")}
                 </span>
               </div>
 
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">Overall suitability</p>
+                  <p className="text-xs text-muted">
+                    {t("ocrReview.safetyPanel.overallSuitabilityLabel")}
+                  </p>
                   <p className="mt-1 break-words font-extrabold text-ink">
-                    {aiWorkflow.suitability ?? "CHƯA CÓ KẾT QUẢ"}
+                    {aiWorkflow.suitability ??
+                      t("ocrReview.safetyPanel.noResultBadge")}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-control bg-canvas p-3">
                   <p className="text-xs text-muted">
-                    An toàn văn bản (Text Safety)
+                    {t("ocrReview.safetyPanel.textSafetyHeading")}
                   </p>
                   <p className="mt-1 break-words font-extrabold text-ink">
                     {aiWorkflow.text_safety_status ?? aiWorkflow.safety_status}
@@ -2941,33 +3091,37 @@ export function AdminOcrReviewScreen({
                 </div>
                 <div className="min-w-0 rounded-control bg-canvas p-3 sm:col-span-2">
                   <p className="text-xs text-muted">
-                    An toàn hình ảnh (Image Safety)
+                    {t("ocrReview.safetyPanel.imageSafetyHeading")}
                   </p>
                   <p
                     className="mt-1 break-words font-extrabold text-ink"
                     data-testid="image-safety-status"
                   >
                     {workflowImageSafetyStatus === "ADMIN_CONFIRMED_SAFE"
-                      ? "Admin đã xác nhận ảnh an toàn"
+                      ? t("ocrReview.safetyPanel.imageSafeLabel")
                       : workflowImageSafetyStatus === "ADMIN_FLAGGED_UNSAFE"
-                        ? "Admin gắn cờ ảnh không phù hợp"
-                        : "Chưa đánh giá ảnh (chưa có model vision)"}
+                        ? t("ocrReview.safetyPanel.imageUnsafeLabel")
+                        : t("ocrReview.safetyPanel.imageUnassessedLabel")}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">Candidate version</p>
+                  <p className="text-xs text-muted">
+                    {t("ocrReview.safetyPanel.candidateVersionLabel")}
+                  </p>
                   <p className="mt-1 break-words font-extrabold text-ink">
-                    {aiWorkflow.candidate_version}
+                    {formatNumber(aiWorkflow.candidate_version)}
                   </p>
                 </div>
                 <div className="min-w-0 rounded-control bg-canvas p-3">
-                  <p className="text-xs text-muted">Safety hash match</p>
+                  <p className="text-xs text-muted">
+                    {t("ocrReview.safetyPanel.safetyHashMatchLabel")}
+                  </p>
                   <p className="mt-1 break-words font-extrabold text-ink">
                     {candidateEditPending
-                      ? "Đang lưu Candidate…"
+                      ? t("ocrReview.safetyPanel.savingCandidateLabel")
                       : aiWorkflow.hash_match
-                        ? "Khớp Candidate hiện tại"
-                        : "Chưa khớp / cần quét lại"}
+                        ? t("ocrReview.safetyPanel.hashMatchLabel")
+                        : t("ocrReview.safetyPanel.hashMismatchLabel")}
                   </p>
                 </div>
               </div>
@@ -2979,25 +3133,25 @@ export function AdminOcrReviewScreen({
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-extrabold text-ink">
-                      Kiểm tra an toàn hình ảnh (Admin kiểm tra thủ công)
+                      {t("ocrReview.safetyPanel.manualImageHeading")}
                     </p>
                     <p className="mt-1 text-xs text-muted">
-                      AI Child Safety hiện chỉ đánh giá văn bản (không kiểm tra
-                      nội dung trực quan trong ảnh). Admin cần đối chiếu ảnh
-                      trang sách trước khi xác nhận.
+                      {t("ocrReview.safetyPanel.manualImageDesc")}
                     </p>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-col gap-3">
                   <label className="block w-full text-xs font-bold text-ink">
-                    Ghi chú kiểm tra ảnh (bắt buộc nếu gắn cờ không phù hợp)
+                    {t("ocrReview.safetyPanel.imageNoteLabel")}
                     <input
                       className="mt-1 h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
                       maxLength={500}
                       onChange={(event) =>
                         setImageSafetyReason(event.target.value)
                       }
-                      placeholder="Ví dụ: Ảnh minh họa rõ nét, phù hợp học sinh tiểu học"
+                      placeholder={t(
+                        "ocrReview.safetyPanel.imageNotePlaceholder",
+                      )}
                       type="text"
                       value={imageSafetyReason}
                     />
@@ -3013,8 +3167,8 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      <CheckCircle2 aria-hidden className="size-4" /> Xác nhận
-                      ảnh an toàn
+                      <CheckCircle2 aria-hidden className="size-4" />{" "}
+                      {t("ocrReview.safetyPanel.confirmImageSafeBtn")}
                     </Button>
                     <Button
                       className="h-10 w-auto px-3"
@@ -3026,7 +3180,7 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      Gắn cờ ảnh không phù hợp
+                      {t("ocrReview.safetyPanel.flagImageUnsafeBtn")}
                     </Button>
                   </div>
                 </div>
@@ -3034,29 +3188,39 @@ export function AdminOcrReviewScreen({
 
               {aiWorkflow.uncertain_word_indices.length > 0 ? (
                 <p className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950">
-                  Proofreading còn {aiWorkflow.uncertain_word_indices.length} từ
-                  chưa chắc chắn (vị trí{" "}
-                  {aiWorkflow.uncertain_word_indices
-                    .map((index) => index + 1)
-                    .join(", ")}
-                  ). Các từ này được giữ nguyên để Admin đối chiếu.
+                  {t("ocrReview.safetyPanel.uncertainWordsNote", {
+                    count: formatNumber(
+                      aiWorkflow.uncertain_word_indices.length,
+                    ),
+                    indices: aiWorkflow.uncertain_word_indices
+                      .map((index) => index + 1)
+                      .join(", "),
+                  })}
                 </p>
               ) : null}
 
               <dl className="mt-4 grid gap-2 break-all rounded-control border border-border p-3 font-mono text-xs">
                 <div>
-                  <dt className="font-bold">CandidateHash</dt>
-                  <dd>{aiWorkflow.candidate_hash ?? "—"}</dd>
+                  <dt className="font-bold">
+                    {t("ocrReview.safetyPanel.candidateHashKey")}
+                  </dt>
+                  <dd>{aiWorkflow.candidate_hash ?? t("common.emptyDash")}</dd>
                 </div>
                 <div>
-                  <dt className="font-bold">SafetyInputHash</dt>
-                  <dd>{aiWorkflow.safety_input_hash ?? "—"}</dd>
+                  <dt className="font-bold">
+                    {t("ocrReview.safetyPanel.safetyInputHashKey")}
+                  </dt>
+                  <dd>
+                    {aiWorkflow.safety_input_hash ?? t("common.emptyDash")}
+                  </dd>
                 </div>
                 <div>
-                  <dt className="font-bold">FinalApprovedTextHash</dt>
+                  <dt className="font-bold">
+                    {t("ocrReview.safetyPanel.finalApprovedHashKey")}
+                  </dt>
                   <dd>
                     {aiWorkflow.final_approved_text_hash ??
-                      "Chưa xác nhận OCR cuối cùng"}
+                      t("ocrReview.safetyPanel.notConfirmedFinal")}
                   </dd>
                 </div>
               </dl>
@@ -3093,20 +3257,34 @@ export function AdminOcrReviewScreen({
                         : null);
                     const failureMessage =
                       failureCode === "INVALID_EVIDENCE"
-                        ? "AI trả về evidence không thể đối chiếu chính xác với Candidate. Nội dung OCR và Candidate vẫn được giữ nguyên."
+                        ? t(
+                            "ocrReview.safetyPanel.stageFailures.evidenceMismatch",
+                          )
                         : failureCode === "INVALID_JSON"
-                          ? "Provider trả về JSON không hợp lệ; kết quả Safety chưa được lưu."
+                          ? t("ocrReview.safetyPanel.stageFailures.invalidJson")
                           : failureCode === "MISSING_REQUIRED_FIELDS"
-                            ? "Provider thiếu trường bắt buộc; Safety chưa được xác nhận."
+                            ? t(
+                                "ocrReview.safetyPanel.stageFailures.missingFields",
+                              )
                             : failureCode === "INVALID_OUTPUT_SCHEMA"
-                              ? "Provider trả kết quả không đúng cấu trúc Safety yêu cầu."
+                              ? t(
+                                  "ocrReview.safetyPanel.stageFailures.schemaMismatch",
+                                )
                               : failureCode === "PROVIDER_TIMEOUT"
-                                ? "Provider hết thời gian chờ; Candidate chưa được đánh giá an toàn."
+                                ? t(
+                                    "ocrReview.safetyPanel.stageFailures.timeout",
+                                  )
                                 : failureCode === "PROVIDER_UNAVAILABLE"
-                                  ? "Provider không khả dụng; Candidate chưa được đánh giá an toàn."
+                                  ? t(
+                                      "ocrReview.safetyPanel.stageFailures.unavailable",
+                                    )
                                   : safetyFailure
-                                    ? "Safety chưa hoàn tất; Candidate hiện tại chưa được đánh giá an toàn."
-                                    : "Proofreading chưa hoàn tất; Candidate hiện tại chưa được cập nhật.";
+                                    ? t(
+                                        "ocrReview.safetyPanel.stageFailures.safetyIncomplete",
+                                      )
+                                    : t(
+                                        "ocrReview.safetyPanel.stageFailures.proofreadIncomplete",
+                                      );
                     return (
                       <div
                         className="mt-4 rounded-control border border-amber-500 bg-amber-50 p-3 text-sm text-amber-950"
@@ -3114,12 +3292,18 @@ export function AdminOcrReviewScreen({
                       >
                         <p className="font-bold">
                           {safetyFailure
-                            ? "Child Safety chưa hoàn tất."
-                            : "Proofreading chưa hoàn tất."}
+                            ? t(
+                                "ocrReview.safetyPanel.stageFailures.safetyTitle",
+                              )
+                            : t(
+                                "ocrReview.safetyPanel.stageFailures.proofreadTitle",
+                              )}
                         </p>
                         <p className="mt-1">{failureMessage}</p>
                         <p className="mt-1">
-                          Lỗi: {failureCode ?? "UNKNOWN"}
+                          {t("ocrReview.safetyPanel.failureCodeLine", {
+                            code: failureCode ?? "UNKNOWN",
+                          })}
                           {failureEvent?.provider
                             ? ` · Provider ${String(failureEvent.provider)}`
                             : ""}
@@ -3127,15 +3311,20 @@ export function AdminOcrReviewScreen({
                             ? ` · Model ${String(failureEvent.model)}`
                             : ""}
                           {failureEvent?.duration_ms != null
-                            ? ` · ${String(failureEvent.duration_ms)} ms`
+                            ? t("ocrReview.safetyPanel.httpStatusPart", {
+                                status: "",
+                              }).replace("HTTP ", "") &&
+                              ` · ${String(failureEvent.duration_ms)} ms`
                             : ""}
-                          {` · Lần thử ${aiWorkflow.attempts}`}
-                          {` · ${new Date(aiWorkflow.updated_at).toLocaleString("vi-VN")}`}
+                          {t("ocrReview.safetyPanel.attemptSuffix", {
+                            attempts: formatNumber(aiWorkflow.attempts),
+                          })}
+                          {` · ${formatDateTime(aiWorkflow.updated_at)}`}
                         </p>
                         <p className="mt-1">
                           {safetyFailure
-                            ? "Có thể thử lại riêng giai đoạn Safety; Proofreading và OCR được giữ nguyên."
-                            : "Có thể thử lại riêng Proofreading; OCR được giữ nguyên."}
+                            ? t("ocrReview.safetyPanel.retrySafetyHint")
+                            : t("ocrReview.safetyPanel.retryProofreadHint")}
                         </p>
                       </div>
                     );
@@ -3148,8 +3337,7 @@ export function AdminOcrReviewScreen({
                   className="mt-4 rounded-control border border-amber-400 bg-amber-50 p-3 text-sm text-amber-950"
                   role="status"
                 >
-                  Candidate đã đổi sau Proofreading. Child Safety cần chạy riêng
-                  trên Candidate mới trước khi xác minh hoặc xuất bản.
+                  {t("ocrReview.safetyPanel.candidateChangedWarning")}
                 </p>
               ) : null}
 
@@ -3172,8 +3360,8 @@ export function AdminOcrReviewScreen({
                     <RefreshCw aria-hidden className="size-4" />
                     {aiWorkflow.status === "FAILED" &&
                     aiWorkflow.stage === "PROOFREADING"
-                      ? "Thử lại Proofreading"
-                      : "Thử lại Child Safety"}
+                      ? t("ocrReview.safetyPanel.retryProofreadBtn")
+                      : t("ocrReview.safetyPanel.retrySafetyBtn")}
                   </Button>
                 ) : null}
                 {aiWorkflow.safety_status === "PROVISIONAL" &&
@@ -3181,7 +3369,7 @@ export function AdminOcrReviewScreen({
                 (aiWorkflow.findings.length > 0 ||
                   aiWorkflow.suitability !== "SUITABLE") ? (
                   <label className="basis-full text-sm font-bold text-ink">
-                    Lý do Admin xem xét Safety · bắt buộc
+                    {t("ocrReview.safetyPanel.reviewReasonLabel")}
                     <textarea
                       className="mt-1 min-h-20 w-full rounded-control border border-border bg-white p-3 font-normal"
                       maxLength={500}
@@ -3208,8 +3396,8 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <CheckCircle2 aria-hidden className="size-4" /> Xác nhận kết
-                    quả Safety
+                    <CheckCircle2 aria-hidden className="size-4" />{" "}
+                    {t("ocrReview.safetyPanel.confirmSafetyBtn")}
                   </Button>
                 ) : aiWorkflow.safety_status === "CONFIRMED" &&
                   aiWorkflow.hash_match ? (
@@ -3221,13 +3409,15 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    Bỏ xác nhận Safety
+                    {t("ocrReview.safetyPanel.clearSafetyConfirmBtn")}
                   </Button>
                 ) : null}
               </div>
 
               <section className="mt-5">
-                <h3 className="font-extrabold">Safety findings</h3>
+                <h3 className="font-extrabold">
+                  {t("ocrReview.safetyPanel.findingsHeading")}
+                </h3>
                 {aiWorkflow.findings.length ? (
                   <ul className="mt-2 grid gap-3">
                     {aiWorkflow.findings.map((finding, index) => {
@@ -3270,17 +3460,23 @@ export function AdminOcrReviewScreen({
                               >
                                 {severity}
                               </span>
-                              <span className="ml-auto text-xs text-muted">
-                                Mở chi tiết
+                              <span className="ms-auto text-xs text-muted">
+                                {t("ocrReview.safetyPanel.openDetail")}
                               </span>
                             </summary>
                             <div className="mt-3 border-t border-border pt-3">
                               <p className="text-xs font-bold uppercase tracking-wide text-muted">
-                                Bằng chứng
+                                {t("ocrReview.safetyPanel.evidenceLabel")}
                               </p>
-                              <blockquote className="mt-1 border-l-2 border-primary pl-3 text-sm">
-                                “{compactEvidence}”
-                                <span className="ml-2 font-mono text-xs text-muted">
+                              <blockquote className="mt-1 border-s-2 border-primary ps-3 text-sm">
+                                <span
+                                  className="viread-learning-content"
+                                  dir="ltr"
+                                  lang="vi"
+                                >
+                                  “{compactEvidence}”
+                                </span>
+                                <span className="ms-2 font-mono text-xs text-muted">
                                   [{String(finding.evidence_start ?? "?")}–
                                   {String(finding.evidence_end ?? "?")}]
                                 </span>
@@ -3288,22 +3484,27 @@ export function AdminOcrReviewScreen({
                               {evidence.length > 240 ? (
                                 <details className="mt-2 text-sm">
                                   <summary className="cursor-pointer font-bold text-primary">
-                                    Xem toàn bộ trích dẫn nguyên văn (
-                                    {evidence.length} ký tự)
+                                    {t("ocrReview.safetyPanel.viewFullQuote", {
+                                      length: formatNumber(evidence.length),
+                                    })}
                                   </summary>
-                                  <blockquote className="mt-2 border-l-2 border-primary pl-3">
+                                  <blockquote
+                                    className="viread-learning-content mt-2 border-s-2 border-primary ps-3"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
                                     “{evidence}”
                                   </blockquote>
                                 </details>
                               ) : null}
                               <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                Giải thích
+                                {t("ocrReview.safetyPanel.explanationLabel")}
                               </p>
                               <p className="mt-1 text-sm">
                                 {String(finding.explanation ?? "")}
                               </p>
                               <p className="mt-3 text-xs font-bold uppercase tracking-wide text-muted">
-                                Khuyến nghị
+                                {t("ocrReview.safetyPanel.recommendationLabel")}
                               </p>
                               <p className="mt-1 text-sm text-muted">
                                 {String(finding.recommendation ?? "")}
@@ -3319,8 +3520,8 @@ export function AdminOcrReviewScreen({
                     {aiWorkflow.safety_status === "PROVISIONAL" ||
                     aiWorkflow.safety_status === "CONFIRMED" ||
                     aiWorkflow.safety_status === "AUTO_CONFIRMED"
-                      ? "AI chưa phát hiện finding trong Candidate này."
-                      : "Findings sẽ hiển thị sau khi Safety hoàn tất."}
+                      ? t("ocrReview.safetyPanel.noFindings")
+                      : t("ocrReview.safetyPanel.findingsPending")}
                   </p>
                 )}
               </section>
@@ -3328,11 +3529,10 @@ export function AdminOcrReviewScreen({
               {aiWorkflow.safety_history.length > 0 ? (
                 <section className="mt-5">
                   <h3 className="font-extrabold">
-                    Safety history · kết quả cũ
+                    {t("ocrReview.safetyPanel.historyHeading")}
                   </h3>
                   <p className="mt-1 text-xs text-muted">
-                    Các scan này chỉ phục vụ audit; không áp dụng cho Candidate
-                    hiện tại.
+                    {t("ocrReview.safetyPanel.historyDesc")}
                   </p>
                   <div className="mt-2 grid gap-2">
                     {aiWorkflow.safety_history.map((scan, scanIndex) => {
@@ -3350,12 +3550,21 @@ export function AdminOcrReviewScreen({
                           key={`${String(scan.scan_id ?? scanIndex)}-${scanIndex}`}
                         >
                           <summary className="cursor-pointer text-sm font-bold">
-                            {String(scan.status ?? "UNKNOWN")} ·{" "}
-                            {String(scan.suitability ?? "Chưa có suitability")}
-                            {` · ${historicalFindings.length} finding`}
+                            {t("ocrReview.safetyPanel.scanStatusLine", {
+                              status: String(scan.status ?? "UNKNOWN"),
+                              suitability: String(
+                                scan.suitability ??
+                                  t(
+                                    "ocrReview.safetyPanel.noSuitabilityFallback",
+                                  ),
+                              ),
+                              count: formatNumber(historicalFindings.length),
+                            })}
                             {scan.content_hash
-                              ? ` · hash ${String(scan.content_hash).slice(0, 12)}…`
-                              : " · chưa có hash"}
+                              ? t("ocrReview.safetyPanel.scanHashPrefix", {
+                                  hash: String(scan.content_hash).slice(0, 12),
+                                })
+                              : t("ocrReview.safetyPanel.noHashSuffix")}
                           </summary>
                           {historicalFindings.length ? (
                             <ul className="mt-2 grid gap-2">
@@ -3363,7 +3572,7 @@ export function AdminOcrReviewScreen({
                                 (finding, findingIndex) => {
                                   return (
                                     <li
-                                      className="border-l-2 border-border pl-3 text-sm"
+                                      className="border-s-2 border-border ps-3 text-sm"
                                       key={`${String(finding.finding_id ?? findingIndex)}-${findingIndex}`}
                                     >
                                       <p className="font-bold">
@@ -3373,7 +3582,11 @@ export function AdminOcrReviewScreen({
                                         ·{" "}
                                         {String(finding.severity ?? "UNKNOWN")}
                                       </p>
-                                      <p>
+                                      <p
+                                        className="viread-learning-content"
+                                        dir="ltr"
+                                        lang="vi"
+                                      >
                                         “{String(finding.evidence_text ?? "")}”
                                       </p>
                                     </li>
@@ -3383,7 +3596,7 @@ export function AdminOcrReviewScreen({
                             </ul>
                           ) : (
                             <p className="mt-2 text-sm">
-                              Không có finding trong scan lịch sử.
+                              {t("ocrReview.safetyPanel.noHistoricalFindings")}
                             </p>
                           )}
                         </details>
@@ -3394,22 +3607,27 @@ export function AdminOcrReviewScreen({
               ) : null}
 
               <section className="mt-5">
-                <h3 className="font-extrabold">Provider và model provenance</h3>
+                <h3 className="font-extrabold">
+                  {t("ocrReview.safetyPanel.provenanceHeading")}
+                </h3>
                 <p className="mt-1 break-all font-mono text-xs text-muted">
-                  Run{" "}
-                  {String(
-                    aiWorkflow.proofread_metadata.run_id ??
-                      aiWorkflow.workflow_id,
-                  )}
-                  {" · Prompt "}
-                  {String(aiWorkflow.proofread_metadata.prompt_version ?? "—")}
-                  {" · "}
-                  {String(
-                    aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
-                  )}{" "}
-                  ms
-                  {" · Safety prompt "}
-                  {String(aiWorkflow.safety_metadata.prompt_version ?? "—")}
+                  {t("ocrReview.safetyPanel.provenanceRunPrefix", {
+                    runId: String(
+                      aiWorkflow.proofread_metadata.run_id ??
+                        aiWorkflow.workflow_id,
+                    ),
+                    promptVersion: String(
+                      aiWorkflow.proofread_metadata.prompt_version ??
+                        t("common.emptyDash"),
+                    ),
+                    duration: String(
+                      aiWorkflow.proofread_metadata.processing_time_ms ?? 0,
+                    ),
+                    safetyPrompt: String(
+                      aiWorkflow.safety_metadata.prompt_version ??
+                        t("common.emptyDash"),
+                    ),
+                  })}
                 </p>
                 {aiWorkflow.provider_events.length ? (
                   <ul className="mt-2 grid gap-2 text-xs">
@@ -3419,25 +3637,30 @@ export function AdminOcrReviewScreen({
                         key={`${String(event.provider ?? "provider")}-${index}`}
                       >
                         <span className="font-bold">
-                          {String(event.provider ?? "—")}
+                          {String(event.provider ?? t("common.emptyDash"))}
                         </span>
                         {" · "}
-                        {String(event.model ?? "—")}
+                        {String(event.model ?? t("common.emptyDash"))}
                         {" · "}
                         {event.availability === true
-                          ? "khả dụng"
+                          ? t("ocrReview.safetyPanel.providerAvailable")
                           : event.availability === false
-                            ? "không khả dụng"
-                            : "đang kiểm tra"}
-                        {" · HTTP "}
-                        {String(event.http_status ?? "—")}
+                            ? t("ocrReview.safetyPanel.providerUnavailable")
+                            : t("ocrReview.safetyPanel.providerChecking")}
+                        {t("ocrReview.safetyPanel.httpStatusPart", {
+                          status: String(
+                            event.http_status ?? t("common.emptyDash"),
+                          ),
+                        })}
                         {" · "}
                         {String(event.duration_ms ?? 0)} ms
                         {event.output_mode
                           ? ` · ${String(event.output_mode)}`
                           : ""}
                         {Number(event.retry_count ?? 0) > 0
-                          ? ` · fallback ${String(event.retry_count)}`
+                          ? t("ocrReview.safetyPanel.fallbackRetryPart", {
+                              count: String(event.retry_count),
+                            })
                           : ""}
                         {event.error_code
                           ? ` · ${String(event.error_code)}`
@@ -3447,15 +3670,13 @@ export function AdminOcrReviewScreen({
                   </ul>
                 ) : (
                   <p className="mt-2 text-sm text-muted">
-                    Chưa có provider event.
+                    {t("ocrReview.safetyPanel.noProviderEvents")}
                   </p>
                 )}
               </section>
 
               <p className="mt-4 text-xs text-muted">
-                Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với
-                workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận
-                Safety cho đúng Candidate hiện tại.
+                {t("ocrReview.safetyPanel.safetyDisclaimer")}
               </p>
             </Card>
           ) : null}
@@ -3466,7 +3687,7 @@ export function AdminOcrReviewScreen({
               size="compact"
               variant="secondary"
             >
-              Kiểm tra từ và vị trí
+              {t("ocrReview.tabs.words")}
             </ButtonLink>
             <ButtonLink
               className="sm:max-w-[280px]"
@@ -3474,23 +3695,28 @@ export function AdminOcrReviewScreen({
               size="compact"
               variant="secondary"
             >
-              Lịch sử xử lý OCR
+              {t("ocrReview.tabs.revisions")}
             </ButtonLink>
           </div>
 
           <details className="rounded-card border border-border bg-white p-4">
             <summary className="cursor-pointer rounded-control font-semibold text-primary focus-visible:outline-3 focus-visible:outline-primary">
-              Thông tin chi tiết từ OCR và lịch sử revision
+              {t("ocrReview.tabs.ariaLabel")}
             </summary>
             <div className="mt-4 grid gap-6">
               <Card className="bg-white">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <h2 className="text-2xl font-semibold">Danh sách từ OCR</h2>
+                    <h2 className="text-2xl font-semibold">
+                      {t("ocrReview.wordsPanel.heading")}
+                    </h2>
                     <p className="mt-1 text-sm text-muted">
-                      Ưu tiên xem {colorCounts.red + colorCounts.yellow} từ cần
-                      kiểm tra; {colorCounts.green} từ đã có evidence tốt, nhưng
-                      nhóm xanh chưa đồng nghĩa với Admin verified.
+                      {t("ocrReview.wordsPanel.prioritySummary", {
+                        attention: formatNumber(
+                          colorCounts.red + colorCounts.yellow,
+                        ),
+                        good: formatNumber(colorCounts.green),
+                      })}
                     </p>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -3501,8 +3727,8 @@ export function AdminOcrReviewScreen({
                       type="button"
                       variant="secondary"
                     >
-                      <CheckCircle2 aria-hidden className="size-4" /> Đồng bộ từ
-                      khớp với văn bản
+                      <CheckCircle2 aria-hidden className="size-4" />{" "}
+                      {t("ocrReview.wordsPanel.alignedBadge")}
                     </Button>
                     <Button
                       className="min-h-11 h-auto w-auto px-3 text-sm"
@@ -3510,14 +3736,12 @@ export function AdminOcrReviewScreen({
                       onClick={syncTextFromWords}
                       variant="secondary"
                     >
-                      Đồng bộ văn bản từ danh sách từ
+                      {t("ocrReview.wordsPanel.syncFromWordsBtn")}
                     </Button>
                   </div>
                 </div>
                 <p className="mb-4 text-sm text-muted">
-                  Chọn một từ để làm nổi bật vùng trên ảnh. Bằng chứng engine
-                  nằm trong chi tiết; tọa độ chỉ hiện khi mở phần chỉnh sửa nâng
-                  cao.
+                  {t("ocrReview.wordsPanel.hint")}
                 </p>
                 <div
                   aria-live="polite"
@@ -3525,50 +3749,57 @@ export function AdminOcrReviewScreen({
                   role="status"
                 >
                   <span className="font-semibold">
-                    Đối chiếu văn bản ↔ vùng OCR:{" "}
+                    {t("ocrReview.wordsPanel.alignmentLabel")}{" "}
                   </span>
                   {textAlignment.canCompare ? (
                     <>
-                      {textAlignment.matched}/{words.length} từ khớp ·{" "}
-                      {textAlignment.different} từ cần đối chiếu
+                      {t("ocrReview.wordsPanel.alignmentCount", {
+                        matched: formatNumber(textAlignment.matched),
+                        total: formatNumber(words.length),
+                        different: formatNumber(textAlignment.different),
+                      })}
                     </>
                   ) : (
-                    "Chưa thể ghép từng từ vì số lượng từ chưa khớp."
+                    t("ocrReview.wordsPanel.alignmentMismatch")
                   )}
                 </div>
                 <div
-                  aria-label="Lọc danh sách từ theo trạng thái"
+                  aria-label={t("ocrReview.wordsPanel.filterAria")}
                   className="mb-4 flex flex-wrap gap-2"
                   role="group"
                 >
                   {(
                     [
-                      { id: "all", label: "Tất cả", count: words.length },
+                      {
+                        id: "all",
+                        label: t("ocrReview.wordsPanel.filters.all"),
+                        count: words.length,
+                      },
                       {
                         id: "review",
-                        label: "Cần xem",
+                        label: t("ocrReview.wordsPanel.filters.attention"),
                         count: colorCounts.red + colorCounts.yellow,
                       },
                       {
                         id: "risk",
-                        label: "Rủi ro cao",
+                        label: t("ocrReview.wordsPanel.filters.risk"),
                         count: colorCounts.yellow,
                       },
                       {
                         id: "disagreement",
-                        label: "Engine bất đồng",
+                        label: t("ocrReview.wordsPanel.filters.disagreement"),
                         count: words.filter((word) => {
                           return hasEngineDisagreementEvidence(word);
                         }).length,
                       },
                       {
                         id: "red",
-                        label: "Đỏ · reference xác nhận sai",
+                        label: t("ocrReview.wordsPanel.filters.red"),
                         count: colorCounts.red,
                       },
                       {
                         id: "green",
-                        label: "Xanh · evidence tốt",
+                        label: t("ocrReview.wordsPanel.filters.green"),
                         count: colorCounts.green,
                       },
                     ] as const satisfies readonly {
@@ -3594,7 +3825,7 @@ export function AdminOcrReviewScreen({
                       onClick={() => setWordFilter(filter.id)}
                       type="button"
                     >
-                      {filter.label} ({filter.count})
+                      {filter.label} ({formatNumber(filter.count)})
                     </button>
                   ))}
                   <span
@@ -3602,16 +3833,36 @@ export function AdminOcrReviewScreen({
                     className="self-center text-xs font-semibold text-muted"
                   >
                     {wordFilter === "review"
-                      ? `Còn ${filteredWords.length} từ cần chú ý`
-                      : `Đang hiện ${filteredWords.length}/${words.length} từ`}
+                      ? t("ocrReview.wordsPanel.attentionRemaining", {
+                          count: formatNumber(filteredWords.length),
+                        })
+                      : t("ocrReview.wordsPanel.showingRatio", {
+                          shown: formatNumber(filteredWords.length),
+                          total: formatNumber(words.length),
+                        })}
                   </span>
                 </div>
                 <div className="grid gap-3">
                   {filteredWords.length === 0 ? (
                     <p className="rounded-control border border-border bg-canvas p-4 text-sm text-muted">
                       {wordFilter === "review"
-                        ? "Không có từ nào có mismatch hoặc thiếu bằng chứng cần ưu tiên."
-                        : `Không có từ nào trong nhóm ${wordFilter === "risk" ? "vàng" : wordFilter === "red" ? "đỏ" : wordFilter === "green" ? "xanh" : wordFilter === "disagreement" ? "engine bất đồng" : "này"}.`}
+                        ? t("ocrReview.wordsPanel.emptyAttention")
+                        : t("ocrReview.wordsPanel.emptyGroup", {
+                            group:
+                              wordFilter === "risk"
+                                ? t("ocrReview.wordsPanel.groupNames.risk")
+                                : wordFilter === "red"
+                                  ? t("ocrReview.wordsPanel.groupNames.red")
+                                  : wordFilter === "green"
+                                    ? t("ocrReview.wordsPanel.groupNames.green")
+                                    : wordFilter === "disagreement"
+                                      ? t(
+                                          "ocrReview.wordsPanel.groupNames.disagreement",
+                                        )
+                                      : t(
+                                          "ocrReview.wordsPanel.groupNames.default",
+                                        ),
+                          })}
                     </p>
                   ) : (
                     filteredWords.map((word) => {
@@ -3632,6 +3883,7 @@ export function AdminOcrReviewScreen({
                         reviewStatus,
                         word,
                         paddleLineScore,
+                        t,
                       );
                       const draftToken = draftTokens[word.word_index];
                       const canCompareToken =
@@ -3648,17 +3900,17 @@ export function AdminOcrReviewScreen({
                             else wordRefs.current.delete(word.word_index);
                           }}
                           id={`ocr-word-${word.word_index}`}
-                          className={`rounded-control border border-border border-l-4 p-3 transition-shadow ${
+                          className={`rounded-control border border-border border-s-4 p-3 transition-shadow ${
                             colorGroup === "green"
-                              ? "border-l-green-600"
+                              ? "border-s-green-600"
                               : colorGroup === "red"
-                                ? "border-l-red-600"
+                                ? "border-s-red-600"
                                 : colorGroup === "yellow"
-                                  ? "border-l-amber-500"
-                                  : "border-l-slate-400"
+                                  ? "border-s-amber-500"
+                                  : "border-s-slate-400"
                           } ${
                             word.word_index === selectedWord
-                              ? "border-y-primary border-r-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
+                              ? "border-y-primary border-e-primary bg-sky/30 shadow-md ring-2 ring-primary/20"
                               : "bg-white hover:shadow-sm"
                           }`}
                           key={word.word_index}
@@ -3666,11 +3918,14 @@ export function AdminOcrReviewScreen({
                           <div className="mb-3 flex items-center justify-between gap-2">
                             <button
                               aria-pressed={word.word_index === selectedWord}
-                              className="rounded-sm text-left text-sm font-semibold text-primary underline underline-offset-2"
+                              className="rounded-sm text-start text-sm font-semibold text-primary underline underline-offset-2"
                               onClick={() => selectWordOnImage(word.word_index)}
                               type="button"
                             >
-                              Từ #{word.word_index} · Dòng {word.line_index}
+                              {t("ocrReview.wordsPanel.wordIndexLine", {
+                                index: formatNumber(word.word_index),
+                                line: formatNumber(word.line_index),
+                              })}
                             </button>
                             <div className="flex flex-wrap items-center justify-end gap-2">
                               <span
@@ -3686,30 +3941,44 @@ export function AdminOcrReviewScreen({
                               {reviewStatus === "confirmed_mismatch" ? (
                                 <>
                                   <span className="font-semibold">
-                                    Reference đã xác minh không khớp
+                                    {t(
+                                      "ocrReview.wordsPanel.referenceMismatchHeading",
+                                    )}
                                   </span>
                                   <span className="break-words">
-                                    OCR đọc “{word.text}”
+                                    {t("ocrReview.wordsPanel.ocrReadPrefix", {
+                                      text: word.text,
+                                    })}
                                     {word.ocr_evidence?.reference_text
-                                      ? ` · Bản đã xác minh: “${word.ocr_evidence.reference_text}”`
+                                      ? t(
+                                          "ocrReview.wordsPanel.verifiedReferenceSuffix",
+                                          {
+                                            text: word.ocr_evidence
+                                              .reference_text,
+                                          },
+                                        )
                                       : ""}
                                   </span>
                                 </>
                               ) : (
                                 <>
                                   <span className="font-semibold">
-                                    Reference mismatch đã được xác nhận
+                                    {t(
+                                      "ocrReview.wordsPanel.mismatchConfirmedTitle",
+                                    )}
                                   </span>
                                   <span className="break-words">
-                                    Từ OCR: “{word.text}” ·{" "}
+                                    {t("ocrReview.wordsPanel.ocrTokenLine", {
+                                      text: word.text,
+                                    })}
                                     {getWordScoreLabel(
                                       word,
                                       detail.ocr_metadata,
+                                      t,
                                     )}
                                   </span>
                                   <span className="text-xs">
-                                    Màu đỏ chỉ dùng cho mismatch đã được Admin
-                                    hoặc reference đáng tin cậy xác nhận.
+                                    {t("ocrReview.wordsPanel.redWarningNote")}
                                   </span>
                                 </>
                               )}
@@ -3723,25 +3992,44 @@ export function AdminOcrReviewScreen({
 
                           <div className="mb-3 grid gap-1 rounded-control border border-border bg-canvas px-3 py-2 text-sm">
                             <span className="text-xs font-semibold text-muted">
-                              Văn bản trang ↔ từ gắn với vùng ảnh
+                              {t("ocrReview.wordsPanel.textVsBoxHeading")}
                             </span>
                             <span className="break-words font-semibold">
-                              {canCompareToken
-                                ? `${draftToken} ↔ ${word.text}`
-                                : "Không thể ghép từ này theo vị trí hiện tại"}
                               {canCompareToken ? (
-                                <span className="ml-2 whitespace-nowrap text-xs font-semibold text-muted">
-                                  {tokenMatches ? "Khớp" : "Cần đối chiếu"}
+                                <span
+                                  className="viread-learning-content"
+                                  dir="ltr"
+                                  lang="vi"
+                                >
+                                  {t("ocrReview.wordsPanel.tokenCompare", {
+                                    draftToken,
+                                    wordText: word.text,
+                                  })}
+                                </span>
+                              ) : (
+                                t("ocrReview.wordsPanel.cannotAlignByPosition")
+                              )}
+                              {canCompareToken ? (
+                                <span className="ms-2 whitespace-nowrap text-xs font-semibold text-muted">
+                                  {tokenMatches
+                                    ? t("ocrReview.wordsPanel.matchedLabel")
+                                    : t(
+                                        "ocrReview.wordsPanel.needsCompareLabel",
+                                      )}
                                 </span>
                               ) : null}
                             </span>
                           </div>
 
                           <label className="grid gap-1 text-sm font-semibold">
-                            Chỉnh từ OCR - Từ {word.word_index + 1}
+                            {t("ocrReview.wordsPanel.editWordInputAria", {
+                              num: formatNumber(word.word_index + 1),
+                            })}
                             <input
-                              className="min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
+                              className="viread-learning-content min-h-10 rounded-control border border-border px-3 font-normal disabled:bg-canvas"
+                              dir="ltr"
                               disabled={verified || busy !== null}
+                              lang="vi"
                               onChange={(event) =>
                                 updateWord(word.word_index, {
                                   text: event.target.value,
@@ -3755,7 +4043,7 @@ export function AdminOcrReviewScreen({
                           </label>
                           <details className="mt-2 rounded-control border border-border bg-white">
                             <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary">
-                              Tọa độ vùng ảnh · chỉnh sửa nâng cao
+                              {t("ocrReview.wordsPanel.advancedBboxSummary")}
                             </summary>
                             <div className="grid grid-cols-4 gap-2 border-t border-border p-3">
                               {(["x", "y", "w", "h"] as const).map(
@@ -3766,7 +4054,13 @@ export function AdminOcrReviewScreen({
                                   >
                                     {label}
                                     <input
-                                      aria-label={`Từ ${word.word_index} bbox ${label}`}
+                                      aria-label={t(
+                                        "ocrReview.wordsPanel.bboxInputAria",
+                                        {
+                                          index: formatNumber(word.word_index),
+                                          axis: label,
+                                        },
+                                      )}
                                       className="min-h-10 min-w-0 rounded-control border border-border px-2 font-normal disabled:bg-canvas"
                                       disabled={verified || busy !== null}
                                       max={1}
@@ -3792,15 +4086,18 @@ export function AdminOcrReviewScreen({
                             open={word.word_index === selectedWord}
                           >
                             <summary className="cursor-pointer rounded-control px-3 py-2 text-sm font-semibold text-primary hover:bg-white focus-visible:outline-3 focus-visible:outline-primary">
-                              Bằng chứng nhận dạng ·{" "}
-                              {getWordScoreLabel(word, detail.ocr_metadata)}
+                              {t("ocrReview.wordsPanel.evidenceSummaryPrefix")}
+                              {getWordScoreLabel(word, detail.ocr_metadata, t)}
                             </summary>
                             <section
-                              aria-label={`Bằng chứng OCR từ ${word.word_index + 1}`}
+                              aria-label={t(
+                                "ocrReview.wordsPanel.evidenceRegionAria",
+                                { num: formatNumber(word.word_index + 1) },
+                              )}
                               className="grid gap-1 border-t border-border px-3 py-3 text-xs"
                             >
                               <h3 className="text-sm font-semibold">
-                                Bằng chứng OCR
+                                {t("ocrReview.wordsPanel.evidenceHeading")}
                               </h3>
                               <span>
                                 PaddleOCR:{" "}
@@ -3808,6 +4105,7 @@ export function AdminOcrReviewScreen({
                                   word,
                                   "paddleocr",
                                   detail.ocr_metadata,
+                                  t,
                                 )}
                               </span>
                               <span>
@@ -3816,6 +4114,7 @@ export function AdminOcrReviewScreen({
                                   word,
                                   "vietocr",
                                   detail.ocr_metadata,
+                                  t,
                                 )}
                               </span>
                               {typeof word.ocr_evidence?.engine_outputs
@@ -3826,8 +4125,7 @@ export function AdminOcrReviewScreen({
                                 detail.ocr_metadata,
                               ) ? (
                                 <span>
-                                  PaddleOCR dòng gốc (không phải token căn
-                                  chỉnh):{" "}
+                                  {t("ocrReview.wordsPanel.paddleRawLineLabel")}{" "}
                                   {getLineEngineOutput(
                                     word,
                                     "paddleocr",
@@ -3843,7 +4141,9 @@ export function AdminOcrReviewScreen({
                                 detail.ocr_metadata,
                               ) ? (
                                 <span>
-                                  VietOCR dòng gốc (không phải token căn chỉnh):{" "}
+                                  {t(
+                                    "ocrReview.wordsPanel.vietOcrRawLineLabel",
+                                  )}{" "}
                                   {getLineEngineOutput(
                                     word,
                                     "vietocr",
@@ -3857,112 +4157,152 @@ export function AdminOcrReviewScreen({
                                   word,
                                   "tesseract",
                                   detail.ocr_metadata,
+                                  t,
                                 )}
                               </span>
                               <span>
-                                OCR source token:{" "}
-                                {word.ocr_evidence?.source_text ??
-                                  "Not recorded"}
+                                {t("ocrReview.wordsPanel.ocrSourceTokenLine", {
+                                  value:
+                                    word.ocr_evidence?.source_text ??
+                                    t("ocrReview.wordsPanel.notRecorded"),
+                                })}
                               </span>
                               {word.ocr_evidence?.source_text &&
                               normalizeVietnameseWord(
                                 word.ocr_evidence.source_text,
                               ) !== normalizeVietnameseWord(word.text) ? (
                                 <span className="text-amber-900">
-                                  {`Evidence engine thuộc token OCR ban đầu “${word.ocr_evidence.source_text}”; từ hiện tại “${word.text}” đã được chỉnh sửa. Candidate/score gốc không đánh giá độ đúng của bản chỉnh sửa.`}
+                                  {t(
+                                    "ocrReview.wordsPanel.editedWordEvidenceNote",
+                                    {
+                                      sourceText: word.ocr_evidence.source_text,
+                                      currentText: word.text,
+                                    },
+                                  )}
                                 </span>
                               ) : null}
                               <span>
-                                Alignment:{" "}
-                                {word.ocr_evidence?.alignment ?? "Not computed"}
+                                {t("ocrReview.wordsPanel.alignmentLine", {
+                                  value:
+                                    word.ocr_evidence?.alignment ??
+                                    t("ocrReview.wordsPanel.notComputed"),
+                                })}
                               </span>
                               <span>
-                                Điểm tương đồng giữa engine:{" "}
+                                {t("ocrReview.wordsPanel.agreementScoreLabel")}{" "}
                                 {word.ocr_evidence?.engine_agreement_score ===
                                   null ||
                                 word.ocr_evidence?.engine_agreement_score ===
                                   undefined
-                                  ? "Not computed"
-                                  : `${Math.round(word.ocr_evidence.engine_agreement_score * 100)}/100 · heuristic, không phải xác suất`}
+                                  ? t("ocrReview.wordsPanel.notComputed")
+                                  : t(
+                                      "ocrReview.wordsPanel.agreementHeuristic",
+                                      {
+                                        score: Math.round(
+                                          word.ocr_evidence
+                                            .engine_agreement_score * 100,
+                                        ),
+                                      },
+                                    )}
                               </span>
                               <span>
-                                Reference text:{" "}
+                                {t("ocrReview.wordsPanel.referenceTextLabel")}{" "}
                                 {word.ocr_evidence?.reference_text ??
-                                  "Not provided"}
+                                  t("ocrReview.wordsPanel.notProvided")}
                               </span>
                               <span>
-                                Nguồn xác minh:{" "}
+                                {t(
+                                  "ocrReview.wordsPanel.verificationSourceLabel",
+                                )}{" "}
                                 {word.ocr_evidence?.verification_source ??
-                                  "None"}
+                                  t("ocrReview.wordsPanel.noneValue")}
                               </span>
                               <span>
-                                Calibrated accuracy:{" "}
+                                {t(
+                                  "ocrReview.wordsPanel.calibratedAccuracyLabel",
+                                )}{" "}
                                 {word.ocr_score_source ===
                                   "ocr_calibrated_word_accuracy_v1" &&
                                 word.ocr_confidence !== null
                                   ? `${Math.round(word.ocr_confidence * 100)}%`
-                                  : "Not calibrated · chưa có calibration evidence"}
+                                  : t(
+                                      "ocrReview.wordsPanel.notCalibratedEvidence",
+                                    )}
                               </span>
                               <span>
-                                Engine dùng cho bản nháp:{" "}
+                                {t("ocrReview.wordsPanel.draftEngineLabel")}{" "}
                                 {word.ocr_evidence?.selected_engine ??
-                                  "Not selected"}{" "}
-                                · lựa chọn tạm thời, chưa phải verified
+                                  t("ocrReview.wordsPanel.notSelected")}
+                                {t("ocrReview.wordsPanel.tempSelectionSuffix")}
                               </span>
                               <span>
-                                Lý do chọn candidate:{" "}
+                                {t("ocrReview.wordsPanel.selectionReasonLabel")}{" "}
                                 {word.ocr_evidence?.selection_reason ??
-                                  "Not recorded"}
+                                  t("ocrReview.wordsPanel.notRecorded")}
                               </span>
                               <span>
-                                Hình học của box: {getWordGeometryLabel(word)}
+                                {t("ocrReview.wordsPanel.geometryLabel", {
+                                  label: getWordGeometryLabel(word, t),
+                                })}
                               </span>
                               <span>
-                                Dấu câu: {getWordPunctuationLabel(word)}
+                                {t("ocrReview.wordsPanel.punctuationLabel", {
+                                  label: getWordPunctuationLabel(word, t),
+                                })}
                               </span>
                               <span>
-                                Bounding box quality:{" "}
+                                {t("ocrReview.wordsPanel.bboxQualityLabel")}{" "}
                                 {word.ocr_evidence?.bbox_quality ??
-                                  "Not assessed"}
+                                  t("ocrReview.wordsPanel.notAssessed")}
                               </span>
                               <span>
-                                Crop quality:{" "}
+                                {t("ocrReview.wordsPanel.cropQualityLabel")}{" "}
                                 {word.ocr_evidence?.crop_quality ??
-                                  "Not processed"}
+                                  t("ocrReview.wordsPanel.notProcessed")}
                               </span>
                               {word.ocr_evidence?.crop_evidence ? (
                                 <>
                                   <span>
-                                    Crop PaddleOCR:{" "}
+                                    {t("ocrReview.wordsPanel.cropPaddleLabel")}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .paddleocr_candidate === "string"
                                       ? word.ocr_evidence.crop_evidence
                                           .paddleocr_candidate
-                                      : "No crop candidate recorded"}
+                                      : t(
+                                          "ocrReview.wordsPanel.noCropCandidate",
+                                        )}
                                   </span>
                                   <span>
-                                    Crop VietOCR:{" "}
+                                    {t("ocrReview.wordsPanel.cropVietOcrLabel")}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .vietocr_candidate === "string"
                                       ? word.ocr_evidence.crop_evidence
                                           .vietocr_candidate
-                                      : "No crop candidate recorded"}
+                                      : t(
+                                          "ocrReview.wordsPanel.noCropCandidate",
+                                        )}
                                   </span>
                                   <span>
-                                    Crop Tesseract:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.cropTesseractLabel",
+                                    )}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .tesseract_candidate === "string"
                                       ? word.ocr_evidence.crop_evidence
                                           .tesseract_candidate
-                                      : "Not run or no candidate"}
+                                      : t(
+                                          "ocrReview.wordsPanel.noTesseractCrop",
+                                        )}
                                   </span>
                                   <span>
-                                    Phân xử candidate:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.adjudicationLabel",
+                                    )}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .adjudication_status === "string"
                                       ? word.ocr_evidence.crop_evidence
                                           .adjudication_status
-                                      : "Not recorded"}
+                                      : t("ocrReview.wordsPanel.notRecorded")}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .adjudication_support === "string" &&
                                     word.ocr_evidence.crop_evidence
@@ -3973,80 +4313,111 @@ export function AdminOcrReviewScreen({
                                   {typeof word.ocr_evidence.crop_evidence
                                     .text_before_adjudication === "string" ? (
                                     <span>
-                                      Text trước phân xử:{" "}
-                                      {
-                                        word.ocr_evidence.crop_evidence
-                                          .text_before_adjudication
-                                      }
+                                      {t(
+                                        "ocrReview.wordsPanel.textBeforeAdjudication",
+                                      )}{" "}
+                                      <span
+                                        className="viread-learning-content"
+                                        dir="ltr"
+                                        lang="vi"
+                                      >
+                                        {
+                                          word.ocr_evidence.crop_evidence
+                                            .text_before_adjudication
+                                        }
+                                      </span>
                                     </span>
                                   ) : null}
                                   <span>
-                                    Paddle crop raw recognition score:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.paddleCropRawScoreLabel",
+                                    )}{" "}
                                     {formatRawOcrEvidence(
                                       word.ocr_evidence.crop_evidence
                                         .paddle_crop_recognition_score,
-                                    )}{" "}
-                                    · not probability
+                                      t,
+                                    )}
+                                    {t(
+                                      "ocrReview.wordsPanel.notProbabilitySuffix",
+                                    )}
                                   </span>
                                   <span>
-                                    VietOCR crop raw recognition score:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.vietOcrCropRawScoreLabel",
+                                    )}{" "}
                                     {formatRawOcrEvidence(
                                       word.ocr_evidence.crop_evidence
                                         .vietocr_crop_recognition_score,
-                                    )}{" "}
-                                    · not probability
+                                      t,
+                                    )}
+                                    {t(
+                                      "ocrReview.wordsPanel.notProbabilitySuffix",
+                                    )}
                                   </span>
                                   <span>
-                                    Crop status:{" "}
+                                    {t("ocrReview.wordsPanel.cropStatusLabel")}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .status === "string"
                                       ? word.ocr_evidence.crop_evidence.status
-                                      : "Not processed"}
+                                      : t("ocrReview.wordsPanel.notProcessed")}
                                   </span>
                                   <span>
-                                    VietOCR decoding mode:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.vietOcrDecodingModeLabel",
+                                    )}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .vietocr_decoding_mode === "string"
                                       ? word.ocr_evidence.crop_evidence
                                           .vietocr_decoding_mode
-                                      : "Not applicable"}
+                                      : t("ocrReview.wordsPanel.notApplicable")}
                                   </span>
                                   <span>
-                                    Crop contrast (standard deviation):{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.cropContrastStdLabel",
+                                    )}{" "}
                                     {formatRawOcrEvidence(
                                       word.ocr_evidence.crop_evidence
                                         .contrast_std,
+                                      t,
                                     )}
                                   </span>
                                   <span>
-                                    Ink ratio:{" "}
+                                    {t("ocrReview.wordsPanel.inkRatioLabel")}{" "}
                                     {formatRawOcrEvidence(
                                       word.ocr_evidence.crop_evidence.ink_ratio,
+                                      t,
                                     )}
                                   </span>
                                   <span>
-                                    Padding clipped by page boundary:{" "}
+                                    {t(
+                                      "ocrReview.wordsPanel.paddingClippedLabel",
+                                    )}{" "}
                                     {typeof word.ocr_evidence.crop_evidence
                                       .padding_clipped === "boolean"
                                       ? word.ocr_evidence.crop_evidence
                                           .padding_clipped
-                                        ? "Yes"
-                                        : "No"
-                                      : "Not assessed"}
+                                        ? t("ocrReview.wordsPanel.yesLabel")
+                                        : t("ocrReview.wordsPanel.noLabel")
+                                      : t("ocrReview.wordsPanel.notAssessed")}
                                   </span>
                                 </>
                               ) : null}
                               <span>
-                                Lý do trạng thái:{" "}
+                                {t("ocrReview.wordsPanel.statusReasonLabel")}{" "}
                                 {word.ocr_evidence?.review_reason ??
                                   (colorGroup === "green"
-                                    ? "Evidence supports a likely-correct OCR token; not Admin verified"
-                                    : "Insufficient OCR evidence; Admin review required")}
+                                    ? t(
+                                        "ocrReview.wordsPanel.greenStatusFallback",
+                                      )
+                                    : t(
+                                        "ocrReview.wordsPanel.reviewStatusFallback",
+                                      ))}
                               </span>
                               <span>
                                 {getPaddleLineScoreLabel(
                                   detail.ocr_metadata,
                                   word.line_index,
+                                  t,
                                 )}
                               </span>
                             </section>
@@ -4060,15 +4431,15 @@ export function AdminOcrReviewScreen({
 
               <Card className="bg-white">
                 <h2 className="mb-3 text-2xl font-semibold">
-                  Lịch sử revision
+                  {t("ocrReview.revisionsPanel.heading")}
                 </h2>
                 <div className="grid gap-2">
                   {history.map((revision) => (
                     <button
                       className={
                         revision.page_revision_id === detail.page_revision_id
-                          ? "rounded-control border-2 border-primary bg-sky p-3 text-left"
-                          : "rounded-control border border-border p-3 text-left"
+                          ? "rounded-control border-2 border-primary bg-sky p-3 text-start"
+                          : "rounded-control border border-border p-3 text-start"
                       }
                       key={revision.page_revision_id}
                       disabled={busy !== null}
@@ -4078,11 +4449,13 @@ export function AdminOcrReviewScreen({
                       type="button"
                     >
                       <span className="font-semibold">
-                        Revision R{revision.revision_no}
+                        Revision R{formatNumber(revision.revision_no)}
                       </span>
-                      <span className="ml-2 text-sm text-muted">
+                      <span className="ms-2 text-sm text-muted">
                         {revision.verification_status}
-                        {revision.is_current_verified ? " · hiện hành" : ""}
+                        {revision.is_current_verified
+                          ? t("ocrReview.revisionsPanel.currentSuffix")
+                          : ""}
                       </span>
                     </button>
                   ))}
@@ -4092,7 +4465,7 @@ export function AdminOcrReviewScreen({
                     className="grid gap-2 text-sm font-semibold"
                     htmlFor="replacement-page-image"
                   >
-                    Tải ảnh mới cho riêng trang này
+                    {t("ocrReview.revisionsPanel.reuploadLabel")}
                     <input
                       id="replacement-page-image"
                       accept="image/jpeg,image/png,image/webp"
@@ -4108,7 +4481,9 @@ export function AdminOcrReviewScreen({
                   </label>
                   {replacementFile ? (
                     <p className="text-sm text-muted">
-                      Đã chọn: {replacementFile.name}
+                      {t("ocrReview.revisionsPanel.selectedFile", {
+                        fileName: replacementFile.name,
+                      })}
                     </p>
                   ) : null}
                   <Button
@@ -4123,8 +4498,8 @@ export function AdminOcrReviewScreen({
                     type="button"
                     variant="secondary"
                   >
-                    <RefreshCw aria-hidden className="size-4" /> Tải ảnh mới và
-                    chạy OCR
+                    <RefreshCw aria-hidden className="size-4" />{" "}
+                    {t("ocrReview.revisionsPanel.reuploadBtn")}
                   </Button>
                 </div>
                 <Button
@@ -4136,8 +4511,8 @@ export function AdminOcrReviewScreen({
                   onClick={() => void reprocess()}
                   variant="secondary"
                 >
-                  <RotateCcw aria-hidden className="size-4" /> Chạy lại OCR từ
-                  ảnh đã lưu
+                  <RotateCcw aria-hidden className="size-4" />{" "}
+                  {t("ocrReview.revisionsPanel.reprocessBtn")}
                 </Button>
                 <Button
                   className="mt-4 sm:w-auto"
@@ -4145,7 +4520,8 @@ export function AdminOcrReviewScreen({
                   onClick={() => void load()}
                   variant="quiet"
                 >
-                  <RefreshCw aria-hidden className="size-4" /> Tải lại dữ liệu
+                  <RefreshCw aria-hidden className="size-4" />{" "}
+                  {t("ocrReview.revisionsPanel.reloadDataBtn")}
                 </Button>
               </Card>
             </div>
@@ -4225,6 +4601,8 @@ function AdminOcrWordReviewPanel({
   wordSyncError: string | null;
   words: readonly AdminRevisionWordDTO[];
 }) {
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const selected =
     words.find((word) => word.word_index === selectedWord) ?? words[0] ?? null;
   const readOnly = status !== "NEEDS_REVIEW" || busy;
@@ -4232,22 +4610,28 @@ function AdminOcrWordReviewPanel({
   return (
     <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
       <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
-        ← Quay lại
+        {t("ocrReview.bboxView.backBtn")}
       </ButtonLink>
       <header className="flex flex-col gap-2">
         <h1 className="text-heading font-extrabold text-ink">
-          Kiểm tra từ và vị trí
+          {t("ocrReview.bboxView.heading")}
         </h1>
         <p className="text-sm text-muted">
-          {bookTitle} · Trang {pageNumber} · Revision R{revisionNo}
+          {t("ocrReview.bboxView.subtitle", {
+            title: bookTitle,
+            pageNumber: formatNumber(pageNumber),
+            revisionNo: formatNumber(revisionNo),
+          })}
         </p>
         <OcrRevisionStatus status={status} />
       </header>
 
       <Card className="gap-4 bg-white sm:p-8">
-        <h2 className="text-2xl font-extrabold text-ink">Từ và bounding box</h2>
+        <h2 className="text-2xl font-extrabold text-ink">
+          {t("ocrReview.bboxView.sectionHeading")}
+        </h2>
         <div
-          aria-label="Danh sách từ và bounding box trên di động"
+          aria-label={t("ocrReview.bboxView.mobileListAria")}
           className="grid max-h-[360px] gap-2.5 overflow-y-auto md:hidden"
         >
           {words.map((word) => {
@@ -4262,18 +4646,24 @@ function AdminOcrWordReviewPanel({
                 key={word.word_index}
               >
                 <div className="mb-1.5 flex items-center justify-between gap-2 text-xs text-muted">
-                  <span className="font-bold text-ink">#{word.word_index}</span>
+                  <span className="font-bold text-ink">
+                    #{formatNumber(word.word_index)}
+                  </span>
                   <span>
-                    Confidence:{" "}
+                    {t("ocrReview.bboxView.confidencePrefix")}{" "}
                     {word.ocr_confidence === null
-                      ? "—"
-                      : getOcrScoreLabel(word)}
+                      ? t("common.emptyDash")
+                      : getOcrScoreLabel(word, t)}
                   </span>
                 </div>
                 <input
-                  aria-label={`Từ ${word.word_index + 1} (di động)`}
-                  className="min-h-12 w-full rounded-control border border-border bg-white px-3 text-sm font-semibold text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                  aria-label={t("ocrReview.bboxView.mobileWordAria", {
+                    num: formatNumber(word.word_index + 1),
+                  })}
+                  className="viread-learning-content min-h-12 w-full rounded-control border border-border bg-white px-3 text-sm font-semibold text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                  dir="ltr"
                   disabled={readOnly}
+                  lang="vi"
                   onChange={(event) =>
                     onUpdateWord(word.word_index, {
                       text: event.target.value,
@@ -4288,15 +4678,21 @@ function AdminOcrWordReviewPanel({
         </div>
         <div className="hidden md:block">
           <ResponsiveTable
-            ariaLabel="Bảng từ và bounding box"
+            ariaLabel={t("ocrReview.bboxView.tableAria")}
             className="max-h-[360px] overflow-y-auto"
           >
-            <table className="w-full border-collapse text-left text-sm">
+            <table className="w-full border-collapse text-start text-sm">
               <thead className="sticky top-0 z-10 bg-sky text-primary-hover">
                 <tr>
-                  <th className="px-3 py-3 font-bold">#</th>
-                  <th className="px-3 py-3 font-bold">Từ</th>
-                  <th className="px-3 py-3 font-bold">Confidence</th>
+                  <th className="px-3 py-3 font-bold">
+                    {t("ocrReview.bboxView.hashColumnLabel")}
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    {t("ocrReview.bboxView.wordColumn")}
+                  </th>
+                  <th className="px-3 py-3 font-bold">
+                    {t("ocrReview.bboxView.confidenceColumn")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -4309,12 +4705,18 @@ function AdminOcrWordReviewPanel({
                       }
                       key={word.word_index}
                     >
-                      <td className="px-3 py-3">{word.word_index}</td>
+                      <td className="px-3 py-3">
+                        {formatNumber(word.word_index)}
+                      </td>
                       <td className="px-3 py-2">
                         <input
-                          aria-label={`Từ ${word.word_index + 1}`}
-                          className="min-h-9 w-full min-w-20 scroll-mt-12 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
+                          aria-label={t("ocrReview.bboxView.wordInputAria", {
+                            num: formatNumber(word.word_index + 1),
+                          })}
+                          className="viread-learning-content min-h-9 w-full min-w-20 scroll-mt-12 bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary"
+                          dir="ltr"
                           disabled={readOnly}
+                          lang="vi"
                           onChange={(event) =>
                             onUpdateWord(word.word_index, {
                               text: event.target.value,
@@ -4326,8 +4728,8 @@ function AdminOcrWordReviewPanel({
                       </td>
                       <td className="px-3 py-3">
                         {word.ocr_confidence === null
-                          ? "—"
-                          : getOcrScoreLabel(word)}
+                          ? t("common.emptyDash")
+                          : getOcrScoreLabel(word, t)}
                       </td>
                     </tr>
                   );
@@ -4346,7 +4748,10 @@ function AdminOcrWordReviewPanel({
               >
                 <span>{label}</span>
                 <input
-                  aria-label={`${label} của từ ${selected.word_index + 1}`}
+                  aria-label={t("ocrReview.bboxView.coordInputAria", {
+                    axis: label,
+                    num: formatNumber(selected.word_index + 1),
+                  })}
                   className="min-h-6 w-full bg-transparent text-ink outline-offset-2 focus-visible:outline-2 focus-visible:outline-primary disabled:text-muted"
                   disabled={readOnly}
                   max="1"
@@ -4367,7 +4772,7 @@ function AdminOcrWordReviewPanel({
           </div>
         ) : (
           <p className="rounded-control bg-canvas p-4 text-sm text-muted">
-            Chưa có từ nào trong revision này.
+            {t("ocrReview.bboxView.noWords")}
           </p>
         )}
 
@@ -4383,7 +4788,7 @@ function AdminOcrWordReviewPanel({
             size="compact"
             variant="secondary"
           >
-            Thêm từ
+            {t("ocrReview.bboxView.addWord")}
           </Button>
           <Button
             className="min-h-12"
@@ -4392,13 +4797,13 @@ function AdminOcrWordReviewPanel({
             size="compact"
             variant="quiet"
           >
-            Xóa từ
+            {t("ocrReview.bboxView.deleteWord")}
           </Button>
         </div>
       </Card>
 
       <Button className="sm:max-w-[280px]" onClick={onComplete}>
-        Hoàn tất kiểm tra
+        {t("ocrReview.bboxView.finishReview")}
       </Button>
     </section>
   );
@@ -4411,6 +4816,7 @@ function AdminOcrHistoryPanel({
   detail,
   history,
   notice,
+  noticeTone = "info",
   onChooseRevision,
   onReload,
   onReprocess,
@@ -4433,6 +4839,7 @@ function AdminOcrHistoryPanel({
   detail: AdminPageRevisionDetailDTO;
   history: readonly AdminRevisionSummaryUI[];
   notice: string | null;
+  noticeTone?: "info" | "error";
   onChooseRevision: (revisionId: string) => void;
   onReload: () => void;
   onReprocess: () => void;
@@ -4441,55 +4848,57 @@ function AdminOcrHistoryPanel({
   pageNumber: number;
   replacementFile: File | null;
 }) {
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const processing = detail.verification_status === "PROCESSING";
   const canChangeImage = detail.lifecycle_status === "ACTIVE" && !processing;
 
   return (
     <section className="mx-auto flex w-full max-w-[640px] flex-col gap-4">
       <ButtonLink className="sm:max-w-[240px]" href={backHref} variant="quiet">
-        ← Quay lại
+        {t("ocrReview.bboxView.backBtn")}
       </ButtonLink>
       <header className="flex flex-col gap-2">
         <h1 className="text-heading font-extrabold text-ink">
-          Lịch sử xử lý OCR
+          {t("ocrReview.historyView.heading")}
         </h1>
         <p className="text-sm text-muted">
-          {bookTitle} · Trang {pageNumber} · Revision R{detail.revision_no}
+          {t("ocrReview.historyView.subtitle", {
+            title: bookTitle,
+            pageNumber: formatNumber(pageNumber),
+            revisionNo: formatNumber(detail.revision_no),
+          })}
         </p>
         <OcrRevisionStatus status={detail.verification_status} />
       </header>
 
       {notice ? (
-        <StatusMessage
-          tone={
-            notice.startsWith("Không thể") || notice.startsWith("Lỗi")
-              ? "error"
-              : "info"
-          }
-        >
-          {notice}
-        </StatusMessage>
+        <StatusMessage tone={noticeTone}>{notice}</StatusMessage>
       ) : null}
 
       <Card className="gap-4 bg-white sm:p-8">
-        <h2 className="text-2xl font-extrabold text-ink">Lịch sử revision</h2>
+        <h2 className="text-2xl font-extrabold text-ink">
+          {t("ocrReview.revisionsPanel.heading")}
+        </h2>
         <div className="grid gap-2">
           {history.map((revision) => {
             const selected =
               revision.page_revision_id === detail.page_revision_id;
             return (
               <button
-                className={`rounded-card p-4 text-left ${selected ? "bg-sky" : "border border-border"}`}
+                className={`rounded-card p-4 text-start ${selected ? "bg-sky" : "border border-border"}`}
                 key={revision.page_revision_id}
                 onClick={() => onChooseRevision(revision.page_revision_id)}
                 type="button"
               >
                 <span className="block font-extrabold text-ink">
-                  Revision R{revision.revision_no}
+                  Revision R{formatNumber(revision.revision_no)}
                 </span>
                 <span className="mt-1 block text-sm text-muted">
                   {revision.verification_status} ·{" "}
-                  {revision.is_current_verified ? "hiện hành" : "đang xem"}
+                  {revision.is_current_verified
+                    ? t("ocrReview.revisionsPanel.currentLabel")
+                    : t("ocrReview.revisionsPanel.viewingSuffix")}
                 </span>
               </button>
             );
@@ -4500,7 +4909,7 @@ function AdminOcrHistoryPanel({
           className="grid gap-2 text-center text-sm font-semibold text-ink"
           htmlFor="replacement-page-image"
         >
-          Tải ảnh mới cho riêng trang này
+          {t("ocrReview.revisionsPanel.reuploadLabel")}
           <input
             id="replacement-page-image"
             accept="image/jpeg,image/png,image/webp"
@@ -4513,7 +4922,11 @@ function AdminOcrHistoryPanel({
           />
         </label>
         {replacementFile ? (
-          <p className="text-sm text-muted">Đã chọn: {replacementFile.name}</p>
+          <p className="text-sm text-muted">
+            {t("ocrReview.revisionsPanel.selectedFile", {
+              fileName: replacementFile.name,
+            })}
+          </p>
         ) : null}
         <Button
           className="min-h-12"
@@ -4523,7 +4936,7 @@ function AdminOcrHistoryPanel({
           size="compact"
           variant="secondary"
         >
-          Tải ảnh mới và chạy OCR
+          {t("ocrReview.revisionsPanel.reuploadBtn")}
         </Button>
         <Button
           className="min-h-12"
@@ -4533,7 +4946,7 @@ function AdminOcrHistoryPanel({
           size="compact"
           variant="secondary"
         >
-          Chạy lại OCR từ ảnh đã lưu
+          {t("ocrReview.revisionsPanel.reprocessBtn")}
         </Button>
         <Button
           className="min-h-12"
@@ -4542,7 +4955,7 @@ function AdminOcrHistoryPanel({
           size="compact"
           variant="quiet"
         >
-          Tải lại dữ liệu
+          {t("ocrReview.revisionsPanel.reloadDataBtn")}
         </Button>
       </Card>
     </section>

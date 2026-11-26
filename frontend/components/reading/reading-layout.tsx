@@ -1,3 +1,5 @@
+"use client";
+
 import { ArrowLeft, CircleHelp, Volume2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -12,6 +14,7 @@ import {
 } from "@/components/reading/reading-companion-bubble";
 import { ReadingControls } from "@/components/reading/reading-controls";
 import { ReadingProgress } from "@/components/reading/reading-progress";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
@@ -156,6 +159,9 @@ export function ReadingLayout({
   previewSnapshot,
   topBar,
 }: ReadingLayoutProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const tc = useTranslations("child");
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
@@ -175,7 +181,7 @@ export function ReadingLayout({
       <header className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-3">
         <div className="flex shrink-0 items-center">
           <Link
-            aria-label="Thoát khỏi buổi đọc"
+            aria-label={t("layout.exitAria")}
             className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-label"
             href={exitHref}
             onClick={
@@ -189,15 +195,16 @@ export function ReadingLayout({
           >
             <ArrowLeft
               aria-hidden="true"
-              className="size-5 shrink-0 sm:size-5"
+              className="viread-rtl-flip size-5 shrink-0 sm:size-5"
             />
-            <span className="hidden sm:inline">Quay lại</span>
+            <span className="hidden sm:inline">{t("layout.back")}</span>
           </Link>
         </div>
-        <div className="mr-auto min-w-0">
+        <div className="me-auto min-w-0">
           {child && (
             <p className="truncate text-xs font-bold text-primary sm:text-sm">
-              {child.alias} · Lớp {child.grade}
+              {child.alias} ·{" "}
+              {tc("switcher.gradeLabel", { grade: child.grade })}
             </p>
           )}
           {!topBar && progressLabel && (
@@ -209,20 +216,23 @@ export function ReadingLayout({
         {onSpellWord && (currentWordText || page.words.length > 0) ? (
           <button
             type="button"
-            aria-label="Nghe đánh vần"
+            aria-label={t("layout.phonicsAria")}
             onClick={onSpellWord}
             disabled={controlsDisabled}
             className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
             <span>
-              <span className="hidden sm:inline">Nghe </span>đánh vần
+              <span className="hidden sm:inline">
+                {t("layout.phonicsPrefix")}
+              </span>
+              {t("layout.phonicsLabel")}
             </span>
           </button>
         ) : null}
         <button
           type="button"
-          aria-label="Nhờ gia sư giúp đọc"
+          aria-label={t("layout.tutorAria")}
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
           className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
@@ -231,7 +241,7 @@ export function ReadingLayout({
             aria-hidden="true"
             className="size-5 shrink-0 sm:size-5"
           />
-          <span>Gia sư</span>
+          <span>{t("layout.tutorLabel")}</span>
         </button>
       </header>
 
@@ -242,7 +252,7 @@ export function ReadingLayout({
       ) : null}
 
       <section
-        aria-label="Nội dung trang sách"
+        aria-label={t("layout.bookPageAria")}
         className="flex min-h-0 min-w-0 flex-1 flex-col"
       >
         <BookPageViewer
@@ -301,51 +311,70 @@ export function ReadingLayout({
               >
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-primary">
-                    Bé đọc lại từ · {retryWordPosition}/{retryWordCount}
+                    {t("layout.retryHeader", {
+                      current: formatNumber(retryWordPosition),
+                      total: formatNumber(retryWordCount),
+                    })}
                   </p>
 
                   <p className="mt-1 break-words text-base font-bold text-ink">
                     {retryFeedback === "preparing-microphone"
-                      ? "Đang chuẩn bị microphone..."
+                      ? t("layout.retryStatusPreparingMic")
                       : retryFeedback === "playing-instruction"
-                        ? "ViRead đang hướng dẫn bé..."
+                        ? t("layout.retryStatusInstructing")
                         : retryFeedback === "playing-sample"
-                          ? "Nghe mẫu"
+                          ? t("layout.retryStatusSample")
                           : retryFeedback === "listening"
                             ? isMicRecording
-                              ? "Đang nghe bé"
-                              : "Đang bật microphone..."
+                              ? t("layout.retryStatusListening")
+                              : t("layout.retryStatusEnablingMic")
                             : retryFeedback === "processing"
-                              ? "Đang kiểm tra"
+                              ? t("layout.retryStatusChecking")
                               : retryFeedback === "correct"
-                                ? "Bé đã tự sửa đúng"
+                                ? t("layout.retryStatusSelfCorrected")
                                 : retryFeedback === "incorrect"
-                                  ? "Thử lại · Từ này chưa đúng"
+                                  ? t("layout.retryStatusIncorrect")
                                   : retryFeedback === "not-recognized"
-                                    ? "Thử lại · ViRead chưa nghe rõ"
+                                    ? t("layout.retryStatusUnclear")
                                     : retryFeedback === "microphone-unavailable"
-                                      ? "Microphone chưa sẵn sàng."
+                                      ? t("layout.retryStatusMicError")
                                       : retryFeedback === "speech-unavailable"
-                                        ? "Dịch vụ nhận diện đang tạm dừng."
+                                        ? t("layout.retryStatusSttUnavailable")
                                         : retryFeedback === "audio-unavailable"
-                                          ? "Chưa phát được lời hướng dẫn."
+                                          ? t(
+                                              "layout.retryStatusTtsUnavailable",
+                                            )
                                           : retryFeedback === "save-error"
-                                            ? "Chưa lưu được kết quả đọc lại."
-                                            : "Bé hãy đọc riêng từ bên dưới nhé."}
+                                            ? t("layout.retryStatusSaveError")
+                                            : t("layout.retryStatusDefault")}
                   </p>
 
-                  <p className="mt-1.5 w-fit max-w-full break-words rounded-control bg-warning-surface px-3 py-1 text-xl font-extrabold text-ink">
-                    <span className="sr-only">Từ cần luyện </span>
+                  <p
+                    className="viread-learning-content mt-1.5 w-fit max-w-full break-words rounded-control bg-warning-surface px-3 py-1 text-xl font-extrabold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    <span className="sr-only">
+                      {t("layout.retryWordSrPrefix")}
+                    </span>
                     {currentWordText}
                   </p>
 
                   {retryContextPhrase ? (
-                    <p className="mt-1.5 break-words text-base font-bold text-ink sm:text-lg">
+                    <p
+                      className="viread-learning-content mt-1.5 break-words text-base font-bold text-ink sm:text-lg"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {retryContextPhrase}
                     </p>
                   ) : null}
                   {latestTranscript ? (
-                    <p className="mt-1 line-clamp-2 text-sm font-medium text-ink">
+                    <p
+                      className="viread-learning-content mt-1 line-clamp-2 text-sm font-medium text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {latestTranscript}
                     </p>
                   ) : null}
@@ -357,7 +386,7 @@ export function ReadingLayout({
                     onClick={onSkipRetryWord}
                     className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3.5 py-2 text-xs font-semibold text-ink hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    Bỏ qua từ này
+                    {t("layout.skipWord")}
                   </button>
                 ) : null}
                 {retryFeedback === "microphone-unavailable" &&
@@ -368,7 +397,7 @@ export function ReadingLayout({
                     onClick={onRetryMicrophonePermission}
                     className="min-h-11 shrink-0 rounded-control bg-primary px-3.5 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    Thử bật mic
+                    {t("layout.retryMic")}
                   </button>
                 ) : null}
                 {(retryFeedback === "incorrect" ||
@@ -382,7 +411,7 @@ export function ReadingLayout({
                     onClick={onRetryRead}
                     className="min-h-11 shrink-0 rounded-control bg-primary px-3.5 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    Nghe lại và thử
+                    {t("layout.listenAndRetry")}
                   </button>
                 ) : null}
                 {retryFeedback === "save-error" && onRetrySave ? (
@@ -392,7 +421,7 @@ export function ReadingLayout({
                     onClick={onRetrySave}
                     className="min-h-11 shrink-0 rounded-control bg-primary px-3.5 py-2 text-xs font-semibold text-white hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-55"
                   >
-                    Thử lưu lại
+                    {t("layout.retrySave")}
                   </button>
                 ) : null}
                 {retryRecording}
@@ -400,13 +429,15 @@ export function ReadingLayout({
             ) : countdown !== null ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center justify-center gap-3 rounded-card border border-border bg-white px-4 py-2.5">
                 <span className="text-sm font-semibold text-primary">
-                  Chuẩn bị đọc
+                  {t("layout.preparingRead")}
                 </span>
                 <span className="flex size-9 items-center justify-center rounded-control bg-sky text-lg font-semibold text-primary">
                   {countdown > 0 ? countdown : "✓"}
                 </span>
                 <span className="text-base font-medium text-ink">
-                  {countdown > 0 ? "Bé sẵn sàng đọc to nhé" : "Bắt đầu đọc"}
+                  {countdown > 0
+                    ? t("layout.countdownReady")
+                    : t("layout.countdownStart")}
                 </span>
               </div>
             ) : isPlayingSample ? (
@@ -417,12 +448,12 @@ export function ReadingLayout({
                     className="size-4 shrink-0 text-primary"
                   />
                   <span className="shrink-0 text-sm font-semibold text-ink">
-                    Đọc mẫu
+                    {t("layout.sampleBannerTitle")}
                   </span>
                   <span className="min-w-0 truncate text-sm text-muted">
                     {isSamplePaused
-                      ? "Đã tạm dừng đọc mẫu."
-                      : "Đang phát âm toàn bộ trang sách theo giọng mẫu..."}
+                      ? t("layout.samplePaused")
+                      : t("layout.samplePlayingPage")}
                   </span>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -432,7 +463,9 @@ export function ReadingLayout({
                       onClick={onToggleSamplePause}
                       className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
                     >
-                      {isSamplePaused ? "Tiếp tục mẫu" : "Tạm dừng mẫu"}
+                      {isSamplePaused
+                        ? t("layout.resumeSample")
+                        : t("layout.pauseSample")}
                     </button>
                   ) : null}
                   {onReadSample ? (
@@ -441,7 +474,7 @@ export function ReadingLayout({
                       onClick={onReadSample}
                       className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
                     >
-                      Dừng mẫu
+                      {t("layout.stopSample")}
                     </button>
                   ) : null}
                 </div>
@@ -449,9 +482,13 @@ export function ReadingLayout({
             ) : isReadingWord ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple px-4 py-2.5">
                 <span className="shrink-0 text-sm font-semibold text-purple-ink">
-                  Đọc mẫu từ
+                  {t("layout.sampleWordButton")}
                 </span>
-                <p className="min-w-0 flex-1 truncate text-lg font-semibold text-purple-900">
+                <p
+                  className="viread-learning-content min-w-0 flex-1 truncate text-lg font-semibold text-purple-900"
+                  dir="ltr"
+                  lang="vi"
+                >
                   &ldquo;{currentWordText || latestTranscript}&rdquo;
                 </p>
               </div>
@@ -461,14 +498,18 @@ export function ReadingLayout({
                   <div className="flex min-w-0 flex-1 items-center gap-3">
                     <span className="size-2.5 shrink-0 rounded-full bg-danger" />
                     <span className="shrink-0 text-sm font-semibold text-danger">
-                      Chưa chính xác
+                      {t("layout.incorrectWordBannerLabel")}
                     </span>
                     <p className="min-w-0 flex-1 truncate text-base font-semibold text-rose-950">
-                      Hãy đọc lại từ &ldquo;
-                      <span className="underline decoration-2 underline-offset-2">
+                      {t("layout.retryWordPromptPrefix")}
+                      <span
+                        className="viread-learning-content underline decoration-2 underline-offset-2"
+                        dir="ltr"
+                        lang="vi"
+                      >
                         {currentWordText}
                       </span>
-                      &rdquo;
+                      {t("layout.retryWordPromptSuffix")}
                     </p>
                   </div>
                   {currentWordText && onReadWord ? (
@@ -476,26 +517,33 @@ export function ReadingLayout({
                       type="button"
                       onClick={onReadWord}
                       className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control border border-danger/30 bg-white px-3 py-1.5 text-sm font-semibold text-danger hover:bg-danger-surface"
-                      title="Bấm để nghe đọc mẫu từ này"
+                      title={t("layout.listenTargetWordTitle")}
                     >
                       <>
-                        <Volume2 aria-hidden="true" className="size-4" /> Nghe
-                        mẫu
+                        <Volume2 aria-hidden="true" className="size-4" />{" "}
+                        {t("controls.samplePage")}
                       </>
                     </button>
                   ) : null}
                 </div>
               ) : latestTranscript ? (
                 <p className="mx-auto line-clamp-2 w-full max-w-[1008px] px-1 text-sm text-muted sm:text-body">
-                  Bé vừa đọc: <span>“{latestTranscript}”</span>
+                  {t("layout.childJustReadPrefix")}{" "}
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    “{latestTranscript}”
+                  </span>
                 </p>
               ) : null
             ) : latestTranscript ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-2">
                 <span className="shrink-0 text-sm font-semibold text-purple-ink">
-                  Bản ghi mới nhất
+                  {t("layout.latestRecording")}
                 </span>
-                <p className="min-w-0 flex-1 truncate text-sm font-semibold italic text-ink">
+                <p
+                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
                   &ldquo;{latestTranscript}&rdquo;
                 </p>
               </div>

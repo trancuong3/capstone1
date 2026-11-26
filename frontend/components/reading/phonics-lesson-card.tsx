@@ -3,6 +3,7 @@
 import { Mic, RotateCcw, Sparkles, Square, Volume2, X } from "lucide-react";
 
 import { Button } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { PhonicsLessonPlan } from "@/lib/reading/phonics-lesson";
 import { cn } from "@/lib/utils/cn";
 
@@ -35,10 +36,11 @@ export function PhonicsLessonCard({
   onStartRetry,
   onClose,
 }: PhonicsLessonCardProps) {
+  const t = useTranslations("reading");
   if (!lesson.supported) {
     return (
       <section
-        aria-label="Hướng dẫn đánh vần"
+        aria-label={t("phonics.regionAria")}
         className={cn(
           "rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4",
           compact && "p-3",
@@ -49,8 +51,9 @@ export function PhonicsLessonCard({
           <div>
             <p className="text-sm font-bold text-amber-950">{lesson.message}</p>
             <p className="text-xs text-amber-900/80">
-              Từ “{lesson.cleanPhrase || lesson.rawText}” chưa có quy tắc đánh
-              vần lớp 1 chuẩn. Bé vẫn có thể nghe đọc mẫu cả từ nhé.
+              {t("phonics.unsupportedNotice", {
+                word: lesson.cleanPhrase || lesson.rawText,
+              })}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -63,18 +66,18 @@ export function PhonicsLessonCard({
                 variant="secondary"
               >
                 <Volume2 aria-hidden="true" className="size-4" />
-                Nghe từ
+                {t("phonics.listenWord")}
               </Button>
             ) : null}
             {onClose ? (
               <button
                 type="button"
-                aria-label="Đóng hướng dẫn đánh vần"
+                aria-label={t("phonics.closeAria")}
                 onClick={onClose}
                 className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-amber-300 bg-white px-2.5 text-xs font-semibold text-amber-950 hover:bg-amber-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 <X aria-hidden="true" className="size-4" />
-                <span className="sr-only">Đóng</span>
+                <span className="sr-only">{t("phonics.closeSr")}</span>
               </button>
             ) : null}
           </div>
@@ -108,7 +111,7 @@ export function PhonicsLessonCard({
 
   return (
     <section
-      aria-label={`Đánh vần từng bước tiếng ${lesson.focusSyllable}`}
+      aria-label={t("phonics.titleAria", { syllable: lesson.focusSyllable })}
       className={cn(
         "rounded-2xl border-2 border-primary/25 bg-gradient-to-br from-sky/70 via-white to-emerald-50/50 p-4 shadow-sm",
         compact && "p-3",
@@ -119,9 +122,13 @@ export function PhonicsLessonCard({
         <div className="flex items-center gap-2">
           <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-bold text-primary">
             <Sparkles aria-hidden="true" className="size-3.5" />
-            Đánh vần từng bước
+            {t("phonics.title")}
           </span>
-          <span className="rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
+          <span
+            className="viread-learning-content rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950"
+            dir="ltr"
+            lang="vi"
+          >
             {lesson.tone.label}
           </span>
         </div>
@@ -136,7 +143,7 @@ export function PhonicsLessonCard({
               variant="secondary"
             >
               <Volume2 aria-hidden="true" className="size-4" />
-              Nghe từ
+              {t("phonics.listenWord")}
             </Button>
           ) : null}
 
@@ -153,12 +160,12 @@ export function PhonicsLessonCard({
               {isPlayingPhonics ? (
                 <>
                   <Square aria-hidden="true" className="size-4" />
-                  Dừng đánh vần
+                  {t("phonics.stopPhonics")}
                 </>
               ) : (
                 <>
                   <Volume2 aria-hidden="true" className="size-4" />
-                  Nghe đánh vần
+                  {t("phonics.listenPhonics")}
                 </>
               )}
             </Button>
@@ -175,12 +182,12 @@ export function PhonicsLessonCard({
               {isListeningRetry ? (
                 <>
                   <Mic aria-hidden="true" className="size-4 animate-pulse" />
-                  Đang nghe bé…
+                  {t("phonics.listeningRetry")}
                 </>
               ) : (
                 <>
                   <RotateCcw aria-hidden="true" className="size-4" />
-                  Đọc lại
+                  {t("phonics.readAgain")}
                 </>
               )}
             </Button>
@@ -189,12 +196,12 @@ export function PhonicsLessonCard({
           {onClose ? (
             <button
               type="button"
-              aria-label="Đóng hướng dẫn đánh vần"
+              aria-label={t("phonics.closeAria")}
               onClick={onClose}
               className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <X aria-hidden="true" className="size-4" />
-              <span className="sr-only">Đóng</span>
+              <span className="sr-only">{t("phonics.closeSr")}</span>
             </button>
           ) : null}
         </div>
@@ -203,8 +210,10 @@ export function PhonicsLessonCard({
       {/* Synchronized character-slice highlight of the focus syllable / phrase */}
       <div
         aria-live="polite"
-        className="mt-3 flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white px-4 py-3 text-center"
+        className="viread-learning-content mt-3 flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white px-4 py-3 text-center"
         data-testid="phonics-focus-display"
+        dir="ltr"
+        lang="vi"
       >
         {prefixText ? (
           <span
@@ -273,7 +282,7 @@ export function PhonicsLessonCard({
 
       {/* Ordered phonics steps */}
       <ol
-        aria-label="Các bước đánh vần"
+        aria-label={t("phonics.stepsAria")}
         className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4"
       >
         {lesson.steps.map((step, idx) => {
@@ -305,7 +314,13 @@ export function PhonicsLessonCard({
               >
                 {idx + 1}
               </span>
-              <span className="truncate">{step.displayText}</span>
+              <span
+                className="viread-learning-content truncate"
+                dir="ltr"
+                lang="vi"
+              >
+                {step.displayText}
+              </span>
             </li>
           );
         })}

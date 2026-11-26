@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { Button, ButtonSizeContext } from "@/components/common/button";
 import { ViReadLogo } from "@/components/common/viread-logo";
+import { LanguageSelector } from "@/components/i18n/language-selector";
 import {
   ADMIN_MOBILE_MORE_ITEMS,
   ADMIN_MOBILE_PRIMARY_TABS,
@@ -23,34 +24,55 @@ import {
 } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
 
 const links = [
-  { href: "/admin/karaoke", label: "Bài hát", icon: Music2 },
-  { href: "/admin/parents", label: "Phụ huynh", icon: UsersRound },
-  { href: "/admin/books", label: "Kho sách", icon: BookOpenCheck },
+  { href: "/admin/karaoke", labelKey: "layout.nav.karaoke", icon: Music2 },
+  { href: "/admin/parents", labelKey: "layout.nav.parents", icon: UsersRound },
+  { href: "/admin/books", labelKey: "layout.nav.books", icon: BookOpenCheck },
   {
     href: "/admin/metadata-quality",
-    label: "Chất lượng sách",
+    labelKey: "layout.nav.metadataQuality",
     icon: ClipboardCheck,
   },
-  { href: "/admin/audit-logs", label: "Nhật ký", icon: ScrollText },
+  {
+    href: "/admin/audit-logs",
+    labelKey: "layout.nav.auditLogs",
+    icon: ScrollText,
+  },
   {
     href: "/admin/viread-training",
-    label: "Huấn luyện OCR",
+    labelKey: "layout.nav.training",
     icon: BrainCircuit,
   },
-  { href: "/admin/health", label: "Vận hành", icon: HeartPulse },
-];
+  { href: "/admin/health", labelKey: "layout.nav.health", icon: HeartPulse },
+] as const;
 
 export function AdminLayout({ children }: { children: ReactNode }) {
   const { auth } = useAdminServices();
+  const t = useTranslations("admin");
   const pathname = usePathname();
   const router = useRouter();
   const activeNavigationRef = useRef<HTMLAnchorElement>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasSignOutError, setHasSignOutError] = useState(false);
+  const [isDesktopSidebar, setIsDesktopSidebar] = useState(false);
+
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      typeof window.matchMedia !== "function"
+    ) {
+      return;
+    }
+    const mediaQuery = window.matchMedia("(min-width: 1280px)");
+    const syncViewport = () => setIsDesktopSidebar(mediaQuery.matches);
+    syncViewport();
+    mediaQuery.addEventListener("change", syncViewport);
+    return () => mediaQuery.removeEventListener("change", syncViewport);
+  }, []);
 
   useEffect(() => {
     const activeLink = activeNavigationRef.current;
@@ -88,28 +110,28 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     <ButtonSizeContext.Provider value="compact">
       <div className="admin-workspace flex min-h-dvh w-full flex-col bg-canvas">
         <a
-          className="sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
+          className="sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
           href="#admin-main-content"
         >
-          Bỏ qua điều hướng, đến nội dung quản trị
+          {t("layout.skipToContent")}
         </a>
-        <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 backdrop-blur-sm xl:static xl:bg-white">
-          <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between gap-3 px-3 sm:px-6 xl:grid xl:h-auto xl:min-h-18 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
-            <div className="flex min-h-12 items-center gap-2.5 sm:gap-3">
+        <header className="sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 xl:static xl:bg-white">
+          <div className="mx-auto flex h-14 w-full max-w-[1440px] items-center justify-between gap-2 px-3 sm:gap-3 sm:px-6 xl:grid xl:h-auto xl:min-h-18 xl:grid-cols-[auto_minmax(0,1fr)_auto] xl:gap-x-2 xl:px-16">
+            <div className="flex min-h-12 min-w-0 items-center gap-2 sm:gap-3">
               <ViReadLogo
-                ariaLabel="ViRead - khu vực quản trị"
+                ariaLabel={t("layout.logoAria")}
                 href="/admin/parents"
                 size="md"
               />
-              <span className="border-l border-border pl-2.5 text-xs font-semibold text-muted sm:pl-3 sm:text-sm">
-                Quản trị
+              <span className="max-[360px]:sr-only truncate border-s border-border ps-2 text-xs font-semibold text-muted sm:ps-3 sm:text-sm">
+                {t("layout.badge")}
               </span>
             </div>
             <nav
-              aria-label="Điều hướng quản trị"
+              aria-label={t("layout.navAria")}
               className="hidden min-w-0 items-center gap-1 py-1 xl:flex xl:flex-nowrap xl:justify-end"
             >
-              {links.map(({ href, label, icon: Icon }) => {
+              {links.map(({ href, labelKey, icon: Icon }) => {
                 const isActive =
                   pathname === href || pathname.startsWith(`${href}/`);
                 return (
@@ -125,23 +147,44 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                     key={href}
                     ref={isActive ? activeNavigationRef : undefined}
                   >
-                    <Icon aria-hidden className="size-4 xl:hidden" /> {label}
+                    <Icon aria-hidden className="size-4 xl:hidden" />{" "}
+                    {t(labelKey)}
                   </Link>
                 );
               })}
             </nav>
-            <Button
-              className="ml-auto w-auto shrink-0 px-3 xl:ml-0"
-              disabled={isSigningOut}
-              isLoading={isSigningOut}
-              onClick={() => void handleSignOut()}
-              size="compact"
-              type="button"
-              variant="quiet"
-            >
-              {!isSigningOut ? <LogOut aria-hidden className="size-5" /> : null}
-              {isSigningOut ? "Đang đăng xuất…" : "Đăng xuất"}
-            </Button>
+            <div className="ms-auto flex shrink-0 items-center gap-1.5 sm:gap-2 xl:ms-0 xl:mt-auto xl:flex-col xl:items-stretch xl:gap-2">
+              <LanguageSelector
+                align="end"
+                className={cn(
+                  "max-[380px]:max-w-[7.25rem]",
+                  // Sidebar .admin-workspace > header button unlayered styles on xl must be overridden so trigger & dialog stay crisp.
+                  "xl:[&>button]:!mt-0 xl:[&>button]:!w-full xl:[&>button]:!justify-between xl:[&>button]:!rounded-full xl:[&>button]:!border xl:[&>button]:!border-[#aacfc2] xl:[&>button]:!bg-white xl:[&>button]:!px-2.5 xl:[&>button]:!text-[#144f49]",
+                  "xl:[&_[data-language-sheet]>button]:!mt-0 xl:[&_[data-language-sheet]>button]:!border-t-0 xl:[&_[data-language-sheet]>button]:!rounded-none xl:[&_[data-language-sheet]>button]:!bg-ink/40",
+                  "xl:[&_[data-language-sheet]_section_button]:!mt-0 xl:[&_[data-language-sheet]_section_button]:!border-t-0 xl:[&_[data-language-sheet]_section_button]:!rounded-control xl:[&_[data-language-sheet]_section_button]:!text-ink",
+                  "xl:[&_[data-language-sheet]_section_[role=option]]:!justify-start xl:[&_[data-language-sheet]_section_[aria-selected=true]]:!bg-sky/50 xl:[&_[data-language-sheet]_section_[aria-selected=true]]:!text-primary",
+                  "xl:[&_[data-language-sheet]_section_button[aria-label]]:!justify-center xl:[&_[data-language-sheet]_section_button[aria-label]]:!rounded-full xl:[&_[data-language-sheet]_section_button[aria-label]]:!text-muted",
+                )}
+                presentation={isDesktopSidebar ? "sheet" : "auto"}
+                variant="compact"
+              />
+              <Button
+                className="w-auto shrink-0 px-2.5 sm:px-3 xl:!mt-0 xl:w-full"
+                disabled={isSigningOut}
+                isLoading={isSigningOut}
+                onClick={() => void handleSignOut()}
+                size="compact"
+                type="button"
+                variant="quiet"
+              >
+                {!isSigningOut ? (
+                  <LogOut aria-hidden className="size-5" />
+                ) : null}
+                <span className="max-[400px]:sr-only">
+                  {isSigningOut ? t("layout.signingOut") : t("layout.signOut")}
+                </span>
+              </Button>
+            </div>
           </div>
         </header>
         {hasSignOutError ? (
@@ -149,7 +192,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
             className="mx-auto mt-4 w-full max-w-[1360px] px-4 font-semibold text-danger sm:px-6 xl:px-10"
             role="alert"
           >
-            Chưa thể đăng xuất lúc này. Vui lòng thử lại.
+            {t("layout.signOutError")}
           </p>
         ) : null}
         <main
@@ -161,9 +204,9 @@ export function AdminLayout({ children }: { children: ReactNode }) {
         </main>
         <SiteFooter className="hidden lg:block" variant="admin" />
         <MobileBottomNav
-          ariaLabel="Điều hướng quản trị trên di động"
+          ariaLabel={t("layout.mobileNavAria")}
           moreItems={ADMIN_MOBILE_MORE_ITEMS}
-          moreTitle="Quản trị khác"
+          moreTitle={t("layout.moreTitle")}
           pathname={pathname}
           sheetId="admin-mobile-more-sheet"
           tabs={ADMIN_MOBILE_PRIMARY_TABS}

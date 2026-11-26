@@ -13,6 +13,7 @@ import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type {
   MetadataQualityDashboardDTO,
@@ -20,20 +21,10 @@ import type {
   MetadataQualityLifecycleStatus,
 } from "@/types/metadata-quality";
 
-const issueLabels: Record<MetadataQualityIssueType, string> = {
-  MISSING_TITLE: "Thiếu tiêu đề",
-  MISSING_AUTHOR: "Chưa có tác giả",
-  INVALID_GRADE_RANGE: "Khoảng lớp không hợp lệ",
-  POSSIBLE_DUPLICATE: "Có thể trùng sách",
-};
-
-const lifecycleLabels: Record<string, string> = {
-  ACTIVE: "Đang hoạt động",
-  RETIRED: "Đã ngừng",
-};
-
 export function AdminMetadataQualityScreen() {
   const { metadataQuality } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatDateTime, formatNumber } = useI18n();
   const [dashboard, setDashboard] =
     useState<MetadataQualityDashboardDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,9 +92,9 @@ export function AdminMetadataQualityScreen() {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Quản trị nội dung"
-        title="Chất lượng metadata sách"
-        description="Phát hiện thông tin catalog cần kiểm tra. Các cảnh báo là gợi ý để Admin xem xét, không tự sửa hoặc xóa dữ liệu sách."
+        eyebrow={t("metadataQuality.eyebrow")}
+        title={t("metadataQuality.dashboardTitle")}
+        description={t("metadataQuality.description")}
         actions={
           <Button
             className="sm:w-auto"
@@ -113,20 +104,20 @@ export function AdminMetadataQualityScreen() {
             variant="secondary"
           >
             <RefreshCw aria-hidden className="size-5" />
-            Tải lại
+            {t("common.reload")}
           </Button>
         }
       />
 
-      <section aria-label="Bộ lọc chất lượng metadata" className="mb-4">
+      <section aria-label={t("metadataQuality.filterAria")} className="mb-4">
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="relative">
             <Search
               aria-hidden
-              className="pointer-events-none absolute right-4 top-9 size-5 text-muted"
+              className="pointer-events-none absolute end-4 top-9 size-5 text-muted"
             />
             <TextField
-              label="Tìm theo tiêu đề hoặc tác giả"
+              label={t("metadataQuality.searchLabel")}
               onChange={(event) => {
                 setOffset(0);
                 setSearch(event.target.value);
@@ -135,21 +126,29 @@ export function AdminMetadataQualityScreen() {
             />
           </div>
           <SelectField
-            label="Loại vấn đề"
+            label={t("metadataQuality.issueTypeLabel")}
             onChange={(event) => {
               setOffset(0);
               setIssueType(event.target.value as MetadataQualityIssueType | "");
             }}
             value={issueType}
           >
-            <option value="">Tất cả vấn đề</option>
-            <option value="MISSING_TITLE">Thiếu tiêu đề</option>
-            <option value="MISSING_AUTHOR">Chưa có tác giả</option>
-            <option value="INVALID_GRADE_RANGE">Khoảng lớp không hợp lệ</option>
-            <option value="POSSIBLE_DUPLICATE">Có thể trùng sách</option>
+            <option value="">{t("metadataQuality.allIssues")}</option>
+            <option value="MISSING_TITLE">
+              {t("metadataQuality.issueLabels.MISSING_TITLE")}
+            </option>
+            <option value="MISSING_AUTHOR">
+              {t("metadataQuality.issueLabels.MISSING_AUTHOR")}
+            </option>
+            <option value="INVALID_GRADE_RANGE">
+              {t("metadataQuality.issueLabels.INVALID_GRADE_RANGE")}
+            </option>
+            <option value="POSSIBLE_DUPLICATE">
+              {t("metadataQuality.issueLabels.POSSIBLE_DUPLICATE")}
+            </option>
           </SelectField>
           <SelectField
-            label="Vòng đời sách"
+            label={t("metadataQuality.lifecycleLabel")}
             onChange={(event) => {
               setOffset(0);
               setLifecycle(
@@ -158,9 +157,13 @@ export function AdminMetadataQualityScreen() {
             }}
             value={lifecycle}
           >
-            <option value="">Tất cả trạng thái</option>
-            <option value="ACTIVE">Đang hoạt động</option>
-            <option value="RETIRED">Đã ngừng</option>
+            <option value="">{t("metadataQuality.allStatuses")}</option>
+            <option value="ACTIVE">
+              {t("metadataQuality.lifecycleLabels.ACTIVE")}
+            </option>
+            <option value="RETIRED">
+              {t("metadataQuality.lifecycleLabels.RETIRED")}
+            </option>
           </SelectField>
         </div>
         {hasFilters ? (
@@ -170,22 +173,22 @@ export function AdminMetadataQualityScreen() {
             type="button"
             variant="quiet"
           >
-            Xóa bộ lọc
+            {t("metadataQuality.clearFilters")}
           </Button>
         ) : null}
       </section>
 
       {loading ? (
-        <AdminLoading label="Đang kiểm tra metadata catalog…" />
+        <AdminLoading label={t("metadataQuality.loading")} />
       ) : error ? (
         <StatusMessage
           tone="error"
           title={
             error === "auth"
-              ? "Cần đăng nhập quản trị"
+              ? t("common.authRequiredTitle")
               : error === "forbidden"
-                ? "Không có quyền truy cập"
-                : "Không thể tải dữ liệu chất lượng metadata"
+                ? t("common.forbiddenTitle")
+                : t("metadataQuality.loadErrorTitle")
           }
         >
           {error === "auth" ? (
@@ -193,7 +196,7 @@ export function AdminMetadataQualityScreen() {
               className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
-              Đến trang đăng nhập
+              {t("common.goToLogin")}
             </Link>
           ) : error === "safe" ? (
             <Button
@@ -202,50 +205,52 @@ export function AdminMetadataQualityScreen() {
               type="button"
               variant="secondary"
             >
-              Thử lại
+              {t("common.retry")}
             </Button>
           ) : (
-            <p>Hãy sử dụng tài khoản có quyền Admin để mở dashboard này.</p>
+            <p>{t("metadataQuality.forbiddenDesc")}</p>
           )}
         </StatusMessage>
       ) : dashboard ? (
         <>
           <section
-            aria-label="Tổng quan metadata"
+            aria-label={t("metadataQuality.overviewAria")}
             className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
           >
             {[
               {
-                label: "Tổng số sách",
+                label: t("metadataQuality.cards.totalBooks"),
                 value: dashboard.summary.total_books,
-                detail: "Toàn bộ catalog Admin",
+                detail: t("metadataQuality.cards.totalBooksDetail"),
               },
               {
-                label: "Sách cần kiểm tra",
+                label: t("metadataQuality.cards.flaggedBooks"),
                 value: dashboard.summary.books_with_issues,
-                detail: "Mỗi sách chỉ tính một lần",
+                detail: t("metadataQuality.cards.flaggedBooksDetail"),
               },
               {
-                label: "Thiếu tiêu đề",
+                label: t("metadataQuality.cards.missingTitle"),
                 value: dashboard.summary.missing_title,
-                detail: "Tiêu đề rỗng hoặc chỉ có khoảng trắng",
+                detail: t("metadataQuality.cards.missingTitleDetail"),
               },
               {
-                label: "Chưa có tác giả",
+                label: t("metadataQuality.cards.missingAuthor"),
                 value: dashboard.summary.missing_author,
-                detail: "Cảnh báo bổ sung metadata",
+                detail: t("metadataQuality.cards.missingAuthorDetail"),
               },
               {
-                label: "Khoảng lớp không hợp lệ",
+                label: t("metadataQuality.cards.invalidGradeRange"),
                 value: dashboard.summary.invalid_grade_range,
-                detail: "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa",
+                detail: t("metadataQuality.cards.invalidGradeRangeDetail"),
               },
               {
-                label: "Nhóm có thể trùng",
+                label: t("metadataQuality.cards.duplicateGroups"),
                 value: dashboard.summary.possible_duplicate_groups,
-                detail:
-                  dashboard.summary.books_in_duplicate_groups +
-                  " sách nằm trong các nhóm ứng viên",
+                detail: t("metadataQuality.cards.duplicateGroupsDetail", {
+                  count: formatNumber(
+                    dashboard.summary.books_in_duplicate_groups,
+                  ),
+                }),
               },
             ].map((metric) => (
               <article
@@ -256,7 +261,7 @@ export function AdminMetadataQualityScreen() {
                   {metric.label}
                 </p>
                 <p className="mt-2 text-[32px] font-extrabold tabular-nums text-primary">
-                  {metric.value.toLocaleString("vi-VN")}
+                  {formatNumber(metric.value)}
                 </p>
                 <p className="sr-only">{metric.detail}</p>
               </article>
@@ -267,18 +272,19 @@ export function AdminMetadataQualityScreen() {
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="text-2xl font-extrabold text-ink">
-                  Sách cần kiểm tra
+                  {t("metadataQuality.issuesHeading")}
                 </h2>
                 <p className="mt-1 text-sm text-muted">
-                  Các trường hợp trùng chỉ dựa trên tiêu đề và tác giả sau khi
-                  bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.
+                  {t("metadataQuality.duplicateNote")}
                 </p>
               </div>
               <p
                 aria-live="polite"
                 className="text-sm font-semibold text-muted"
               >
-                {dashboard.total.toLocaleString("vi-VN")} kết quả
+                {t("metadataQuality.resultsCount", {
+                  total: formatNumber(dashboard.total),
+                })}
               </p>
             </div>
 
@@ -286,21 +292,21 @@ export function AdminMetadataQualityScreen() {
               <div className="rounded-card bg-cream p-8 text-center">
                 <h3 className="font-semibold text-ink">
                   {hasFilters
-                    ? "Không có kết quả phù hợp"
+                    ? t("metadataQuality.emptySearchTitle")
                     : dashboard.summary.books_with_issues === 0
-                      ? "Chưa phát hiện vấn đề metadata"
-                      : "Không có sách trong trang này"}
+                      ? t("metadataQuality.emptyOkTitle")
+                      : t("metadataQuality.emptyPageTitle")}
                 </h3>
                 <p className="mt-2 text-sm text-muted">
                   {hasFilters
-                    ? "Thử thay đổi bộ lọc hoặc tìm kiếm."
-                    : "Các chỉ số được tính từ metadata sách đã lưu; dashboard không tự sửa dữ liệu."}
+                    ? t("metadataQuality.emptySearchDesc")
+                    : t("metadataQuality.emptyOtherDesc")}
                 </p>
               </div>
             ) : (
               <>
                 <div
-                  aria-label="Danh sách sách cần kiểm tra metadata trên di động"
+                  aria-label={t("metadataQuality.mobileListAria")}
                   className="grid gap-3 md:hidden"
                 >
                   {dashboard.items.map((book) => (
@@ -311,21 +317,33 @@ export function AdminMetadataQualityScreen() {
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
                           <h3 className="break-words text-base font-extrabold text-ink">
-                            {book.title?.trim()
-                              ? book.title
-                              : "Chưa có tiêu đề"}
+                            {book.title?.trim() ? (
+                              <span dir="auto">{book.title}</span>
+                            ) : (
+                              t("metadataQuality.missingTitleFallback")
+                            )}
                           </h3>
                           <p className="mt-0.5 text-sm text-muted">
-                            Tác giả:{" "}
-                            {book.author?.trim() ? book.author : "Chưa có"} ·{" "}
+                            {t("metadataQuality.authorLabel", {
+                              author: book.author?.trim()
+                                ? book.author
+                                : t("metadataQuality.authorMissing"),
+                            })}{" "}
+                            ·{" "}
                             {book.min_grade == null || book.max_grade == null
-                              ? "Chưa đủ dữ liệu lớp"
-                              : `Lớp ${book.min_grade}–${book.max_grade}`}
+                              ? t("metadataQuality.gradeInvalidSummary")
+                              : t("metadataQuality.gradeRangeSummary", {
+                                  min: book.min_grade,
+                                  max: book.max_grade,
+                                })}
                           </p>
                         </div>
                         <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-muted">
-                          {lifecycleLabels[book.lifecycle_status] ??
-                            book.lifecycle_status}
+                          {t(
+                            `metadataQuality.lifecycleLabels.${book.lifecycle_status}`,
+                            undefined,
+                            book.lifecycle_status,
+                          )}
                         </span>
                       </div>
                       <div className="mt-3 flex flex-wrap gap-1.5">
@@ -334,7 +352,7 @@ export function AdminMetadataQualityScreen() {
                             className="inline-flex rounded-full bg-warning-surface px-2.5 py-1 text-xs font-semibold text-warning"
                             key={issue}
                           >
-                            {issueLabels[issue]}
+                            {t(`metadataQuality.issueLabels.${issue}`)}
                           </span>
                         ))}
                       </div>
@@ -356,8 +374,8 @@ export function AdminMetadataQualityScreen() {
                             }
                           >
                             {book.issues.includes("MISSING_TITLE")
-                              ? "Bổ sung metadata"
-                              : "Sửa metadata"}
+                              ? t("metadataQuality.repairMetadata")
+                              : t("metadataQuality.editMetadata")}
                           </Link>
                         ) : null}
                         {book.issues.includes("POSSIBLE_DUPLICATE") ? (
@@ -365,7 +383,7 @@ export function AdminMetadataQualityScreen() {
                             className="inline-flex min-h-12 items-center rounded-control border border-border bg-white px-3.5 text-sm font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
                             href={"/admin/books/" + encodeURIComponent(book.id)}
                           >
-                            So sánh sách
+                            {t("metadataQuality.compareBooks")}
                           </Link>
                         ) : null}
                       </div>
@@ -374,27 +392,27 @@ export function AdminMetadataQualityScreen() {
                 </div>
 
                 <div className="hidden md:block">
-                  <ResponsiveTable ariaLabel="Bảng sách cần kiểm tra metadata">
-                    <table className="w-full min-w-[900px] border-collapse text-left text-sm">
+                  <ResponsiveTable ariaLabel={t("metadataQuality.tableAria")}>
+                    <table className="w-full min-w-[900px] border-collapse text-start text-sm">
                       <thead>
                         <tr className="border-b border-border bg-sky text-primary">
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Sách
+                            {t("metadataQuality.columns.book")}
                           </th>
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Tác giả
+                            {t("metadataQuality.columns.author")}
                           </th>
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Khối lớp
+                            {t("metadataQuality.columns.grades")}
                           </th>
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Trạng thái
+                            {t("metadataQuality.columns.status")}
                           </th>
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Vấn đề phát hiện
+                            {t("metadataQuality.columns.issues")}
                           </th>
                           <th className="px-3 py-3 font-semibold" scope="col">
-                            Thao tác
+                            {t("metadataQuality.columns.actions")}
                           </th>
                         </tr>
                       </thead>
@@ -405,25 +423,32 @@ export function AdminMetadataQualityScreen() {
                             key={book.id}
                           >
                             <td className="px-3 py-4 font-semibold text-ink">
-                              {book.title?.trim()
-                                ? book.title
-                                : "Chưa có tiêu đề"}
+                              {book.title?.trim() ? (
+                                <span dir="auto">{book.title}</span>
+                              ) : (
+                                t("metadataQuality.missingTitleFallback")
+                              )}
                             </td>
                             <td className="px-3 py-4 text-muted">
-                              {book.author?.trim() ? book.author : "Chưa có"}
+                              {book.author?.trim()
+                                ? book.author
+                                : t("metadataQuality.authorMissing")}
                             </td>
                             <td className="px-3 py-4 text-muted">
                               {book.min_grade == null || book.max_grade == null
-                                ? "Chưa đủ dữ liệu"
-                                : "Lớp " +
-                                  book.min_grade +
-                                  "–" +
-                                  book.max_grade}
+                                ? t("metadataQuality.gradeInvalidShort")
+                                : t("metadataQuality.gradeRangeSummary", {
+                                    min: book.min_grade,
+                                    max: book.max_grade,
+                                  })}
                             </td>
                             <td className="px-3 py-4">
                               <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-semibold text-muted">
-                                {lifecycleLabels[book.lifecycle_status] ??
-                                  book.lifecycle_status}
+                                {t(
+                                  `metadataQuality.lifecycleLabels.${book.lifecycle_status}`,
+                                  undefined,
+                                  book.lifecycle_status,
+                                )}
                               </span>
                             </td>
                             <td className="px-3 py-4">
@@ -433,7 +458,7 @@ export function AdminMetadataQualityScreen() {
                                     className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-semibold text-warning"
                                     key={issue}
                                   >
-                                    {issueLabels[issue]}
+                                    {t(`metadataQuality.issueLabels.${issue}`)}
                                   </span>
                                 ))}
                               </div>
@@ -458,8 +483,8 @@ export function AdminMetadataQualityScreen() {
                                     }
                                   >
                                     {book.issues.includes("MISSING_TITLE")
-                                      ? "Bổ sung metadata"
-                                      : "Sửa metadata"}
+                                      ? t("metadataQuality.repairMetadata")
+                                      : t("metadataQuality.editMetadata")}
                                   </Link>
                                 ) : null}
                                 {book.issues.includes("POSSIBLE_DUPLICATE") ? (
@@ -470,7 +495,7 @@ export function AdminMetadataQualityScreen() {
                                       encodeURIComponent(book.id)
                                     }
                                   >
-                                    So sánh sách
+                                    {t("metadataQuality.compareBooks")}
                                   </Link>
                                 ) : null}
                               </div>
@@ -485,11 +510,11 @@ export function AdminMetadataQualityScreen() {
             )}
 
             <PaginationBar
-              ariaLabel="Phân trang danh sách kiểm tra metadata"
+              ariaLabel={t("metadataQuality.paginationAria")}
               className="mt-5"
               compact
               disabled={loading}
-              itemLabel="kết quả"
+              itemLabel={t("metadataQuality.itemLabel")}
               onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
               page={currentPage}
               pageSize={dashboard.limit}
@@ -497,10 +522,10 @@ export function AdminMetadataQualityScreen() {
               total={dashboard.total}
             />
             <p className="mt-4 text-xs text-muted">
-              Lần kiểm tra dữ liệu:{" "}
-              {new Date(dashboard.summary.checked_at).toLocaleString("vi-VN")}.
-              Đây là cảnh báo metadata; không có thao tác sửa hoặc xóa sách tự
-              động.
+              {t("metadataQuality.checkedAtLabel", {
+                time: formatDateTime(dashboard.summary.checked_at),
+              })}{" "}
+              {t("metadataQuality.footerNote")}
             </p>
           </section>
         </>

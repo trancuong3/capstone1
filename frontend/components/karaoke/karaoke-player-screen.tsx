@@ -7,6 +7,7 @@ import { useKaraokeService } from "@/components/karaoke/karaoke-services-provide
 import { SelectedChildIdentity } from "@/components/children/selected-child-identity";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   karaokeParentErrorMessage,
   type KaraokePlayback,
@@ -43,6 +44,7 @@ function Song({
   songId: string;
   expectedVersionId?: string;
 }) {
+  const t = useTranslations("entertainment");
   const [request, setRequest] = useState({
     version: expectedVersionId,
     attempt: 0,
@@ -52,7 +54,7 @@ function Song({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <SelectedChildIdentity child={child} />
         <ButtonLink href="/karaoke" variant="secondary" className="sm:w-auto">
-          Về thư viện bài hát
+          {t("karaoke.playerScreen.backToLibrary")}
         </ButtonLink>
       </div>
       <Playback
@@ -78,6 +80,7 @@ function Playback({
   expectedVersionId?: string;
   onRefresh: (version?: string) => void;
 }) {
+  const t = useTranslations("entertainment");
   const service = useKaraokeService();
   const [state, setState] = useState<
     | { status: "loading" }
@@ -104,12 +107,15 @@ function Playback({
   if (state.status === "loading")
     return (
       <p role="status" className="rounded-card bg-sky p-6">
-        Đang chuẩn bị nhạc và lời cho bé…
+        {t("karaoke.playerScreen.loading")}
       </p>
     );
   if (state.status === "error")
     return (
-      <StatusMessage tone="error" title="Chưa mở được bài hát">
+      <StatusMessage
+        tone="error"
+        title={t("karaoke.playerScreen.openErrorTitle")}
+      >
         {state.message}
         <Button
           className="mt-3 sm:w-auto"
@@ -118,7 +124,9 @@ function Playback({
             onRefresh(state.conflict ? undefined : expectedVersionId)
           }
         >
-          {state.conflict ? "Tải phiên bản mới" : "Thử lại bài hát"}
+          {state.conflict
+            ? t("karaoke.playerScreen.reloadNewVersion")
+            : t("karaoke.playerScreen.retrySong")}
         </Button>
       </StatusMessage>
     );
@@ -126,7 +134,7 @@ function Playback({
   return (
     <KaraokePlayer
       source={source}
-      label="Hát cùng bé"
+      label={t("karaoke.playerScreen.childStageLabel")}
       presentation="child"
       childAlias={child.alias}
       onReload={() => onRefresh(source.version_id)}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useId } from "react";
 import { Button } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import { progressHref } from "@/lib/utils/progress-report-state";
 import type { ChildProfileDTO } from "@/types/child";
 import type { ProgressPeriodOptionDTO } from "@/types/reports";
@@ -29,6 +30,8 @@ export function ProgressReportFilters({
   loadingMore,
   onLoadMore,
 }: ProgressReportFiltersProps) {
+  const t = useTranslations("reports");
+  const tc = useTranslations("child");
   const router = useRouter();
   const childSelectId = useId();
   const periodSelectId = useId();
@@ -49,10 +52,10 @@ export function ProgressReportFilters({
           className="mb-1.5 block text-xs font-bold text-muted"
           htmlFor={childSelectId}
         >
-          Hồ sơ của bé
+          {tc("selector.label")}
         </label>
         <select
-          aria-label="Chọn hồ sơ bé để xem dữ liệu"
+          aria-label={tc("selector.selectAria")}
           className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           id={childSelectId}
           onChange={(event) => router.push(progressHref(event.target.value))}
@@ -60,7 +63,10 @@ export function ProgressReportFilters({
         >
           {childrenProfiles.map((child) => (
             <option key={child.id} value={child.id}>
-              {child.alias} · Lớp {child.grade}
+              {tc("selector.optionLabel", {
+                alias: child.alias,
+                grade: child.grade,
+              })}
             </option>
           ))}
         </select>
@@ -71,7 +77,7 @@ export function ProgressReportFilters({
           className="mb-1.5 block text-xs font-bold text-muted"
           htmlFor={periodSelectId}
         >
-          Kỳ báo cáo đã lưu
+          {t("overview.periodSelectLabel")}
         </label>
         <select
           className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -87,11 +93,13 @@ export function ProgressReportFilters({
           }}
           value={key}
         >
-          <option value="latest">Mới nhất</option>
+          <option value="latest">{t("overview.periodLatestOption")}</option>
           {selectedMissing ? (
             <option value={key}>
-              {selectedPeriod.period_start} → {selectedPeriod.period_end} (đang
-              chọn)
+              {t("overview.periodSelectedRange", {
+                start: selectedPeriod.period_start,
+                end: selectedPeriod.period_end,
+              })}
             </option>
           ) : null}
           {periods.map((item) => (
@@ -112,7 +120,9 @@ export function ProgressReportFilters({
           onClick={onLoadMore}
           variant="secondary"
         >
-          {loadingMore ? "Đang tải kỳ…" : "Tải thêm kỳ"}
+          {loadingMore
+            ? t("overview.loadingPeriods")
+            : t("overview.loadMorePeriods")}
         </Button>
       ) : null}
     </div>

@@ -16,7 +16,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
     return (
       <div className={cn("relative w-full", className)}>
         <label
-          className="absolute left-4 top-3 z-10 max-w-[calc(100%-2rem)] text-sm font-bold text-muted"
+          className="absolute start-4 top-3 z-10 max-w-[calc(100%-2rem)] text-sm font-bold text-muted"
           htmlFor={inputId}
         >
           {label}
@@ -25,7 +25,7 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
           aria-describedby={error ? errorId : undefined}
           aria-invalid={Boolean(error)}
           className={cn(
-            "h-[72px] w-full rounded-control border bg-white px-4 pb-3 pt-8 text-body text-ink outline-none placeholder:text-muted/70 focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-canvas disabled:text-muted",
+            "h-[72px] w-full rounded-control border bg-white px-4 pb-3 pt-8 text-start text-body text-ink outline-none placeholder:text-muted/70 focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-canvas disabled:text-muted",
             error ? "border-danger" : "border-border",
           )}
           id={inputId}

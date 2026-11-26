@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 
 import { cn } from "@/lib/utils/cn";
 
@@ -59,6 +60,7 @@ export function Modal({
   title,
   tone = "cream",
 }: ModalProps) {
+  const tA11y = useTranslations("accessibility");
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
 
@@ -159,7 +161,7 @@ export function Modal({
           </h2>
           {showCloseButton ? (
             <Button
-              aria-label="Đóng hộp thoại"
+              aria-label={tA11y("closeDialog")}
               className="size-12! shrink-0 p-0!"
               fullWidth={false}
               onClick={onClose}

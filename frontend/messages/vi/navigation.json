@@ -1,0 +1,77 @@
+{
+  "parent": {
+    "navLabel": "Điều hướng dành cho ba mẹ",
+    "skipToContent": "Bỏ qua điều hướng, đến nội dung",
+    "dashboard": "Tổng quan",
+    "myBooks": "Sách của tôi",
+    "reports": "Tiến bộ",
+    "readingManagement": "Quản lý đọc",
+    "sessions": "Lịch sử",
+    "sessionsLong": "Lịch sử đọc",
+    "entertainment": "Giải trí",
+    "difficultWords": "Từ cần luyện",
+    "children": "Hồ sơ bé",
+    "parentProfile": "Hồ sơ ba mẹ",
+    "parentProfileLong": "Hồ sơ phụ huynh",
+    "settings": "Cài đặt",
+    "helpSupport": "Trợ giúp & hỗ trợ",
+    "moreTitle": "Tính năng khác",
+    "booksShort": "Sách",
+    "scannerShort": "Quét",
+    "moreButton": "Thêm",
+    "mobileAriaLabel": "Điều hướng nhanh trên di động",
+    "moreDescriptions": {
+      "myBooks": "Tải lên và quản lý sách riêng của gia đình",
+      "readingManagement": "Mục tiêu, lịch đọc và sách đã lưu cho bé",
+      "sessions": "Xem lại các buổi đọc đã hoàn thành",
+      "entertainment": "Trò chơi ngôn ngữ, kể chuyện và karaoke",
+      "difficultWords": "Ôn luyện các từ bé hay đọc nhầm"
+    }
+  },
+  "admin": {
+    "navLabel": "Điều hướng quản trị",
+    "skipToContent": "Bỏ qua điều hướng, đến nội dung quản trị",
+    "badge": "Quản trị",
+    "karaoke": "Bài hát",
+    "parents": "Phụ huynh",
+    "books": "Kho sách",
+    "metadataQuality": "Chất lượng sách",
+    "auditLogs": "Nhật ký",
+    "training": "Huấn luyện OCR",
+    "health": "Vận hành",
+    "moreTitle": "Quản trị khác",
+    "mobileQualityShort": "Chất lượng",
+    "mobileOcrShort": "OCR",
+    "mobileMoreDescriptions": {
+      "auditLogs": "Theo dõi nhật ký kiểm toán quản trị",
+      "training": "Huấn luyện và vận hành model VietOCR V2",
+      "health": "Tình trạng hệ thống, OCR worker và voice"
+    }
+  },
+  "accountMenu": {
+    "openAria": "Mở menu tài khoản",
+    "closeAria": "Đóng menu tài khoản",
+    "menuAria": "Menu tài khoản ViRead",
+    "shortMenuAria": "Menu tài khoản",
+    "accountNavAria": "Tài khoản ViRead",
+    "profileSection": "Hồ sơ",
+    "accountSection": "Tài khoản",
+    "helpSection": "Trợ giúp",
+    "sessionSection": "Phiên đăng nhập",
+    "defaultAccountLabel": "Tài khoản ViRead"
+  },
+  "childSwitcher": {
+    "selectedAria": "Bé đang chọn: {alias}, bấm để đổi",
+    "openAria": "Đổi nhanh bé",
+    "compactLabel": "{alias} · L{grade}",
+    "selectChild": "Chọn bé",
+    "listAria": "Chuyển nhanh hồ sơ bé",
+    "gradeLabel": "· Lớp {grade}",
+    "manageChildren": "Quản lý hồ sơ bé"
+  },
+  "footer": {
+    "ariaLabel": "Thông tin ViRead",
+    "logoDashboardAria": "ViRead - về tổng quan",
+    "logoHomeAria": "ViRead - về trang chủ"
+  }
+}

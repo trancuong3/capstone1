@@ -3,6 +3,33 @@
  * (`sherpa-onnx-zipformer-vi-30M-int8-2026-02-09` inside `/workers/sherpa-stt-worker.js`).
  */
 
+import { translateMessage } from "@/lib/i18n/formatter";
+import {
+  DEFAULT_LOCALE,
+  normalizeLocale,
+  type SupportedLocale,
+} from "@/lib/i18n/locales";
+import { readLocaleCookie } from "@/lib/i18n/persistence";
+import type { MessagesDictionary } from "@/lib/i18n/types";
+import { getCachedLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
+
+function resolveRuntimeLocale(): SupportedLocale {
+  const cookieLocale = readLocaleCookie();
+  if (cookieLocale) return cookieLocale;
+  if (typeof document !== "undefined") {
+    return normalizeLocale(document.documentElement?.lang) ?? DEFAULT_LOCALE;
+  }
+  return DEFAULT_LOCALE;
+}
+
+function tSpeechWasm(key: string): string {
+  const locale = resolveRuntimeLocale();
+  const activeMessages: MessagesDictionary =
+    getCachedLocaleMessages(locale) ?? viMessages;
+  return translateMessage(activeMessages, viMessages, locale, key);
+}
+
 export const SHERPA_WASM_MODEL_ID =
   "sherpa-onnx-zipformer-vi-30M-int8-2026-02-09";
 export const SHERPA_WASM_MODEL_BYTES = 33_920_802;
@@ -75,10 +102,10 @@ export function detectBrowserWasmSttSupport(): BrowserWasmCapabilities {
       indexedDb,
       subtleCrypto,
       reason: !worker
-        ? "Web Worker không khả dụng"
+        ? tSpeechWasm("speech.wasm.workerUnavailable")
         : !wasm
-          ? "WebAssembly không khả dụng"
-          : "Web Crypto API không khả dụng",
+          ? tSpeechWasm("speech.wasm.wasmUnavailable")
+          : tSpeechWasm("speech.wasm.cryptoUnavailable"),
     };
   }
   return {
@@ -425,7 +452,9 @@ export class BrowserWasmSttClient {
     if (this.worker) return this.worker;
     const caps = detectBrowserWasmSttSupport();
     if (!caps.supported) {
-      throw new Error(caps.reason ?? "WASM STT không khả dụng trên thiết bị.");
+      throw new Error(
+        caps.reason ?? tSpeechWasm("speech.wasm.deviceUnsupported"),
+      );
     }
     const worker = new Worker("/workers/sherpa-stt-worker.js");
     worker.onmessage = (event: MessageEvent) => {

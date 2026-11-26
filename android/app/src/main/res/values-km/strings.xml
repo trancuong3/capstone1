@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ViRead</string>
+    <string name="loading_title">កំពុងបើក ViRead</string>
+    <string name="loading_subtitle">កំពុងផ្ទុក ViRead…</string>
+    <string name="loading_hint_stage2">កំពុងភ្ជាប់ទៅម៉ាស៊ីនមេ…</string>
+    <string name="loading_hint_stage3">ម៉ាស៊ីនមេកំពុងចាប់ផ្ដើម សូមរង់ចាំ…</string>
+    <string name="loading_cold_start_hint">ម៉ាស៊ីនមេកំពុងចាប់ផ្ដើម (cold-start) សូមមេត្តារង់ចាំមួយភ្លែត…</string>
+    <string name="error_title_network">មិនទាន់អាចភ្ជាប់ទៅម៉ាស៊ីនមេ ViRead បានទេ</string>
+    <string name="error_title_server">ម៉ាស៊ីនមេ ViRead កំពុងចាប់ផ្ដើម ឬកំពុងមមាញឹក</string>
+    <string name="error_title_timeout">មិនអាចភ្ជាប់ទៅ ViRead បានទេ</string>
+    <string name="error_title_tls">វិញ្ញាបនបត្រសុវត្ថិភាពមិនត្រឹមត្រូវ</string>
+    <string name="offline_message">មិនអាចភ្ជាប់ទៅម៉ាស៊ីនមេ ViRead បានទេ។ សូមពិនិត្យបណ្ដាញ Wi-Fi / ទិន្នន័យចល័ត ឬអាសយដ្ឋានម៉ាស៊ីនមេ រួចចុច ព្យាយាមម្ដងទៀត។</string>
+    <string name="timeout_message">ម៉ាស៊ីនមេ ViRead ឆ្លើយតបយឺត។ សូមពិនិត្យការភ្ជាប់បណ្ដាញ រួចចុច ព្យាយាមម្ដងទៀត។ ប្រសិនបើបើកលើកដំបូង ម៉ាស៊ីនមេអាចត្រូវការ 30–60 វិនាទីដើម្បីចាប់ផ្ដើម។</string>
+    <string name="server_5xx_message">ម៉ាស៊ីនមេ ViRead កំពុងមមាញឹក ឬកំពុងចាប់ផ្ដើមឡើងវិញ (%1$d)។ សូមរង់ចាំប៉ុន្មានវិនាទី រួចចុច ព្យាយាមម្ដងទៀត។</string>
+    <string name="tls_error_message">វិញ្ញាបនបត្រសុវត្ថិភាព HTTPS របស់ម៉ាស៊ីនមេមិនត្រឹមត្រូវ ដូច្នេះ ViRead បានទប់ស្កាត់ការភ្ជាប់ដើម្បីការពារគណនីគ្រួសារ។</string>
+    <string name="no_network_toast">ឧបករណ៍បច្ចុប្បន្នមិនមានការភ្ជាប់អ៊ីនធឺណិត ឬ Wi-Fi ទេ។</string>
+    <string name="network_ready_toast">បានរកឃើញការភ្ជាប់បណ្ដាញ។ កំពុងផ្ទុក ViRead ឡើងវិញ…</string>
+    <string name="retry_button">ព្យាយាមម្ដងទៀត</string>
+    <string name="open_home_button">ទៅកាន់ទំព័រចូលប្រើ</string>
+    <string name="check_connection_button">ពិនិត្យការភ្ជាប់ម្ដងទៀត</string>
+    <string name="configure_lan_server_button">ប្ដូរម៉ាស៊ីនមេ LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_title">កំណត់រចនាសម្ព័ន្ធម៉ាស៊ីនមេ LAN HTTPS (Debug)</string>
+    <string name="lan_dialog_hint">បញ្ចូលអាសយដ្ឋាន HTTPS របស់ម៉ាស៊ីនមេ Next.js នៅលើ Wi-Fi ដូចគ្នា (ឧទាហរណ៍៖ https://192.168.1.10:8443)។ មិនទទួលយក HTTP ឬ localhost ទេ។</string>
+    <string name="lan_dialog_save">រក្សាទុក &amp; ភ្ជាប់</string>
+    <string name="lan_dialog_reset">ស្ដារលំនាំដើម</string>
+    <string name="lan_dialog_cancel">បិទ</string>
+    <string name="lan_invalid_url_toast">អាសយដ្ឋានមិនត្រឹមត្រូវ។ ទទួលយកតែប្រភព LAN HTTPS ត្រឹមត្រូវប៉ុណ្ណោះ (គ្មានផ្លូវរង ឬ HTTP)។</string>
+    <string name="file_chooser_title">ជ្រើសរើសរូបភាពទំព័រសៀវភៅ ថតរូប ឬជ្រើសរើស PDF/DOCX</string>
+    <string name="permission_denied_title">ត្រូវការសិទ្ធិអនុញ្ញាតដើម្បីប្រើមុខងារនេះ</string>
+    <string name="permission_denied_message">សិទ្ធិកាមេរ៉ា ឬមីក្រូហ្វូនសម្រាប់ ViRead កំពុងត្រូវបានបិទ។ អ្នកអាចបើកការកំណត់កម្មវិធីដើម្បីបើកវាវិញបានគ្រប់ពេល។</string>
+    <string name="open_app_settings_button">បើកការកំណត់កម្មវិធី</string>
+    <string name="back_exit_confirm_toast">ចុចម្ដងទៀតដើម្បីចាកចេញពី ViRead</string>
+</resources>

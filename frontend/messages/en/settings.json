@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "ViRead Account",
+    "title": "Account Settings",
+    "description": "Manage account information, security, and ViRead usage options.",
+    "infoHeading": "Account Information",
+    "displayName": "Display name",
+    "email": "Account Email",
+    "role": "Account Role",
+    "emailStatus": "Email Status",
+    "manageProfile": "Manage Profile",
+    "changePassword": "Change Password",
+    "emailVerificationHeading": "Email & Verification",
+    "readingRemindersHeading": "Manage Reading Reminders",
+    "readingRemindersDescription": "Adjust reading schedules and reminders for your child.",
+    "loadingAria": "Loading account settings",
+    "loadErrorBody": "ViRead could not load account data. Please reload the page or log in again.",
+    "notUpdated": "Not updated",
+    "pendingEmailNotice": "New email pending confirmation:",
+    "emailStatusPending": "New email pending confirmation",
+    "emailVerified": "Verified",
+    "emailUnverified": "Unverified",
+    "emailPendingBody": "Email change request is pending verification. The current email remains the previously verified address.",
+    "emailDefaultBody": "To change your email or resend a verification email, use the existing feature in the parent profile.",
+    "openParentProfile": "Open Parent Profile"
+  },
+  "password": {
+    "title": "Change Password",
+    "description": "Use a separate password to protect your account.",
+    "minLengthHint": "New password must be at least {min} characters long.",
+    "noPasswordDescription": "This account does not have a password login method yet. Parents can request a password reset link via email.",
+    "requestRecoveryButton": "No password? Send a password reset link via email",
+    "changedSuccess": "Password updated. Your current session remains active.",
+    "currentInvalid": "Current password is incorrect.",
+    "changeError": "Unable to change password. Please check your connection and try again.",
+    "noEmailForRecovery": "No email address on file to send a password reset link.",
+    "recoverySent": "Supabase Auth has received the password reset request. Please check your inbox and spam folder.",
+    "recoveryError": "Unable to send password reset link. Please try again later.",
+    "showFieldAria": "Show {label}",
+    "hideFieldAria": "Hide {label}"
+  },
+  "language": {
+    "heading": "Display Language",
+    "description": "Choose the language for navigation and settings. Vietnamese book content remains unchanged.",
+    "learningContentNote": "Changing the language only affects navigation, buttons, and settings. Vietnamese books, OCR, voice recognition (STT), and sample audio (TTS) remain in Vietnamese."
+  }
+}

@@ -9,6 +9,7 @@ from email.utils import formataddr
 from typing import Any
 
 from app.database import config as settings
+from app.services.i18n.locales import DEFAULT_LOCALE, resolve_supported_locale
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,14 @@ class SupportEmailProvider:
             server.login(username, password)
             server.send_message(message)
 
-    async def send(self, *, subject: str, body: str, reply_to: str) -> None:
+    async def send(
+        self,
+        *,
+        subject: str,
+        body: str,
+        reply_to: str,
+        locale: str = DEFAULT_LOCALE,
+    ) -> None:
         smtp_settings = self._required_settings()
         message = EmailMessage()
         message["Subject"] = subject
@@ -82,6 +90,7 @@ class SupportEmailProvider:
         message["To"] = str(smtp_settings["recipient"])
         message["Reply-To"] = reply_to
         message.set_content(body)
+        message["Content-Language"] = resolve_supported_locale(locale)
 
         try:
             await asyncio.to_thread(self._send_sync, message, smtp_settings)

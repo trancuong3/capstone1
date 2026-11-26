@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
@@ -19,10 +20,10 @@ import {
 import { isStudioAuthenticatedMediaUrl } from "@/lib/api/book-assets-service";
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
   getWordHighlightTier,
-  getWordPresentationLabel,
   type WordPresentationState,
   type PageWordEvidence,
   wordStateForPage,
@@ -65,6 +66,7 @@ interface OverlayWordButtonProps {
   readonly word: ReadingPageWordDTO;
   readonly pageRevisionId: string;
   readonly state: WordPresentationState;
+  readonly stateLabel: string;
   readonly isCurrent: boolean;
   readonly onSelectWord: (word: ReadingPageWordDTO) => void;
   readonly registerNode: (
@@ -77,6 +79,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
   word,
   pageRevisionId,
   state,
+  stateLabel,
   isCurrent,
   onSelectWord,
   registerNode,
@@ -115,7 +118,7 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
     >
       <span className="sr-only">{word.text}</span>
       <span hidden id={`image-word-state-${pageRevisionId}-${word.word_id}`}>
-        {getWordPresentationLabel(state)}
+        {stateLabel}
       </span>
       {[
         "preview-correct",
@@ -185,6 +188,9 @@ function PageSurface(
     readonly claimExpiredImageRefresh: (pageId: string) => boolean;
   },
 ) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
   const {
     page,
     currentWordId,
@@ -501,10 +507,15 @@ function PageSurface(
   );
 
   const stateFor = wordStateForPage(props);
+  const activeWordText = page.words.find(
+    (word) => word.word_id === activeId,
+  )?.text;
   return (
     <article
       aria-busy={isTransitioning || undefined}
-      aria-label={`Trang sách ${page.page_number}`}
+      aria-label={t("pageViewer.pageAria", {
+        page: formatNumber(page.page_number),
+      })}
       className={cn(
         "reader-sheet mx-auto w-full min-w-0 max-w-[1104px]",
         isTransitioning && "opacity-60",
@@ -525,9 +536,15 @@ function PageSurface(
     >
       <header className="reader-bookplate">
         <div className="min-w-0">
-          <p className="reader-folio">Trang {page.page_number}</p>
-          <h1 className="book-title line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl">
-            {props.title ?? "Trang sách của bé"}
+          <p className="reader-folio">
+            {t("progress.pageLabel", { page: formatNumber(page.page_number) })}
+          </p>
+          <h1
+            className="book-title viread-learning-content line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl"
+            dir="ltr"
+            lang="vi"
+          >
+            {props.title ?? t("pageViewer.defaultBookTitle")}
           </h1>
           {isV2ModeEnabled ? (
             <div
@@ -668,13 +685,15 @@ function PageSurface(
           />
         ) : overlay && rect && source ? (
           <div
-            className="relative mt-1 w-full overflow-hidden"
+            className="viread-learning-content relative mt-1 w-full overflow-hidden"
+            dir="ltr"
+            lang="vi"
             style={{ height: frame.height }}
             data-reading-panel="image"
           >
             <Image
               src={source}
-              alt={`Ảnh trang sách ${page.page_number}`}
+              alt={t("pageViewer.pageImageAlt", { page: page.page_number })}
               fill
               unoptimized
               className="object-contain"
@@ -691,17 +710,25 @@ function PageSurface(
                 height: rect.height,
               }}
             >
-              {page.words.map((word, index) => (
-                <MemoOverlayWordButton
-                  key={word.word_id}
-                  word={word}
-                  pageRevisionId={page.page_revision_id}
-                  state={stateFor(word, index)}
-                  isCurrent={word.word_id === activeId}
-                  onSelectWord={handleSelectWord}
-                  registerNode={registerOverlayNode}
-                />
-              ))}
+              {page.words.map((word, index) => {
+                const pState = stateFor(word, index);
+                const stateLabel =
+                  pState === "assisted" && isMalePersona
+                    ? t("wordStates.assistedMale")
+                    : t(`wordStates.${pState}`);
+                return (
+                  <MemoOverlayWordButton
+                    key={word.word_id}
+                    word={word}
+                    pageRevisionId={page.page_revision_id}
+                    state={pState}
+                    stateLabel={stateLabel}
+                    isCurrent={word.word_id === activeId}
+                    onSelectWord={handleSelectWord}
+                    registerNode={registerOverlayNode}
+                  />
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -733,12 +760,14 @@ function PageSurface(
                   className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
                 >
                   <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
-                    Xem ảnh trang sách
+                    {t("pageViewer.viewPageImage")}
                   </summary>
                   {referenceOpen ? (
                     <Image
                       src={source}
-                      alt={`Ảnh tham khảo trang ${page.page_number}`}
+                      alt={t("pageViewer.referencePageAlt", {
+                        page: page.page_number,
+                      })}
                       width={Math.max(1, page.width)}
                       height={Math.max(1, page.height)}
                       unoptimized
@@ -766,14 +795,18 @@ function PageSurface(
               className="pointer-events-auto inline-flex min-h-11 -translate-y-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary px-3.5 py-2 text-xs font-bold text-white shadow-md hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
             >
               <ArrowDown aria-hidden="true" className="size-4 shrink-0" />
-              Về từ đang đọc
+              {t("pageViewer.scrollToCurrentWord")}
             </button>
           </div>
         ) : null}
       </div>
       <p className="sr-only" aria-live="polite">
-        Từ hiện tại:{" "}
-        {page.words.find((word) => word.word_id === activeId)?.text}
+        {t("pageViewer.currentWordPrefix")}
+        {activeWordText ? (
+          <span className="viread-learning-content" dir="ltr" lang="vi">
+            {activeWordText}
+          </span>
+        ) : null}
       </p>
     </article>
   );

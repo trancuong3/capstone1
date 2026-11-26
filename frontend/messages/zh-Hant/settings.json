@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "ViRead 帳號",
+    "title": "帳號設定",
+    "description": "管理帳號資訊、安全性及 ViRead 使用選項。",
+    "infoHeading": "帳號資訊",
+    "displayName": "顯示名稱",
+    "email": "帳號電子郵件",
+    "role": "帳號角色",
+    "emailStatus": "電子郵件狀態",
+    "manageProfile": "管理個人檔案",
+    "changePassword": "變更密碼",
+    "emailVerificationHeading": "電子郵件與驗證",
+    "readingRemindersHeading": "管理閱讀提醒",
+    "readingRemindersDescription": "調整孩子的閱讀時間表與提醒通知。",
+    "loadingAria": "正在載入帳號設定",
+    "loadErrorBody": "ViRead 無法載入帳號資料。請重新整理頁面或重新登入。",
+    "notUpdated": "尚未更新",
+    "pendingEmailNotice": "新電子郵件待確認：",
+    "emailStatusPending": "新電子郵件待確認",
+    "emailVerified": "已驗證",
+    "emailUnverified": "未驗證",
+    "emailPendingBody": "電子郵件變更請求正在等待驗證。目前的電子郵件仍為先前已驗證的地址。",
+    "emailDefaultBody": "若要變更電子郵件或重新發送驗證信，請使用家長個人檔案中的現有功能。",
+    "openParentProfile": "開啟家長個人檔案"
+  },
+  "password": {
+    "title": "變更密碼",
+    "description": "使用獨立密碼來保護您的帳號。",
+    "minLengthHint": "新密碼至少需要 {min} 個字元。",
+    "noPasswordDescription": "此帳號尚未設定密碼登入方式。家長可透過電子郵件要求重設密碼連結。",
+    "requestRecoveryButton": "沒有密碼？透過電子郵件發送密碼重設連結",
+    "changedSuccess": "密碼已更新。目前的登入工作階段將保持不變。",
+    "currentInvalid": "目前密碼不正確。",
+    "changeError": "無法變更密碼。請檢查您的網路連線並重試。",
+    "noEmailForRecovery": "帳號中沒有可發送密碼重設連結的電子郵件地址。",
+    "recoverySent": "Supabase Auth 已收到密碼重設連結請求。請檢查您的收件匣與垃圾郵件資料夾。",
+    "recoveryError": "無法發送密碼重設連結。請稍後再試。",
+    "showFieldAria": "顯示 {label}",
+    "hideFieldAria": "隱藏 {label}"
+  },
+  "language": {
+    "heading": "顯示語言",
+    "description": "選擇導覽介面與設定的語言。越南語書籍內容將保持不變。",
+    "learningContentNote": "變更語言僅會影響導覽列、按鈕與設定。越南語書籍、OCR、語音辨識 (STT) 與語音朗讀 (TTS) 將維持越南語。"
+  }
+}

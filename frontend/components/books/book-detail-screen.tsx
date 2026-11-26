@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useBookService } from "@/hooks/use-book-service";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
@@ -44,15 +45,10 @@ interface BookDetailScreenProps {
   bookId: string;
 }
 
-function invitationFor(book: BookDetailDTO): string {
-  if (book.title === "Chú Mèo Nhỏ") {
-    return "Cùng chú mèo nhỏ khám phá câu chuyện.";
-  }
-
-  return `Cùng bé khám phá câu chuyện ${book.title.toLocaleLowerCase("vi")}.`;
-}
-
 export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
+  const { formatPercent } = useI18n();
+  const t = useTranslations("books");
+  const tc = useTranslations("child");
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
@@ -241,7 +237,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         className="mx-auto w-full max-w-[900px] px-4 py-8"
       >
         <span className="sr-only" role="status">
-          Đang xác minh hồ sơ trẻ…
+          {tc("verification.loading")}
         </span>
         <Skeleton className="h-14 w-full max-w-sm rounded-card" />
       </section>
@@ -251,13 +247,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   if (childState.status === "error") {
     return (
       <section className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-8">
-        <StatusMessage title="Không thể xác minh hồ sơ trẻ" tone="error">
-          Chưa thể xác nhận hồ sơ thuộc tài khoản hiện tại. Ba mẹ vui lòng thử
-          lại.
+        <StatusMessage title={tc("verification.errorTitle")} tone="error">
+          {tc("verification.errorBody")}
         </StatusMessage>
         <Button className="sm:w-auto" onClick={retryChild} variant="secondary">
           <RefreshCw aria-hidden="true" className="size-5" />
-          Thử lại
+          {tc("verification.retry")}
         </Button>
       </section>
     );
@@ -266,14 +261,17 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   if (state.status === "loading") {
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} mobileLabel="Đang tải sách" />
+        <BookChildHeader
+          child={null}
+          mobileLabel={t("detail.loadingMobileLabel")}
+        />
         <div
           aria-busy="true"
-          aria-label="Đang tải chi tiết sách"
+          aria-label={t("detail.loadingAria")}
           className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 sm:flex-row sm:gap-12"
         >
           <span className="sr-only" role="status">
-            Đang tải sách…
+            {t("detail.loadingText")}
           </span>
           <Skeleton className="h-[518px] w-full rounded-card sm:w-[307px]" />
           <div className="flex flex-1 flex-col gap-4">
@@ -292,7 +290,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
 
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} mobileLabel="Chi tiết sách" />
+        <BookChildHeader child={null} mobileLabel={t("detail.pageTitle")} />
         <div className="mx-auto w-full max-w-[720px]">
           <EmptyState
             headingLevel={1}
@@ -302,18 +300,23 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 href={booksHref}
                 variant="secondary"
               >
-                <ArrowLeft aria-hidden="true" className="size-5" />
-                Về thư viện sách
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5"
+                />
+                {t("detail.backToLibrary")}
               </ButtonLink>
             }
             description={
               unavailable
-                ? "Cuốn sách này chưa có nội dung ACTIVE và VERIFIED để bé đọc."
-                : "Cuốn sách không tồn tại hoặc không có trong thư viện hiện tại."
+                ? t("detail.unavailableDescription")
+                : t("detail.notFoundDescription")
             }
             icon={<BookX aria-hidden="true" className="size-10 text-primary" />}
             title={
-              unavailable ? "Sách hiện chưa sẵn sàng" : "Không tìm thấy sách"
+              unavailable
+                ? t("detail.unavailableTitle")
+                : t("detail.notFoundTitle")
             }
           />
         </div>
@@ -324,10 +327,10 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   if (state.status === "error") {
     return (
       <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-8">
-        <BookChildHeader child={null} mobileLabel="Chi tiết sách" />
+        <BookChildHeader child={null} mobileLabel={t("detail.pageTitle")} />
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4">
-          <StatusMessage title="Chưa tải được chi tiết sách" tone="error">
-            Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.
+          <StatusMessage title={t("detail.loadErrorTitle")} tone="error">
+            {t("catalog.loadErrorBody")}
           </StatusMessage>
           <Button
             className="sm:w-auto sm:self-start sm:px-8"
@@ -335,7 +338,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-5" />
-            Thử lại
+            {t("catalog.retry")}
           </Button>
         </div>
       </section>
@@ -391,10 +394,16 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
         <article className="flex w-full shrink-0 flex-col gap-3 rounded-card border border-border bg-white p-4 sm:w-[306px]">
           <BookCover book={book} className="h-64 max-w-none p-4" />
           <p className="text-sm font-medium text-muted">
-            {book.author ?? "Tác giả đang cập nhật"}
+            {book.author ? (
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {book.author}
+              </span>
+            ) : (
+              t("card.authorPending")
+            )}
           </p>
           <p className="text-sm font-semibold text-primary">
-            {formatGradeRange(book)}
+            {formatGradeRange(book, t)}
           </p>
         </article>
 
@@ -402,14 +411,18 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           {book.visibility_scope === "PARENT_PRIVATE" ? (
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
-                Sách riêng của gia đình
+                {t("card.privateFamilyBadge")}
               </span>
               <span className="text-xs text-muted">
-                Chỉ phụ huynh sở hữu và các hồ sơ trẻ của gia đình được đọc.
+                {t("detail.privateFamilyNote")}
               </span>
             </div>
           ) : null}
-          <h1 className="break-words text-heading font-extrabold leading-tight text-ink sm:text-4xl">
+          <h1
+            className="viread-learning-content break-words text-heading font-extrabold leading-tight text-ink sm:text-4xl"
+            dir="ltr"
+            lang="vi"
+          >
             {book.title}
           </h1>
           {targetPageId &&
@@ -417,7 +430,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           targetConfidence >= 0 &&
           targetConfidence <= 1 ? (
             <p className="text-sm text-primary">
-              Độ tin cậy {Math.round(targetConfidence * 100)}%
+              {t("detail.confidenceLabel", {
+                percent: Math.round(targetConfidence * 100),
+              })}{" "}
+              <span className="sr-only">
+                ({formatPercent(targetConfidence)})
+              </span>
             </p>
           ) : null}
           {book.visibility_scope === "PARENT_PRIVATE" ? (
@@ -427,12 +445,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 variant="secondary"
                 className="sm:w-auto"
               >
-                Quản lý trang trong Sách của tôi
+                {t("detail.manageInMyBooks")}
               </ButtonLink>
             </div>
           ) : (
             <div
-              aria-label="Báo cáo nội dung sách"
+              aria-label={t("detail.reportMenuAria")}
               role="group"
               className="order-last flex flex-wrap gap-2 border-t border-border pt-4"
             >
@@ -441,8 +459,8 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 variant="quiet"
                 className="sm:w-auto"
               >
-                <ClipboardList aria-hidden="true" className="size-4" /> Báo cáo
-                của tôi
+                <ClipboardList aria-hidden="true" className="size-4" />{" "}
+                {t("detail.myReportsButton")}
               </ButtonLink>
               <Button
                 className="sm:w-auto"
@@ -451,7 +469,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 }
                 variant="secondary"
               >
-                Báo lỗi sách
+                {t("detail.reportBookButton")}
               </Button>
               <Button
                 className="sm:w-auto"
@@ -466,16 +484,27 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 }
                 variant="secondary"
               >
-                Báo lỗi trang này
+                {t("detail.reportPageButton")}
               </Button>
             </div>
           )}
 
           <p className="text-body text-muted">
-            {book.author ?? "Tác giả đang cập nhật"} · {formatGradeRange(book)}
+            {book.author ? (
+              <span className="viread-learning-content" dir="ltr" lang="vi">
+                {book.author}
+              </span>
+            ) : (
+              t("card.authorPending")
+            )}{" "}
+            · {formatGradeRange(book, t)}
           </p>
           <p className="text-xl font-medium leading-7 text-ink">
-            {invitationFor(book)}
+            {book.title === "Chú Mèo Nhỏ"
+              ? t("detail.summaryLittleCat")
+              : t("detail.summaryDefault", {
+                  title: book.title.toLocaleLowerCase("vi"),
+                })}
           </p>
 
           <Button
@@ -492,33 +521,37 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             onClick={handleStartReading}
           >
             {startState === "starting"
-              ? "Đang mở bước chuẩn bị…"
-              : "Chuẩn bị đọc"}
+              ? t("detail.preparingButton")
+              : t("detail.prepareButton")}
             {startState === "idle" ? (
-              <ArrowRight aria-hidden="true" className="size-5" />
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-5"
+              />
             ) : null}
           </Button>
 
           {targetPageId && !selectedPage ? (
             <StatusMessage
-              title="Không tìm thấy trang được nhận diện"
+              title={t("detail.matchedPageMissingTitle")}
               tone="warning"
             >
-              Trang OCR trả về không nằm trong danh sách trang có thể đọc của
-              cuốn sách này. Ba mẹ hãy chọn đúng trang trong danh sách bên dưới;
-              ViRead sẽ không tự chọn một trang khác thay thế.
+              {t("detail.matchedPageMissingDescription")}
             </StatusMessage>
           ) : null}
 
           {selectedPage && selectedEndPage ? (
             <section className="rounded-card bg-sky p-4">
               <h2 className="font-extrabold text-ink">
-                Phạm vi đọc: Trang {selectedPage.page_number}–
-                {selectedEndPage.page_number}
+                {t("detail.readingRangeHeading", {
+                  start: selectedPage.page_number,
+                  end: selectedEndPage.page_number,
+                })}
               </h2>
               <p className="mt-2 text-body text-muted">
-                {selectedRangePages.length} trang hợp lệ. Chọn hình trang bên
-                dưới để thay đổi trang bắt đầu.
+                {t("detail.readingRangeValidPages", {
+                  count: selectedRangePages.length,
+                })}
               </p>
             </section>
           ) : null}
@@ -526,12 +559,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
               <span className="text-sm font-semibold text-ink">
-                Trang bắt đầu
+                {t("detail.startPageLabel")}
               </span>
               <span className="text-body text-primary">
                 {selectedPage
-                  ? `Trang ${selectedPage.page_number}`
-                  : "Chưa chọn trang"}
+                  ? t("detail.pageNumberOption", {
+                      page: selectedPage.page_number,
+                    })
+                  : t("detail.noPageSelected")}
               </span>
             </div>
             <div className="flex min-h-[96px] flex-col gap-1 rounded-control border border-border bg-white p-4">
@@ -539,7 +574,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 className="text-sm font-semibold text-ink"
                 htmlFor="reading-end-page"
               >
-                Trang kết thúc
+                {t("detail.endPageLabel")}
               </label>
               <select
                 className="min-h-11 rounded-control border border-border bg-white px-3 text-body text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -563,16 +598,20 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   )
                   .map((candidate) => (
                     <option key={candidate.page_id} value={candidate.page_id}>
-                      Trang {candidate.page_number}
+                      {t("detail.pageNumberOption", {
+                        page: candidate.page_number,
+                      })}
                     </option>
                   ))}
               </select>
             </div>
             {selectedRangeHasGap ? (
               <div className="sm:col-span-2">
-                <StatusMessage title="Khoảng trang chưa liên tục" tone="error">
-                  Trong phạm vi đã chọn có trang thiếu hoặc chưa đủ điều kiện
-                  đọc. Hãy chọn khoảng khác.
+                <StatusMessage
+                  title={t("detail.nonContiguousTitle")}
+                  tone="error"
+                >
+                  {t("detail.nonContiguousDescription")}
                 </StatusMessage>
               </div>
             ) : null}
@@ -581,9 +620,11 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
           <div className="order-3">
             {previewUnavailable ? (
               <div className="mb-4 flex flex-col gap-3">
-                <StatusMessage title="Ảnh xem trước chưa sẵn sàng" tone="info">
-                  Ảnh trang sách sẽ hiển thị khi được bổ sung. Thông tin sách ở
-                  trên lấy từ dữ liệu hiện có.
+                <StatusMessage
+                  title={t("detail.previewPendingTitle")}
+                  tone="info"
+                >
+                  {t("detail.previewPendingDescription")}
                 </StatusMessage>
                 <Button
                   className="sm:w-auto sm:self-start"
@@ -591,12 +632,12 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                   variant="secondary"
                 >
                   <RefreshCw aria-hidden="true" className="size-5" />
-                  Thử tải ảnh lại
+                  {t("detail.retryImages")}
                 </Button>
               </div>
             ) : null}
             <div
-              aria-label="Các trang sách có thể xem trước"
+              aria-label={t("detail.previewGridAria")}
               className="flex gap-4 overflow-x-auto pb-1"
             >
               {pages
@@ -627,10 +668,10 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
             </div>
             {pages.length > THUMBNAILS_PER_PAGE ? (
               <PaginationBar
-                ariaLabel="Phân trang danh sách trang xem trước"
+                ariaLabel={t("detail.previewPaginationAria")}
                 className="mt-3"
                 compact
-                itemLabel="trang"
+                itemLabel={t("detail.previewPaginationItemLabel")}
                 onPageChange={setThumbnailPage}
                 page={thumbnailPage}
                 pageSize={THUMBNAILS_PER_PAGE}

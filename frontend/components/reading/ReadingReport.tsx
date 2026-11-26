@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { Skeleton } from "@/components/common/skeleton";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   getReadingPage,
   type ComparisonResult,
@@ -43,12 +44,10 @@ function isHesitation(value: unknown): value is Hesitation {
   );
 }
 
-const STANDALONE_METRIC_LABELS: Partial<Record<string, string>> = {
-  correct: "Từ đọc đúng",
-  substitution: "Từ đọc nhầm",
-};
-
 export function ReadingReport({ result, sessionId }: Props) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reading");
+  const tp = useTranslations("reports");
   const [page, setPage] = useState<ReadingPage | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -68,9 +67,7 @@ export function ReadingReport({ result, sessionId }: Props) {
             data.page_id !== result.page_id ||
             data.page_revision_id !== result.page_revision_id
           ) {
-            setPageError(
-              "Chưa tải được nội dung trang sách đúng phiên bản đã đọc.",
-            );
+            setPageError(t("report.versionLoadError"));
             setPage(null);
             return;
           }
@@ -79,9 +76,7 @@ export function ReadingReport({ result, sessionId }: Props) {
       } catch (error) {
         if (!cancelled) {
           setPageError(
-            error instanceof Error
-              ? error.message
-              : "Chưa tải được nội dung trang sách đã đọc.",
+            error instanceof Error ? error.message : t("report.pageLoadError"),
           );
         }
       }
@@ -92,7 +87,7 @@ export function ReadingReport({ result, sessionId }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [result.page_id, result.page_revision_id, sessionId]);
+  }, [result.page_id, result.page_revision_id, sessionId, t]);
 
   const metrics = buildReportWordMetrics(result);
   const snapshot = result.summary.initial_assessment;
@@ -127,7 +122,7 @@ export function ReadingReport({ result, sessionId }: Props) {
             ) : !page ? (
               <div
                 aria-busy="true"
-                aria-label="Đang tải nội dung bài đọc"
+                aria-label={t("report.loadingAria")}
                 className="space-y-3 p-2"
               >
                 <Skeleton className="h-4 w-40" />
@@ -142,10 +137,12 @@ export function ReadingReport({ result, sessionId }: Props) {
                 <header className="mb-2 flex items-center justify-between gap-2">
                   <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
-                    Nội dung trang đã xác minh
+                    {t("report.verifiedContentTitle")}
                   </span>
                   <span className="text-xs font-bold tabular-nums text-muted">
-                    Trang {page.page_number}
+                    {t("progress.pageLabel", {
+                      page: formatNumber(page.page_number),
+                    })}
                   </span>
                 </header>
 
@@ -162,7 +159,7 @@ export function ReadingReport({ result, sessionId }: Props) {
           </div>
 
           <ul
-            aria-label="Chú giải màu đối chiếu"
+            aria-label={t("report.legendAria")}
             className="flex flex-wrap gap-1.5 text-xs font-semibold"
           >
             {REPORT_WORD_LEGEND.map((legend) => (
@@ -170,7 +167,7 @@ export function ReadingReport({ result, sessionId }: Props) {
                 className={`rounded-control border px-2.5 py-1 ${legend.swatchClassName}`}
                 key={legend.key}
               >
-                {legend.label}
+                {tp(`sessions.readingReports.legend.${legend.key}`)}
               </li>
             ))}
           </ul>
@@ -184,10 +181,14 @@ export function ReadingReport({ result, sessionId }: Props) {
                 key={metric.key}
               >
                 <dt className={`text-xs font-bold ${metric.accentClassName}`}>
-                  {STANDALONE_METRIC_LABELS[metric.key] ?? metric.label}
+                  {metric.key === "correct"
+                    ? t("report.correctLabel")
+                    : metric.key === "substitution"
+                      ? t("report.substitutionLabel")
+                      : tp(`sessions.readingReports.wordMetrics.${metric.key}`)}
                 </dt>
                 <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
-                  {metric.count}
+                  {formatNumber(metric.count)}
                 </dd>
               </div>
             ))}
@@ -196,10 +197,16 @@ export function ReadingReport({ result, sessionId }: Props) {
           {typeof result.transcript === "string" ? (
             <div className="rounded-control border border-border bg-canvas/70 p-3.5">
               <p className="text-xs font-bold text-muted">
-                Lời đọc đã ghi nhận
+                {t("report.recordedTranscriptLabel")}
               </p>
               <p className="mt-1 text-sm leading-relaxed text-ink">
-                {result.transcript.trim() || "Chưa ghi nhận"}
+                {result.transcript.trim() ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {result.transcript.trim()}
+                  </span>
+                ) : (
+                  t("report.notRecorded")
+                )}
               </p>
             </div>
           ) : null}
@@ -210,45 +217,71 @@ export function ReadingReport({ result, sessionId }: Props) {
         <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
           <div className="space-y-1.5 text-sm">
             <h3 className="font-extrabold text-ink">
-              Tình trạng lặp từ ({repeatedCount})
+              {t("report.repetitionsTitle", {
+                count: formatNumber(repeatedCount),
+              })}
             </h3>
             {repeatedWords.length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-muted">
+              <ul className="list-disc space-y-1 ps-5 text-muted">
                 {repeatedWords.map(([word, count]) => (
                   <li key={word}>
-                    <span className="font-bold text-ink">{word}</span> — {count}{" "}
-                    lần
+                    <span
+                      className="viread-learning-content font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {word}
+                    </span>{" "}
+                    — {formatNumber(count)} {t("report.timesUnit")}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-muted">Không phát hiện từ bị lặp.</p>
+              <p className="text-muted">{t("report.noRepetitions")}</p>
             )}
           </div>
 
           <div className="space-y-1.5 text-sm">
             <h3 className="font-extrabold text-ink">
-              Tình trạng ngập ngừng ({hesitations.length})
+              {t("report.hesitationsTitle", {
+                count: formatNumber(hesitations.length),
+              })}
             </h3>
             {hesitationSeconds != null ? (
               <p className="text-xs font-semibold text-muted tabular-nums">
-                Tổng thời gian dừng: {hesitationSeconds.toFixed(1)} giây
+                {t("report.totalPauseSummary", {
+                  seconds: hesitationSeconds.toFixed(1),
+                })}
               </p>
             ) : null}
             {hesitations.length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-muted">
+              <ul className="list-disc space-y-1 ps-5 text-muted">
                 {hesitations.map((item, index) => (
                   <li key={`${item.after_word}-${item.before_word}-${index}`}>
-                    {item.after_word} →{" "}
-                    <span className="font-bold text-ink">
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {item.after_word}
+                    </span>{" "}
+                    →{" "}
+                    <span
+                      className="viread-learning-content font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {item.before_word}
                     </span>
-                    : dừng {item.pause.toFixed(1)} giây
+                    :{" "}
+                    {t("report.pauseDetail", {
+                      seconds: item.pause.toFixed(1),
+                    })}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-muted">Chưa phát hiện khoảng ngập ngừng.</p>
+              <p className="text-muted">{t("report.noHesitations")}</p>
             )}
           </div>
         </div>
@@ -256,10 +289,10 @@ export function ReadingReport({ result, sessionId }: Props) {
 
       <p className="border-t border-border pt-3 text-sm font-semibold text-muted">
         {uncertainCount > 0
-          ? "Có phần chưa nghe rõ nên chưa thể đánh giá toàn bộ trang."
+          ? t("report.uncertainSummary")
           : missingCount === 0 && wrongCount === 0
-            ? "Bé đã đọc đúng nội dung trang này."
-            : "Bé đã đọc một phần trang. Ba mẹ có thể cùng bé ôn lại các từ cần luyện."}
+            ? t("report.allCorrectSummary")
+            : t("report.partialSummary")}
       </p>
     </div>
   );

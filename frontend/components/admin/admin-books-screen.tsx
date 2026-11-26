@@ -18,6 +18,7 @@ import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminBookListItemUI } from "@/types/admin";
 import type { BookLifecycleStatus } from "@/types/book";
@@ -31,6 +32,8 @@ interface ActionNotice {
 
 export function AdminBooksScreen() {
   const { books } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const pageSize = 30;
   const [pageNumber, setPageNumber] = useState(1);
   const [items, setItems] = useState<readonly AdminBookListItemUI[] | null>(
@@ -130,18 +133,17 @@ export function AdminBooksScreen() {
               tone: "info",
               title:
                 nextStatus === "RETIRED"
-                  ? "Đã ngừng hoạt động sách"
-                  : "Đã kích hoạt lại sách",
+                  ? t("books.notices.retiredTitle")
+                  : t("books.notices.reactivatedTitle"),
               message:
                 nextStatus === "RETIRED"
-                  ? "Các trang sách và lịch sử đọc đã được giữ lại."
-                  : "Sách có thể xuất hiện lại trong thư viện khi có trang đã duyệt.",
+                  ? t("books.notices.retiredDesc")
+                  : t("books.notices.reactivatedDesc"),
             }
           : {
               tone: "error",
-              title: "Đã lưu trạng thái nhưng chưa tải lại được Kho sách",
-              message:
-                "Backend đã xác nhận cập nhật. Danh sách chưa đồng bộ được; hãy bấm Thử lại để tải trạng thái mới từ API.",
+              title: t("books.notices.reloadWarningTitle"),
+              message: t("books.notices.reloadWarningDesc"),
             },
       );
     } catch (cause) {
@@ -150,18 +152,18 @@ export function AdminBooksScreen() {
         tone: "error",
         title:
           nextStatus === "ACTIVE"
-            ? "Không thể kích hoạt lại sách"
-            : "Không thể ngừng hoạt động sách",
+            ? t("books.notices.reactivateFailedTitle")
+            : t("books.notices.retireFailedTitle"),
         message:
           nextStatus === "ACTIVE" &&
           isServiceError(cause) &&
           cause.status === 409
-            ? "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn."
+            ? t("books.notices.safetyBlocked")
             : nextStatus === "ACTIVE" &&
                 isServiceError(cause) &&
                 cause.status === 422
-              ? "Metadata chưa hợp lệ. Hãy chỉnh sửa tiêu đề và khoảng lớp rồi thử kích hoạt lại."
-              : "Backend chưa xác nhận thay đổi. Hãy kiểm tra quyền Admin hoặc kết nối rồi thử lại.",
+              ? t("books.notices.invalidMetadata")
+              : t("books.notices.genericToggleError"),
       });
     } finally {
       setLifecycleBusyBookId(null);
@@ -202,23 +204,22 @@ export function AdminBooksScreen() {
       setPendingDelete(null);
       setActionNotice({
         tone: "info",
-        title: "Đã xóa sách",
-        message:
-          "Sách đã được ẩn khỏi Kho sách. Lịch sử và dữ liệu liên quan vẫn được giữ lại.",
+        title: t("books.notices.deletedTitle"),
+        message: t("books.notices.deletedDesc"),
       });
     } catch (cause) {
       setDeleteError(
         isServiceError(cause) && cause.status === 401
-          ? "Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Hãy đăng nhập lại rồi thử."
+          ? t("books.notices.deleteUnauthorized")
           : isServiceError(cause) && cause.status === 403
-            ? "Tài khoản hiện tại không có quyền Admin để xóa sách."
+            ? t("books.notices.deleteForbidden")
             : isServiceError(cause) && cause.status === 404
-              ? "Không tìm thấy sách trong Kho sách. Danh sách chưa được thay đổi."
+              ? t("books.notices.deleteNotFound")
               : isServiceError(cause) && cause.status === 409
-                ? "Trạng thái sách đã thay đổi. Hãy tải lại Kho sách rồi thử lại."
+                ? t("books.notices.deleteConflict")
                 : isServiceError(cause)
                   ? cause.message
-                  : "Không thể xóa sách lúc này. Danh sách chưa được thay đổi.",
+                  : t("books.notices.deleteGenericError"),
       );
     } finally {
       deleteInFlightRef.current = false;
@@ -234,42 +235,56 @@ export function AdminBooksScreen() {
   return (
     <>
       <AdminPageHeader
-        eyebrow="Quản trị nội dung"
-        title="Kho sách"
-        description="Chỉnh sửa thông tin sách và kiểm tra những trang đang chờ duyệt."
+        eyebrow={t("books.eyebrow")}
+        title={t("books.title")}
+        description={t("books.subtitle")}
         actions={
           <ButtonLink className="sm:w-auto sm:px-6" href="/admin/books/new">
-            Tạo sách mới
+            {t("books.newBook")}
           </ButtonLink>
         }
       />
-      <p aria-label="Tổng quan kho sách" className="mb-4 text-sm text-muted">
+      <p
+        aria-label={t("books.overviewAria")}
+        className="mb-4 text-sm text-muted"
+      >
         {items
-          ? `${items.length} sách · ${items.filter((i) => i.book.lifecycle_status === "ACTIVE").length} đang hoạt động · ${items.reduce((t, i) => t + i.needs_review_count, 0)} trang cần duyệt OCR`
-          : "Đang tải…"}
+          ? t("books.summaryLine", {
+              total: formatNumber(items.length),
+              active: formatNumber(
+                items.filter((i) => i.book.lifecycle_status === "ACTIVE")
+                  .length,
+              ),
+              needsReview: formatNumber(
+                items.reduce((acc, i) => acc + i.needs_review_count, 0),
+              ),
+            })
+          : t("books.loadingSummary")}
       </p>
       <div className="mb-4">
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="relative">
             <TextField
-              label="Tìm theo tên sách, tiêu đề hoặc tác giả"
+              label={t("books.searchLabel")}
               onChange={(event) => setSearch(event.target.value)}
               value={search}
             />
           </div>
           <SelectField
-            label="Vòng đời"
+            label={t("books.lifecycleLabel")}
             onChange={(event) =>
               setLifecycle(event.target.value as BookLifecycleStatus | "")
             }
             value={lifecycle}
           >
-            <option value="">Tất cả</option>
-            <option value="ACTIVE">ACTIVE</option>
-            <option value="RETIRED">RETIRED</option>
+            <option value="">{t("common.all")}</option>
+            <option value="ACTIVE">{t("books.lifecycleOptions.ACTIVE")}</option>
+            <option value="RETIRED">
+              {t("books.lifecycleOptions.RETIRED")}
+            </option>
           </SelectField>
           <SelectField
-            label="Trạng thái OCR"
+            label={t("books.ocrStatusLabel")}
             onChange={(event) =>
               setVerification(
                 event.target.value as PageRevisionVerificationStatus | "",
@@ -277,10 +292,12 @@ export function AdminBooksScreen() {
             }
             value={verification}
           >
-            <option value="">Tất cả</option>
-            <option value="PROCESSING">PROCESSING</option>
-            <option value="NEEDS_REVIEW">NEEDS_REVIEW</option>
-            <option value="VERIFIED">VERIFIED</option>
+            <option value="">{t("common.all")}</option>
+            <option value="PROCESSING">{t("statusBadges.PROCESSING")}</option>
+            <option value="NEEDS_REVIEW">
+              {t("statusBadges.NEEDS_REVIEW")}
+            </option>
+            <option value="VERIFIED">{t("statusBadges.VERIFIED")}</option>
           </SelectField>
         </div>
       </div>
@@ -302,10 +319,10 @@ export function AdminBooksScreen() {
           tone="error"
           title={
             error === "auth"
-              ? "Cần đăng nhập quản trị"
+              ? t("books.loadErrorAuth")
               : error === "forbidden"
-                ? "Không có quyền truy cập"
-                : "Không thể tải kho sách"
+                ? t("books.loadErrorForbidden")
+                : t("books.loadErrorGeneric")
           }
         >
           {error === "safe" ? (
@@ -315,26 +332,26 @@ export function AdminBooksScreen() {
               type="button"
               variant="secondary"
             >
-              Thử lại
+              {t("common.retry")}
             </Button>
           ) : (
             <Link
               className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
-              Đến trang đăng nhập
+              {t("common.goToLogin")}
             </Link>
           )}
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          description="Thử tên sách khác hoặc thay đổi bộ lọc."
-          title="Không tìm thấy sách"
+          description={t("books.emptyDesc")}
+          title={t("books.emptyTitle")}
         />
       ) : (
         <div className="grid gap-5">
           <AdminResultsPagination
-            itemLabel="sách"
+            itemLabel={t("books.itemLabel")}
             onPageChange={setPageNumber}
             page={pageNumber}
             pageSize={pageSize}
@@ -356,67 +373,83 @@ export function AdminBooksScreen() {
                   href={`/admin/books/${encodeURIComponent(book.id)}`}
                 >
                   <h2 className="break-words text-2xl font-extrabold text-ink">
-                    {missingTitle ? "Chưa có tiêu đề" : book.title}
+                    {missingTitle ? (
+                      t("books.missingTitle")
+                    ) : (
+                      <span dir="auto">{book.title}</span>
+                    )}
                   </h2>
                 </Link>
                 <p className="break-words text-body text-muted">
-                  Tên sách: {book.name?.trim() ? book.name : "Chưa có tên sách"}{" "}
-                  · {book.author?.trim() ? book.author : "Chưa có tác giả"} ·
-                  Khối {book.min_grade}–{book.max_grade}
+                  {t("books.metaLine", {
+                    name: book.name?.trim()
+                      ? book.name
+                      : t("books.missingName"),
+                    author: book.author?.trim()
+                      ? book.author
+                      : t("books.missingAuthor"),
+                    minGrade: book.min_grade,
+                    maxGrade: book.max_grade,
+                  })}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <AdminStatusBadge status={book.lifecycle_status} />
                   {item.parent_catalog_eligible ? (
                     <span className="rounded-control bg-sky px-3 py-1 text-sm font-bold text-primary">
-                      Có trong thư viện ba mẹ
+                      {t("books.inParentLibrary")}
                     </span>
                   ) : book.lifecycle_status === "ACTIVE" ? (
                     <span className="rounded-control bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">
-                      Chưa đủ điều kiện thư viện trẻ em · OCR / Safety
+                      {t("books.notReadyChildren")}
                     </span>
                   ) : null}
                 </div>
                 <p
-                  aria-label="Trạng thái trang sách"
+                  aria-label={t("books.pageStatusAria")}
                   className="text-label text-muted"
                 >
-                  {item.page_count} trang · Đang xử lý {item.processing_count} ·
-                  Cần duyệt {item.needs_review_count} · Đã duyệt{" "}
-                  {item.verified_count}
+                  {t("books.pageSummaryLine", {
+                    total: formatNumber(item.page_count),
+                    processing: formatNumber(item.processing_count),
+                    needsReview: formatNumber(item.needs_review_count),
+                    verified: formatNumber(item.verified_count),
+                  })}
                 </p>
                 <div className="grid w-full max-w-[820px] grid-cols-2 gap-3 sm:grid-cols-4">
                   <ButtonLink
-                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
+                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
                     variant="secondary"
                     href={`/admin/books/${encodeURIComponent(book.id)}`}
                   >
-                    Xem các trang
+                    {t("books.viewPages")}
                   </ButtonLink>
 
                   <ButtonLink
-                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2 text-center"
+                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
                     variant="quiet"
                     href={editHref}
                   >
-                    {missingTitle ? "Bổ sung tiêu đề" : "Chỉnh sửa thông tin"}
+                    {missingTitle
+                      ? t("books.repairTitle")
+                      : t("books.editInfo")}
                   </ButtonLink>
 
                   <Button
-                    className="!h-[76px] !w-full !min-w-0 !max-w-none whitespace-normal px-2 text-center"
+                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
                     disabled={isBusy}
                     isLoading={lifecycleBusyBookId === book.id}
                     onClick={() => setPendingLifecycleBook(book)}
                     variant="quiet"
                   >
                     {lifecycleBusyBookId === book.id
-                      ? "Đang cập nhật…"
+                      ? t("books.updating")
                       : book.lifecycle_status === "ACTIVE"
-                        ? "Ngừng hoạt động"
-                        : "Kích hoạt lại"}
+                        ? t("books.retire")
+                        : t("books.reactivate")}
                   </Button>
 
                   <Button
-                    className="!h-[76px] !w-full !min-w-0 !max-w-none px-2"
+                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2"
                     disabled={isBusy}
                     onClick={() => {
                       setActionNotice(null);
@@ -426,14 +459,14 @@ export function AdminBooksScreen() {
                     variant="destructive"
                   >
                     <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                    Xóa sách
+                    {t("books.deleteBook")}
                   </Button>
                 </div>
               </Card>
             );
           })}
           <AdminResultsPagination
-            itemLabel="sách"
+            itemLabel={t("books.itemLabel")}
             onPageChange={setPageNumber}
             page={pageNumber}
             pageSize={pageSize}
@@ -453,7 +486,7 @@ export function AdminBooksScreen() {
               type="button"
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={lifecycleBusyBookId !== null}
@@ -468,8 +501,8 @@ export function AdminBooksScreen() {
               }
             >
               {pendingLifecycleBook?.lifecycle_status === "ACTIVE"
-                ? "Xác nhận ngừng hoạt động"
-                : "Xác nhận kích hoạt lại"}
+                ? t("books.confirmModal.retireButton")
+                : t("books.confirmModal.reactivateButton")}
             </Button>
           </div>
         }
@@ -481,15 +514,15 @@ export function AdminBooksScreen() {
         showCloseButton={lifecycleBusyBookId === null}
         title={
           pendingLifecycleBook?.lifecycle_status === "ACTIVE"
-            ? "Ngừng hoạt động sách?"
-            : "Kích hoạt lại sách?"
+            ? t("books.confirmModal.retireTitle")
+            : t("books.confirmModal.reactivateTitle")
         }
         tone="paper"
       >
         <p className="text-body text-ink">
           {pendingLifecycleBook?.lifecycle_status === "ACTIVE"
-            ? "Ngừng hoạt động sách này? Trang sách, revision và lịch sử đọc sẽ được giữ nguyên."
-            : "Kích hoạt lại sách này? Sách chỉ được kích hoạt khi metadata hợp lệ."}
+            ? t("books.confirmModal.retireBody")
+            : t("books.confirmModal.reactivateBody")}
         </p>
       </Modal>
       <Modal
@@ -497,17 +530,15 @@ export function AdminBooksScreen() {
         isOpen={pendingDelete !== null}
         onClose={closeDeleteDialog}
         showCloseButton={deleteBusyBookId === null}
-        title="Xác nhận xóa sách"
+        title={t("books.deleteModal.title")}
       >
         <div className="grid gap-5">
-          <p className="text-body text-ink">
-            Bạn có chắc chắn muốn xóa sách này khỏi kho sách không? Sách sẽ
-            không còn hiển thị trong danh sách sách đang hoạt động. Hệ thống vẫn
-            giữ lại bản ghi sách và các dữ liệu lịch sử đọc, kết quả học tập,
-            kết quả trò chơi cùng bằng chứng kiểm duyệt cần thiết.
-          </p>
+          <p className="text-body text-ink">{t("books.deleteModal.body")}</p>
           {deleteError ? (
-            <StatusMessage tone="error" title="Không thể xóa sách">
+            <StatusMessage
+              tone="error"
+              title={t("books.deleteModal.errorTitle")}
+            >
               {deleteError}
             </StatusMessage>
           ) : null}
@@ -517,7 +548,7 @@ export function AdminBooksScreen() {
               onClick={closeDeleteDialog}
               variant="secondary"
             >
-              Hủy
+              {t("common.cancel")}
             </Button>
             <Button
               disabled={deleteBusyBookId !== null}
@@ -525,7 +556,9 @@ export function AdminBooksScreen() {
               onClick={() => void confirmDeleteBook()}
               variant="destructive"
             >
-              {deleteBusyBookId !== null ? "Đang xóa…" : "Xóa sách"}
+              {deleteBusyBookId !== null
+                ? t("books.deleteModal.deleting")
+                : t("books.deleteBook")}
             </Button>
           </div>
         </div>

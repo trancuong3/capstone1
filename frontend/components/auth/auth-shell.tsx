@@ -1,11 +1,14 @@
+"use client";
+
 import Image from "next/image";
 import type { ReactNode } from "react";
 
+import { ButtonSizeProvider } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { Skeleton } from "@/components/common/skeleton";
-import { SiteHeader } from "@/components/layout/site-header";
 import { SiteFooter } from "@/components/layout/site-footer";
-import { ButtonSizeProvider } from "@/components/common/button";
+import { SiteHeader } from "@/components/layout/site-header";
+import { useTranslations } from "@/hooks/use-i18n";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -42,15 +45,18 @@ export function AuthShell({ children }: AuthShellProps) {
 }
 
 export function AuthLoadingState() {
+  const tA11y = useTranslations("accessibility");
+  const tCommon = useTranslations("common");
+
   return (
     <AuthShell>
       <Card
         aria-busy="true"
-        aria-label="Đang tải nội dung"
+        aria-label={tA11y("loadingContent")}
         className="border border-border bg-white"
       >
         <span className="sr-only" role="status">
-          Đang tải…
+          {tCommon("states.loading")}
         </span>
         <Skeleton className="h-11 w-3/5" />
         <Skeleton className="h-7 w-4/5" />

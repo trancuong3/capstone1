@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "חשבון ViRead",
+    "title": "הגדרות חשבון",
+    "description": "ניהול פרטי חשבון, אבטחה ואפשרויות שימוש ב-ViRead.",
+    "infoHeading": "פרטי חשבון",
+    "displayName": "שם תצוגה",
+    "email": "אימייל החשבון",
+    "role": "תפקיד בחשבון",
+    "emailStatus": "סטטוס אימייל",
+    "manageProfile": "ניהול פרופיל",
+    "changePassword": "שינוי סיסמה",
+    "emailVerificationHeading": "אימייל ואימות",
+    "readingRemindersHeading": "ניהול תזכורות קריאה",
+    "readingRemindersDescription": "התאמת לוחות זמנים ותזכורות קריאה עבור הילד.",
+    "loadingAria": "טוען הגדרות חשבון",
+    "loadErrorBody": "ViRead לא הצליחה לטעון את נתוני החשבון. אנא טען מחדש את הדף או התחבר מחדש.",
+    "notUpdated": "לא עודכן",
+    "pendingEmailNotice": "אימייל חדש ממתין לאישור:",
+    "emailStatusPending": "אימייל חדש ממתין לאישור",
+    "emailVerified": "מאומת",
+    "emailUnverified": "לא מאומת",
+    "emailPendingBody": "בקשת שינוי האימייל ממתינה לאישור. האימייל הנוכחי נשאר הכתובת שאומתה בעבר.",
+    "emailDefaultBody": "כדי לשנות את האימייל או לשלוח מחדש אימייל אימות, השתמש בתכונה הקיימת בפרופיל ההורה.",
+    "openParentProfile": "פתח פרופיל הורה"
+  },
+  "password": {
+    "title": "שינוי סיסמה",
+    "description": "השתמש בסיסמה נפרדת להגנה על החשבון שלך.",
+    "minLengthHint": "הסיסמה החדשה חייבת להכיל לפחות {min} תווים.",
+    "noPasswordDescription": "לחשבון זה אין עדיין שיטת התחברות בסיסמה. ההורים יכולים לבקש קישור לאיפוס סיסמה באמצעות האימייל.",
+    "requestRecoveryButton": "אין סיסמה? שליחת קישור לאיפוס סיסמה באימייל",
+    "changedSuccess": "הסיסמה עודכנה. ההפעלה הנוכחית נשארת פעילה.",
+    "currentInvalid": "הסיסמה הנוכחית אינה נכונה.",
+    "changeError": "לא ניתן לשנות את הסיסמה. אנא בדוק את חיבור הרשת שלך ונסה שוב.",
+    "noEmailForRecovery": "אין כתובת אימייל רשומה לשליחת קישור לאיפוס סיסמה.",
+    "recoverySent": "Supabase Auth קיבלה את בקשת איפוס הסיסמה. אנא בדוק את תיבת הדואר הנכנס ותיקיית הספאם.",
+    "recoveryError": "לא ניתן לשלוח את הקישור לאיפוס הסיסמה. אנא נסה שוב מאוחר יותר.",
+    "showFieldAria": "הצג {label}",
+    "hideFieldAria": "הסתר {label}"
+  },
+  "language": {
+    "heading": "שפת תצוגה",
+    "description": "בחר את השפה עבור הניווט וההגדרות. תוכן הספר בוייטנאמית נשאר ללא שינוי.",
+    "learningContentNote": "שינוי השפה משפיע רק על הניווט, הכפתורים וההגדרות. ספרים בוייטנאמית, OCR, זיהוי קולי (STT) ושמע לדוגמה (TTS) נשארים בוייטנאמית."
+  }
+}

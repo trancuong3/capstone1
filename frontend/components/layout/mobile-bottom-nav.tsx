@@ -27,11 +27,13 @@ import {
   MobileMoreSheet,
   type MobileMoreSheetItem,
 } from "@/components/layout/mobile-more-sheet";
+import { useI18n } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 export interface MobileNavTabItem {
   readonly href: string;
   readonly label: string;
+  readonly labelKey?: string;
   readonly icon: LucideIcon;
   readonly isPrimaryAction?: boolean;
   readonly isActive?: (pathname: string) => boolean;
@@ -45,22 +47,26 @@ export const PARENT_MOBILE_PRIMARY_TABS: readonly MobileNavTabItem[] = [
   {
     href: "/dashboard",
     label: "Tổng quan",
+    labelKey: "navigation.parent.dashboard",
     icon: LayoutDashboard,
   },
   {
     href: "/books",
     label: "Sách",
+    labelKey: "navigation.parent.booksShort",
     icon: BookOpen,
   },
   {
     href: "/book-scanner",
     label: "Quét",
+    labelKey: "navigation.parent.scannerShort",
     icon: Camera,
     isPrimaryAction: true,
   },
   {
     href: "/reports",
     label: "Tiến bộ",
+    labelKey: "navigation.parent.reports",
     icon: BarChart3,
     isActive: (pathname) =>
       pathname === "/reports" ||
@@ -73,25 +79,33 @@ export const PARENT_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
     href: "/my-books",
     label: "Sách của tôi",
+    labelKey: "navigation.parent.myBooks",
     description: "Tải lên và quản lý sách riêng của gia đình",
+    descriptionKey: "navigation.parent.moreDescriptions.myBooks",
     icon: BookMarked,
   },
   {
     href: "/reading-management",
     label: "Quản lý đọc",
+    labelKey: "navigation.parent.readingManagement",
     description: "Mục tiêu, lịch đọc và sách đã lưu cho bé",
+    descriptionKey: "navigation.parent.moreDescriptions.readingManagement",
     icon: CalendarClock,
   },
   {
     href: "/sessions",
     label: "Lịch sử",
+    labelKey: "navigation.parent.sessions",
     description: "Xem lại các buổi đọc đã hoàn thành",
+    descriptionKey: "navigation.parent.moreDescriptions.sessions",
     icon: History,
   },
   {
     href: "/entertainment",
     label: "Giải trí",
+    labelKey: "navigation.parent.entertainment",
     description: "Trò chơi ngôn ngữ, kể chuyện và karaoke",
+    descriptionKey: "navigation.parent.moreDescriptions.entertainment",
     icon: Gamepad2,
     isActive: (pathname) =>
       routeMatches(pathname, "/entertainment") ||
@@ -100,7 +114,9 @@ export const PARENT_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
     href: "/reports/difficult-words",
     label: "Từ cần luyện",
+    labelKey: "navigation.parent.difficultWords",
     description: "Ôn luyện các từ bé hay đọc nhầm",
+    descriptionKey: "navigation.parent.moreDescriptions.difficultWords",
     icon: Volume2,
   },
 ] as const;
@@ -109,21 +125,25 @@ export const ADMIN_MOBILE_PRIMARY_TABS: readonly MobileNavTabItem[] = [
   {
     href: "/admin/parents",
     label: "Phụ huynh",
+    labelKey: "navigation.admin.parents",
     icon: UsersRound,
   },
   {
     href: "/admin/books",
     label: "Kho sách",
+    labelKey: "navigation.admin.books",
     icon: BookOpenCheck,
   },
   {
     href: "/admin/metadata-quality",
     label: "Chất lượng",
+    labelKey: "navigation.admin.mobileQualityShort",
     icon: ClipboardCheck,
   },
   {
     href: "/admin/karaoke",
     label: "Bài hát",
+    labelKey: "navigation.admin.karaoke",
     icon: Music2,
   },
 ] as const;
@@ -132,19 +152,25 @@ export const ADMIN_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
     href: "/admin/audit-logs",
     label: "Nhật ký",
+    labelKey: "navigation.admin.auditLogs",
     description: "Theo dõi nhật ký kiểm toán quản trị",
+    descriptionKey: "navigation.admin.mobileMoreDescriptions.auditLogs",
     icon: ScrollText,
   },
   {
     href: "/admin/viread-training",
     label: "OCR",
+    labelKey: "navigation.admin.mobileOcrShort",
     description: "Huấn luyện và vận hành model VietOCR V2",
+    descriptionKey: "navigation.admin.mobileMoreDescriptions.training",
     icon: BrainCircuit,
   },
   {
     href: "/admin/health",
     label: "Vận hành",
+    labelKey: "navigation.admin.health",
     description: "Tình trạng hệ thống, OCR worker và voice",
+    descriptionKey: "navigation.admin.mobileMoreDescriptions.health",
     icon: HeartPulse,
   },
 ] as const;
@@ -160,14 +186,17 @@ interface MobileBottomNavProps {
 
 export function MobileBottomNav({
   pathname,
-  ariaLabel = "Điều hướng nhanh trên di động",
-  moreTitle = "Tính năng khác",
+  ariaLabel,
+  moreTitle,
   sheetId = "parent-mobile-more-sheet",
   tabs = PARENT_MOBILE_PRIMARY_TABS,
   moreItems = PARENT_MOBILE_MORE_ITEMS,
 }: MobileBottomNavProps) {
+  const { t } = useI18n();
   const [openForPathname, setOpenForPathname] = useState<string | null>(null);
   const isMoreOpen = openForPathname === pathname;
+  const resolvedAriaLabel = ariaLabel ?? t("navigation.parent.mobileAriaLabel");
+  const resolvedMoreTitle = moreTitle ?? t("navigation.parent.moreTitle");
 
   const isMoreRouteActive = moreItems.some((item) =>
     item.isActive ? item.isActive(pathname) : routeMatches(pathname, item.href),
@@ -178,7 +207,7 @@ export function MobileBottomNav({
   return (
     <>
       <nav
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(35,62,64,0.06)] backdrop-blur-sm xl:hidden"
         data-testid="mobile-bottom-nav"
       >
@@ -189,10 +218,18 @@ export function MobileBottomNav({
           )}
         >
           {tabs.map(
-            ({ href, label, icon: Icon, isPrimaryAction, isActive }) => {
+            ({
+              href,
+              label,
+              labelKey,
+              icon: Icon,
+              isPrimaryAction,
+              isActive,
+            }) => {
               const active = isActive
                 ? isActive(pathname)
                 : routeMatches(pathname, href);
+              const resolvedLabel = labelKey ? t(labelKey) : label;
 
               if (isPrimaryAction) {
                 return (
@@ -217,7 +254,9 @@ export function MobileBottomNav({
                     >
                       <Icon className="size-5" strokeWidth={2.1} />
                     </span>
-                    <span className="truncate leading-tight">{label}</span>
+                    <span className="truncate leading-tight">
+                      {resolvedLabel}
+                    </span>
                   </Link>
                 );
               }
@@ -242,7 +281,9 @@ export function MobileBottomNav({
                   >
                     <Icon className="size-5" strokeWidth={active ? 2.2 : 1.9} />
                   </span>
-                  <span className="truncate leading-tight">{label}</span>
+                  <span className="truncate leading-tight">
+                    {resolvedLabel}
+                  </span>
                 </Link>
               );
             },
@@ -279,7 +320,9 @@ export function MobileBottomNav({
                 strokeWidth={isMoreOpen || isMoreRouteActive ? 2.2 : 1.9}
               />
             </span>
-            <span className="truncate leading-tight">Thêm</span>
+            <span className="truncate leading-tight">
+              {t("navigation.parent.moreButton")}
+            </span>
           </button>
         </div>
       </nav>
@@ -290,7 +333,7 @@ export function MobileBottomNav({
         items={moreItems}
         onClose={() => setOpenForPathname(null)}
         pathname={pathname}
-        title={moreTitle}
+        title={resolvedMoreTitle}
       />
     </>
   );

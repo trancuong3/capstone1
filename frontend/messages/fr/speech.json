@@ -1,0 +1,117 @@
+{
+  "recorder": {
+    "permissionRequired": "L'autorisation du microphone est requise pour enregistrer la voix de l'enfant.",
+    "recording": "Écoute de l'enfant en cours…",
+    "processing": "Analyse de la prononciation en cours…",
+    "playback": "Écouter l'enregistrement"
+  },
+  "preferences": {
+    "title": "Options de voix",
+    "voiceSpeed": "Vitesse de lecture",
+    "autoRead": "Lecture automatique du modèle à l'ouverture de la page",
+    "slow": "Lent",
+    "normal": "Normal",
+    "fast": "Rapide"
+  },
+  "status": {
+    "micReady": "Microphone prêt",
+    "micMuted": "Microphone désactivé",
+    "ttsReady": "Voix modèle prête"
+  },
+  "settings": {
+    "buttonLabel": "Voix",
+    "modalTitle": "Voix modèle",
+    "savedVoice": "Voix enregistrée",
+    "defaultVoice": "Voix par défaut",
+    "localOnlyMode": "Cet appareil uniquement",
+    "localWithGoogleMode": "Cet appareil + Google (secours)",
+    "speedLabel": "Vitesse de lecture",
+    "regionAndVoiceTitle": "Sélectionner la région et la voix",
+    "regionAria": "Sélectionner la région",
+    "filterAria": "Filtrer les voix",
+    "allVoices": "Toutes les voix",
+    "maleVoice": "Voix d'homme",
+    "femaleVoice": "Voix de femme",
+    "youngVoice": "Voix jeune",
+    "childVoice": "Voix d'enfant",
+    "loadingVoices": "Chargement de la liste des voix…",
+    "loadErrorFallback": "Impossible de charger la liste des voix. La voix par défaut reste disponible.",
+    "retry": "Réessayer",
+    "emptyVoices": "Aucune voix disponible dans la liste. Votre enfant peut utiliser la voix par défaut de cet appareil.",
+    "emptyFiltered": "Aucune voix ne correspond à vos filtres.",
+    "parentModeTitle": "Paramètres vocaux (Mode parent)",
+    "localAvailable": "Prêt",
+    "localUnavailable": "Désactivé",
+    "googleConfigured": "Configuré",
+    "googleUnconfigured": "Clé API non configurée",
+    "localOnlyTitle": "Cet appareil uniquement",
+    "localOnlyDesc": "Fonctionne à 100 % en local (serveur + navigateur), aucun appel vers Google",
+    "localWithGoogleTitle": "Cet appareil + Google (secours)",
+    "localWithGoogleDesc": "Priorité au local, basculement automatique sur le mode en ligne en cas de besoin",
+    "googleSttFallback": "Secours Google pour la reconnaissance vocale (STT)",
+    "googleTtsFallback": "Secours Google pour la prononciation (TTS)",
+    "missingGoogleKeyHint": "Si la clé de l'API Google Cloud n'est pas configurée dans backend/.env, ViRead utilisera automatiquement Google ou le navigateur en ligne comme solution de secours.",
+    "useDefaultVoice": "Utiliser la voix par défaut",
+    "preview": "Aperçu",
+    "stopPreview": "Arrêter l'aperçu",
+    "previewFailed": "Impossible de lire la voix. Veuillez réessayer ou choisir une autre voix.",
+    "savedVoiceResetNotice": "La voix précédemment enregistrée n'est plus disponible. ViRead est revenu à la voix par défaut pour que vous puissiez vérifier.",
+    "regions": {
+      "all": "Toutes les régions",
+      "north": "Nord",
+      "central": "Centre",
+      "south": "Sud"
+    },
+    "genders": {
+      "female": "Femme",
+      "male": "Homme"
+    },
+    "ageGroups": {
+      "young": "Jeune",
+      "child": "Voix d'enfant",
+      "middle_aged": "D'âge mûr",
+      "old": "Senior"
+    },
+    "accents": {
+      "northern": "Accent du Nord",
+      "southern": "Accent du Sud",
+      "central": "Accent central",
+      "american": "Accent américain",
+      "british": "Accent britannique"
+    },
+    "googleProviderLabel": "Secours Google"
+  },
+  "engineBadge": {
+    "ariaLabel": "Source audio : STT {stt}, TTS {tts}",
+    "fallbackDetail": "{base} (Secours : {reason})",
+    "androidDetail": "{base} (Appareil · Voix Android vi-VN)",
+    "catalogCacheDetail": "{base} (Cache standard · Lecture zéro latence)",
+    "googleCloudDetail": "{base} (En ligne · Utilisation du secours Google Cloud API)",
+    "browserDefaultDetail": "{base} (En ligne · Secours Google/Navigateur)",
+    "wasmDetail": "{base} (Hors ligne · Reconnaissance sur l'appareil via WASM)",
+    "localDetail": "{base} (Hors ligne · Exécution directe sur cet appareil)",
+    "shortLabels": {
+      "local_offline": "Hors ligne",
+      "browser_wasm": "Hors ligne (WASM)",
+      "catalog_cache": "Cache standard",
+      "android_native": "Android (vi-VN)",
+      "google_cloud": "En ligne (Google API)",
+      "browser_default": "En ligne (Google/Navigateur)"
+    }
+  },
+  "playback": {
+    "unavailable": "La voix sur l'appareil n'est pas prête. Vous pouvez suivre le texte à l'écran et appuyer sur Réessayer.",
+    "lockedVoiceUnavailableNotice": "La voix sélectionnée est temporairement occupée. ViRead conserve les instructions textuelles pour éviter de changer de voix — veuillez appuyer sur Réessayer.",
+    "serverFallbackNotice": "La voix choisie n'est pas disponible pour le moment, le système utilise une voix de secours.",
+    "androidNativeFallbackNotice": "La voix sur le serveur est désactivée — ViRead utilise la voix vietnamienne de l'appareil Android.",
+    "browserFallbackNotice": "La voix sur l'appareil est désactivée — ViRead utilise la voix en ligne du navigateur.",
+    "autoplayBlocked": "Le navigateur attend que vous touchiez le bouton Réécouter pour activer le son.",
+    "partialPlayback": "Audio interrompu. Vous pouvez écouter depuis le début."
+  },
+  "wasm": {
+    "workerUnavailable": "Web Worker indisponible",
+    "wasmUnavailable": "WebAssembly indisponible",
+    "cryptoUnavailable": "Web Crypto API indisponible",
+    "deviceUnsupported": "WASM STT indisponible sur cet appareil."
+  }
+}

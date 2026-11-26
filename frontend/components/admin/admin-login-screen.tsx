@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { Button } from "@/components/common/button";
@@ -13,18 +13,10 @@ import { TextField } from "@/components/common/text-field";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useTranslations } from "@/hooks/use-i18n";
 import { isAdminAuthError } from "@/lib/api/admin-auth-service";
 import { sanitizeNextPath } from "@/lib/auth/route-policy";
 import type { AdminLoginRequest, AdminMockScenario } from "@/types/admin";
-
-const schema = z.object({
-  email: z
-    .string()
-    .trim()
-    .min(1, "Vui lòng nhập email.")
-    .email("Email chưa đúng định dạng."),
-  password: z.string().min(8, "Mật khẩu cần có ít nhất 8 ký tự."),
-});
 
 export function AdminLoginScreen({
   nextPath = null,
@@ -34,12 +26,25 @@ export function AdminLoginScreen({
   scenario: AdminMockScenario;
 }) {
   const { auth } = useAdminServices();
+  const t = useTranslations("admin");
   const { refresh, replace } = useRouter();
-  const [notice, setNotice] = useState<string | null>(
+  const schema = useMemo(
+    () =>
+      z.object({
+        email: z
+          .string()
+          .trim()
+          .min(1, t("login.validation.emailRequired"))
+          .email(t("login.validation.emailInvalid")),
+        password: z.string().min(8, t("login.validation.passwordMin")),
+      }),
+    [t],
+  );
+  const [noticeErrorKey, setNoticeErrorKey] = useState<string | null>(
     scenario === "unauthenticated"
-      ? "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."
+      ? "login.errors.sessionExpired"
       : scenario === "forbidden"
-        ? "Tài khoản này không có quyền truy cập khu vực quản trị."
+        ? "login.errors.forbidden"
         : null,
   );
   const {
@@ -51,18 +56,18 @@ export function AdminLoginScreen({
     defaultValues: { email: "admin@example.com", password: "" },
   });
   const submit = handleSubmit(async (values) => {
-    setNotice(null);
+    setNoticeErrorKey(null);
     try {
       await auth.signIn(values);
       replace(sanitizeNextPath(nextPath, "admin"));
       refresh();
     } catch (error) {
-      setNotice(
+      setNoticeErrorKey(
         isAdminAuthError(error) && error.reason === "forbidden"
-          ? "Tài khoản này không có quyền truy cập khu vực quản trị."
+          ? "login.errors.forbidden"
           : isAdminAuthError(error) && error.reason === "invalid-credentials"
-            ? "Thông tin đăng nhập chưa đúng. Vui lòng thử lại."
-            : "Không thể đăng nhập lúc này. Vui lòng thử lại sau.",
+            ? "login.errors.invalidCredentials"
+            : "login.errors.generic",
       );
     }
   });
@@ -74,30 +79,28 @@ export function AdminLoginScreen({
           <ShieldCheck aria-hidden className="size-14 text-primary" />
           <div>
             <p className="text-sm font-semibold text-primary">
-              Khu vực quản trị
+              {t("login.areaLabel")}
             </p>
             <h1 className="mt-2 text-heading font-extrabold text-ink">
-              Đăng nhập quản trị
+              {t("login.title")}
             </h1>
-            <p className="mt-2 text-muted">
-              Quản lý hồ sơ phụ huynh, sách và trạng thái vận hành.
-            </p>
+            <p className="mt-2 text-muted">{t("login.subtitle")}</p>
           </div>
           <form className="flex flex-col gap-4" noValidate onSubmit={submit}>
-            {notice ? (
-              <StatusMessage tone="error">{notice}</StatusMessage>
+            {noticeErrorKey ? (
+              <StatusMessage tone="error">{t(noticeErrorKey)}</StatusMessage>
             ) : null}
             <TextField
               autoComplete="username"
               error={errors.email?.message}
-              label="Email quản trị"
+              label={t("login.emailLabel")}
               type="email"
               {...register("email")}
             />
             <TextField
               autoComplete="current-password"
               error={errors.password?.message}
-              label="Mật khẩu"
+              label={t("login.passwordLabel")}
               type="password"
               {...register("password")}
             />
@@ -106,12 +109,10 @@ export function AdminLoginScreen({
               isLoading={isSubmitting}
               type="submit"
             >
-              {isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
+              {isSubmitting ? t("login.submitting") : t("login.submit")}
             </Button>
           </form>
-          <p className="text-body text-muted">
-            Chỉ tài khoản có quyền quản trị mới có thể truy cập khu vực này.
-          </p>
+          <p className="text-body text-muted">{t("login.adminOnlyHint")}</p>
         </Card>
       </main>
       <SiteFooter variant="admin" />

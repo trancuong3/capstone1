@@ -4,6 +4,7 @@ import { useContext, useEffect, useId, useState } from "react";
 
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { useAutomationPreferences } from "@/hooks/use-automation-preferences";
+import { useTranslations } from "@/hooks/use-i18n";
 import { announcePresenceOptIn } from "@/lib/reading/presence-opt-in";
 import type { CoachingStyle } from "@/lib/reading/automation-preferences";
 import { cn } from "@/lib/utils/cn";
@@ -13,18 +14,18 @@ type EmailState =
 
 const COACHING_STYLE_OPTIONS: readonly {
   readonly value: CoachingStyle;
-  readonly label: string;
-  readonly hint: string;
+  readonly labelKey: string;
+  readonly hintKey: string;
 }[] = [
   {
     value: "gentle",
-    label: "Dịu dàng chi tiết (Lớp 1)",
-    hint: "An ủi nhiều câu ấm áp và hướng dẫn đánh vần từng bước khi bé vấp chữ.",
+    labelKey: "automation.gentleLabel",
+    hintKey: "automation.gentleHint",
   },
   {
     value: "concise",
-    label: "Ngắn gọn (Đọc thạo)",
-    hint: "Nhắc ngắn gọn, tiết kiệm lời cho bé đã đọc trơn nhanh.",
+    labelKey: "automation.conciseLabel",
+    hintKey: "automation.conciseHint",
   },
 ];
 
@@ -88,6 +89,7 @@ function Switch({
  * coaching style selector (G14, G28).
  */
 export function ReadingAutomationSettings() {
+  const t = useTranslations("reading");
   const services = useContext(AppServicesContext);
   const presence = services?.readingPresenceService;
   const { preferences, update, coachingStyle, updateCoachingStyle } =
@@ -135,21 +137,21 @@ export function ReadingAutomationSettings() {
         className="text-label font-semibold text-ink"
         id="automation-settings-heading"
       >
-        Tự động khi đọc
+        {t("automation.sectionTitle")}
       </h3>
       <Switch
         checked={preferences.assist}
-        description="Tự nhắc nhẹ, vỗ về và đọc mẫu khi bé đọc sai hoặc ngập ngừng."
-        label="Hỗ trợ tự động"
+        description={t("automation.autoHelpDesc")}
+        label={t("automation.autoHelpLabel")}
         onChange={(assist) => update({ assist })}
       />
       <div
-        aria-label="Mức độ tương tác của thầy cô giáo"
-        className="ml-8 space-y-1.5"
+        aria-label={t("automation.styleGroupAria")}
+        className="ms-8 space-y-1.5"
         role="group"
       >
         <span className="block text-xs font-semibold text-muted">
-          Phong cách thầy cô giáo hướng dẫn
+          {t("automation.styleTitle")}
         </span>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {COACHING_STYLE_OPTIONS.map((option) => {
@@ -158,7 +160,7 @@ export function ReadingAutomationSettings() {
               <button
                 aria-pressed={selected}
                 className={cn(
-                  "flex min-h-11 flex-col items-start rounded-control border px-3 py-2 text-left transition-colors",
+                  "flex min-h-11 flex-col items-start rounded-control border px-3 py-2 text-start transition-colors",
                   selected
                     ? "border-primary bg-sky text-ink"
                     : "border-border bg-white text-ink hover:bg-canvas",
@@ -169,8 +171,10 @@ export function ReadingAutomationSettings() {
                 onClick={() => updateCoachingStyle(option.value)}
                 type="button"
               >
-                <span className="text-xs font-bold">{option.label}</span>
-                <span className="mt-0.5 text-xs text-muted">{option.hint}</span>
+                <span className="text-xs font-bold">{t(option.labelKey)}</span>
+                <span className="mt-0.5 text-xs text-muted">
+                  {t(option.hintKey)}
+                </span>
               </button>
             );
           })}
@@ -178,17 +182,17 @@ export function ReadingAutomationSettings() {
       </div>
       <Switch
         checked={preferences.autoAdvance}
-        description="Tự sang trang tiếp theo sau khi đã lưu kết quả trang."
-        label="Tự chuyển trang"
+        description={t("automation.autoAdvanceDesc")}
+        label={t("automation.autoAdvanceLabel")}
         onChange={(autoAdvance) => update({ autoAdvance })}
       />
       {presence ? (
         <div className="space-y-1">
           <Switch
             checked={email === "on" || email === "saving"}
-            description="Chỉ khi ViRead tạm dừng vì một lúc không thấy người đọc trong khung hình. ViRead chỉ đếm người trong khung ngay trên máy, không lưu hay gửi hình ảnh."
+            description={t("automation.presenceAlertDesc")}
             disabled={email === "loading" || email === "saving"}
-            label="Nhắc ba mẹ qua email"
+            label={t("automation.presenceAlertLabel")}
             onChange={(next) => void changeEmail(next)}
           />
           {email === "camera-needed" ? (
@@ -196,7 +200,7 @@ export function ReadingAutomationSettings() {
               className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
               role="status"
             >
-              Cần cho phép camera để dùng nhắc qua email. Chưa bật.
+              {t("automation.cameraRequiredNotice")}
             </p>
           ) : null}
           {email === "error" ? (
@@ -204,7 +208,7 @@ export function ReadingAutomationSettings() {
               className="rounded-control bg-warning-surface px-3 py-2 text-sm font-medium text-ink"
               role="status"
             >
-              Chưa lưu được cài đặt email. Ba mẹ thử lại nhé.
+              {t("automation.saveEmailError")}
             </p>
           ) : null}
         </div>

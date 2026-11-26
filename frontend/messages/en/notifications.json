@@ -1,0 +1,15 @@
+{
+  "reminders": {
+    "saved": "Reading reminder saved.",
+    "deleted": "Reading reminder deleted.",
+    "emailSent": "Reading reminder email sent."
+  },
+  "presence": {
+    "childStarted": "{alias} just started a new reading session.",
+    "childCompleted": "{alias} completed a reading session."
+  },
+  "updates": {
+    "saved": "Changes saved.",
+    "localeChanged": "Display language updated to {language}."
+  }
+}

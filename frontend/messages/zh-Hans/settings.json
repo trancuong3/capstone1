@@ -1,0 +1,47 @@
+{
+  "account": {
+    "eyebrow": "ViRead 账户",
+    "title": "账户设置",
+    "description": "管理账户信息、安全及 ViRead 使用选项。",
+    "infoHeading": "账户信息",
+    "displayName": "显示名称",
+    "email": "账户邮箱",
+    "role": "账户角色",
+    "emailStatus": "邮箱状态",
+    "manageProfile": "管理档案",
+    "changePassword": "修改密码",
+    "emailVerificationHeading": "邮箱与验证",
+    "readingRemindersHeading": "管理阅读提醒",
+    "readingRemindersDescription": "调整孩子的阅读计划和提醒。",
+    "loadingAria": "正在加载账户设置",
+    "loadErrorBody": "ViRead 无法加载账户数据。请刷新页面或重新登录。",
+    "notUpdated": "未更新",
+    "pendingEmailNotice": "新邮箱等待确认：",
+    "emailStatusPending": "新邮箱等待确认",
+    "emailVerified": "已验证",
+    "emailUnverified": "未验证",
+    "emailPendingBody": "邮箱更改请求正在等待验证。当前邮箱仍为之前已验证的地址。",
+    "emailDefaultBody": "如需更改邮箱或重新发送验证邮件，请使用家长资料中的现有功能。",
+    "openParentProfile": "打开家长资料"
+  },
+  "password": {
+    "title": "修改密码",
+    "description": "使用独立密码保护您的账户。",
+    "minLengthHint": "新密码至少需要 {min} 个字符。",
+    "noPasswordDescription": "此账户尚未设置密码登录方式。家长可以通过电子邮件请求设置密码链接。",
+    "requestRecoveryButton": "没有密码？发送密码重置链接到邮箱",
+    "changedSuccess": "密码已更新。当前登录会话保持不变。",
+    "currentInvalid": "当前密码不正确。",
+    "changeError": "无法更改密码。请检查网络连接并重试。",
+    "noEmailForRecovery": "账户中没有可用于发送密码重置链接的邮箱。",
+    "recoverySent": "Supabase Auth 已收到密码重置请求。请检查您的收件箱和垃圾邮件文件夹。",
+    "recoveryError": "无法发送密码重置链接。请稍后再试。",
+    "showFieldAria": "显示 {label}",
+    "hideFieldAria": "隐藏 {label}"
+  },
+  "language": {
+    "heading": "显示语言",
+    "description": "选择导航和设置的语言。越南语书籍内容保持不变。",
+    "learningContentNote": "更改语言仅影响导航、按钮和设置。越南语书籍、OCR、语音识别 (STT) 和语音朗读 (TTS) 仍为越南语。"
+  }
+}

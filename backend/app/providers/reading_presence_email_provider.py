@@ -19,6 +19,8 @@ from app.providers.reading_reminder_email_provider import (
     EmailDeliveryNotConfigured,
     email_delivery_is_configured,
 )
+from app.services.i18n.email_templates import render_reading_presence_email
+from app.services.i18n.locales import DEFAULT_LOCALE
 
 SUBJECT = "ViRead đã tạm dừng buổi đọc"
 
@@ -33,6 +35,7 @@ def build_presence_message(
     child_alias: str | None,
     alert_id: UUID,
     from_email: str | None = None,
+    locale: str = DEFAULT_LOCALE,
 ) -> EmailMessage:
     """The only copy a presence alert may contain.
 
@@ -42,19 +45,18 @@ def build_presence_message(
     """
     sender = from_email or SMTP_FROM_EMAIL or "viread@localhost"
     domain = sender.rpartition("@")[2] or "viread.local"
-    who = f" của {child_alias}" if child_alias else ""
+    rendered = render_reading_presence_email(
+        locale=locale,
+        child_alias=child_alias,
+        app_url=READING_REMINDER_APP_URL,
+    )
     message = EmailMessage()
     message["From"] = sender
     message["To"] = recipient
-    message["Subject"] = SUBJECT
+    message["Subject"] = rendered.subject
     message["Message-ID"] = f"<reading-presence-{alert_id}@{domain}>"
-    message.set_content(
-        "Chào ba mẹ,\n\n"
-        f"ViRead đã tạm dừng buổi đọc{who} vì một lúc không thấy người đọc trong khung hình.\n\n"
-        f"Khi sẵn sàng, ba mẹ có thể mở ViRead để tiếp tục: {READING_REMINDER_APP_URL}\n\n"
-        "Bạn nhận email này vì đã bật \"Nhắc qua email khi không thấy người đọc\". "
-        "Ba mẹ có thể tắt bất kỳ lúc nào trong phần cài đặt đọc sách."
-    )
+    message.set_content(rendered.body)
+    message["Content-Language"] = rendered.locale
     return message
 
 
@@ -72,9 +74,13 @@ def send_presence_email(
     recipient: str,
     child_alias: str | None,
     alert_id: UUID,
+    locale: str = DEFAULT_LOCALE,
 ) -> None:
     message = build_presence_message(
-        recipient=recipient, child_alias=child_alias, alert_id=alert_id
+        recipient=recipient,
+        child_alias=child_alias,
+        alert_id=alert_id,
+        locale=locale,
     )
     if READING_PRESENCE_MAIL_SINK_DIR:
         _write_to_sink(message, READING_PRESENCE_MAIL_SINK_DIR)

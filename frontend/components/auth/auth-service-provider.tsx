@@ -14,6 +14,7 @@ import {
   type AuthFailureReason,
   type AuthService,
 } from "@/lib/api/auth-service";
+import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
 import { clearPersistedSelectedChild } from "@/lib/cache/selected-child-storage";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
@@ -88,6 +89,9 @@ export function AuthServiceProvider({
         clearUserCache();
         clearPersistedSelectedChild();
         lastUserIdRef.current = null;
+        if (event === "SIGNED_OUT") {
+          dispatchI18nAuthSync({ userId: null, preferredLocale: null });
+        }
       } else if (
         lastUserIdRef.current &&
         lastUserIdRef.current !== nextUserId

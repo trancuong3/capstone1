@@ -44,6 +44,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
+import { useTranslations } from "@/hooks/use-i18n";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
@@ -94,24 +95,22 @@ type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
-const defaultGameError =
-  "Chưa kết nối được góc Kể chuyện qua tranh. Ba mẹ và bé hãy thử lại nhé.";
 
 const STORYTELLING_STEPS = [
   {
     step: "1",
-    title: "Trong tranh có ai, vật gì?",
-    detail: "Gọi tên nhân vật, con vật hoặc đồ vật nổi bật.",
+    titleKey: "pictureDescription.storySteps.step1Title",
+    detailKey: "pictureDescription.storySteps.step1Detail",
   },
   {
     step: "2",
-    title: "Đang làm gì, ở đâu?",
-    detail: "Kể hoạt động đang diễn ra và khung cảnh xung quanh.",
+    titleKey: "pictureDescription.storySteps.step2Title",
+    detailKey: "pictureDescription.storySteps.step2Detail",
   },
   {
     step: "3",
-    title: "Màu sắc, cảm nghĩ ra sao?",
-    detail: "Thêm màu sắc, thời tiết hoặc cảm xúc của bé.",
+    titleKey: "pictureDescription.storySteps.step3Title",
+    detailKey: "pictureDescription.storySteps.step3Detail",
   },
 ] as const;
 
@@ -206,20 +205,26 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
   return record.SpeechRecognition ?? record.webkitSpeechRecognition ?? null;
 }
 
-function sourceLabel(source: PictureSessionSummaryDTO["source_type"]): string {
+type TranslateFn = ReturnType<typeof useTranslations>;
+
+function sourceLabel(
+  source: PictureSessionSummaryDTO["source_type"],
+  t: TranslateFn,
+): string {
   switch (source) {
     case "BOOK_PAGE":
-      return "Từ sách ViRead";
+      return t("pictureDescription.sources.BOOK_PAGE");
     case "CUSTOM_UPLOAD":
-      return "Ảnh tải lên";
+      return t("pictureDescription.sources.CUSTOM_UPLOAD");
     default:
-      return "Tranh chủ đề";
+      return t("pictureDescription.sources.SAMPLE");
   }
 }
 
 function readinessHint(
   wordCount: number,
   grade: number,
+  t: TranslateFn,
 ): {
   readonly label: string;
   readonly readyFor3Stars: boolean;
@@ -227,34 +232,33 @@ function readinessHint(
   const targetWords = grade >= 3 ? 7 : 5;
   if (wordCount === 0) {
     return {
-      label: "Bé hãy bấm Nói bằng Micro hoặc gõ câu mô tả bức tranh nhé.",
+      label: t("pictureDescription.readiness.empty"),
       readyFor3Stars: false,
     };
   }
   if (wordCount <= 2) {
     return {
-      label: `Mới có ${wordCount} từ rời — bé hãy ghép thành 1 câu trọn vẹn nhé!`,
+      label: t("pictureDescription.readiness.tooShort", { count: wordCount }),
       readyFor3Stars: false,
     };
   }
   if (wordCount < targetWords) {
     return {
-      label: `Đã có ${wordCount} từ — kể thêm 1–2 chi tiết nữa để săn đủ 3 sao nhé!`,
+      label: t("pictureDescription.readiness.needMoreDetail", {
+        count: wordCount,
+      }),
       readyFor3Stars: false,
     };
   }
   return {
-    label: `Bài kể đã có ${wordCount} từ rất đầy đặn — sẵn sàng gửi cô giáo AI chấm!`,
+    label: t("pictureDescription.readiness.ready", { count: wordCount }),
     readyFor3Stars: true,
   };
 }
 
-function renderStars(count: number) {
+function renderStars(count: number, ariaLabel: string) {
   return (
-    <span
-      aria-label={`${count} trên 3 sao`}
-      className="inline-flex items-center gap-1"
-    >
+    <span aria-label={ariaLabel} className="inline-flex items-center gap-1">
       {[1, 2, 3].map((index) => (
         <Star
           aria-hidden="true"
@@ -271,6 +275,8 @@ function renderStars(count: number) {
 }
 
 export function PictureDescriptionScreen() {
+  const t = useTranslations("entertainment");
+  const defaultGameError = t("pictureDescription.defaultError");
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
@@ -380,7 +386,7 @@ export function PictureDescriptionScreen() {
       active = false;
       controller.abort();
     };
-  }, [catalogRefreshKey, childId, pictureService]);
+  }, [catalogRefreshKey, childId, defaultGameError, pictureService]);
 
   const sampleSessionMap = useMemo(() => {
     const map = new Map<string, PictureSessionSummaryDTO>();
@@ -584,15 +590,13 @@ export function PictureDescriptionScreen() {
     if (!ACCEPTED_TYPES.has(chosen.type)) {
       setUploadFile(null);
       setUploadPreviewUrl(null);
-      setUploadError(
-        "Chỉ hỗ trợ ảnh định dạng JPG, PNG hoặc WebP. Ba mẹ hãy chọn lại ảnh nhé.",
-      );
+      setUploadError(t("pictureDescription.uploadInvalidType"));
       return;
     }
     if (chosen.size > MAX_UPLOAD_BYTES) {
       setUploadFile(null);
       setUploadPreviewUrl(null);
-      setUploadError("Ảnh hơi nặng (tối đa 5 MB). Hãy chọn ảnh nhẹ hơn nhé.");
+      setUploadError(t("pictureDescription.uploadTooLarge"));
       return;
     }
     setUploadFile(chosen);
@@ -641,15 +645,13 @@ export function PictureDescriptionScreen() {
     } catch {
       isRecordingVoiceRef.current = false;
       setIsRecordingVoice(false);
-      setVoiceMessage(
-        "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
-      );
+      setVoiceMessage(t("pictureDescription.micUnavailable"));
       return;
     }
 
     isRecordingVoiceRef.current = true;
     setIsRecordingVoice(true);
-    setVoiceMessage("Đang lắng nghe bé nói mô tả bức tranh...");
+    setVoiceMessage(t("pictureDescription.micListening"));
 
     const rawCtor = getSpeechRecognitionCtor();
     const SpeechRecognition = isInjectedTestSpeechRecognition(rawCtor)
@@ -696,7 +698,7 @@ export function PictureDescriptionScreen() {
     isRecordingVoiceRef.current = false;
     setIsRecordingVoice(false);
     setIsTranscribing(true);
-    setVoiceMessage("Đang chuyển giọng nói của bé bằng ElevenLabs...");
+    setVoiceMessage(t("pictureDescription.transcribingSpeech"));
 
     const liveSnapshot = liveTranscript;
     try {
@@ -731,9 +733,7 @@ export function PictureDescriptionScreen() {
 
       const finalTranscript = elevenLabsText || browserFallback || null;
       if (!finalTranscript) {
-        setVoiceMessage(
-          "Cô chưa nghe rõ tiếng bé nói. Bé hãy bấm micro nói lại hoặc gõ chữ nhé!",
-        );
+        setVoiceMessage(t("pictureDescription.unclearVoice"));
         return;
       }
 
@@ -744,8 +744,8 @@ export function PictureDescriptionScreen() {
       setInputMode("VOICE");
       setVoiceMessage(
         elevenLabsText
-          ? "Đã chuyển giọng nói bằng ElevenLabs! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé."
-          : "Đã ghi lại lời kể của bé! Bé có thể đọc lại hoặc sửa trước khi gửi chấm bài nhé.",
+          ? t("pictureDescription.transcribedElevenLabs")
+          : t("pictureDescription.transcribedBrowser"),
       );
     } finally {
       setIsTranscribing(false);
@@ -780,9 +780,7 @@ export function PictureDescriptionScreen() {
       overrideTranscript !== undefined ? overrideTranscript : descriptionText;
     const trimmed = rawText.trim();
     if (!trimmed) {
-      setEvaluateError(
-        "Bé hãy nói hoặc viết ít nhất 1 câu mô tả bức tranh nhé.",
-      );
+      setEvaluateError(t("pictureDescription.emptySubmissionError"));
       return;
     }
 
@@ -834,14 +832,14 @@ export function PictureDescriptionScreen() {
       <section className="mx-auto flex w-full max-w-[780px] flex-col gap-4">
         <StatusMessage tone="error">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <span>Chưa tải được hồ sơ của bé. Ba mẹ hãy thử lại nhé.</span>
+            <span>{t("pictureDescription.childLoadError")}</span>
             <Button
               className="w-auto"
               onClick={retryChild}
               size="compact"
               variant="secondary"
             >
-              Thử lại
+              {t("pictureDescription.retry")}
             </Button>
           </div>
         </StatusMessage>
@@ -873,6 +871,7 @@ export function PictureDescriptionScreen() {
   const draftReadiness = readinessHint(
     draftWordCount,
     session?.child_grade ?? selectedChild.grade,
+    t,
   );
   const usedVocabCount = session
     ? session.guide.suggested_vocabulary.filter((item) =>
@@ -884,7 +883,7 @@ export function PictureDescriptionScreen() {
     <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
       <BookChildHeader
         child={selectedChild}
-        mobileLabel="Góc kể chuyện"
+        mobileLabel={t("pictureDescription.mobileLabel")}
         backHref="/entertainment"
       />
 
@@ -894,16 +893,13 @@ export function PictureDescriptionScreen() {
             className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
             href="/entertainment"
           >
-            <ArrowLeft aria-hidden="true" className="size-4" />
-            Quay lại góc Giải trí
+            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+            {t("pictureDescription.backLink")}
           </Link>
           <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
-            Kể chuyện qua tranh
+            {t("pictureDescription.heading")}
           </h1>
-          <p className="text-body text-muted">
-            Chọn một bức tranh. Bé có thể kể bằng giọng nói hoặc viết một câu về
-            điều mình nhìn thấy.
-          </p>
+          <p className="text-body text-muted">{t("pictureDescription.lead")}</p>
         </div>
 
         {session ? (
@@ -928,8 +924,8 @@ export function PictureDescriptionScreen() {
             type="button"
             variant="secondary"
           >
-            <ArrowLeft aria-hidden="true" className="size-4" />
-            Chọn bức tranh khác
+            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
+            {t("pictureDescription.chooseAnotherPicture")}
           </Button>
         ) : null}
       </div>
@@ -948,11 +944,12 @@ export function PictureDescriptionScreen() {
             className="size-8 animate-spin text-primary"
           />
           <h2 className="text-xl font-extrabold text-ink">
-            Đang chuẩn bị câu hỏi cho bức tranh…
+            {t("pictureDescription.analyzingTitle")}
           </h2>
           <p className="max-w-md text-body text-muted">
-            Hệ thống đang chuẩn bị câu hỏi gợi ý và bộ từ vựng phù hợp cho Lớp{" "}
-            {selectedChild.grade}. Đợi một chút xíu nhé!
+            {t("pictureDescription.analyzingDesc", {
+              grade: selectedChild.grade,
+            })}
           </p>
         </div>
       ) : null}
@@ -961,7 +958,7 @@ export function PictureDescriptionScreen() {
         <>
           <div className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-7">
             <div
-              aria-label="Chọn nguồn tranh"
+              aria-label={t("pictureDescription.sourceTabsAria")}
               className="flex flex-wrap gap-2 border-b border-border pb-4"
               role="tablist"
             >
@@ -969,17 +966,17 @@ export function PictureDescriptionScreen() {
                 [
                   {
                     id: "SAMPLE",
-                    label: "Tranh chủ đề ViRead",
+                    label: t("pictureDescription.tabSample"),
                     icon: Images,
                   },
                   {
                     id: "CUSTOM_UPLOAD",
-                    label: "Tải ảnh từ máy",
+                    label: t("pictureDescription.tabCustomUpload"),
                     icon: ImagePlus,
                   },
                   {
                     id: "BOOK_PAGE",
-                    label: "Tranh từ sách ViRead",
+                    label: t("pictureDescription.tabBookPage"),
                     icon: BookOpen,
                   },
                 ] as const
@@ -1027,7 +1024,7 @@ export function PictureDescriptionScreen() {
                       variant="secondary"
                     >
                       <RefreshCw aria-hidden="true" className="size-4" />
-                      Thử lại
+                      {t("pictureDescription.retry")}
                     </Button>
                   </div>
                 </StatusMessage>
@@ -1061,24 +1058,38 @@ export function PictureDescriptionScreen() {
                                   className="h-full w-full object-cover"
                                   src={sample.image_url}
                                 />
-                                <span className="absolute left-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
+                                <span className="absolute start-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
                                   {sample.theme}
                                 </span>
                                 {hasPriorAttempt && existing ? (
-                                  <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
-                                    {existing.best_stars}/3 sao
+                                  <span className="absolute end-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                    {t("pictureDescription.starsBadge", {
+                                      count: existing.best_stars,
+                                    })}
                                   </span>
                                 ) : null}
                               </div>
                               <div className="flex flex-1 flex-col justify-between gap-4 p-4">
                                 <div>
-                                  <h2 className="text-lg font-extrabold text-ink">
+                                  <h2
+                                    className="viread-learning-content text-lg font-extrabold text-ink"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
                                     {sample.title}
                                   </h2>
                                   <p className="mt-1 text-sm text-muted">
                                     {hasPriorAttempt && existing
-                                      ? `Bé đã kể ${existing.attempts_count} lượt (cao nhất ${existing.best_score}/10).`
-                                      : "Quan sát tranh và kể lại theo cách nghĩ của bé."}
+                                      ? t(
+                                          "pictureDescription.sampleAttemptsSummary",
+                                          {
+                                            count: existing.attempts_count,
+                                            score: existing.best_score,
+                                          },
+                                        )
+                                      : t(
+                                          "pictureDescription.sampleDefaultPrompt",
+                                        )}
                                   </p>
                                 </div>
                                 <div className="flex flex-col gap-2">
@@ -1089,8 +1100,10 @@ export function PictureDescriptionScreen() {
                                     type="button"
                                   >
                                     {hasPriorAttempt
-                                      ? "Xem kết quả & Kể tiếp"
-                                      : "Khám phá tranh này"}
+                                      ? t(
+                                          "pictureDescription.viewResultsAndContinue",
+                                        )
+                                      : t("pictureDescription.explorePicture")}
                                   </Button>
                                   {hasPriorAttempt ? (
                                     <Button
@@ -1101,7 +1114,7 @@ export function PictureDescriptionScreen() {
                                       type="button"
                                       variant="secondary"
                                     >
-                                      Tạo bộ gợi ý mới
+                                      {t("pictureDescription.createNewGuide")}
                                     </Button>
                                   ) : null}
                                 </div>
@@ -1111,10 +1124,10 @@ export function PictureDescriptionScreen() {
                         })}
                     </div>
                     <PaginationBar
-                      ariaLabel="Phân trang tranh chủ đề"
+                      ariaLabel={t("pictureDescription.samplesPaginationAria")}
                       className="mt-4"
                       compact
-                      itemLabel="tranh"
+                      itemLabel={t("pictureDescription.samplesPaginationItem")}
                       onPageChange={setSamplesPage}
                       page={samplesPage}
                       pageSize={PICTURE_GRID_PAGE_SIZE}
@@ -1133,19 +1146,17 @@ export function PictureDescriptionScreen() {
                         />
                         <div>
                           <h2 className="text-lg font-extrabold text-ink">
-                            Chọn một bức ảnh hoặc tranh vẽ từ máy
+                            {t("pictureDescription.uploadHeading")}
                           </h2>
                           <p className="mt-1 text-sm text-muted">
-                            Hỗ trợ ảnh JPG, PNG, WebP tối đa 5 MB. AI sẽ kiểm
-                            tra độ an toàn cho bé và tạo câu hỏi gợi ý riêng cho
-                            bức ảnh này.
+                            {t("pictureDescription.uploadLead")}
                           </p>
                         </div>
                       </div>
 
                       <input
                         accept="image/jpeg,image/png,image/webp"
-                        aria-label="Chọn tệp ảnh để mô tả"
+                        aria-label={t("pictureDescription.uploadInputAria")}
                         className="sr-only"
                         onChange={handleFileChange}
                         ref={fileInputRef}
@@ -1159,7 +1170,9 @@ export function PictureDescriptionScreen() {
                           variant="secondary"
                         >
                           <ImagePlus aria-hidden="true" className="size-4" />
-                          {uploadFile ? "Đổi ảnh khác" : "Chọn ảnh từ thiết bị"}
+                          {uploadFile
+                            ? t("pictureDescription.changePhoto")
+                            : t("pictureDescription.chooseFromDevice")}
                         </Button>
                         {uploadFile ? (
                           <Button
@@ -1167,14 +1180,16 @@ export function PictureDescriptionScreen() {
                             type="button"
                           >
                             <Sparkles aria-hidden="true" className="size-4" />
-                            Phân tích tranh & Bắt đầu
+                            {t("pictureDescription.analyzeAndStart")}
                           </Button>
                         ) : null}
                       </div>
 
                       {uploadFile ? (
                         <p className="text-sm font-bold text-primary">
-                          Đã chọn: {uploadFile.name}
+                          {t("pictureDescription.selectedFile", {
+                            name: uploadFile.name,
+                          })}
                         </p>
                       ) : null}
                       {uploadError ? (
@@ -1188,13 +1203,13 @@ export function PictureDescriptionScreen() {
                       {uploadPreviewUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
-                          alt="Ảnh xem trước của bé"
+                          alt={t("pictureDescription.uploadPreviewAlt")}
                           className="max-h-72 w-full rounded-control object-contain"
                           src={uploadPreviewUrl}
                         />
                       ) : (
                         <p className="text-center text-sm font-semibold text-muted">
-                          Ảnh ba mẹ và bé chọn sẽ hiện xem trước ở đây.
+                          {t("pictureDescription.uploadPreviewEmpty")}
                         </p>
                       )}
                     </div>
@@ -1225,25 +1240,44 @@ export function PictureDescriptionScreen() {
                                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
                                   {/* eslint-disable-next-line @next/next/no-img-element */}
                                   <img
-                                    alt={`${page.book_title} - Trang ${page.page_number}`}
+                                    alt={t(
+                                      "pictureDescription.bookPageImageAlt",
+                                      {
+                                        title: page.book_title,
+                                        page: page.page_number,
+                                      },
+                                    )}
                                     className="h-full w-full object-cover"
                                     src={page.image_url}
                                   />
                                   {hasPriorAttempt && existing ? (
-                                    <span className="absolute right-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
-                                      {existing.best_stars}/3 sao
+                                    <span className="absolute end-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
+                                      {t("pictureDescription.starsBadge", {
+                                        count: existing.best_stars,
+                                      })}
                                     </span>
                                   ) : null}
                                 </div>
                                 <div className="flex flex-1 flex-col justify-between gap-3 p-4">
                                   <div>
-                                    <h2 className="line-clamp-1 text-base font-extrabold text-ink">
+                                    <h2
+                                      className="viread-learning-content line-clamp-1 text-base font-extrabold text-ink"
+                                      dir="ltr"
+                                      lang="vi"
+                                    >
                                       {page.book_title}
                                     </h2>
                                     <p className="text-sm font-semibold text-muted">
-                                      Trang {page.page_number}
+                                      {t("pictureDescription.bookPageNumber", {
+                                        page: page.page_number,
+                                      })}
                                       {hasPriorAttempt && existing
-                                        ? ` • Đã kể ${existing.attempts_count} lượt`
+                                        ? t(
+                                            "pictureDescription.bookPageAttemptsSuffix",
+                                            {
+                                              count: existing.attempts_count,
+                                            },
+                                          )
                                         : ""}
                                     </p>
                                   </div>
@@ -1255,8 +1289,12 @@ export function PictureDescriptionScreen() {
                                       type="button"
                                     >
                                       {hasPriorAttempt
-                                        ? "Xem kết quả & Kể tiếp"
-                                        : "Mô tả trang này"}
+                                        ? t(
+                                            "pictureDescription.viewResultsAndContinue",
+                                          )
+                                        : t(
+                                            "pictureDescription.describeThisPage",
+                                          )}
                                     </Button>
                                     {hasPriorAttempt ? (
                                       <Button
@@ -1267,7 +1305,7 @@ export function PictureDescriptionScreen() {
                                         type="button"
                                         variant="secondary"
                                       >
-                                        Tạo bộ gợi ý mới
+                                        {t("pictureDescription.createNewGuide")}
                                       </Button>
                                     ) : null}
                                   </div>
@@ -1277,10 +1315,14 @@ export function PictureDescriptionScreen() {
                           })}
                       </div>
                       <PaginationBar
-                        ariaLabel="Phân trang tranh từ sách"
+                        ariaLabel={t(
+                          "pictureDescription.bookPagesPaginationAria",
+                        )}
                         className="mt-4"
                         compact
-                        itemLabel="trang"
+                        itemLabel={t(
+                          "pictureDescription.bookPagesPaginationItem",
+                        )}
                         onPageChange={setBookPagesPage}
                         page={bookPagesPage}
                         pageSize={PICTURE_GRID_PAGE_SIZE}
@@ -1289,8 +1331,8 @@ export function PictureDescriptionScreen() {
                     </>
                   ) : (
                     <EmptyState
-                      description="Hiện chưa có trang sách có tranh cho khối lớp này. Bé hãy thử chọn Tranh chủ đề ViRead hoặc Tải ảnh từ máy nhé!"
-                      title="Chưa có trang sách phù hợp"
+                      description={t("pictureDescription.emptyBookPagesDesc")}
+                      title={t("pictureDescription.emptyBookPagesTitle")}
                     />
                   )
                 ) : null}
@@ -1303,7 +1345,7 @@ export function PictureDescriptionScreen() {
             <section className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-7">
               <h2 className="flex items-center gap-2 text-lg font-extrabold text-ink">
                 <History aria-hidden="true" className="size-5 text-primary" />
-                Những bức tranh bé đã kể gần đây
+                {t("pictureDescription.recentHeading")}
               </h2>
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {catalogState.sessions
@@ -1313,7 +1355,7 @@ export function PictureDescriptionScreen() {
                   )
                   .map((item) => (
                     <button
-                      className="flex items-center gap-3 rounded-control border border-border bg-white p-3 text-left transition-colors hover:border-primary hover:bg-sky/20 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      className="flex items-center gap-3 rounded-control border border-border bg-white p-3 text-start transition-colors hover:border-primary hover:bg-sky/20 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       key={item.session_id}
                       onClick={() => void handleResumeSession(item.session_id)}
                       type="button"
@@ -1325,24 +1367,37 @@ export function PictureDescriptionScreen() {
                         src={item.image_url}
                       />
                       <div className="min-w-0 flex-1">
-                        <p className="truncate font-extrabold text-ink">
+                        <p
+                          className="viread-learning-content truncate font-extrabold text-ink"
+                          dir="ltr"
+                          lang="vi"
+                        >
                           {item.scene_title}
                         </p>
                         <p className="text-xs font-semibold text-muted">
-                          {sourceLabel(item.source_type)} •{" "}
+                          {sourceLabel(item.source_type, t)} •{" "}
                           {item.attempts_count > 0
-                            ? `${item.attempts_count} lượt kể`
-                            : "Chưa gửi lượt kể"}
+                            ? t("pictureDescription.recentAttemptsCount", {
+                                count: item.attempts_count,
+                              })
+                            : t("pictureDescription.recentNoAttempts")}
                         </p>
                         <div className="mt-1 flex items-center gap-2">
-                          {renderStars(item.best_stars)}
+                          {renderStars(
+                            item.best_stars,
+                            t("pictureDescription.starsAria", {
+                              count: item.best_stars,
+                            }),
+                          )}
                           {item.best_score > 0 ? (
                             <span className="text-xs font-extrabold text-primary">
-                              {item.best_score}/10 điểm
+                              {t("pictureDescription.recentScoreBadge", {
+                                score: item.best_score,
+                              })}
                             </span>
                           ) : (
                             <span className="text-xs font-semibold text-muted">
-                              Đang mở
+                              {t("pictureDescription.recentInProgress")}
                             </span>
                           )}
                         </div>
@@ -1351,10 +1406,10 @@ export function PictureDescriptionScreen() {
                   ))}
               </div>
               <PaginationBar
-                ariaLabel="Phân trang tranh bé đã kể gần đây"
+                ariaLabel={t("pictureDescription.recentPaginationAria")}
                 className="mt-4"
                 compact
-                itemLabel="phiên"
+                itemLabel={t("pictureDescription.recentPaginationItem")}
                 onPageChange={setSessionsPage}
                 page={sessionsPage}
                 pageSize={PICTURE_GRID_PAGE_SIZE}
@@ -1372,18 +1427,33 @@ export function PictureDescriptionScreen() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <span className="rounded-full bg-sky px-3 py-1 text-xs font-extrabold text-primary">
-                  {sourceLabel(session.source_type)} • Lớp {session.child_grade}
+                  {t("pictureDescription.sourceGradeBadge", {
+                    source: sourceLabel(session.source_type, t),
+                    grade: session.child_grade,
+                  })}
                 </span>
-                <h2 className="mt-2 text-xl font-extrabold text-ink">
+                <h2
+                  className="viread-learning-content mt-2 text-xl font-extrabold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
                   {session.scene_title}
                 </h2>
               </div>
               <div className="flex flex-col items-end gap-1">
-                {renderStars(session.best_stars)}
+                {renderStars(
+                  session.best_stars,
+                  t("pictureDescription.starsAria", {
+                    count: session.best_stars,
+                  }),
+                )}
                 <span className="text-xs font-bold text-muted">
                   {session.attempts_count > 0
-                    ? `Kỷ lục ${session.best_score}/10 • ${session.attempts_count} lượt`
-                    : "Chưa có lượt chấm"}
+                    ? t("pictureDescription.sessionStats", {
+                        score: session.best_score,
+                        count: session.attempts_count,
+                      })
+                    : t("pictureDescription.sessionNoAttempts")}
                 </span>
               </div>
             </div>
@@ -1399,7 +1469,7 @@ export function PictureDescriptionScreen() {
 
             <div className="rounded-control bg-sky/25 p-3.5">
               <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                Bố cục 3 bước kể chuyện hay
+                {t("pictureDescription.stepsTitle")}
               </p>
               <ol className="mt-2 grid gap-2 sm:grid-cols-3">
                 {STORYTELLING_STEPS.map((item) => (
@@ -1408,10 +1478,12 @@ export function PictureDescriptionScreen() {
                     key={item.step}
                   >
                     <span className="font-extrabold text-primary">
-                      Bước {item.step}:
+                      {t("pictureDescription.stepPrefix", { step: item.step })}
                     </span>{" "}
-                    <span className="font-bold text-ink">{item.title}</span>
-                    <p className="mt-0.5 text-muted">{item.detail}</p>
+                    <span className="font-bold text-ink">
+                      {t(item.titleKey)}
+                    </span>
+                    <p className="mt-0.5 text-muted">{t(item.detailKey)}</p>
                   </li>
                 ))}
               </ol>
@@ -1421,7 +1493,7 @@ export function PictureDescriptionScreen() {
           {/* Interactive Recording + Optional Collapsed Hints + Evaluation Column */}
           <div className="flex flex-col gap-5">
             <div
-              aria-label="Chế độ làm bài và kết quả"
+              aria-label={t("pictureDescription.modeTabsAria")}
               className="flex flex-wrap gap-2 rounded-card border border-border bg-white p-2 shadow-sm"
               role="tablist"
             >
@@ -1439,7 +1511,7 @@ export function PictureDescriptionScreen() {
                 type="button"
               >
                 <Sparkles aria-hidden="true" className="size-4" />
-                Mô tả tranh
+                {t("pictureDescription.tabPractice")}
               </button>
               <button
                 aria-selected={practiceTab === "RESULT"}
@@ -1462,7 +1534,7 @@ export function PictureDescriptionScreen() {
                 type="button"
               >
                 <Star aria-hidden="true" className="size-4" />
-                Kết quả chấm điểm
+                {t("pictureDescription.tabResult")}
                 {latestAttempt ? (
                   <span
                     className={
@@ -1483,26 +1555,33 @@ export function PictureDescriptionScreen() {
                 {/* Coaching Reminder from Previous Attempt so Child Knows What to Improve */}
                 {latestAttempt ? (
                   <section
-                    aria-label="Gợi ý từ lượt chấm trước"
+                    aria-label={t("pictureDescription.previousCoachingAria")}
                     className="rounded-card border border-primary/25 bg-sky/20 p-4"
                   >
                     <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
                       <Lightbulb aria-hidden="true" className="size-4" />
-                      Lời dặn của cô giáo từ Lượt #
-                      {latestAttempt.attempt_number}
+                      {t("pictureDescription.previousCoachingTitle", {
+                        attempt: latestAttempt.attempt_number,
+                      })}
                     </p>
-                    <p className="mt-1 text-sm font-semibold text-ink">
+                    <p
+                      className="viread-learning-content mt-1 text-sm font-semibold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {latestAttempt.feedback.improvement_tip}
                     </p>
                     {latestAttempt.feedback.missed_details.length > 0 ? (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         <span className="text-xs font-bold text-muted">
-                          Chi tiết có thể kể thêm:
+                          {t("pictureDescription.missedDetailsHintLabel")}
                         </span>
                         {latestAttempt.feedback.missed_details.map((detail) => (
                           <span
-                            className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-ink shadow-2xs"
+                            className="viread-learning-content rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-ink shadow-2xs"
+                            dir="ltr"
                             key={detail}
+                            lang="vi"
                           >
                             {detail}
                           </span>
@@ -1517,8 +1596,10 @@ export function PictureDescriptionScreen() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-extrabold text-ink">
                       {latestAttempt
-                        ? `Phần mô tả lượt #${session.attempts_count + 1} của bé`
-                        : "Phần mô tả của bé"}
+                        ? t("pictureDescription.draftHeadingNext", {
+                            attempt: session.attempts_count + 1,
+                          })
+                        : t("pictureDescription.draftHeadingFirst")}
                     </h2>
                     <div className="flex flex-wrap items-center gap-2">
                       {descriptionText.trim() ? (
@@ -1533,7 +1614,7 @@ export function PictureDescriptionScreen() {
                             variant="secondary"
                           >
                             <Eraser aria-hidden="true" className="size-4" />
-                            Xóa nháp
+                            {t("pictureDescription.clearDraft")}
                           </Button>
                           <Button
                             disabled={isRecordingVoice || isTranscribing}
@@ -1553,7 +1634,7 @@ export function PictureDescriptionScreen() {
                                   aria-hidden="true"
                                   className="size-4"
                                 />
-                                Dừng nghe
+                                {t("pictureDescription.stopListen")}
                               </>
                             ) : (
                               <>
@@ -1561,7 +1642,7 @@ export function PictureDescriptionScreen() {
                                   aria-hidden="true"
                                   className="size-4"
                                 />
-                                Nghe lại
+                                {t("pictureDescription.replayDraft")}
                               </>
                             )}
                           </Button>
@@ -1577,7 +1658,7 @@ export function PictureDescriptionScreen() {
                           variant="secondary"
                         >
                           <Mic aria-hidden="true" className="size-4" />
-                          Nói bằng Micro
+                          {t("pictureDescription.speakWithMic")}
                         </Button>
                       ) : (
                         <Button
@@ -1587,7 +1668,7 @@ export function PictureDescriptionScreen() {
                           variant="destructive"
                         >
                           <Square aria-hidden="true" className="size-4" />
-                          Dừng ghi âm
+                          {t("pictureDescription.stopRecording")}
                         </Button>
                       )}
                     </div>
@@ -1615,7 +1696,7 @@ export function PictureDescriptionScreen() {
                           </span>
                         )}
                         <span className="text-xs font-extrabold uppercase tracking-wider text-primary">
-                          Bé đang nói:
+                          {t("pictureDescription.childSpeakingLabel")}
                         </span>
                       </div>
                       <p
@@ -1623,16 +1704,20 @@ export function PictureDescriptionScreen() {
                         data-testid="live-voice-transcript"
                       >
                         {liveTranscript ? (
-                          <span className="text-primary underline decoration-2 underline-offset-4">
+                          <span
+                            className="viread-learning-content text-primary underline decoration-2 underline-offset-4"
+                            dir="ltr"
+                            lang="vi"
+                          >
                             &ldquo;{liveTranscript}&rdquo;
                           </span>
                         ) : recorder.isSpeaking ? (
                           <span className="animate-pulse font-bold text-emerald-700">
-                            Đang nhận diện giọng bé… (bé kể tiếp đi nào)
+                            {t("pictureDescription.liveRecognizing")}
                           </span>
                         ) : (
                           <span className="text-sm font-medium italic text-muted">
-                            Đang lắng nghe bé kể… (bé hãy nói vào mic)
+                            {t("pictureDescription.liveListening")}
                           </span>
                         )}
                       </p>
@@ -1647,10 +1732,14 @@ export function PictureDescriptionScreen() {
                     className="mt-3 block"
                     htmlFor="picture-description-input"
                   >
-                    <span className="sr-only">Nội dung bé mô tả bức tranh</span>
+                    <span className="sr-only">
+                      {t("pictureDescription.textareaSrLabel")}
+                    </span>
                     <textarea
-                      className="min-h-32 w-full rounded-control border border-border bg-white p-3.5 text-base font-medium text-ink focus:border-primary focus:outline-none"
+                      className="viread-learning-content min-h-32 w-full rounded-control border border-border bg-white p-3.5 text-base font-medium text-ink focus:border-primary focus:outline-none"
+                      dir="ltr"
                       id="picture-description-input"
+                      lang="vi"
                       maxLength={2000}
                       onChange={(event) => {
                         const nextValue = event.target.value;
@@ -1660,7 +1749,7 @@ export function PictureDescriptionScreen() {
                           setInputMode("TEXT");
                         }
                       }}
-                      placeholder="Bé hãy nói qua Micro hoặc viết 1–3 câu tự kể những gì bé nhìn thấy trong tranh nhé..."
+                      placeholder={t("pictureDescription.textareaPlaceholder")}
                       value={descriptionText}
                     />
                   </label>
@@ -1674,10 +1763,7 @@ export function PictureDescriptionScreen() {
                         aria-hidden="true"
                         className="size-4 shrink-0 animate-spin"
                       />
-                      <span>
-                        Cô giáo AI đang ngắm tranh và đọc kỹ bài kể của bé, đợi
-                        cô vài giây nhé...
-                      </span>
+                      <span>{t("pictureDescription.evaluatingBanner")}</span>
                     </div>
                   ) : null}
 
@@ -1694,7 +1780,7 @@ export function PictureDescriptionScreen() {
                             variant="secondary"
                           >
                             <RefreshCw aria-hidden="true" className="size-4" />
-                            Thử chấm lại ngay
+                            {t("pictureDescription.retryEvaluateNow")}
                           </Button>
                         </div>
                       </StatusMessage>
@@ -1714,7 +1800,9 @@ export function PictureDescriptionScreen() {
                         {draftReadiness.label}
                       </p>
                       <p className="text-xs text-muted">
-                        {descriptionText.trim().length}/2000 ký tự
+                        {t("pictureDescription.charCounter", {
+                          count: descriptionText.trim().length,
+                        })}
                       </p>
                     </div>
                     <Button
@@ -1729,8 +1817,8 @@ export function PictureDescriptionScreen() {
                     >
                       <Send aria-hidden="true" className="size-4" />
                       {isEvaluating
-                        ? "Cô giáo AI đang chấm bài..."
-                        : "Gửi cô giáo AI chấm bài"}
+                        ? t("pictureDescription.evaluatingButton")
+                        : t("pictureDescription.submitButton")}
                     </Button>
                   </div>
                 </section>
@@ -1744,12 +1832,14 @@ export function PictureDescriptionScreen() {
                           aria-hidden="true"
                           className="size-5 text-[#E5A913]"
                         />
-                        Gợi ý thêm (khi bé cần)
+                        {t("pictureDescription.hintsHeading")}
                       </h2>
                       {usedVocabCount > 0 ? (
                         <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold text-success-ink">
-                          Đã dùng {usedVocabCount}/
-                          {session.guide.suggested_vocabulary.length} từ gợi ý
+                          {t("pictureDescription.usedVocabBadge", {
+                            used: usedVocabCount,
+                            total: session.guide.suggested_vocabulary.length,
+                          })}
                         </span>
                       ) : null}
                     </div>
@@ -1763,12 +1853,12 @@ export function PictureDescriptionScreen() {
                       {showHints ? (
                         <>
                           <ChevronUp aria-hidden="true" className="size-4" />
-                          Thu gọn gợi ý
+                          {t("pictureDescription.collapseHints")}
                         </>
                       ) : (
                         <>
                           <ChevronDown aria-hidden="true" className="size-4" />
-                          Mở gợi ý câu hỏi
+                          {t("pictureDescription.expandHints")}
                         </>
                       )}
                     </Button>
@@ -1778,7 +1868,7 @@ export function PictureDescriptionScreen() {
                     <div className="mt-4 border-t border-border pt-4">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                          Câu hỏi gợi mở quan sát
+                          {t("pictureDescription.guidingQuestionsTitle")}
                         </p>
                         <Button
                           onClick={() =>
@@ -1794,12 +1884,12 @@ export function PictureDescriptionScreen() {
                           {playingSpeechKey === "guide" ? (
                             <>
                               <VolumeX aria-hidden="true" className="size-4" />
-                              Dừng đọc
+                              {t("pictureDescription.stopGuideRead")}
                             </>
                           ) : (
                             <>
                               <Volume2 aria-hidden="true" className="size-4" />
-                              Nghe gợi ý
+                              {t("pictureDescription.listenGuide")}
                             </>
                           )}
                         </Button>
@@ -1815,7 +1905,13 @@ export function PictureDescriptionScreen() {
                               <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-extrabold text-white">
                                 {index + 1}
                               </span>
-                              <span>{question}</span>
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {question}
+                              </span>
                             </li>
                           ),
                         )}
@@ -1823,7 +1919,7 @@ export function PictureDescriptionScreen() {
 
                       <div className="mt-4">
                         <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                          Từ vựng gợi ý (nhấn vào từ để nghe giải nghĩa)
+                          {t("pictureDescription.suggestedVocabTitle")}
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {session.guide.suggested_vocabulary.map((item) => {
@@ -1835,14 +1931,16 @@ export function PictureDescriptionScreen() {
                             return (
                               <button
                                 className={
-                                  "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                                  "viread-learning-content inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
                                   (active
                                     ? "border-primary bg-primary text-white"
                                     : used
                                       ? "border-success-ink/40 bg-success-surface/60 text-success-ink"
                                       : "border-border bg-white text-ink hover:border-primary hover:bg-sky/30")
                                 }
+                                dir="ltr"
                                 key={item.word}
+                                lang="vi"
                                 onClick={() => {
                                   setSelectedVocabWord(item.word);
                                   void speakVietnamese(
@@ -1870,7 +1968,11 @@ export function PictureDescriptionScreen() {
                         </div>
                         {selectedVocabWord ? (
                           <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-control bg-warning-surface/60 px-3 py-2 text-sm font-semibold text-ink">
-                            <p>
+                            <p
+                              className="viread-learning-content"
+                              dir="ltr"
+                              lang="vi"
+                            >
                               <strong>{selectedVocabWord}:</strong>{" "}
                               {
                                 session.guide.suggested_vocabulary.find(
@@ -1891,7 +1993,7 @@ export function PictureDescriptionScreen() {
                                 variant="secondary"
                               >
                                 <Plus aria-hidden="true" className="size-3.5" />
-                                Chèn vào bài kể
+                                {t("pictureDescription.insertIntoDraft")}
                               </Button>
                             ) : null}
                           </div>
@@ -1901,8 +2003,7 @@ export function PictureDescriptionScreen() {
                       <div className="mt-4 border-t border-border pt-3">
                         {!hasSubmittedAttempt ? (
                           <p className="text-sm font-semibold text-muted">
-                            Câu mẫu tham khảo sẽ mở sau khi bé tự kể và gửi lượt
-                            đầu tiên nhé!
+                            {t("pictureDescription.sampleSentencesLocked")}
                           </p>
                         ) : (
                           <>
@@ -1919,12 +2020,12 @@ export function PictureDescriptionScreen() {
                                     aria-hidden="true"
                                     className="size-4"
                                   />
-                                  Ẩn câu mẫu tham khảo
+                                  {t("pictureDescription.hideSampleSentences")}
                                 </>
                               ) : (
                                 <>
                                   <Eye aria-hidden="true" className="size-4" />
-                                  Xem câu mẫu tham khảo
+                                  {t("pictureDescription.showSampleSentences")}
                                 </>
                               )}
                             </button>
@@ -1936,7 +2037,13 @@ export function PictureDescriptionScreen() {
                                       className="flex items-center justify-between gap-2 rounded-control bg-success-surface/50 px-3 py-2 text-sm font-semibold text-success-ink"
                                       key={sentence}
                                     >
-                                      <span>“{sentence}”</span>
+                                      <span
+                                        className="viread-learning-content"
+                                        dir="ltr"
+                                        lang="vi"
+                                      >
+                                        “{sentence}”
+                                      </span>
                                       <Button
                                         onClick={() =>
                                           void speakVietnamese(
@@ -1954,8 +2061,8 @@ export function PictureDescriptionScreen() {
                                         />
                                         {playingSpeechKey ===
                                         `sample-sentence:${idx}`
-                                          ? "Dừng"
-                                          : "Nghe"}
+                                          ? t("pictureDescription.stopShort")
+                                          : t("pictureDescription.listenShort")}
                                       </Button>
                                     </li>
                                   ),
@@ -1982,7 +2089,7 @@ export function PictureDescriptionScreen() {
                 {session.attempts.length > 1 ? (
                   <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border pb-3">
                     <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                      Lịch sử các lượt:
+                      {t("pictureDescription.attemptHistoryLabel")}
                     </span>
                     {session.attempts.map((attempt, index) => {
                       const isSelected =
@@ -2002,9 +2109,14 @@ export function PictureDescriptionScreen() {
                           }
                           type="button"
                         >
-                          Lượt #{attempt.attempt_number}
-                          {index === 0 ? " (Mới nhất)" : ""} •{" "}
-                          {attempt.score_out_of_10}/10
+                          {t("pictureDescription.attemptTab", {
+                            number: attempt.attempt_number,
+                            latest:
+                              index === 0
+                                ? t("pictureDescription.attemptLatestSuffix")
+                                : "",
+                            score: attempt.score_out_of_10,
+                          })}
                         </button>
                       );
                     })}
@@ -2013,17 +2125,28 @@ export function PictureDescriptionScreen() {
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
                   <div className="flex flex-wrap items-center gap-3">
-                    {renderStars(activeAttempt.stars)}
+                    {renderStars(
+                      activeAttempt.stars,
+                      t("pictureDescription.starsAria", {
+                        count: activeAttempt.stars,
+                      }),
+                    )}
                     <span className="rounded-full bg-success-surface px-3 py-1 text-sm font-extrabold text-success-ink">
-                      {activeAttempt.score_out_of_10}/10 điểm
+                      {t("pictureDescription.recentScoreBadge", {
+                        score: activeAttempt.score_out_of_10,
+                      })}
                     </span>
                     <span className="text-xs font-bold text-muted">
-                      Lượt #{activeAttempt.attempt_number}
+                      {t("pictureDescription.attemptNumberBadge", {
+                        number: activeAttempt.attempt_number,
+                      })}
                     </span>
                     {scoreDelta !== null && scoreDelta > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800">
-                        <TrendingUp aria-hidden="true" className="size-3.5" />+
-                        {scoreDelta} điểm so với lượt trước!
+                        <TrendingUp aria-hidden="true" className="size-3.5" />
+                        {t("pictureDescription.scoreImprovement", {
+                          delta: scoreDelta,
+                        })}
                       </span>
                     ) : null}
                   </div>
@@ -2042,12 +2165,12 @@ export function PictureDescriptionScreen() {
                     `feedback:${activeAttempt.attempt_id}` ? (
                       <>
                         <VolumeX aria-hidden="true" className="size-4" />
-                        Dừng nghe
+                        {t("pictureDescription.stopListen")}
                       </>
                     ) : (
                       <>
                         <Volume2 aria-hidden="true" className="size-4" />
-                        Nghe nhận xét
+                        {t("pictureDescription.listenFeedback")}
                       </>
                     )}
                   </Button>
@@ -2058,8 +2181,7 @@ export function PictureDescriptionScreen() {
                     <StatusMessage tone="info">
                       <div className="flex flex-wrap items-center justify-between gap-2.5">
                         <span>
-                          Cô giáo AI đang tạm bận nên hệ thống đã chấm nhanh
-                          theo gợi ý của bức tranh để bé nhận phản hồi ngay.
+                          {t("pictureDescription.fallbackEvalNotice")}
                         </span>
                         <Button
                           disabled={isEvaluating}
@@ -2080,8 +2202,8 @@ export function PictureDescriptionScreen() {
                             }
                           />
                           {isEvaluating
-                            ? "Đang chấm lại..."
-                            : "Chấm lại bằng cô giáo AI"}
+                            ? t("pictureDescription.reEvaluatingAi")
+                            : t("pictureDescription.reEvaluateWithAi")}
                         </Button>
                       </div>
                     </StatusMessage>
@@ -2096,14 +2218,24 @@ export function PictureDescriptionScreen() {
 
                 <div className="mt-4 rounded-control border border-border bg-sky/15 px-3.5 py-2.5">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                    Lời bé đã kể (Lượt #{activeAttempt.attempt_number})
+                    {t("pictureDescription.childTranscriptTitle", {
+                      attempt: activeAttempt.attempt_number,
+                    })}
                   </p>
-                  <p className="mt-1 text-sm font-semibold text-ink">
+                  <p
+                    className="viread-learning-content mt-1 text-sm font-semibold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
                     “{activeAttempt.transcript_text}”
                   </p>
                 </div>
 
-                <p className="mt-4 rounded-control bg-warning-surface/50 px-4 py-3 text-base font-extrabold text-ink">
+                <p
+                  className="viread-learning-content mt-4 rounded-control bg-warning-surface/50 px-4 py-3 text-base font-extrabold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
                   {activeAttempt.feedback.praise_message}
                 </p>
 
@@ -2111,18 +2243,24 @@ export function PictureDescriptionScreen() {
                   <div className="rounded-control bg-success-surface/40 p-3.5">
                     <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-success-ink">
                       <CheckCircle2 aria-hidden="true" className="size-4" />
-                      Chi tiết bé kể đúng
+                      {t("pictureDescription.matchedDetailsTitle")}
                     </h3>
                     {activeAttempt.feedback.matched_details.length > 0 ? (
                       <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
                         {activeAttempt.feedback.matched_details.map((item) => (
-                          <li key={item}>• {item}</li>
+                          <li
+                            className="viread-learning-content"
+                            dir="ltr"
+                            key={item}
+                            lang="vi"
+                          >
+                            • {item}
+                          </li>
                         ))}
                       </ul>
                     ) : (
                       <p className="mt-2 text-sm text-muted">
-                        Chưa có chi tiết khớp trong lượt này — bé hãy quan sát
-                        kỹ tranh và thử lại nhé!
+                        {t("pictureDescription.noMatchedDetails")}
                       </p>
                     )}
                   </div>
@@ -2130,17 +2268,24 @@ export function PictureDescriptionScreen() {
                   <div className="rounded-control bg-sky/40 p-3.5">
                     <h3 className="flex items-center gap-1.5 text-sm font-extrabold text-primary">
                       <Lightbulb aria-hidden="true" className="size-4" />
-                      Chi tiết bé có thể kể thêm
+                      {t("pictureDescription.missedDetailsTitle")}
                     </h3>
                     {activeAttempt.feedback.missed_details.length > 0 ? (
                       <ul className="mt-2 flex flex-col gap-1.5 text-sm text-ink">
                         {activeAttempt.feedback.missed_details.map((item) => (
-                          <li key={item}>• {item}</li>
+                          <li
+                            className="viread-learning-content"
+                            dir="ltr"
+                            key={item}
+                            lang="vi"
+                          >
+                            • {item}
+                          </li>
                         ))}
                       </ul>
                     ) : (
                       <p className="mt-2 text-sm text-muted">
-                        Bé đã kể đầy đủ các chi tiết chính trong tranh rồi!
+                        {t("pictureDescription.allDetailsCovered")}
                       </p>
                     )}
                   </div>
@@ -2148,15 +2293,19 @@ export function PictureDescriptionScreen() {
 
                 <div className="mt-4 rounded-control border border-border p-3.5">
                   <p className="text-sm font-bold text-ink">
-                    Mẹo cho lượt kể sau:{" "}
-                    <span className="font-semibold text-muted">
+                    {t("pictureDescription.nextAttemptTipLabel")}
+                    <span
+                      className="viread-learning-content font-semibold text-muted"
+                      dir="ltr"
+                      lang="vi"
+                    >
                       {activeAttempt.feedback.improvement_tip}
                     </span>
                   </p>
                   {activeAttempt.feedback.upgraded_sentences.length > 0 ? (
                     <div className="mt-3">
                       <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                        Gợi ý câu diễn đạt hay hơn cho bé
+                        {t("pictureDescription.upgradedSentencesTitle")}
                       </p>
                       <ul className="mt-1.5 flex flex-col gap-1.5">
                         {activeAttempt.feedback.upgraded_sentences.map(
@@ -2165,7 +2314,13 @@ export function PictureDescriptionScreen() {
                               className="flex items-center justify-between gap-2 rounded-control bg-sky/25 px-3 py-2 text-sm font-bold text-ink"
                               key={sentence}
                             >
-                              <span>“{sentence}”</span>
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                “{sentence}”
+                              </span>
                               <Button
                                 onClick={() =>
                                   void speakVietnamese(
@@ -2183,8 +2338,8 @@ export function PictureDescriptionScreen() {
                                 />
                                 {playingSpeechKey ===
                                 `upgraded:${activeAttempt.attempt_id}:${index}`
-                                  ? "Dừng"
-                                  : "Nghe"}
+                                  ? t("pictureDescription.stopShort")
+                                  : t("pictureDescription.listenShort")}
                               </Button>
                             </li>
                           ),
@@ -2196,14 +2351,16 @@ export function PictureDescriptionScreen() {
                   {activeAttempt.feedback.vocabulary_highlights.length > 0 ? (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                        Từ ngữ miêu tả hay cô tặng bé (nhấn để nghe)
+                        {t("pictureDescription.vocabHighlightsTitle")}
                       </p>
                       <div className="mt-1.5 flex flex-wrap gap-2">
                         {activeAttempt.feedback.vocabulary_highlights.map(
                           (word) => (
                             <button
-                              className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
+                              className="viread-learning-content inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-sky/25 px-3 py-1 text-xs font-extrabold text-primary transition-colors hover:bg-sky/50"
+                              dir="ltr"
                               key={word}
+                              lang="vi"
                               onClick={() =>
                                 void speakVietnamese(
                                   word,
@@ -2239,7 +2396,7 @@ export function PictureDescriptionScreen() {
                     variant="secondary"
                   >
                     <PenLine aria-hidden="true" className="size-4" />
-                    Sửa & bổ sung bài vừa kể
+                    {t("pictureDescription.editPreviousDraft")}
                   </Button>
                   <Button
                     onClick={() => {
@@ -2253,7 +2410,7 @@ export function PictureDescriptionScreen() {
                     type="button"
                   >
                     <RefreshCw aria-hidden="true" className="size-4" />
-                    Kể lại từ đầu (lượt mới)
+                    {t("pictureDescription.restartFromScratch")}
                   </Button>
                 </div>
               </section>

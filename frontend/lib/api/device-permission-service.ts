@@ -5,6 +5,32 @@ import type {
   DevicePermissionUiState,
   MicrophonePermissionUiState,
 } from "@/types/reading";
+import { translateMessage } from "@/lib/i18n/formatter";
+import {
+  DEFAULT_LOCALE,
+  normalizeLocale,
+  type SupportedLocale,
+} from "@/lib/i18n/locales";
+import { readLocaleCookie } from "@/lib/i18n/persistence";
+import type { MessagesDictionary, TranslationParams } from "@/lib/i18n/types";
+import { getCachedLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
+
+function resolveRuntimeLocale(): SupportedLocale {
+  const cookieLocale = readLocaleCookie();
+  if (cookieLocale) return cookieLocale;
+  if (typeof document !== "undefined") {
+    return normalizeLocale(document.documentElement?.lang) ?? DEFAULT_LOCALE;
+  }
+  return DEFAULT_LOCALE;
+}
+
+function tPermError(key: string, params?: TranslationParams): string {
+  const locale = resolveRuntimeLocale();
+  const activeMessages: MessagesDictionary =
+    getCachedLocaleMessages(locale) ?? viMessages;
+  return translateMessage(activeMessages, viMessages, locale, key, params);
+}
 
 export interface DevicePermissionService {
   getSnapshot(): Promise<DevicePermissionSnapshotUI>;
@@ -93,16 +119,21 @@ function classifyMediaError(
   kind: DeviceKind,
 ): Pick<DevicePermissionCheckResult, "status" | "verified" | "message"> {
   const name = error instanceof Error ? error.name : "";
-  const deviceLabel = kind === "camera" ? "camera" : "microphone";
+  const deviceLabel = tPermError(
+    kind === "camera"
+      ? "errors.devicePermission.deviceCamera"
+      : "errors.devicePermission.deviceMicrophone",
+  );
 
   if (name === "NotAllowedError" || name === "PermissionDeniedError") {
     return {
       status: "denied",
       verified: false,
-      message:
+      message: tPermError(
         kind === "microphone"
-          ? "Vui lòng cấp quyền microphone trong cài đặt trình duyệt."
-          : "Vui lòng cấp quyền camera trong cài đặt trình duyệt.",
+          ? "errors.devicePermission.deniedMic"
+          : "errors.devicePermission.deniedCamera",
+      ),
     };
   }
 
@@ -110,10 +141,11 @@ function classifyMediaError(
     return {
       status: kind === "microphone" ? "no_device" : "unavailable",
       verified: false,
-      message:
+      message: tPermError(
         kind === "microphone"
-          ? "Không tìm thấy microphone trên thiết bị."
-          : "Không tìm thấy camera trên thiết bị.",
+          ? "errors.devicePermission.notFoundMic"
+          : "errors.devicePermission.notFoundCamera",
+      ),
     };
   }
 
@@ -121,10 +153,11 @@ function classifyMediaError(
     return {
       status: kind === "microphone" ? "device_busy" : "error",
       verified: false,
-      message:
+      message: tPermError(
         kind === "microphone"
-          ? "Microphone đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại."
-          : "Camera đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại.",
+          ? "errors.devicePermission.busyMic"
+          : "errors.devicePermission.busyCamera",
+      ),
     };
   }
 
@@ -135,7 +168,9 @@ function classifyMediaError(
     return {
       status: "error",
       verified: false,
-      message: `Thiết bị ${deviceLabel} không đáp ứng cấu hình yêu cầu. Hãy thử lại hoặc chọn thiết bị khác.`,
+      message: tPermError("errors.devicePermission.overconstrained", {
+        device: deviceLabel,
+      }),
     };
   }
 
@@ -143,20 +178,22 @@ function classifyMediaError(
     return {
       status: "error",
       verified: false,
-      message:
+      message: tPermError(
         kind === "microphone"
-          ? "Hãy sử dụng HTTPS hoặc localhost để truy cập microphone."
-          : "Hãy sử dụng HTTPS hoặc localhost để truy cập camera.",
+          ? "errors.devicePermission.insecureMic"
+          : "errors.devicePermission.insecureCamera",
+      ),
     };
   }
 
   return {
     status: "error",
     verified: false,
-    message:
+    message: tPermError(
       kind === "microphone"
-        ? "Không thể kiểm tra microphone. Hãy kiểm tra thiết bị và cài đặt trình duyệt rồi thử lại."
-        : "Không thể kiểm tra camera. Hãy kiểm tra thiết bị và cài đặt trình duyệt rồi thử lại.",
+        ? "errors.devicePermission.genericMic"
+        : "errors.devicePermission.genericCamera",
+    ),
   };
 }
 
@@ -246,7 +283,7 @@ export function createDevicePermissionService(): DevicePermissionService {
         return {
           status: "unsupported",
           verified: false,
-          message: "Quyền thiết bị chỉ có thể được kiểm tra trong trình duyệt.",
+          message: tPermError("errors.devicePermission.browserOnly"),
           mediaRecorderSupported: false,
         };
       }
@@ -255,10 +292,11 @@ export function createDevicePermissionService(): DevicePermissionService {
         return {
           status: "error",
           verified: false,
-          message:
+          message: tPermError(
             kind === "microphone"
-              ? "Hãy sử dụng HTTPS hoặc localhost để truy cập microphone."
-              : "Hãy sử dụng HTTPS hoặc localhost để truy cập camera.",
+              ? "errors.devicePermission.insecureMic"
+              : "errors.devicePermission.insecureCamera",
+          ),
           mediaRecorderSupported,
         };
       }
@@ -267,10 +305,11 @@ export function createDevicePermissionService(): DevicePermissionService {
         return {
           status: "unsupported",
           verified: false,
-          message:
+          message: tPermError(
             kind === "microphone"
-              ? "Trình duyệt không hỗ trợ truy cập microphone. Hãy cập nhật hoặc đổi trình duyệt."
-              : "Trình duyệt không hỗ trợ truy cập camera. Hãy cập nhật hoặc đổi trình duyệt.",
+              ? "errors.devicePermission.unsupportedMic"
+              : "errors.devicePermission.unsupportedCamera",
+          ),
           mediaRecorderSupported,
         };
       }
@@ -299,10 +338,11 @@ export function createDevicePermissionService(): DevicePermissionService {
           return {
             status: kind === "microphone" ? "no_device" : "unavailable",
             verified: false,
-            message:
+            message: tPermError(
               kind === "microphone"
-                ? "Không tìm thấy microphone đang hoạt động trên thiết bị."
-                : "Không tìm thấy camera đang hoạt động trên thiết bị.",
+                ? "errors.devicePermission.noLiveTrackMic"
+                : "errors.devicePermission.noLiveTrackCamera",
+            ),
             mediaRecorderSupported,
           };
         }
@@ -311,8 +351,7 @@ export function createDevicePermissionService(): DevicePermissionService {
           return {
             status: "unsupported",
             verified: false,
-            message:
-              "Microphone đã được cấp quyền nhưng trình duyệt không hỗ trợ ghi âm cho buổi đọc. Hãy sử dụng trình duyệt mới hơn.",
+            message: tPermError("errors.devicePermission.recorderUnsupported"),
             mediaRecorderSupported: false,
           };
         }
@@ -320,10 +359,11 @@ export function createDevicePermissionService(): DevicePermissionService {
         return {
           status: "granted",
           verified: true,
-          message:
+          message: tPermError(
             kind === "camera"
-              ? "Camera đã được cấp quyền và thiết bị đang hoạt động."
-              : "Microphone đã được cấp quyền và thiết bị đang hoạt động.",
+              ? "errors.devicePermission.grantedCamera"
+              : "errors.devicePermission.grantedMic",
+          ),
           mediaRecorderSupported,
         };
       } catch (error) {

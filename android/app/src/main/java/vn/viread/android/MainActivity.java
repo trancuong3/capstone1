@@ -7,7 +7,9 @@ import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -19,6 +21,7 @@ import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.LocaleList;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
@@ -61,8 +64,15 @@ import java.io.File;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Branded server-backed Android shell for ViRead.
@@ -89,6 +99,48 @@ public final class MainActivity extends Activity {
     private static final long LOAD_TIMEOUT_MS = 90_000L;
     private static final long BACK_EXIT_WINDOW_MS = 2_000L;
     static final String VIREAD_ANDROID_UA_MARKER = "ViReadAndroid/1.0";
+    static final String LOCALE_PREFS_NAME = "viread_locale_prefs";
+    static final String KEY_UI_LOCALE = "viread_ui_locale";
+    static final String LOCALE_COOKIE_NAME = "viread_locale";
+    static final String DEFAULT_UI_LOCALE = "vi";
+
+    private static final Map<String, String> SUPPORTED_LOCALE_LOWER_MAP;
+    private static final Map<String, String> LOCALE_EXPLICIT_ALIASES;
+
+    static {
+        List<String> supported = Arrays.asList(
+                "vi", "en", "zh-Hans", "zh-Hant", "ja", "ko", "fr", "de", "es", "pt",
+                "it", "ru", "th", "id", "ms", "fil", "hi", "bn", "ar", "tr",
+                "nl", "sv", "pl", "uk", "el", "he", "km", "lo", "my", "ne");
+        Map<String, String> lowerMap = new HashMap<>();
+        for (String tag : supported) {
+            lowerMap.put(tag.toLowerCase(Locale.ROOT), tag);
+        }
+        SUPPORTED_LOCALE_LOWER_MAP = Collections.unmodifiableMap(lowerMap);
+
+        Map<String, String> aliases = new HashMap<>();
+        aliases.put("zh", "zh-Hans");
+        aliases.put("zh-cn", "zh-Hans");
+        aliases.put("zh-sg", "zh-Hans");
+        aliases.put("zh-hans", "zh-Hans");
+        aliases.put("zh-hans-cn", "zh-Hans");
+        aliases.put("zh-hans-sg", "zh-Hans");
+        aliases.put("zh-tw", "zh-Hant");
+        aliases.put("zh-hk", "zh-Hant");
+        aliases.put("zh-mo", "zh-Hant");
+        aliases.put("zh-hant", "zh-Hant");
+        aliases.put("zh-hant-tw", "zh-Hant");
+        aliases.put("zh-hant-hk", "zh-Hant");
+        aliases.put("in", "id");
+        aliases.put("in-id", "id");
+        aliases.put("iw", "he");
+        aliases.put("iw-il", "he");
+        aliases.put("he-il", "he");
+        aliases.put("tl", "fil");
+        aliases.put("tl-ph", "fil");
+        aliases.put("fil-ph", "fil");
+        LOCALE_EXPLICIT_ALIASES = Collections.unmodifiableMap(aliases);
+    }
 
     interface BackendWarmupRunner {
         void warmUp(String url);
@@ -156,6 +208,114 @@ public final class MainActivity extends Activity {
                     "LOAD_TIMEOUT");
         }
     };
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        super.attachBaseContext(wrapContextWithSavedLocale(newBase));
+    }
+
+    static Context wrapContextWithSavedLocale(Context newBase) {
+        if (newBase == null) {
+            return null;
+        }
+        try {
+            SharedPreferences prefs = newBase.getSharedPreferences(
+                    LOCALE_PREFS_NAME, Context.MODE_PRIVATE);
+            String savedRaw = prefs != null ? prefs.getString(KEY_UI_LOCALE, null) : null;
+            String resolvedTag = resolveSupportedLocaleTag(savedRaw);
+            Locale targetLocale = Locale.forLanguageTag(resolvedTag);
+            Configuration config = new Configuration(newBase.getResources().getConfiguration());
+            config.setLocales(new LocaleList(targetLocale));
+            config.setLayoutDirection(targetLocale);
+            return newBase.createConfigurationContext(config);
+        } catch (Throwable ignored) {
+            return newBase;
+        }
+    }
+
+    static String resolveSupportedLocaleTag(String raw) {
+        if (raw == null) {
+            return DEFAULT_UI_LOCALE;
+        }
+        String candidate = raw.trim();
+        if (candidate.isEmpty() || candidate.length() > 32) {
+            return DEFAULT_UI_LOCALE;
+        }
+        if (candidate.indexOf('\0') >= 0
+                || candidate.contains("..")
+                || candidate.contains("/")
+                || candidate.contains("\\")
+                || !candidate.matches("[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8}){0,2}")) {
+            return DEFAULT_UI_LOCALE;
+        }
+        String hyphenated = candidate.replace('_', '-').toLowerCase(Locale.ROOT);
+        String exact = SUPPORTED_LOCALE_LOWER_MAP.get(hyphenated);
+        if (exact != null) {
+            return exact;
+        }
+        String alias = LOCALE_EXPLICIT_ALIASES.get(hyphenated);
+        if (alias != null) {
+            return alias;
+        }
+        int dash = hyphenated.indexOf('-');
+        String primary = dash >= 0 ? hyphenated.substring(0, dash) : hyphenated;
+        if ("zh".equals(primary)) {
+            return DEFAULT_UI_LOCALE;
+        }
+        String primaryAlias = LOCALE_EXPLICIT_ALIASES.get(primary);
+        if (primaryAlias != null) {
+            return primaryAlias;
+        }
+        String primaryMatch = SUPPORTED_LOCALE_LOWER_MAP.get(primary);
+        return primaryMatch != null ? primaryMatch : DEFAULT_UI_LOCALE;
+    }
+
+    static String extractCookieValue(String cookieHeader, String cookieName) {
+        if (cookieHeader == null || cookieHeader.isEmpty() || cookieName == null) {
+            return null;
+        }
+        String[] pairs = cookieHeader.split(";");
+        for (String pair : pairs) {
+            int eq = pair.indexOf('=');
+            if (eq <= 0) continue;
+            String name = pair.substring(0, eq).trim();
+            if (!cookieName.equals(name)) continue;
+            String value = pair.substring(eq + 1).trim();
+            if (value.length() >= 2 && value.startsWith("\"") && value.endsWith("\"")) {
+                value = value.substring(1, value.length() - 1);
+            }
+            if (value.indexOf('%') >= 0) {
+                try {
+                    value = URLDecoder.decode(value, StandardCharsets.UTF_8.name());
+                } catch (IllegalArgumentException | java.io.UnsupportedEncodingException ignored) {
+                    return null;
+                }
+            }
+            return value;
+        }
+        return null;
+    }
+
+    void syncLocalePreferenceFromCookies() {
+        if (navigation == null) {
+            return;
+        }
+        try {
+            String cookieHeader = CookieManager.getInstance().getCookie(navigation.getOrigin());
+            String rawLocale = extractCookieValue(cookieHeader, LOCALE_COOKIE_NAME);
+            if (rawLocale == null || rawLocale.trim().isEmpty()) {
+                return;
+            }
+            String resolved = resolveSupportedLocaleTag(rawLocale);
+            getApplicationContext()
+                    .getSharedPreferences(LOCALE_PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_UI_LOCALE, resolved)
+                    .apply();
+        } catch (Throwable ignored) {
+            // Safe fallback when CookieManager is unavailable.
+        }
+    }
 
     @Override
     protected void onCreate(Bundle state) {
@@ -468,8 +628,9 @@ public final class MainActivity extends Activity {
             @Override
             public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
                 super.doUpdateVisitedHistory(view, url, isReload);
-                // Immediately persist SPA session cookies (e.g. signInWithPassword -> router.replace)
-                // to Android's SQLite CookieStore so force-stop / swipe-away never loses login state.
+                // Immediately persist SPA session & locale cookies (e.g. signInWithPassword -> router.replace)
+                // to Android's SQLite CookieStore so force-stop / swipe-away never loses login or language state.
+                syncLocalePreferenceFromCookies();
                 CookieManager.getInstance().flush();
             }
 
@@ -490,6 +651,7 @@ public final class MainActivity extends Activity {
                 if (!mainFrameHasError) {
                     revealWebViewOnCleanPage();
                 }
+                syncLocalePreferenceFromCookies();
                 CookieManager.getInstance().flush();
             }
         });
@@ -1332,10 +1494,11 @@ public final class MainActivity extends Activity {
     @Override
     protected void onPause() {
         if (webView != null) {
-            // Flush session/PKCE cookies immediately, while keeping WebView JS timers active
+            // Flush session/PKCE/locale cookies immediately, while keeping WebView JS timers active
             // if a translucent OEM overlay (e.g. Honor Keychain / Google Autofill dialog)
             // appears above the still-visible Activity. Full media release + webView.onPause()
             // happens in onStop() when ViRead actually leaves the visible screen.
+            syncLocalePreferenceFromCookies();
             CookieManager.getInstance().flush();
         }
         super.onPause();
@@ -1343,6 +1506,10 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onStop() {
+        if (webView != null) {
+            syncLocalePreferenceFromCookies();
+            CookieManager.getInstance().flush();
+        }
         if (!awaitingSystemPermission && nativeSpeechBridge != null) {
             nativeSpeechBridge.onHostStop();
         }

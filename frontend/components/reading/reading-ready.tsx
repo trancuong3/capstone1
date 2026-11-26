@@ -1,8 +1,11 @@
+"use client";
+
 import { ArrowLeft, ArrowRight, Mic } from "lucide-react";
 import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
+import { useTranslations } from "@/hooks/use-i18n";
 import type { BookDetailDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -19,6 +22,8 @@ export function ReadingReady({
   isStarting,
   onStart,
 }: ReadingReadyProps) {
+  const t = useTranslations("reading");
+  const tc = useTranslations("child");
   const detailHref = `/books/${encodeURIComponent(book.id)}`;
 
   return (
@@ -43,23 +48,31 @@ export function ReadingReady({
         <div className="flex flex-col items-start justify-center gap-5 p-6 sm:p-9">
           <div>
             <p className="mb-2 text-sm font-bold text-primary">
-              {child.alias} · Lớp {child.grade}
+              {child.alias} ·{" "}
+              {tc("switcher.gradeLabel", { grade: child.grade })}
             </p>
-            <h1 className="book-title text-4xl text-ink">{book.title}</h1>
+            <h1
+              className="book-title viread-learning-content text-4xl text-ink"
+              dir="ltr"
+              lang="vi"
+            >
+              {book.title}
+            </h1>
           </div>
           <p className="text-lg leading-relaxed text-ink">
-            Đặt sách trước mặt bé. Khi sẵn sàng, bé hãy đọc to từng dòng.
+            {t("ready.instruction")}
           </p>
           <p className="flex items-start gap-3 border-t border-border pt-4 text-sm text-muted">
             <Mic className="size-5 shrink-0 text-primary" aria-hidden="true" />
-            Microphone sẽ bật khi bắt đầu đọc.
+            {t("ready.micNotice")}
           </p>
           <Button isLoading={isStarting} onClick={onStart}>
-            Bắt đầu đọc <ArrowRight aria-hidden="true" className="size-5" />
+            {t("ready.startAction")}{" "}
+            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-5" />
           </Button>
           <ButtonLink href={detailHref} variant="quiet">
-            <ArrowLeft aria-hidden="true" className="size-5" />
-            Quay lại chi tiết sách
+            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-5" />
+            {t("ready.backToDetail")}
           </ButtonLink>
         </div>
       </article>

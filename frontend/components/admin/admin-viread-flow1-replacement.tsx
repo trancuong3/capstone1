@@ -15,6 +15,8 @@ import { Card } from "@/components/common/card";
 import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import type { TranslateFn } from "@/lib/i18n/types";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
 
 function shortHash(value: string) {
@@ -22,10 +24,28 @@ function shortHash(value: string) {
   return `${value.slice(0, 10)}…${value.slice(-8)}`;
 }
 
-function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+function formatBytes(
+  bytes: number,
+  t: TranslateFn,
+  formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string,
+) {
+  if (bytes < 1024) {
+    return t("training.flow1.bytesUnitB", { value: formatNumber(bytes) });
+  }
+  if (bytes < 1024 * 1024) {
+    return t("training.flow1.bytesUnitKB", {
+      value: formatNumber(bytes / 1024, {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      }),
+    });
+  }
+  return t("training.flow1.bytesUnitMB", {
+    value: formatNumber(bytes / (1024 * 1024), {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }),
+  });
 }
 
 interface DatasetComparison {
@@ -90,6 +110,8 @@ export function AdminVireadReliabilityPanel({
 }: {
   activeModel: NonNullable<VireadTrainingOverview["active_model"]>;
 }) {
+  const t = useTranslations("admin");
+  const { formatDateTime, formatNumber } = useI18n();
   const summary = activeModel.comparison_summary as ComparisonSummary | null;
   if (!summary || !summary.datasets || summary.datasets.length === 0) {
     return null;
@@ -97,6 +119,7 @@ export function AdminVireadReliabilityPanel({
 
   const models = summary.models || {};
   const diacritics = summary.vietnamese_diacritics_errors;
+  const dash = t("common.emptyDash");
 
   return (
     <Card className="mb-6 border-primary/30 bg-white">
@@ -104,8 +127,8 @@ export function AdminVireadReliabilityPanel({
         <div>
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-0.5 text-xs font-black text-emerald-800">
-              <CheckCircle2 className="size-3.5" /> Model Fine-Tuned Đang Hoạt
-              Động
+              <CheckCircle2 className="size-3.5" />{" "}
+              {t("training.flow1.activeBadge")}
             </span>
             <span className="rounded-control bg-sky px-2 py-0.5 font-mono text-xs font-bold text-primary-hover">
               {activeModel.profile}
@@ -115,12 +138,13 @@ export function AdminVireadReliabilityPanel({
             {activeModel.version_label ||
               models.finetuned_full_pipeline ||
               models.finetuned_model_only ||
-              "VietOCR V2 Fine-Tuned"}
+              t("training.flow1.modelTitleFallback")}
           </h2>
           <p className="mt-1 text-sm text-muted">
-            Trọng số:{" "}
+            {t("training.flow1.weightsLine")}{" "}
             <span className="font-semibold text-ink">
-              {activeModel.weights_filename || "Trọng số tải lên thủ công"}
+              {activeModel.weights_filename ||
+                t("training.flow1.manualWeightsFallback")}
             </span>{" "}
             · SHA-256:{" "}
             <span className="font-mono text-xs">
@@ -128,25 +152,31 @@ export function AdminVireadReliabilityPanel({
             </span>
           </p>
         </div>
-        <div className="text-right text-xs text-muted">
+        <div className="text-end text-xs text-muted">
           <p className="font-semibold text-ink">
             {activeModel.config_source === "custom_yaml"
-              ? `Config YAML tùy chỉnh: ${activeModel.config_filename || "config.yml"}`
-              : "Config mặc định: vgg_transformer"}
+              ? t("training.flow1.customYaml", {
+                  filename:
+                    activeModel.config_filename ||
+                    t("training.flow1.configFallbackFilename"),
+                })
+              : t("training.flow1.defaultYaml")}
           </p>
           <p className="mt-1">
-            Cập nhật: {new Date(activeModel.updated_at).toLocaleString("vi-VN")}
+            {t("training.flow1.updatedAt", {
+              time: formatDateTime(activeModel.updated_at),
+            })}
           </p>
         </div>
       </div>
 
       <div>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-lg font-black text-ink">
-            Bảng kết quả tin cậy so sánh 2 model (Baseline vs Fine-tuned)
+            {t("training.flow1.benchmarkPanelHeading")}
           </h3>
           <span className="text-xs font-bold text-emerald-700">
-            ✓ Đạt chuẩn cải thiện độc lập (Reliability Gate Passed)
+            {t("training.flow1.reliabilityPassed")}
           </span>
         </div>
 
@@ -201,19 +231,19 @@ export function AdminVireadReliabilityPanel({
               highlightGain?: boolean;
             }> = [
               {
-                label: "CER (%) · càng thấp càng tốt",
-                baseline: bCer !== undefined ? `${bCer}%` : "—",
-                modelOnly: mCer !== undefined ? `${mCer}%` : "—",
-                fullPipeline: pCer !== undefined ? `${pCer}%` : "—",
-                gain: cerGain ? `-${cerGain}%` : "—",
+                label: t("training.flow1.cerMobileRow"),
+                baseline: bCer !== undefined ? `${bCer}%` : dash,
+                modelOnly: mCer !== undefined ? `${mCer}%` : dash,
+                fullPipeline: pCer !== undefined ? `${pCer}%` : dash,
+                gain: cerGain ? `-${cerGain}%` : dash,
                 highlightGain: true,
               },
               {
-                label: "WER (%) · càng thấp càng tốt",
-                baseline: bWer !== undefined ? `${bWer}%` : "—",
-                modelOnly: mWer !== undefined ? `${mWer}%` : "—",
-                fullPipeline: pWer !== undefined ? `${pWer}%` : "—",
-                gain: werGain ? `-${werGain}%` : "—",
+                label: t("training.flow1.werMobileRow"),
+                baseline: bWer !== undefined ? `${bWer}%` : dash,
+                modelOnly: mWer !== undefined ? `${mWer}%` : dash,
+                fullPipeline: pWer !== undefined ? `${pWer}%` : dash,
+                gain: werGain ? `-${werGain}%` : dash,
                 highlightGain: true,
               },
             ];
@@ -223,27 +253,27 @@ export function AdminVireadReliabilityPanel({
               pExact !== undefined
             ) {
               mobileRows.push({
-                label: "Exact Match (%)",
-                baseline: bExact !== undefined ? `${bExact}%` : "—",
-                modelOnly: mExact !== undefined ? `${mExact}%` : "—",
-                fullPipeline: pExact !== undefined ? `${pExact}%` : "—",
+                label: t("training.flow1.exactMatchMobileRow"),
+                baseline: bExact !== undefined ? `${bExact}%` : dash,
+                modelOnly: mExact !== undefined ? `${mExact}%` : dash,
+                fullPipeline: pExact !== undefined ? `${pExact}%` : dash,
                 gain:
                   bExact !== undefined && (pExact ?? mExact) !== undefined
                     ? `+${((pExact ?? mExact)! - bExact).toFixed(2)}%`
-                    : "—",
+                    : dash,
                 highlightGain: true,
               });
             }
             if (bF1 !== undefined || mF1 !== undefined || pF1 !== undefined) {
               mobileRows.push({
-                label: "F1-Score (%)",
-                baseline: bF1 !== undefined ? `${bF1}%` : "—",
-                modelOnly: mF1 !== undefined ? `${mF1}%` : "—",
-                fullPipeline: pF1 !== undefined ? `${pF1}%` : "—",
+                label: t("training.flow1.f1MobileRow"),
+                baseline: bF1 !== undefined ? `${bF1}%` : dash,
+                modelOnly: mF1 !== undefined ? `${mF1}%` : dash,
+                fullPipeline: pF1 !== undefined ? `${pF1}%` : dash,
                 gain:
                   bF1 !== undefined && (pF1 ?? mF1) !== undefined
                     ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
-                    : "—",
+                    : dash,
                 highlightGain: true,
               });
             }
@@ -253,11 +283,28 @@ export function AdminVireadReliabilityPanel({
               pGpu !== undefined
             ) {
               mobileRows.push({
-                label: "Tốc độ GPU (ms/dòng)",
-                baseline: bGpu !== undefined ? `${bGpu} ms` : "—",
-                modelOnly: mGpu !== undefined ? `${mGpu} ms` : "—",
-                fullPipeline: pGpu !== undefined ? `${pGpu} ms` : "—",
-                gain: `${pGpu ?? mGpu ?? bGpu} ms/dòng`,
+                label: t("training.flow1.gpuSpeedLabel"),
+                baseline:
+                  bGpu !== undefined
+                    ? t("training.flow1.gpuSpeedValue", {
+                        value: formatNumber(bGpu),
+                      })
+                    : dash,
+                modelOnly:
+                  mGpu !== undefined
+                    ? t("training.flow1.gpuSpeedValue", {
+                        value: formatNumber(mGpu),
+                      })
+                    : dash,
+                fullPipeline:
+                  pGpu !== undefined
+                    ? t("training.flow1.gpuSpeedValue", {
+                        value: formatNumber(pGpu),
+                      })
+                    : dash,
+                gain: t("training.flow1.gpuSpeedPerLine", {
+                  value: formatNumber((pGpu ?? mGpu ?? bGpu)!),
+                }),
                 highlightGain: false,
               });
             }
@@ -289,19 +336,25 @@ export function AdminVireadReliabilityPanel({
                       </div>
                       <dl className="mt-2.5 grid grid-cols-3 gap-2 text-xs">
                         <div className="rounded-control bg-canvas px-2.5 py-2">
-                          <dt className="text-muted">Baseline</dt>
+                          <dt className="text-muted">
+                            {t("training.flow1.baselineShort")}
+                          </dt>
                           <dd className="mt-0.5 font-mono font-semibold text-muted">
                             {row.baseline}
                           </dd>
                         </div>
                         <div className="rounded-control bg-canvas px-2.5 py-2">
-                          <dt className="text-muted">Model Only</dt>
+                          <dt className="text-muted">
+                            {t("training.flow1.modelOnlyShort")}
+                          </dt>
                           <dd className="mt-0.5 font-mono font-semibold text-ink">
                             {row.modelOnly}
                           </dd>
                         </div>
                         <div className="rounded-control bg-sky/30 px-2.5 py-2">
-                          <dt className="text-muted">Full Pipe</dt>
+                          <dt className="text-muted">
+                            {t("training.flow1.fullPipeShort")}
+                          </dt>
                           <dd className="mt-0.5 font-mono font-bold text-ink">
                             {row.fullPipeline}
                           </dd>
@@ -313,66 +366,74 @@ export function AdminVireadReliabilityPanel({
 
                 <div className="hidden md:block">
                   <ResponsiveTable
-                    ariaLabel={`Bảng kết quả tin cậy ${dataset.label}`}
+                    ariaLabel={t("training.flow1.tableAria", {
+                      label: dataset.label,
+                    })}
                     className="rounded-b-control rounded-t-none border-t-0"
                   >
-                    <table className="w-full min-w-[640px] text-left text-sm">
+                    <table className="w-full min-w-[640px] text-start text-sm">
                       <thead className="border-b border-border bg-slate-50 text-xs font-bold text-muted">
                         <tr>
-                          <th className="px-4 py-2.5">Chỉ số đánh giá</th>
                           <th className="px-4 py-2.5">
-                            Baseline ({models.baseline || "Gốc"})
+                            {t("training.flow1.metricHeader")}
                           </th>
                           <th className="px-4 py-2.5">
-                            Fine-tuned (Model Only)
+                            {t("training.flow1.baselineHeader", {
+                              name:
+                                models.baseline ||
+                                t("training.flow1.baselineFallback"),
+                            })}
                           </th>
                           <th className="px-4 py-2.5">
-                            Fine-tuned (Full Pipeline)
+                            {t("training.flow1.finetunedModelOnlyHeader")}
                           </th>
-                          <th className="px-4 py-2.5 text-right">
-                            Mức cải thiện (Gain)
+                          <th className="px-4 py-2.5">
+                            {t("training.flow1.finetunedPipelineHeader")}
+                          </th>
+                          <th className="px-4 py-2.5 text-end">
+                            {t("training.flow1.gainHeader")}
                           </th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
                         <tr className="hover:bg-sky/10">
                           <td className="px-4 py-2.5 font-bold text-ink">
-                            CER (%){" "}
+                            {t("training.flow1.cerHeader")}{" "}
                             <span className="text-xs font-normal text-muted">
-                              (Càng thấp càng tốt)
+                              {t("training.flow1.lowerBetter")}
                             </span>
                           </td>
                           <td className="px-4 py-2.5 font-mono text-muted">
-                            {bCer !== undefined ? `${bCer}%` : "—"}
+                            {bCer !== undefined ? `${bCer}%` : dash}
                           </td>
                           <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                            {mCer !== undefined ? `${mCer}%` : "—"}
+                            {mCer !== undefined ? `${mCer}%` : dash}
                           </td>
                           <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                            {pCer !== undefined ? `${pCer}%` : "—"}
+                            {pCer !== undefined ? `${pCer}%` : dash}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
-                            {cerGain ? `-${cerGain}%` : "—"}
+                          <td className="px-4 py-2.5 text-end font-mono font-extrabold text-emerald-700">
+                            {cerGain ? `-${cerGain}%` : dash}
                           </td>
                         </tr>
                         <tr className="hover:bg-sky/10">
                           <td className="px-4 py-2.5 font-bold text-ink">
-                            WER (%){" "}
+                            {t("training.flow1.werHeader")}{" "}
                             <span className="text-xs font-normal text-muted">
-                              (Càng thấp càng tốt)
+                              {t("training.flow1.lowerBetter")}
                             </span>
                           </td>
                           <td className="px-4 py-2.5 font-mono text-muted">
-                            {bWer !== undefined ? `${bWer}%` : "—"}
+                            {bWer !== undefined ? `${bWer}%` : dash}
                           </td>
                           <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                            {mWer !== undefined ? `${mWer}%` : "—"}
+                            {mWer !== undefined ? `${mWer}%` : dash}
                           </td>
                           <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                            {pWer !== undefined ? `${pWer}%` : "—"}
+                            {pWer !== undefined ? `${pWer}%` : dash}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-extrabold text-emerald-700">
-                            {werGain ? `-${werGain}%` : "—"}
+                          <td className="px-4 py-2.5 text-end font-mono font-extrabold text-emerald-700">
+                            {werGain ? `-${werGain}%` : dash}
                           </td>
                         </tr>
                         {bExact !== undefined ||
@@ -380,22 +441,22 @@ export function AdminVireadReliabilityPanel({
                         pExact !== undefined ? (
                           <tr className="hover:bg-sky/10">
                             <td className="px-4 py-2.5 font-bold text-ink">
-                              Exact Match (%)
+                              {t("training.flow1.exactMatchMobileRow")}
                             </td>
                             <td className="px-4 py-2.5 font-mono text-muted">
-                              {bExact !== undefined ? `${bExact}%` : "—"}
+                              {bExact !== undefined ? `${bExact}%` : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono">
-                              {mExact !== undefined ? `${mExact}%` : "—"}
+                              {mExact !== undefined ? `${mExact}%` : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                              {pExact !== undefined ? `${pExact}%` : "—"}
+                              {pExact !== undefined ? `${pExact}%` : dash}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
+                            <td className="px-4 py-2.5 text-end font-mono font-bold text-emerald-700">
                               {bExact !== undefined &&
                               (pExact ?? mExact) !== undefined
                                 ? `+${((pExact ?? mExact)! - bExact).toFixed(2)}%`
-                                : "—"}
+                                : dash}
                             </td>
                           </tr>
                         ) : null}
@@ -404,21 +465,21 @@ export function AdminVireadReliabilityPanel({
                         pF1 !== undefined ? (
                           <tr className="hover:bg-sky/10">
                             <td className="px-4 py-2.5 font-bold text-ink">
-                              F1-Score (%)
+                              {t("training.flow1.f1MobileRow")}
                             </td>
                             <td className="px-4 py-2.5 font-mono text-muted">
-                              {bF1 !== undefined ? `${bF1}%` : "—"}
+                              {bF1 !== undefined ? `${bF1}%` : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono">
-                              {mF1 !== undefined ? `${mF1}%` : "—"}
+                              {mF1 !== undefined ? `${mF1}%` : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono font-semibold text-ink">
-                              {pF1 !== undefined ? `${pF1}%` : "—"}
+                              {pF1 !== undefined ? `${pF1}%` : dash}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-700">
+                            <td className="px-4 py-2.5 text-end font-mono font-bold text-emerald-700">
                               {bF1 !== undefined && (pF1 ?? mF1) !== undefined
                                 ? `+${((pF1 ?? mF1)! - bF1).toFixed(2)}%`
-                                : "—"}
+                                : dash}
                             </td>
                           </tr>
                         ) : null}
@@ -427,19 +488,33 @@ export function AdminVireadReliabilityPanel({
                         pGpu !== undefined ? (
                           <tr className="hover:bg-sky/10">
                             <td className="px-4 py-2.5 font-bold text-ink">
-                              Tốc độ GPU (ms/dòng)
+                              {t("training.flow1.gpuSpeedLabel")}
                             </td>
                             <td className="px-4 py-2.5 font-mono text-muted">
-                              {bGpu !== undefined ? `${bGpu} ms` : "—"}
+                              {bGpu !== undefined
+                                ? t("training.flow1.gpuSpeedValue", {
+                                    value: formatNumber(bGpu),
+                                  })
+                                : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono">
-                              {mGpu !== undefined ? `${mGpu} ms` : "—"}
+                              {mGpu !== undefined
+                                ? t("training.flow1.gpuSpeedValue", {
+                                    value: formatNumber(mGpu),
+                                  })
+                                : dash}
                             </td>
                             <td className="px-4 py-2.5 font-mono">
-                              {pGpu !== undefined ? `${pGpu} ms` : "—"}
+                              {pGpu !== undefined
+                                ? t("training.flow1.gpuSpeedValue", {
+                                    value: formatNumber(pGpu),
+                                  })
+                                : dash}
                             </td>
-                            <td className="px-4 py-2.5 text-right font-mono text-muted">
-                              {pGpu ?? mGpu ?? bGpu} ms/dòng
+                            <td className="px-4 py-2.5 text-end font-mono text-muted">
+                              {t("training.flow1.gpuSpeedPerLine", {
+                                value: formatNumber((pGpu ?? mGpu ?? bGpu)!),
+                              })}
                             </td>
                           </tr>
                         ) : null}
@@ -454,50 +529,88 @@ export function AdminVireadReliabilityPanel({
           {diacritics ? (
             <div className="rounded-control border border-border bg-amber-50/40 p-4">
               <h4 className="font-extrabold text-ink">
-                Lỗi dấu tiếng Việt (Vietnamese Diacritics Reliability)
+                {t("training.flow1.diacriticsHeading")}
               </h4>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 {diacritics.tone_confusion_chars ? (
-                  <div className="rounded-control bg-white p-3 border border-border">
+                  <div className="rounded-control border border-border bg-white p-3">
                     <p className="text-xs font-bold text-muted">
-                      Nhầm thanh điệu
+                      {t("training.flow1.toneConfusion")}
                     </p>
                     <p className="mt-1 font-mono text-sm">
                       <span className="text-muted line-through">
-                        {diacritics.tone_confusion_chars.baseline ?? "—"} ký tự
+                        {t("training.flow1.charUnit", {
+                          count:
+                            diacritics.tone_confusion_chars.baseline !==
+                            undefined
+                              ? formatNumber(
+                                  diacritics.tone_confusion_chars.baseline,
+                                )
+                              : dash,
+                        })}
                       </span>{" "}
                       →{" "}
                       <span className="font-extrabold text-emerald-700">
-                        {diacritics.tone_confusion_chars.finetuned ?? "—"} ký tự
+                        {t("training.flow1.charUnit", {
+                          count:
+                            diacritics.tone_confusion_chars.finetuned !==
+                            undefined
+                              ? formatNumber(
+                                  diacritics.tone_confusion_chars.finetuned,
+                                )
+                              : dash,
+                        })}
                       </span>
                     </p>
                     {diacritics.tone_confusion_chars.reduction_pct ? (
                       <span className="mt-1 inline-block text-xs font-bold text-emerald-700">
-                        ↓ Giảm {diacritics.tone_confusion_chars.reduction_pct}%
-                        lỗi dấu
+                        {t("training.flow1.reductionTone", {
+                          pct: formatNumber(
+                            diacritics.tone_confusion_chars.reduction_pct,
+                          ),
+                        })}
                       </span>
                     ) : null}
                   </div>
                 ) : null}
 
                 {diacritics.d_vs_d_stroke_chars ? (
-                  <div className="rounded-control bg-white p-3 border border-border">
+                  <div className="rounded-control border border-border bg-white p-3">
                     <p className="text-xs font-bold text-muted">
-                      Nhầm chữ d / đ
+                      {t("training.flow1.dStrokeConfusion")}
                     </p>
                     <p className="mt-1 font-mono text-sm">
                       <span className="text-muted line-through">
-                        {diacritics.d_vs_d_stroke_chars.baseline ?? "—"} ký tự
+                        {t("training.flow1.charUnit", {
+                          count:
+                            diacritics.d_vs_d_stroke_chars.baseline !==
+                            undefined
+                              ? formatNumber(
+                                  diacritics.d_vs_d_stroke_chars.baseline,
+                                )
+                              : dash,
+                        })}
                       </span>{" "}
                       →{" "}
                       <span className="font-extrabold text-emerald-700">
-                        {diacritics.d_vs_d_stroke_chars.finetuned ?? "—"} ký tự
+                        {t("training.flow1.charUnit", {
+                          count:
+                            diacritics.d_vs_d_stroke_chars.finetuned !==
+                            undefined
+                              ? formatNumber(
+                                  diacritics.d_vs_d_stroke_chars.finetuned,
+                                )
+                              : dash,
+                        })}
                       </span>
                     </p>
                     {diacritics.d_vs_d_stroke_chars.reduction_pct ? (
                       <span className="mt-1 inline-block text-xs font-bold text-emerald-700">
-                        ↓ Giảm {diacritics.d_vs_d_stroke_chars.reduction_pct}%
-                        lỗi d/đ
+                        {t("training.flow1.reductionDStroke", {
+                          pct: formatNumber(
+                            diacritics.d_vs_d_stroke_chars.reduction_pct,
+                          ),
+                        })}
                       </span>
                     ) : null}
                   </div>
@@ -517,12 +630,13 @@ export function AdminVireadFlow1Replacement({
   onSuccess: () => Promise<void> | void;
 }) {
   const { vireadTraining } = useAdminServices();
+  const t = useTranslations("admin");
+  const { formatNumber } = useI18n();
   const [weightsFile, setWeightsFile] = useState<File | null>(null);
   const [configFile, setConfigFile] = useState<File | null>(null);
   const [comparisonFile, setComparisonFile] = useState<File | null>(null);
   const [modelVersion, setModelVersion] = useState("");
-  const reason =
-    "Trực tiếp thay thế model VietOCR V2 fine-tuned đạt độ tin cậy vượt trội.";
+  const reason = t("training.flow1.defaultModelDescription");
 
   const [uploading, setUploading] = useState(false);
   const [progressPercent, setProgressPercent] = useState(0);
@@ -552,7 +666,7 @@ export function AdminVireadFlow1Replacement({
     }
     const name = file.name.toLowerCase();
     if (!name.endsWith(".pth") && !name.endsWith(".pt")) {
-      setFormError("Tệp trọng số bắt buộc phải có đuôi .pth hoặc .pt.");
+      setFormError(t("training.flow1.errors.weightsExt"));
       setWeightsFile(null);
       return;
     }
@@ -573,9 +687,7 @@ export function AdminVireadFlow1Replacement({
     }
     const name = file.name.toLowerCase();
     if (!name.endsWith(".yml") && !name.endsWith(".yaml")) {
-      setFormError(
-        "Tệp cấu hình tùy chọn bắt buộc phải có đuôi .yml hoặc .yaml.",
-      );
+      setFormError(t("training.flow1.errors.yamlExt"));
       setConfigFile(null);
       return;
     }
@@ -594,7 +706,7 @@ export function AdminVireadFlow1Replacement({
       return;
     }
     if (!file.name.toLowerCase().endsWith(".json")) {
-      setFormError("Tệp kết quả so sánh bắt buộc phải có đuôi .json.");
+      setFormError(t("training.flow1.errors.jsonExt"));
       setComparisonFile(null);
       return;
     }
@@ -606,7 +718,7 @@ export function AdminVireadFlow1Replacement({
       if (!parsed || typeof parsed !== "object") {
         setPreviewMetrics({
           isValid: false,
-          errorMsg: "Tệp JSON không đúng định dạng đối tượng.",
+          errorMsg: t("training.flow1.errors.jsonNotObject"),
         });
         setComparisonFile(null);
         return;
@@ -615,7 +727,7 @@ export function AdminVireadFlow1Replacement({
       if (!parsed.models || typeof parsed.models !== "object") {
         setPreviewMetrics({
           isValid: false,
-          errorMsg: "Tệp JSON thiếu mục khai báo 'models'.",
+          errorMsg: t("training.flow1.errors.jsonMissingModels"),
         });
         setComparisonFile(null);
         return;
@@ -681,7 +793,7 @@ export function AdminVireadFlow1Replacement({
       if (!foundValidDataset) {
         setPreviewMetrics({
           isValid: false,
-          errorMsg: "Tệp JSON thiếu dữ liệu tập kiểm thử (cer_pct / wer_pct).",
+          errorMsg: t("training.flow1.errors.jsonMissingMetrics"),
         });
         setComparisonFile(null);
         return;
@@ -690,8 +802,7 @@ export function AdminVireadFlow1Replacement({
       if (hasRegression) {
         setPreviewMetrics({
           isValid: false,
-          errorMsg:
-            "Model fine-tuned không vượt trội hơn baseline (chỉ số CER hoặc WER bị giảm sút trên tập kiểm thử).",
+          errorMsg: t("training.flow1.errors.notBetterThanBaseline"),
         });
         setComparisonFile(null);
         return;
@@ -712,7 +823,7 @@ export function AdminVireadFlow1Replacement({
     } catch {
       setPreviewMetrics({
         isValid: false,
-        errorMsg: "Không thể đọc hoặc parse tệp JSON kết quả so sánh.",
+        errorMsg: t("training.flow1.errors.jsonParseFailed"),
       });
       setComparisonFile(null);
     }
@@ -726,7 +837,7 @@ export function AdminVireadFlow1Replacement({
     setFormError(null);
     setSuccessNotice(null);
     setProgressPercent(0);
-    setProgressStatus("Đang chuẩn bị các mảnh trọng số (20 MiB/mảnh)...");
+    setProgressStatus(t("training.flow1.progress.preparingChunks"));
 
     const CHUNK_SIZE = 20 * 1024 * 1024;
     const totalChunks = Math.max(1, Math.ceil(weightsFile.size / CHUNK_SIZE));
@@ -747,7 +858,11 @@ export function AdminVireadFlow1Replacement({
         const uploadPct = Math.round(((i + 1) / totalChunks) * 85);
         setProgressPercent(uploadPct);
         setProgressStatus(
-          `Đang tải mảnh ${i + 1}/${totalChunks} (${formatBytes(chunkBlob.size)})...`,
+          t("training.flow1.progress.uploadingChunk", {
+            current: formatNumber(i + 1),
+            total: formatNumber(totalChunks),
+            size: formatBytes(chunkBlob.size, t, formatNumber),
+          }),
         );
 
         const res = await vireadTraining.uploadFlow1ModelChunk(
@@ -764,7 +879,7 @@ export function AdminVireadFlow1Replacement({
       }
 
       setProgressPercent(90);
-      setProgressStatus("Đang kiểm tra toàn vẹn SHA-256 & kích hoạt model...");
+      setProgressStatus(t("training.flow1.progress.verifyingSha"));
 
       const activationRes = await vireadTraining.activateFlow1Model({
         uploadId,
@@ -777,7 +892,7 @@ export function AdminVireadFlow1Replacement({
       });
 
       setProgressPercent(100);
-      setProgressStatus("Kích hoạt thành công!");
+      setProgressStatus(t("training.flow1.progress.activated"));
       setSuccessNotice({
         versionLabel:
           activationRes.active_model.version_label || weightsFile.name,
@@ -796,7 +911,7 @@ export function AdminVireadFlow1Replacement({
       const msg =
         err instanceof Error
           ? err.message
-          : "Có lỗi xảy ra khi thay thế model.";
+          : t("training.flow1.errors.replaceFailed");
       setFormError(msg);
     } finally {
       setUploading(false);
@@ -810,6 +925,8 @@ export function AdminVireadFlow1Replacement({
     reason,
     uploading,
     onSuccess,
+    t,
+    formatNumber,
   ]);
 
   return (
@@ -817,37 +934,37 @@ export function AdminVireadFlow1Replacement({
       <div className="flex items-center justify-between gap-2 border-b border-border/80 pb-3">
         <div>
           <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-black text-primary-hover">
-            Luồng 1 Mới · Direct Model Replacement
+            {t("training.flow1.badgeEyebrow")}
           </span>
           <h3 className="mt-1 text-lg font-black text-ink">
-            Thay thế trực tiếp Model VietOCR V2 Fine-Tuned
+            {t("training.flow1.heading")}
           </h3>
         </div>
         <UploadCloud className="size-6 text-primary" />
       </div>
 
       <p className="mt-2 text-sm text-muted">
-        Tải lên trọng số PyTorch fine-tuned, file cấu hình YAML (tùy chọn) và
-        kết quả so sánh JSON để kích hoạt trực tiếp model nhận diện sách giáo
-        khoa.
+        {t("training.flow1.description")}
       </p>
 
       {successNotice ? (
-        <div className="mt-4 rounded-control bg-emerald-50 border border-emerald-200 p-4">
+        <div className="mt-4 rounded-control border border-emerald-200 bg-emerald-50 p-4">
           <div className="flex items-start gap-3">
-            <CheckCircle2 className="size-5 text-emerald-700 shrink-0 mt-0.5" />
+            <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-700" />
             <div>
               <p className="font-extrabold text-emerald-900">
-                Kích hoạt model mới thành công!
+                {t("training.flow1.successTitle")}
               </p>
               <p className="mt-1 text-sm text-emerald-800">
-                Phiên bản đang hoạt động:{" "}
+                {t("training.flow1.activeVersionLabel")}{" "}
                 <span className="font-bold">{successNotice.versionLabel}</span>.
               </p>
               <p className="mt-1 text-xs text-emerald-700">
                 {successNotice.previousModelExisted
-                  ? `Đã xóa an toàn ${successNotice.deletedCount} tệp trọng số/cấu hình của model cũ trong Storage để tối ưu dung lượng.`
-                  : "Model gốc (Original baseline) được lưu giữ an toàn làm phương án rollback."}
+                  ? t("training.flow1.cleanupDeletedOld", {
+                      count: formatNumber(successNotice.deletedCount),
+                    })
+                  : t("training.flow1.cleanupKeptOriginal")}
               </p>
             </div>
           </div>
@@ -867,13 +984,13 @@ export function AdminVireadFlow1Replacement({
             className="block text-sm font-bold text-ink"
             htmlFor="viread-weights-file"
           >
-            1. Tệp trọng số PyTorch (.pth, .pt){" "}
+            {t("training.flow1.step1Label")}{" "}
             <span className="text-danger">*</span>
           </label>
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".pth,.pt"
-              className="block w-full text-sm text-muted file:mr-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
+              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
               disabled={uploading}
               id="viread-weights-file"
               onChange={handleWeightsChange}
@@ -883,12 +1000,14 @@ export function AdminVireadFlow1Replacement({
           {weightsFile ? (
             <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
               <FileCheck2 className="size-3.5" />
-              Đã chọn: {weightsFile.name} ({formatBytes(weightsFile.size)})
+              {t("training.flow1.selectedWithSize", {
+                name: weightsFile.name,
+                size: formatBytes(weightsFile.size, t, formatNumber),
+              })}
             </p>
           ) : (
             <p className="mt-1 text-xs text-muted">
-              Hệ thống tự động cắt nhỏ 20 MiB/mảnh để tải lên ổn định không
-              nghẽn mạng.
+              {t("training.flow1.step1Hint")}
             </p>
           )}
         </div>
@@ -899,15 +1018,15 @@ export function AdminVireadFlow1Replacement({
             className="block text-sm font-bold text-ink"
             htmlFor="viread-config-file"
           >
-            2. Tệp cấu hình YAML (.yml, .yaml){" "}
+            {t("training.flow1.step2Label")}{" "}
             <span className="text-xs font-normal text-muted">
-              (Không bắt buộc)
+              {t("training.flow1.optionalTag")}
             </span>
           </label>
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".yml,.yaml"
-              className="block w-full text-sm text-muted file:mr-4 file:rounded-control file:border-0 file:bg-slate-100 file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-ink hover:file:bg-slate-200 focus-visible:outline-none"
+              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-slate-100 file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-ink hover:file:bg-slate-200 focus-visible:outline-none"
               disabled={uploading}
               id="viread-config-file"
               onChange={handleConfigChange}
@@ -917,13 +1036,16 @@ export function AdminVireadFlow1Replacement({
           {configFile ? (
             <p className="mt-1 flex items-center gap-1.5 text-xs font-semibold text-ink">
               <FileCode2 className="size-3.5" />
-              Đã chọn: {configFile.name} ({formatBytes(configFile.size)})
+              {t("training.flow1.selectedWithSize", {
+                name: configFile.name,
+                size: formatBytes(configFile.size, t, formatNumber),
+              })}
             </p>
           ) : (
             <p className="mt-1 text-xs text-muted">
-              Không bắt buộc — hệ thống sẽ dùng cấu hình chuẩn{" "}
-              <code className="font-mono text-ink">vgg_transformer</code> nếu để
-              trống.
+              {t("training.flow1.step2HintPrefix")}
+              <code className="font-mono text-ink">vgg_transformer</code>
+              {t("training.flow1.step2HintSuffix")}
             </p>
           )}
         </div>
@@ -934,13 +1056,13 @@ export function AdminVireadFlow1Replacement({
             className="block text-sm font-bold text-ink"
             htmlFor="viread-comparison-file"
           >
-            3. Tệp JSON kết quả so sánh đối chứng (.json){" "}
+            {t("training.flow1.step3Label")}{" "}
             <span className="text-danger">*</span>
           </label>
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".json"
-              className="block w-full text-sm text-muted file:mr-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
+              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
               disabled={uploading}
               id="viread-comparison-file"
               onChange={(e) => void handleComparisonChange(e)}
@@ -950,27 +1072,31 @@ export function AdminVireadFlow1Replacement({
           {previewMetrics ? (
             <div className="mt-2">
               {previewMetrics.isValid ? (
-                <div className="rounded-control bg-emerald-50 border border-emerald-200 p-2.5 text-xs text-emerald-800">
-                  <p className="font-bold flex items-center gap-1">
+                <div className="rounded-control border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+                  <p className="flex items-center gap-1 font-bold">
                     <CheckCircle2 className="size-3.5 text-emerald-600" />
-                    Độ tin cậy được chứng thực:
+                    {t("training.flow1.verifiedReliabilityHeading")}
                   </p>
                   {previewMetrics.sgkCerImprovement ? (
                     <p className="mt-0.5">
-                      • CER SGK: {previewMetrics.sgkCerImprovement}
+                      {t("training.flow1.sgkCerLine", {
+                        value: previewMetrics.sgkCerImprovement,
+                      })}
                     </p>
                   ) : null}
                   {previewMetrics.sgkWerImprovement ? (
                     <p className="mt-0.5">
-                      • WER SGK: {previewMetrics.sgkWerImprovement}
+                      {t("training.flow1.sgkWerLine", {
+                        value: previewMetrics.sgkWerImprovement,
+                      })}
                     </p>
                   ) : null}
                 </div>
               ) : (
-                <div className="rounded-control bg-rose-50 border border-rose-200 p-2.5 text-xs text-rose-800">
-                  <p className="font-bold flex items-center gap-1">
+                <div className="rounded-control border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800">
+                  <p className="flex items-center gap-1 font-bold">
                     <AlertCircle className="size-3.5 text-rose-600" />
-                    Không đạt tiêu chuẩn tin cậy:
+                    {t("training.flow1.failedReliabilityHeading")}
                   </p>
                   <p className="mt-0.5">{previewMetrics.errorMsg}</p>
                 </div>
@@ -978,8 +1104,7 @@ export function AdminVireadFlow1Replacement({
             </div>
           ) : (
             <p className="mt-1 text-xs text-muted">
-              File JSON chứa số liệu so sánh Baseline vs Fine-tuned (CER, WER,
-              F1...).
+              {t("training.flow1.step3HintShort")}
             </p>
           )}
         </div>
@@ -990,8 +1115,10 @@ export function AdminVireadFlow1Replacement({
             className="block text-sm font-bold text-ink"
             htmlFor="viread-model-version"
           >
-            4. Tên phiên bản model{" "}
-            <span className="text-xs font-normal text-muted">(Tùy chọn)</span>
+            {t("training.flow1.step4Label")}{" "}
+            <span className="text-xs font-normal text-muted">
+              {t("training.flow1.optionalShort")}
+            </span>
           </label>
           <input
             className="mt-1.5 w-full rounded-control border border-border px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-primary"
@@ -999,7 +1126,7 @@ export function AdminVireadFlow1Replacement({
             id="viread-model-version"
             maxLength={120}
             onChange={(e) => setModelVersion(e.target.value)}
-            placeholder="vd: VietOCR V2 - SGK Fine-Tuned 2026"
+            placeholder={t("training.flow1.versionPlaceholder")}
             value={modelVersion}
           />
         </div>
@@ -1032,7 +1159,9 @@ export function AdminVireadFlow1Replacement({
           variant="primary"
         >
           <ArrowUpRight className="size-5" />
-          {uploading ? "Đang xử lý..." : "Tải lên & Thay thế Model"}
+          {uploading
+            ? t("training.flow1.uploadingBtn")
+            : t("training.flow1.submitBtn")}
         </Button>
       </div>
     </div>

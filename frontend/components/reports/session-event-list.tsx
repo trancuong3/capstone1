@@ -1,26 +1,7 @@
+"use client";
+
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { HistoryEventDTO } from "@/types/reading";
-
-const eventLabels: Record<HistoryEventDTO["type"], string> = {
-  MISPRONUNCIATION: "Ghi nhận phát âm",
-  OMISSION: "Bỏ sót",
-  REPETITION: "Lặp từ",
-  LONG_PAUSE: "Dừng lâu",
-  SUBSTITUTION: "Thay từ",
-  SELF_CORRECTION: "Tự sửa",
-  READ_EXAMPLE: "Nghe đọc mẫu",
-  WORD_RETRY: "Lượt đọc lại",
-};
-
-const statusLabels: Record<HistoryEventDTO["status"], string> = {
-  DETECTED: "Đã phát hiện, chưa xác nhận",
-  FEEDBACK_GIVEN: "Đã đưa phản hồi",
-  IGNORED_BY_GATE: "Không qua điều kiện xác nhận",
-  CANDIDATE: "Đang xem xét",
-  CONFIRMED: "Đã xác nhận",
-  FAILED: "Chưa đọc đúng ở lượt này",
-  UNCERTAIN: "Chưa chắc chắn",
-  DISMISSED: "Đã loại",
-};
 
 function eventStatusBadgeClass(status: HistoryEventDTO["status"]): string {
   if (status === "CONFIRMED") {
@@ -37,10 +18,13 @@ interface SessionEventListProps {
 }
 
 export function SessionEventList({ events }: SessionEventListProps) {
+  const { formatNumber } = useI18n();
+  const t = useTranslations("reports");
+
   if (events.length === 0) {
     return (
       <p className="rounded-control border border-border bg-canvas px-4 py-4 text-sm text-muted">
-        Buổi đọc này chưa có sự kiện để hiển thị.
+        {t("sessions.events.empty")}
       </p>
     );
   }
@@ -51,8 +35,13 @@ export function SessionEventList({ events }: SessionEventListProps) {
   return (
     <div className="flex flex-col gap-5">
       {retryEvents.length > 0 ? (
-        <section aria-label="Kết quả đọc lại" className="flex flex-col gap-2.5">
-          <h3 className="text-base font-extrabold text-ink">Kết quả đọc lại</h3>
+        <section
+          aria-label={t("sessions.events.retrySectionAria")}
+          className="flex flex-col gap-2.5"
+        >
+          <h3 className="text-base font-extrabold text-ink">
+            {t("sessions.events.retrySectionTitle")}
+          </h3>
           <ol className="divide-y divide-border rounded-control border border-border bg-white">
             {retryEvents.map((event) => {
               const metadata = event.metadata;
@@ -65,37 +54,54 @@ export function SessionEventList({ events }: SessionEventListProps) {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-bold text-ink">
                       {event.status === "CONFIRMED"
-                        ? "Đã đọc đúng ở lượt đọc lại"
+                        ? t("sessions.events.retryCorrect")
                         : event.status === "FAILED"
-                          ? "Chưa đọc đúng ở lượt đọc lại"
-                          : "Kết quả đọc lại chưa chắc chắn"}
+                          ? t("sessions.events.retryFailed")
+                          : t("sessions.events.retryUncertain")}
                     </p>
                     <span
                       className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
                     >
                       {typeof attempt === "number" && Number.isInteger(attempt)
-                        ? `Lần thử ${attempt}`
-                        : statusLabels[event.status]}
+                        ? t("sessions.events.retryAttempt", { attempt })
+                        : t(`sessions.events.statuses.${event.status}`)}
                     </span>
                   </div>
                   <p className="text-sm text-muted">
-                    Từ cần luyện:{" "}
-                    <strong className="font-bold text-ink">
+                    {t("sessions.events.practiceWordLabel")}
+                    <strong
+                      className={
+                        typeof targetWord === "string"
+                          ? "viread-learning-content font-bold text-ink"
+                          : "font-bold text-ink"
+                      }
+                      dir={typeof targetWord === "string" ? "ltr" : undefined}
+                      lang={typeof targetWord === "string" ? "vi" : undefined}
+                    >
                       {typeof targetWord === "string"
                         ? targetWord
-                        : (event.page_revision_word_id ?? "Chưa ghi nhận")}
+                        : (event.page_revision_word_id ??
+                          t("sessions.detail.notRecorded"))}
                     </strong>
                     {typeof originalStatus === "string"
-                      ? ` · ${originalStatus === "OMISSION" ? "Bỏ sót" : "Phát âm chưa đúng"}`
+                      ? ` · ${
+                          originalStatus === "OMISSION"
+                            ? t("sessions.events.originalOmission")
+                            : t("sessions.events.originalMispronunciation")
+                        }`
                       : ""}
                   </p>
                   {typeof recognizedText === "string" && recognizedText ? (
                     <p className="text-sm text-muted">
-                      ViRead nhận diện: “{recognizedText}”
+                      {t("sessions.events.recognizedPrefix", {
+                        text: recognizedText,
+                      })}
                     </p>
                   ) : null}
                   <p className="text-xs text-muted">
-                    Mã trang {event.page_id} · phiên bản{" "}
+                    {t("sessions.events.pageRevisionMeta", {
+                      pageId: event.page_id,
+                    })}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
                 </li>
@@ -107,12 +113,12 @@ export function SessionEventList({ events }: SessionEventListProps) {
 
       {readingEvents.length > 0 ? (
         <section
-          aria-label="Sự kiện lượt đọc đầu"
+          aria-label={t("sessions.events.firstPassSectionAria")}
           className="flex flex-col gap-2.5"
         >
           {retryEvents.length > 0 ? (
             <h3 className="text-base font-extrabold text-ink">
-              Sự kiện lượt đọc đầu
+              {t("sessions.events.firstPassSectionTitle")}
             </h3>
           ) : null}
           <ol className="divide-y divide-border rounded-control border border-border bg-white">
@@ -130,26 +136,30 @@ export function SessionEventList({ events }: SessionEventListProps) {
                 <li className="space-y-1.5 p-3.5 sm:p-4" key={event.id}>
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-bold text-ink">
-                      {eventLabels[event.type]}
+                      {t(`sessions.events.types.${event.type}`)}
                     </p>
                     <span
                       className={`rounded-control px-2.5 py-0.5 text-xs font-bold ${eventStatusBadgeClass(event.status)}`}
                     >
-                      {statusLabels[event.status]}
+                      {t(`sessions.events.statuses.${event.status}`)}
                     </span>
                   </div>
                   <p className="text-xs text-muted">
-                    Mốc{" "}
+                    {t("sessions.events.timestampAt")}
                     <span className="font-bold tabular-nums text-ink">
-                      {Math.round(event.start_ms / 1000)} giây
-                    </span>{" "}
-                    · phiên bản{" "}
+                      {t("sessions.events.secondsValue", {
+                        seconds: formatNumber(
+                          Math.round(event.start_ms / 1000),
+                        ),
+                      })}
+                    </span>
+                    {t("sessions.events.versionSeparator")}
                     <code className="break-all">{event.page_revision_id}</code>
                   </p>
                   <p className="text-xs font-semibold text-muted">
                     {countsAsError
-                      ? "Bằng chứng lỗi đã xác nhận."
-                      : "Sự kiện hỗ trợ hoặc chưa chắc chắn, không tính là lỗi của bé."}
+                      ? t("sessions.events.confirmedEvidence")
+                      : t("sessions.events.supportOrUncertainEvidence")}
                   </p>
                 </li>
               );

@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react";
 import Image from "next/image";
 import { Music2 } from "lucide-react";
 import { StatusMessage } from "@/components/common/status-message";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   useKaraokePlayer,
   type KaraokePlayerController,
@@ -38,9 +39,9 @@ function PlayerSession({
   lyrics = source.lyrics,
   children,
   onPlayed,
-  label = "Nghe thử bài hát",
+  label,
   presentation = "preview",
-  childAlias = "Bé",
+  childAlias,
   onReload,
 }: {
   source: AudioSource;
@@ -52,6 +53,10 @@ function PlayerSession({
   childAlias?: string;
   onReload?: () => void;
 }) {
+  const t = useTranslations("entertainment");
+  const resolvedLabel = label ?? t("karaoke.playerScreen.previewLabel");
+  const resolvedAlias =
+    childAlias ?? t("karaoke.playerScreen.defaultChildAlias");
   const [coverFailed, setCoverFailed] = useState(false);
   const player = useKaraokePlayer(
     source.audio_url,
@@ -64,17 +69,17 @@ function PlayerSession({
       <KaraokeStage
         source={{ ...source, lyrics }}
         player={player}
-        childAlias={childAlias}
-        label={label}
+        childAlias={resolvedAlias}
+        label={resolvedLabel}
         onReload={onReload}
       />
     );
   return (
-    <section aria-label={label} className="grid gap-5">
+    <section aria-label={resolvedLabel} className="grid gap-5">
       {source.cover_url && !coverFailed ? (
         <Image
           src={source.cover_url}
-          alt={`Ảnh bìa ${source.title}`}
+          alt={t("karaoke.library.coverAlt", { title: source.title })}
           width={200}
           height={200}
           unoptimized
@@ -84,7 +89,7 @@ function PlayerSession({
       ) : (
         <div
           className="grid size-24 place-items-center rounded-control bg-sky"
-          aria-label="Bài hát chưa có ảnh bìa"
+          aria-label={t("karaoke.playerScreen.noCoverAria")}
         >
           <Music2 aria-hidden className="size-10 text-primary" />
         </div>
