@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: github-pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   validate:
@@ -57,8 +57,8 @@ jobs:
           node --check project-dashboard/build-snapshot.cjs
           node --test project-dashboard/roadmap-core.test.cjs project-dashboard/dashboard-smoke.test.cjs project-dashboard/build-snapshot.test.cjs
 
-  deploy:
-    name: Deploy GitHub Pages
+  build:
+    name: Build public static site
     if: github.event_name != 'pull_request'
     needs: validate
     permissions:
@@ -66,11 +66,6 @@ jobs:
       issues: read
       pull-requests: read
       actions: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout trusted main branch
@@ -92,13 +87,25 @@ jobs:
           cp project-dashboard/data/hub-snapshot.json "$RUNNER_TEMP/viread-pages/data/hub-snapshot.json"
           node -e 'const fs=require("node:fs"); const p=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/viread-pages/data/hub-snapshot.json","utf8")); require("./project-dashboard/roadmap-core.js").validateSnapshot(p);'
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
       - name: Upload public static site
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ runner.temp }}/viread-pages
+
+  deploy:
+    name: Deploy GitHub Pages
+    if: github.event_name != 'pull_request'
+    needs: build
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Deploy to GitHub Pages
         id: deployment
