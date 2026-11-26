@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import unicodedata
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -59,7 +60,7 @@ class ReadingComparisonService:
         actor_id: UUID,
         payload: CompareReadingRequest,
     ) -> ReadingComparisonReportRead:
-        transcript = payload.transcript.strip()
+        transcript = unicodedata.normalize("NFC", payload.transcript).strip()
         if not transcript:
             raise HTTPException(status_code=422, detail="Transcript must contain recognized speech.")
 
@@ -81,7 +82,9 @@ class ReadingComparisonService:
             # current page. New multi-page clients must send the exact snapshot.
             page = await self.content.get_session_page(session_id, actor_id)
 
-        reference_text = page.text or " ".join(word.text for word in page.words)
+        reference_text = unicodedata.normalize(
+            "NFC", page.text or " ".join(word.text for word in page.words)
+        )
         if not reference_text.strip():
             raise HTTPException(status_code=422, detail="Book text is empty.")
 
@@ -96,8 +99,12 @@ class ReadingComparisonService:
             if len(supplied) != len(payload.initial_assessment) or set(supplied) != word_ids:
                 raise HTTPException(status_code=422, detail="Assessment words must match the page revision exactly")
             initial_assessment = [
-                {"word_id": str(word.word_id), "word_index": word.word_index,
-                 "text": word.text, "status": supplied[str(word.word_id)]}
+                {
+                    "word_id": str(word.word_id),
+                    "word_index": word.word_index,
+                    "text": unicodedata.normalize("NFC", str(word.text)),
+                    "status": supplied[str(word.word_id)],
+                }
                 for word in page.words
             ]
         elif payload.initial_assessment is not None:
@@ -108,7 +115,13 @@ class ReadingComparisonService:
         await self._release_read_transaction()
         result = await asyncio.to_thread(align_text, reference_text, transcript)
         words = (
-            [word.model_dump() for word in payload.words]
+            [
+                {
+                    **word.model_dump(),
+                    "text": unicodedata.normalize("NFC", str(word.text)),
+                }
+                for word in payload.words
+            ]
             if payload.words is not None
             else None
         )
@@ -130,13 +143,29 @@ class ReadingComparisonService:
             session_id, page.page_id, page.page_revision_id,
         )
         if finalized is not None:
-            finalized_initial = (
+            finalized_transcript_nfc = unicodedata.normalize(
+                "NFC", str(finalized.Transcript or "")
+            ).strip()
+            existing_initial = (
                 finalized.Summary.get("initial_assessment")
                 if isinstance(finalized.Summary, dict)
                 else None
             )
-            if (finalized.Transcript != transcript or (payload.finalize
-                    and finalized_initial != initial_assessment)):
+            if isinstance(existing_initial, list):
+                existing_initial_nfc = [
+                    (
+                        {**item, "text": unicodedata.normalize("NFC", str(item["text"]))}
+                        if isinstance(item, dict) and isinstance(item.get("text"), str)
+                        else item
+                    )
+                    for item in existing_initial
+                ]
+            else:
+                existing_initial_nfc = existing_initial
+            if (
+                finalized_transcript_nfc != transcript
+                or (payload.finalize and existing_initial_nfc != initial_assessment)
+            ):
                 raise HTTPException(status_code=409, detail="The initial assessment is immutable")
             return self._to_read(finalized)
         if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
@@ -157,6 +186,14 @@ class ReadingComparisonService:
         )
         if existing is not None and not payload.finalize:
             return self._to_read(existing)
+        if existing is None and not payload.finalize:
+            for row in await self.repository.list_for_session(session_id):
+                if (
+                    row.PageId == page.page_id
+                    and row.PageRevisionId == page.page_revision_id
+                    and unicodedata.normalize("NFC", str(row.Transcript or "")).strip() == transcript
+                ):
+                    return self._to_read(row)
 
         report = ReadingComparisonReport(
             SessionId=session_id,

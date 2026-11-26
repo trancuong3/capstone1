@@ -98,9 +98,12 @@ export class AudioQualityMonitor {
   private minRms = Number.POSITIVE_INFINITY;
   private stationaryLoudMs = 0;
   private lastRms = 0;
-  private totalCheckedSamples = 0;
-  private totalClippedSamples = 0;
-  private recentClipRatios: number[] = [];
+  /** Sliding 300ms window of recent frames for sustained clipping detection. */
+  private readonly clipWindow: Array<{
+    readonly atMs: number;
+    readonly elapsedMs: number;
+    readonly clipped: boolean;
+  }> = [];
   private snapshot: AudioQualitySnapshot = {
     status: "UNKNOWN",
     durationMs: 0,
@@ -116,17 +119,6 @@ export class AudioQualityMonitor {
   constructor(options?: AudioQualityMonitorOptions) {
     this.mode = options?.mode ?? "passage";
     this.profile = AUDIO_QUALITY_PROFILES[this.mode];
-  }
-
-  private isSustainedClipping(): boolean {
-    const recentWindow = this.recentClipRatios.slice(-8);
-    const highRecentFrames = recentWindow.filter((r) => r > 0.1).length;
-    if (highRecentFrames >= 3 && this.totalClippedSamples >= 480) {
-      return true;
-    }
-    const overallRatio =
-      this.totalClippedSamples / Math.max(1, this.totalCheckedSamples);
-    return overallRatio > 0.05 && this.totalClippedSamples >= 480;
   }
 
   addFrame(samples: Float32Array, nowMs: number): AudioQualitySnapshot {
@@ -149,6 +141,34 @@ export class AudioQualityMonitor {
       peak = Math.max(peak, Math.abs(sample));
       if (Math.abs(sample) >= 0.99) clippedSamples++;
     }
+    const frameClipped = clippedSamples / samples.length > 0.05;
+    this.clipWindow.push({
+      atMs: nowMs,
+      elapsedMs: elapsed,
+      clipped: frameClipped,
+    });
+    const windowStartMs = nowMs - 300;
+    while (
+      this.clipWindow.length > 0 &&
+      this.clipWindow[0].atMs < windowStartMs
+    ) {
+      this.clipWindow.shift();
+    }
+    let clippedFramesInWindow = 0;
+    let clippedMsInWindow = 0;
+    for (const entry of this.clipWindow) {
+      if (entry.clipped) {
+        clippedFramesInWindow += 1;
+        clippedMsInWindow += entry.elapsedMs;
+      }
+    }
+    // Require sustained clipping across the 300ms window (>= 120ms and >= 3 frames,
+    // or >= 50% of frames over >= 3 frames) instead of permanently latching a single plosive.
+    const sustainedClipped =
+      clippedFramesInWindow >= 3 &&
+      (clippedMsInWindow >= 120 ||
+        clippedFramesInWindow / this.clipWindow.length >= 0.5);
+
     const rms = Math.sqrt(sum / samples.length);
     this.frames++;
     this.maxRms = Math.max(this.maxRms, rms);
@@ -168,12 +188,6 @@ export class AudioQualityMonitor {
       this.stationaryLoudMs = 0;
     }
     this.lastRms = rms;
-    this.totalCheckedSamples += samples.length;
-    this.totalClippedSamples += clippedSamples;
-    this.recentClipRatios.push(clippedSamples / samples.length);
-    if (this.recentClipRatios.length > 16) {
-      this.recentClipRatios.shift();
-    }
     const durationMs = Math.max(0, nowMs - this.startedAt);
     const protectEarlySpeech =
       this.mode === "short-word" || this.mode === "child-passage";
@@ -224,11 +238,7 @@ export class AudioQualityMonitor {
     const speechDurationMs = isStationaryFanNoise
       ? 0
       : this.snapshot.speechDurationMs + (speaking && active ? elapsed : 0);
-    // Evaluate clipping over the segment/sliding window rather than latching forever on a transient spike.
-    const clipped =
-      this.mode === "passage"
-        ? this.isSustainedClipping() || clippedSamples / samples.length > 0.05
-        : this.isSustainedClipping();
+    // Require sustained clipping over the 300ms window rather than latching forever on a transient spike.
     this.snapshot = {
       status: "UNKNOWN",
       durationMs,
@@ -237,7 +247,7 @@ export class AudioQualityMonitor {
       rms,
       peak,
       noiseFloor: noise,
-      clipped,
+      clipped: sustainedClipped,
       isSpeaking: speaking,
     };
     return this.getSnapshot();

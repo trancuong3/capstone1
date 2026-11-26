@@ -146,14 +146,20 @@ def align_edited_text_to_words(
     if len(valid_base) == len(tokens_with_lines):
         aligned: list[dict[str, Any]] = []
         for idx, ((line_idx, tok), (orig, box)) in enumerate(zip(tokens_with_lines, valid_base)):
-            aligned.append({
+            orig_line = int(orig.get("line_index", line_idx))
+            entry: dict[str, Any] = {
                 "word_index": idx,
-                "line_index": int(orig.get("line_index", line_idx)),
+                "line_index": orig_line,
                 "text": tok,
                 "normalized_text": normalize_word(tok) or tok.lower(),
                 "bounding_box": box,
                 "ocr_confidence": orig.get("ocr_confidence"),
-            })
+            }
+            if orig_line != line_idx:
+                entry["bbox_source"] = "aligned_reordered"
+            elif orig.get("bbox_source"):
+                entry["bbox_source"] = orig.get("bbox_source")
+            aligned.append(entry)
         return aligned
 
     # Group base boxes by line or fallback evenly across the OCR text envelope so
@@ -192,6 +198,7 @@ def align_edited_text_to_words(
                 "normalized_text": normalize_word(tok) or tok.lower(),
                 "bounding_box": [round(x, 6), round(y, 6), round(w, 6), round(h, 6)],
                 "ocr_confidence": None,
+                "bbox_source": "synthetic_grid",
             })
             word_idx += 1
     return out

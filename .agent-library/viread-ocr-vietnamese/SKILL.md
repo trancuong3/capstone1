@@ -11,9 +11,10 @@ ViRead uses a local Dual-Engine OCR pipeline (**PaddleOCR 2.7.3** detector + **V
 ## 1. Key Modules
 
 - Core OCR engine: `backend/app/services/ocr_engine.py` (`DualEngineOcrService`)
-- Preprocessing & geometry: `viread_vietocr_v2_preprocessing.py`, `word_box_geometry.py`, `ocr_evidence.py`
+- Preprocessing & geometry: `viread_vietocr_v2_preprocessing.py`, `viread_flow2_hygiene.py`, `word_box_geometry.py`, `ocr_evidence.py`
 - Vietnamese token/punctuation adjudication: `ocr_adjudication.py`, `ocr_punctuation.py`, `ocr_calibration.py`
 - Admin OCR workflow & routes: `backend/app/api/routes/admin_ocr.py`, `services/admin_ocr_service.py`, `services/admin_ocr_jobs.py`
+- Flow 2 training & Colab orchestration: `backend/app/services/viread_ocr_training_service.py`, `backend/app/jobs/viread_ocr_training_auto_worker.py`, `ai/vietocr_v2/colab_worker.py`, `ai/vietocr_v2/colab_state_store.py`
 - Runtime preflight check: `backend/app/services/runtime_diagnostics.py`
 
 ## 2. Mandatory OCR Engineering Rules
@@ -34,6 +35,9 @@ ViRead uses a local Dual-Engine OCR pipeline (**PaddleOCR 2.7.3** detector + **V
    - New OCR output enters `pagerevisions` as `NEEDS_REVIEW`; only explicit Admin verification transitions it to `VERIFIED`.
 5. **Fallback Discipline**:
    - Use Tesseract (`vie.traineddata`, `TESSDATA_PREFIX` auto-detected if `backend/tessdata/vie.traineddata` exists) when Dual-Engine is unavailable or detects zero lines. Do not silently mask mid-pipeline Dual-Engine crashes as fake `success`; surface engine status (`not_initialized` / error type) in metadata.
+6. **Flow 2 Data Hygiene & Colab Training Resilience**:
+   - Flow 2 crops and labels must pass `viread_flow2_hygiene.py` before materialization or dataset snapshots: NFC + `Cf` strip, exact 229-char locked VietOCR vocabulary, EXIF-safe cropping (`ImageOps.exif_transpose`), contrast/sharpness/density bounds, and archived/quarantined holdout rows must never block sibling splits.
+   - Colab resume validation compares `LINEAGE_IDENTITY_FIELDS` (excluding `repository_commit`) so resuming across repository pushes works safely; throttle heavy `state_store.sync()` checkpoint uploads to every 500 steps, and configure Apps Script Bridge permanent delete (Advanced Drive API with `setTrashed` fallback) to avoid Drive Trash overflow.
 
 ## 3. Safe Diagnostics & Testing
 

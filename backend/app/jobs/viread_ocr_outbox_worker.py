@@ -34,6 +34,14 @@ from app.services.training_storage import (
     TrainingStorageError,
 )
 from app.services.viread_drive_connection_service import VireadDriveConnectionService
+from app.services.viread_flow2_hygiene import (
+    compute_line_crop_box,
+    detect_vietnamese_pii_strict,
+    open_image_exif_safe,
+    sanitize_and_validate_vietocr_label,
+    validate_flow2_line_crop,
+    validate_line_word_geometry,
+)
 from app.services.viread_training_storage_quota import (
     ensure_database_capacity,
     ensure_storage_capacity,
@@ -79,16 +87,12 @@ def is_flow2_ingestion_paused() -> bool:
 
 
 def normalize_verified_label(tokens: list[str]) -> str:
-    """Normalize Admin-verified Vietnamese tokens to NFC while preserving punctuation and spaces."""
-    cleaned: list[str] = []
-    for raw in tokens:
-        text_token = unicodedata.normalize("NFC", str(raw))
-        if any(ord(ch) < 32 and ch not in {"\t", " "} for ch in text_token):
-            raise ValueError("verified OCR label contains forbidden control characters")
-        stripped = " ".join(text_token.split())
-        if stripped:
-            cleaned.append(stripped)
-    return unicodedata.normalize("NFC", " ".join(cleaned))
+    """Normalize Admin-verified Vietnamese tokens to NFC and enforce locked VietOCR vocab."""
+    raw = " ".join(str(token or "").strip() for token in tokens if str(token or "").strip())
+    cleaned, reason = sanitize_and_validate_vietocr_label(raw)
+    if cleaned is None:
+        raise ValueError(f"verified OCR label failed hygiene check: {reason}")
+    return cleaned
 
 
 def deterministic_sample_id(revision_id: Any, line_index: int, image_sha256: str) -> str:
@@ -136,11 +140,14 @@ async def _claim_one() -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
-def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[int, bytes, str, str]]:
+def _line_crops(
+    image_bytes: bytes,
+    words: list[dict[str, Any]],
+    *,
+    rejected_lines: list[dict[str, Any]] | None = None,
+) -> list[tuple[int, bytes, str, str]]:
     try:
-        with Image.open(BytesIO(image_bytes)) as source:
-            source.load()
-            page = source.convert("RGB")
+        page = open_image_exif_safe(image_bytes)
     except Exception as exc:
         raise ValueError("verified OCR source page image is corrupted or unreadable") from exc
     if page.width <= 0 or page.height <= 0:
@@ -149,15 +156,23 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
     by_line: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for word in words:
         by_line[int(word["lineindex"])].append(word)
-    crops = []
+    crops: list[tuple[int, bytes, str, str]] = []
+    rejections: list[dict[str, Any]] = rejected_lines if rejected_lines is not None else []
     for line_index, line_words in sorted(by_line.items()):
         line_words.sort(key=lambda item: int(item["wordindex"]))
+        geom_ok, geom_reason = validate_line_word_geometry(line_words)
+        if not geom_ok:
+            rejections.append({"line_index": line_index, "reason": geom_reason or "INVALID_WORD_GEOMETRY"})
+            continue
         bounds = []
         tokens = []
+        valid_line = True
         for word in line_words:
             box = word["boundingbox"]
             if not isinstance(box, list) or len(box) != 4:
-                raise ValueError("verified OCR word has invalid geometry")
+                valid_line = False
+                rejections.append({"line_index": line_index, "reason": "INVALID_WORD_GEOMETRY"})
+                break
             x, y, width, height = (float(value) for value in box)
             if (
                 not all(math.isfinite(v) for v in (x, y, width, height))
@@ -168,38 +183,51 @@ def _line_crops(image_bytes: bytes, words: list[dict[str, Any]]) -> list[tuple[i
                 or x + width > 1.001
                 or y + height > 1.001
             ):
-                raise ValueError("verified OCR word geometry is outside normalized page bounds")
+                valid_line = False
+                rejections.append({"line_index": line_index, "reason": "OUT_OF_BOUNDS_GEOMETRY"})
+                break
             bounds.append(
                 (x * page.width, y * page.height, (x + width) * page.width, (y + height) * page.height)
             )
             token = str(word.get("text") or "").strip()
             if token:
                 tokens.append(token)
-        if not bounds or not tokens:
+        if not valid_line or not bounds or not tokens:
             continue
-        left = min(item[0] for item in bounds)
-        top = min(item[1] for item in bounds)
-        right = max(item[2] for item in bounds)
-        bottom = max(item[3] for item in bounds)
-        pad_y = max(2, round((bottom - top) * 0.12))
-        crop_box = (
-            max(0, math.floor(left)),
-            max(0, math.floor(top - pad_y)),
-            min(page.width, math.ceil(right)),
-            min(page.height, math.ceil(bottom + pad_y)),
-        )
+        crop_box = compute_line_crop_box(bounds, page_width=page.width, page_height=page.height)
         if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
-            raise ValueError("verified OCR line crop has zero area")
-        label = normalize_verified_label(tokens)
-        if not label:
-            raise ValueError("verified OCR line label is empty after normalization")
+            rejections.append({"line_index": line_index, "reason": "ZERO_AREA_CROP"})
+            continue
+        try:
+            label = normalize_verified_label(tokens)
+        except ValueError as exc:
+            rejections.append({"line_index": line_index, "reason": str(exc)})
+            continue
+        pii_flags = detect_vietnamese_pii_strict(label, mode="contact_only")
+        if pii_flags:
+            rejections.append({"line_index": line_index, "reason": f"PII_DETECTED:{','.join(pii_flags)}"})
+            continue
+        cropped_img = page.crop(crop_box)
+        quality_ok, _metrics, quality_reason = validate_flow2_line_crop(
+            cropped_img,
+            label=label,
+            page_height=page.height,
+        )
+        if not quality_ok:
+            rejections.append({"line_index": line_index, "reason": quality_reason or "IMAGE_QUALITY_REJECTED"})
+            continue
         output = BytesIO()
-        page.crop(crop_box).save(output, format="PNG", optimize=True)
+        cropped_img.save(output, format="PNG", optimize=True)
         data = output.getvalue()
         if not data:
-            raise ValueError("verified OCR line crop produced empty PNG output")
+            rejections.append({"line_index": line_index, "reason": "EMPTY_PNG_OUTPUT"})
+            continue
         fingerprint = hashlib.sha256(data + b"\0" + label.encode("utf-8")).hexdigest()
         crops.append((line_index, data, label, fingerprint))
+    if not crops and rejections:
+        raise ValueError(
+            f"verified OCR revision has no usable line crops ({rejections[0]['reason']})"
+        )
     return crops
 
 
@@ -407,19 +435,21 @@ async def _process_parent_contribution_candidate(event: dict[str, Any]) -> None:
     )
 
     def _crop_and_verify() -> bytes:
-        with Image.open(BytesIO(page_bytes)) as src:
-            src.load()
-            rgb = src.convert("RGB")
-            cropped = rgb.crop((int(crop_box[0]), int(crop_box[1]), int(crop_box[2]), int(crop_box[3])))
-            q_ok, _metrics, q_reason = evaluate_line_crop_quality(cropped)
-            if not q_ok:
-                raise OutboxEventSkipped(
-                    f"CROP_QUALITY_FAILED:{q_reason}",
-                    f"Parent contribution crop failed quality gate: {q_reason}",
-                )
-            buf = BytesIO()
-            cropped.save(buf, format="PNG", optimize=True)
-            return buf.getvalue()
+        rgb = open_image_exif_safe(page_bytes)
+        cropped = rgb.crop((int(crop_box[0]), int(crop_box[1]), int(crop_box[2]), int(crop_box[3])))
+        q_ok, _metrics, q_reason = evaluate_line_crop_quality(
+            cropped,
+            label=verified_label,
+            page_height=rgb.height,
+        )
+        if not q_ok:
+            raise OutboxEventSkipped(
+                f"CROP_QUALITY_FAILED:{q_reason}",
+                f"Parent contribution crop failed quality gate: {q_reason}",
+            )
+        buf = BytesIO()
+        cropped.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
 
     crop_bytes = await asyncio.to_thread(_crop_and_verify)
     image_sha = hashlib.sha256(crop_bytes).hexdigest()
@@ -661,6 +691,10 @@ async def _process(event: dict[str, Any]) -> None:
                    r.verifiedby, r.verifiedat,
                    r.processingmeta -> 'ai_proofread_audit' ->> 'mode' AS ai_proofread_mode,
                    to_jsonb(b) ->> 'visibility_scope' AS visibility_scope,
+                   to_jsonb(b) ->> 'lifecyclestatus' AS book_lifecycle_status,
+                   to_jsonb(p) ->> 'lifecyclestatus' AS page_lifecycle_status,
+                   to_jsonb(p) ->> 'currentverifiedrevisionid' AS current_verified_revision_id,
+                   r.processingmeta -> 'word_evidence_v2' AS word_evidence_v2,
                    r.processingmeta -> 'ai_proofread_audit' ->> 'reviewed_by' AS ai_reviewed_by,
                    r.processingmeta -> 'ai_proofread_audit' ->> 'automated_by' AS ai_automated_by
             FROM public.bookpages AS p
@@ -677,6 +711,24 @@ async def _process(event: dict[str, Any]) -> None:
             raise OutboxEventSkipped(
                 "PARENT_PRIVATE_BOOK_EXCLUDED",
                 "Parent private books are strictly excluded from Flow 2 OCR training",
+            )
+        book_lifecycle = header_dict.get("book_lifecycle_status")
+        if book_lifecycle is not None and str(book_lifecycle).strip().upper() != "ACTIVE":
+            raise OutboxEventSkipped(
+                "BOOK_NOT_ACTIVE",
+                "Book is no longer ACTIVE; skipping Flow 2 OCR training ingestion",
+            )
+        page_lifecycle = header_dict.get("page_lifecycle_status")
+        if page_lifecycle is not None and str(page_lifecycle).strip().upper() != "ACTIVE":
+            raise OutboxEventSkipped(
+                "PAGE_NOT_ACTIVE",
+                "Page is no longer ACTIVE; skipping Flow 2 OCR training ingestion",
+            )
+        current_rev_id = header_dict.get("current_verified_revision_id")
+        if current_rev_id and str(current_rev_id) != str(event["revision_id"]):
+            raise OutboxEventSkipped(
+                "REVISION_SUPERSEDED",
+                "Superseded catalog revision is excluded from Flow 2 OCR training",
             )
         eligible, reject_code = _is_explicit_admin_verification(header_dict)
         if not eligible:
@@ -702,26 +754,52 @@ async def _process(event: dict[str, Any]) -> None:
     if not words:
         raise ValueError("outbox source revision has no words")
 
+    raw_evidence = header_dict.get("word_evidence_v2")
+    if isinstance(raw_evidence, list):
+        for w in words:
+            w_idx = int(w.get("wordindex", -1))
+            if 0 <= w_idx < len(raw_evidence) and isinstance(raw_evidence[w_idx], dict):
+                w["ocr_evidence"] = raw_evidence[w_idx]
+
     image_path = header_dict["imagepath"]
     if not image_path:
         raise ValueError("verified revision page has no source image path")
     image_bytes = await asyncio.to_thread(download_object, image_path)
-    crops = await asyncio.to_thread(_line_crops, image_bytes, words)
+    rejected_lines: list[dict[str, Any]] = []
+    crops = await asyncio.to_thread(
+        _line_crops, image_bytes, words, rejected_lines=rejected_lines
+    )
+    if rejected_lines:
+        log_diagnostic(
+            logger,
+            logging.INFO,
+            event="viread_ocr_outbox_lines_quarantined",
+            stage="flow2_hygiene_gate",
+            outbox_id=str(event["id"]),
+            quarantined_count=len(rejected_lines),
+            accepted_count=len(crops),
+            sample_reason=str(rejected_lines[0].get("reason", ""))[:64],
+        )
     if not crops:
-        raise ValueError("verified revision contains no usable line crops")
+        raise OutboxEventSkipped(
+            "ALL_LINES_REJECTED_BY_HYGIENE",
+            "Verified revision contains no line crops passing Flow 2 hygiene checks",
+        )
 
-    # Detect within-revision and cross-revision duplicate-image-hash label conflicts.
+    # Detect within-revision duplicate-image-hash label conflicts and deduplicate identical pairs.
     image_labels: dict[str, str] = {}
     prepared_lines: list[tuple[int, bytes, str, str, str, str]] = []
     for line_index, crop, label, fingerprint in crops:
         image_sha = hashlib.sha256(crop).hexdigest()
         label_sha = hashlib.sha256(label.encode("utf-8")).hexdigest()
         prev_label = image_labels.get(image_sha)
-        if prev_label is not None and prev_label != label:
-            raise OutboxEventBlocked(
-                "CONFLICTING_LABEL_FOR_IMAGE_HASH",
-                "Duplicate line crop hash within revision has conflicting verified labels",
-            )
+        if prev_label is not None:
+            if prev_label != label:
+                raise OutboxEventBlocked(
+                    "CONFLICTING_LABEL_FOR_IMAGE_HASH",
+                    "Duplicate line crop hash within revision has conflicting verified labels",
+                )
+            continue
         image_labels[image_sha] = label
         prepared_lines.append((line_index, crop, label, fingerprint, image_sha, label_sha))
 
@@ -743,13 +821,37 @@ async def _process(event: dict[str, Any]) -> None:
     estimated_label_json_bytes = sum(len(label.encode("utf-8")) + 512 for _, _, label, _, _, _ in prepared_lines)
     total_db_bytes = sum(len(label.encode("utf-8")) + 2048 for _, _, label, _, _, _ in prepared_lines)
 
+    async def _archive_superseded_page_samples(db_session) -> None:
+        try:
+            await db_session.execute(
+                text(
+                    """
+                    UPDATE public.viread_ocr_samples
+                    SET training_eligibility = 'ARCHIVED',
+                        quarantine_reason = 'SUPERSEDED_BY_NEWER_REVISION'
+                    WHERE source_flow = 'FLOW1_VERIFIED'
+                      AND dataset_version_id IS NULL
+                      AND source_page_id = :page_id
+                      AND source_revision_id IS DISTINCT FROM :revision_id
+                      AND training_eligibility = 'ELIGIBLE'
+                    """
+                ),
+                {"page_id": event["page_id"], "revision_id": event["revision_id"]},
+            )
+        except Exception as exc:
+            if "column" not in str(exc).lower() and "does not exist" not in str(exc).lower():
+                raise
+
     async with AsyncSessionLocal() as db:
+        await _archive_superseded_page_samples(db)
         conflicts = await _find_conflicting_labels(db, image_labels)
         if conflicts:
+            await db.rollback()
             raise OutboxEventBlocked(
                 "CONFLICTING_LABEL_FOR_IMAGE_HASH",
                 f"Detected {len(conflicts)} duplicate line image hash(es) with conflicting labels",
             )
+        await db.commit()
         router = await _build_artifact_router(db)
         await ensure_database_capacity(db, total_db_bytes)
         if router.write_provider == StorageProvider.SUPABASE_LEGACY:

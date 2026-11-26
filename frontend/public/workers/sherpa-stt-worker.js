@@ -17,6 +17,7 @@ const HF_BASE_URL =
   "https://huggingface.co/csukuangfj2/sherpa-onnx-zipformer-vi-30M-int8-2026-02-09/resolve/main";
 const SAMPLE_RATE = 16000;
 const MIN_PAD_DURATION_SECONDS = 1.2;
+const LEAD_PAD_SECONDS = 0.18;
 const TRAILING_PAD_SECONDS = 0.35;
 const IDB_NAME = "viread-wasm-models-v1";
 const IDB_STORE = "files";
@@ -291,26 +292,53 @@ async function ensureRecognizer() {
       );
     }
 
-    const recognizer = new OfflineRecognizerCtor(
-      {
-        featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
-        modelConfig: {
-          transducer: {
-            encoder: "/encoder.int8.onnx",
-            decoder: "/decoder.onnx",
-            joiner: "/joiner.int8.onnx",
-          },
-          tokens: "/tokens.txt",
-          numThreads: 1,
-          provider: "cpu",
-          modelType: "",
-          debug: 0,
+    const baseConfig = {
+      featConfig: { sampleRate: SAMPLE_RATE, featureDim: 80 },
+      modelConfig: {
+        transducer: {
+          encoder: "/encoder.int8.onnx",
+          decoder: "/decoder.onnx",
+          joiner: "/joiner.int8.onnx",
         },
-        decodingMethod: "greedy_search",
-        maxActivePaths: 4,
+        tokens: "/tokens.txt",
+        numThreads: 1,
+        provider: "cpu",
+        modelType: "",
+        debug: 0,
       },
-      M,
-    );
+      maxActivePaths: 4,
+    };
+
+    let recognizer = null;
+    try {
+      const beamRecognizer = new OfflineRecognizerCtor(
+        {
+          ...baseConfig,
+          decodingMethod: "modified_beam_search",
+          blankPenalty: -0.05,
+        },
+        M,
+      );
+      if (
+        beamRecognizer &&
+        (beamRecognizer.handle === undefined || beamRecognizer.handle !== 0)
+      ) {
+        recognizer = beamRecognizer;
+      }
+    } catch {
+      recognizer = null;
+    }
+
+    if (!recognizer) {
+      recognizer = new OfflineRecognizerCtor(
+        {
+          ...baseConfig,
+          decodingMethod: "greedy_search",
+        },
+        M,
+      );
+    }
+
     if (epoch !== loadEpoch) {
       try {
         recognizer.free();
@@ -319,6 +347,7 @@ async function ensureRecognizer() {
       }
       throw new Error("WASM STT init disposed");
     }
+
     recognizerInstance = recognizer;
     return recognizer;
   })().catch((err) => {
@@ -330,6 +359,139 @@ async function ensureRecognizer() {
 
   recognizerPromise = pending;
   return pending;
+}
+
+/**
+ * Mirror server voice_worker.py child-voice acoustic preprocessing:
+ * 1) DC offset removal
+ * 2) 80Hz 1st-order high-pass filter (removes table rumble & breath thumps)
+ * 3) Active-frame AGC up to 15x gain (lifts quiet child voices RMS 0.003-0.01)
+ */
+function preprocessChildVoice(input, sampleRate) {
+  const n = input.length;
+  const out = new Float32Array(n);
+  if (!n) return out;
+
+  // 1. DC offset removal
+  let mean = 0;
+  for (let i = 0; i < n; i += 1) {
+    mean += input[i];
+  }
+  mean /= n;
+
+  // 2. 80Hz 1st-order high-pass filter
+  const sr = sampleRate > 0 ? sampleRate : SAMPLE_RATE;
+  const rc = 1 / (2 * Math.PI * 80);
+  const dt = 1 / sr;
+  const alpha = rc / (rc + dt);
+  let prevX = input[0] - mean;
+  let prevY = 0;
+  out[0] = prevX;
+  for (let i = 1; i < n; i += 1) {
+    const x = input[i] - mean;
+    const y = alpha * (prevY + x - prevX);
+    out[i] = y;
+    prevX = x;
+    prevY = y;
+  }
+
+  // 3. Active-frame child-voice AGC (<= 15x gain, clipped to [-0.98, 0.98])
+  let peak = 0;
+  let totalSq = 0;
+  for (let i = 0; i < n; i += 1) {
+    const v = out[i];
+    const abs = v < 0 ? -v : v;
+    if (abs > peak) peak = abs;
+    totalSq += v * v;
+  }
+
+  const frameLen = Math.max(1, Math.round(sr * 0.02));
+  const numFrames = Math.floor(n / frameLen);
+  let rms = Math.sqrt(totalSq / n);
+  if (numFrames >= 2) {
+    const frameRms = new Float32Array(numFrames);
+    let maxFrameRms = 0;
+    for (let f = 0; f < numFrames; f += 1) {
+      let fSq = 0;
+      const base = f * frameLen;
+      for (let j = 0; j < frameLen; j += 1) {
+        const v = out[base + j];
+        fSq += v * v;
+      }
+      const r = Math.sqrt(fSq / frameLen);
+      frameRms[f] = r;
+      if (r > maxFrameRms) maxFrameRms = r;
+    }
+    const activeThresh = Math.max(0.002, maxFrameRms * 0.2);
+    let activeSq = 0;
+    let activeCount = 0;
+    for (let f = 0; f < numFrames; f += 1) {
+      if (frameRms[f] >= activeThresh) {
+        activeSq += frameRms[f] * frameRms[f];
+        activeCount += 1;
+      }
+    }
+    if (activeCount > 0) {
+      rms = Math.sqrt(activeSq / activeCount);
+    }
+  }
+
+  if (rms > 0.0004 && peak > 0.0015) {
+    const gainRms = 0.08 / rms;
+    const gainPeak = 0.92 / peak;
+    const gain = Math.min(15.0, gainRms, gainPeak);
+    if (gain > 1.0) {
+      for (let i = 0; i < n; i += 1) {
+        const scaled = out[i] * gain;
+        out[i] = scaled > 0.98 ? 0.98 : scaled < -0.98 ? -0.98 : scaled;
+      }
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Estimate voiced speech span in seconds using 20ms frame energy when caller
+ * does not pass explicit `voicedDurationMs` from client VAD.
+ */
+function estimateVoicedDurationSeconds(samples, sampleRate) {
+  const n = samples.length;
+  if (!n) return 0;
+  const sr = sampleRate > 0 ? sampleRate : SAMPLE_RATE;
+  const frameLen = Math.max(1, Math.round(sr * 0.02));
+  const numFrames = Math.floor(n / frameLen);
+  if (numFrames <= 0) return n / sr;
+
+  const frameRms = new Float32Array(numFrames);
+  let maxFrameRms = 0;
+  for (let f = 0; f < numFrames; f += 1) {
+    let fSq = 0;
+    const base = f * frameLen;
+    for (let j = 0; j < frameLen; j += 1) {
+      const v = samples[base + j];
+      fSq += v * v;
+    }
+    const r = Math.sqrt(fSq / frameLen);
+    frameRms[f] = r;
+    if (r > maxFrameRms) maxFrameRms = r;
+  }
+
+  const thresh = Math.max(0.004, maxFrameRms * 0.14);
+  if (maxFrameRms < thresh) {
+    return 0;
+  }
+
+  let firstActive = -1;
+  let lastActive = -1;
+  for (let f = 0; f < numFrames; f += 1) {
+    if (frameRms[f] >= thresh) {
+      if (firstActive === -1) firstActive = f;
+      lastActive = f;
+    }
+  }
+  if (firstActive === -1) return 0;
+  return ((lastActive - firstActive + 1) * frameLen) / sr;
 }
 
 self.onmessage = async (event) => {
@@ -399,19 +561,59 @@ self.onmessage = async (event) => {
         return;
       }
 
-      // Append 0.35s trailing silence ONLY for clips >= 1.2s (sample-rate invariant).
-      // Keep < 1.2s isolated word clips unpadded so OfflineRecognizer does not hallucinate collocations.
+      // Early pre-decode silence guard: never feed digital silence or near-zero
+      // noise into Sherpa modified_beam_search (with blankPenalty=-0.05, all-zero
+      // audio can hallucinate filler syllables such as "vâng").
+      let rawPeak = 0;
+      let rawSumSq = 0;
+      for (let i = 0; i < input.length; i += 1) {
+        const v = input[i];
+        const a = v < 0 ? -v : v;
+        if (a > rawPeak) rawPeak = a;
+        rawSumSq += v * v;
+      }
+      const rawRms = Math.sqrt(rawSumSq / input.length);
+      if (rawPeak <= 0.0015 || (msg.voicedDurationMs === 0 && rawRms < 0.003)) {
+        self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
+        return;
+      }
+
+      // Prepend 0.18s lead pad (matches server voice_worker) and append 0.35s
+      // trailing silence ONLY when *voiced* speech duration >= 1.2s (never total
+      // buffer length inflated by 0.45s pre-roll), avoiding short-word hallucinations.
       const sr =
         typeof msg.sampleRate === "number" && msg.sampleRate > 0
           ? msg.sampleRate
           : SAMPLE_RATE;
-      let waveform = input;
-      if (input.length / sr >= MIN_PAD_DURATION_SECONDS) {
-        const padSamples = Math.round(TRAILING_PAD_SECONDS * sr);
-        const padded = new Float32Array(input.length + padSamples);
-        padded.set(input, 0);
-        waveform = padded;
+      const preprocessed = preprocessChildVoice(input, sr);
+      const estimatedVoicedSeconds = estimateVoicedDurationSeconds(
+        preprocessed,
+        sr,
+      );
+      if (
+        estimatedVoicedSeconds <= 0 &&
+        (msg.voicedDurationMs === undefined ||
+          msg.voicedDurationMs === null ||
+          msg.voicedDurationMs <= 0)
+      ) {
+        self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
+        return;
       }
+      const voicedDurationSeconds =
+        typeof msg.voicedDurationMs === "number" &&
+        Number.isFinite(msg.voicedDurationMs) &&
+        msg.voicedDurationMs >= 0
+          ? msg.voicedDurationMs / 1000
+          : estimatedVoicedSeconds;
+      const leadPadSamples = Math.round(LEAD_PAD_SECONDS * sr);
+      const trailPadSamples =
+        voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS
+          ? Math.round(TRAILING_PAD_SECONDS * sr)
+          : 0;
+      const waveform = new Float32Array(
+        leadPadSamples + preprocessed.length + trailPadSamples,
+      );
+      waveform.set(preprocessed, leadPadSamples);
 
       const t0 = self.performance ? self.performance.now() : Date.now();
       const stream = recognizer.createStream();

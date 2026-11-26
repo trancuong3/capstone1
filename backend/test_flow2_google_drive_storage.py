@@ -805,6 +805,133 @@ class GoogleDriveStoreResilienceTests(unittest.TestCase):
 
         asyncio.run(_run())
 
+    def test_artifact_stream_route_raises_http_before_streaming_and_sets_content_length(self):
+        """Transient Drive failures raise HTTPException before StreamingResponse starts."""
+        import asyncio
+        from datetime import datetime, timedelta, timezone
+        from app.services.training_storage.base import ArtifactMetadata, DriveTransientError
+
+        job_id = uuid4()
+        worker_id = "colab-worker-stream"
+        payload = b"png-verified-bytes-0123456789"
+        sha = hashlib.sha256(payload).hexdigest()
+        ref = format_gdrive_ref("drv_authorized_stream_001")
+
+        class _AuthorizedRepo:
+            async def one(self, sql, _params=None):
+                if "FROM public.viread_ocr_training_jobs" in sql:
+                    return {
+                        "id": job_id,
+                        "target": "COLAB",
+                        "status": "COLAB_RUNNING",
+                        "worker_id": worker_id,
+                        "lease_expires_at": datetime.now(timezone.utc) + timedelta(minutes=10),
+                        "dataset_version_id": uuid4(),
+                        "locked_test_version_id": None,
+                        "parent_checkpoint_sha256": "a" * 64,
+                        "run_id": None,
+                    }
+                return {"is_authorized": True}
+
+        async def _run():
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY": "k" * 48,
+                    "VIREAD_ARTIFACT_STREAM_SIGNING_SECRET": "s" * 48,
+                },
+            ):
+                tok = sign_worker_artifact_token(
+                    job_id=str(job_id),
+                    worker_id=worker_id,
+                    reference=ref,
+                    expected_sha256=sha,
+                )
+
+                def _make_fake_db():
+                    fake_db = MagicMock()
+                    fake_db.rollback = AsyncMock()
+                    fake_db.commit = AsyncMock()
+                    return fake_db
+
+                fake_svc = MagicMock(repo=_AuthorizedRepo())
+
+                # 1. Transient/rate-limit upstream error fails BEFORE StreamingResponse 200
+                failing_router = MagicMock()
+                failing_router.open_stream_with_metadata.side_effect = DriveTransientError(
+                    "Apps Script bridge HTTP 503",
+                    http_status=503,
+                )
+                failing_drive_svc = MagicMock()
+                failing_drive_svc.build_artifact_router = AsyncMock(return_value=failing_router)
+                with (
+                    patch.object(admin_viread_training, "VireadOcrTrainingService", return_value=fake_svc),
+                    patch.object(admin_viread_training, "VireadDriveConnectionService", return_value=failing_drive_svc),
+                ):
+                    with self.assertRaises(HTTPException) as err_503:
+                        await admin_viread_training.stream_viread_colab_job_artifact(
+                            job_id=job_id,
+                            worker_id=worker_id,
+                            token=tok,
+                            _worker=None,
+                            db=_make_fake_db(),
+                        )
+                self.assertEqual(err_503.exception.status_code, 503)
+
+                rate_router = MagicMock()
+                rate_router.open_stream_with_metadata.side_effect = DriveRateLimitError("Rate limited")
+                rate_drive_svc = MagicMock()
+                rate_drive_svc.build_artifact_router = AsyncMock(return_value=rate_router)
+                with (
+                    patch.object(admin_viread_training, "VireadOcrTrainingService", return_value=fake_svc),
+                    patch.object(admin_viread_training, "VireadDriveConnectionService", return_value=rate_drive_svc),
+                ):
+                    with self.assertRaises(HTTPException) as err_429:
+                        await admin_viread_training.stream_viread_colab_job_artifact(
+                            job_id=job_id,
+                            worker_id=worker_id,
+                            token=tok,
+                            _worker=None,
+                            db=_make_fake_db(),
+                        )
+                self.assertEqual(err_429.exception.status_code, 429)
+
+                # 2. Successful eager open includes Content-Length & X-ViRead-SHA256 headers
+                ok_meta = ArtifactMetadata(
+                    provider=StorageProvider.GOOGLE_DRIVE,
+                    reference=ref,
+                    name="line-0001.png",
+                    size_bytes=len(payload),
+                    sha256=sha,
+                    content_type="image/png",
+                    trashed=False,
+                    is_public=False,
+                    drive_file_id="drv_authorized_stream_001",
+                )
+                ok_router = MagicMock()
+                ok_router.open_stream_with_metadata.return_value = (ok_meta, iter([payload]))
+                ok_drive_svc = MagicMock()
+                ok_drive_svc.build_artifact_router = AsyncMock(return_value=ok_router)
+                with (
+                    patch.object(admin_viread_training, "VireadOcrTrainingService", return_value=fake_svc),
+                    patch.object(admin_viread_training, "VireadDriveConnectionService", return_value=ok_drive_svc),
+                ):
+                    resp = await admin_viread_training.stream_viread_colab_job_artifact(
+                        job_id=job_id,
+                        worker_id=worker_id,
+                        token=tok,
+                        _worker=None,
+                        db=_make_fake_db(),
+                    )
+                self.assertEqual(resp.headers.get("content-length"), str(len(payload)))
+                self.assertEqual(resp.headers.get("x-viread-sha256"), sha)
+                chunks = []
+                async for part in resp.body_iterator:
+                    chunks.append(part)
+                self.assertEqual(b"".join(chunks), payload)
+
+        asyncio.run(_run())
+
     def test_non_admin_is_blocked_from_drive_routes(self):
         async def _run():
             fake_db = MagicMock()
@@ -1146,6 +1273,61 @@ class TestAppsScriptDriveBridge(unittest.TestCase):
         with self.assertRaises(DrivePermissionError) as html_err:
             store.quota_check()
         self.assertEqual(html_err.exception.code, "DRIVE_BRIDGE_ACCESS_DENIED")
+
+    def test_open_stream_with_metadata_single_call_eager_validation(self):
+        from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        session = server.make_session()
+        raw_post = session.post
+        recorded_actions: list[str] = []
+
+        def _spied_post(*args, **kwargs):
+            envelope = kwargs.get("json") or {}
+            recorded_actions.append(str(envelope.get("action") or ""))
+            return raw_post(*args, **kwargs)
+
+        session.post = _spied_post
+        store = GoogleAppsScriptDriveStore(
+            web_app_url=self.VALID_URL,
+            bridge_secret=self.SECRET,
+            session=session,
+            chunk_bytes=64 * 1024,
+            sleep_fn=lambda _s: None,
+        )
+        router = TrainingArtifactStoreRouter(drive_store_factory=lambda: store)
+
+        small_data = b"flow2-line-image-bytes"
+        small_sha = hashlib.sha256(small_data).hexdigest()
+        s_small = store.put("verified-samples/p1/line-0.png", small_data, content_type="image/png", expected_sha256=small_sha)
+
+        recorded_actions.clear()
+        meta, stream = router.open_stream_with_metadata(s_small.reference, expected_sha256=small_sha)
+        self.assertEqual(recorded_actions, ["get_file"])
+        self.assertEqual(meta.size_bytes, len(small_data))
+        self.assertEqual(meta.sha256, small_sha)
+        self.assertEqual(b"".join(stream), small_data)
+
+        # SHA mismatch fails eagerly BEFORE returning stream iterator
+        with self.assertRaises(DriveIntegrityError):
+            router.open_stream_with_metadata(s_small.reference, expected_sha256="f" * 64)
+
+        # Chunked file (> 64 KiB) streams cleanly with full logical size
+        large_payload = os.urandom(140 * 1024)
+        large_sha = hashlib.sha256(large_payload).hexdigest()
+        s_large = store.put("checkpoints/runs/run-2/candidate.pth", large_payload, expected_sha256=large_sha)
+        l_meta, l_stream = router.open_stream_with_metadata(s_large.reference, expected_sha256=large_sha)
+        self.assertEqual(l_meta.size_bytes, len(large_payload))
+        self.assertEqual(b"".join(l_stream), large_payload)
+
+        # Public sharing & trashed files rejected eagerly
+        server.files[s_small.drive_file_id]["is_public"] = True
+        with self.assertRaises(DrivePermissionError):
+            router.open_stream_with_metadata(s_small.reference)
+        server.files[s_small.drive_file_id]["is_public"] = False
+        server.files[s_small.drive_file_id]["trashed"] = True
+        with self.assertRaises(DriveNotFoundError):
+            router.open_stream_with_metadata(s_small.reference)
 
     def test_connect_apps_script_enforces_owner_email_and_hydrates_without_oauth_env(self):
         import asyncio

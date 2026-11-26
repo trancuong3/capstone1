@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import socket
 import ssl
 import sys
@@ -218,10 +219,14 @@ _running_test_cli = any(
     runner in (sys.argv[0] if sys.argv else "")
     for runner in ("unittest", "pytest")
 )
+_force_null_pool = (
+    (os.getenv("DATABASE_FORCE_NULL_POOL") or "").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 _use_null_pool = (
-    APP_ENVIRONMENT == "test"
+    _force_null_pool
+    or APP_ENVIRONMENT == "test"
     or _running_test_cli
-    or DATABASE_POOLER_MODE == "transaction"
     or (
         DATABASE_POOLER_MODE == "local"
         and (sqlalchemy_database_url.host or "") in {"127.0.0.1", "localhost", "::1"}
@@ -233,6 +238,20 @@ if _use_null_pool:
         sqlalchemy_database_url,
         echo=False,
         poolclass=NullPool,
+        connect_args=asyncpg_connect_args,
+    )
+elif DATABASE_POOLER_MODE == "transaction":
+    # Tiny bounded pool avoids per-request TLS/SCRAM handshakes across Supavisor
+    # transaction pooler (port 6543) while prepared statements remain disabled.
+    engine = create_async_engine(
+        sqlalchemy_database_url,
+        echo=False,
+        pool_size=2,
+        max_overflow=2,
+        pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
+        pool_recycle=300,
+        pool_pre_ping=True,
+        pool_use_lifo=True,
         connect_args=asyncpg_connect_args,
     )
 else:

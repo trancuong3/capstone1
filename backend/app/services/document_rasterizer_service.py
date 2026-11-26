@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import hashlib
 import logging
 import math
@@ -11,12 +12,14 @@ import tempfile
 import unicodedata
 import xml.etree.ElementTree as ET
 import zipfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path, PurePath
-from typing import Literal
+from typing import Any, BinaryIO, Literal
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageSequence, UnidentifiedImageError
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,41 @@ _MARGIN_X = 120
 _MARGIN_Y = 130
 _PDF_RENDER_DPI = 220.0
 _MIN_FREE_TEMP_BYTES = 200 * 1024 * 1024
+_UPLOAD_SPOOL_CHUNK_BYTES = 256 * 1024
+_UPLOAD_SPOOL_RAM_THRESHOLD_BYTES = 2 * 1024 * 1024
+
+
+def _is_constrained_web_runtime() -> bool:
+    """Detect 512 MiB Render / remote-worker web deployments where memory headroom is tight."""
+    render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+    disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+    return render or disable_heavy or remote_ocr
+
+
+def _resolve_pdf_render_dpi() -> float:
+    raw = (os.getenv("VIREAD_RASTERIZE_DPI") or "").strip()
+    if raw:
+        try:
+            return max(96.0, min(300.0, float(raw)))
+        except ValueError:
+            pass
+    return 160.0 if _is_constrained_web_runtime() else _PDF_RENDER_DPI
+
+
+def _resolve_max_render_edge() -> int:
+    raw = (os.getenv("VIREAD_RASTERIZE_MAX_EDGE") or "").strip()
+    if raw:
+        try:
+            return max(1000, min(MAX_PAGE_IMAGE_DIMENSION, int(raw)))
+        except ValueError:
+            pass
+    return 2400 if _is_constrained_web_runtime() else MAX_PAGE_IMAGE_DIMENSION
 
 
 @dataclass(frozen=True)
@@ -96,6 +134,67 @@ class RasterizedDocumentBundle:
     source_format: SourceDocumentFormat
     source_sha256: str
     pages: tuple[RasterizedDocumentPage, ...]
+
+
+@dataclass
+class SpooledUploadDocument:
+    """Disk-backed spooled upload holding file metadata without keeping 50 MB in Python heap RAM."""
+
+    file_name: str
+    content_type: str | None
+    byte_length: int
+    source_sha256: str
+    spool_file: tempfile.SpooledTemporaryFile[bytes]
+    header_bytes: bytes
+
+    def close(self) -> None:
+        try:
+            self.spool_file.close()
+        except Exception:
+            pass
+
+
+async def spool_upload_file(
+    upload: UploadFile,
+    *,
+    max_bytes: int = MAX_DOCUMENT_BYTES,
+) -> SpooledUploadDocument:
+    """Stream an UploadFile into a SpooledTemporaryFile while computing SHA-256."""
+    spool: tempfile.SpooledTemporaryFile[bytes] = tempfile.SpooledTemporaryFile(
+        max_size=_UPLOAD_SPOOL_RAM_THRESHOLD_BYTES,
+        mode="w+b",
+    )
+    hasher = hashlib.sha256()
+    total = 0
+    header_buf = bytearray()
+    try:
+        while True:
+            chunk = await upload.read(_UPLOAD_SPOOL_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
+            hasher.update(chunk)
+            if len(header_buf) < 8192:
+                need = 8192 - len(header_buf)
+                header_buf.extend(chunk[:need])
+            spool.write(chunk)
+        spool.seek(0)
+        return SpooledUploadDocument(
+            file_name=upload.filename or "",
+            content_type=upload.content_type,
+            byte_length=total,
+            source_sha256=hasher.hexdigest(),
+            spool_file=spool,
+            header_bytes=bytes(header_buf),
+        )
+    except Exception:
+        try:
+            spool.close()
+        except Exception:
+            pass
+        raise
 
 
 def _detect_format_by_magic(data: bytes) -> SourceDocumentFormat | None:
@@ -227,9 +326,15 @@ def _validate_docx_xml_entry(lower_name: str, raw_bytes: bytes) -> None:
                 )
 
 
-def _validate_docx_archive(data: bytes) -> None:
+def _validate_docx_archive(source: bytes | BinaryIO) -> None:
+    stream: BinaryIO
+    if isinstance(source, (bytes, bytearray)):
+        stream = BytesIO(source)
+    else:
+        source.seek(0)
+        stream = source
     try:
-        with zipfile.ZipFile(BytesIO(data), "r") as zf:
+        with zipfile.ZipFile(stream, "r") as zf:
             infos = zf.infolist()
             if len(infos) > MAX_DOCX_ZIP_ENTRIES:
                 raise HTTPException(
@@ -370,57 +475,65 @@ def _normalize_pil_frame(
 ) -> tuple[bytes, str, str, int, int]:
     _assert_pil_image_within_pixel_budget(frame)
     canvas = _flatten_to_rgb(frame)
-    width, height = canvas.size
-    if width <= 0 or height <= 0:
-        raise HTTPException(
-            status_code=422,
-            detail="The uploaded document is empty or corrupted",
-        )
-    if width * height > MAX_PAGE_IMAGE_PIXELS:
+    owns_canvas = canvas is not frame
+    try:
+        width, height = canvas.size
+        if width <= 0 or height <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail="The uploaded document is empty or corrupted",
+            )
+        max_edge = _resolve_max_render_edge()
+        if max(width, height) > max_edge:
+            scale = max_edge / float(max(width, height))
+            new_w = max(1, min(max_edge, int(round(width * scale))))
+            new_h = max(1, min(max_edge, int(round(height * scale))))
+            resized = canvas.resize((new_w, new_h), Image.Resampling.LANCZOS)
+            if owns_canvas:
+                canvas.close()
+            canvas = resized
+            owns_canvas = True
+            width, height = canvas.size
+
+        target_format = output_format or _resolve_rasterizer_output_format()
+        default_q = _resolve_rasterizer_jpeg_quality()
+
+        if target_format == "png":
+            png_buffer = BytesIO()
+            canvas.save(png_buffer, format="PNG", optimize=True)
+            png_bytes = png_buffer.getvalue()
+            if len(png_bytes) <= MAX_PAGE_IMAGE_BYTES:
+                return png_bytes, "image/png", "png", width, height
+
+        qualities = (default_q, 75) if default_q > 75 else (default_q,)
+        if target_format == "png":
+            qualities = (92, default_q, 75)
+        for quality in qualities:
+            jpeg_buffer = BytesIO()
+            canvas.save(jpeg_buffer, format="JPEG", quality=quality, optimize=True)
+            jpeg_bytes = jpeg_buffer.getvalue()
+            if len(jpeg_bytes) <= MAX_PAGE_IMAGE_BYTES:
+                return jpeg_bytes, "image/jpeg", "jpg", width, height
+
         raise HTTPException(
             status_code=413,
-            detail="Image dimensions must not exceed 6000 by 6000 pixels",
+            detail="Image exceeds the 12 MB limit",
         )
-    if max(width, height) > MAX_PAGE_IMAGE_DIMENSION:
-        scale = MAX_PAGE_IMAGE_DIMENSION / float(max(width, height))
-        new_w = max(1, min(MAX_PAGE_IMAGE_DIMENSION, int(round(width * scale))))
-        new_h = max(1, min(MAX_PAGE_IMAGE_DIMENSION, int(round(height * scale))))
-        canvas = canvas.resize((new_w, new_h), Image.Resampling.LANCZOS)
-        width, height = canvas.size
-
-    target_format = output_format or _resolve_rasterizer_output_format()
-    default_q = _resolve_rasterizer_jpeg_quality()
-
-    if target_format == "png":
-        png_buffer = BytesIO()
-        canvas.save(png_buffer, format="PNG", optimize=True)
-        png_bytes = png_buffer.getvalue()
-        if len(png_bytes) <= MAX_PAGE_IMAGE_BYTES:
-            return png_bytes, "image/png", "png", width, height
-
-    qualities = (default_q, 75) if default_q > 75 else (default_q,)
-    if target_format == "png":
-        qualities = (92, default_q, 75)
-    for quality in qualities:
-        jpeg_buffer = BytesIO()
-        canvas.save(jpeg_buffer, format="JPEG", quality=quality, optimize=True)
-        jpeg_bytes = jpeg_buffer.getvalue()
-        if len(jpeg_bytes) <= MAX_PAGE_IMAGE_BYTES:
-            return jpeg_bytes, "image/jpeg", "jpg", width, height
-
-    raise HTTPException(
-        status_code=413,
-        detail="Image exceeds the 12 MB limit",
-    )
+    finally:
+        if owns_canvas:
+            canvas.close()
 
 
-def _rasterize_image_bytes(
-    data: bytes,
+def _iter_image_pages(
+    source: bytes | BinaryIO,
     source_format: SourceDocumentFormat,
-) -> list[RasterizedDocumentPage]:
-    pages: list[RasterizedDocumentPage] = []
+) -> Iterator[RasterizedDocumentPage]:
+    stream: BinaryIO = BytesIO(source) if isinstance(source, (bytes, bytearray)) else source
+    if not isinstance(source, (bytes, bytearray)):
+        stream.seek(0)
+    yielded = 0
     try:
-        with Image.open(BytesIO(data)) as img:
+        with Image.open(stream) as img:
             if source_format == "TIFF":
                 for index, frame in enumerate(ImageSequence.Iterator(img), start=1):
                     if index > MAX_DOCUMENT_PAGES:
@@ -434,29 +547,29 @@ def _rasterize_image_bytes(
                         out_bytes, ctype, ext, w, h = _normalize_pil_frame(frame_copy)
                     finally:
                         frame_copy.close()
-                    pages.append(
-                        RasterizedDocumentPage(
-                            source_page=index,
-                            image_bytes=out_bytes,
-                            content_type=ctype,
-                            extension=ext,
-                            width=w,
-                            height=h,
-                        )
-                    )
-            else:
-                _assert_pil_image_within_pixel_budget(img)
-                img.load()
-                out_bytes, ctype, ext, w, h = _normalize_pil_frame(img)
-                pages.append(
-                    RasterizedDocumentPage(
-                        source_page=1,
+                    yielded += 1
+                    yield RasterizedDocumentPage(
+                        source_page=index,
                         image_bytes=out_bytes,
                         content_type=ctype,
                         extension=ext,
                         width=w,
                         height=h,
                     )
+                    del out_bytes
+                    gc.collect()
+            else:
+                _assert_pil_image_within_pixel_budget(img)
+                img.load()
+                out_bytes, ctype, ext, w, h = _normalize_pil_frame(img)
+                yielded += 1
+                yield RasterizedDocumentPage(
+                    source_page=1,
+                    image_bytes=out_bytes,
+                    content_type=ctype,
+                    extension=ext,
+                    width=w,
+                    height=h,
                 )
     except HTTPException:
         raise
@@ -471,15 +584,20 @@ def _rasterize_image_bytes(
             detail="The uploaded document is empty or corrupted",
         ) from exc
 
-    if not pages:
+    if yielded == 0:
         raise HTTPException(
             status_code=422,
             detail="The uploaded document is empty or corrupted",
         )
-    return pages
 
 
-def _compute_safe_pdf_render_scale(page_w_pt: float, page_h_pt: float) -> float:
+def _compute_safe_pdf_render_scale(
+    page_w_pt: float,
+    page_h_pt: float,
+    *,
+    render_dpi: float | None = None,
+    max_edge: int | None = None,
+) -> float:
     """Compute a PDF render scale strictly capped by MAX_PAGE_IMAGE_DIMENSION and MAX_PAGE_IMAGE_PIXELS."""
     if (
         not math.isfinite(page_w_pt)
@@ -491,8 +609,14 @@ def _compute_safe_pdf_render_scale(page_w_pt: float, page_h_pt: float) -> float:
             status_code=422,
             detail="PDF page dimensions are invalid",
         )
+    dpi = _PDF_RENDER_DPI if render_dpi is None else float(render_dpi)
+    edge_cap = (
+        MAX_PAGE_IMAGE_DIMENSION
+        if max_edge is None
+        else min(MAX_PAGE_IMAGE_DIMENSION, int(max_edge))
+    )
     max_pt = max(page_w_pt, page_h_pt)
-    scale = min(_PDF_RENDER_DPI / 72.0, MAX_PAGE_IMAGE_DIMENSION / max_pt)
+    scale = min(dpi / 72.0, edge_cap / max_pt)
     if not math.isfinite(scale) or scale <= 0.0:
         raise HTTPException(
             status_code=422,
@@ -503,8 +627,8 @@ def _compute_safe_pdf_render_scale(page_w_pt: float, page_h_pt: float) -> float:
     if (
         est_w < 1
         or est_h < 1
-        or est_w > MAX_PAGE_IMAGE_DIMENSION
-        or est_h > MAX_PAGE_IMAGE_DIMENSION
+        or est_w > edge_cap
+        or est_h > edge_cap
         or (est_w * est_h) > MAX_PAGE_IMAGE_PIXELS
     ):
         raise HTTPException(
@@ -514,13 +638,22 @@ def _compute_safe_pdf_render_scale(page_w_pt: float, page_h_pt: float) -> float:
     return scale
 
 
-def _rasterize_pdf_with_pypdfium2(data: bytes) -> list[RasterizedDocumentPage]:
+def _rasterize_image_bytes(
+    data: bytes,
+    source_format: SourceDocumentFormat,
+) -> list[RasterizedDocumentPage]:
+    return list(_iter_image_pages(data, source_format))
+
+
+def _iter_pdf_with_pypdfium2(source: bytes | Path) -> Iterator[RasterizedDocumentPage]:
     import pypdfium2  # type: ignore[import-not-found]
 
+    render_dpi = _resolve_pdf_render_dpi()
+    max_edge = _resolve_max_render_edge()
     pdf = None
     try:
         try:
-            pdf = pypdfium2.PdfDocument(data)
+            pdf = pypdfium2.PdfDocument(str(source) if isinstance(source, Path) else source)
         except Exception as exc:
             message = str(exc).lower()
             if "password" in message or "encrypt" in message:
@@ -545,47 +678,60 @@ def _rasterize_pdf_with_pypdfium2(data: bytes) -> list[RasterizedDocumentPage]:
                 detail="Document exceeds the 30-page limit per upload",
             )
 
-        pages: list[RasterizedDocumentPage] = []
         for idx in range(page_count):
             page = pdf[idx]
             bitmap = None
             pil_image = None
             try:
                 page_w_pt, page_h_pt = page.get_size()
-                scale = _compute_safe_pdf_render_scale(float(page_w_pt), float(page_h_pt))
+                scale = _compute_safe_pdf_render_scale(
+                    float(page_w_pt),
+                    float(page_h_pt),
+                    render_dpi=render_dpi,
+                    max_edge=max_edge,
+                )
                 bitmap = page.render(scale=scale)
                 pil_image = bitmap.to_pil()
                 _assert_pil_image_within_pixel_budget(pil_image)
                 out_bytes, ctype, ext, w, h = _normalize_pil_frame(pil_image)
-                pages.append(
-                    RasterizedDocumentPage(
-                        source_page=idx + 1,
-                        image_bytes=out_bytes,
-                        content_type=ctype,
-                        extension=ext,
-                        width=w,
-                        height=h,
-                    )
-                )
             finally:
                 if pil_image is not None:
                     pil_image.close()
                 if bitmap is not None:
                     bitmap.close()
                 page.close()
-        return pages
+            yield RasterizedDocumentPage(
+                source_page=idx + 1,
+                image_bytes=out_bytes,
+                content_type=ctype,
+                extension=ext,
+                width=w,
+                height=h,
+            )
+            del out_bytes
+            gc.collect()
     finally:
         if pdf is not None:
             pdf.close()
 
 
-def _rasterize_pdf_with_pymupdf(data: bytes) -> list[RasterizedDocumentPage]:
+def _rasterize_pdf_with_pypdfium2(data: bytes) -> list[RasterizedDocumentPage]:
+    return list(_iter_pdf_with_pypdfium2(data))
+
+
+def _iter_pdf_with_pymupdf(source: bytes | Path) -> Iterator[RasterizedDocumentPage]:
     import pymupdf  # type: ignore[import-not-found]
 
+    render_dpi = _resolve_pdf_render_dpi()
+    max_edge = _resolve_max_render_edge()
     doc = None
     try:
         try:
-            doc = pymupdf.open(stream=data, filetype="pdf")
+            doc = (
+                pymupdf.open(str(source))
+                if isinstance(source, Path)
+                else pymupdf.open(stream=source, filetype="pdf")
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=422,
@@ -609,11 +755,15 @@ def _rasterize_pdf_with_pymupdf(data: bytes) -> list[RasterizedDocumentPage]:
                 detail="Document exceeds the 30-page limit per upload",
             )
 
-        pages: list[RasterizedDocumentPage] = []
         for idx in range(page_count):
             page = doc[idx]
             rect = page.rect
-            scale = _compute_safe_pdf_render_scale(float(rect.width), float(rect.height))
+            scale = _compute_safe_pdf_render_scale(
+                float(rect.width),
+                float(rect.height),
+                render_dpi=render_dpi,
+                max_edge=max_edge,
+            )
             pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
             if (
                 pix.width <= 0
@@ -627,27 +777,31 @@ def _rasterize_pdf_with_pymupdf(data: bytes) -> list[RasterizedDocumentPage]:
                     detail="PDF page dimensions exceed safe rendering limits",
                 )
             pil_image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            del pix
             try:
                 out_bytes, ctype, ext, w, h = _normalize_pil_frame(pil_image)
             finally:
                 pil_image.close()
-            pages.append(
-                RasterizedDocumentPage(
-                    source_page=idx + 1,
-                    image_bytes=out_bytes,
-                    content_type=ctype,
-                    extension=ext,
-                    width=w,
-                    height=h,
-                )
+            yield RasterizedDocumentPage(
+                source_page=idx + 1,
+                image_bytes=out_bytes,
+                content_type=ctype,
+                extension=ext,
+                width=w,
+                height=h,
             )
-        return pages
+            del out_bytes
+            gc.collect()
     finally:
         if doc is not None:
             doc.close()
 
 
-def _rasterize_pdf_bytes(data: bytes) -> list[RasterizedDocumentPage]:
+def _rasterize_pdf_with_pymupdf(data: bytes) -> list[RasterizedDocumentPage]:
+    return list(_iter_pdf_with_pymupdf(data))
+
+
+def _iter_pdf_pages(source: bytes | Path) -> Iterator[RasterizedDocumentPage]:
     try:
         import pypdfium2  # noqa: F401
     except ImportError:
@@ -656,7 +810,8 @@ def _rasterize_pdf_bytes(data: bytes) -> list[RasterizedDocumentPage]:
         pypdfium2_available = True
 
     if pypdfium2_available:
-        return _rasterize_pdf_with_pypdfium2(data)
+        yield from _iter_pdf_with_pypdfium2(source)
+        return
 
     try:
         import pymupdf  # noqa: F401
@@ -666,12 +821,17 @@ def _rasterize_pdf_bytes(data: bytes) -> list[RasterizedDocumentPage]:
         pymupdf_available = True
 
     if pymupdf_available:
-        return _rasterize_pdf_with_pymupdf(data)
+        yield from _iter_pdf_with_pymupdf(source)
+        return
 
     raise HTTPException(
         status_code=503,
         detail="PDF rendering engine is not available on the server",
     )
+
+
+def _rasterize_pdf_bytes(data: bytes) -> list[RasterizedDocumentPage]:
+    return list(_iter_pdf_pages(data))
 
 
 def _find_unicode_font_paths() -> tuple[str, str]:
@@ -792,10 +952,17 @@ def _try_libreoffice_docx_to_pdf(data: bytes) -> bytes | None:
     return None
 
 
-def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
-    converted_pdf = _try_libreoffice_docx_to_pdf(data)
-    if converted_pdf is not None:
-        return _rasterize_pdf_bytes(converted_pdf)
+def _iter_docx_pages(source: bytes | BinaryIO) -> Iterator[RasterizedDocumentPage]:
+    """Stream DOCX rendering holding at most ONE uncompressed A4 canvas in RAM at a time."""
+    if isinstance(source, (bytes, bytearray)):
+        converted_pdf = _try_libreoffice_docx_to_pdf(bytes(source))
+        if converted_pdf is not None:
+            yield from _iter_pdf_pages(converted_pdf)
+            return
+        doc_stream: BinaryIO = BytesIO(source)
+    else:
+        source.seek(0)
+        doc_stream = source
 
     import docx  # type: ignore[import-not-found]
     from docx.oxml.ns import qn  # type: ignore[import-not-found]
@@ -812,7 +979,7 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
     }
 
     try:
-        doc = docx.Document(BytesIO(data))
+        doc = docx.Document(doc_stream)
     except HTTPException:
         raise
     except Exception as exc:
@@ -824,33 +991,63 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
     content_width = _A4_WIDTH - (2 * _MARGIN_X)
     max_y = _A4_HEIGHT - _MARGIN_Y
 
-    canvas_pages: list[Image.Image] = []
-    page_has_content: list[bool] = []
+    allocated_count = 0
+    emitted_count = 0
     has_any_content = False
+    current_has_content = False
+    current_img: Image.Image | None = None
 
     def allocate_page() -> tuple[Image.Image, ImageDraw.ImageDraw]:
-        if len(canvas_pages) >= MAX_DOCUMENT_PAGES:
+        nonlocal allocated_count, current_has_content
+        if allocated_count >= MAX_DOCUMENT_PAGES:
             raise HTTPException(
                 status_code=422,
                 detail="Document exceeds the 30-page limit per upload",
             )
+        allocated_count += 1
+        current_has_content = False
         img = Image.new("RGB", (_A4_WIDTH, _A4_HEIGHT), (255, 255, 255))
-        canvas_pages.append(img)
-        page_has_content.append(False)
         return img, ImageDraw.Draw(img)
+
+    def flush_current_page() -> RasterizedDocumentPage | None:
+        nonlocal current_img, emitted_count, current_has_content
+        if current_img is None:
+            return None
+        img = current_img
+        used = current_has_content
+        current_img = None
+        current_has_content = False
+        try:
+            if not used:
+                return None
+            out_bytes, ctype, ext, w, h = _normalize_pil_frame(img)
+            emitted_count += 1
+            return RasterizedDocumentPage(
+                source_page=emitted_count,
+                image_bytes=out_bytes,
+                content_type=ctype,
+                extension=ext,
+                width=w,
+                height=h,
+            )
+        finally:
+            img.close()
+            gc.collect()
 
     current_img, draw = allocate_page()
     cursor_y = _MARGIN_Y
 
-    def advance_page() -> None:
+    def advance_page() -> RasterizedDocumentPage | None:
         nonlocal current_img, draw, cursor_y
+        finished = flush_current_page()
         current_img, draw = allocate_page()
         cursor_y = _MARGIN_Y
+        return finished
 
     def mark_drawn() -> None:
-        nonlocal has_any_content
+        nonlocal has_any_content, current_has_content
         has_any_content = True
-        page_has_content[-1] = True
+        current_has_content = True
 
     def extract_embedded_images(paragraph_el: object) -> list[bytes]:
         blobs: list[bytes] = []
@@ -876,8 +1073,10 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
         for child in doc.element.body.iterchildren():
             if child.tag.endswith("}p"):
                 para = Paragraph(child, doc)
-                if has_explicit_page_break(para) and page_has_content[-1]:
-                    advance_page()
+                if has_explicit_page_break(para) and current_has_content:
+                    finished = advance_page()
+                    if finished is not None:
+                        yield finished
 
                 style_name = (para.style.name if para.style and para.style.name else "").lower()
                 if "title" in style_name or "heading 1" in style_name:
@@ -902,7 +1101,9 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
                     lines = _wrap_text(draw, text_value, font, content_width)
                     for line in lines:
                         if cursor_y + line_height > max_y:
-                            advance_page()
+                            finished = advance_page()
+                            if finished is not None:
+                                yield finished
                         draw.text((_MARGIN_X, cursor_y), line, fill=(20, 20, 20), font=font)
                         cursor_y += line_height
                         mark_drawn()
@@ -924,11 +1125,16 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
                     target_w = max(1, int(round(embedded_rgb.width * scale)))
                     target_h = max(1, int(round(embedded_rgb.height * scale)))
                     if (target_w, target_h) != embedded_rgb.size:
-                        embedded_rgb = embedded_rgb.resize(
+                        resized = embedded_rgb.resize(
                             (target_w, target_h), Image.Resampling.LANCZOS
                         )
-                    if cursor_y + target_h > max_y and page_has_content[-1]:
-                        advance_page()
+                        embedded_rgb.close()
+                        embedded_rgb = resized
+                    if cursor_y + target_h > max_y and current_has_content:
+                        finished = advance_page()
+                        if finished is not None:
+                            yield finished
+                    assert current_img is not None
                     current_img.paste(embedded_rgb, (_MARGIN_X, cursor_y))
                     embedded_rgb.close()
                     cursor_y += target_h + 24
@@ -959,8 +1165,10 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
                     max_lines = max((len(lines) for lines in cell_lines), default=0)
                     max_lines = max(max_lines, 1)
                     row_h = (max_lines * row_line_h) + (2 * cell_pad_y)
-                    if cursor_y + row_h > max_y and page_has_content[-1]:
-                        advance_page()
+                    if cursor_y + row_h > max_y and current_has_content:
+                        finished = advance_page()
+                        if finished is not None:
+                            yield finished
                     for col_idx, lines in enumerate(cell_lines):
                         x0 = _MARGIN_X + col_idx * col_w
                         x1 = x0 + col_w
@@ -991,46 +1199,37 @@ def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
                 detail="No usable text was detected in the uploaded document",
             )
 
-        rendered_pages: list[RasterizedDocumentPage] = []
-        for idx, (img, used) in enumerate(zip(canvas_pages, page_has_content, strict=True)):
-            if not used:
-                continue
-            out_bytes, ctype, ext, w, h = _normalize_pil_frame(img)
-            rendered_pages.append(
-                RasterizedDocumentPage(
-                    source_page=len(rendered_pages) + 1,
-                    image_bytes=out_bytes,
-                    content_type=ctype,
-                    extension=ext,
-                    width=w,
-                    height=h,
-                )
-            )
-        return rendered_pages
+        last_page = flush_current_page()
+        if last_page is not None:
+            yield last_page
     finally:
-        for img in canvas_pages:
-            img.close()
+        if current_img is not None:
+            current_img.close()
 
 
-def rasterize_uploaded_document(
+def _rasterize_docx_bytes(data: bytes) -> list[RasterizedDocumentPage]:
+    return list(_iter_docx_pages(data))
+
+
+def _validate_document_header(
     *,
     filename: str | None,
     content_type: str | None,
-    data: bytes,
-) -> RasterizedDocumentBundle:
-    """Validate an uploaded image or document and rasterize it into 1..30 normalized RGB pages."""
+    byte_length: int,
+    header_bytes: bytes,
+) -> tuple[str, SourceDocumentFormat]:
     if not filename or not str(filename).strip():
         raise HTTPException(status_code=422, detail="A file is required")
 
     clean_name = PurePath(str(filename)).name
     suffix = PurePath(clean_name).suffix.lower()
 
-    if not data:
+    if byte_length <= 0:
         raise HTTPException(
             status_code=422,
             detail="The uploaded document is empty or corrupted",
         )
-    if len(data) > MAX_DOCUMENT_BYTES:
+    if byte_length > MAX_DOCUMENT_BYTES:
         raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
 
     if suffix == ".docm":
@@ -1039,7 +1238,7 @@ def rasterize_uploaded_document(
             detail="Macro-enabled Word documents are not permitted",
         )
 
-    if data.startswith(OLE2_MAGIC):
+    if header_bytes.startswith(OLE2_MAGIC):
         if suffix == ".doc":
             raise HTTPException(
                 status_code=415,
@@ -1047,8 +1246,8 @@ def rasterize_uploaded_document(
             )
         if (
             suffix == ".docx"
-            or b"EncryptedPackage" in data[:8192]
-            or "EncryptedPackage".encode("utf-16-le") in data[:8192]
+            or b"EncryptedPackage" in header_bytes[:8192]
+            or "EncryptedPackage".encode("utf-16-le") in header_bytes[:8192]
         ):
             raise HTTPException(
                 status_code=422,
@@ -1065,7 +1264,7 @@ def rasterize_uploaded_document(
             detail="Unsupported upload format; use JPEG, PNG, WebP, BMP, TIFF, PDF, or DOCX",
         )
 
-    detected = _detect_format_by_magic(data)
+    detected = _detect_format_by_magic(header_bytes)
     if detected is None or suffix not in _FORMAT_EXTENSIONS[detected]:
         raise HTTPException(
             status_code=415,
@@ -1079,8 +1278,73 @@ def rasterize_uploaded_document(
             detail="File content does not match the declared file type or extension",
         )
 
-    if detected in ("JPEG", "PNG", "WEBP", "BMP") and len(data) > MAX_SINGLE_IMAGE_BYTES:
+    if detected in ("JPEG", "PNG", "WEBP", "BMP") and byte_length > MAX_SINGLE_IMAGE_BYTES:
         raise HTTPException(status_code=413, detail="Image exceeds the 12 MB limit")
+
+    return clean_name, detected
+
+
+@contextmanager
+def iter_rasterized_spooled_document(
+    spooled: SpooledUploadDocument,
+) -> Iterator[tuple[str, SourceDocumentFormat, str, Iterator[RasterizedDocumentPage]]]:
+    """Validate and stream 1..30 rasterized pages one at a time from a SpooledUploadDocument."""
+    clean_name, detected = _validate_document_header(
+        filename=spooled.file_name,
+        content_type=spooled.content_type,
+        byte_length=spooled.byte_length,
+        header_bytes=spooled.header_bytes,
+    )
+    temp_pdf_path: Path | None = None
+    try:
+        if detected == "DOCX":
+            _validate_docx_archive(spooled.spool_file)
+            page_iter = _iter_docx_pages(spooled.spool_file)
+        elif detected == "PDF":
+            # Write PDF to a temporary disk file so pypdfium2/pymupdf reads directly
+            # from disk without keeping a 50 MB buffer in Python heap RAM.
+            fd, raw_path = tempfile.mkstemp(prefix="viread_pdf_", suffix=".pdf")
+            temp_pdf_path = Path(raw_path)
+            spooled.spool_file.seek(0)
+            with os.fdopen(fd, "wb") as out_f:
+                shutil.copyfileobj(spooled.spool_file, out_f, length=_UPLOAD_SPOOL_CHUNK_BYTES)
+            page_iter = _iter_pdf_pages(temp_pdf_path)
+        else:
+            page_iter = _iter_image_pages(spooled.spool_file, detected)
+
+        def _bounded_iter() -> Iterator[RasterizedDocumentPage]:
+            count = 0
+            for page in page_iter:
+                count += 1
+                if count > MAX_DOCUMENT_PAGES:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Document exceeds the 30-page limit per upload",
+                    )
+                yield page
+
+        yield clean_name, detected, spooled.source_sha256, _bounded_iter()
+    finally:
+        if temp_pdf_path is not None:
+            try:
+                temp_pdf_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+
+def rasterize_uploaded_document(
+    *,
+    filename: str | None,
+    content_type: str | None,
+    data: bytes,
+) -> RasterizedDocumentBundle:
+    """Validate an uploaded image or document and rasterize it into 1..30 normalized RGB pages."""
+    clean_name, detected = _validate_document_header(
+        filename=filename,
+        content_type=content_type,
+        byte_length=len(data),
+        header_bytes=data[:8192],
+    )
 
     if detected == "DOCX":
         _validate_docx_archive(data)

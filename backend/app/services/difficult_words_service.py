@@ -1267,14 +1267,22 @@ class DifficultWordsService:
             else "audio/webm"
         )
 
-        exact_browser_read = (
-            browser_status == "CORRECT"
-            and valid_browser_conf is not None
-            and valid_browser_conf >= 0.9
+        exact_browser_tokens_match = (
+            browser_usable
+            and browser_status == "CORRECT"
             and _short_word_tokens(clean_browser_text) == _short_word_tokens(display_text)
         )
+        wasm_verified_status = (audio_quality_status or "").strip().upper() in {
+            "BROWSER_WASM",
+            "BROWSER_WASM_VERIFIED",
+            "WASM_VERIFIED",
+        }
+        exact_browser_read = exact_browser_tokens_match and (
+            (valid_browser_conf is not None and valid_browser_conf >= 0.9)
+            or wasm_verified_status
+        )
         if audio_quality_status in UNUSABLE_AUDIO_QUALITY_STATUSES and not (
-            exact_browser_read and audio_quality_status == "AUDIO_TOO_SHORT"
+            exact_browser_tokens_match and audio_quality_status == "AUDIO_TOO_SHORT"
         ):
             return ("NO_CLEAR_AUDIO", "AUDIO_QUALITY_GATE", None, None)
 

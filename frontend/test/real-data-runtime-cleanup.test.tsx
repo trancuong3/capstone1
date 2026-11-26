@@ -186,7 +186,8 @@ describe("Phase 5 real-data runtime cleanup", () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
-  it("uploader accepts multiple page images and exposes the real upload action", () => {
+  it("uploader accepts multiple page images and exposes the real upload action", async () => {
+    fetchMock.mockResolvedValue(Response.json({ ocr: { ready: true } }));
     const onUploaded = vi.fn();
     render(
       <AdminServicesProvider>
@@ -203,8 +204,15 @@ describe("Phase 5 real-data runtime cleanup", () => {
     expect(
       screen.getByRole("button", { name: "Upload và chạy OCR" }),
     ).toBeEnabled();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     expect(onUploaded).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      fetchMock.mock.calls.every(
+        ([url, init]) =>
+          String(url).endsWith("/health") &&
+          ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+      ),
+    ).toBe(true);
   });
   it("legacy Admin scenario props cannot replace actual API catalog", async () => {
     fetchMock.mockResolvedValue(

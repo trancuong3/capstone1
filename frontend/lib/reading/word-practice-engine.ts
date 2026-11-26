@@ -15,6 +15,10 @@ import {
   type AudioQualityStatus,
 } from "@/lib/reading/audio-quality";
 import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import {
   hasHighConfidenceKeytermResult,
   hasUsableBrowserConfidence,
   hasUsableTranscript,
@@ -164,6 +168,7 @@ export function hasShortWordSpeechActivity(
 export type ShortWordEvaluationSource =
   | "SERVER_STT"
   | "SERVER_STT_KEYTERM"
+  | "BROWSER_WASM"
   | "BROWSER_SPEECH"
   | "AUDIO_QUALITY_GATE"
   | "ENGINE_ERROR";
@@ -328,6 +333,31 @@ export async function evaluateRecordedShortWord({
       sttDurationMs: elapsedMs(),
     };
   } catch {
+    if (detectBrowserWasmSttSupport().supported) {
+      try {
+        const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
+          audioBlob,
+          {
+            timeoutMs: 12_000,
+            voicedDurationMs: audioQuality?.speechDurationMs,
+          },
+        );
+        const wasmText = wasmResult.text.normalize("NFC").trim();
+        const wasmStatus = classifyPracticePhraseTranscript(
+          expectedWord,
+          wasmText,
+          { contextPhrase },
+        );
+        return {
+          status: wasmStatus,
+          source: "BROWSER_WASM",
+          transcript: wasmText || null,
+          sttDurationMs: elapsedMs(),
+        };
+      } catch {
+        // Fall through cleanly to browser transcript / ENGINE_ERROR.
+      }
+    }
     if (usableBrowser && browserStatus !== null) {
       return {
         status: browserStatus,

@@ -229,6 +229,7 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
         `/books/my-books/${encodeURIComponent(bookId)}`,
         parentPrivateBookDetailSchema,
         signal,
+        { method: "GET", bypassCache: true },
       ),
     create: (input) =>
       requestApi("/books/my-books", parentPrivateBookSummarySchema, undefined, {
@@ -320,6 +321,8 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
       requestApi(
         `/books/my-books/${encodeURIComponent(bookId)}/submissions/${encodeURIComponent(submissionId)}`,
         parentPageSubmissionSchema,
+        undefined,
+        { method: "GET", bypassCache: true },
       ),
     acceptSpelling: (
       bookId,

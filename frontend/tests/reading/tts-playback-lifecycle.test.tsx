@@ -12,6 +12,7 @@ import {
   countUnintendedVoiceSwitches,
   getSessionVoiceAudit,
   lockSessionVoice,
+  releaseSessionVoiceLock,
   resetVoiceLockAndPolicyForTests,
   setVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
@@ -987,10 +988,35 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await firstPlay;
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
 
-      // Case 2: /phonics 503 AND cached word 503 -> falls through to Android native TTS even in local_only mode
+      // Case 2: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
+      // (One-Session-One-Voice); once unlocked, on-device Android native TTS works under local_only.
       const planMiss = buildPhonicsLesson("bàn");
       expect(planMiss.supported).toBe(true);
       if (!planMiss.supported) return;
+      lockSessionVoice("android-lock-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
+      speech.synthesizePhonics.mockRejectedValueOnce(
+        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+          status: 503,
+          code: "TTS_UNAVAILABLE",
+        }),
+      );
+      speech.synthesize.mockRejectedValueOnce(
+        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+          status: 503,
+          code: "TTS_UNAVAILABLE",
+        }),
+      );
+      await expect(
+        result.current.playPhonicsLesson(planMiss, {
+          cacheScope: "COACHING",
+        }),
+      ).rejects.toThrow();
+      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
+      releaseSessionVoiceLock("android-lock-test");
+
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -1034,6 +1060,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     resetAndroidNativeSpeechBridgeForTests();
 
     try {
+      setVoicePolicyPreferences({
+        providerMode: "local_with_google_fallback",
+        allowGoogleTtsFallback: true,
+      });
       const plan = buildPhonicsLesson("mốt");
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
@@ -1094,6 +1124,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     resetAndroidNativeSpeechBridgeForTests();
 
     try {
+      setVoicePolicyPreferences({
+        providerMode: "local_with_google_fallback",
+        allowGoogleTtsFallback: true,
+      });
       const plan = buildPhonicsLesson("mốt");
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;

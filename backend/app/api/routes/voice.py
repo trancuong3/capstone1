@@ -235,10 +235,7 @@ def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
     cache_hit = bool(getattr(speech_or_audio, "cache_hit", False))
     cache_scope = getattr(speech_or_audio, "cache_scope", None)
     cached_speed = getattr(speech_or_audio, "cached_speed", None)
-    if cache_hit:
-        cache_control = "private, no-store" if cache_scope == "PRIVATE" else "private, max-age=86400"
-    else:
-        cache_control = "no-store"
+    cache_control = "private, no-store" if cache_scope == "PRIVATE" else "no-store"
     headers = {
         "Cache-Control": cache_control,
         "X-TTS-Cache": "HIT" if cache_hit else "MISS",
@@ -248,6 +245,9 @@ def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
         headers["X-TTS-Scope"] = str(cache_scope)
     if cached_speed is not None:
         headers["X-TTS-Cached-Speed"] = f"{float(cached_speed):.2f}"
+    fallback_reason = getattr(speech_or_audio, "fallback_reason", None)
+    if fallback_reason:
+        headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
     return headers
 
 

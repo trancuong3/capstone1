@@ -6,11 +6,12 @@ import unicodedata
 from pathlib import Path
 from typing import Any, Literal
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .contracts import canonical_sha256, sha256_file
 from .metrics import PairedLine, benchmark_metrics
 from .quality_gate import GatePolicy, evaluate_gate
+from .train import _LOCKED_VOCAB_PUNCTUATION
 
 
 def _predictor(config: dict[str, Any], weights: str):
@@ -89,7 +90,7 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
     for item in rows:
         sample_id = str(item.get("sample_id", ""))
         group_id = str(item.get("group_id", ""))
-        reference = unicodedata.normalize("NFC", str(item.get("reference", item.get("label", ""))))
+        reference = unicodedata.normalize("NFC", str(item.get("reference", item.get("label", "")))).translate(_LOCKED_VOCAB_PUNCTUATION)
         raw_image = item.get("image") or item.get("image_storage_path")
         image = Path(str(raw_image or ""))
         if not sample_id or not group_id or not reference.strip() or sample_id in seen:
@@ -102,18 +103,18 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
             raise ValueError(f"Locked Test image hash mismatch for {sample_id}")
         seen.add(sample_id)
         with Image.open(image) as source:
-            crop = source.convert("RGB")
-            original_text = unicodedata.normalize("NFC", str(original.predict(crop)))
+            crop = ImageOps.exif_transpose(source).convert("RGB")
+            original_text = unicodedata.normalize("NFC", str(original.predict(crop))).translate(_LOCKED_VOCAB_PUNCTUATION)
             candidate_image = crop
             if candidate_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
                 candidate_image = _preprocess_v2_candidate_image(crop)
-            candidate_text = unicodedata.normalize("NFC", str(candidate.predict(candidate_image)))
+            candidate_text = unicodedata.normalize("NFC", str(candidate.predict(candidate_image))).translate(_LOCKED_VOCAB_PUNCTUATION)
             baseline_text: dict[str, str | None] = {"parent": None, "active": None}
             for baseline, (predictor, profile) in predictors.items():
                 baseline_image = crop
                 if profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
                     baseline_image = _preprocess_v2_candidate_image(crop)
-                baseline_text[baseline] = unicodedata.normalize("NFC", str(predictor.predict(baseline_image)))
+                baseline_text[baseline] = unicodedata.normalize("NFC", str(predictor.predict(baseline_image))).translate(_LOCKED_VOCAB_PUNCTUATION)
         paired.append(PairedLine(group_id, reference, original_text, candidate_text, sample_id,
                                  baseline_text["parent"], baseline_text["active"]))
 

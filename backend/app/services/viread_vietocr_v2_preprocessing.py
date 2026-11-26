@@ -9,6 +9,10 @@ import numpy as np
 def _deskew(image: np.ndarray, max_degrees: float = 10.0) -> np.ndarray:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     _, foreground = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    fg_ratio = float(cv2.countNonZero(foreground)) / float(max(1, foreground.size))
+    # Skip deskew on dark/illustrated children's book crops where Otsu inverts background.
+    if fg_ratio < 0.02 or fg_ratio > 0.55:
+        return image
     points = cv2.findNonZero(foreground)
     if points is None or len(points) < 24:
         return image
@@ -17,9 +21,20 @@ def _deskew(image: np.ndarray, max_degrees: float = 10.0) -> np.ndarray:
     if abs(angle) < 0.15 or abs(angle) > max_degrees:
         return image
     height, width = image.shape[:2]
-    matrix = cv2.getRotationMatrix2D((width / 2.0, height / 2.0), angle, 1.0)
-    return cv2.warpAffine(image, matrix, (width, height), flags=cv2.INTER_CUBIC,
-                          borderMode=cv2.BORDER_REPLICATE)
+    pad_y = max(2, int(round(width * abs(np.sin(np.deg2rad(angle))) * 0.25)))
+    pad_y = min(pad_y, max(4, height // 3))
+    padded = cv2.copyMakeBorder(
+        image, pad_y, pad_y, 0, 0, borderType=cv2.BORDER_REPLICATE
+    )
+    ph, pw = padded.shape[:2]
+    matrix = cv2.getRotationMatrix2D((pw / 2.0, ph / 2.0), angle, 1.0)
+    return cv2.warpAffine(
+        padded,
+        matrix,
+        (pw, ph),
+        flags=cv2.INTER_CUBIC,
+        borderMode=cv2.BORDER_REPLICATE,
+    )
 
 
 def preprocess_line_array(image: np.ndarray) -> np.ndarray:
@@ -27,7 +42,8 @@ def preprocess_line_array(image: np.ndarray) -> np.ndarray:
     if image is None or image.size == 0:
         raise ValueError("line image is empty")
     processed = _deskew(image)
-    processed = cv2.fastNlMeansDenoisingColored(processed, None, 3, 3, 7, 15)
+    if processed.shape[0] >= 28:
+        processed = cv2.fastNlMeansDenoisingColored(processed, None, 3, 3, 7, 15)
     lab = cv2.cvtColor(processed, cv2.COLOR_BGR2LAB)
     lightness, a_channel, b_channel = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))

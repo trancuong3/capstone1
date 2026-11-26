@@ -17,7 +17,7 @@ from fastapi import HTTPException
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL
+from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin_headers
 from app.repositories.viread_drive_connection_repository import (
     PRIMARY_CONNECTION_KEY,
     VireadDriveConnectionRepository,
@@ -140,11 +140,7 @@ def _mark_token_revoked_via_postgrest(error_code: str) -> None:
         requests.patch(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/viread_ocr_drive_connections",
             params={"connection_key": f"eq.{PRIMARY_CONNECTION_KEY}"},
-            headers={
-                "apikey": SUPABASE_ADMIN_KEY,
-                "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
-                "Content-Type": "application/json",
-            },
+            headers=supabase_admin_headers(SUPABASE_ADMIN_KEY, extra={"Content-Type": "application/json"}),
             json={
                 "status": "TOKEN_REVOKED",
                 "last_health_status": "TOKEN_REVOKED",
@@ -481,10 +477,7 @@ def load_sync_google_drive_store() -> DriveStoreType | None:
                 "connection_key": f"eq.{PRIMARY_CONNECTION_KEY}",
                 "limit": "1",
             },
-            headers={
-                "apikey": SUPABASE_ADMIN_KEY,
-                "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
-            },
+            headers=supabase_admin_headers(SUPABASE_ADMIN_KEY),
             timeout=(2, 4),
         )
         if response.status_code != 200:
@@ -806,6 +799,25 @@ class VireadDriveConnectionService:
         account_email: str | None = None,
     ) -> dict[str, Any]:
         """Connect Flow 2 Google Drive via official Google Drive for Desktop synced mount (Advanced-Protection safe)."""
+        app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
+        is_render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+        if app_env == "production" or is_render:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER: Cloud server không thể đọc ổ G:\\ "
+                    "Google Drive for Desktop trên máy cá nhân; hãy kết nối qua Apps Script Bridge."
+                ),
+            )
+        raw_input = (sync_root_path or "").strip()
+        if os.name != "nt" and (not raw_input or (len(raw_input) >= 2 and raw_input[1] == ":")):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST: Máy chủ Linux không hỗ trợ "
+                    "Google Drive for Desktop local mount; hãy kết nối qua Apps Script Bridge."
+                ),
+            )
         _, migration_applied = await self.repo.get_primary()
         await self._release_read_txn()
         if not migration_applied:

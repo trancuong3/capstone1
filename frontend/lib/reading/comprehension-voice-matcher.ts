@@ -176,13 +176,40 @@ const CORRECTION_PIVOTS: readonly string[] = [
   "sửa lại",
   "chọn lại",
   "mà là",
-  "không con chọn",
-  "không bé chọn",
-  "không em chọn",
-  "không phải con chọn",
-  "không phải bé chọn",
-  "không phải em chọn",
 ];
+
+const PURE_FILLER_OR_PRONOUN_TOKENS = new Set([
+  "con",
+  "bé",
+  "em",
+  "mình",
+  "tớ",
+  "dạ",
+  "vâng",
+  "thưa",
+  "ạ",
+  "à",
+  "ờ",
+  "ừ",
+  "ừm",
+  "cô",
+  "thầy",
+  "ơi",
+  "nhé",
+  "nha",
+]);
+
+function isOnlyFillerOrPronoun(fragment: string): boolean {
+  const parts = fragment.trim().split(/\s+/u).filter(Boolean);
+  return (
+    parts.length === 0 ||
+    parts.every((part) => PURE_FILLER_OR_PRONOUN_TOKENS.has(part))
+  );
+}
+
+function isAnyHomophoneLetterAlias(token: string): boolean {
+  return HOMOPHONE_LETTER_ALIASES.some((group) => group.includes(token));
+}
 
 const VIETNAMESE_DIGIT_MAP: Readonly<Record<string, string>> = {
   không: "0",
@@ -252,7 +279,7 @@ function subtractLabelTokens(
 }
 
 const NEGATION_RE =
-  /(?:^|\s)(?:không\s+chọn|không\s+phải(?:\s+là)?|chẳng\s+chọn|chẳng\s+phải|đừng\s+chọn|không\s+lấy|không\s+đúng)(?:\s|$)/u;
+  /(?:^|\s)(?:không\s+(?:(?:con|bé|em)\s+)?chọn|không\s+phải(?:\s+là)?|chẳng\s+chọn|chẳng\s+phải|đừng\s+chọn|không\s+lấy|không\s+đúng)(?:\s|$)/u;
 
 const CHOICE_LETTER_SPOKEN: readonly string[] = ["A", "B", "C", "D"];
 
@@ -286,14 +313,51 @@ function extractSelfCorrectedTail(normalized: string): {
     const tail = normalized.slice(latestEnd).trim();
     if (tail) return { clause: tail, hadRevision: true };
   }
-  // Pattern: "không phải <X> con chọn <Y>"
-  const notMatch =
-    /^(?:con |bé |em )?không\s+(?:chọn|phải)\s+.+?\s+(?:con\s+|bé\s+|em\s+)?(?:chọn|là)\s+(.+)$/u.exec(
+
+  // Unanchored negation + positive correction:
+  // "không phải A, chọn C", "không phải A, đáp án C", "đừng chọn A, chọn C", "bỏ A chọn C",
+  // "con chọn A, không phải A mà C".
+  // Guard: retracted <X> must contain real non-pronoun content so pure negations
+  // like "không phải con chọn A" stay NEGATED and NEVER submit A!
+  const negCorrectionMatch =
+    /(?:^|\s)(?:không\s+(?:chọn|phải)|chẳng\s+(?:chọn|phải)|đừng\s+chọn|bỏ)\s+(.+?)\s+(?:mà\s+)?(?:(?:con|bé|em)\s+)?(?:(?:chọn|là)\s+|(?=(?:đáp\s+án|phương\s+án|câu)\s+))(.+)$/u.exec(
       normalized,
     );
-  if (notMatch?.[1]) {
-    return { clause: notMatch[1].trim(), hadRevision: true };
+  if (
+    negCorrectionMatch?.[1] &&
+    negCorrectionMatch?.[2] &&
+    !isOnlyFillerOrPronoun(negCorrectionMatch[1])
+  ) {
+    return { clause: negCorrectionMatch[2].trim(), hadRevision: true };
   }
+
+  // "không phải A mà C" / "đừng chọn A mà C"
+  const notButMatch =
+    /(?:^|\s)(?:không\s+(?:chọn|phải)|chẳng\s+(?:chọn|phải)|đừng\s+chọn|bỏ)\s+(.+?)\s+mà\s+(.+)$/u.exec(
+      normalized,
+    );
+  if (
+    notButMatch?.[1] &&
+    notButMatch?.[2] &&
+    !isOnlyFillerOrPronoun(notButMatch[1])
+  ) {
+    return { clause: notButMatch[2].trim(), hadRevision: true };
+  }
+
+  // Retracted-prefix correction: "A, không, con chọn B" or "A, không phải, chọn B".
+  // Requires real retracted content BEFORE "không" so "không phải con chọn A" stays NEGATED!
+  const prefixRetractMatch =
+    /^(.+?)\s+không(?:\s+phải)?\s+(?:(?:con|bé|em)\s+)?(?:(?:chọn|là)\s+|(?=(?:đáp\s+án|phương\s+án|câu)\s+))(.+)$/u.exec(
+      normalized,
+    );
+  if (
+    prefixRetractMatch?.[1] &&
+    prefixRetractMatch?.[2] &&
+    !isOnlyFillerOrPronoun(prefixRetractMatch[1])
+  ) {
+    return { clause: prefixRetractMatch[2].trim(), hadRevision: true };
+  }
+
   return { clause: normalized, hadRevision: false };
 }
 
@@ -335,16 +399,22 @@ function resolveLetterIndexAt(
   visibleChoiceTokens: ReadonlySet<string>,
 ): number {
   const token = tokens[tokenIndex];
-  if (!token || visibleChoiceTokens.has(token)) {
-    return -1;
-  }
+  if (!token) return -1;
+  const hasExplicitMarker = hasExplicitChoiceMarkerBefore(tokens, tokenIndex);
+  const inVisibleChoice = visibleChoiceTokens.has(token);
   const limit = Math.min(choicesLength, PRIMARY_LETTER_ALIASES.length);
   for (let idx = 0; idx < limit; idx += 1) {
     if (PRIMARY_LETTER_ALIASES[idx].includes(token)) {
-      return idx;
+      // Only let visibleChoiceTokens block bare unprefixed tokens (e.g. bare "bê"
+      // when "Con bê" is an option). Explicit "con chọn B ạ" / "đáp án bê" ALWAYS resolves!
+      if (!inVisibleChoice || hasExplicitMarker) {
+        return idx;
+      }
+      return -1;
     }
   }
-  if (hasExplicitChoiceMarkerBefore(tokens, tokenIndex)) {
+  // Homophone nouns ("dê", "xe", "cờ") require explicit marker AND absence from visible options.
+  if (hasExplicitMarker && !inVisibleChoice) {
     const homophoneLimit = Math.min(
       choicesLength,
       HOMOPHONE_LETTER_ALIASES.length,
@@ -467,10 +537,14 @@ function matchContentChoice(
     if (!rawLabelTokens.length) continue;
     const labelTokens = rawLabelTokens.map(normalizeContentToken);
 
-    // Track partial distinct token overlap across choices to catch e.g. "Bạn" -> [Bạn Lan, Bạn An]
+    // Strip the same filler/classifier words from labels symmetrically so
+    // "chọn bò ạ" matches "Con bò", while guarding bare homophones like "dê".
     const meaningfulLabelTokens = labelTokens.filter(
       (t) => !FILLER_OR_POLITE_WORDS.has(t),
     );
+    const strippedLabelTokens = meaningfulLabelTokens.length
+      ? meaningfulLabelTokens
+      : labelTokens;
     if (
       meaningfulLabelTokens.some((t) => evalSet.has(t)) &&
       evalTokens.some((t) => meaningfulLabelTokens.includes(t))
@@ -479,8 +553,15 @@ function matchContentChoice(
     }
 
     const labelJoined = labelTokens.join(" ");
+    const strippedLabelJoined = strippedLabelTokens.join(" ");
+    const isBareHomophoneSingleToken =
+      tokens.length === 1 && isAnyHomophoneLetterAlias(tokens[0]);
     const isFullExact =
-      fullJoined === labelJoined || strippedJoined === labelJoined;
+      fullJoined === labelJoined ||
+      strippedJoined === labelJoined ||
+      (!isBareHomophoneSingleToken &&
+        strippedLabelTokens.length < labelTokens.length &&
+        strippedJoined === strippedLabelJoined);
 
     if (isFullExact) {
       fullExactMatches.push(choice);
@@ -490,12 +571,17 @@ function matchContentChoice(
       isFullExact ||
       (labelTokens.length >= 2 &&
         (containsTokenSubsequence(evalTokens, labelTokens) ||
-          containsTokenSubsequence(fullTokens, labelTokens)));
+          containsTokenSubsequence(fullTokens, labelTokens))) ||
+      (!isBareHomophoneSingleToken &&
+        strippedLabelTokens.length >= 2 &&
+        containsTokenSubsequence(evalTokens, strippedLabelTokens));
 
     if (isContiguous) {
-      const score = isFullExact
-        ? 1
-        : 0.75 + 0.2 * (labelTokens.length / Math.max(evalTokens.length, 1));
+      const matchedLen = containsTokenSubsequence(evalTokens, labelTokens)
+        ? labelTokens.length
+        : strippedLabelTokens.length;
+      const ratio = Math.min(1, matchedLen / Math.max(evalTokens.length, 1));
+      const score = isFullExact ? 1 : Math.min(0.95, 0.75 + 0.2 * ratio);
       if (!isFullExact) {
         contiguousMatches.push({ choice, labelTokens, score });
       }
@@ -508,24 +594,29 @@ function matchContentChoice(
       continue;
     }
 
-    if (labelTokens.length >= 2) {
+    const computePartialScore = (candidateLabel: readonly string[]): number => {
+      if (candidateLabel.length < 2) return 0;
       let overlap = 0;
-      for (const word of labelTokens) {
+      for (const word of candidateLabel) {
         if (evalSet.has(word)) overlap += 1;
       }
-      const recall = overlap / labelTokens.length;
+      const recall = overlap / candidateLabel.length;
       const precision = overlap / evalTokens.length;
-      const score =
-        recall >= 0.6 && precision >= 0.5
-          ? ((recall + precision) / 2) * 0.65
-          : 0;
-      if (score > 0) {
-        if (!best || score > best.score) {
-          secondScore = best ? best.score : 0;
-          best = { choice, score };
-        } else if (score > secondScore) {
-          secondScore = score;
-        }
+      return recall >= 0.6 && precision >= 0.5
+        ? Math.min(1, ((recall + precision) / 2) * 0.65)
+        : 0;
+    };
+
+    const score = Math.max(
+      computePartialScore(labelTokens),
+      computePartialScore(strippedLabelTokens),
+    );
+    if (score > 0) {
+      if (!best || score > best.score) {
+        secondScore = best ? best.score : 0;
+        best = { choice, score };
+      } else if (score > secondScore) {
+        secondScore = score;
       }
     }
   }
@@ -562,11 +653,19 @@ function matchContentChoice(
 
   // Grade-1 short distinctive content answer (e.g. "ô" for "Chiếc ô", "dê" for "Con dê",
   // "xe" for "Xe đạp"): match uniquely when the child speaks a single non-classifier content
-  // word that belongs to exactly ONE visible choice label.
+  // word that belongs to exactly ONE visible choice label (never hijacking active ordinals
+  // like "ba" when >= 3 choices exist so ordinal ambiguity still prompts clarification).
   if (evalTokens.length === 1) {
     const singleToken = evalTokens[0];
+    const matchesActiveOrdinal = Boolean(
+      singleToken &&
+      ORDINAL_ALIASES.some(
+        (aliases, idx) => idx < choices.length && aliases.includes(singleToken),
+      ),
+    );
     if (
       singleToken &&
+      !matchesActiveOrdinal &&
       !CONTENT_CLASSIFIER_WORDS.has(singleToken) &&
       !FILLER_OR_POLITE_WORDS.has(singleToken) &&
       !CHOICE_MARKER_TOKENS.has(singleToken)
@@ -756,6 +855,29 @@ export function analyzeComprehensionVoiceInput(
     };
   }
   if (ordinalIdx >= 0 && ordinalIdx < choices.length) {
+    // Disambiguate non-positional ordinal (e.g. "chọn ba") when the ordinal token
+    // also appears inside another option's label (e.g. Choice A = "Ba con bò").
+    if (!hasPositionalMarker) {
+      const ordinalTokens = ORDINAL_ALIASES[ordinalIdx] ?? [];
+      const spokenOrdinalTokens = tokens.filter((t) =>
+        ordinalTokens.includes(t),
+      );
+      const conflictingLabelChoice = choices.find(
+        (choice, idx) =>
+          idx !== ordinalIdx &&
+          tokenizeVietnameseText(choice.label).some((tok) =>
+            spokenOrdinalTokens.includes(tok),
+          ),
+      );
+      if (conflictingLabelChoice) {
+        const ordinalChoice = choices[ordinalIdx];
+        return {
+          type: "AMBIGUOUS",
+          candidates: [conflictingLabelChoice, ordinalChoice],
+          clarificationPrompt: `Con chọn ${conflictingLabelChoice.label} hay ${ordinalChoice.label}?`,
+        };
+      }
+    }
     return {
       type: "CHOICE",
       choice: choices[ordinalIdx],

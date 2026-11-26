@@ -28,7 +28,10 @@ from app.providers.local_voice_provider import (
     LocalTimedWord,
     LocalTranscription,
 )
-from app.services.vietnamese_tts_normalizer import normalize_vietnamese_tts_text
+from app.services.vietnamese_tts_normalizer import (
+    normalize_vietnamese_tts_text,
+    project_chunk_spans_to_surface_words,
+)
 
 GOOGLE_STT_ENDPOINT = "https://speech.googleapis.com/v1/speech:recognize"
 GOOGLE_TTS_ENDPOINT = "https://texttospeech.googleapis.com/v1/text:synthesize"
@@ -345,10 +348,14 @@ class GoogleCloudVoiceProvider:
             round(sum(confidences) / len(confidences), 4) if confidences else None
         )
         return LocalTranscription(
-            text=" ".join(transcript_parts).strip(),
+            text=unicodedata.normalize("NFC", " ".join(transcript_parts).strip()),
             language_code="vi",
             language_probability=avg_conf,
-            words=words_out or None,
+            words=[
+                {**w, "text": unicodedata.normalize("NFC", str(w.get("text") or ""))}
+                for w in words_out
+            ]
+            or None,
             provider="google",
             model_version=GOOGLE_STT_MODEL_VERSION,
             fallback_used=True,
@@ -361,6 +368,7 @@ class GoogleCloudVoiceProvider:
         text: str,
         voice_id: str,
         speed: float,
+        for_phonics_step: bool = False,
     ) -> tuple[bytes, dict[str, Any]]:
         global _tts_cooldown_until
 
@@ -375,9 +383,9 @@ class GoogleCloudVoiceProvider:
         if meta is None:
             raise VoiceProviderError(status_code=404, code="VOICE_NOT_FOUND")
 
-        normalized_text = normalize_vietnamese_tts_text(text) or unicodedata.normalize(
-            "NFC", text.strip()
-        )
+        normalized_text = normalize_vietnamese_tts_text(
+            text, for_phonics_step=for_phonics_step
+        ) or unicodedata.normalize("NFC", text.strip())
         body = {
             "input": {"text": normalized_text},
             "voice": {
@@ -474,8 +482,9 @@ class GoogleCloudVoiceProvider:
         voice_id: str,
         speed: float = 1.0,
     ) -> LocalTimedSpeech:
+        passage = " ".join(words)
         wav_bytes, meta = await self._synthesize_wav_raw(
-            text=" ".join(words), voice_id=voice_id, speed=speed
+            text=passage, voice_id=voice_id, speed=speed
         )
         try:
             duration, _, _ = _wav_duration_and_pcm(wav_bytes)
@@ -484,18 +493,20 @@ class GoogleCloudVoiceProvider:
                 status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
             ) from exc
         duration = max(0.05, round(duration, 3))
-        weights = [max(1, len(w)) for w in words]
-        total = float(sum(weights))
-        cursor = 0.0
-        timed_words: list[LocalTimedWord] = []
-        for idx, weight in enumerate(weights):
-            span = duration * (weight / total)
-            start = min(duration, max(0.0, cursor))
-            end = min(duration, max(start, cursor + span))
-            timed_words.append(
-                LocalTimedWord(index=idx, start=round(start, 3), end=round(end, 3))
+        normalized_passage = normalize_vietnamese_tts_text(passage) or passage
+        projected = project_chunk_spans_to_surface_words(
+            words,
+            [(normalized_passage, 0.0, duration)],
+            duration,
+        )
+        timed_words = [
+            LocalTimedWord(
+                index=idx,
+                start=float(item["start"]),
+                end=float(item["end"]),
             )
-            cursor += span
+            for idx, item in enumerate(projected)
+        ]
 
         return LocalTimedSpeech(
             audio=wav_bytes,
@@ -527,7 +538,10 @@ class GoogleCloudVoiceProvider:
 
         for idx, step in enumerate(steps):
             wav_bytes, _ = await self._synthesize_wav_raw(
-                text=str(step["spoken_text"]), voice_id=voice_id, speed=speed
+                text=str(step["spoken_text"]),
+                voice_id=voice_id,
+                speed=speed,
+                for_phonics_step=True,
             )
             try:
                 _, step_sr, pcm = _wav_duration_and_pcm(wav_bytes)

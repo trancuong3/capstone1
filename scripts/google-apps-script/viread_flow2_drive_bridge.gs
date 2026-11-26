@@ -525,6 +525,33 @@ function handleGetFile_(payload) {
   };
 }
 
+function deleteFilePermanentlyOrTrash_(file) {
+  if (!file) {
+    return;
+  }
+  var fileId = "";
+  try {
+    fileId = String(file.getId() || "");
+  } catch (ignoreIdErr) {}
+  if (fileId && typeof Drive !== "undefined" && Drive && Drive.Files) {
+    try {
+      if (typeof Drive.Files.remove === "function") {
+        Drive.Files.remove(fileId);
+        return;
+      }
+      if (typeof Drive.Files["delete"] === "function") {
+        Drive.Files["delete"](fileId);
+        return;
+      }
+    } catch (ignoreApiErr) {}
+  }
+  try {
+    if (!file.isTrashed()) {
+      file.setTrashed(true);
+    }
+  } catch (ignoreTrashErr) {}
+}
+
 function handleDeleteFile_(payload) {
   var tree = ensureRootTree_();
   var cleanId = String(payload.file_id || "").trim();
@@ -552,7 +579,7 @@ function handleDeleteFile_(payload) {
             try {
               var partFile = DriveApp.getFileById(String(partId));
               if (!partFile.isTrashed() && isDescendantOfFolder_(partFile, tree.rootFolderId)) {
-                partFile.setTrashed(true);
+                deleteFilePermanentlyOrTrash_(partFile);
               }
             } catch (ignorePartErr) {}
           }
@@ -560,7 +587,7 @@ function handleDeleteFile_(payload) {
       }
     } catch (ignoreManifestErr) {}
   }
-  file.setTrashed(true);
+  deleteFilePermanentlyOrTrash_(file);
   return { ok: true, deleted: true };
 }
 
@@ -642,12 +669,10 @@ function handlePutResumeFile_(payload) {
     skip_dedup: true
   });
   var newFileId = putResult.file.file_id;
-  // Manifest-last cleanup: trash superseded copies ONLY after new file succeeded.
+  // Manifest-last cleanup: permanently delete (or trash) superseded copies ONLY after new file succeeded.
   for (var i = 0; i < prior.length; i++) {
     if (prior[i].getId() !== newFileId) {
-      try {
-        prior[i].setTrashed(true);
-      } catch (ignoreErr) {}
+      deleteFilePermanentlyOrTrash_(prior[i]);
     }
   }
   return putResult;
@@ -697,7 +722,7 @@ function handleDeleteResumeFile_(payload) {
   var deletedAny = false;
   for (var j = 0; j < matches.length; j++) {
     try {
-      matches[j].setTrashed(true);
+      deleteFilePermanentlyOrTrash_(matches[j]);
       deletedAny = true;
     } catch (ignoreErr) {}
   }

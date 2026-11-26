@@ -70,9 +70,55 @@ function createIdempotencyKey(): string {
 
 type OcrProcessingStage = "optimizing" | "uploading";
 
-const POLL_INTERVAL_WORKER_ONLINE_MS = 1_500;
+const POLL_INTERVAL_WORKER_ONLINE_MS = 2_000;
 const POLL_INTERVAL_WORKER_OFFLINE_MS = 4_000;
+const POLL_INTERVAL_MAX_MS = 8_000;
 const MAX_POLL_ATTEMPTS = 120;
+const MAX_CONSECUTIVE_POLL_ERRORS = 3;
+
+function isTransientPollError(error: unknown): boolean {
+  if (isServiceError(error)) {
+    return (
+      error.retryable ||
+      error.status === 0 ||
+      error.status === 429 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    );
+  }
+  return error instanceof TypeError;
+}
+
+function waitUntilVisible(signal: AbortSignal): Promise<void> {
+  if (
+    typeof document === "undefined" ||
+    document.visibilityState !== "hidden"
+  ) {
+    return Promise.resolve();
+  }
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      signal.removeEventListener("abort", onAbort);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") {
+        cleanup();
+        resolve();
+      }
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
@@ -161,9 +207,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
   useEffect(() => {
     const controller = new AbortController();
-    let didTimeout = false;
     const timer = globalThis.setTimeout(() => {
-      didTimeout = true;
       controller.abort();
     }, 15_000);
     let active = true;
@@ -194,12 +238,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         }
       } catch {
         if (!active) return;
-        if (didTimeout) {
-          setOcrWorkerStatus("unreachable");
-        } else {
-          // Keep non-blocking when health probe is unavailable in isolated test/offline envs.
-          setOcrWorkerStatus("ready");
-        }
+        setOcrWorkerStatus("unreachable");
       } finally {
         globalThis.clearTimeout(timer);
       }
@@ -224,6 +263,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       ocrGenerationRef.current += 1;
       ocrAbortRef.current?.abort();
       ocrAbortRef.current = null;
+      const jobIdToCancel = activeJobIdRef.current;
+      activeJobIdRef.current = null;
+      if (jobIdToCancel) {
+        void cancelScanPageOcrJob(jobIdToCancel).catch(() => undefined);
+      }
     };
   }, []);
 
@@ -413,10 +457,16 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             idempotencyKey,
           });
 
-          const pollDelay = currentJob.worker_online
+          const baseDelay = currentJob.worker_online
             ? POLL_INTERVAL_WORKER_ONLINE_MS
             : POLL_INTERVAL_WORKER_OFFLINE_MS;
+          const backoffStep = Math.min(4, Math.floor(attempt / 3));
+          const pollDelay = Math.min(
+            POLL_INTERVAL_MAX_MS,
+            Math.round(baseDelay * Math.pow(1.4, backoffStep)),
+          );
           await sleepWithAbort(pollDelay, controller.signal);
+          await waitUntilVisible(controller.signal);
 
           if (
             generation !== ocrGenerationRef.current ||
@@ -425,10 +475,38 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             return;
           }
 
-          currentJob = await getScanPageOcrJob(
-            currentJob.job_id,
-            controller.signal,
-          );
+          let transientFailures = 0;
+          while (true) {
+            try {
+              currentJob = await getScanPageOcrJob(
+                currentJob.job_id,
+                controller.signal,
+              );
+              break;
+            } catch (pollErr) {
+              if (
+                generation !== ocrGenerationRef.current ||
+                controller.signal.aborted ||
+                (pollErr instanceof Error && pollErr.name === "AbortError")
+              ) {
+                throw pollErr;
+              }
+              transientFailures += 1;
+              if (
+                !isTransientPollError(pollErr) ||
+                transientFailures > MAX_CONSECUTIVE_POLL_ERRORS
+              ) {
+                throw pollErr;
+              }
+              const retryDelay = Math.min(
+                POLL_INTERVAL_MAX_MS,
+                POLL_INTERVAL_WORKER_ONLINE_MS *
+                  Math.pow(2, transientFailures - 1),
+              );
+              await sleepWithAbort(retryDelay, controller.signal);
+              await waitUntilVisible(controller.signal);
+            }
+          }
         }
 
         activeJobIdRef.current = null;

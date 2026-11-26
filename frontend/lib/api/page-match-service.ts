@@ -185,7 +185,7 @@ export async function getScanPageOcrJob(
     `/reading/scan-page-ocr/jobs/${encodeURIComponent(jobId)}`,
     localOcrPageScanJobSchema,
     signal,
-    { method: "GET" },
+    { method: "GET", bypassCache: true },
   );
 }
 

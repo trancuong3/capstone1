@@ -299,20 +299,25 @@ describe("Deep Audit P0/P1 Regressions (Mũi A–F)", () => {
 
       expect(createdProtocols[0]).toEqual(["viread-stt-v1"]);
       expect(JSON.stringify(createdProtocols[0])).not.toContain("bearer.");
-      const startFrame = JSON.parse(sentFrames[0]);
+      const authFrame = JSON.parse(sentFrames[0]);
+      expect(authFrame).toEqual({ type: "auth", token: "initial-jwt-1" });
+      const startFrame = JSON.parse(sentFrames[1]);
       expect(startFrame.type).toBe("start");
-      expect(startFrame.token).toBe("initial-jwt-1");
+      expect(startFrame.token).toBeUndefined();
       expect(startFrame.vad_mode).toBe("client");
 
       // Simulate 4401 expired token close -> refreshes token & reconnects once
       latestSocket!.onclose?.({ code: 4401 } as CloseEvent);
       await new Promise((r) => setTimeout(r, 10));
       expect(refreshCalls).toBe(1);
-      expect(JSON.parse(sentFrames[1]).token).toBe("fresh-jwt-2");
+      expect(JSON.parse(sentFrames[2])).toEqual({
+        type: "auth",
+        token: "fresh-jwt-2",
+      });
 
       // Mark ready & emit final with words
       const receivedEvents: Array<{
-        words?: readonly unknown[];
+        words?: readonly unknown[] | null;
         text?: string;
       }> = [];
       rec.onresult = (ev) => {
@@ -529,14 +534,14 @@ describe("Deep Audit P0/P1 Regressions (Mũi A–F)", () => {
       await Promise.all([prefetchP, playP]);
       expect(synthesize).toHaveBeenCalledTimes(1);
 
-      // 2. Multi-chunk sentence-pipeline (>90 chars with punctuation): prefetch warms exact chunk keys play() consumes
+      // 2. Multi-chunk sentence-pipeline (>90 chars with punctuation, non-cache-targeted): prefetch warms exact chunk keys play() consumes
       synthesize.mockClear();
       const longChoice =
-        "Đáp án C: Bạn Mi mang chiếc ô màu xanh đến lớp học. Trời đổ mưa to nhưng Mi không bị ướt chút nào.";
-      await player.prefetch(longChoice, { coaching: true });
+        "Bạn Mi mang chiếc ô màu xanh rất đẹp đến lớp học. Trời đổ mưa to nhưng Mi không bị ướt chút nào.";
+      await player.prefetch(longChoice);
       const prefetchedChunks = synthesize.mock.calls.length;
       expect(prefetchedChunks).toBeGreaterThanOrEqual(2);
-      await player.play(longChoice, { coaching: true });
+      await player.play(longChoice);
       expect(synthesize).toHaveBeenCalledTimes(prefetchedChunks);
 
       // 3. wordSample speed parity when locked speed = 1.0 (> 0.95)

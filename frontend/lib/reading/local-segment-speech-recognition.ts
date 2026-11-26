@@ -11,8 +11,9 @@
  * (detected via non-native constructor source).
  */
 
+import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
-import type { SpeechService } from "@/lib/api/speech-service";
+import type { SpeechService, WordTimestamp } from "@/lib/api/speech-service";
 import {
   AndroidNativeSpeechRecognition,
   getCachedAndroidSpeechCapabilities,
@@ -70,8 +71,8 @@ export interface SegmentSpeechResultItem {
   readonly speechDurationMs?: number | null;
   /** Acoustic quality telemetry from captured 16kHz mono PCM. */
   readonly audioQuality?: SegmentAudioQuality;
-  /** Word-level timestamps returned by WS streaming STT or HTTP STT. */
-  readonly words?: readonly SegmentSpeechWordTiming[];
+  /** Optional word-level timestamps forwarded from streaming WS or HTTP STT. */
+  readonly words?: readonly WordTimestamp[] | null;
 }
 
 export interface SegmentSpeechEvent {
@@ -146,22 +147,65 @@ export function resetLocalSttEmergencyStateForTests(): void {
 }
 
 function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
-  if (inputRate === TARGET_SAMPLE_RATE || inputRate <= 0) {
+  if (
+    inputRate === TARGET_SAMPLE_RATE ||
+    inputRate <= 0 ||
+    input.length === 0
+  ) {
     return new Float32Array(input);
   }
   const ratio = inputRate / TARGET_SAMPLE_RATE;
   const outLength = Math.max(1, Math.round(input.length / ratio));
+  if (inputRate < TARGET_SAMPLE_RATE) {
+    const out = new Float32Array(outLength);
+    for (let i = 0; i < outLength; i += 1) {
+      const pos = i * ratio;
+      const idx = Math.floor(pos);
+      const frac = pos - idx;
+      const s0 = input[Math.min(idx, input.length - 1)];
+      const s1 = input[Math.min(idx + 1, input.length - 1)];
+      out[i] = s0 + (s1 - s0) * frac;
+    }
+    return out;
+  }
+
+  // 2nd-order Butterworth anti-aliasing low-pass filter (fc = 7.2 kHz) before
+  // decimation from 44.1/48 kHz -> 16 kHz to preserve Vietnamese sibilants (s/x, ch/tr).
+  const fc = Math.min(7_200, TARGET_SAMPLE_RATE * 0.45);
+  const omega = (2 * Math.PI * fc) / inputRate;
+  const sinW = Math.sin(omega);
+  const cosW = Math.cos(omega);
+  const alpha = sinW / (2 * Math.SQRT1_2);
+  const a0 = 1 + alpha;
+  const b0 = (1 - cosW) / 2 / a0;
+  const b1 = (1 - cosW) / a0;
+  const b2 = b0;
+  const a1 = (-2 * cosW) / a0;
+  const a2 = (1 - alpha) / a0;
+
+  const filtered = new Float32Array(input.length);
+  let x1 = input[0];
+  let x2 = input[0];
+  let y1 = input[0];
+  let y2 = input[0];
+  for (let i = 0; i < input.length; i += 1) {
+    const x0 = input[i];
+    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+    filtered[i] = y0;
+    x2 = x1;
+    x1 = x0;
+    y2 = y1;
+    y1 = y0;
+  }
+
   const out = new Float32Array(outLength);
   for (let i = 0; i < outLength; i += 1) {
-    const start = Math.floor(i * ratio);
-    const end = Math.min(input.length, Math.floor((i + 1) * ratio) + 1);
-    let sum = 0;
-    let count = 0;
-    for (let j = start; j < end; j += 1) {
-      sum += input[j];
-      count += 1;
-    }
-    out[i] = count > 0 ? sum / count : 0;
+    const pos = i * ratio;
+    const idx = Math.floor(pos);
+    const frac = pos - idx;
+    const s0 = filtered[Math.min(idx, filtered.length - 1)];
+    const s1 = filtered[Math.min(idx + 1, filtered.length - 1)];
+    out[i] = s0 + (s1 - s0) * frac;
   }
   return out;
 }
@@ -449,7 +493,24 @@ export function shouldPreferAndroidNativeStt(): boolean {
 }
 
 export function isTechnicalSttUnavailabilityError(error: unknown): boolean {
-  return isSttFallbackEligibleError(error);
+  if (!error) return false;
+  if (error instanceof Error && error.name === "AbortError") return false;
+  if (isSttFallbackEligibleError(error)) return true;
+  if (typeof error === "object") {
+    const rec = error as { code?: unknown; message?: unknown };
+    const code = typeof rec.code === "string" ? rec.code : "";
+    const message = typeof rec.message === "string" ? rec.message : "";
+    const combined = `${code} ${message}`;
+    return (
+      combined.includes("WASM STT") ||
+      combined.includes("Model fetch failed") ||
+      combined.includes("Model SHA-256") ||
+      combined.includes("Model size mismatch") ||
+      combined.includes("OfflineRecognizer") ||
+      combined.includes("WASM aborted")
+    );
+  }
+  return false;
 }
 
 function getBrowserSpeechRecognitionCtor():
@@ -512,7 +573,7 @@ async function resolveDefaultSttStreamEndpoint(
 
 interface ResolvedSegmentResult {
   readonly text: string;
-  readonly words?: readonly SegmentSpeechWordTiming[];
+  readonly words?: readonly WordTimestamp[] | null;
   readonly audioQuality?: SegmentAudioQuality;
 }
 
@@ -523,12 +584,13 @@ function normalizeWordTimings(
         start?: number;
         end?: number;
         type?: string;
+        logprob?: number | null;
       }[]
     | null
     | undefined,
-): SegmentSpeechWordTiming[] | undefined {
+): WordTimestamp[] | undefined {
   if (!rawWords?.length) return undefined;
-  const out: SegmentSpeechWordTiming[] = [];
+  const out: WordTimestamp[] = [];
   for (const w of rawWords) {
     const text = (w.text ?? "").normalize("NFC").trim();
     if (
@@ -544,6 +606,7 @@ function normalizeWordTimings(
         start: w.start,
         end: w.end,
         type: w.type ?? "word",
+        ...(w.logprob !== undefined ? { logprob: w.logprob } : {}),
       });
     }
   }
@@ -573,6 +636,7 @@ interface PendingWsSegment {
   readonly capturedInterims: string[];
   readonly onsetAt: number | null;
   readonly audioEndedAt: number;
+  readonly voicedDurationMs: number;
   readonly qualitySnapshot: SegmentAudioQuality;
   readonly audioToEncode: Float32Array;
   readonly resolve: (result: ResolvedSegmentResult | null) => void;
@@ -614,6 +678,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private segmentClippedSamples = 0;
   private segmentCheckedSamples = 0;
   private recentChunkClipRatios: number[] = [];
+  private segmentClippedFrames = 0;
   private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
   private epoch = 0;
@@ -1076,7 +1141,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           const alt = rawItem[a];
           if (alt) {
             copiedAlts.push({
-              transcript: String(alt.transcript ?? ""),
+              transcript: String(alt.transcript ?? "").normalize("NFC"),
               confidence:
                 typeof alt.confidence === "number" ? alt.confidence : undefined,
             });
@@ -1084,7 +1149,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
         if (copiedAlts.length === 0 && rawItem[0]) {
           copiedAlts.push({
-            transcript: String(rawItem[0].transcript ?? ""),
+            transcript: String(rawItem[0].transcript ?? "").normalize("NFC"),
             confidence:
               typeof rawItem[0].confidence === "number"
                 ? rawItem[0].confidence
@@ -1107,7 +1172,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           audioEndedAt: number;
           speechDurationMs: number | null;
           audioQuality?: SegmentAudioQuality;
-          words?: readonly SegmentSpeechWordTiming[];
+          words?: readonly WordTimestamp[] | null;
         } = {
           isFinal,
           length: copiedAlts.length,
@@ -1274,6 +1339,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.segmentClippedSamples = 0;
     this.segmentCheckedSamples = 0;
     this.recentChunkClipRatios = [];
+    this.segmentClippedFrames = 0;
     this.segmentInterims = [];
     this.wsStreamingCurrentSegment = false;
     this.wsPcmTail = new Float32Array(0);
@@ -1334,13 +1400,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     const signal = this.abortController?.signal;
     let rawText = "";
-    let rawWords: readonly SegmentSpeechWordTiming[] | undefined;
+    let rawWords: readonly WordTimestamp[] | null | undefined;
     if (this.usingWasmStt) {
       const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
         pending.audioToEncode,
         {
           signal,
           timeoutMs: 20_000,
+          voicedDurationMs: pending.voicedDurationMs,
         },
       );
       rawText = (wasmRes.text ?? "").normalize("NFC").trim();
@@ -1353,6 +1420,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         sessionId: pending.sessionId,
         pageId: pending.pageId,
         turnId: pending.turnId,
+        voicedDurationMs: pending.voicedDurationMs,
         source: "local_live_segment",
         signal,
         timeoutMs: 12_000,
@@ -1360,7 +1428,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures = 0;
       lastLocalSttOutageAt = 0;
       rawText = (res.text ?? "").normalize("NFC").trim();
-      rawWords = normalizeWordTimings(res.words);
+      rawWords = normalizeWordTimings(res.words) ?? null;
     }
     if (!rawText) return null;
     const reconciled = reconcileSegmentTranscriptWithInterims(
@@ -1368,10 +1436,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       pending.capturedInterims,
       pending.keyterms,
     );
-    return {
-      text: reconciled,
-      words: rawWords,
-    };
+    return reconciled ? { text: reconciled, words: rawWords } : null;
   }
 
   private async openSttWebSocket(forceRefresh = false): Promise<void> {
@@ -1399,7 +1464,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     let socket: WebSocket;
     try {
       // Never put JWT tokens in Sec-WebSocket-Protocol (`bearer.<jwt>` leaks in logs/proxies);
-      // authenticate cleanly via the first JSON "start" frame supported by voice.py.
+      // authenticate cleanly via first JSON "auth" frame followed by "start" frame.
       socket = new WebSocket(endpoint.wsUrl, ["viread-stt-v1"]);
       socket.binaryType = "arraybuffer";
     } catch {
@@ -1428,6 +1493,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       try {
         socket.send(
           JSON.stringify({
+            type: "auth",
+            token: endpoint.token,
+          }),
+        );
+        socket.send(
+          JSON.stringify({
             type: "start",
             session_id: this.wsStartedSessionId,
             page_id: this.wsStartedPageId,
@@ -1435,7 +1506,6 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             sample_rate: TARGET_SAMPLE_RATE,
             language: "vi",
             vad_mode: "client",
-            token: endpoint.token,
             ...(ctx.keyterms?.length ? { keyterms: ctx.keyterms } : {}),
           }),
         );
@@ -1451,12 +1521,6 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       let msg: {
         type?: string;
         text?: string;
-        words?: readonly {
-          text?: string;
-          start?: number;
-          end?: number;
-          type?: string;
-        }[];
         segment_id?: string;
         turn_id?: string;
         session_id?: string | null;
@@ -1464,6 +1528,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         epoch_ms?: number;
         audio_ended_ms?: number;
         code?: string;
+        words?: readonly WordTimestamp[] | null;
         audio_quality?: {
           status?: SegmentAudioQuality["status"];
           rms?: number;
@@ -1491,6 +1556,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       if (msg.type === "error") {
         if (msg.code === "UNAUTHORIZED" && !this.wsAuthRetriedForRun) {
           this.wsAuthRetriedForRun = true;
+          invalidateBrowserTokenCache();
           this.closeSttWebSocket();
           void this.openSttWebSocket(true);
           return;
@@ -1514,7 +1580,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         return;
       }
       const rawText = (msg.text ?? "").normalize("NFC").trim();
-      const mappedWords = normalizeWordTimings(msg.words);
+      const mappedWords = normalizeWordTimings(msg.words) ?? null;
       const mappedQuality: SegmentAudioQuality | undefined = msg.audio_quality
         ?.status
         ? {
@@ -1539,14 +1605,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
         const now =
           typeof performance !== "undefined" ? performance.now() : Date.now();
-        const activeSpeechMs = Math.max(
-          0,
-          ((this.speechSamples -
-            this.segmentPreRollSamples -
-            this.silenceSamples) /
-            TARGET_SAMPLE_RATE) *
-            1000,
-        );
+        const voicedSpeechMs = (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000;
+        const activeSpeechMs =
+          voicedSpeechMs > 0
+            ? voicedSpeechMs
+            : Math.max(
+                0,
+                ((this.speechSamples -
+                  this.segmentPreRollSamples -
+                  this.silenceSamples) /
+                  TARGET_SAMPLE_RATE) *
+                  1000,
+              );
         const qualitySnapshot =
           mappedQuality ?? this.computeAudioQuality(activeSpeechMs);
         const turnId =
@@ -1615,14 +1685,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       if (!rawText || (!this.active && !this.stopping)) return;
       const now =
         typeof performance !== "undefined" ? performance.now() : Date.now();
-      const activeSpeechMs = Math.max(
-        0,
-        ((this.speechSamples -
-          this.segmentPreRollSamples -
-          this.silenceSamples) /
-          TARGET_SAMPLE_RATE) *
-          1000,
-      );
+      const voicedSpeechMs = (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000;
+      const activeSpeechMs =
+        voicedSpeechMs > 0
+          ? voicedSpeechMs
+          : Math.max(
+              0,
+              ((this.speechSamples -
+                this.segmentPreRollSamples -
+                this.silenceSamples) /
+                TARGET_SAMPLE_RATE) *
+                1000,
+            );
       const qualitySnapshot =
         mappedQuality ?? this.computeAudioQuality(activeSpeechMs);
       const turnId =
@@ -1642,7 +1716,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         audioEndedAt: now,
         speechDurationMs: qualitySnapshot.speechDurationMs,
         audioQuality: qualitySnapshot,
-        words: mappedWords,
+        ...(mappedWords ? { words: mappedWords } : {}),
       };
       this.resultsHistory.push(item);
       const resultsObj: Record<number, SegmentSpeechResultItem> & {
@@ -1668,9 +1742,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         !this.wsAuthRetriedForRun &&
         this.active &&
         !this.stopping &&
+        !this.usingBrowserFallback &&
         capturedEpoch === this.epoch
       ) {
         this.wsAuthRetriedForRun = true;
+        invalidateBrowserTokenCache();
         this.closeSttWebSocket();
         void this.openSttWebSocket(true);
         return;
@@ -2058,6 +2134,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       if (abs > peak) peak = abs;
       if (abs >= 0.99) clippedInChunk += 1;
     }
+    const isClippedChunk =
+      clippedInChunk >= 16 && clippedInChunk / Math.max(1, chunk.length) > 0.05;
     const rms = Math.sqrt(sumSq / Math.max(1, chunk.length));
     const chunkClipRatio = clippedInChunk / Math.max(1, chunk.length);
     const onsetThreshold = Math.max(
@@ -2081,6 +2159,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         this.segmentClippedSamples = clippedInChunk;
         this.segmentCheckedSamples = chunk.length;
         this.recentChunkClipRatios = [chunkClipRatio];
+        this.segmentClippedFrames = isClippedChunk ? 1 : 0;
         const ctx = this.getContext?.() ?? {};
         const turnId =
           this.wsCurrentTurnId ??
@@ -2141,6 +2220,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.voicedSamples += chunk.length;
       this.segmentSumSq += sumSq;
       if (peak > this.segmentPeak) this.segmentPeak = peak;
+      if (isClippedChunk) this.segmentClippedFrames += 1;
     }
 
     const silenceMs = (this.silenceSamples / TARGET_SAMPLE_RATE) * 1000;
@@ -2186,8 +2266,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private computeAudioQuality(speechDurationMs: number): SegmentAudioQuality {
-    const voicedDenom = Math.max(1, this.voicedSamples);
-    const rms = Math.sqrt(this.segmentSumSq / voicedDenom);
+    // Compute RMS over voiced frames only (never diluted by pre-roll / tail silence).
+    const rmsDenominator =
+      this.voicedSamples > 0
+        ? this.voicedSamples
+        : Math.max(1, this.speechSamples);
+    const rms = Math.sqrt(this.segmentSumSq / rmsDenominator);
     const peak = this.segmentPeak;
     const clipRatio =
       this.segmentClippedSamples / Math.max(1, this.segmentCheckedSamples);
@@ -2195,6 +2279,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.recentChunkClipRatios.filter((r) => r >= 0.1).length >= 3 &&
       this.segmentClippedSamples >= 480;
     const isClipped =
+      this.segmentClippedFrames >= 3 ||
       (clipRatio >= 0.05 && this.segmentClippedSamples >= 480) ||
       sustainedWindowClip;
     let status: SegmentAudioQuality["status"] = "OK";
@@ -2245,12 +2330,19 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       combined.set(part, offset);
       offset += part.length;
     }
-    const activeSpeechMs = Math.max(
+    const voicedDurationMs = Math.max(
       0,
-      ((total - this.segmentPreRollSamples - this.silenceSamples) /
-        TARGET_SAMPLE_RATE) *
-        1000,
+      Math.round((this.voicedSamples / TARGET_SAMPLE_RATE) * 1000),
     );
+    const activeSpeechMs =
+      voicedDurationMs > 0
+        ? voicedDurationMs
+        : Math.max(
+            0,
+            ((total - this.segmentPreRollSamples - this.silenceSamples) /
+              TARGET_SAMPLE_RATE) *
+              1000,
+          );
     const qualitySnapshot = this.computeAudioQuality(activeSpeechMs);
     const onsetAt = this.segmentOnsetAt;
     const capturedEpoch = this.epoch;
@@ -2267,6 +2359,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       ? getBrowserWasmSttClient().transcribeSamples(combined, {
           signal: interimCtrl.signal,
           timeoutMs: 4_000,
+          voicedDurationMs,
         })
       : this.speechService.transcribe(encodeFloat32ToWav16kBlob(combined), {
           filename: "interim.wav",
@@ -2275,6 +2368,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           sessionId: ctx.sessionId ?? null,
           pageId: ctx.pageId ?? null,
           turnId: interimTurnId,
+          voicedDurationMs,
           source: "local_live_interim",
           signal: interimCtrl.signal,
           timeoutMs: 3_500,
@@ -2346,6 +2440,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       })
       .catch((err) => {
         if (interimCtrl.signal.aborted) return;
+        if (usedWasm && this.usingWasmStt) {
+          this.usingWasmStt = false;
+          this.tryActivateBrowserFallback();
+          return;
+        }
         if (isTechnicalSttUnavailabilityError(err)) {
           this.recordTechnicalFailureAndMaybeFallback(err);
         }
@@ -2369,18 +2468,25 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       return;
     }
     const total = this.speechSamples;
+    const voicedDurationMs = Math.max(
+      0,
+      Math.round((this.voicedSamples / TARGET_SAMPLE_RATE) * 1000),
+    );
     const silenceTailSamples = this.silenceSamples;
     const capturedInterims = this.segmentInterims;
     const capturedEpoch = this.epoch;
     const onsetAt = this.segmentOnsetAt;
     const audioEndedAt =
       typeof performance !== "undefined" ? performance.now() : Date.now();
-    const activeSpeechMs = Math.max(
-      0,
-      ((total - this.segmentPreRollSamples - silenceTailSamples) /
-        TARGET_SAMPLE_RATE) *
-        1000,
-    );
+    const activeSpeechMs =
+      voicedDurationMs > 0
+        ? voicedDurationMs
+        : Math.max(
+            0,
+            ((total - this.segmentPreRollSamples - silenceTailSamples) /
+              TARGET_SAMPLE_RATE) *
+              1000,
+          );
     const qualitySnapshot = this.computeAudioQuality(activeSpeechMs);
     const combined = new Float32Array(total);
     let offset = 0;
@@ -2443,7 +2549,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         isFinal: true,
         length: 1,
         0: {
-          transcript: text,
+          transcript: text.normalize("NFC"),
           // 0 denotes uncalibrated confidence so recognition-evidence treats it honestly
           confidence: 0,
         },
@@ -2456,7 +2562,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         audioEndedAt,
         speechDurationMs: effectiveQuality.speechDurationMs,
         audioQuality: effectiveQuality,
-        words: result?.words,
+        ...(result?.words ? { words: result.words } : {}),
       };
       this.resultsHistory.push(item);
       const resultsObj: Record<number, SegmentSpeechResultItem> & {
@@ -2479,6 +2585,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       !this.wsDisabledForRun;
 
     this.wsCurrentTurnId = canFlushViaWs ? nextTurn : null;
+    let attemptedWasm = false;
 
     const responsePromise: Promise<ResolvedSegmentResult | null> = canFlushViaWs
       ? new Promise<ResolvedSegmentResult | null>((resolve) => {
@@ -2492,6 +2599,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             capturedInterims,
             onsetAt,
             audioEndedAt,
+            voicedDurationMs,
             qualitySnapshot,
             audioToEncode,
             resolve,
@@ -2519,6 +2627,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 type: "flush",
                 turn_id: turnId,
                 next_turn_id: nextTurn,
+                voiced_duration_ms: voicedDurationMs,
               }),
             );
           } catch {
@@ -2539,11 +2648,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         })
       : (() => {
           const transcribeWithWasm = async () => {
+            attemptedWasm = true;
             const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
               audioToEncode,
               {
                 signal,
                 timeoutMs: 20_000,
+                voicedDurationMs,
               },
             );
             recordSttEngineUsage({
@@ -2554,8 +2665,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             });
             return {
               text: wasmRes.text,
-              words: undefined as
-                readonly SegmentSpeechWordTiming[] | undefined,
+              words: null as readonly WordTimestamp[] | null,
               fromWasm: true as const,
             };
           };
@@ -2572,13 +2682,14 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               sessionId: ctx.sessionId ?? null,
               pageId: ctx.pageId ?? null,
               turnId,
+              voicedDurationMs,
               source: "local_live_segment",
               signal,
               timeoutMs: 12_000,
             });
             return {
               text: res.text,
-              words: normalizeWordTimings(res.words),
+              words: normalizeWordTimings(res.words) ?? null,
               fromWasm: false as const,
             };
           };
@@ -2596,6 +2707,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 throw err;
               }
               if (this.usingWasmStt) {
+                // Tier 1 WASM failed -> fall back immediately to Tier 3 (Android Native / Web Speech).
+                this.usingWasmStt = false;
+                if (this.tryActivateBrowserFallback()) {
+                  return {
+                    text: "",
+                    words: null as readonly WordTimestamp[] | null,
+                    fromWasm: true as const,
+                  };
+                }
                 throw err;
               }
               if (
@@ -2603,7 +2723,19 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 this.recordTechnicalFailureAndMaybeFallback(err)
               ) {
                 if (this.usingWasmStt) {
-                  return transcribeWithWasm();
+                  try {
+                    return await transcribeWithWasm();
+                  } catch (wasmErr) {
+                    this.usingWasmStt = false;
+                    if (this.tryActivateBrowserFallback()) {
+                      return {
+                        text: "",
+                        words: null as readonly WordTimestamp[] | null,
+                        fromWasm: true as const,
+                      };
+                    }
+                    throw wasmErr;
+                  }
                 }
                 throw err;
               }
@@ -2632,10 +2764,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
               capturedInterims,
               ctx.keyterms,
             );
-            return {
-              text: reconciled,
-              words: res.words,
-            };
+            return reconciled ? { text: reconciled, words: res.words } : null;
           });
         })();
 
@@ -2647,21 +2776,17 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         deliverFinalResult(result);
       })
       .catch((err) => {
+        if (signal?.aborted || capturedEpoch !== this.epoch) return;
+        const isWasmFailure =
+          attemptedWasm && !(err instanceof Error && err.name === "AbortError");
         if (
-          isTechnicalSttUnavailabilityError(err) &&
+          (isTechnicalSttUnavailabilityError(err) || isWasmFailure) &&
           !this.usingBrowserFallback
         ) {
-          if (
-            !this.canActivateBrowserFallback() &&
-            !detectBrowserWasmSttSupport().supported
-          ) {
-            this.tripServiceCircuitBreaker();
-          } else {
-            this.active = false;
-            this.closeSttWebSocket();
-            this.teardownAudioGraph();
-            this.onerror?.({ error: "stt-unavailable" });
+          if (this.tryActivateBrowserFallback()) {
+            return;
           }
+          this.tripServiceCircuitBreaker();
         }
       })
       .finally(() => {

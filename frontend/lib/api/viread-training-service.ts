@@ -135,6 +135,31 @@ const storageSummarySchema = z.object({
   outbox_blocked: z.number().int(),
   outbox_skipped: z.number().int(),
   outbox_done: z.number().int(),
+  flow2_blockers: z.array(z.string()).optional(),
+});
+
+const workerStatusSchema = z.object({
+  local_training_enabled: z.boolean(),
+  local_gpu_ready: z.boolean(),
+  local_capacity: z.record(z.string(), z.unknown()).optional(),
+  web_heavy_workers_disabled: z.boolean(),
+  execution_mode: z.string(),
+});
+
+const flow2TriggerResponseSchema = z.object({
+  scheduled: z.number().int(),
+  reason: z.string(),
+  job_id: z.guid().nullable().optional(),
+  status: z.string().nullable().optional(),
+  target: z.string().nullable().optional(),
+  dataset_version_id: z.guid().nullable().optional(),
+  manifest_sha256: z.string().nullable().optional(),
+  config_sha256: z.string().nullable().optional(),
+  parent_checkpoint_sha256: z.string().nullable().optional(),
+  generation: z.number().int().nullable().optional(),
+  train_count: z.number().int().nullable().optional(),
+  validation_count: z.number().int().nullable().optional(),
+  locked_test_ready: z.boolean().optional(),
 });
 
 const overviewSchema = z.object({
@@ -149,15 +174,15 @@ const overviewSchema = z.object({
   jobs: z
     .array(
       z.object({
-        job_id: z.uuid(),
+        job_id: z.guid(),
         profile: z.string(),
         target: z.string(),
         status: z.string(),
-        dataset_version_id: z.uuid(),
+        dataset_version_id: z.guid(),
         manifest_sha256: z.string(),
         config_sha256: z.string(),
         parent_checkpoint_sha256: z.string(),
-        run_id: z.uuid().nullable(),
+        run_id: z.guid().nullable(),
         run_status: z.string().nullable().optional(),
         run_config_sha256: z.string().nullable().optional(),
         generation: z.number().int().optional(),
@@ -176,7 +201,7 @@ const overviewSchema = z.object({
           .datetime({ offset: true })
           .nullable()
           .optional(),
-        locked_test_version_id: z.uuid().nullable().optional(),
+        locked_test_version_id: z.guid().nullable().optional(),
         locked_test_manifest_sha256: z.string().nullable().optional(),
         created_at: z.iso.datetime({ offset: true }),
         updated_at: z.iso.datetime({ offset: true }),
@@ -185,7 +210,7 @@ const overviewSchema = z.object({
     .default([]),
   runs: z.array(
     z.object({
-      run_id: z.uuid(),
+      run_id: z.guid(),
       profile: z.string(),
       status: z.string(),
       parent_checkpoint_sha256: z.string(),
@@ -198,8 +223,8 @@ const overviewSchema = z.object({
   ),
   benchmarks: z.array(
     z.object({
-      benchmark_id: z.uuid(),
-      run_id: z.uuid(),
+      benchmark_id: z.guid(),
+      run_id: z.guid(),
       gate_status: z.string(),
       sample_count: z.number().int(),
       group_count: z.number().int(),
@@ -217,7 +242,7 @@ const overviewSchema = z.object({
       storage_provider: z.string().nullable().optional(),
       drive_file_id: z.string().nullable().optional(),
       profile: z.string(),
-      decision_id: z.uuid().nullable(),
+      decision_id: z.guid().nullable(),
       updated_at: z.iso.datetime({ offset: true }),
       version_label: z.string().nullable().optional(),
       weights_filename: z.string().nullable().optional(),
@@ -233,7 +258,7 @@ const overviewSchema = z.object({
   locked_test: z
     .object({
       status: z.string(),
-      version_id: z.uuid().nullable(),
+      version_id: z.guid().nullable(),
       manifest_sha256: z.string().nullable(),
       sample_count: z.number().int(),
       group_count: z.number().int(),
@@ -248,9 +273,12 @@ const overviewSchema = z.object({
   google_drive: driveStatusSchema.nullable().optional(),
   runtime_model: runtimeModelSchema.nullable().optional(),
   storage_summary: storageSummarySchema.nullable().optional(),
+  worker_status: workerStatusSchema.nullable().optional(),
+  flow2_blockers: z.array(z.string()).optional(),
 });
 
 export type VireadTrainingOverview = z.infer<typeof overviewSchema>;
+export type Flow2TriggerResult = z.infer<typeof flow2TriggerResponseSchema>;
 export type GoogleDriveTrainingStatus = z.infer<typeof driveStatusSchema>;
 export type GoogleDriveConnectStartResult = z.infer<
   typeof driveConnectStartSchema
@@ -268,7 +296,7 @@ const flow1ChunkResponseSchema = z.object({
 });
 
 const flow1ActivationResponseSchema = z.object({
-  decision_id: z.uuid(),
+  decision_id: z.guid(),
   active_model: z.object({
     checkpoint_sha256: z.string(),
     storage_path: z.string(),
@@ -292,6 +320,7 @@ export type Flow1ModelActivationResult = z.infer<
 
 export interface VireadTrainingService {
   overview(): Promise<VireadTrainingOverview>;
+  triggerFlow2?(): Promise<Flow2TriggerResult>;
   driveStatus(): Promise<GoogleDriveTrainingStatus>;
   startDriveConnect(
     redirectUri?: string,
@@ -372,6 +401,13 @@ export function createVireadTrainingService(): VireadTrainingService {
   return {
     overview: () =>
       requestApi("/books/admin/viread-training/overview", overviewSchema),
+    triggerFlow2: () =>
+      requestApi(
+        "/books/admin/viread-training/flow2/trigger",
+        flow2TriggerResponseSchema,
+        undefined,
+        { method: "POST" },
+      ),
     driveStatus: () =>
       requestApi(
         "/books/admin/viread-training/drive/status",
@@ -438,14 +474,14 @@ export function createVireadTrainingService(): VireadTrainingService {
       ),
     requestEvaluation: (jobId, evaluationType) =>
       requestApi(
-        `/books/admin/viread-training/jobs/${jobId}/evaluate`,
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}/evaluate`,
         z.object({
-          job_id: z.uuid(),
-          run_id: z.uuid(),
+          job_id: z.guid(),
+          run_id: z.guid(),
           status: z.string(),
           operation: z.string(),
           evaluation_type: z.string(),
-          cohort_id: z.uuid(),
+          cohort_id: z.guid(),
           sample_count: z.number().int(),
           group_count: z.number().int(),
           trainer_will_run: z.boolean(),
@@ -455,18 +491,18 @@ export function createVireadTrainingService(): VireadTrainingService {
       ),
     retry: (jobId) =>
       requestApi(
-        `/books/admin/viread-training/jobs/${jobId}/retry`,
-        z.object({ job_id: z.uuid(), status: z.string() }),
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}/retry`,
+        z.object({ job_id: z.guid(), status: z.string() }),
         undefined,
         { method: "POST" },
       ),
     discardMismatchedCandidate: (jobId) =>
       requestApi(
-        `/books/admin/viread-training/jobs/${jobId}/discard-mismatched-candidate`,
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}/discard-mismatched-candidate`,
         z.object({
-          job_id: z.uuid(),
+          job_id: z.guid(),
           status: z.string(),
-          run_id: z.uuid(),
+          run_id: z.guid(),
           checkpoint_retained: z.boolean(),
           candidate_promoted: z.boolean(),
         }),
@@ -475,11 +511,11 @@ export function createVireadTrainingService(): VireadTrainingService {
       ),
     closeUnbenchmarkedCandidate: (jobId) =>
       requestApi(
-        `/books/admin/viread-training/jobs/${jobId}/close-unbenchmarked-candidate`,
+        `/books/admin/viread-training/jobs/${encodeURIComponent(jobId)}/close-unbenchmarked-candidate`,
         z.object({
-          job_id: z.uuid(),
+          job_id: z.guid(),
           status: z.string(),
-          run_id: z.uuid(),
+          run_id: z.guid(),
           checkpoint_retained: z.boolean(),
           candidate_promoted: z.boolean(),
         }),

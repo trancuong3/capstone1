@@ -15,17 +15,33 @@
  * Mọi mốc thời gian là mili-giây của cùng một đồng hồ đơn điệu.
  */
 
+import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 
 export interface EchoGuardOptions {
   /** Echo can outlive the player's `ended` event (room reverb, speaker delay). */
   readonly onsetGraceMs?: number;
+  /** Keep text-overlap check active after `endedAt` even when `onsetAt` is present. */
+  readonly onsetTailOverlapMs?: number;
   /** Fallback window when the recorder cannot tell when speech started. */
   readonly tailMs?: number;
   /** Share of segment words that must come from the sample to call it echo. */
   readonly overlapThreshold?: number;
   /** Forget playbacks older than this. */
   readonly retainMs?: number;
+}
+
+function defaultOnsetGraceMs(): number {
+  if (isAndroidNativeSpeechAvailable()) {
+    return 400;
+  }
+  if (
+    typeof navigator !== "undefined" &&
+    /android/i.test(navigator.userAgent ?? "")
+  ) {
+    return 400;
+  }
+  return 250;
 }
 
 export type EchoVerdictReason =
@@ -53,12 +69,14 @@ interface PlaybackRecord {
 export class EchoGuard {
   private readonly records: PlaybackRecord[] = [];
   private readonly onsetGraceMs: number;
+  private readonly onsetTailOverlapMs: number;
   private readonly tailMs: number;
   private readonly overlapThreshold: number;
   private readonly retainMs: number;
 
   constructor(options: EchoGuardOptions = {}) {
-    this.onsetGraceMs = options.onsetGraceMs ?? 250;
+    this.onsetGraceMs = options.onsetGraceMs ?? defaultOnsetGraceMs();
+    this.onsetTailOverlapMs = options.onsetTailOverlapMs ?? 800;
     this.tailMs = options.tailMs ?? 1500;
     this.overlapThreshold = options.overlapThreshold ?? 0.6;
     this.retainMs = options.retainMs ?? 30_000;
@@ -110,6 +128,19 @@ export class EchoGuard {
           return {
             accept: false,
             reason: "onset-during-playback",
+            playbackId: record.id,
+          };
+        }
+        const onsetSinceEnd = segment.onsetAt - record.endedAt;
+        if (
+          onsetSinceEnd >= 0 &&
+          onsetSinceEnd <= this.onsetTailOverlapMs &&
+          tokens.length > 0 &&
+          this.overlap(tokens, record.tokens) >= this.overlapThreshold
+        ) {
+          return {
+            accept: false,
+            reason: "tail-overlap",
             playbackId: record.id,
           };
         }

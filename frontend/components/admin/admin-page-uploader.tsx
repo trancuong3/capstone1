@@ -7,10 +7,11 @@ import {
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { UploadCloud } from "lucide-react";
+import { RefreshCw, UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { getApiBaseUrl } from "@/lib/supabase/config";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
@@ -161,12 +162,59 @@ export function AdminPageUploader({
   const { pages } = useAdminServices();
   const [files, setFiles] = useState<File[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [workerStatus, setWorkerStatus] = useState<
+    "checking" | "ready" | "offline" | "unreachable"
+  >("checking");
+  const [healthNonce, setHealthNonce] = useState(0);
   const session = useSyncExternalStore(
     (onChange) => subscribeAdminBookUploadSession(bookId, onChange),
     () => getAdminBookUploadSession(bookId),
     () => emptyAdminBookUploadSession,
   );
   const lastCompletedRunIdRef = useRef(0);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    const timer = globalThis.setTimeout(() => controller.abort(), 10_000);
+    async function probeOcrWorker() {
+      try {
+        const res = await fetch(`${getApiBaseUrl()}/health`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!active) return;
+        if (!res.ok) {
+          setWorkerStatus("unreachable");
+          return;
+        }
+        const body = (await res.json()) as {
+          ocr?: { ready?: boolean; probe_degraded?: boolean };
+        };
+        if (!active) return;
+        if (body?.ocr?.probe_degraded) {
+          setWorkerStatus("unreachable");
+        } else if (body?.ocr?.ready === false) {
+          setWorkerStatus("offline");
+        } else {
+          setWorkerStatus("ready");
+        }
+      } catch {
+        if (!active) return;
+        setWorkerStatus("unreachable");
+      } finally {
+        globalThis.clearTimeout(timer);
+      }
+    }
+    void probeOcrWorker();
+    return () => {
+      active = false;
+      globalThis.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [healthNonce]);
 
   useEffect(() => {
     if (
@@ -309,6 +357,38 @@ export function AdminPageUploader({
         mỗi tệp). Sau khi bấm upload, tiến trình vẫn chạy và được giữ khi bạn
         chuyển sang màn hình khác trong cùng tab.
       </p>
+      {workerStatus === "offline" || workerStatus === "unreachable" ? (
+        <div
+          className="mb-4 flex flex-col gap-2"
+          data-testid="admin-ocr-worker-offline-banner"
+        >
+          <StatusMessage
+            title={
+              workerStatus === "offline"
+                ? "Máy chủ OCR Windows hiện đang tắt"
+                : "Chưa kiểm tra được trạng thái máy chủ OCR"
+            }
+            tone="warning"
+          >
+            {workerStatus === "offline"
+              ? "Bạn vẫn có thể upload ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi máy chủ OCR Windows hoạt động."
+              : "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc upload để xếp hàng OCR."}
+          </StatusMessage>
+          <Button
+            className="sm:w-auto sm:self-start"
+            onClick={() => {
+              setWorkerStatus("checking");
+              setHealthNonce((n) => n + 1);
+            }}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden className="size-4" />
+            Kiểm tra lại kết nối OCR
+          </Button>
+        </div>
+      ) : null}
       {formError || session.error ? (
         <StatusMessage className="mb-4" tone="error">
           {formError ?? session.error}

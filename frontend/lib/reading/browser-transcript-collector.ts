@@ -1,3 +1,4 @@
+import type { WordTimestamp } from "@/lib/api/speech-service";
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
 
 export interface SegmentAudioQualityMeta {
@@ -24,7 +25,7 @@ export interface SegmentResultMeta {
   readonly audioEndedAt?: number | null;
   readonly speechDurationMs?: number | null;
   readonly audioQuality?: SegmentAudioQualityMeta;
-  readonly words?: readonly SegmentWordTimingMeta[];
+  readonly words?: readonly WordTimestamp[] | null;
 }
 
 export interface BrowserRecognitionResultLike {
@@ -39,7 +40,7 @@ export interface BrowserRecognitionResultLike {
   readonly audioEndedAt?: number | null;
   readonly speechDurationMs?: number | null;
   readonly audioQuality?: SegmentAudioQualityMeta;
-  readonly words?: readonly SegmentWordTimingMeta[];
+  readonly words?: readonly WordTimestamp[] | null;
 }
 
 export interface BrowserRecognitionEventLike {
@@ -104,7 +105,7 @@ export class BrowserTranscriptCollector {
     for (let index = start; index < event.results.length; index += 1) {
       const result = event.results[index];
       if (!result?.isFinal || this.currentCycle.has(index)) continue;
-      const text = result[0]?.transcript?.trim();
+      const text = result[0]?.transcript?.normalize("NFC").trim();
       if (text) {
         const confidence = result[0]?.confidence;
         const usable = hasUsableBrowserConfidence(confidence);
@@ -163,8 +164,8 @@ export function resolveTranscriptForSegment(
   providerText: string | null | undefined,
   browserFinalText: string | null | undefined,
 ): string | null {
-  const preferred = browserFinalText?.trim();
+  const preferred = browserFinalText?.normalize("NFC").trim();
   if (preferred) return preferred;
-  const fallback = providerText?.trim();
+  const fallback = providerText?.normalize("NFC").trim();
   return fallback || null;
 }

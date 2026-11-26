@@ -6,9 +6,10 @@ from decimal import Decimal
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import case, func, literal_column, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -30,6 +31,25 @@ class TtsAudioCacheRepository:
     @staticmethod
     def _quantize_speed(speed: float) -> Decimal:
         return Decimal(f"{float(speed):.2f}")
+
+    def _get_dialect_name(self) -> str:
+        bind = getattr(self.db, "bind", None)
+        if bind is None:
+            try:
+                bind = self.db.get_bind()
+            except Exception:
+                bind = None
+        dialect_name = getattr(getattr(bind, "dialect", None), "name", "") if bind is not None else ""
+        return dialect_name if isinstance(dialect_name, str) else ""
+
+    @staticmethod
+    def _format_priority_expr(audio_formats: Sequence[str]):
+        order_map = {fmt: idx for idx, fmt in enumerate(audio_formats)}
+        return case(
+            order_map,
+            value=TtsAudioCacheEntry.AudioFormat,
+            else_=len(order_map),
+        )
 
     async def get_book_scope_info(self, book_id: UUID) -> dict[str, Any] | None:
         row = (
@@ -229,7 +249,10 @@ class TtsAudioCacheRepository:
         stmt = (
             select(TtsAudioCacheEntry)
             .where(*filters)
-            .order_by(TtsAudioCacheEntry.CreatedAt.desc())
+            .order_by(
+                self._format_priority_expr(audio_formats).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            )
             .limit(1)
         )
         exact = await self.db.scalar(stmt)
@@ -282,6 +305,7 @@ class TtsAudioCacheRepository:
             .where(*filters)
             .order_by(
                 func.abs(TtsAudioCacheEntry.Speed - q_speed).asc(),
+                self._format_priority_expr(audio_formats).asc(),
                 TtsAudioCacheEntry.CreatedAt.desc(),
             )
             .limit(1)
@@ -320,10 +344,14 @@ class TtsAudioCacheRepository:
         order_by = (
             [
                 func.abs(TtsAudioCacheEntry.Speed - q_speed).asc(),
+                self._format_priority_expr(audio_formats).asc(),
                 TtsAudioCacheEntry.CreatedAt.desc(),
             ]
             if allow_speed_fallback
-            else [TtsAudioCacheEntry.CreatedAt.desc()]
+            else [
+                self._format_priority_expr(audio_formats).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            ]
         )
         stmt = (
             select(TtsAudioCacheEntry)
@@ -332,6 +360,25 @@ class TtsAudioCacheRepository:
             .limit(max(1, min(int(limit), 16)))
         )
         return list((await self.db.scalars(stmt)).all())
+
+    async def has_active_entry_for_storage_path(
+        self,
+        storage_bucket: str,
+        storage_path: str,
+        *,
+        exclude_ids: Sequence[UUID] = (),
+    ) -> bool:
+        filters = [
+            TtsAudioCacheEntry.Status == "ACTIVE",
+            TtsAudioCacheEntry.StorageBucket == storage_bucket,
+            TtsAudioCacheEntry.StoragePath == storage_path,
+        ]
+        if exclude_ids:
+            filters.append(TtsAudioCacheEntry.Id.not_in(list(exclude_ids)))
+        found = await self.db.scalar(
+            select(TtsAudioCacheEntry.Id).where(*filters).limit(1)
+        )
+        return found is not None
 
     async def upsert_active_entry(
         self,
@@ -366,7 +413,7 @@ class TtsAudioCacheRepository:
             if scope == "PRIVATE"
             else TtsAudioCacheEntry.OwnerParentId.is_(None)
         )
-        existing = await self.db.scalar(
+        existing_stmt = (
             select(TtsAudioCacheEntry)
             .where(
                 TtsAudioCacheEntry.Status == "ACTIVE",
@@ -380,23 +427,109 @@ class TtsAudioCacheRepository:
             )
             .limit(1)
         )
+        existing = await self.db.scalar(existing_stmt)
         replaced: list[tuple[str, str]] = []
-        if existing is not None:
-            if (existing.StorageBucket, existing.StoragePath) != (storage_bucket, storage_path):
-                replaced.append((str(existing.StorageBucket), str(existing.StoragePath)))
-            existing.BookId = book_id if book_id is not None else existing.BookId
-            existing.PageId = page_id if page_id is not None else existing.PageId
-            existing.PageRevisionId = (
-                page_revision_id if page_revision_id is not None else existing.PageRevisionId
+        if existing is not None and (
+            existing.StorageBucket,
+            existing.StoragePath,
+        ) != (storage_bucket, storage_path):
+            replaced.append((str(existing.StorageBucket), str(existing.StoragePath)))
+
+        dialect_name = self._get_dialect_name()
+        if dialect_name == "postgresql":
+            new_id = uuid4()
+            pg_stmt = pg_insert(TtsAudioCacheEntry).values(
+                Id=new_id,
+                Scope=scope,
+                OwnerParentId=owner_parent_id,
+                BookId=book_id,
+                PageId=page_id,
+                PageRevisionId=page_revision_id,
+                ContentSha256=content_sha256,
+                NormalizedText=normalized_text,
+                VoiceId=voice_id,
+                ModelVersion=model_version,
+                Speed=q_speed,
+                AudioFormat=audio_format,
+                StorageBucket=storage_bucket,
+                StoragePath=storage_path,
+                ByteSize=int(byte_size),
+                DurationSeconds=duration_seconds,
+                WordTimingsJson=word_timings_json,
+                Status="ACTIVE",
+                LastAccessedAt=ts,
+                HitCount=0,
+                CreatedAt=ts,
+                UpdatedAt=ts,
             )
-            existing.NormalizedText = normalized_text
-            existing.StorageBucket = storage_bucket
-            existing.StoragePath = storage_path
-            existing.ByteSize = int(byte_size)
-            existing.DurationSeconds = duration_seconds
-            existing.WordTimingsJson = word_timings_json
-            existing.LastAccessedAt = ts
-            existing.UpdatedAt = ts
+            pg_stmt = pg_stmt.on_conflict_do_update(
+                index_elements=[
+                    TtsAudioCacheEntry.Scope,
+                    func.coalesce(
+                        TtsAudioCacheEntry.OwnerParentId,
+                        literal_column("'00000000-0000-0000-0000-000000000000'::uuid"),
+                    ),
+                    TtsAudioCacheEntry.ContentSha256,
+                    TtsAudioCacheEntry.VoiceId,
+                    TtsAudioCacheEntry.ModelVersion,
+                    TtsAudioCacheEntry.Speed,
+                    TtsAudioCacheEntry.AudioFormat,
+                ],
+                index_where=TtsAudioCacheEntry.Status == "ACTIVE",
+                set_={
+                    "book_id": func.coalesce(pg_stmt.excluded.book_id, TtsAudioCacheEntry.BookId),
+                    "page_id": func.coalesce(pg_stmt.excluded.page_id, TtsAudioCacheEntry.PageId),
+                    "page_revision_id": func.coalesce(
+                        pg_stmt.excluded.page_revision_id,
+                        TtsAudioCacheEntry.PageRevisionId,
+                    ),
+                    "normalized_text": pg_stmt.excluded.normalized_text,
+                    "storage_bucket": pg_stmt.excluded.storage_bucket,
+                    "storage_path": pg_stmt.excluded.storage_path,
+                    "byte_size": pg_stmt.excluded.byte_size,
+                    "duration_seconds": func.coalesce(
+                        pg_stmt.excluded.duration_seconds,
+                        TtsAudioCacheEntry.DurationSeconds,
+                    ),
+                    "word_timings_json": func.coalesce(
+                        pg_stmt.excluded.word_timings_json,
+                        TtsAudioCacheEntry.WordTimingsJson,
+                    ),
+                    "last_accessed_at": ts,
+                    "updated_at": ts,
+                },
+            ).returning(TtsAudioCacheEntry.Id)
+            persisted_id = await self.db.scalar(pg_stmt)
+            entry = await self.db.get(TtsAudioCacheEntry, persisted_id)
+            if entry is None:
+                entry = await self.db.scalar(existing_stmt)
+            assert entry is not None
+            return entry, replaced
+
+        def _apply_update(target_row: TtsAudioCacheEntry) -> None:
+            if (target_row.StorageBucket, target_row.StoragePath) != (
+                storage_bucket,
+                storage_path,
+            ) and (str(target_row.StorageBucket), str(target_row.StoragePath)) not in replaced:
+                replaced.append((str(target_row.StorageBucket), str(target_row.StoragePath)))
+            target_row.BookId = book_id if book_id is not None else target_row.BookId
+            target_row.PageId = page_id if page_id is not None else target_row.PageId
+            target_row.PageRevisionId = (
+                page_revision_id if page_revision_id is not None else target_row.PageRevisionId
+            )
+            target_row.NormalizedText = normalized_text
+            target_row.StorageBucket = storage_bucket
+            target_row.StoragePath = storage_path
+            target_row.ByteSize = int(byte_size)
+            if duration_seconds is not None:
+                target_row.DurationSeconds = duration_seconds
+            if word_timings_json is not None:
+                target_row.WordTimingsJson = word_timings_json
+            target_row.LastAccessedAt = ts
+            target_row.UpdatedAt = ts
+
+        if existing is not None:
+            _apply_update(existing)
             await self.db.flush()
             return existing, replaced
 
@@ -424,9 +557,22 @@ class TtsAudioCacheRepository:
             CreatedAt=ts,
             UpdatedAt=ts,
         )
-        self.db.add(entry)
-        await self.db.flush()
-        return entry, replaced
+        try:
+            if hasattr(self.db, "begin_nested"):
+                async with self.db.begin_nested():
+                    self.db.add(entry)
+                    await self.db.flush()
+            else:
+                self.db.add(entry)
+                await self.db.flush()
+            return entry, replaced
+        except IntegrityError:
+            raced = await self.db.scalar(existing_stmt)
+            if raced is None:
+                raise
+            _apply_update(raced)
+            await self.db.flush()
+            return raced, replaced
 
     async def _increment_daily_usage(
         self,
@@ -577,12 +723,15 @@ class TtsAudioCacheRepository:
             filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
         if exclude_ids:
             filters.append(TtsAudioCacheEntry.Id.not_in(list(exclude_ids)))
-        result = await self.db.execute(
+        stmt = (
             select(TtsAudioCacheEntry)
             .where(*filters)
             .order_by(TtsAudioCacheEntry.LastAccessedAt.asc(), TtsAudioCacheEntry.CreatedAt.asc())
             .limit(limit)
         )
+        if self._get_dialect_name() == "postgresql":
+            stmt = stmt.with_for_update(skip_locked=True)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def mark_entries_status(

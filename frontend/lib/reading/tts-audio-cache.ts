@@ -2,9 +2,11 @@
  * Persistent Browser TTS Audio Cache (IndexedDB LRU, max 50 MB).
  *
  * Security & privacy invariants:
- * - Caches ONLY `CATALOG` and `COACHING` audio clips.
- * - NEVER persists `PRIVATE` parent-book clips or responses carrying
- *   `Cache-Control: no-store` / `X-TTS-Scope: PRIVATE`.
+ * - Caches ONLY explicitly scoped `CATALOG` and `COACHING` audio clips.
+ * - NEVER persists `PRIVATE` parent-book clips or requests with `isPrivateBook: true`.
+ * - Decoupled from HTTP `Cache-Control: no-store` (which backend sends uniformly
+ *   to block shared HTTP proxy caching while allowing client IndexedDB storage
+ *   for verified `X-TTS-Scope: CATALOG|COACHING` clips).
  */
 
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
@@ -54,11 +56,7 @@ export function shouldPersistTtsCacheEntry(options: {
   isPrivateBook?: boolean;
 }): boolean {
   if (options.isPrivateBook) return false;
-  if (options.scope === "PRIVATE") return false;
-  if ((options.cacheControl ?? "").toLowerCase().includes("no-store")) {
-    return false;
-  }
-  return true;
+  return options.scope === "CATALOG" || options.scope === "COACHING";
 }
 
 export function buildTtsBrowserCacheKey(input: {

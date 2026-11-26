@@ -49,6 +49,8 @@ from test_flow2_google_drive_storage import InMemoryGoogleDriveServer
 
 def _make_sample_page_png(width: int = 400, height: int = 200, color=(255, 255, 255)) -> bytes:
     img = Image.new("RGB", (width, height), color)
+    for x in range(4, width, 10):
+        img.paste((15, 15, 15), (x, 0, min(x + 2, width), height))
     buf = BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()

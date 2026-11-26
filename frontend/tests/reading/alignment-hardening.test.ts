@@ -170,12 +170,21 @@ describe("EchoGuard", () => {
     });
   });
 
-  it("accepts the child's own imitation that starts after the echo grace", () => {
+  it("accepts the child's own imitation after tail-overlap window while blocking early reverb overlap", () => {
     const guard = new EchoGuard();
     guard.playbackStarted("a", "cho", 1000);
     guard.playbackEnded("a", 1600);
+    // Reverb echo repeating exact TTS text at +400ms (within 800ms tail-overlap window) is blocked
     expect(
-      guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2000 }).accept,
+      guard.evaluate({ text: "cho", receivedAt: 2200, onsetAt: 2000 }),
+    ).toMatchObject({ accept: false, reason: "tail-overlap" });
+    // Distinct non-overlapping child speech at +400ms is accepted immediately
+    expect(
+      guard.evaluate({ text: "mèo", receivedAt: 2200, onsetAt: 2000 }).accept,
+    ).toBe(true);
+    // Child repeating exact TTS word after 800ms tail-overlap window is accepted
+    expect(
+      guard.evaluate({ text: "cho", receivedAt: 2800, onsetAt: 2450 }).accept,
     ).toBe(true);
   });
 

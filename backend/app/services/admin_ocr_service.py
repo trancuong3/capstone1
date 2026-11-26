@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import hashlib
 import inspect
 import json
@@ -40,7 +41,9 @@ from app.schemas.book import (
 )
 from app.services.document_rasterizer_service import (
     MAX_DOCUMENT_BYTES,
+    iter_rasterized_spooled_document,
     rasterize_uploaded_document,
+    spool_upload_file,
 )
 from app.services.ocr_adjudication import adjudicate_word
 from app.services.tts_audio_cache_service import invalidate_tts_cache_best_effort
@@ -1804,102 +1807,122 @@ class AdminOcrService:
             if book_lifecycle_status != "ACTIVE":
                 raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
 
-            raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
-            filename = file.filename
-            content_type = file.content_type
+            spooled = await spool_upload_file(file, max_bytes=MAX_DOCUMENT_BYTES)
         finally:
             await self._close_upload_file(file)
-        if len(raw_data) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
-
-        bundle = await run_in_threadpool(
-            rasterize_uploaded_document,
-            filename=filename,
-            content_type=content_type,
-            data=raw_data,
-        )
-
         results: list[AdminDocumentPageResultRead] = []
         created_pages_count = 0
         skipped_empty_count = 0
         failed_pages_count = 0
+        total_source_pages = 0
 
         empty_details = {
             "No usable text was detected; check the image quality",
             "OCR produced empty text",
             "OCR did not produce any valid word",
         }
-        fatal_statuses = {403, 404, 409, 503}
+        fatal_statuses = {403, 404, 409, 503, 504}
+        fatal_triggered: tuple[int, str] | None = None
 
-        for index, page_item in enumerate(bundle.pages):
-            page_upload_id = (
-                uuid5(upload_id, f"source-page:{page_item.source_page}:{bundle.source_sha256}")
-                if upload_id is not None
-                else None
-            )
-            try:
-                page_number, revision = await self._ingest_validated_page_image(
-                    actor_id,
-                    book_id,
-                    data=page_item.image_bytes,
-                    content_type=page_item.content_type,
-                    extension=page_item.extension,
-                    width=page_item.width,
-                    height=page_item.height,
-                    upload_id=page_upload_id,
-                    started_at=started_at,
-                )
-                created_pages_count += 1
-                results.append(
-                    AdminDocumentPageResultRead(
-                        source_page=page_item.source_page,
-                        status="SUCCEEDED",
-                        page_id=revision.page_id,
-                        page_number=page_number,
-                        revision=revision,
-                    )
-                )
-            except HTTPException as exc:
-                detail_text = str(exc.detail) if exc.detail is not None else "OCR failed"
-                if exc.status_code == 422 and detail_text in empty_details:
-                    skipped_empty_count += 1
-                    results.append(
-                        AdminDocumentPageResultRead(
-                            source_page=page_item.source_page,
-                            status="SKIPPED_EMPTY",
-                            error_code="EMPTY_PAGE",
-                            error_message="Trang không có chữ nhận dạng được nên đã bỏ qua.",
-                        )
-                    )
-                    continue
+        try:
+            with iter_rasterized_spooled_document(spooled) as (
+                file_name,
+                source_format,
+                source_sha256,
+                page_iter,
+            ):
+                def _next_page(it):
+                    return next(it, None)
 
-                if exc.status_code in fatal_statuses:
-                    if created_pages_count == 0:
-                        raise
-                    for remaining_item in bundle.pages[index:]:
+                while True:
+                    page_item = await run_in_threadpool(_next_page, page_iter)
+                    if page_item is None:
+                        break
+                    total_source_pages += 1
+                    if fatal_triggered is not None:
+                        fatal_status_code, fatal_detail_text = fatal_triggered
                         failed_pages_count += 1
                         results.append(
                             AdminDocumentPageResultRead(
-                                source_page=remaining_item.source_page,
+                                source_page=page_item.source_page,
                                 status="FAILED",
-                                error_code=f"HTTP_{exc.status_code}",
-                                error_message=detail_text,
+                                error_code=f"HTTP_{fatal_status_code}",
+                                error_message=fatal_detail_text,
                             )
                         )
-                    break
+                        del page_item
+                        continue
 
-                failed_pages_count += 1
-                results.append(
-                    AdminDocumentPageResultRead(
-                        source_page=page_item.source_page,
-                        status="FAILED",
-                        error_code=f"HTTP_{exc.status_code}",
-                        error_message=detail_text,
+                    page_upload_id = (
+                        uuid5(upload_id, f"source-page:{page_item.source_page}:{source_sha256}")
+                        if upload_id is not None
+                        else None
                     )
-                )
+                    try:
+                        page_number, revision = await self._ingest_validated_page_image(
+                            actor_id,
+                            book_id,
+                            data=page_item.image_bytes,
+                            content_type=page_item.content_type,
+                            extension=page_item.extension,
+                            width=page_item.width,
+                            height=page_item.height,
+                            upload_id=page_upload_id,
+                            started_at=started_at,
+                        )
+                        created_pages_count += 1
+                        results.append(
+                            AdminDocumentPageResultRead(
+                                source_page=page_item.source_page,
+                                status="SUCCEEDED",
+                                page_id=revision.page_id,
+                                page_number=page_number,
+                                revision=revision,
+                            )
+                        )
+                    except HTTPException as exc:
+                        detail_text = str(exc.detail) if exc.detail is not None else "OCR failed"
+                        if exc.status_code == 422 and detail_text in empty_details:
+                            skipped_empty_count += 1
+                            results.append(
+                                AdminDocumentPageResultRead(
+                                    source_page=page_item.source_page,
+                                    status="SKIPPED_EMPTY",
+                                    error_code="EMPTY_PAGE",
+                                    error_message="Trang không có chữ nhận dạng được nên đã bỏ qua.",
+                                )
+                            )
+                        elif exc.status_code in fatal_statuses:
+                            if created_pages_count == 0:
+                                raise
+                            fatal_triggered = (exc.status_code, detail_text)
+                            failed_pages_count += 1
+                            results.append(
+                                AdminDocumentPageResultRead(
+                                    source_page=page_item.source_page,
+                                    status="FAILED",
+                                    error_code=f"HTTP_{exc.status_code}",
+                                    error_message=detail_text,
+                                )
+                            )
+                        else:
+                            failed_pages_count += 1
+                            results.append(
+                                AdminDocumentPageResultRead(
+                                    source_page=page_item.source_page,
+                                    status="FAILED",
+                                    error_code=f"HTTP_{exc.status_code}",
+                                    error_message=detail_text,
+                                )
+                            )
+                    finally:
+                        del page_item
+                        gc.collect()
+        finally:
+            spooled.close()
 
         if created_pages_count == 0:
-            if skipped_empty_count == len(bundle.pages):
+            if skipped_empty_count == total_source_pages and total_source_pages > 0:
                 raise HTTPException(
                     status_code=422,
                     detail="No usable text was detected in the uploaded document",
@@ -1911,9 +1934,9 @@ class AdminOcrService:
 
         return AdminDocumentUploadResponse(
             book_id=book_id,
-            file_name=bundle.file_name,
-            source_format=bundle.source_format,
-            total_source_pages=len(bundle.pages),
+            file_name=file_name,
+            source_format=source_format,
+            total_source_pages=total_source_pages,
             created_pages_count=created_pages_count,
             skipped_empty_count=skipped_empty_count,
             failed_pages_count=failed_pages_count,
@@ -3822,11 +3845,19 @@ class AdminOcrService:
             },
         )
         await self.db.commit()
-        completed = (
-            job
-            if job.Status == "SUCCEEDED"
-            else await job_service.wait_for_job_completion(job.Id)
-        )
+        try:
+            completed = (
+                job
+                if job.Status == "SUCCEEDED"
+                else await job_service.wait_for_job_completion(job.Id)
+            )
+        except HTTPException as exc:
+            if exc.status_code == 504:
+                try:
+                    await job_service.cancel_job(job.Id, reason="SYNC_WAIT_TIMEOUT")
+                except Exception:
+                    await self.db.rollback()
+            raise
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -3881,11 +3912,19 @@ class AdminOcrService:
             },
         )
         await self.db.commit()
-        completed = (
-            job
-            if job.Status == "SUCCEEDED"
-            else await job_service.wait_for_job_completion(job.Id)
-        )
+        try:
+            completed = (
+                job
+                if job.Status == "SUCCEEDED"
+                else await job_service.wait_for_job_completion(job.Id)
+            )
+        except HTTPException as exc:
+            if exc.status_code == 504:
+                try:
+                    await job_service.cancel_job(job.Id, reason="SYNC_WAIT_TIMEOUT")
+                except Exception:
+                    await self.db.rollback()
+            raise
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -3940,11 +3979,19 @@ class AdminOcrService:
             processing_meta={"expected_page_image_path": expected_page_image_path},
         )
         await self.db.commit()
-        completed = (
-            job
-            if job.Status == "SUCCEEDED"
-            else await job_service.wait_for_job_completion(job.Id)
-        )
+        try:
+            completed = (
+                job
+                if job.Status == "SUCCEEDED"
+                else await job_service.wait_for_job_completion(job.Id)
+            )
+        except HTTPException as exc:
+            if exc.status_code == 504:
+                try:
+                    await job_service.cancel_job(job.Id, reason="SYNC_WAIT_TIMEOUT")
+                except Exception:
+                    await self.db.rollback()
+            raise
         if completed.Status != "SUCCEEDED":
             if (completed.ErrorCode or "").upper() == "NO_TEXT_DETECTED":
                 raise OcrNoTextDetected("No usable text was detected")
@@ -4029,6 +4076,14 @@ class AdminOcrService:
                 },
             )
             await self.db.commit()
+            if job.PageId is not None and job.PageId != page_id:
+                await self._abort_page_upload(
+                    page_id,
+                    object_path,
+                    object_may_exist=True,
+                    book_id=book_id,
+                    started_at=time.perf_counter(),
+                )
             return OcrInferenceJobService.serialize_job(job)
         except Exception:
             await self.db.rollback()
@@ -4059,118 +4114,135 @@ class AdminOcrService:
             if book_lifecycle_status != "ACTIVE":
                 raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
 
-            raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
-            filename = file.filename
-            content_type = file.content_type
+            spooled = await spool_upload_file(file, max_bytes=MAX_DOCUMENT_BYTES)
         finally:
             await self._close_upload_file(file)
-        if len(raw_data) > MAX_DOCUMENT_BYTES:
-            raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
-
-        bundle = await run_in_threadpool(
-            rasterize_uploaded_document,
-            filename=filename,
-            content_type=content_type,
-            data=raw_data,
-        )
-
         job_service = OcrInferenceJobService(self.db)
         job_ids: list[str] = []
         serialized_jobs: list[dict[str, object]] = []
+        total_source_pages = 0
 
-        for page_item in bundle.pages:
-            page_upload_id = (
-                uuid5(upload_id, f"source-page:{page_item.source_page}:{bundle.source_sha256}")
-                if upload_id is not None
-                else None
-            )
-            image_digest = hashlib.sha256(page_item.image_bytes).hexdigest()
-            idem_key = f"admin_upload:{page_upload_id}" if page_upload_id else None
-            if idem_key is not None:
-                existing_job = await job_service.repo.get_by_idempotency(
-                    JOB_KIND_ADMIN_UPLOAD, actor_id, idem_key
-                )
-                if existing_job is not None:
-                    if existing_job.ImageSha256 != image_digest:
-                        raise HTTPException(
-                            status_code=409,
-                            detail="Upload identity already belongs to a different image",
+        try:
+            with iter_rasterized_spooled_document(spooled) as (
+                _file_name,
+                source_format,
+                source_sha256,
+                page_iter,
+            ):
+                def _next_page(it):
+                    return next(it, None)
+
+                while True:
+                    page_item = await run_in_threadpool(_next_page, page_iter)
+                    if page_item is None:
+                        break
+                    total_source_pages += 1
+                    try:
+                        page_upload_id = (
+                            uuid5(upload_id, f"source-page:{page_item.source_page}:{source_sha256}")
+                            if upload_id is not None
+                            else None
                         )
-                    job_ids.append(str(existing_job.Id))
-                    serialized_jobs.append(OcrInferenceJobService.serialize_job(existing_job))
-                    continue
+                        image_digest = hashlib.sha256(page_item.image_bytes).hexdigest()
+                        idem_key = f"admin_upload:{page_upload_id}" if page_upload_id else None
+                        if idem_key is not None:
+                            existing_job = await job_service.repo.get_by_idempotency(
+                                JOB_KIND_ADMIN_UPLOAD, actor_id, idem_key
+                            )
+                            if existing_job is not None:
+                                if existing_job.ImageSha256 != image_digest:
+                                    raise HTTPException(
+                                        status_code=409,
+                                        detail="Upload identity already belongs to a different image",
+                                    )
+                                job_ids.append(str(existing_job.Id))
+                                serialized_jobs.append(OcrInferenceJobService.serialize_job(existing_job))
+                                continue
 
-            page_id = uuid4()
-            object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{page_item.extension}"
-            locked_book = await self.repo.book(book_id, lock=True)
-            if locked_book is None:
-                await self.db.rollback()
-                raise HTTPException(status_code=404, detail="Book not found")
-            if locked_book.LifecycleStatus != "ACTIVE":
-                await self.db.rollback()
-                raise HTTPException(status_code=409, detail="Cannot add pages to an archived book")
-            page_number = await self.repo.next_active_page_number(book_id)
-            page = BookPage(
-                Id=page_id,
-                BookId=book_id,
-                PageNumber=page_number,
-                ImagePath=object_path,
-                Width=page_item.width,
-                Height=page_item.height,
-                ContentType="CONTENT",
-                LifecycleStatus="PROCESSING",
-                ProcessingMeta={
-                    "storage": "supabase",
-                    "image_sha256": image_digest,
-                    "source_page": page_item.source_page,
-                    **({"upload_id": str(page_upload_id)} if page_upload_id else {}),
-                },
-            )
-            self.repo.stage_page_reservation(page)
-            await self.repo.flush()
-            await self.db.commit()
+                        page_id = uuid4()
+                        object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{page_item.extension}"
+                        locked_book = await self.repo.book(book_id, lock=True)
+                        if locked_book is None:
+                            await self.db.rollback()
+                            raise HTTPException(status_code=404, detail="Book not found")
+                        if locked_book.LifecycleStatus != "ACTIVE":
+                            await self.db.rollback()
+                            raise HTTPException(status_code=409, detail="Cannot add pages to an archived book")
+                        page_number = await self.repo.next_active_page_number(book_id)
+                        page = BookPage(
+                            Id=page_id,
+                            BookId=book_id,
+                            PageNumber=page_number,
+                            ImagePath=object_path,
+                            Width=page_item.width,
+                            Height=page_item.height,
+                            ContentType="CONTENT",
+                            LifecycleStatus="PROCESSING",
+                            ProcessingMeta={
+                                "storage": "supabase",
+                                "image_sha256": image_digest,
+                                "source_page": page_item.source_page,
+                                **({"upload_id": str(page_upload_id)} if page_upload_id else {}),
+                            },
+                        )
+                        self.repo.stage_page_reservation(page)
+                        await self.repo.flush()
+                        await self.db.commit()
 
-            try:
-                await run_in_threadpool(
-                    upload_object, object_path, page_item.image_bytes, page_item.content_type
-                )
-                job = await job_service.enqueue_job(
-                    job_kind=JOB_KIND_ADMIN_UPLOAD,
-                    owner_user_id=actor_id,
-                    book_id=book_id,
-                    page_id=page_id,
-                    image_path=object_path,
-                    image_sha256=image_digest,
-                    image_width=page_item.width,
-                    image_height=page_item.height,
-                    image_mime_type=page_item.content_type,
-                    priority=PRIORITY_ADMIN_OCR,
-                    idempotency_key=idem_key,
-                    processing_meta={
-                        "upload_id": str(page_upload_id) if page_upload_id else None,
-                        "source_page": page_item.source_page,
-                        "expected_page_image_path": object_path,
-                    },
-                )
-                await self.db.commit()
-                job_ids.append(str(job.Id))
-                serialized_jobs.append(OcrInferenceJobService.serialize_job(job))
-            except Exception:
-                await self.db.rollback()
-                await self._abort_page_upload(
-                    page_id,
-                    object_path,
-                    object_may_exist=True,
-                    book_id=book_id,
-                    started_at=time.perf_counter(),
-                )
-                raise
+                        try:
+                            await run_in_threadpool(
+                                upload_object, object_path, page_item.image_bytes, page_item.content_type
+                            )
+                            job = await job_service.enqueue_job(
+                                job_kind=JOB_KIND_ADMIN_UPLOAD,
+                                owner_user_id=actor_id,
+                                book_id=book_id,
+                                page_id=page_id,
+                                image_path=object_path,
+                                image_sha256=image_digest,
+                                image_width=page_item.width,
+                                image_height=page_item.height,
+                                image_mime_type=page_item.content_type,
+                                priority=PRIORITY_ADMIN_OCR,
+                                idempotency_key=idem_key,
+                                processing_meta={
+                                    "upload_id": str(page_upload_id) if page_upload_id else None,
+                                    "source_page": page_item.source_page,
+                                    "expected_page_image_path": object_path,
+                                },
+                            )
+                            await self.db.commit()
+                            if job.PageId is not None and job.PageId != page_id:
+                                await self._abort_page_upload(
+                                    page_id,
+                                    object_path,
+                                    object_may_exist=True,
+                                    book_id=book_id,
+                                    started_at=time.perf_counter(),
+                                )
+                            job_ids.append(str(job.Id))
+                            serialized_jobs.append(OcrInferenceJobService.serialize_job(job))
+                        except Exception:
+                            await self.db.rollback()
+                            await self._abort_page_upload(
+                                page_id,
+                                object_path,
+                                object_may_exist=True,
+                                book_id=book_id,
+                                started_at=time.perf_counter(),
+                            )
+                            raise
+                    finally:
+                        del page_item
+                        gc.collect()
+        finally:
+            spooled.close()
 
         worker_online = await job_service.has_online_worker()
         return {
             "book_id": str(book_id),
-            "source_format": bundle.source_format,
-            "total_source_pages": bundle.total_source_pages,
+            "source_format": source_format,
+            "total_source_pages": total_source_pages,
             "job_ids": job_ids,
             "queued_count": len(job_ids),
             "worker_online": worker_online,
@@ -4310,6 +4382,14 @@ class AdminOcrService:
                 },
             )
             await self.db.commit()
+            if job.ImagePath != object_path:
+                await self._cleanup_uploaded_object(
+                    object_path,
+                    object_may_exist=True,
+                    book_id=book.Id,
+                    page_id=page_id,
+                    started_at=time.perf_counter(),
+                )
             return OcrInferenceJobService.serialize_job(job)
         except Exception:
             await self._rollback_if_possible()

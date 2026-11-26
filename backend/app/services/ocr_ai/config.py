@@ -60,6 +60,7 @@ class OcrCorrectionConfig:
     groq_model: str = "qwen/qwen3.8-27b"
     cloud_timeout_seconds: int = 60
     total_timeout_seconds: int = 7200
+    local_enabled: bool = True
     local: LocalOcrConfig = field(default_factory=LocalOcrConfig, repr=False)
 
     @property
@@ -81,13 +82,44 @@ class OcrCorrectionConfig:
             groq_model=self.groq_model,
             cloud_timeout_seconds=self.cloud_timeout_seconds,
             total_timeout_seconds=self.total_timeout_seconds,
+            local_enabled=True,
             local=self.local,
         )
 
     @staticmethod
+    def local_ollama_enabled() -> bool:
+        """Detect whether a local Ollama daemon is expected on this runtime.
+
+        Disabled automatically on Render / remote-worker web dynos unless
+        `LOCAL_OCR_ENABLED=true` or an explicit `LOCAL_OCR_BASE_URL` is set.
+        """
+        explicit = os.getenv("LOCAL_OCR_ENABLED")
+        if explicit is not None and explicit.strip() != "":
+            return _read_bool("LOCAL_OCR_ENABLED", True)
+        if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
+            return True
+        render_flag = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
+        disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+        return not (render_flag or disable_heavy or remote_ocr)
+
+    @staticmethod
     def private_book_allow_cloud_ai() -> bool:
-        """Private parent book text stays on local Ollama unless explicitly opted in."""
-        return _read_bool("PRIVATE_BOOK_ALLOW_CLOUD_AI", False)
+        """Honor explicit PRIVATE_BOOK_ALLOW_CLOUD_AI; auto-allow on hosted Render when cloud AI is enabled and local Ollama is disabled."""
+        explicit = os.getenv("PRIVATE_BOOK_ALLOW_CLOUD_AI")
+        if explicit is not None and explicit.strip() != "":
+            return _read_bool("PRIVATE_BOOK_ALLOW_CLOUD_AI", False)
+        if not OcrCorrectionConfig.local_ollama_enabled():
+            try:
+                return _read_bool("OCR_CLOUD_CORRECTION_ENABLED", False)
+            except OcrConfigurationError:
+                return False
+        return False
 
     @classmethod
     def from_environment_for_private_book(cls) -> "OcrCorrectionConfig":
@@ -98,10 +130,14 @@ class OcrCorrectionConfig:
 
     @classmethod
     def from_environment(cls) -> "OcrCorrectionConfig":
+        local_enabled = cls.local_ollama_enabled()
         try:
             local = LocalOcrConfig.from_environment()
         except LocalCorrectionError as exc:
-            raise OcrConfigurationError("INVALID_LOCAL_OCR_CONFIGURATION") from exc
+            if not local_enabled and not (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
+                local = LocalOcrConfig()
+            else:
+                raise OcrConfigurationError("INVALID_LOCAL_OCR_CONFIGURATION") from exc
         return cls(
             cloud_enabled=_read_bool("OCR_CLOUD_CORRECTION_ENABLED", False),
             gemini_api_key=_optional_secret("GEMINI_API_KEY"),
@@ -122,5 +158,6 @@ class OcrCorrectionConfig:
                 1,
                 14400,
             ),
+            local_enabled=local_enabled,
             local=local,
         )

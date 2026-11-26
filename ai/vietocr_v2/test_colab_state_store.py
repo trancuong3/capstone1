@@ -231,6 +231,24 @@ class ColabStateStoreTests(unittest.TestCase):
             self.assertNotIn(f"blobs/{old_sha}", remote_objects)
             self.assertIn(f"blobs/{new_sha}", remote_objects)
 
+            # Resuming after a new commit to main (repository_commit changed, lineage hashes same)
+            # must succeed without throwing identity mismatch.
+            dir_c = Path(temp_dir) / "colab-acc-c"
+            next_commit_identity = {**IDENTITY, "repository_commit": "0123456789abcdef" * 2 + "01234567"}
+            store_c = RemoteBackendJobStateStore(
+                _FakeWorker("colab-account-c"), next_commit_identity, dir_c, chunk_bytes=64 * 1024
+            )
+            restored_c = store_c.restore()
+            self.assertIn("latest.pt", restored_c)
+
+            # Changing dataset/config lineage still fails closed.
+            bad_identity = {**IDENTITY, "config_sha256": "f" * 64}
+            store_bad = RemoteBackendJobStateStore(
+                _FakeWorker("colab-account-d"), bad_identity, dir_c, chunk_bytes=64 * 1024
+            )
+            with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                store_bad.restore()
+
 
 if __name__ == "__main__":
     unittest.main()

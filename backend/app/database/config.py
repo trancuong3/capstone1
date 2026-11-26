@@ -50,6 +50,27 @@ SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip
 SUPABASE_ADMIN_KEY = SUPABASE_SECRET_KEY or SUPABASE_SERVICE_ROLE_KEY
 
 
+def is_supabase_jwt_key(api_key: str | None) -> bool:
+    """Return True only when the key looks like a legacy 3-part JWT rather than sb_secret_*."""
+    clean = (api_key or "").strip()
+    return clean.count(".") == 2 and not clean.startswith("sb_")
+
+
+def supabase_admin_headers(
+    api_key: str | None = None,
+    *,
+    extra: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Build Supabase Storage/PostgREST headers compatible with both sb_secret_* and JWT keys."""
+    key = ((api_key if api_key is not None else SUPABASE_ADMIN_KEY) or "").strip()
+    headers: dict[str, str] = {"apikey": key}
+    if is_supabase_jwt_key(key):
+        headers["Authorization"] = f"Bearer {key}"
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 def _int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
     raw = os.getenv(name)
     if raw is None or not raw.strip():

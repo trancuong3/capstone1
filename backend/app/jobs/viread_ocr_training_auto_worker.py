@@ -148,7 +148,7 @@ def _available_ram_bytes() -> int:
 
 def local_training_capacity() -> tuple[bool, dict[str, Any]]:
     """Require a real CUDA runtime and configurable free VRAM/disk before claiming local work."""
-    local_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "true").strip().lower() in {
+    local_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
     if not local_enabled:
@@ -423,7 +423,11 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
         return 1 if inserted.scalar_one_or_none() else 0
 
 
-async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> int:
+async def _schedule_ready_flow2_detailed(
+    locked_test: dict[str, Any] | None = None,
+    *,
+    actor_id: UUID | None = None,
+) -> dict[str, Any]:
     """Snapshot committed VERIFIED samples and enqueue once train/validation are ready."""
     if os.getenv("VIREAD_FLOW2_INGESTION_PAUSED", "false").strip().lower() in {
         "1",
@@ -431,26 +435,35 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
         "yes",
         "on",
     }:
-        return 0
+        return {"scheduled": 0, "reason": "FLOW2_INGESTION_PAUSED"}
     async with AsyncSessionLocal() as db:
         await db.execute(text("SELECT pg_advisory_xact_lock(hashtext('viread_training_job_schedule'))"))
         if await _has_unresolved_training_job(db):
-            return 0
-        actor = await db.execute(text("""
-            SELECT actor_id FROM public.viread_ocr_outbox
-            WHERE status='DONE' AND actor_id IS NOT NULL
-            ORDER BY updated_at DESC LIMIT 1
-        """))
-        actor_id = actor.scalar_one_or_none()
-        if actor_id is None:
-            return 0
+            return {"scheduled": 0, "reason": "UNRESOLVED_TRAINING_JOB_EXISTS"}
+        effective_actor_id = actor_id
+        if effective_actor_id is None:
+            actor = await db.execute(text("""
+                SELECT actor_id FROM public.viread_ocr_outbox
+                WHERE status='DONE' AND actor_id IS NOT NULL
+                ORDER BY updated_at DESC LIMIT 1
+            """))
+            effective_actor_id = actor.scalar_one_or_none()
+        if effective_actor_id is None:
+            admin_row = await db.execute(text("""
+                SELECT id FROM public.profiles
+                WHERE lower(COALESCE(to_jsonb(profiles)->>'role', '')) = 'admin'
+                ORDER BY id LIMIT 1
+            """))
+            effective_actor_id = admin_row.scalar_one_or_none()
+        if effective_actor_id is None:
+            return {"scheduled": 0, "reason": "NO_ADMIN_ACTOR_AVAILABLE"}
         overview = await VireadOcrTrainingService(db).admin_verified_manifest(
-            actor_id, limit=1, offset=0
+            effective_actor_id, limit=1, offset=0
         )
         dataset_id = overview.get("dataset_version_id")
         manifest_sha = overview.get("manifest_sha256")
         if not dataset_id or not manifest_sha:
-            return 0
+            return {"scheduled": 0, "reason": "NO_ELIGIBLE_FLOW2_SAMPLES"}
         result = await db.execute(text("""
             SELECT count(*) FILTER (WHERE split='train')::integer AS train_count,
                    count(*) FILTER (WHERE split='validation')::integer AS validation_count
@@ -462,10 +475,22 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
         """))
         parent_sha = parent.scalar_one_or_none()
         if not parent_sha:
-            return 0
+            return {
+                "scheduled": 0,
+                "reason": "NO_ACTIVE_PARENT_MODEL",
+                "dataset_version_id": str(dataset_id),
+                "manifest_sha256": manifest_sha,
+            }
         has_splits = bool(counts["train_count"] and counts["validation_count"])
         if not has_splits:
-            return 0
+            return {
+                "scheduled": 0,
+                "reason": "TRAIN_AND_VALIDATION_REQUIRED",
+                "dataset_version_id": str(dataset_id),
+                "manifest_sha256": manifest_sha,
+                "train_count": int(counts["train_count"] or 0),
+                "validation_count": int(counts["validation_count"] or 0),
+            }
         local_ready, hardware = await asyncio.to_thread(local_training_capacity)
         target = "LOCAL" if local_ready else "COLAB"
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
@@ -490,7 +515,16 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
         )
         if generation is None:
             await db.commit()
-            return 0
+            return {
+                "scheduled": 0,
+                "reason": "ALREADY_TRAINED_FOR_CURRENT_DATASET_AND_CONFIG",
+                "dataset_version_id": str(dataset_id),
+                "manifest_sha256": manifest_sha,
+                "config_sha256": config_sha,
+                "parent_checkpoint_sha256": parent_sha,
+                "train_count": int(counts["train_count"]),
+                "validation_count": int(counts["validation_count"]),
+            }
         inserted = await db.execute(text("""
             INSERT INTO public.viread_ocr_training_jobs
                 (profile, dataset_version_id, manifest_sha256, config_sha256, parent_checkpoint_sha256,
@@ -504,13 +538,51 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha, "config_sha": config_sha,
               "parent_sha": parent_sha, "target": target, "status": initial_status,
               "generation": generation,
-              "actor_id": actor_id, "metadata": json.dumps({"hardware": hardware,
-                                                                "train_count": counts["train_count"],
-                                                                "validation_count": counts["validation_count"],
-                                                                "training_config": training_config,
-                                                                "evaluation_status": "WAITING_FOR_HOLDOUT"})})
+              "actor_id": effective_actor_id, "metadata": json.dumps({"hardware": hardware,
+                                                                      "train_count": counts["train_count"],
+                                                                      "validation_count": counts["validation_count"],
+                                                                      "training_config": training_config,
+                                                                      "evaluation_status": "WAITING_FOR_HOLDOUT"})})
+        new_job_id = inserted.scalar_one_or_none()
         await db.commit()
-        return 1 if inserted.scalar_one_or_none() else 0
+        return {
+            "scheduled": 1 if new_job_id else 0,
+            "reason": "JOB_ENQUEUED" if new_job_id else "JOB_CONFLICT",
+            "job_id": str(new_job_id) if new_job_id else None,
+            "status": initial_status if new_job_id else None,
+            "target": target,
+            "dataset_version_id": str(dataset_id),
+            "manifest_sha256": manifest_sha,
+            "config_sha256": config_sha,
+            "parent_checkpoint_sha256": parent_sha,
+            "generation": generation,
+            "train_count": int(counts["train_count"]),
+            "validation_count": int(counts["validation_count"]),
+        }
+
+
+async def _schedule_ready_flow2(
+    locked_test: dict[str, Any] | None = None,
+    *,
+    actor_id: UUID | None = None,
+) -> int:
+    details = await _schedule_ready_flow2_detailed(locked_test, actor_id=actor_id)
+    return int(details.get("scheduled") or 0)
+
+
+async def trigger_flow2_schedule_once(actor_id: UUID | None = None) -> dict[str, Any]:
+    """On-demand trigger for Flow 2 snapshot & job scheduling (works when background pollers are off)."""
+    await _expire_exhausted_jobs()
+    result = await _schedule_ready_flow2_detailed(actor_id=actor_id)
+    try:
+        locked_test = await _ensure_automatic_locked_test()
+    except Exception as exc:
+        logger.debug("Automatic locked test check skipped during manual Flow 2 trigger: %s", type(exc).__name__)
+        locked_test = None
+    return {
+        **result,
+        "locked_test_ready": bool(locked_test and locked_test.get("status") == "READY"),
+    }
 
 
 async def _expire_exhausted_jobs() -> None:
@@ -711,7 +783,7 @@ async def _release_local_claim_on_cancel(job_id: UUID, worker_id: str) -> None:
 
 
 async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path, Path, Path]:
-    from ai.vietocr_v2.contracts import write_jsonl
+    from ai.vietocr_v2.contracts import DatasetRow, write_jsonl
 
     async with AsyncSessionLocal() as db:
         dataset_result = await db.execute(text("""
@@ -752,11 +824,18 @@ async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path
             if hashlib.sha256(image_bytes).hexdigest() != sample["image_sha256"]:
                 raise ValueError("DATASET_IMAGE_HASH_MISMATCH")
             await asyncio.to_thread(_write_bytes_if_missing_sync, image_path, image_bytes)
-        rows.append({"image": image_path.as_posix(), "label": sample["label"],
-                     "group_id": sample["source_group_id"], "source_flow": sample["source_flow"],
-                     "split": sample["split"], "image_sha256": sample["image_sha256"],
-                     "verified": sample["source_flow"] == "FLOW1_VERIFIED",
-                     "annotation_id": sample["source_annotation_id"] or f"admin:{index}"})
+        rows.append(
+            DatasetRow(
+                image=image_path.as_posix(),
+                label=sample["label"],
+                group_id=sample["source_group_id"],
+                source_flow=sample["source_flow"],
+                split=sample["split"],
+                image_sha256=sample["image_sha256"],
+                verified=sample["source_flow"] == "FLOW1_VERIFIED",
+                annotation_id=sample["source_annotation_id"] or f"admin:{index}",
+            )
+        )
     manifest_path = run_dir / "training.jsonl"
     await asyncio.to_thread(write_jsonl, manifest_path, rows)
     return manifest_path, receipt_path, run_dir
@@ -1366,10 +1445,12 @@ async def _pipeline_change_token() -> tuple[Any, ...]:
                 (SELECT max(created_at) FROM public.viread_ocr_dataset_versions) AS last_dataset_at,
                 (SELECT max(updated_at) FROM public.viread_ocr_training_jobs) AS last_job_at,
                 (SELECT updated_at FROM public.viread_ocr_active_model WHERE singleton = TRUE) AS active_model_at,
+                (SELECT max(created_at) FROM public.viread_ocr_samples WHERE source_flow = 'FLOW1_VERIFIED' AND dataset_version_id IS NULL) AS last_flow2_pool_at,
+                (SELECT count(*)::integer FROM public.viread_ocr_samples WHERE source_flow = 'FLOW1_VERIFIED' AND dataset_version_id IS NULL) AS flow2_pool_count,
                 EXISTS (
                     SELECT 1 FROM public.viread_ocr_training_jobs
                     WHERE status IN (
-                        'LOCAL_RUNNING', 'COLAB_RUNNING', 'COLAB_SUBMITTING',
+                        'QUEUED', 'LOCAL_RUNNING', 'COLAB_RUNNING', 'COLAB_SUBMITTING',
                         'COLAB_SUBMITTED', 'COLAB_EXECUTING', 'WAITING_FOR_COLAB_WORKER',
                         'FALLBACK_QUEUED_COLAB', 'BLOCKED_CONFIGURATION'
                     )
@@ -1381,6 +1462,8 @@ async def _pipeline_change_token() -> tuple[Any, ...]:
             row["last_dataset_at"],
             row["last_job_at"],
             row["active_model_at"],
+            row["last_flow2_pool_at"],
+            int(row["flow2_pool_count"] or 0),
             bool(row["has_active_jobs"]),
         )
 
@@ -1391,8 +1474,8 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:
         did_work = False
         try:
             current_token = await _pipeline_change_token()
-            has_active_jobs = current_token[4]
-            data_changed = (last_schedule_token is None) or (current_token[:4] != last_schedule_token[:4])
+            has_active_jobs = current_token[6]
+            data_changed = (last_schedule_token is None) or (current_token[:6] != last_schedule_token[:6])
 
             if has_active_jobs or data_changed:
                 await _expire_exhausted_jobs()

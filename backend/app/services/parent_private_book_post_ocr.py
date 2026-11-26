@@ -105,7 +105,7 @@ def align_edited_text_to_words(
     tokens_with_lines: list[tuple[int, str]] = []
     for line_idx, line in enumerate(lines):
         for tok in _WHITESPACE_RE.split(line):
-            if tok:
+            if tok and normalize_word(tok):
                 tokens_with_lines.append((line_idx, tok))
     if not tokens_with_lines:
         return []
@@ -199,10 +199,19 @@ def build_proofread_suggestions(
 ) -> list[dict[str, Any]]:
     """Compute canonical word-level spelling/diacritic diff between OCR and proofread output."""
     uncertain_set = {int(i) for i in (uncertain_indices or ())}
-    proof_tokens = [tok for tok in normalize_private_book_text(proofread_text).split() if tok]
+    filtered_ocr_words = [
+        word
+        for word in (ocr_words or [])
+        if isinstance(word, dict) and normalize_word(str(word.get("text") or ""))
+    ]
+    proof_tokens = [
+        tok
+        for tok in normalize_private_book_text(proofread_text).split()
+        if tok and normalize_word(tok)
+    ]
     suggestions: list[dict[str, Any]] = []
-    for idx, word in enumerate(ocr_words):
-        original = str(word.get("text") or "").strip() if isinstance(word, dict) else ""
+    for idx, word in enumerate(filtered_ocr_words):
+        original = str(word.get("text") or "").strip()
         suggested = proof_tokens[idx] if idx < len(proof_tokens) else original
         is_uncertain = idx in uncertain_set
         if original != suggested or is_uncertain:

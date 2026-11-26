@@ -120,6 +120,7 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
+  poweredByHeader: false,
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [

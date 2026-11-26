@@ -2,11 +2,25 @@
 import re
 import unicodedata
 
+_NUMERAL_TO_VIET_WORD: dict[str, str] = {
+    "0": "không",
+    "1": "một",
+    "2": "hai",
+    "3": "ba",
+    "4": "bốn",
+    "5": "năm",
+    "6": "sáu",
+    "7": "bảy",
+    "8": "tám",
+    "9": "chín",
+    "10": "mười",
+}
+
 
 def normalize_text(text: str) -> list[str]:
     text = unicodedata.normalize("NFC", text).lower()
     text = re.sub(r"[^\w\s]", " ", text.replace("_", " "))
-    return text.split()
+    return [_NUMERAL_TO_VIET_WORD.get(tok, tok) for tok in text.split()]
 
 
 def align_text(reference_text: str, transcript: str) -> dict:

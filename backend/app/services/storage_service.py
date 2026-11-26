@@ -20,6 +20,7 @@ from app.database.config import (
     SUPABASE_ADMIN_KEY,
     SUPABASE_STORAGE_BUCKET,
     SUPABASE_URL,
+    supabase_admin_headers,
 )
 from app.database.supabase_client import get_supabase_admin_client
 from app.diagnostic_logging import log_diagnostic
@@ -373,10 +374,7 @@ def hash_storage_object(object_path: str, aggregate_digest: object | None = None
         f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/authenticated/"
         f"{quote(bucket_name, safe='')}/{quote(object_path, safe='/')}"
     )
-    headers = {
-        "apikey": SUPABASE_ADMIN_KEY,
-        "Authorization": f"Bearer {SUPABASE_ADMIN_KEY}",
-    }
+    headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
     digest = hashlib.sha256()
     total_bytes = 0
     try:

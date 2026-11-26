@@ -721,8 +721,8 @@ class Wave2TtsCacheAndVoiceTests(unittest.IsolatedAsyncioTestCase):
         fake_cm.__aenter__ = AsyncMock(return_value=MagicMock())
         fake_cm.__aexit__ = AsyncMock(return_value=False)
         with (
-            patch.object(voice_studio_route, "AsyncSessionLocal", return_value=fake_cm),
-            patch.object(voice_studio_route, "TtsAudioCacheRepository", _FailingRepo),
+            patch("app.services.tts_audio_cache_service.AsyncSessionLocal", return_value=fake_cm),
+            patch("app.services.tts_audio_cache_service.TtsAudioCacheRepository", _FailingRepo),
         ):
             r1 = await voice_studio_route._get_cached_public_voice_ids()
             await asyncio.sleep(0.02)
