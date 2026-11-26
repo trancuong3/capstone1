@@ -254,12 +254,13 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
     }) => Promise<void>;
 
     const initTask = onmessage({ data: { type: "init", id: "init_1" } });
+    // Parallel 4-file model download starts all 4 fetches concurrently
     await vi.waitFor(() => expect(fakeFetch).toHaveBeenCalledTimes(4));
     expect(capturedSignals).toHaveLength(4);
-    expect(capturedSignals.every((s) => s.aborted === false)).toBe(true);
+    expect(capturedSignals.every((sig) => !sig.aborted)).toBe(true);
 
     await onmessage({ data: { type: "dispose", id: "dispose_1" } });
-    expect(capturedSignals.every((s) => s.aborted === true)).toBe(true);
+    expect(capturedSignals.every((sig) => sig.aborted)).toBe(true);
     for (const rejectFetch of rejectFetches) {
       rejectFetch(new DOMException("Aborted", "AbortError"));
     }

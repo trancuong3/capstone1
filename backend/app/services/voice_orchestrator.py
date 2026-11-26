@@ -392,15 +392,15 @@ class VoiceOrchestrator:
             and not self.google.is_tts_in_cooldown()
         )
 
-    def _enforce_session_voice_lock(
+    def _validate_session_voice_lock(
         self,
         ctx: VoicePolicyContext,
         voice_id: str,
-    ) -> None:
-        """Enforce server-side 'Một buổi, một giọng' lock across TTS turns within a session."""
+    ) -> tuple[tuple[str, str], str, str] | None:
+        """Validate against any existing session voice lock without poisoning on a failed first turn."""
         raw_sid = (ctx.session_id or "").strip()[:80]
         if not raw_sid:
-            return
+            return None
         if voice_id.startswith("google_"):
             canonical_voice = voice_id
             requested_provider = "google"
@@ -430,10 +430,42 @@ class VoiceOrchestrator:
                 )
             _session_voice_locks.move_to_end(lock_key)
             _session_voice_locks[lock_key] = (now, locked_voice_id, locked_provider)
-            return
+            return None
 
+        return (lock_key, canonical_voice, requested_provider)
+
+    def _commit_session_voice_lock(
+        self,
+        pending: tuple[tuple[str, str], str, str] | None,
+    ) -> None:
+        """Commit a newly established session voice lock only once audio synthesis or cache lookup succeeds."""
+        if pending is None:
+            return
+        lock_key, canonical_voice, requested_provider = pending
+        now = time.monotonic()
+        _prune_session_voice_locks(now)
+        existing = _session_voice_locks.get(lock_key)
+        if existing is not None:
+            _ts, locked_voice_id, locked_provider = existing
+            if locked_provider != requested_provider or locked_voice_id != canonical_voice:
+                raise VoiceProviderError(
+                    status_code=409,
+                    code="SESSION_VOICE_LOCKED",
+                )
+            _session_voice_locks.move_to_end(lock_key)
+            _session_voice_locks[lock_key] = (now, locked_voice_id, locked_provider)
+            return
         _session_voice_locks[lock_key] = (now, canonical_voice, requested_provider)
         _session_voice_locks.move_to_end(lock_key)
+
+    def _enforce_session_voice_lock(
+        self,
+        ctx: VoicePolicyContext,
+        voice_id: str,
+    ) -> None:
+        """Validate and immediately commit a session voice lock (backward-compatible helper)."""
+        pending = self._validate_session_voice_lock(ctx, voice_id)
+        self._commit_session_voice_lock(pending)
 
     async def synthesize(
         self,
@@ -450,7 +482,7 @@ class VoiceOrchestrator:
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
-        self._enforce_session_voice_lock(ctx, voice_id)
+        pending_lock = self._validate_session_voice_lock(ctx, voice_id)
         is_google_voice = voice_id.startswith("google_")
         if is_google_voice:
             self._validate_google_tts_allowed(ctx)
@@ -487,6 +519,7 @@ class VoiceOrchestrator:
                     normalized_text=normalized_text,
                     voice_id=voice_id,
                     model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
+                    preferred_model_version=None if is_google_voice else LOCAL_TTS_MODEL_VERSION,
                     speed=speed,
                     accept=ctx.accept,
                     audio_format=ctx.audio_format,
@@ -621,7 +654,9 @@ class VoiceOrchestrator:
                 )
                 return fallback_audio
 
-        return await self._run_tts_single_flight(sf_key, _execute)
+        result = await self._run_tts_single_flight(sf_key, _execute)
+        self._commit_session_voice_lock(pending_lock)
+        return result
 
     @staticmethod
     def _align_cached_word_timings(
@@ -728,7 +763,7 @@ class VoiceOrchestrator:
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
-        self._enforce_session_voice_lock(ctx, voice_id)
+        pending_lock = self._validate_session_voice_lock(ctx, voice_id)
         is_google_voice = voice_id.startswith("google_")
         if is_google_voice:
             self._validate_google_tts_allowed(ctx)
@@ -764,6 +799,7 @@ class VoiceOrchestrator:
                     normalized_text=normalized_text,
                     voice_id=voice_id,
                     model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
+                    preferred_model_version=None if is_google_voice else LOCAL_TTS_MODEL_VERSION,
                     speed=speed,
                     accept=ctx.accept,
                     audio_format=ctx.audio_format,
@@ -812,9 +848,16 @@ class VoiceOrchestrator:
                     )
 
             if is_google_voice:
-                speech = await self.google.synthesize_timed(
-                    words=words, voice_id=voice_id, speed=speed
-                )
+                google_timed_kwargs: dict[str, Any] = {
+                    "words": words,
+                    "voice_id": voice_id,
+                    "speed": speed,
+                }
+                if ctx.accept and self._fn_accepts_kwarg(self.google.synthesize_timed, "accept"):
+                    google_timed_kwargs["accept"] = ctx.accept
+                if ctx.audio_format and self._fn_accepts_kwarg(self.google.synthesize_timed, "audio_format"):
+                    google_timed_kwargs["audio_format"] = ctx.audio_format
+                speech = await self.google.synthesize_timed(**google_timed_kwargs)
                 if (
                     cache_svc is not None
                     and cache_target is not None
@@ -895,9 +938,16 @@ class VoiceOrchestrator:
                     )
                     raise
                 backup_voice_id, backup_reason = _map_local_voice_to_google_backup_with_reason(voice_id)
-                timed = await self.google.synthesize_timed(
-                    words=words, voice_id=backup_voice_id, speed=speed
-                )
+                google_timed_kwargs = {
+                    "words": words,
+                    "voice_id": backup_voice_id,
+                    "speed": speed,
+                }
+                if ctx.accept and self._fn_accepts_kwarg(self.google.synthesize_timed, "accept"):
+                    google_timed_kwargs["accept"] = ctx.accept
+                if ctx.audio_format and self._fn_accepts_kwarg(self.google.synthesize_timed, "audio_format"):
+                    google_timed_kwargs["audio_format"] = ctx.audio_format
+                timed = await self.google.synthesize_timed(**google_timed_kwargs)
                 logger.info(
                     "tts_timed_ok provider=google fallback=1 reason=%s backup_reason=%s voice=%s session=- request_id=%s",
                     local_err.code,
@@ -911,7 +961,9 @@ class VoiceOrchestrator:
                     fallback_reason=backup_reason or local_err.code,
                 )
 
-        return await self._run_tts_single_flight(sf_key, _execute)
+        result = await self._run_tts_single_flight(sf_key, _execute)
+        self._commit_session_voice_lock(pending_lock)
+        return result
 
     async def synthesize_phonics(
         self,
@@ -927,7 +979,7 @@ class VoiceOrchestrator:
         voice_id = (requested_voice_id or "").strip() or DEFAULT_LOCAL_VOICE_ID
         t0 = time.perf_counter()
 
-        self._enforce_session_voice_lock(ctx, voice_id)
+        pending_lock = self._validate_session_voice_lock(ctx, voice_id)
         is_google_voice = voice_id.startswith("google_")
         if is_google_voice:
             self._validate_google_tts_allowed(ctx)
@@ -963,6 +1015,7 @@ class VoiceOrchestrator:
                     normalized_text=phonics_key,
                     voice_id=voice_id,
                     model_version=GOOGLE_TTS_MODEL_VERSION if is_google_voice else None,
+                    preferred_model_version=None if is_google_voice else LOCAL_TTS_MODEL_VERSION,
                     speed=speed,
                     accept=ctx.accept,
                     audio_format=ctx.audio_format,
@@ -1140,7 +1193,9 @@ class VoiceOrchestrator:
                     fallback_reason=backup_reason or local_err.code,
                 )
 
-        return await self._run_tts_single_flight(sf_key, _execute)
+        result = await self._run_tts_single_flight(sf_key, _execute)
+        self._commit_session_voice_lock(pending_lock)
+        return result
 
     async def transcribe(
         self,

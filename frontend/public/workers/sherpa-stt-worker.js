@@ -197,7 +197,7 @@ function ensureWasmModule() {
   return wasmModulePromise;
 }
 
-async function fetchAndVerifyModelFile(db, spec, epoch) {
+async function readVerifiedCachedModelFile(db, spec, epoch) {
   if (epoch !== loadEpoch) {
     throw new Error("WASM STT init disposed");
   }
@@ -220,7 +220,14 @@ async function fetchAndVerifyModelFile(db, spec, epoch) {
     }
     await deleteCachedFile(db, cacheKey);
   }
+  return null;
+}
 
+async function downloadAndVerifyModelFile(db, spec, epoch) {
+  if (epoch !== loadEpoch) {
+    throw new Error("WASM STT init disposed");
+  }
+  const cacheKey = `${MODEL_VERSION}/${spec.name}`;
   const controller =
     typeof AbortController === "function" ? new AbortController() : null;
   let timeoutId = null;
@@ -285,9 +292,11 @@ async function ensureRecognizer() {
   const pending = (async () => {
     const [M, db] = await Promise.all([ensureWasmModule(), openModelsDb()]);
     try {
-      // Load/fetch all 4 model files concurrently to cut cold start latency.
+      // Read warm-cached model files from IndexedDB in parallel, then fetch any
+      // uncached model files in parallel (4-file parallel download) while
+      // reporting progress and honoring dispose() epoch cancellation cleanly.
       const loadedFiles = await Promise.all(
-        MODEL_FILES.map(async (spec, i) => {
+        MODEL_FILES.map(async (spec, index) => {
           if (epoch !== loadEpoch) {
             throw new Error("WASM STT init disposed");
           }
@@ -295,11 +304,23 @@ async function ensureRecognizer() {
             type: "progress",
             stage: "loading-model",
             file: spec.name,
-            index: i,
+            index,
             total: MODEL_FILES.length,
           });
-          const bytes = await fetchAndVerifyModelFile(db, spec, epoch);
-          return { spec, bytes };
+          const cachedBytes = await readVerifiedCachedModelFile(
+            db,
+            spec,
+            epoch,
+          );
+          if (cachedBytes) {
+            return { spec, bytes: cachedBytes };
+          }
+          const downloadedBytes = await downloadAndVerifyModelFile(
+            db,
+            spec,
+            epoch,
+          );
+          return { spec, bytes: downloadedBytes };
         }),
       );
       if (epoch !== loadEpoch) {

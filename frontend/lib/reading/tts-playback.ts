@@ -1418,6 +1418,11 @@ export class TtsPlayback {
       readonly modelVersion?: string | null;
     },
   ): void {
+    // Voice previews explicitly bypass SessionVoiceLock and MUST NOT pollute
+    // the active reading session's voice consistency audit.
+    if (operation.voice.bypassSessionLock) {
+      return;
+    }
     const resolvedVoiceId =
       served?.voiceId?.trim() || operation.voice.cacheVoiceId;
     const rawProvider = served?.provider?.trim().toLowerCase();
@@ -1618,7 +1623,8 @@ export class TtsPlayback {
             });
             recordActualUtterance({
               provider: "local",
-              voiceId: DEFAULT_LOCAL_VOICE_ID,
+              voiceId:
+                options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID,
             });
             this.setFallbackNotice(null);
             try {
@@ -2141,6 +2147,9 @@ export class TtsPlayback {
                     voiceId: operation.voice.requestedVoiceId ?? undefined,
                     speed: operation.voice.speed,
                     wordSample: true,
+                    ...(operation.voice.bypassSessionLock
+                      ? { bypassSessionLock: true }
+                      : {}),
                     ...wordCacheMeta,
                     signal: operation.controller.signal,
                   }),
@@ -2279,6 +2288,9 @@ export class TtsPlayback {
                 this.speech.synthesizePhonics(normalizedSteps, {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
+                  ...(operation.voice.bypassSessionLock
+                    ? { bypassSessionLock: true }
+                    : {}),
                   ...phonicsCacheMeta,
                   signal: operation.controller.signal,
                 }),
@@ -2300,6 +2312,9 @@ export class TtsPlayback {
                       this.speech.synthesizePhonics(normalizedSteps, {
                         voiceId: googleVoiceId,
                         speed: operation.voice.speed,
+                        ...(operation.voice.bypassSessionLock
+                          ? { bypassSessionLock: true }
+                          : {}),
                         ...phonicsCacheMeta,
                         signal: operation.controller.signal,
                       }),
@@ -2400,6 +2415,9 @@ export class TtsPlayback {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
                   audioFormat: "wav",
+                  ...(operation.voice.bypassSessionLock
+                    ? { bypassSessionLock: true }
+                    : {}),
                   ...phonicsCacheMeta,
                   signal: operation.controller.signal,
                 }),
@@ -2473,6 +2491,9 @@ export class TtsPlayback {
                   voiceId: operation.voice.requestedVoiceId ?? undefined,
                   speed: operation.voice.speed,
                   wordSample: true,
+                  ...(operation.voice.bypassSessionLock
+                    ? { bypassSessionLock: true }
+                    : {}),
                   ...stepCacheMeta,
                   signal: operation.controller.signal,
                 }),
@@ -2602,7 +2623,8 @@ export class TtsPlayback {
             });
             recordTimedUtterance({
               provider: "local",
-              voiceId: DEFAULT_LOCAL_VOICE_ID,
+              voiceId:
+                options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID,
             });
             this.setFallbackNotice(null);
             try {
@@ -2749,6 +2771,7 @@ export class TtsPlayback {
             if (canMap) options.onWordChange?.(chunk.wordOffset + index);
           };
           if (useBrowserFallback) {
+            nextTimedPrefetch = null;
             elapsed += await this.playDeviceFallbackSpeech(
               operation,
               chunk.words.join(" "),
@@ -2776,10 +2799,9 @@ export class TtsPlayback {
                 return;
               }
               timed = await (nextTimedPrefetch ?? fetchTimedChunk(chunk.words));
-              nextTimedPrefetch = null;
-            } else {
-              nextTimedPrefetch = null;
             }
+            nextTimedPrefetch = null;
+            this.ensure(operation);
             synthesizedTimedOk = true;
             const timedMeta = getSynthesizedAudioMeta(timed.audio);
             recordTimedUtterance({
@@ -2792,23 +2814,38 @@ export class TtsPlayback {
               modelVersion:
                 timedMeta?.modelVersion ?? operation.voice.modelVersion,
             });
-            // Prefetch next timed chunk once the current chunk actually starts playing
-            // so we avoid inter-chunk stalls without racing audio decode or wasting calls on autoplay errors.
-            let prefetchedNext = false;
-            const onStartWithPrefetch = () => {
-              onStart();
-              if (!prefetchedNext && idx + 1 < chunks.length) {
-                prefetchedNext = true;
-                const upcomingWords = chunks[idx + 1].words;
-                if (!this.cache.has(makeTimedKeyForWords(upcomingWords))) {
-                  nextTimedPrefetch = fetchTimedChunk(upcomingWords);
-                  nextTimedPrefetch.catch(() => undefined);
-                }
-              }
-            };
             this.setFallbackNotice(
               timed.usedFallbackVoice ? getServerFallbackVoiceNotice() : null,
             );
+            // Prefetch the next timed chunk in parallel once playback of the
+            // current chunk is underway so multi-chunk pages have zero
+            // inter-chunk synthesis stalls without wasting synthesis if stopped
+            // immediately or failing autoplay.
+            let prefetchedNextChunk = false;
+            const maybePrefetchNextChunk =
+              idx + 1 < chunks.length
+                ? (currentTime: number, duration: number) => {
+                    if (
+                      prefetchedNextChunk ||
+                      operation.controller.signal.aborted
+                    ) {
+                      return;
+                    }
+                    if (
+                      currentTime > 0 &&
+                      (currentTime >= 1.0 ||
+                        (Number.isFinite(duration) &&
+                          duration > 0 &&
+                          currentTime / duration >= 0.25))
+                    ) {
+                      prefetchedNextChunk = true;
+                      nextTimedPrefetch = fetchTimedChunk(
+                        chunks[idx + 1].words,
+                      );
+                      nextTimedPrefetch.catch(() => undefined);
+                    }
+                  }
+                : undefined;
             try {
               const timedPlaybackRate = computeEffectivePlaybackRate(
                 operation.voice.speed,
@@ -2819,9 +2856,9 @@ export class TtsPlayback {
                 timed.audio,
                 timed.words,
                 elapsed,
-                onStartWithPrefetch,
+                onStart,
                 onWord,
-                undefined,
+                maybePrefetchNextChunk,
                 timedPlaybackRate,
               );
             } catch (playErr) {
@@ -2883,22 +2920,25 @@ export class TtsPlayback {
               );
               this.cache.delete(key);
             }
+            const errProviderCode =
+              typeof error === "object" && error !== null
+                ? ((
+                    error as {
+                      provider_code?: unknown;
+                      providerCode?: unknown;
+                    }
+                  ).provider_code ??
+                  (error as { providerCode?: unknown }).providerCode)
+                : undefined;
             const isUnconfiguredLocalErr =
-              typeof error === "object" &&
-              error !== null &&
-              "providerCode" in error &&
-              (error as { providerCode?: string }).providerCode ===
-                "LOCAL_VOICE_UNCONFIGURED";
+              errProviderCode === "LOCAL_VOICE_UNCONFIGURED";
             // Prefer the same locked voice via the short endpoint before
-            // switching providers, unless local worker is unconfigured with no cache/precomputed target.
+            // switching providers, unless local worker is unconfigured without
+            // a precomputed public catalog URL (avoiding a duplicate 503 roundtrip).
             if (
               !completedChunks &&
               fallback &&
-              !(
-                isUnconfiguredLocalErr &&
-                !options.precomputedAudioUrl &&
-                !hasTimedCacheTarget
-              )
+              !(isUnconfiguredLocalErr && !options.precomputedAudioUrl)
             ) {
               this.timedCooldownUntil = Date.now() + 15_000;
               await fallback();

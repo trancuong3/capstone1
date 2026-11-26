@@ -1129,6 +1129,7 @@ class TtsAudioCacheService:
         normalized_text: str,
         voice_id: str,
         model_version: str | None = None,
+        preferred_model_version: str | None = None,
         speed: float = 1.0,
         accept: str | None = None,
         audio_format: str | None = None,
@@ -1161,9 +1162,15 @@ class TtsAudioCacheService:
                     daily_usage = cached_usage
                 else:
                     daily_usage = await self.repo.get_daily_usage()
+                    now_put = time.monotonic()
                     with _CACHE_STATE_LOCK:
+                        expired_keys = [
+                            k for k, (exp, _) in _DAILY_USAGE_CACHE.items() if exp <= now_put
+                        ]
+                        for k in expired_keys:
+                            _DAILY_USAGE_CACHE.pop(k, None)
                         _DAILY_USAGE_CACHE[usage_cache_key] = (
-                            time.monotonic() + _DAILY_USAGE_CACHE_TTL_SECONDS,
+                            now_put + _DAILY_USAGE_CACHE_TTL_SECONDS,
                             dict(daily_usage),
                         )
             else:
@@ -1197,6 +1204,7 @@ class TtsAudioCacheService:
                     content_sha256=content_sha256,
                     voice_id=voice_id,
                     model_version=model_version,
+                    preferred_model_version=preferred_model_version,
                     speed=speed,
                     audio_formats=formats,
                     folded_sha256=folded_sha256,

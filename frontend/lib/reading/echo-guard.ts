@@ -99,14 +99,20 @@ export class EchoGuard {
     if (record && record.endedAt === null) record.endedAt = now;
   }
 
+  /** Remove a playback record that failed before any audio ever played. */
+  discardPlayback(id: string): void {
+    const index = this.records.findIndex((entry) => entry.id === id);
+    if (index >= 0) this.records.splice(index, 1);
+  }
+
   isPlaying(): boolean {
     return this.records.some((record) => record.endedAt === null);
   }
 
   evaluate(segment: EchoSegment): EchoVerdict {
     const active = this.records.find((record) => {
-      // When VAD timestamps prove the child finished speaking strictly BEFORE
-      // TTS started, never drop the utterance just because STT delivered late.
+      // When VAD timestamps show the child finished speaking BEFORE TTS even
+      // started, never drop the utterance merely because STT delivery was late.
       if (
         segment.audioEndedAt != null &&
         segment.audioEndedAt < record.startedAt
@@ -164,6 +170,17 @@ export class EchoGuard {
           };
         }
         continue;
+      }
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt >= record.startedAt &&
+        segment.audioEndedAt < record.endedAt + this.onsetGraceMs
+      ) {
+        return {
+          accept: false,
+          reason: "onset-during-playback",
+          playbackId: record.id,
+        };
       }
       if (
         sinceEnd <= this.tailMs &&

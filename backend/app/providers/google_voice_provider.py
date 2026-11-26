@@ -182,6 +182,44 @@ def _wrap_pcm16_mono_wav(pcm: bytes, sr: int) -> bytes:
     return buf.getvalue()
 
 
+def _prefers_mp3(accept: str | None, audio_format: str | None) -> bool:
+    """Negotiate compressed MP3 vs LINEAR16 WAV honoring explicit format and HTTP Accept q-values."""
+    if audio_format:
+        return audio_format.strip().lower() == "mp3"
+    if not accept:
+        return False
+    q_mp3 = 0.0
+    q_wav = 0.0
+    for raw_part in accept.split(","):
+        part = raw_part.strip().lower()
+        if not part:
+            continue
+        segments = [seg.strip() for seg in part.split(";") if seg.strip()]
+        media = segments[0]
+        q_val = 1.0
+        for param in segments[1:]:
+            if param.startswith("q="):
+                try:
+                    q_val = max(0.0, min(1.0, float(param[2:].strip())))
+                except ValueError:
+                    q_val = 0.0
+        if media in ("audio/mpeg", "audio/mp3"):
+            q_mp3 = max(q_mp3, q_val)
+        elif media in ("audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"):
+            q_wav = max(q_wav, q_val)
+    return q_mp3 > 0.0 and q_mp3 >= q_wav
+
+
+def _mp3_duration_seconds(mp3_bytes: bytes) -> float:
+    from mutagen.mp3 import MP3
+
+    info = MP3(io.BytesIO(mp3_bytes)).info
+    length = float(getattr(info, "length", 0.0) or 0.0)
+    if length <= 0.0:
+        raise ValueError("invalid MP3 duration")
+    return length
+
+
 class GoogleCloudVoiceProvider:
     def __init__(
         self,
@@ -556,13 +594,7 @@ class GoogleCloudVoiceProvider:
         accept: str | None = None,
         audio_format: str | None = None,
     ) -> LocalSynthesizedAudio:
-        want_mp3 = False
-        if audio_format:
-            want_mp3 = audio_format.strip().lower() == "mp3"
-        elif accept:
-            lower_accept = accept.lower()
-            if ("audio/mpeg" in lower_accept or "audio/mp3" in lower_accept) and "audio/wav" not in lower_accept:
-                want_mp3 = True
+        want_mp3 = _prefers_mp3(accept, audio_format)
         audio_bytes, content_type, meta = await self._synthesize_audio_raw(
             text=text,
             voice_id=voice_id,
@@ -585,17 +617,35 @@ class GoogleCloudVoiceProvider:
         words: list[str],
         voice_id: str,
         speed: float = 1.0,
+        accept: str | None = None,
+        audio_format: str | None = None,
     ) -> LocalTimedSpeech:
         passage = " ".join(words)
-        wav_bytes, meta = await self._synthesize_wav_raw(
-            text=passage, voice_id=voice_id, speed=speed
-        )
-        try:
-            duration, _, _ = _wav_duration_and_pcm(wav_bytes)
-        except (wave.Error, EOFError, struct.error, ValueError) as exc:
-            raise VoiceProviderError(
-                status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
-            ) from exc
+        want_mp3 = _prefers_mp3(accept, audio_format)
+        if want_mp3:
+            audio_bytes, content_type, meta = await self._synthesize_audio_raw(
+                text=passage,
+                voice_id=voice_id,
+                speed=speed,
+                audio_encoding="MP3",
+            )
+            try:
+                duration = _mp3_duration_seconds(audio_bytes)
+            except Exception as exc:
+                raise VoiceProviderError(
+                    status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
+                ) from exc
+        else:
+            audio_bytes, meta = await self._synthesize_wav_raw(
+                text=passage, voice_id=voice_id, speed=speed
+            )
+            content_type = "audio/wav"
+            try:
+                duration, _, _ = _wav_duration_and_pcm(audio_bytes)
+            except (wave.Error, EOFError, struct.error, ValueError) as exc:
+                raise VoiceProviderError(
+                    status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
+                ) from exc
         duration = max(0.05, round(duration, 3))
         normalized_passage = normalize_vietnamese_tts_text(passage) or passage
         projected = project_chunk_spans_to_surface_words(
@@ -613,8 +663,8 @@ class GoogleCloudVoiceProvider:
         ]
 
         return LocalTimedSpeech(
-            audio=wav_bytes,
-            content_type="audio/wav",
+            audio=audio_bytes,
+            content_type=content_type,
             duration_seconds=duration,
             words=timed_words,
             resolved_voice_id=meta["voice_id"],

@@ -184,21 +184,6 @@ async function installVoiceAndPhonicsFixture(page: Page) {
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("local_north_truc_ly"));
-    if (
-      path === "/voice/session-lock" &&
-      ["POST", "PUT", "DELETE"].includes(route.request().method())
-    ) {
-      const body = (route.request().postDataJSON() ?? {}) as Record<
-        string,
-        unknown
-      >;
-      return respond(route, {
-        session_id: body.session_id ?? ids.session,
-        voice_id: body.voice_id ?? "local_north_truc_ly",
-        provider: body.provider ?? "local",
-        locked: true,
-      });
-    }
     if (path === "/voice/voices") {
       return respond(route, {
         default_voice_id: "local_north_truc_ly",
@@ -233,6 +218,20 @@ async function installVoiceAndPhonicsFixture(page: Page) {
             model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
           },
         ],
+      });
+    }
+    if (path === "/voice/session-lock" && route.request().method() === "PUT") {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        session_id?: string;
+        voice_id?: string;
+      };
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "local_north_truc_ly",
+        provider: (body.voice_id ?? "").startsWith("google_")
+          ? "google"
+          : "local",
+        locked: true,
       });
     }
     if (path === "/voice/text-to-speech/phonics") {
@@ -323,12 +322,12 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   await localOnlyBtn.click();
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
 
+  // During an active locked reading session, clicking a region tab filters
+  // the list without silently mutating the locked voice; explicit radio click switches voice.
   await dialog.getByRole("button", { name: "Miền Trung" }).click();
   const centralVoiceRadio = dialog.getByRole("radio", { name: /Cô Ngọc Trân/ });
   await expect(centralVoiceRadio).toBeVisible();
-  if (!(await centralVoiceRadio.isChecked())) {
-    await centralVoiceRadio.click();
-  }
+  await centralVoiceRadio.click();
   await expect(centralVoiceRadio).toBeChecked();
 
   await dialog.getByRole("button", { name: "Chậm" }).click();

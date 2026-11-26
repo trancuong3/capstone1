@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import re
+
+_CONFIG_ERROR_CODE_RE = re.compile(r"^[A-Z][A-Z0-9_]{1,71}$")
+
 
 class OcrConfigurationError(RuntimeError):
     """A safe, server-side OCR provider configuration error."""
+
+    def __init__(self, code: str = "OCR_CONFIGURATION_ERROR") -> None:
+        super().__init__(code)
+        self.code: str | None = code if _CONFIG_ERROR_CODE_RE.fullmatch(code) else None
 
 
 class OcrProviderError(RuntimeError):

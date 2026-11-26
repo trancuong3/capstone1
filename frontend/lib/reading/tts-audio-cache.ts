@@ -93,7 +93,7 @@ export interface BrowserTtsCacheStats {
 
 let cacheHits = 0;
 let cacheMisses = 0;
-let cachedDbPromise: Promise<IDBDatabase | null> | null = null;
+let cachedDbPromise: Promise<TtsDbOpenResult> | null = null;
 let cachedDbInstance: IDBDatabase | null = null;
 let cachedIndexedDbRef: IDBFactory | null = null;
 const pendingMetaTouches = new Map<string, StoredTtsMeta>();
@@ -192,26 +192,17 @@ function openTtsDbWithReason(): Promise<TtsDbOpenResult> {
     return Promise.resolve({ db: cachedDbInstance, error: null });
   }
   if (cachedDbPromise) {
-    return cachedDbPromise.then((db) =>
-      db ? { db, error: null } : { db: null, error: "INDEXEDDB_OPEN_ERROR" },
-    );
+    return cachedDbPromise;
   }
-  let resolveDb: ((db: IDBDatabase | null) => void) | null = null;
-  const openPromise = new Promise<IDBDatabase | null>((resolve) => {
-    resolveDb = resolve;
-  });
-  cachedDbPromise = openPromise;
-
-  return new Promise<TtsDbOpenResult>((resolve) => {
+  const openPromise = new Promise<TtsDbOpenResult>((resolve) => {
     let settled = false;
     const finish = (result: TtsDbOpenResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (cachedDbPromise === openPromise && !result.db) {
+      if (!result.db && cachedDbPromise === openPromise) {
         cachedDbPromise = null;
       }
-      resolveDb?.(result.db);
       resolve(result);
     };
     const timer = setTimeout(
@@ -292,6 +283,8 @@ function openTtsDbWithReason(): Promise<TtsDbOpenResult> {
       finish({ db: null, error: "INDEXEDDB_OPEN_ERROR" });
     }
   });
+  cachedDbPromise = openPromise;
+  return openPromise;
 }
 
 async function openTtsDb(): Promise<IDBDatabase | null> {

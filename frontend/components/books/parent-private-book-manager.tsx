@@ -133,6 +133,69 @@ function parseBookSourceDeclaration(raw: string | null): {
 
 type BooksTranslateFn = ReturnType<typeof useTranslations>;
 
+function stageStatusLabel(
+  status: string,
+  stage: "ocr" | "post_ocr",
+  t: BooksTranslateFn,
+): string {
+  if (stage === "post_ocr" && status === "PENDING") {
+    return t("privateManager.statusLabels.PENDING_POST_OCR");
+  }
+  return STAGE_LABEL_KEYS[status] ? t(STAGE_LABEL_KEYS[status]) : status;
+}
+
+function parentNoticeMeta(
+  sub: ParentPageSubmissionDTO,
+  t: BooksTranslateFn,
+): { className: string; title: string } {
+  if (sub.workflow_status === "CHECK_FAILED") {
+    return {
+      className: "border-rose-300 bg-rose-50 text-rose-950",
+      title: t("privateManager.toolCheckFailedNotice"),
+    };
+  }
+  if (sub.workflow_status === "REJECTED") {
+    return {
+      className: "border-rose-300 bg-rose-50 text-rose-950",
+      title: t("privateManager.toolCheckRejectedNotice"),
+    };
+  }
+  if (
+    sub.workflow_status === "PASSED_READY_TO_ADD" ||
+    sub.workflow_status === "APPROVED_READY_TO_ADD" ||
+    sub.workflow_status === "ADDED_TO_BOOK"
+  ) {
+    return {
+      className: "border-emerald-300 bg-emerald-50 text-emerald-950",
+      title: t("privateManager.toolCheckPassedNotice"),
+    };
+  }
+  if (sub.workflow_status === "CHECKING") {
+    return {
+      className: "border-primary/30 bg-sky text-primary-hover",
+      title: t("privateManager.toolCheckCheckingNotice"),
+    };
+  }
+  if (sub.workflow_status === "NEEDS_RECHECK") {
+    return {
+      className: "border-orange-300 bg-orange-50 text-orange-950",
+      title: t("privateManager.toolCheckRecheckNotice"),
+    };
+  }
+  if (sub.tool_check_findings_count > 0) {
+    return {
+      className: "border-amber-300 bg-amber-50 text-amber-950",
+      title: t("privateManager.toolCheckFlaggedNotice", {
+        count: sub.tool_check_findings_count,
+      }),
+    };
+  }
+  return {
+    className: "border-amber-300 bg-amber-50 text-amber-950",
+    title: t("privateManager.toolCheckAdminNotice"),
+  };
+}
+
 function describeToolCheckScope(
   scope: ToolCheckScopeDTO,
   t: BooksTranslateFn,
@@ -1868,9 +1931,7 @@ function ParentPrivateBookManagerContent({
                             <p className="mt-0.5 text-muted">
                               {sub.ocr_status === "PENDING" && ocrWorkerOffline
                                 ? t("privateManager.waitingWindowsOcrShort")
-                                : STAGE_LABEL_KEYS[sub.ocr_status]
-                                  ? t(STAGE_LABEL_KEYS[sub.ocr_status])
-                                  : sub.ocr_status}
+                                : stageStatusLabel(sub.ocr_status, "ocr", t)}
                               {sub.ocr_error_code
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}
@@ -1886,9 +1947,11 @@ function ParentPrivateBookManagerContent({
                               {t("privateManager.stepProofreadTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABEL_KEYS[sub.proofread_status]
-                                ? t(STAGE_LABEL_KEYS[sub.proofread_status])
-                                : sub.proofread_status}
+                              {stageStatusLabel(
+                                sub.proofread_status,
+                                "post_ocr",
+                                t,
+                              )}
                               {sub.proofread_suggestions.length > 0
                                 ? t(
                                     "privateManager.proofreadSuggestionsSuffix",
@@ -1912,9 +1975,11 @@ function ParentPrivateBookManagerContent({
                               {t("privateManager.stepSafetyTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABEL_KEYS[sub.tool_check_status]
-                                ? t(STAGE_LABEL_KEYS[sub.tool_check_status])
-                                : sub.tool_check_status}
+                              {stageStatusLabel(
+                                sub.tool_check_status,
+                                "post_ocr",
+                                t,
+                              )}
                               {sub.tool_check_findings_count > 0
                                 ? t("privateManager.safetyFindingsSuffix", {
                                     count: sub.tool_check_findings_count,
@@ -1942,26 +2007,40 @@ function ParentPrivateBookManagerContent({
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
                         {sub.tool_check_parent_notice ||
-                        sub.tool_check_findings_count > 0 ? (
-                          <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
-                            <p className="flex items-center gap-1.5 font-bold">
-                              <AlertTriangle
-                                aria-hidden="true"
-                                className="size-4 shrink-0"
-                              />
-                              {sub.tool_check_findings_count > 0
-                                ? t("privateManager.toolCheckFlaggedNotice", {
-                                    count: sub.tool_check_findings_count,
-                                  })
-                                : t("privateManager.toolCheckAdminNotice")}
-                            </p>
-                            {sub.tool_check_parent_notice ? (
-                              <p className="mt-1">
-                                {sub.tool_check_parent_notice}
-                              </p>
-                            ) : null}
-                          </div>
-                        ) : null}
+                        sub.tool_check_findings_count > 0
+                          ? (() => {
+                              const notice = parentNoticeMeta(sub, t);
+                              return (
+                                <div
+                                  className={`rounded-control border p-3 text-xs ${notice.className}`}
+                                >
+                                  <p className="flex items-center gap-1.5 font-bold">
+                                    {sub.workflow_status ===
+                                      "PASSED_READY_TO_ADD" ||
+                                    sub.workflow_status ===
+                                      "APPROVED_READY_TO_ADD" ||
+                                    sub.workflow_status === "ADDED_TO_BOOK" ? (
+                                      <ShieldCheck
+                                        aria-hidden="true"
+                                        className="size-4 shrink-0"
+                                      />
+                                    ) : (
+                                      <AlertTriangle
+                                        aria-hidden="true"
+                                        className="size-4 shrink-0"
+                                      />
+                                    )}
+                                    {notice.title}
+                                  </p>
+                                  {sub.tool_check_parent_notice ? (
+                                    <p className="mt-1">
+                                      {sub.tool_check_parent_notice}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              );
+                            })()
+                          : null}
 
                         {/* Candidate Text Preview */}
                         {sub.candidate_text ? (

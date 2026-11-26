@@ -59,7 +59,7 @@ async function installReading(
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers":
       "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
     "access-control-expose-headers":
       "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback",
   };
@@ -162,21 +162,6 @@ async function installReading(
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("voice_female"));
-    if (
-      path === "/voice/session-lock" &&
-      ["POST", "PUT", "DELETE"].includes(route.request().method())
-    ) {
-      const body = (route.request().postDataJSON() ?? {}) as Record<
-        string,
-        unknown
-      >;
-      return respond(route, {
-        session_id: body.session_id ?? ids.session,
-        voice_id: body.voice_id ?? "voice_female",
-        provider: body.provider ?? "local",
-        locked: true,
-      });
-    }
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "voice_female",
@@ -187,6 +172,20 @@ async function installReading(
           { voice_id: "voice_unknown", name: "Giọng chưa có metadata" },
         ],
       });
+    if (path === "/voice/session-lock" && route.request().method() === "PUT") {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        session_id?: string;
+        voice_id?: string;
+      };
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "voice_female",
+        provider: (body.voice_id ?? "").startsWith("google_")
+          ? "google"
+          : "local",
+        locked: true,
+      });
+    }
     if (path === "/voice/text-to-speech/timed") {
       const body = route.request().postDataJSON() as {
         words: string[];

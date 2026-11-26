@@ -892,6 +892,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         policy.providerMode === "local_with_google_fallback" &&
         policy.allowGoogleSttFallback &&
         Boolean(getBrowserSpeechRecognitionCtor());
+      const backendGoogleSttAvailable =
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback &&
+        freshHealth !== null &&
+        freshHealth.google.stt_configured &&
+        !freshHealth.google.stt_cooldown;
       const confirmedLocalDownNoGoogle =
         confirmedLocalDown &&
         (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
@@ -900,7 +906,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       // 1. Android Native STT (100% on-device streaming on Android APK WebView).
       // 2. Hosted opted-in streaming Web Speech API (low-latency vi-VN on Chrome/Edge
       //    when parent enabled online fallback & backend Google STT is unavailable).
-      // 3. On-device Browser WASM Sherpa-ONNX (100% offline / privacy-first under `local_only`
+      // 3. Backend Google Cloud STT (when opted-in and configured/not in cooldown).
+      // 4. On-device Browser WASM Sherpa-ONNX (100% offline / privacy-first under `local_only`
       //    or browsers without Web Speech API).
       if (
         (confirmedLocalDown || withinEmergencyCooldown) &&
@@ -915,6 +922,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
       if (
         optedInStreamingBrowser &&
+        localUnconfigured &&
         (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
       ) {
         if (confirmedLocalDownNoGoogle) {
@@ -926,6 +934,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
 
       if (
+        !backendGoogleSttAvailable &&
         (confirmedLocalDown || withinEmergencyCooldown) &&
         detectBrowserWasmSttSupport().supported
       ) {
@@ -947,6 +956,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         void getBrowserWasmSttClient()
           .init(this.abortController.signal)
           .catch(() => undefined);
+      } else if (
+        optedInStreamingBrowser &&
+        (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
+      ) {
+        if (confirmedLocalDownNoGoogle) {
+          lastLocalSttOutageAt = now;
+        }
+        if (this.tryActivateBrowserFallback()) {
+          return;
+        }
       } else if (
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
@@ -1139,18 +1158,22 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         return true;
       }
       const policy = getVoicePolicyPreferences();
+      const localUnconfigured =
+        freshHealth !== null &&
+        (freshHealth.local.configured === false ||
+          freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
       const optedInStreamingBrowser =
         policy.providerMode === "local_with_google_fallback" &&
         policy.allowGoogleSttFallback &&
         Boolean(getBrowserSpeechRecognitionCtor());
-      if (optedInStreamingBrowser && this.tryActivateBrowserFallback()) {
+      if (
+        localUnconfigured &&
+        optedInStreamingBrowser &&
+        this.tryActivateBrowserFallback()
+      ) {
         return true;
       }
       if (detectBrowserWasmSttSupport().supported) {
-        const localUnconfigured =
-          freshHealth !== null &&
-          (freshHealth.local.configured === false ||
-            freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
         this.usingWasmStt = true;
         this.wsDisabledForRun = true;
         this.wasmFallbackReason = localUnconfigured
@@ -1283,6 +1306,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
 
         const isFinal = Boolean(rawItem.isFinal);
+        // Interim-onset fallback for browsers that emit onresult before onspeechstart/onsoundstart.
+        if (
+          !isFinal &&
+          this.browserSpeechOnsetAt === null &&
+          copiedAlts[0]?.transcript.trim()
+        ) {
+          this.browserSpeechOnsetAt = now;
+        }
+        const effectiveOnset =
+          rawItem.onsetAt ?? capturedOnset ?? this.browserSpeechOnsetAt ?? null;
         const fallbackTurnId =
           rawItem.turnId ?? nextTurnId(ctx.pageId ?? "browser", ++this.turnSeq);
         const itemObj: Record<number, SegmentSpeechResultAlternative> & {
@@ -1306,7 +1339,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           pageId: rawItem.pageId ?? ctx.pageId ?? null,
           turnId: fallbackTurnId,
           segmentId: rawItem.segmentId ?? fallbackTurnId,
-          onsetAt: rawItem.onsetAt ?? capturedOnset ?? null,
+          onsetAt: effectiveOnset,
           audioEndedAt: rawItem.audioEndedAt ?? now,
           speechDurationMs: rawItem.speechDurationMs ?? null,
           audioQuality: rawItem.audioQuality,
@@ -2597,6 +2630,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         });
       })
       .catch((err) => {
+        if (
+          !usedWasm &&
+          !this.usingBrowserFallback &&
+          capturedEpoch === this.epoch &&
+          isTechnicalSttUnavailabilityError(err)
+        ) {
+          this.recordTechnicalFailureAndMaybeFallback(err);
+          return;
+        }
         if (interimCtrl.signal.aborted) return;
         if (usedWasm && this.usingWasmStt) {
           // Only leave WASM mode if browser/Android fallback actually activates;

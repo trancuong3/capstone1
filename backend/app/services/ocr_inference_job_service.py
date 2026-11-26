@@ -25,6 +25,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, OcrInferenceJob, OcrWorkerHeartbeat, PageRevision, ParentBookPageSubmission
 from app.repositories.ocr_inference_job_repository import ACTIVE_JOB_STATUSES, OcrInferenceJobRepository
 from app.services import storage_service
+from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_text_utils import (  # noqa: F401
     align_ocr_tokens,
     normalize_text_tokens,
@@ -391,7 +392,11 @@ _TRANSIENT_POST_OCR_ERROR_CODES = {
 
 
 def _is_transient_post_ocr_error(exc: Exception) -> bool:
+    if isinstance(exc, OcrConfigurationError):
+        return False
     code = str(getattr(exc, "code", "") or "").upper()
+    if code == "NO_AI_PROVIDER_CONFIGURED":
+        return False
     status_code = getattr(exc, "status_code", None)
     if code in _TRANSIENT_POST_OCR_ERROR_CODES:
         return True
@@ -443,7 +448,6 @@ async def run_parent_submission_post_ocr(
         content_hash as safety_content_hash,
     )
     from app.services.ocr_ai.config import OcrCorrectionConfig
-    from app.services.ocr_ai.exceptions import OcrConfigurationError
     from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator, OcrOrchestrationError
 
     local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
@@ -589,6 +593,8 @@ async def run_parent_submission_post_ocr(
             uncertain_set: set[int] = set()
 
             def _on_event(evt: dict[str, object]) -> None:
+                if evt.get("status") == "started":
+                    return
                 if len(events) < 30:
                     events.append(
                         {

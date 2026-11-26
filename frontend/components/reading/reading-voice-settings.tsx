@@ -713,9 +713,12 @@ export function ReadingVoiceSettings({
                           ? [defaultVoiceId]
                           : []
                       : [];
+                  const isLocalWorkerOffline = voiceHealth
+                    ? !voiceHealth.local.available
+                    : loadState.status === "ready" &&
+                      loadState.data.local_worker_ready === false;
                   const isCachedOffline =
-                    loadState.status === "ready" &&
-                    loadState.data.local_worker_ready === false &&
+                    isLocalWorkerOffline &&
                     cachedVoiceIds.includes(voice.voice_id);
                   return (
                     <label
@@ -766,7 +769,9 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
-            loadState.data.local_worker_ready === false
+            (voiceHealth
+              ? !voiceHealth.local.available
+              : loadState.data.local_worker_ready === false)
               ? (() => {
                   const cachedIds =
                     loadState.data.cached_voice_ids !== undefined

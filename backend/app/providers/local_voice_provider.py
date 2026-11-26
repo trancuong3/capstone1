@@ -301,6 +301,9 @@ class LocalTranscription:
     superseded: bool = False
 
 
+_REMOTE_GATEWAY_DOWN_STATUSES = frozenset({502, 504, 520, 521, 522, 523, 524, 530})
+
+
 class LocalVoiceTechnicalError(VoiceProviderError):
     """Raised when the local voice worker is unconfigured, unreachable, busy, or times out."""
 
@@ -428,17 +431,23 @@ class LocalVoiceProvider:
         self._remote_unavailable_error_code = error_code
         # In production `_get_client` is unbound on the instance; if a unit test patches
         # `provider._get_client` to swap fake clients mid-test, scope the breaker to that mock.
-        self._remote_unavailable_override = self.__dict__.get("_get_client")
+        override = self.__dict__.get("_get_client")
+        self._remote_unavailable_override = override
         self._remote_unavailable_client_id = (
-            id(client) if "_get_client" in self.__dict__ else None
+            id(client) if override is not None else None
         )
+
+    def _clear_remote_circuit(self) -> None:
+        self._remote_unavailable_until = 0.0
+        self._remote_unavailable_client_id = None
+        self._remote_unavailable_override = None
 
     def _is_remote_circuit_open(self, client: Any | None = None) -> bool:
         if self.is_loopback or time.monotonic() >= self._remote_unavailable_until:
             return False
-        override = self.__dict__.get("_get_client")
         recorded_override = getattr(self, "_remote_unavailable_override", None)
-        if recorded_override is not None and override is not recorded_override:
+        current_override = self.__dict__.get("_get_client")
+        if recorded_override is not None and current_override is not recorded_override:
             return False
         if (
             self._remote_unavailable_client_id is not None
@@ -702,6 +711,7 @@ class LocalVoiceProvider:
                     retries_used += 1
                     await asyncio.sleep(backoff_s)
                     continue
+                self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
                 raise
             except httpx.TimeoutException as exc:
                 await self._release_client(client)
@@ -719,9 +729,9 @@ class LocalVoiceProvider:
                 await self._release_client(client)
 
             if resp.status_code == 200:
-                self._remote_unavailable_until = 0.0
-                self._remote_unavailable_client_id = None
-                self._remote_unavailable_override = None
+                self._clear_remote_circuit()
+            elif not self.is_loopback and resp.status_code in _REMOTE_GATEWAY_DOWN_STATUSES:
+                self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
 
             if resp.status_code == 503 and retries_used < retry_limit:
                 worker_code = _extract_worker_error_code(resp)
@@ -763,16 +773,15 @@ class LocalVoiceProvider:
             }
         probe_client = self._get_client() if "_get_client" in self.__dict__ else None
         if self._is_remote_circuit_open(probe_client):
-            err_code = self._remote_unavailable_error_code or "LOCAL_VOICE_UNAVAILABLE"
-            is_timeout = err_code == "LOCAL_VOICE_TIMEOUT"
+            err = self._remote_unavailable_error_code
             return {
                 "configured": True,
                 "available": False,
                 "stt_ready": False,
                 "tts_ready": False,
-                "error_code": err_code,
-                "stt_error_code": "LOCAL_STT_TIMEOUT" if is_timeout else "LOCAL_STT_UNAVAILABLE",
-                "tts_error_code": "LOCAL_TTS_TIMEOUT" if is_timeout else "LOCAL_TTS_UNAVAILABLE",
+                "error_code": err,
+                "stt_error_code": err if err == "LOCAL_VOICE_TIMEOUT" else "LOCAL_STT_UNAVAILABLE",
+                "tts_error_code": err if err == "LOCAL_VOICE_TIMEOUT" else "LOCAL_TTS_UNAVAILABLE",
                 "stt_model_version": LOCAL_STT_MODEL_VERSION,
                 "tts_model_version": LOCAL_TTS_MODEL_VERSION,
                 "latency_ms": 0,
@@ -790,9 +799,7 @@ class LocalVoiceProvider:
             )
             latency_ms = int((time.perf_counter() - started) * 1000)
             if resp.status_code == 200:
-                self._remote_unavailable_until = 0.0
-                self._remote_unavailable_client_id = None
-                self._remote_unavailable_override = None
+                self._clear_remote_circuit()
             if resp.status_code == 503:
                 return {
                     "configured": True,
@@ -805,7 +812,9 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             if resp.status_code != 200:
-                if not self.is_loopback and resp.status_code >= 500:
+                if not self.is_loopback and (
+                    resp.status_code >= 500 or resp.status_code in _REMOTE_GATEWAY_DOWN_STATUSES
+                ):
                     self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
                 if resp.status_code in (401, 403) and not self._get_token():
                     self._schedule_background_recovery()
@@ -864,7 +873,7 @@ class LocalVoiceProvider:
                 "latency_ms": latency_ms,
             }
         except (httpx.TimeoutException, asyncio.TimeoutError):
-            self._trip_remote_circuit(client, "LOCAL_VOICE_TIMEOUT")
+            self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
             return {
                 "configured": True,
                 "available": False,
@@ -920,9 +929,7 @@ class LocalVoiceProvider:
                 timeout=2.0,
             )
             if resp.status_code == 200:
-                self._remote_unavailable_until = 0.0
-                self._remote_unavailable_client_id = None
-                self._remote_unavailable_override = None
+                self._clear_remote_circuit()
                 payload = resp.json()
                 if not isinstance(payload, dict):
                     raise ValueError("expected JSON object")
@@ -960,6 +967,8 @@ class LocalVoiceProvider:
                     )
                 if mapped:
                     return mapped, True
+            elif not self.is_loopback and resp.status_code in _REMOTE_GATEWAY_DOWN_STATUSES:
+                self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
         except Exception:
             self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
         finally:

@@ -277,6 +277,8 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
                 const entry = manifest.files[spec.name];
                 if (
                   entry?.verified &&
+                  typeof entry.byteLength === "number" &&
+                  Number.isFinite(entry.byteLength) &&
                   entry.byteLength === spec.expectedBytes
                 ) {
                   cachedFiles += 1;
