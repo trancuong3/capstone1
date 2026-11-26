@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "Recognizing page...",
     "jobHeadlineRetrying": "Retrying page recognition...",
     "jobHeadlineQueuedOnline": "Image queued — waiting for recognition...",
-    "jobHeadlineQueuedOffline": "Waiting for Windows OCR server — image saved safely",
+    "jobHeadlineQueuedOffline": "Page saved in the OCR queue — Recognition will start automatically when the OCR server comes back online",
     "jobIdMeta": "{fileName} · Task ID: ",
     "scanFailedTitle": "Could not scan page",
     "relogin": "Log In Again",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "Cannot connect to local OCR server. Please try again.",
     "errorUnsupportedFormat": "Unsupported image format. Please select JPG, PNG, or WebP.",
     "errorEmptyFile": "Image file is empty. Please select another image.",
-    "errorFileTooLarge": "Image exceeds 32 MB limit. Please select a smaller file."
+    "errorFileTooLarge": "Image exceeds 32 MB limit. Please select a smaller file.",
+    "workerOfflineBannerTitle": "OCR server is temporarily offline",
+    "workerOfflineBannerBody": "The OCR server is temporarily offline — You can still capture or upload pages to save them in the queue; recognition will start automatically when the server comes back online.",
+    "workerUnreachableBannerTitle": "OCR server is starting up or temporarily unreachable",
+    "workerUnreachableBannerBody": "Could not verify OCR server status right now due to startup or a slow connection. You can still upload images to queue them or retry checking in a few seconds.",
+    "recheckOcrConnection": "Recheck OCR connection",
+    "queuePositionLabel": "Queue position: #{position}",
+    "savedAtLabel": "Saved at {time}",
+    "checkQueueNow": "Check now",
+    "scanAnotherPageQueued": "Scan another page",
+    "cancelQueuedTask": "Cancel task",
+    "queuedListHeading": "Other pages saved in the OCR queue ({count} pages)"
   },
   "camera": {
     "missingBookInfo": "ViRead recognized the page but missing book info. Please align and scan again.",

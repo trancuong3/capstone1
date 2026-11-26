@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   RefreshCw,
   RotateCcw,
   Save,
@@ -32,6 +33,12 @@ import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import {
+  getAdminOcrJob,
+  isActiveAdminOcrJobStatus,
+  isAdminOcrJobQueuedSignal,
+  type AdminOcrJobDTO,
+} from "@/lib/api/admin-page-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
@@ -910,6 +917,7 @@ export function AdminOcrReviewScreen({
     message: string;
     tone: "info" | "error";
   } | null>(null);
+  const [queuedOcrJob, setQueuedOcrJob] = useState<AdminOcrJobDTO | null>(null);
   const notice = noticeState?.message ?? null;
   const noticeTone = noticeState?.tone ?? "info";
   const setNotice = useCallback(
@@ -2050,6 +2058,144 @@ export function AdminOcrReviewScreen({
     }
   }
 
+  // Restore any active queued/running OCR job for this page across reloads.
+  useEffect(() => {
+    if (typeof pages.listOcrJobs !== "function") return;
+    let active = true;
+    const controller = new AbortController();
+    void pages
+      .listOcrJobs(bookId, controller.signal)
+      .then((jobs) => {
+        if (!active || controller.signal.aborted) return;
+        const match =
+          jobs.find(
+            (job) =>
+              job.page_id === pageId && isActiveAdminOcrJobStatus(job.status),
+          ) ?? null;
+        setQueuedOcrJob(match);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [bookId, pageId, pages]);
+
+  // Gently auto-poll queued OCR job (12s when laptop worker is offline, 3s when online)
+  // and refresh the new revision automatically as soon as the worker completes it.
+  const queuedOcrJobId = queuedOcrJob?.id ?? null;
+  const queuedOcrWorkerOffline = queuedOcrJob?.worker_online === false;
+  useEffect(() => {
+    if (!queuedOcrJobId) return;
+    let active = true;
+    let timerId: ReturnType<typeof globalThis.setTimeout> | null = null;
+    const controller = new AbortController();
+
+    const clearTimer = () => {
+      if (timerId !== null) {
+        globalThis.clearTimeout(timerId);
+        timerId = null;
+      }
+    };
+
+    const schedule = (ms: number) => {
+      clearTimer();
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      timerId = globalThis.setTimeout(() => {
+        void tick();
+      }, ms);
+    };
+
+    const tick = async () => {
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      try {
+        const nextJob = await getAdminOcrJob(queuedOcrJobId, controller.signal);
+        if (!active || controller.signal.aborted) return;
+        if (nextJob.status === "SUCCEEDED") {
+          setQueuedOcrJob(null);
+          const nextRevisionId =
+            nextJob.revision_id ??
+            (await pages.reload(pageId)).page_revision_id;
+          const [nextDetail, nextImage, nextHistory] = await Promise.all([
+            ocr.getRevision(pageId, nextRevisionId),
+            pages.getImage(pageId, nextRevisionId),
+            revisions.list(pageId),
+          ]);
+          if (!active) return;
+          setImage(nextImage);
+          applyDetail(nextDetail);
+          setHistory(nextHistory);
+          setNotice(
+            nextJob.job_kind === "ADMIN_PAGE_REUPLOAD"
+              ? t("ocrReview.notices.reuploadCreated")
+              : t("ocrReview.notices.reprocessCreated"),
+          );
+          return;
+        }
+        if (
+          nextJob.status === "DEAD_LETTER" ||
+          nextJob.status === "CANCELLED"
+        ) {
+          setQueuedOcrJob(null);
+          setNotice(
+            nextJob.error_message || t("ocrReview.notices.reprocessError"),
+            "error",
+          );
+          return;
+        }
+        setQueuedOcrJob(nextJob);
+        schedule(nextJob.worker_online === false ? 12_000 : 3_000);
+      } catch {
+        if (!active || controller.signal.aborted) return;
+        schedule(queuedOcrWorkerOffline ? 12_000 : 5_000);
+      }
+    };
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+      } else {
+        schedule(400);
+      }
+    };
+
+    schedule(queuedOcrWorkerOffline ? 12_000 : 3_000);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+    return () => {
+      active = false;
+      clearTimer();
+      controller.abort();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+    };
+  }, [
+    applyDetail,
+    ocr,
+    pageId,
+    pages,
+    queuedOcrJobId,
+    queuedOcrWorkerOffline,
+    revisions,
+    setNotice,
+    t,
+  ]);
+
   async function reprocess() {
     if (!detail || detail.lifecycle_status !== "ACTIVE" || busy !== null)
       return;
@@ -2069,16 +2215,22 @@ export function AdminOcrReviewScreen({
         generation !== revisionChoiceRequestIdRef.current
       )
         return;
+      setQueuedOcrJob(null);
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
       setNotice(t("ocrReview.notices.reprocessCreated"));
-    } catch {
+    } catch (cause) {
       if (
         !mountedRef.current ||
         generation !== revisionChoiceRequestIdRef.current
       )
         return;
+      if (isAdminOcrJobQueuedSignal(cause)) {
+        setQueuedOcrJob(cause.job);
+        setNotice(cause.message, "info");
+        return;
+      }
       setNotice(t("ocrReview.notices.reprocessError"), "error");
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -2123,6 +2275,7 @@ export function AdminOcrReviewScreen({
         generation !== revisionChoiceRequestIdRef.current
       )
         return;
+      setQueuedOcrJob(null);
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
@@ -2132,12 +2285,22 @@ export function AdminOcrReviewScreen({
       ) as HTMLInputElement | null;
       if (input) input.value = "";
       setNotice(t("ocrReview.notices.reuploadCreated"));
-    } catch {
+    } catch (cause) {
       if (
         !mountedRef.current ||
         generation !== revisionChoiceRequestIdRef.current
       )
         return;
+      if (isAdminOcrJobQueuedSignal(cause)) {
+        setQueuedOcrJob(cause.job);
+        setReplacementFile(null);
+        const input = document.getElementById(
+          "replacement-page-image",
+        ) as HTMLInputElement | null;
+        if (input) input.value = "";
+        setNotice(cause.message, "info");
+        return;
+      }
       setNotice(t("ocrReview.notices.reuploadError"), "error");
     } finally {
       if (mountedRef.current) setBusy(null);
@@ -2482,6 +2645,34 @@ export function AdminOcrReviewScreen({
         >
           {t("ocrReview.header.processingBannerDesc")}
         </StatusMessage>
+      ) : null}
+      {queuedOcrJob ? (
+        <div
+          className="mb-6 flex items-start gap-3 rounded-card border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
+          data-testid="admin-review-ocr-queued-banner"
+          role="status"
+        >
+          <Clock3
+            aria-hidden
+            className="mt-0.5 size-5 shrink-0 text-amber-700"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-extrabold">
+              {queuedOcrJob.worker_online === false
+                ? t("books.detail.ocrQueueOfflineBanner", {
+                    count: formatNumber(1),
+                  })
+                : t("books.detail.ocrQueueOnlineBanner", {
+                    count: formatNumber(1),
+                  })}
+            </p>
+            <p className="mt-1 text-xs text-amber-900">
+              {queuedOcrJob.worker_online === false
+                ? t("books.detail.ocrQueueOfflineHint")
+                : t("books.detail.ocrQueueOnlineHint")}
+            </p>
+          </div>
+        </div>
       ) : null}
       {notice ? (
         <StatusMessage className="mb-6" tone={noticeTone}>

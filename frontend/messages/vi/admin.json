@@ -454,7 +454,15 @@
       "notFoundTitle": "Không tìm thấy sách",
       "loadErrorTitle": "Không thể tải sách",
       "notFoundDesc": "ID sách không thuộc dữ liệu quản trị hiện tại.",
-      "genericErrorDesc": "Vui lòng thử lại sau."
+      "genericErrorDesc": "Vui lòng thử lại sau.",
+      "ocrQueueOfflineBanner": "Đã lưu {count} trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
+      "ocrQueueOnlineBanner": "Đang xử lý OCR cho {count} trang…",
+      "ocrQueueOfflineHint": "Các tác vụ đã được lưu bền vững; danh sách trang sẽ tự động cập nhật ngay khi máy chủ OCR hoạt động trở lại kể cả sau khi tải lại trang.",
+      "ocrQueueOnlineHint": "Hệ thống đang tự động cập nhật tiến trình nhận diện OCR từng trang.",
+      "ocrQueueCheckNow": "Kiểm tra lại ngay",
+      "queuedNewPageBadge": "Trang mới #{index} · Đã lưu trong hàng chờ OCR",
+      "pageQueuedOfflineBadge": "Đã lưu trong hàng chờ OCR — Chờ máy chủ bật lại",
+      "pageQueuedOnlineBadge": "Đang xử lý OCR lại…"
     },
     "editor": {
       "loading": "Đang tải metadata sách…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "Không thể đọc kích thước ảnh tại trình duyệt.",
         "noValidFiles": "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
         "someInvalidFiles": "Một số tệp không hợp lệ nên chưa được upload. Các tệp hợp lệ vẫn đang được xử lý."
-      }
+      },
+      "workerOfflineTitle": "Máy chủ OCR đang tạm tắt",
+      "workerOfflineBody": "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ lưu bền vững vào hàng chờ và tự động xử lý OCR ngay khi máy chủ OCR bật lại.",
+      "workerUnreachableTitle": "Chưa kiểm tra được trạng thái máy chủ OCR",
+      "workerUnreachableBody": "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để lưu vào hàng chờ OCR.",
+      "recheckWorkerBtn": "Kiểm tra lại kết nối OCR"
     },
     "imagePreview": {
       "hideButton": "Ẩn ảnh trang {pageNumber}",
@@ -2348,21 +2361,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "Tác vụ OCR chưa hoàn tất. Hãy kiểm tra máy chủ OCR Windows rồi thử lại.",
-    "ocrTaskQueuedWindows": "Ảnh trang đã được xếp hàng chờ máy chủ OCR Windows xử lý. Bạn có thể làm mới lại sau khi máy chủ OCR hoàn tất.",
+    "ocrTaskQueuedWindows": "Đã lưu trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
     "skippedEmptyNote": "bỏ qua {count} trang trắng",
     "failedPagesNote": "lỗi {count} trang",
     "createdPagesSummary": "Đã tạo {count} trang · Cần duyệt{suffix}",
-    "queuedDocPagesForWorker": "Đã xếp hàng {count} trang chờ máy chủ OCR Windows bật",
+    "queuedDocPagesForWorker": "Đã lưu {count} trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
     "docPagesPartialProgress": "Hoàn tất {completed}/{total} trang ({pending} trang đang tiếp tục xếp hàng OCR)",
     "docPagesComplete": "Đã hoàn tất OCR {completed}/{total} trang · Cần duyệt",
     "singlePageQueued": "Đã xếp hàng chờ máy chủ OCR Windows xử lý",
     "singlePageRecognizing": "Đang nhận diện OCR trang sách…",
     "singlePageFailed": "Tác vụ OCR trang sách chưa hoàn tất. Vui lòng thử lại.",
     "singlePageSucceeded": "Đã nhận diện OCR · Cần duyệt",
-    "singlePageWaitingWorker": "Đã xếp hàng an toàn chờ máy chủ OCR Windows hoàn tất",
+    "singlePageWaitingWorker": "Đã lưu 1 trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
     "uploadFailedCheckBackend": "Upload thất bại. Hãy kiểm tra Backend và thử lại.",
     "reloadAfterUploadFailed": "Không thể tải lại danh sách trang sau upload. Dữ liệu có thể đã được lưu; hãy tải lại để xác minh.",
     "reprocessIncomplete": "Tác vụ OCR lại trang chưa hoàn tất. Vui lòng thử lại.",
-    "reprocessQueuedWindows": "Trang đã được xếp hàng chờ máy chủ OCR Windows xử lý lại. Vui lòng làm mới sau khi hoàn tất."
+    "reprocessQueuedWindows": "Đã lưu yêu cầu chạy lại OCR trong hàng chờ — Tự động xử lý ngay khi máy chủ OCR bật lại"
   }
 }

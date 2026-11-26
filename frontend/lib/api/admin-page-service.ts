@@ -35,6 +35,7 @@ export const adminOcrJobSchema = z.object({
   revision_id: z.string().nullable().optional(),
   submission_id: z.string().nullable().optional(),
   worker_id: z.string().nullable().optional(),
+  worker_online: z.boolean().optional(),
   attempt_count: z.number().optional(),
   max_attempts: z.number().optional(),
   error_code: z.string().nullable().optional(),
@@ -46,6 +47,40 @@ export const adminOcrJobSchema = z.object({
 });
 
 export type AdminOcrJobDTO = z.infer<typeof adminOcrJobSchema>;
+
+export class AdminOcrJobQueuedSignal extends Error {
+  readonly kind = "ADMIN_OCR_JOB_QUEUED" as const;
+  readonly job: AdminOcrJobDTO;
+
+  constructor(job: AdminOcrJobDTO, message: string) {
+    super(message);
+    this.name = "AdminOcrJobQueuedSignal";
+    this.job = job;
+  }
+}
+
+export function isAdminOcrJobQueuedSignal(
+  error: unknown,
+): error is AdminOcrJobQueuedSignal {
+  return (
+    error instanceof AdminOcrJobQueuedSignal ||
+    (typeof error === "object" &&
+      error !== null &&
+      "kind" in error &&
+      (error as { kind?: unknown }).kind === "ADMIN_OCR_JOB_QUEUED")
+  );
+}
+
+export function isActiveAdminOcrJobStatus(
+  status: AdminOcrJobDTO["status"],
+): boolean {
+  return (
+    status === "QUEUED" ||
+    status === "CLAIMED" ||
+    status === "RUNNING" ||
+    status === "FAILED_RETRYABLE"
+  );
+}
 
 export const adminDocumentJobsResponseSchema = z.object({
   book_id: z.uuid(),
@@ -177,6 +212,12 @@ export async function pollAdminOcrJob(
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (isTerminalOcrJobStatus(current.status)) {
+      return current;
+    }
+    if (
+      current.worker_online === false &&
+      (current.status === "QUEUED" || current.status === "FAILED_RETRYABLE")
+    ) {
       return current;
     }
     if (options.signal?.aborted) {
@@ -342,13 +383,10 @@ async function fetchRevisionForCompletedJob(
     });
   }
   if (job.status !== "SUCCEEDED") {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      status: 503,
-      request_id: job.id,
-      retryable: true,
-      message: translateRuntime("admin.pageUploadRuntime.ocrTaskQueuedWindows"),
-    });
+    throw new AdminOcrJobQueuedSignal(
+      job,
+      translateRuntime("admin.pageUploadRuntime.ocrTaskQueuedWindows"),
+    );
   }
   const targetPageId = job.page_id ?? pageId;
   if (job.revision_id) {
@@ -369,6 +407,10 @@ async function fetchRevisionForCompletedJob(
 
 export interface AdminPageService {
   list(bookId: string): Promise<readonly AdminPageListItemUI[]>;
+  listOcrJobs?(
+    bookId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly AdminOcrJobDTO[]>;
   getImage(pageId: string, revisionId?: string): Promise<AdminPageImageUI>;
   replaceImageAndReprocess(
     pageId: string,
@@ -506,6 +548,7 @@ export function createAdminPageService(options?: {
           )
           .refine((items) => items.every((item) => item.book_id === bookId)),
       ),
+    listOcrJobs: (bookId, signal) => listAdminBookOcrJobs(bookId, signal),
     getImage: (pageId, revisionId) =>
       requestApi(
         `/books/admin/pages/${encodeURIComponent(pageId)}/image${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
@@ -710,54 +753,69 @@ export function createAdminPageService(options?: {
                 undefined,
                 { method: "POST", body: form },
               );
-              onProgress?.({
-                client_id: page.client_id,
-                file_name: page.file_name,
-                progress_percent: 35,
-                status: "PROCESSING",
-                summary_message:
-                  job.status === "QUEUED"
-                    ? translateRuntime(
-                        "admin.pageUploadRuntime.singlePageQueued",
-                      )
-                    : translateRuntime(
-                        "admin.pageUploadRuntime.singlePageRecognizing",
-                      ),
-              });
-              const finalJob = await pollAdminOcrJob(job, {
-                pollIntervalMs,
-                maxAttempts: maxPollAttempts,
-              });
               if (
-                finalJob.status === "DEAD_LETTER" ||
-                finalJob.status === "CANCELLED"
+                job.worker_online === false &&
+                (job.status === "QUEUED" || job.status === "FAILED_RETRYABLE")
               ) {
-                onProgress?.({
-                  client_id: page.client_id,
-                  file_name: page.file_name,
-                  progress_percent: 0,
-                  status: "FAILED",
-                  error_message:
-                    finalJob.error_message ||
-                    translateRuntime(
-                      "admin.pageUploadRuntime.singlePageFailed",
-                    ),
-                });
-              } else {
                 onProgress?.({
                   client_id: page.client_id,
                   file_name: page.file_name,
                   progress_percent: 100,
                   status: "PROCESSING",
+                  summary_message: translateRuntime(
+                    "admin.pageUploadRuntime.singlePageWaitingWorker",
+                  ),
+                });
+              } else {
+                onProgress?.({
+                  client_id: page.client_id,
+                  file_name: page.file_name,
+                  progress_percent: 35,
+                  status: "PROCESSING",
                   summary_message:
-                    finalJob.status === "SUCCEEDED"
+                    job.status === "QUEUED"
                       ? translateRuntime(
-                          "admin.pageUploadRuntime.singlePageSucceeded",
+                          "admin.pageUploadRuntime.singlePageQueued",
                         )
                       : translateRuntime(
-                          "admin.pageUploadRuntime.singlePageWaitingWorker",
+                          "admin.pageUploadRuntime.singlePageRecognizing",
                         ),
                 });
+                const finalJob = await pollAdminOcrJob(job, {
+                  pollIntervalMs,
+                  maxAttempts: maxPollAttempts,
+                });
+                if (
+                  finalJob.status === "DEAD_LETTER" ||
+                  finalJob.status === "CANCELLED"
+                ) {
+                  onProgress?.({
+                    client_id: page.client_id,
+                    file_name: page.file_name,
+                    progress_percent: 0,
+                    status: "FAILED",
+                    error_message:
+                      finalJob.error_message ||
+                      translateRuntime(
+                        "admin.pageUploadRuntime.singlePageFailed",
+                      ),
+                  });
+                } else {
+                  onProgress?.({
+                    client_id: page.client_id,
+                    file_name: page.file_name,
+                    progress_percent: 100,
+                    status: "PROCESSING",
+                    summary_message:
+                      finalJob.status === "SUCCEEDED"
+                        ? translateRuntime(
+                            "admin.pageUploadRuntime.singlePageSucceeded",
+                          )
+                        : translateRuntime(
+                            "admin.pageUploadRuntime.singlePageWaitingWorker",
+                          ),
+                  });
+                }
               }
             } catch (pageJobError) {
               if (!isAsyncRouteUnsupported(pageJobError)) throw pageJobError;

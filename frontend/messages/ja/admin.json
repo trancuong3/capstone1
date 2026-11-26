@@ -454,7 +454,15 @@
       "notFoundTitle": "書籍が見つかりません",
       "loadErrorTitle": "書籍を読み込めません",
       "notFoundDesc": "書籍IDが現在の管理データに含まれていません。",
-      "genericErrorDesc": "後でもう一度試してください。"
+      "genericErrorDesc": "後でもう一度試してください。",
+      "ocrQueueOfflineBanner": "{count}ページをOCR待機キューに保存しました — OCRサーバーが再起動すると自動的に処理されます",
+      "ocrQueueOnlineBanner": "{count}ページのOCR処理を実行中…",
+      "ocrQueueOfflineHint": "タスクは永続的に保存されており、ページを再読み込みしてもOCRサーバー復旧後に自動で反映されます。",
+      "ocrQueueOnlineHint": "各ページのOCR進捗を自動更新しています。",
+      "ocrQueueCheckNow": "今すぐ確認",
+      "queuedNewPageBadge": "新規ページ #{index} · OCR待機キュー保存済み",
+      "pageQueuedOfflineBadge": "OCR待機キュー保存済み — サーバー起動待ち",
+      "pageQueuedOnlineBadge": "OCR再処理中…"
     },
     "editor": {
       "loading": "書籍メタデータを読み込み中…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "ブラウザで画像サイズを読み取れません。",
         "noValidFiles": "有効なアップロードファイルがありません。形式、サイズ、画像寸法を確認してください。",
         "someInvalidFiles": "一部のファイルが無効なためアップロードされませんでした。有効なファイルは引き続き処理中です。"
-      }
+      },
+      "workerOfflineTitle": "OCRサーバーは一時的にオフラインです",
+      "workerOfflineBody": "画像やPDF/DOCXは今すぐアップロードできます。ページは待機キューに安全に保存され、OCRサーバーが復旧すると自動的に処理されます。",
+      "workerUnreachableTitle": "OCRサーバーの状態を確認できませんでした",
+      "workerUnreachableBody": "バックエンドが起動中か通信が不安定です。再確認するか、OCR待機キューへアップロードできます。",
+      "recheckWorkerBtn": "OCR接続を再確認"
     },
     "imagePreview": {
       "hideButton": "{pageNumber}ページの画像を非表示",
@@ -2348,21 +2361,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR タスクが完了していません。Windows OCR サーバーを確認して再試行してください。",
-    "ocrTaskQueuedWindows": "ページ画像は Windows OCR サーバーの処理キューに追加されました。OCR サーバー完了後に再読み込みしてください。",
+    "ocrTaskQueuedWindows": "ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
     "skippedEmptyNote": "空白ページ {count} 件をスキップ",
     "failedPagesNote": "{count} ページでエラー",
     "createdPagesSummary": "{count} ページを作成 · 承認待ち{suffix}",
-    "queuedDocPagesForWorker": "Windows OCR サーバー起動待ちとして {count} ページをキューに追加",
+    "queuedDocPagesForWorker": "{count}ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
     "docPagesPartialProgress": "{completed}/{total} ページ完了（残り {pending} ページは OCR キュー処理中）",
     "docPagesComplete": "OCR {completed}/{total} ページ完了 · 承認待ち",
     "singlePageQueued": "Windows OCR サーバー処理のキューに追加されました",
     "singlePageRecognizing": "ページを OCR 認識中…",
     "singlePageFailed": "ページの OCR タスクを完了できませんでした。もう一度お試しください。",
     "singlePageSucceeded": "OCR 認識完了 · 承認待ち",
-    "singlePageWaitingWorker": "安全にキュー登録されました。Windows OCR サーバー完了を待機中です",
+    "singlePageWaitingWorker": "1ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
     "uploadFailedCheckBackend": "アップロードに失敗しました。Backend を確認して再試行してください。",
     "reloadAfterUploadFailed": "アップロード後にページ一覧を再読み込みできませんでした。データは保存済みの可能性があるため、再読み込みして確認してください。",
     "reprocessIncomplete": "ページの OCR 再処理が完了しませんでした。もう一度お試しください。",
-    "reprocessQueuedWindows": "ページは Windows OCR サーバーの再処理キューに追加されました。完了後に再読み込みしてください。"
+    "reprocessQueuedWindows": "OCR再実行リクエストを待機キューに保存しました — OCRサーバー復旧後に自動処理されます"
   }
 }

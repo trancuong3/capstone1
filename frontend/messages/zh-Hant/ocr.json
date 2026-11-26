@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "正在識別頁面...",
     "jobHeadlineRetrying": "正在嘗試重新識別頁面...",
     "jobHeadlineQueuedOnline": "圖片已加入佇列 — 等待頁面識別中...",
-    "jobHeadlineQueuedOffline": "等待 Windows OCR 伺服器啟動 — 圖片已安全儲存",
+    "jobHeadlineQueuedOffline": "書頁已儲存至 OCR 佇列 — OCR 伺服器重新上線後將自動開始辨識",
     "jobIdMeta": "{fileName} · 任務代碼：",
     "scanFailedTitle": "無法掃描頁面",
     "relogin": "重新登入",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "無法傳送圖片至本地 OCR 伺服器。請再試一次。",
     "errorUnsupportedFormat": "不支援的圖片格式。請選擇 JPG、PNG 或 WebP。",
     "errorEmptyFile": "圖片檔案為空。請選擇其他圖片。",
-    "errorFileTooLarge": "圖片超過 32 MB 的大小限制。請選擇較小的檔案。"
+    "errorFileTooLarge": "圖片超過 32 MB 的大小限制。請選擇較小的檔案。",
+    "workerOfflineBannerTitle": "OCR 伺服器目前暫時離線",
+    "workerOfflineBannerBody": "OCR 伺服器目前暫時離線 — 您仍可拍照或上傳圖片儲存至佇列；伺服器重新啟動後將自動執行辨識。",
+    "workerUnreachableBannerTitle": "OCR 伺服器正在啟動或暫時無回應",
+    "workerUnreachableBannerBody": "因伺服器啟動或網路較慢，暫時無法確認 OCR 狀態。您仍可上傳圖片儲存至佇列，或幾秒後重新檢查。",
+    "recheckOcrConnection": "重新檢查 OCR 連線",
+    "queuePositionLabel": "佇列位置：#{position}",
+    "savedAtLabel": "儲存於 {time}",
+    "checkQueueNow": "立即檢查",
+    "scanAnotherPageQueued": "繼續掃描其他頁",
+    "cancelQueuedTask": "取消任務",
+    "queuedListHeading": "OCR 佇列中儲存的其他書頁（共 {count} 頁）"
   },
   "camera": {
     "missingBookInfo": "ViRead 已識別頁面但缺少書籍資訊。請對齊後重新掃描。",

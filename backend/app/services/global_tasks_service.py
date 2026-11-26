@@ -188,11 +188,17 @@ def _stage_label(stage_value: str) -> str:
     return STAGE_LABELS_VI.get(stage_value.upper(), stage_value)
 
 
+WAITING_FOR_OCR_WORKER_SUBSTATUS_VI = (
+    "Đã lưu trong hàng chờ — Chờ máy chủ OCR bật lại"
+)
+
+
 def _build_result_href(
     *,
     actor_role: ActorRole,
     book_id: UUID | None,
     book_page_id: UUID | None,
+    job_type: str = "",
 ) -> str | None:
     if actor_role == "admin":
         if book_id and book_page_id:
@@ -200,6 +206,10 @@ def _build_result_href(
         if book_id:
             return f"/admin/books/{book_id}"
         return "/admin/books"
+    if job_type == "LOCAL_PAGE_SCAN":
+        if book_id:
+            return f"/book-scanner?bookId={book_id}"
+        return "/book-scanner"
     if book_id:
         return f"/my-books?bookId={book_id}"
     return "/my-books"
@@ -865,7 +875,13 @@ class GlobalTasksService:
         if any(item.status in ("RUNNING", "CANCEL_REQUESTED") for item in items):
             recommended_poll_ms = 3500
         elif active_count > 0:
-            recommended_poll_ms = 8000
+            active_items = [item for item in items if item.status in ACTIVE_TASK_STATUSES]
+            if worker_online is False and active_items and all(
+                item.status == "WAITING_FOR_WORKER" for item in active_items
+            ):
+                recommended_poll_ms = 15000
+            else:
+                recommended_poll_ms = 8000
 
         return GlobalTaskListResponse(
             actor_id=actor_id,
@@ -1010,7 +1026,11 @@ class GlobalTasksService:
             status=mapped_status,
             status_label_vi=_status_label(mapped_status, str(job.JobKind)),
             stage="OCR",
-            stage_label_vi=_stage_label("OCR"),
+            stage_label_vi=(
+                WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
+                if mapped_status == "WAITING_FOR_WORKER"
+                else _stage_label("OCR")
+            ),
             priority=int(job.Priority or 50),
             attempt_count=int(job.AttemptCount or 0),
             max_attempts=int(job.MaxAttempts or 3),
@@ -1025,6 +1045,7 @@ class GlobalTasksService:
                 actor_role=actor_role,
                 book_id=job.BookId,
                 book_page_id=job.PageId,
+                job_type=str(job.JobKind),
             ),
             error_code=job.ErrorCode,
             error_message_vi=job.ErrorMessage,
@@ -1175,7 +1196,11 @@ class GlobalTasksService:
             status=mapped_status,
             status_label_vi=_status_label(mapped_status, "PARENT_PAGE_PIPELINE"),
             stage=stage,
-            stage_label_vi=_stage_label(stage),
+            stage_label_vi=(
+                WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
+                if mapped_status == "WAITING_FOR_WORKER"
+                else _stage_label(stage)
+            ),
             priority=50,
             attempt_count=int(sub.Attempts or 0),
             max_attempts=3,

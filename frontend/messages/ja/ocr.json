@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "ページを認識中...",
     "jobHeadlineRetrying": "ページを再認識中...",
     "jobHeadlineQueuedOnline": "キューに追加済み — 認識待ちです...",
-    "jobHeadlineQueuedOffline": "Windows OCRサーバーを待機中 — 画像は安全に保存されました",
+    "jobHeadlineQueuedOffline": "ページをOCR待機キューに保存しました — OCRサーバーが再起動すると自動的に認識が始まります",
     "jobIdMeta": "{fileName} · タスクID: ",
     "scanFailedTitle": "ページをスキャンできませんでした",
     "relogin": "再ログイン",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "ローカルOCRサーバーに接続できません。再試行してください。",
     "errorUnsupportedFormat": "サポートされていない画像形式です。JPG、PNG、またはWebPを選択してください。",
     "errorEmptyFile": "画像ファイルが空です。別の画像を選択してください。",
-    "errorFileTooLarge": "画像が32MBを超えています。より小さなファイルを選択してください。"
+    "errorFileTooLarge": "画像が32MBを超えています。より小さなファイルを選択してください。",
+    "workerOfflineBannerTitle": "OCRサーバーは一時的にオフラインです",
+    "workerOfflineBannerBody": "OCRサーバーは一時的にオフラインです — ページの撮影・アップロードは引き続き可能で、キューに安全に保存され、サーバー起動後に自動認識されます。",
+    "workerUnreachableBannerTitle": "OCRサーバーは起動中か一時的に応答していません",
+    "workerUnreachableBannerBody": "起動中または通信が不安定なためOCRサーバーの状態を確認できませんでした。画像をキューに保存するか、数秒後に再確認してください。",
+    "recheckOcrConnection": "OCR接続を再確認",
+    "queuePositionLabel": "待機順位: #{position}",
+    "savedAtLabel": "{time} に保存",
+    "checkQueueNow": "今すぐ確認",
+    "scanAnotherPageQueued": "別のページをスキャン",
+    "cancelQueuedTask": "タスクをキャンセル",
+    "queuedListHeading": "OCR待機キューに保存中の他のページ（{count}ページ）"
   },
   "camera": {
     "missingBookInfo": "ページは認識されましたが、書籍情報が不足しています。位置を合わせて再度スキャンしてください。",

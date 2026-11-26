@@ -454,7 +454,15 @@
       "notFoundTitle": "未找到书籍",
       "loadErrorTitle": "无法加载书籍",
       "notFoundDesc": "书籍 ID 不属于当前管理数据。",
-      "genericErrorDesc": "请稍后再试。"
+      "genericErrorDesc": "请稍后再试。",
+      "ocrQueueOfflineBanner": "已将 {count} 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
+      "ocrQueueOnlineBanner": "正在为 {count} 页执行 OCR…",
+      "ocrQueueOfflineHint": "任务已持久保存；即使刷新页面，OCR 服务器上线后也会自动更新页面列表。",
+      "ocrQueueOnlineHint": "正在自动更新各页 OCR 进度。",
+      "ocrQueueCheckNow": "立即检查",
+      "queuedNewPageBadge": "新书页 #{index} · 已保存至 OCR 队列",
+      "pageQueuedOfflineBadge": "已保存至 OCR 队列 — 等待服务器上线",
+      "pageQueuedOnlineBadge": "正在重新执行 OCR…"
     },
     "editor": {
       "loading": "正在加载书籍元数据…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "无法在浏览器中读取图片尺寸。",
         "noValidFiles": "没有可上传的有效文件。请检查格式、大小和图片尺寸。",
         "someInvalidFiles": "部分文件无效，未进行上传。有效文件正在处理中。"
-      }
+      },
+      "workerOfflineTitle": "OCR 服务器当前暂时离线",
+      "workerOfflineBody": "您现在仍可上传图片或 PDF/DOCX：书页将持久保存到队列中，待 OCR 服务器重新上线后自动处理。",
+      "workerUnreachableTitle": "暂无法确认 OCR 服务器状态",
+      "workerUnreachableBody": "后端正在启动或网络较慢。您可重新检查，或直接上传并保存到 OCR 队列。",
+      "recheckWorkerBtn": "重新检查 OCR 连接"
     },
     "imagePreview": {
       "hideButton": "隐藏第 {pageNumber} 页图片",
@@ -2348,21 +2361,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR 任务尚未完成。请检查 Windows OCR 服务器后重试。",
-    "ocrTaskQueuedWindows": "页面图像已加入队列等待 Windows OCR 服务器处理。OCR 服务器完成后可刷新页面查看。",
+    "ocrTaskQueuedWindows": "已将该页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
     "skippedEmptyNote": "跳过 {count} 页空白页",
     "failedPagesNote": "{count} 页出错",
     "createdPagesSummary": "已创建 {count} 页 · 待审核{suffix}",
-    "queuedDocPagesForWorker": "已将 {count} 页加入队列，等待 Windows OCR 服务器启动",
+    "queuedDocPagesForWorker": "已将 {count} 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
     "docPagesPartialProgress": "已完成 {completed}/{total} 页（另有 {pending} 页正在继续排队进行 OCR）",
     "docPagesComplete": "已完成 {completed}/{total} 页 OCR · 待审核",
     "singlePageQueued": "已加入队列等待 Windows OCR 服务器处理",
     "singlePageRecognizing": "正在对书页执行 OCR 识别…",
     "singlePageFailed": "书页 OCR 任务尚未完成，请重试。",
     "singlePageSucceeded": "已完成 OCR 识别 · 待审核",
-    "singlePageWaitingWorker": "已安全排队，等待 Windows OCR 服务器处理完成",
+    "singlePageWaitingWorker": "已将 1 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
     "uploadFailedCheckBackend": "上传失败。请检查 Backend 后重试。",
     "reloadAfterUploadFailed": "上传后无法重新加载页面列表。数据可能已保存；请刷新页面确认。",
     "reprocessIncomplete": "重新执行页面 OCR 的任务尚未完成，请重试。",
-    "reprocessQueuedWindows": "页面已加入队列等待 Windows OCR 服务器重新处理。完成后请刷新查看。"
+    "reprocessQueuedWindows": "已将重新 OCR 请求保存到队列 — OCR 服务器重新上线后将自动处理"
   }
 }

@@ -321,7 +321,7 @@
     "overviewAria": "Tổng quan nhanh trạng thái các trang",
     "overviewChipTitle": "Trang nguồn {page}: {status}",
     "workerFailuresSummary": "Có {count} trang gặp lỗi OCR/AI (dịch vụ kiểm tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại kiểm tra» ở từng trang bị lỗi.",
-    "windowsOcrQueueWaiting": "Đang chờ máy chủ OCR Windows bật (hàng đợi an toàn — {count} trang đã được lưu an toàn và sẽ tự động nhận diện ngay khi máy chủ OCR hoạt động).",
+    "windowsOcrQueueWaiting": "Đã lưu trong hàng chờ OCR ({count} trang) — Đang chờ máy chủ bật lại. Hệ thống sẽ tự động nhận diện ngay khi máy chủ OCR hoạt động trở lại.",
     "ocrRunningStatus": "Đang nhận diện OCR {running} trang",
     "ocrQueuedSuffix": " ({count} trang đang xếp hàng tiếp theo)",
     "ocrOtherPagesStillVisible": ". Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao tác ngay.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "Đã hủy bản tải lên đang chờ.",
     "cancelSubmissionErrorFallback": "Không thể hủy trang này.",
     "pageNumberHeading": "Trang {page}",
-    "pageItemLabel": "trang"
+    "pageItemLabel": "trang",
+    "workerOfflineUploadNotice": "Máy chủ OCR đang tạm tắt — Ba mẹ vẫn có thể tải ảnh hoặc PDF/DOCX lên để lưu sẵn trong hàng chờ; hệ thống sẽ tự động nhận diện ngay khi máy chủ bật lại.",
+    "queuedWaitingWorkerBadge": "Đã lưu trong hàng chờ OCR — Đang chờ máy chủ bật lại",
+    "queuedWaitingWorkerShort": "Đã lưu trong hàng chờ OCR — Tự động nhận diện khi máy chủ bật lại",
+    "reasonQueuedOffline": "Trang sách đã được lưu an toàn trong hàng chờ OCR và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại."
   },
   "ocrContribution": {
     "cardAria": "Đóng góp mẫu để cải thiện OCR ViRead cho {title}",
