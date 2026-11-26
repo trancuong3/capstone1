@@ -103,13 +103,23 @@ export function ReadingCompanionBubble({
   const persona = gender
     ? getTeacherPersona(gender)
     : getEffectiveTeacherPersona();
+  const localizedPersonaTitle = t(
+    persona.gender === "male"
+      ? "companion.teacherMaleTitle"
+      : "companion.teacherFemaleTitle",
+  );
   const fallbackLabel = t(
     persona.gender === "male" ? theme.labelKeys.male : theme.labelKeys.female,
   );
-  const displayTitle = adaptTextToTeacherPersona(
+  const normalizedTitle = adaptTextToTeacherPersona(
     state.title || fallbackLabel,
     persona.gender,
-  ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, persona.title);
+  ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, localizedPersonaTitle);
+  const displayTitle =
+    normalizedTitle.includes(localizedPersonaTitle) ||
+    normalizedTitle.includes(persona.title)
+      ? normalizedTitle
+      : `${localizedPersonaTitle} · ${normalizedTitle}`;
   const displayMessage = adaptTextToTeacherPersona(
     state.message,
     persona.gender,

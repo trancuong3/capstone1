@@ -465,7 +465,7 @@ export function AppShell({ children }: AppShellProps) {
           <nav
             aria-label={t("navigation.parent.navLabel")}
             className={cn(
-              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-4",
+              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-2 2xl:gap-4",
               isChildOnboarding && "min-h-11",
             )}
           >
@@ -476,7 +476,7 @@ export function AppShell({ children }: AppShellProps) {
               size="md"
             />
 
-            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-3">
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-2 2xl:gap-3">
               {!isChildOnboarding ? (
                 <>
                   <div
@@ -595,7 +595,7 @@ export function AppShell({ children }: AppShellProps) {
                     )}
                   </div>
 
-                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-2 py-1 xl:flex xl:flex-none xl:flex-nowrap">
+                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
                     {navigationItemsConfig.map(
                       ({ href, icon: Icon, labelKey }) => {
                         const isActive =
@@ -613,7 +613,7 @@ export function AppShell({ children }: AppShellProps) {
                           <Link
                             aria-current={isActive ? "page" : undefined}
                             className={cn(
-                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
+                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-1.5 xl:px-2 xl:text-label 2xl:gap-2 2xl:px-3",
                               isActive
                                 ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
                                 : "bg-white hover:bg-canvas",

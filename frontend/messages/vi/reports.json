@@ -199,14 +199,14 @@
       "viewDetail": "Xem chi tiết"
     },
     "states": {
-      "FINISHED": "Hoàn thành",
-      "IN_PROGRESS": "Đang đọc",
-      "CREATED": "Đang đọc",
-      "PAGE_READY": "Đang đọc",
+      "FINISHED": "Đã hoàn thành",
+      "IN_PROGRESS": "Đang thực hiện",
+      "CREATED": "Đang chuẩn bị",
+      "PAGE_READY": "Đã nhận trang",
       "LISTENING": "Đang đọc",
-      "QUESTIONING": "Đang đọc",
-      "PAUSED": "Tạm dừng",
-      "RECONNECTING": "Tạm dừng",
+      "QUESTIONING": "Đang trả lời",
+      "PAUSED": "Đang tạm dừng",
+      "RECONNECTING": "Đang kết nối lại",
       "ABORTED": "Đã dừng"
     },
     "durationNotCompleted": "Chưa hoàn tất",
