@@ -4287,7 +4287,8 @@ class AdminOcrService:
             if existing_job is not None:
                 if existing_job.ImageSha256 != image_digest:
                     raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
-                return OcrInferenceJobService.serialize_job(existing_job)
+                worker_online = await job_service.has_online_worker()
+                return OcrInferenceJobService.serialize_job(existing_job, worker_online=worker_online)
 
         page_id = uuid4()
         object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
@@ -4344,7 +4345,8 @@ class AdminOcrService:
                     book_id=book_id,
                     started_at=time.perf_counter(),
                 )
-            return OcrInferenceJobService.serialize_job(job)
+            worker_online = await job_service.has_online_worker()
+            return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
         except Exception:
             await self.db.rollback()
             await self._abort_page_upload(
@@ -4499,6 +4501,8 @@ class AdminOcrService:
             spooled.close()
 
         worker_online = await job_service.has_online_worker()
+        for item in serialized_jobs:
+            item["worker_online"] = worker_online
         return {
             "book_id": str(book_id),
             "source_format": source_format,
@@ -4567,7 +4571,8 @@ class AdminOcrService:
             processing_meta={"expected_page_image_path": page_image_path},
         )
         await self.db.commit()
-        return OcrInferenceJobService.serialize_job(job)
+        worker_online = await job_service.has_online_worker()
+        return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
 
     async def enqueue_reupload_ocr_job(
         self,
@@ -4616,7 +4621,8 @@ class AdminOcrService:
             if existing_job is not None:
                 if existing_job.ImageSha256 != image_digest:
                     raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
-                return OcrInferenceJobService.serialize_job(existing_job)
+                worker_online = await job_service.has_online_worker()
+                return OcrInferenceJobService.serialize_job(existing_job, worker_online=worker_online)
             await self._rollback_if_possible()
 
         await run_in_threadpool(upload_object, object_path, data, content_type)
@@ -4650,7 +4656,8 @@ class AdminOcrService:
                     page_id=page_id,
                     started_at=time.perf_counter(),
                 )
-            return OcrInferenceJobService.serialize_job(job)
+            worker_online = await job_service.has_online_worker()
+            return OcrInferenceJobService.serialize_job(job, worker_online=worker_online)
         except Exception:
             await self._rollback_if_possible()
             await self._cleanup_uploaded_object(

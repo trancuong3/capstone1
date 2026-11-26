@@ -406,14 +406,14 @@ export function AdminPageUploader({
           <StatusMessage
             title={
               workerStatus === "offline"
-                ? "Máy chủ OCR Windows hiện đang tắt"
-                : "Chưa kiểm tra được trạng thái máy chủ OCR"
+                ? t("books.uploader.workerOfflineTitle")
+                : t("books.uploader.workerUnreachableTitle")
             }
             tone="warning"
           >
             {workerStatus === "offline"
-              ? "Bạn vẫn có thể upload ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi máy chủ OCR Windows hoạt động."
-              : "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc upload để xếp hàng OCR."}
+              ? t("books.uploader.workerOfflineBody")
+              : t("books.uploader.workerUnreachableBody")}
           </StatusMessage>
           <Button
             className="sm:w-auto sm:self-start"
@@ -426,7 +426,7 @@ export function AdminPageUploader({
             variant="secondary"
           >
             <RefreshCw aria-hidden className="size-4" />
-            Kiểm tra lại kết nối OCR
+            {t("books.uploader.recheckWorkerBtn")}
           </Button>
         </div>
       ) : null}

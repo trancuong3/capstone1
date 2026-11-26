@@ -454,7 +454,15 @@
       "notFoundTitle": "الكتاب غير موجود",
       "loadErrorTitle": "تعذر تحميل الكتاب",
       "notFoundDesc": "معرف الكتاب (ID) لا ينتمي إلى البيانات الإدارية الحالية.",
-      "genericErrorDesc": "يرجى المحاولة مرة أخرى لاحقاً."
+      "genericErrorDesc": "يرجى المحاولة مرة أخرى لاحقاً.",
+      "ocrQueueOfflineBanner": "تم حفظ {count} صفحة في قائمة انتظار OCR — ستُعالج تلقائيًا فور عودة خادم OCR للعمل",
+      "ocrQueueOnlineBanner": "جارٍ معالجة OCR لـ {count} صفحة…",
+      "ocrQueueOfflineHint": "تم حفظ المهام بشكل دائم؛ سيتم تحديث قائمة الصفحات تلقائيًا عند عودة خادم OCR حتى بعد إعادة تحميل الصفحة.",
+      "ocrQueueOnlineHint": "جارٍ تحديث تقدم التعرف على النص تلقائيًا.",
+      "ocrQueueCheckNow": "تحقق الآن",
+      "queuedNewPageBadge": "صفحة جديدة #{index} · محفوظة في قائمة انتظار OCR",
+      "pageQueuedOfflineBadge": "محفوظة في قائمة انتظار OCR — بانتظار الخادم",
+      "pageQueuedOnlineBadge": "جارٍ إعادة تشغيل OCR…"
     },
     "editor": {
       "loading": "جاري تحميل البيانات الوصفية للكتاب...",
@@ -517,7 +525,12 @@
         "imageUnreadable": "تم تأجيل مراجعة الصورة الجديدة. تُحفظ الصور المؤكدة والمحتويات للقراءة.",
         "noValidFiles": "لم يتم استبدال الصورة. تُحفظ الصورة القديمة؛ يرجى المحاولة مرة أخرى باستخدام الملف المحدد.",
         "someInvalidFiles": "بعض الملفات غير صالحة ولم يتم تحميلها. الملفات الصالحة لا تزال قيد المعالجة."
-      }
+      },
+      "workerOfflineTitle": "خادم OCR متوقف مؤقتًا",
+      "workerOfflineBody": "يمكنك رفع الصور أو ملفات PDF/DOCX الآن: سيتم حفظ الصفحات بأمان في قائمة الانتظار ومعالجتها تلقائيًا فور عودة خادم OCR.",
+      "workerUnreachableTitle": "تعذر التحقق من حالة خادم OCR",
+      "workerUnreachableBody": "الخادم قيد التشغيل أو الشبكة بطيئة. يمكنك إعادة الفحص أو الرفع للحفظ في قائمة انتظار OCR.",
+      "recheckWorkerBtn": "إعادة فحص اتصال OCR"
     },
     "imagePreview": {
       "hideButton": "إعادة تحميل صورة الصفحة {pageNumber}.",
@@ -2348,21 +2361,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "لم تكتمل مهمة OCR. تحقق من خادم OCR على Windows ثم أعد المحاولة.",
-    "ocrTaskQueuedWindows": "تم إدراج صورة الصفحة في قائمة الانتظار لخادم OCR على Windows. يمكنك التحديث بعد انتهاء المعالجة.",
+    "ocrTaskQueuedWindows": "تم حفظ الصفحة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
     "skippedEmptyNote": "تخطي {count} صفحات فارغة",
     "failedPagesNote": "خطأ في {count} صفحات",
     "createdPagesSummary": "تم إنشاء {count} صفحات · بانتظار المراجعة{suffix}",
-    "queuedDocPagesForWorker": "تم وضع {count} صفحات في الانتظار لتشغيل خادم OCR على Windows",
+    "queuedDocPagesForWorker": "تم حفظ {count} صفحة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
     "docPagesPartialProgress": "اكتملت {completed}/{total} صفحة ({pending} صفحة ما زالت في قائمة انتظار OCR)",
     "docPagesComplete": "اكتمل OCR لـ {completed}/{total} صفحة · بانتظار المراجعة",
     "singlePageQueued": "تم وضعه في الانتظار لمعالجة خادم OCR على Windows",
     "singlePageRecognizing": "جارٍ التعرف على نص الصفحة عبر OCR…",
     "singlePageFailed": "لم تكتمل مهمة OCR لصفحة الكتاب. يُرجى المحاولة مرة أخرى.",
     "singlePageSucceeded": "تم التعرف عبر OCR · بانتظار المراجعة",
-    "singlePageWaitingWorker": "تم الإدراج بأمان في قائمة الانتظار لحين انتهاء خادم OCR على Windows",
+    "singlePageWaitingWorker": "تم حفظ صفحة واحدة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
     "uploadFailedCheckBackend": "فشل الرفع. تحقق من الخادم الخلفي (Backend) وأعد المحاولة.",
     "reloadAfterUploadFailed": "تعذر إعادة تحميل قائمة الصفحات بعد الرفع. قد تكون البيانات قد حُفظت؛ أعد التحميل للتحقق.",
     "reprocessIncomplete": "لم تكتمل مهمة إعادة معالجة OCR للصفحة. يُرجى المحاولة مرة أخرى.",
-    "reprocessQueuedWindows": "تم وضع الصفحة في قائمة الانتظار لإعادة المعالجة عبر خادم OCR على Windows. يُرجى التحديث عند الانتهاء."
+    "reprocessQueuedWindows": "تم حفظ طلب إعادة OCR في قائمة الانتظار — سيُعالج تلقائيًا عند عودة خادم OCR"
   }
 }

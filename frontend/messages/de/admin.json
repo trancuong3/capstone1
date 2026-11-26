@@ -454,7 +454,15 @@
       "notFoundTitle": "Buch nicht gefunden",
       "loadErrorTitle": "Buch kann nicht geladen werden",
       "notFoundDesc": "Die Buch-ID gehört nicht zu den aktuellen Verwaltungsdaten.",
-      "genericErrorDesc": "Bitte versuchen Sie es später erneut."
+      "genericErrorDesc": "Bitte versuchen Sie es später erneut.",
+      "ocrQueueOfflineBanner": "{count} Seiten in der OCR-Warteschlange gespeichert — Automatische Verarbeitung, sobald der OCR-Server wieder online ist",
+      "ocrQueueOnlineBanner": "OCR-Verarbeitung für {count} Seiten läuft…",
+      "ocrQueueOfflineHint": "Aufgaben sind dauerhaft gespeichert; die Seitenliste aktualisiert sich automatisch nach dem Neustart des OCR-Servers, auch nach einem Neuladen.",
+      "ocrQueueOnlineHint": "Der OCR-Fortschritt wird automatisch aktualisiert.",
+      "ocrQueueCheckNow": "Jetzt prüfen",
+      "queuedNewPageBadge": "Neue Seite #{index} · In OCR-Warteschlange gespeichert",
+      "pageQueuedOfflineBadge": "In OCR-Warteschlange — Wartet auf Server",
+      "pageQueuedOnlineBadge": "OCR wird erneut ausgeführt…"
     },
     "editor": {
       "loading": "Buchmetadaten werden geladen…",
@@ -517,7 +525,12 @@
         "imageUnreadable": "Bildabmessungen können im Browser nicht gelesen werden.",
         "noValidFiles": "Keine gültigen Dateien zum Hochladen. Überprüfen Sie Format, Größe und Bildabmessungen.",
         "someInvalidFiles": "Einige Dateien sind ungültig und wurden nicht hochgeladen. Gültige Dateien werden weiterhin verarbeitet."
-      }
+      },
+      "workerOfflineTitle": "OCR-Server ist vorübergehend offline",
+      "workerOfflineBody": "Sie können jetzt weiterhin Bilder oder PDF/DOCX hochladen: Seiten werden dauerhaft in der Warteschlange gespeichert und automatisch verarbeitet, sobald der OCR-Server wieder läuft.",
+      "workerUnreachableTitle": "OCR-Serverstatus konnte nicht geprüft werden",
+      "workerUnreachableBody": "Das Backend startet gerade oder die Verbindung ist langsam. Sie können erneut prüfen oder Dateien in die OCR-Warteschlange hochladen.",
+      "recheckWorkerBtn": "OCR-Verbindung erneut prüfen"
     },
     "imagePreview": {
       "hideButton": "Bild der Seite {pageNumber} ausblenden",
@@ -2348,21 +2361,21 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "Der OCR-Auftrag wurde nicht abgeschlossen. Prüfen Sie den Windows-OCR-Server und versuchen Sie es erneut.",
-    "ocrTaskQueuedWindows": "Das Seitenbild wartet in der Warteschlange auf den Windows-OCR-Server. Aktualisieren Sie die Seite nach Abschluss.",
+    "ocrTaskQueuedWindows": "Seite in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
     "skippedEmptyNote": "{count} leere Seiten übersprungen",
     "failedPagesNote": "{count} fehlerhafte Seiten",
     "createdPagesSummary": "{count} Seiten erstellt · Prüfung ausstehend{suffix}",
-    "queuedDocPagesForWorker": "{count} Seiten für den Windows-OCR-Server in die Warteschlange gestellt",
+    "queuedDocPagesForWorker": "{count} Seiten in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
     "docPagesPartialProgress": "{completed}/{total} Seiten fertig ({pending} Seiten weiter in OCR-Warteschlange)",
     "docPagesComplete": "OCR für {completed}/{total} Seiten fertig · Prüfung ausstehend",
     "singlePageQueued": "Für den Windows-OCR-Server in die Warteschlange gestellt",
     "singlePageRecognizing": "Buchseite wird per OCR erkannt…",
     "singlePageFailed": "Der OCR-Auftrag für die Seite wurde nicht abgeschlossen. Bitte erneut versuchen.",
     "singlePageSucceeded": "OCR erkannt · Prüfung ausstehend",
-    "singlePageWaitingWorker": "Sicher in der Warteschlange für den Abschluss durch den Windows-OCR-Server",
+    "singlePageWaitingWorker": "1 Seite in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
     "uploadFailedCheckBackend": "Hochladen fehlgeschlagen. Prüfen Sie das Backend und versuchen Sie es erneut.",
     "reloadAfterUploadFailed": "Seitenliste konnte nach dem Hochladen nicht neu geladen werden. Daten wurden möglicherweise gespeichert; bitte neu laden.",
     "reprocessIncomplete": "Die erneute OCR-Verarbeitung der Seite wurde nicht abgeschlossen. Bitte erneut versuchen.",
-    "reprocessQueuedWindows": "Die Seite wartet auf erneute Verarbeitung durch den Windows-OCR-Server. Bitte danach aktualisieren."
+    "reprocessQueuedWindows": "Erneute OCR-Anfrage in der Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart"
   }
 }

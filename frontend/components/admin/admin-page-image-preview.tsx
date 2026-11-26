@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
+import { isAdminOcrJobQueuedSignal } from "@/lib/api/admin-page-service";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import type { AdminPageImageUI } from "@/types/admin";
 
@@ -105,9 +106,15 @@ function AdminPageImagePreviewContent({
       setNotice(t("books.imagePreview.uploadedNotice"));
       setFile(null);
       onReplaced?.();
-    } catch {
-      if (mountedRef.current)
-        setNotice(t("books.imagePreview.uploadFailedNotice"));
+    } catch (cause) {
+      if (!mountedRef.current) return;
+      if (isAdminOcrJobQueuedSignal(cause)) {
+        setNotice(cause.message);
+        setFile(null);
+        onReplaced?.();
+        return;
+      }
+      setNotice(t("books.imagePreview.uploadFailedNotice"));
     } finally {
       if (mountedRef.current) setBusy(false);
     }

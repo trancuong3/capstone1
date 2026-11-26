@@ -321,7 +321,7 @@
     "overviewAria": "Resumen rápido del estado de las páginas",
     "overviewChipTitle": "Página de origen {page}: {status}",
     "workerFailuresSummary": "{count} páginas encontraron errores de OCR/IA (el servicio podría estar ocupado o temporalmente fuera de línea). Las páginas listas o pendientes de revisión por el administrador no se ven afectadas; haga clic en «Reintentar comprobación» en las páginas con error.",
-    "windowsOcrQueueWaiting": "Esperando a que el servidor OCR de Windows se inicie (cola segura: {count} páginas guardadas y se procesarán automáticamente una vez que el servidor esté activo).",
+    "windowsOcrQueueWaiting": "Guardado en la cola de OCR ({count} páginas) — Esperando a que el servidor OCR vuelva a encenderse. El reconocimiento comenzará automáticamente al reconectarse.",
     "ocrRunningStatus": "Procesando OCR de {running} páginas",
     "ocrQueuedSuffix": " ({count} páginas en cola)",
     "ocrOtherPagesStillVisible": ". Las páginas ya comprobadas permanecen visibles para que pueda actuar sobre ellas de inmediato.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "Carga pendiente cancelada.",
     "cancelSubmissionErrorFallback": "No se puede cancelar esta página.",
     "pageNumberHeading": "Página {page}",
-    "pageItemLabel": "páginas"
+    "pageItemLabel": "páginas",
+    "workerOfflineUploadNotice": "El servidor OCR está temporalmente apagado — Aún puedes subir imágenes o archivos PDF/DOCX para guardarlos en la cola; el reconocimiento empezará automáticamente cuando vuelva a estar en línea.",
+    "queuedWaitingWorkerBadge": "Guardado en cola OCR — Esperando servidor",
+    "queuedWaitingWorkerShort": "Guardado en cola OCR — Reconocimiento automático al volver",
+    "reasonQueuedOffline": "Esta página está guardada de forma segura en la cola de OCR y se reconocerá automáticamente en cuanto el servidor OCR vuelva a encenderse."
   },
   "ocrContribution": {
     "cardAria": "Contribuir con muestras para mejorar el OCR de ViRead para {title}",

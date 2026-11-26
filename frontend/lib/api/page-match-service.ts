@@ -92,12 +92,23 @@ export const localOcrPageScanJobSchema = z.object({
   worker_online: z.boolean(),
   created_at: z.string(),
   updated_at: z.string(),
+  file_name: z.string().nullable().optional(),
+  queue_position: z.number().int().positive().nullable().optional(),
   error_code: z.string().nullable().optional(),
   error_message: z.string().nullable().optional(),
   result: localOcrPageScanSchema.nullable().optional(),
 });
 
 export type LocalOcrPageScanJobDTO = z.infer<typeof localOcrPageScanJobSchema>;
+
+export const localOcrPageScanJobListSchema = z.object({
+  worker_online: z.boolean(),
+  jobs: z.array(localOcrPageScanJobSchema),
+});
+
+export type LocalOcrPageScanJobListDTO = z.infer<
+  typeof localOcrPageScanJobListSchema
+>;
 
 export interface OcrWorkerHealthSnapshot {
   readonly mode: string;
@@ -174,6 +185,29 @@ export async function enqueueScanPageOcrJob(
       method: "POST",
       body: formData,
     },
+  );
+}
+
+export async function listScanPageOcrJobs(
+  options: {
+    readonly activeOnly?: boolean;
+    readonly limit?: number;
+    readonly signal?: AbortSignal;
+  } = {},
+): Promise<LocalOcrPageScanJobListDTO> {
+  const params = new URLSearchParams();
+  params.set("active_only", options.activeOnly === false ? "false" : "true");
+  if (typeof options.limit === "number" && Number.isFinite(options.limit)) {
+    params.set(
+      "limit",
+      String(Math.max(1, Math.min(20, Math.floor(options.limit)))),
+    );
+  }
+  return requestApi(
+    `/reading/scan-page-ocr/jobs?${params.toString()}`,
+    localOcrPageScanJobListSchema,
+    options.signal,
+    { method: "GET", bypassCache: true },
   );
 }
 

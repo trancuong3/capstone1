@@ -23,7 +23,7 @@
     "jobHeadlineRunning": "Reconociendo página...",
     "jobHeadlineRetrying": "Reintentando reconocimiento de página...",
     "jobHeadlineQueuedOnline": "Imagen en cola — esperando reconocimiento...",
-    "jobHeadlineQueuedOffline": "Esperando al servidor OCR Windows — imagen guardada de forma segura",
+    "jobHeadlineQueuedOffline": "Página guardada en la cola de OCR — El reconocimiento comenzará automáticamente cuando el servidor OCR vuelva a encenderse",
     "jobIdMeta": "{fileName} · ID de tarea: ",
     "scanFailedTitle": "No se pudo escanear la página",
     "relogin": "Iniciar sesión de nuevo",
@@ -59,7 +59,18 @@
     "errorSubmitFailed": "No se puede conectar al servidor OCR local. Inténtalo de nuevo.",
     "errorUnsupportedFormat": "Formato de imagen no compatible. Selecciona JPG, PNG o WebP.",
     "errorEmptyFile": "El archivo de imagen está vacío. Selecciona otra imagen.",
-    "errorFileTooLarge": "La imagen supera el límite de 32 MB. Selecciona una más pequeña."
+    "errorFileTooLarge": "La imagen supera el límite de 32 MB. Selecciona una más pequeña.",
+    "workerOfflineBannerTitle": "El servidor OCR está temporalmente apagado",
+    "workerOfflineBannerBody": "El servidor OCR está temporalmente apagado — Aún puedes tomar o subir fotos para guardarlas en la cola; el reconocimiento se ejecutará automáticamente cuando el servidor vuelva a estar en línea.",
+    "workerUnreachableBannerTitle": "El servidor OCR se está iniciando o no responde temporalmente",
+    "workerUnreachableBannerBody": "No se pudo comprobar el estado del servidor OCR ahora por inicio o conexión lenta. Aún puedes subir imágenes a la cola o volver a comprobar en unos segundos.",
+    "recheckOcrConnection": "Volver a comprobar conexión OCR",
+    "queuePositionLabel": "Posición en la cola: #{position}",
+    "savedAtLabel": "Guardado a las {time}",
+    "checkQueueNow": "Comprobar ahora",
+    "scanAnotherPageQueued": "Escanear otra página",
+    "cancelQueuedTask": "Cancelar tarea",
+    "queuedListHeading": "Otras páginas guardadas en la cola de OCR ({count} páginas)"
   },
   "camera": {
     "missingBookInfo": "ViRead reconoció la página pero falta información del libro. Alinéala y vuelve a escanear.",

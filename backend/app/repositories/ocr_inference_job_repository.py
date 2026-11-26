@@ -166,6 +166,54 @@ class OcrInferenceJobRepository:
         )
         return list((await self.db.scalars(query)).all())
 
+    async def list_local_scans_for_owner(
+        self,
+        owner_user_id: UUID,
+        *,
+        active_only: bool = True,
+        limit: int = 10,
+    ) -> list[OcrInferenceJob]:
+        """List owner-scoped parent quick-scan OCR jobs (active queue or recent history)."""
+        filters: list[Any] = [
+            OcrInferenceJob.JobKind == "LOCAL_PAGE_SCAN",
+            OcrInferenceJob.OwnerUserId == owner_user_id,
+        ]
+        if active_only:
+            filters.append(OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES))
+        else:
+            filters.append(OcrInferenceJob.Status != "CANCELLED")
+        query = (
+            select(OcrInferenceJob)
+            .where(*filters)
+            .order_by(OcrInferenceJob.CreatedAt.desc(), OcrInferenceJob.Id.desc())
+            .limit(max(1, min(int(limit), 50)))
+        )
+        return list((await self.db.scalars(query)).all())
+
+    async def get_queue_positions(self, job_ids: list[UUID]) -> dict[UUID, int]:
+        """Return 1-based queue position for claimable OCR jobs in scheduling order."""
+        if not job_ids:
+            return {}
+        target_set = set(job_ids)
+        query = (
+            select(OcrInferenceJob)
+            .where(OcrInferenceJob.Status.in_(CLAIMABLE_JOB_STATUSES))
+            .order_by(
+                OcrInferenceJob.Priority.asc(),
+                OcrInferenceJob.CreatedAt.asc(),
+                OcrInferenceJob.Id.asc(),
+            )
+            .limit(500)
+        )
+        rows = list((await self.db.scalars(query)).all())
+        positions: dict[UUID, int] = {}
+        for idx, row in enumerate(rows, start=1):
+            if row.Id in target_set:
+                positions[row.Id] = idx
+                if len(positions) == len(target_set):
+                    break
+        return positions
+
     async def create_job(self, job: OcrInferenceJob) -> OcrInferenceJob:
         self.db.add(job)
         await self.db.flush()

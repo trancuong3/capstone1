@@ -321,7 +321,7 @@
     "overviewAria": "Aperçu rapide du statut des pages",
     "overviewChipTitle": "Page source {page} : {status}",
     "workerFailuresSummary": "{count} pages ont rencontré des erreurs OCR/IA (le service est peut-être occupé ou temporairement hors ligne). Les pages prêtes ou en attente d'examen par l'administrateur ne sont pas affectées — cliquez sur « Réessayer la vérification » sur les pages en erreur.",
-    "windowsOcrQueueWaiting": "En attente du serveur OCR Windows (file d'attente sécurisée — {count} pages enregistrées en toute sécurité et traitées automatiquement dès que le serveur sera actif).",
+    "windowsOcrQueueWaiting": "Enregistré dans la file OCR ({count} pages) — En attente du retour du serveur OCR. La reconnaissance démarrera automatiquement dès sa reconnexion.",
     "ocrRunningStatus": "Traitement OCR de {running} pages",
     "ocrQueuedSuffix": " ({count} pages en file d'attente)",
     "ocrOtherPagesStillVisible": ". Les pages dont la vérification est terminée restent visibles pour une action immédiate.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "Téléversement en attente annulé.",
     "cancelSubmissionErrorFallback": "Impossible d'annuler cette page.",
     "pageNumberHeading": "Page {page}",
-    "pageItemLabel": "pages"
+    "pageItemLabel": "pages",
+    "workerOfflineUploadNotice": "Le serveur OCR est temporairement hors ligne — Vous pouvez tout de même importer des images ou fichiers PDF/DOCX dans la file d’attente ; la reconnaissance démarrera automatiquement dès sa remise en ligne.",
+    "queuedWaitingWorkerBadge": "En file OCR — En attente du serveur",
+    "queuedWaitingWorkerShort": "En file OCR — Reconnaissance automatique au retour",
+    "reasonQueuedOffline": "Cette page est enregistrée en toute sécurité dans la file OCR et sera reconnue automatiquement dès le retour du serveur OCR."
   },
   "ocrContribution": {
     "cardAria": "Contribuer des échantillons pour améliorer l'OCR ViRead pour {title}",

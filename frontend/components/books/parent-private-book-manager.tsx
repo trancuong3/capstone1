@@ -172,6 +172,7 @@ function describeToolCheckScope(
 function lockReasonForSubmission(
   sub: ParentPageSubmissionDTO,
   t: BooksTranslateFn,
+  ocrWorkerOffline = false,
 ): string | null {
   if (sub.can_add_to_book) return null;
   if (sub.workflow_status === "ADDED_TO_BOOK") {
@@ -181,6 +182,9 @@ function lockReasonForSubmission(
     return t("privateManager.reasonBlocked");
   }
   if (sub.workflow_status === "CHECKING") {
+    if (ocrWorkerOffline && sub.ocr_status === "PENDING") {
+      return t("privateManager.reasonQueuedOffline");
+    }
     return t("privateManager.reasonChecking");
   }
   if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
@@ -446,13 +450,34 @@ function ParentPrivateBookManagerContent({
     workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
   }, [ocrWorkerHealth]);
 
+  // Probe OCR worker health once on book view so parents immediately see reassuring
+  // offline-queue guidance even before uploading new pages.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    void fetchOcrWorkerHealth(controller.signal)
+      .then((snapshot) => {
+        if (active && snapshot) {
+          lastHealthCheckAtRef.current = Date.now();
+          setOcrWorkerHealth(snapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [bookId]);
+
   useEffect(() => {
     if (!hasCheckingSubmission) return;
     let active = true;
     let timerId: number | null = null;
     let idleTicks = 0;
-    const BASE_POLL_MS = 3_000;
-    const MAX_POLL_MS = 15_000;
+    const ONLINE_BASE_POLL_MS = 3_000;
+    const ONLINE_MAX_POLL_MS = 6_000;
+    const OFFLINE_MIN_POLL_MS = 12_000;
+    const OFFLINE_MAX_POLL_MS = 15_000;
     const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
 
     const clearTimer = () => {
@@ -478,12 +503,14 @@ function ParentPrivateBookManagerContent({
 
     const nextDelayMs = () => {
       const offline = workerOnlineRef.current === false;
-      const step = offline
-        ? Math.min(4, idleTicks + 1)
-        : Math.min(3, idleTicks);
+      if (offline) {
+        // Gentle 12-15s cadence while laptop OCR worker is offline to protect Render DB.
+        return idleTicks <= 1 ? OFFLINE_MIN_POLL_MS : OFFLINE_MAX_POLL_MS;
+      }
+      const step = Math.min(2, idleTicks);
       return Math.min(
-        MAX_POLL_MS,
-        Math.round(BASE_POLL_MS * Math.pow(1.6, step)),
+        ONLINE_MAX_POLL_MS,
+        Math.round(ONLINE_BASE_POLL_MS * Math.pow(1.35, step)),
       );
     };
 
@@ -535,7 +562,11 @@ function ParentPrivateBookManagerContent({
     };
 
     void maybePollWorkerHealth(true);
-    scheduleNext(BASE_POLL_MS);
+    scheduleNext(
+      workerOnlineRef.current === false
+        ? OFFLINE_MIN_POLL_MS
+        : ONLINE_BASE_POLL_MS,
+    );
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
@@ -1489,6 +1520,16 @@ function ParentPrivateBookManagerContent({
           />
         </label>
 
+        {ocrWorkerOffline ? (
+          <div
+            className="rounded-control border border-amber-300 bg-amber-50/80 px-3.5 py-2.5 text-xs font-medium text-amber-950"
+            data-testid="private-book-worker-offline-notice"
+            role="status"
+          >
+            {t("privateManager.workerOfflineUploadNotice")}
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-3">
           <Button
             className="sm:w-auto"
@@ -1502,10 +1543,17 @@ function ParentPrivateBookManagerContent({
               : t("privateManager.uploadButton")}
           </Button>
           {hasCheckingSubmission ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
-              <Clock3 aria-hidden="true" className="size-4 animate-spin" />
-              {t("privateManager.autoPollingHint")}
-            </span>
+            ocrWorkerOffline && pendingOcrCount > 0 ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                <Clock3 aria-hidden="true" className="size-4" />
+                {t("privateManager.queuedWaitingWorkerShort")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <Clock3 aria-hidden="true" className="size-4 animate-spin" />
+                {t("privateManager.autoPollingHint")}
+              </span>
+            )
           ) : null}
         </div>
       </form>
@@ -1602,9 +1650,17 @@ function ParentPrivateBookManagerContent({
                 className="flex flex-wrap gap-1.5 border-t border-border pt-3"
               >
                 {activeSubmissions.map((sub, index) => {
-                  const chipStyle =
-                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                    "border-border bg-canvas text-ink";
+                  const isChipQueuedOffline =
+                    ocrWorkerOffline &&
+                    sub.workflow_status === "CHECKING" &&
+                    sub.ocr_status === "PENDING";
+                  const chipStyle = isChipQueuedOffline
+                    ? "border-amber-300 bg-amber-50 text-amber-950"
+                    : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                      "border-border bg-canvas text-ink");
+                  const chipLabel = isChipQueuedOffline
+                    ? t("privateManager.queuedWaitingWorkerBadge")
+                    : sub.workflow_status_label;
                   return (
                     <button
                       key={`map-${sub.id}`}
@@ -1626,14 +1682,12 @@ function ParentPrivateBookManagerContent({
                       }}
                       title={t("privateManager.overviewChipTitle", {
                         page: sub.source_page_number,
-                        status: sub.workflow_status_label,
+                        status: chipLabel,
                       })}
                       type="button"
                     >
                       <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">
-                        · {sub.workflow_status_label}
-                      </span>
+                      <span className="font-normal">· {chipLabel}</span>
                     </button>
                   );
                 })}
@@ -1690,10 +1744,22 @@ function ParentPrivateBookManagerContent({
             ) : null}
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
-                const badgeStyle =
-                  WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                  "border-border bg-canvas text-ink";
-                const lockReason = lockReasonForSubmission(sub, t);
+                const isQueuedOffline =
+                  ocrWorkerOffline &&
+                  sub.workflow_status === "CHECKING" &&
+                  sub.ocr_status === "PENDING";
+                const badgeStyle = isQueuedOffline
+                  ? "border-amber-300 bg-amber-50 text-amber-950"
+                  : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                    "border-border bg-canvas text-ink");
+                const badgeLabel = isQueuedOffline
+                  ? t("privateManager.queuedWaitingWorkerBadge")
+                  : sub.workflow_status_label;
+                const lockReason = lockReasonForSubmission(
+                  sub,
+                  t,
+                  ocrWorkerOffline,
+                );
                 const isEditing = editingSubId === sub.id;
                 const isReviewFormOpen = reviewFormSubId === sub.id;
                 const isSubBusy =
@@ -1750,8 +1816,13 @@ function ParentPrivateBookManagerContent({
                           <div className="flex flex-wrap items-center gap-2">
                             <span
                               className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${badgeStyle}`}
+                              data-testid={
+                                isQueuedOffline
+                                  ? "submission-queued-offline-badge"
+                                  : undefined
+                              }
                             >
-                              {sub.workflow_status_label}
+                              {badgeLabel}
                             </span>
                             {sub.is_image_only ? (
                               <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">

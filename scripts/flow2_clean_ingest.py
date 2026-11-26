@@ -363,96 +363,143 @@ def validate_batch(
     return accepted, rejected
 
 
+async def _upload_sample_to_drive(
+    sample: ValidatedSample,
+    *,
+    router,
+    max_attempts: int = 3,
+):
+    """Upload one verified sample image and label JSON to Drive with transient retry."""
+    from app.services.training_storage.base import (
+        DriveRateLimitError,
+        DriveTransientError,
+    )
+
+    folder = f"verified-samples/{sample.source_group_id}"
+    img_name = f"line-{sample.line_index:04d}-{sample.image_sha256[:12]}.png"
+    lbl_name = f"line-{sample.line_index:04d}-{sample.image_sha256[:12]}.json"
+
+    async def _put_with_retry(fn, *args, **kwargs):
+        last_exc: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                return await asyncio.to_thread(fn, *args, **kwargs)
+            except (DriveTransientError, DriveRateLimitError, ConnectionError, TimeoutError) as exc:
+                last_exc = exc
+                if attempt + 1 >= max_attempts:
+                    raise
+                await asyncio.sleep(0.5 * (2**attempt))
+        raise last_exc  # pragma: no cover
+
+    stored_img = await _put_with_retry(
+        router.put,
+        f"{folder}/{img_name}",
+        sample.image_bytes,
+        content_type="image/png",
+        expected_sha256=sample.image_sha256,
+    )
+    label_payload = json.dumps(
+        {
+            "sample_id": sample.sample_id,
+            "source_group_id": sample.source_group_id,
+            "line_index": sample.line_index,
+            "label": sample.label,
+            "label_sha256": sample.label_sha256,
+            "image_sha256": sample.image_sha256,
+            "image_reference": stored_img.reference,
+            "source_name": sample.source_name,
+            "rights_basis": sample.rights_basis,
+            "verified_by": sample.verified_by,
+            "verified_at": sample.verified_at,
+            "verification_source": "admin",
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    ).encode("utf-8")
+    stored_lbl = await _put_with_retry(
+        router.put,
+        f"{folder}/{lbl_name}",
+        label_payload,
+        content_type="application/json",
+    )
+    return sample, stored_img, stored_lbl
+
+
 async def ingest_validated_samples(
     samples: list[ValidatedSample],
     *,
     db,
     router,
+    workers: int = 4,
+    commit_every: int = 25,
 ) -> dict[str, int]:
     """Upload verified line PNG + label JSON to Google Drive and insert idempotent DB rows."""
     from sqlalchemy import text
 
+    concurrency = max(1, min(int(workers), 8))
+    chunk_size = max(1, int(commit_every))
+    semaphore = asyncio.Semaphore(concurrency)
     inserted_count = 0
     skipped_existing = 0
-    for sample in samples:
-        folder = f"verified-samples/{sample.source_group_id}"
-        img_name = f"line-{sample.line_index:04d}-{sample.image_sha256[:12]}.png"
-        lbl_name = f"line-{sample.line_index:04d}-{sample.image_sha256[:12]}.json"
 
-        stored_img = await asyncio.to_thread(
-            router.put,
-            f"{folder}/{img_name}",
-            sample.image_bytes,
-            content_type="image/png",
-            expected_sha256=sample.image_sha256,
-        )
-        label_payload = json.dumps(
-            {
-                "sample_id": sample.sample_id,
-                "source_group_id": sample.source_group_id,
-                "line_index": sample.line_index,
-                "label": sample.label,
-                "label_sha256": sample.label_sha256,
-                "image_sha256": sample.image_sha256,
+    async def _bounded_upload(sample: ValidatedSample):
+        async with semaphore:
+            return await _upload_sample_to_drive(sample, router=router)
+
+    total = len(samples)
+    for start in range(0, total, chunk_size):
+        chunk = samples[start : start + chunk_size]
+        uploaded = await asyncio.gather(*(_bounded_upload(sample) for sample in chunk))
+        # AsyncSession is not concurrency-safe; execute & commit DB inserts sequentially per chunk.
+        for sample, stored_img, stored_lbl in uploaded:
+            provenance = {
+                **sample.provenance,
                 "image_reference": stored_img.reference,
-                "source_name": sample.source_name,
-                "rights_basis": sample.rights_basis,
-                "verified_by": sample.verified_by,
-                "verified_at": sample.verified_at,
-                "verification_source": "admin",
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ).encode("utf-8")
-        stored_lbl = await asyncio.to_thread(
-            router.put,
-            f"{folder}/{lbl_name}",
-            label_payload,
-            content_type="application/json",
-        )
-        provenance = {
-            **sample.provenance,
-            "image_reference": stored_img.reference,
-            "label_reference": stored_lbl.reference,
-            "storage_provider": stored_img.provider.value,
-        }
-        result = await db.execute(
-            text(
-                """
-                INSERT INTO public.viread_ocr_samples
-                    (id, source_flow, source_group_id, split, image_storage_path, image_sha256,
-                     label, source_page_id, source_revision_id, provenance,
-                     storage_provider, drive_file_id, label_storage_path,
-                     label_drive_file_id, label_sha256, sync_status, training_eligibility)
-                VALUES (CAST(:sample_id AS uuid), 'FLOW1_VERIFIED', :group_id, :split, :image_ref,
-                        :image_sha, :label, CAST(:page_id AS uuid), CAST(:revision_id AS uuid),
-                        CAST(:provenance AS jsonb), :storage_provider, :drive_file_id,
-                        :label_ref, :label_drive_file_id, :label_sha, 'SYNCED', 'ELIGIBLE')
-                ON CONFLICT DO NOTHING
-                """
-            ),
-            {
-                "sample_id": sample.sample_id,
-                "group_id": sample.source_group_id,
-                "split": sample.split,
-                "image_ref": stored_img.reference,
-                "image_sha": sample.image_sha256,
-                "label": sample.label,
-                "page_id": sample.source_page_id,
-                "revision_id": sample.source_revision_id,
-                "provenance": json.dumps(provenance, ensure_ascii=False),
+                "label_reference": stored_lbl.reference,
                 "storage_provider": stored_img.provider.value,
-                "drive_file_id": stored_img.drive_file_id,
-                "label_ref": stored_lbl.reference,
-                "label_drive_file_id": stored_lbl.drive_file_id,
-                "label_sha": sample.label_sha256,
-            },
+            }
+            result = await db.execute(
+                text(
+                    """
+                    INSERT INTO public.viread_ocr_samples
+                        (id, source_flow, source_group_id, split, image_storage_path, image_sha256,
+                         label, source_page_id, source_revision_id, provenance,
+                         storage_provider, drive_file_id, label_storage_path,
+                         label_drive_file_id, label_sha256, sync_status, training_eligibility)
+                    VALUES (CAST(:sample_id AS uuid), 'FLOW1_VERIFIED', :group_id, :split, :image_ref,
+                            :image_sha, :label, CAST(:page_id AS uuid), CAST(:revision_id AS uuid),
+                            CAST(:provenance AS jsonb), :storage_provider, :drive_file_id,
+                            :label_ref, :label_drive_file_id, :label_sha, 'SYNCED', 'ELIGIBLE')
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {
+                    "sample_id": sample.sample_id,
+                    "group_id": sample.source_group_id,
+                    "split": sample.split,
+                    "image_ref": stored_img.reference,
+                    "image_sha": sample.image_sha256,
+                    "label": sample.label,
+                    "page_id": sample.source_page_id,
+                    "revision_id": sample.source_revision_id,
+                    "provenance": json.dumps(provenance, ensure_ascii=False),
+                    "storage_provider": stored_img.provider.value,
+                    "drive_file_id": stored_img.drive_file_id,
+                    "label_ref": stored_lbl.reference,
+                    "label_drive_file_id": stored_lbl.drive_file_id,
+                    "label_sha": sample.label_sha256,
+                },
+            )
+            if result.rowcount:
+                inserted_count += 1
+            else:
+                skipped_existing += 1
+        await db.commit()
+        print(
+            f"Ingested {min(start + chunk_size, total)}/{total} "
+            f"(inserted={inserted_count}, skipped={skipped_existing})",
+            flush=True,
         )
-        if result.rowcount:
-            inserted_count += 1
-        else:
-            skipped_existing += 1
-    await db.commit()
     return {"inserted": inserted_count, "skipped_existing": skipped_existing}
 
 
@@ -540,7 +587,13 @@ async def _run_cli(args: argparse.Namespace) -> int:
 
         if not args.dry_run and accepted:
             router = await VireadDriveConnectionService(db).build_artifact_router()
-            summary["ingest"] = await ingest_validated_samples(accepted, db=db, router=router)
+            summary["ingest"] = await ingest_validated_samples(
+                accepted,
+                db=db,
+                router=router,
+                workers=args.workers,
+                commit_every=args.commit_every,
+            )
             if args.build_manifest:
                 admin_id = (
                     await db.execute(
@@ -561,6 +614,8 @@ def main() -> int:
     parser.add_argument("--pending-out", default="", help="Optional JSONL path for samples routed to pending review.")
     parser.add_argument("--dry-run", action="store_true", help="Validate only; do not write to Drive or DB.")
     parser.add_argument("--build-manifest", action="store_true", help="Create immutable Flow 2 dataset manifest after ingest.")
+    parser.add_argument("--workers", type=int, default=4, help="Bounded concurrent Drive upload workers (1-8).")
+    parser.add_argument("--commit-every", type=int, default=25, help="Checkpoint DB commit batch size.")
     args = parser.parse_args()
     return asyncio.run(_run_cli(args))
 
