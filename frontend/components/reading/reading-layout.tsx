@@ -174,8 +174,9 @@ export function ReadingLayout({
   const handleReadingModeChange = onReadingModeChange ?? setInternalReadingMode;
   const pageHasVerifiedIllustration =
     Boolean(page.illustration_url) && page.illustration_text_free === true;
-  const resolvedInitialReadingMode: ReadingDisplayMode =
-    activeReadingMode ?? (pageHasVerifiedIllustration ? "ILLUSTRATED" : "TEXT");
+  const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
+    activeReadingMode ??
+    (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||

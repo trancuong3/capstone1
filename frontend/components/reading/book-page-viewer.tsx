@@ -254,11 +254,13 @@ function PageSurface(
   const safeIllustrationUrl = isSafeIllustrationUrl(resolvedIllustrationProp);
   const hasVerifiedIllustration =
     Boolean(safeIllustrationUrl) && resolvedIllustrationTextFree === true;
+  const hasUnverifiedIllustration =
+    Boolean(safeIllustrationUrl) && resolvedIllustrationTextFree !== true;
   const isV2Explicit =
-    readingMode !== undefined ||
+    (readingMode !== undefined && readingMode !== null) ||
     initialReadingMode !== undefined ||
-    illustrationUrl !== undefined ||
-    hasVerifiedIllustration;
+    hasVerifiedIllustration ||
+    hasUnverifiedIllustration;
   const illustrationNeedsAuth =
     hasVerifiedIllustration &&
     isStudioAuthenticatedMediaUrl(safeIllustrationUrl);
