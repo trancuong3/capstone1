@@ -11,10 +11,14 @@ export default async function ParentAppLayout({
 }: {
   children: ReactNode;
 }) {
-  await requireAppRole("parent");
+  const identity = await requireAppRole("parent");
 
   return (
-    <AuthServiceProvider mode="supabase" scenario="default">
+    <AuthServiceProvider
+      initialUserId={identity.id}
+      mode="supabase"
+      scenario="default"
+    >
       <AppServicesProvider>
         <AppStoreProvider>
           <AppShell>{children}</AppShell>

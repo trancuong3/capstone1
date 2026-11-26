@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import random
 import re
 import unicodedata
@@ -32,6 +33,12 @@ from app.services.training_storage import (
     sign_worker_artifact_token,
 )
 from app.services.viread_drive_connection_service import VireadDriveConnectionService
+from app.services.viread_flow2_hygiene import (
+    normalize_typographic_for_vietocr,
+    open_image_exif_safe,
+    sanitize_and_validate_vietocr_label,
+    validate_flow2_line_crop,
+)
 from app.services.viread_training_storage_quota import ensure_database_capacity, ensure_storage_capacity
 
 logger = logging.getLogger(__name__)
@@ -211,27 +218,59 @@ def _assign_leak_safe_splits(source_rows: list[dict[str, Any]]) -> None:
             else:
                 parent[ra] = rb
 
+    # Pre-scan near-duplicate long labels so boilerplate headings shared by >3 books
+    # never collapse unrelated document groups into one mega-cluster.
+    label_groups: dict[str, set[str]] = defaultdict(set)
+    row_text_keys: list[str | None] = []
     for row in source_rows:
+        norm_label = " ".join(
+            normalize_typographic_for_vietocr(unicodedata.normalize("NFC", str(row.get("label") or ""))).lower().split()
+        )
+        if len(norm_label) >= 24:
+            t_key = f"t:{hashlib.sha256(norm_label.encode('utf-8')).hexdigest()}"
+            label_groups[t_key].add(str(row["group_id"]))
+            row_text_keys.append(t_key)
+        else:
+            row_text_keys.append(None)
+
+    for row, t_key in zip(source_rows, row_text_keys, strict=True):
         g_key = f"g:{row['group_id']}"
         h_key = f"h:{str(row['image_sha256']).lower()}"
         union(g_key, h_key)
-        norm_label = " ".join(unicodedata.normalize("NFC", str(row.get("label") or "")).lower().split())
-        if len(norm_label) >= 12:
-            t_key = f"t:{hashlib.sha256(norm_label.encode('utf-8')).hexdigest()}"
+        if t_key is not None and 2 <= len(label_groups[t_key]) <= 3:
             union(g_key, t_key)
 
     # Determine canonical cluster key (smallest raw group_id in each connected component)
     cluster_min_group: dict[str, str] = {}
+    cluster_sizes: dict[str, int] = defaultdict(int)
     for row in source_rows:
         root = find(f"g:{row['group_id']}")
         gid = str(row["group_id"])
+        cluster_sizes[root] += 1
         if root not in cluster_min_group or gid < cluster_min_group[root]:
             cluster_min_group[root] = gid
 
+    cluster_split = {
+        root: _verified_training_split(canonical_group)
+        for root, canonical_group in cluster_min_group.items()
+    }
+    if len(cluster_split) >= 2:
+        train_roots = [r for r, sp in cluster_split.items() if sp == "train"]
+        val_roots = [r for r, sp in cluster_split.items() if sp == "validation"]
+        if not val_roots:
+            # Deterministic fallback: move smallest cluster(s) (~20%, >=1) into validation
+            # without splitting any cluster across train/validation.
+            ordered = sorted(train_roots, key=lambda r: (cluster_sizes[r], cluster_min_group[r]))
+            target_val = max(1, len(ordered) // 5)
+            for r in ordered[:target_val]:
+                cluster_split[r] = "validation"
+        elif not train_roots:
+            ordered = sorted(val_roots, key=lambda r: (cluster_sizes[r], cluster_min_group[r]), reverse=True)
+            cluster_split[ordered[0]] = "train"
+
     for row in source_rows:
         root = find(f"g:{row['group_id']}")
-        canonical_group = cluster_min_group[root]
-        row["split"] = _verified_training_split(canonical_group)
+        row["split"] = cluster_split[root]
 
 
 def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -270,8 +309,10 @@ def _edit_distance(left: list[str], right: list[str]) -> int:
 def _metric_counts(lines: list[dict[str, str]], field: str, metric: str) -> tuple[int, int]:
     errors = units = 0
     for line in lines:
-        reference = list(unicodedata.normalize("NFC", line["reference"])) if metric == "cer" else unicodedata.normalize("NFC", line["reference"]).split()
-        hypothesis = list(unicodedata.normalize("NFC", line[field])) if metric == "cer" else unicodedata.normalize("NFC", line[field]).split()
+        ref_norm = normalize_typographic_for_vietocr(unicodedata.normalize("NFC", line["reference"]))
+        hyp_norm = normalize_typographic_for_vietocr(unicodedata.normalize("NFC", line[field]))
+        reference = list(ref_norm) if metric == "cer" else ref_norm.split()
+        hypothesis = list(hyp_norm) if metric == "cer" else hyp_norm.split()
         errors += _edit_distance(reference, hypothesis)
         units += len(reference)
     return errors, units
@@ -648,59 +689,109 @@ class VireadOcrTrainingService:
         flow2_excluded_count = 0
         try:
             flow2_stats = await self.repo.one("""
-                SELECT count(DISTINCT image_sha256) FILTER (
+                SELECT count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
                        )::integer AS total_verified_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
-                             AND image_storage_path LIKE 'gdrive://%'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
+                             AND s.image_storage_path LIKE 'gdrive://%'
                        )::integer AS drive_synced_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
-                             AND image_storage_path NOT LIKE 'gdrive://%'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
+                             AND s.image_storage_path NOT LIKE 'gdrive://%'
                        )::integer AS legacy_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
-                             AND split = 'train'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
+                             AND s.split = 'train'
                        )::integer AS train_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
-                             AND split = 'validation'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
+                             AND s.split = 'validation'
                        )::integer AS validation_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                             AND provenance->>'verified_by_admin' = 'true'
-                             AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                             AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
-                             AND split = 'holdout'
+                             AND s.provenance->>'verified_by_admin' = 'true'
+                             AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                             AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
+                             AND COALESCE(to_jsonb(b)->>'is_deleted', 'false') <> 'true'
+                             AND COALESCE(to_jsonb(b)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND COALESCE(to_jsonb(p)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+                             AND (
+                                 p.id IS NULL
+                                 OR NULLIF(to_jsonb(p)->>'currentverifiedrevisionid', '') IS NULL
+                                 OR (to_jsonb(p)->>'currentverifiedrevisionid') = s.source_revision_id::text
+                             )
+                             AND s.split = 'holdout'
                        )::integer AS holdout_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
                              AND NOT (
-                                 provenance->>'verified_by_admin' = 'true'
-                                 AND COALESCE(provenance->>'ai_review_required', 'false') <> 'true'
-                                 AND COALESCE(provenance->>'verification_source', 'admin') = 'admin'
+                                 s.provenance->>'verified_by_admin' = 'true'
+                                 AND COALESCE(s.provenance->>'ai_review_required', 'false') <> 'true'
+                                 AND COALESCE(s.provenance->>'verification_source', 'admin') = 'admin'
                              )
                        )::integer AS pending_verification_count,
-                       count(DISTINCT image_sha256) FILTER (
+                       count(DISTINCT s.image_sha256) FILTER (
                            WHERE COALESCE(to_jsonb(s)->>'training_eligibility', 'ELIGIBLE') IN ('QUARANTINED', 'ARCHIVED')
                        )::integer AS excluded_count
                 FROM public.viread_ocr_samples s
+                LEFT JOIN public.bookpages p ON p.id = s.source_page_id
+                LEFT JOIN public.books b ON b.id = p.bookid
                 WHERE s.source_flow = 'FLOW1_VERIFIED'
                   AND s.dataset_version_id IS NULL
             """)
@@ -731,6 +822,40 @@ class VireadOcrTrainingService:
         except Exception as exc:
             logger.debug("Parent Flow 2 candidate summary query skipped: %s", type(exc).__name__)
         outbox_map = {str(item["status"]): int(item["count"]) for item in outbox}
+        from app.jobs.viread_ocr_training_auto_worker import local_training_capacity
+
+        local_ready, local_info = local_training_capacity()
+        web_heavy_disabled = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
+            "1", "true", "yes", "on",
+        }
+        worker_status = {
+            "local_training_enabled": local_ready or local_info.get("reason") != "LOCAL_TRAINING_DISABLED",
+            "local_gpu_ready": local_ready,
+            "local_capacity": local_info,
+            "web_heavy_workers_disabled": web_heavy_disabled,
+            "execution_mode": "COLAB" if not local_ready else "LOCAL",
+        }
+        flow2_blockers: list[str] = []
+        if flow2_storage_provider_setting() == StorageProvider.GOOGLE_DRIVE:
+            if not google_drive or not google_drive.get("connected"):
+                flow2_blockers.append("Google Drive cho Luồng 2 chưa kết nối hoặc phiên bridge không hợp lệ.")
+            elif google_drive.get("connection_mode") == "drive_desktop_sync" and web_heavy_disabled:
+                flow2_blockers.append("Đang dùng Google Drive Desktop trên máy cá nhân; Cloud server cần Apps Script Bridge.")
+        if flow2_legacy_count > 0:
+            flow2_blockers.append(
+                f"Còn {flow2_legacy_count} mẫu chưa đồng bộ lên Cloud Google Drive (cần Apps Script Bridge & migrate)."
+            )
+        if not (flow2_train_count > 0 and flow2_validation_count > 0):
+            flow2_blockers.append(
+                f"Pool sạch Luồng 2 cần mẫu ở cả train ({flow2_train_count}) và validation ({flow2_validation_count}); có thể bấm kích hoạt tạo snapshot nếu đã có ít nhất 2 nhóm sách."
+            )
+        if web_heavy_disabled and not any(
+            str(j.get("profile") or "") in {"FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"}
+            and str(j.get("status") or "") in {"WAITING_FOR_COLAB_WORKER", "COLAB_RUNNING", "QUEUED"}
+            for j in jobs
+        ):
+            flow2_blockers.append("Worker nền trên Web bị tắt (VIREAD_WEB_DISABLE_HEAVY_WORKERS=true); hãy bấm 'Tạo snapshot & Xếp hàng train Luồng 2' để đẩy job cho Colab.")
+
         storage_summary = {
             "flow2_write_provider": flow2_storage_provider_setting().value,
             "flow2_drive_synced_samples": flow2_drive_count,
@@ -754,6 +879,7 @@ class VireadOcrTrainingService:
             "outbox_blocked": outbox_map.get("BLOCKED", 0),
             "outbox_skipped": outbox_map.get("SKIPPED", 0),
             "outbox_done": outbox_map.get("DONE", 0),
+            "flow2_blockers": flow2_blockers,
         }
         return {
             "outbox": outbox,
@@ -766,6 +892,8 @@ class VireadOcrTrainingService:
             "google_drive": google_drive,
             "runtime_model": runtime_model,
             "storage_summary": storage_summary,
+            "worker_status": worker_status,
+            "flow2_blockers": flow2_blockers,
         }
 
     async def register_dataset(self, actor_id: UUID, payload: DatasetImport) -> dict[str, Any]:
@@ -1188,9 +1316,13 @@ class VireadOcrTrainingService:
         """)
         by_hash: dict[str, dict[str, Any]] = {}
         for row in rows:
+            cleaned_label, _label_reason = sanitize_and_validate_vietocr_label(row.get("label"))
+            if not cleaned_label:
+                continue
+            row = {**row, "label": cleaned_label}
             digest = str(row["image_sha256"]).lower()
             previous = by_hash.get(digest)
-            if previous and unicodedata.normalize("NFC", previous["label"]) != unicodedata.normalize("NFC", row["label"]):
+            if previous and previous["label"] != row["label"]:
                 await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Verified holdout image has conflicting labels")
             by_hash.setdefault(digest, row)
@@ -1236,9 +1368,17 @@ class VireadOcrTrainingService:
                 with Image.open(BytesIO(image_bytes)) as image:
                     image.verify()
                     image_format = (image.format or "PNG").upper()
+                rgb_crop = open_image_exif_safe(image_bytes)
             except (UnidentifiedImageError, OSError) as exc:
                 await self.repo.rollback()
                 raise HTTPException(status_code=422, detail="Verified Pilot holdout contains an invalid image") from exc
+            crop_ok, _crop_metrics, crop_reason = validate_flow2_line_crop(rgb_crop, label=row["label"])
+            if not crop_ok:
+                await self.repo.rollback()
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Verified Pilot holdout image failed quality check: {crop_reason}",
+                )
             extension, content_type = {"JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
                                        "WEBP": ("webp", "image/webp")}.get(image_format, (None, None))
             if not extension:
@@ -1371,10 +1511,14 @@ class VireadOcrTrainingService:
         """)
         by_hash: dict[str, dict[str, Any]] = {}
         for row in rows:
+            cleaned_label, _label_reason = sanitize_and_validate_vietocr_label(row.get("label"))
+            if not cleaned_label:
+                continue
+            row = {**row, "label": cleaned_label}
             digest = str(row["image_sha256"]).lower()
             existing = by_hash.get(digest)
             if existing:
-                if unicodedata.normalize("NFC", existing["label"]) != unicodedata.normalize("NFC", row["label"]):
+                if existing["label"] != row["label"]:
                     await self.repo.rollback()
                     raise HTTPException(status_code=409, detail="Verified holdout image has conflicting labels; Locked Test was not created")
                 continue
@@ -1403,9 +1547,17 @@ class VireadOcrTrainingService:
                 with Image.open(BytesIO(image_bytes)) as image:
                     image.verify()
                     image_format = (image.format or "PNG").upper()
+                rgb_crop = open_image_exif_safe(image_bytes)
             except (UnidentifiedImageError, OSError) as exc:
                 await self.repo.rollback()
                 raise HTTPException(status_code=422, detail="Verified holdout contains an invalid image; Locked Test was not created") from exc
+            crop_ok, _crop_metrics, crop_reason = validate_flow2_line_crop(rgb_crop, label=row["label"])
+            if not crop_ok:
+                await self.repo.rollback()
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Verified holdout image failed quality check; Locked Test was not created ({crop_reason})",
+                )
             extension, content_type = {
                 "JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
                 "WEBP": ("webp", "image/webp"),
@@ -1480,17 +1632,27 @@ class VireadOcrTrainingService:
                    sample.source_page_id, sample.source_revision_id, sample.provenance
             FROM public.viread_ocr_samples sample
             LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+            LEFT JOIN public.books book ON book.id=page.bookid
             WHERE sample.source_flow='FLOW1_VERIFIED'
               AND sample.split IN ('train','validation') AND sample.dataset_version_id IS NULL
               AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
               AND sample.provenance->>'verified_by_admin' = 'true'
               AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
               AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
+              AND COALESCE(to_jsonb(book)->>'is_deleted', 'false') <> 'true'
+              AND COALESCE(to_jsonb(book)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+              AND COALESCE(to_jsonb(page)->>'lifecyclestatus', 'ACTIVE') = 'ACTIVE'
+              AND (
+                  page.id IS NULL
+                  OR NULLIF(to_jsonb(page)->>'currentverifiedrevisionid', '') IS NULL
+                  OR (to_jsonb(page)->>'currentverifiedrevisionid') = sample.source_revision_id::text
+              )
               AND NOT EXISTS (
                   SELECT 1 FROM public.viread_ocr_samples held
                   LEFT JOIN public.bookpages held_page ON held_page.id=held.source_page_id
                   WHERE held.source_flow='FLOW1_VERIFIED' AND held.split='holdout'
                     AND held.dataset_version_id IS NULL
+                    AND COALESCE(to_jsonb(held)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
                     AND COALESCE(held_page.bookid::text, held.source_group_id)
                         = COALESCE(page.bookid::text, sample.source_group_id)
               )
@@ -1596,16 +1758,76 @@ class VireadOcrTrainingService:
 
             source_rows = [row for row in source_rows if _parent_sample_still_valid(row)]
 
+        # Flow 2 label & duplicate-conflict hygiene gate: quarantine bad labels or conflicting
+        # hashes before building the immutable snapshot so corrupt pool rows never block training.
+        clean_rows: list[dict[str, Any]] = []
+        bad_sample_ids: list[str] = []
+        for row in source_rows:
+            cleaned_label, _label_err = sanitize_and_validate_vietocr_label(row.get("label"))
+            if not cleaned_label:
+                if row.get("sample_id"):
+                    bad_sample_ids.append(str(row["sample_id"]))
+                continue
+            clean_rows.append({**row, "label": cleaned_label})
+
+        labels_by_hash: dict[str, set[str]] = defaultdict(set)
+        for row in clean_rows:
+            labels_by_hash[str(row["image_sha256"]).lower()].add(row["label"])
+        conflicting_hashes = {sha for sha, lbls in labels_by_hash.items() if len(lbls) > 1}
+        if conflicting_hashes:
+            filtered_rows: list[dict[str, Any]] = []
+            for row in clean_rows:
+                if str(row["image_sha256"]).lower() in conflicting_hashes:
+                    if row.get("sample_id"):
+                        bad_sample_ids.append(str(row["sample_id"]))
+                else:
+                    filtered_rows.append(row)
+            clean_rows = filtered_rows
+        if bad_sample_ids and hasattr(self.db, "execute"):
+            try:
+                if hasattr(self.db, "begin_nested"):
+                    async with self.db.begin_nested():
+                        await self.repo.execute(
+                            """
+                            UPDATE public.viread_ocr_samples
+                            SET training_eligibility = 'QUARANTINED',
+                                quarantined_at = now(),
+                                quarantine_reason = 'FLOW2_MANIFEST_HYGIENE_REJECTED'
+                            WHERE id::text = ANY(:ids)
+                              AND dataset_version_id IS NULL
+                            """,
+                            {"ids": bad_sample_ids},
+                        )
+                logger.warning(
+                    "Quarantined %d invalid/conflicting Flow 2 pool sample(s) before snapshot",
+                    len(bad_sample_ids),
+                )
+            except Exception as exc:
+                logger.warning("Could not persist Flow 2 manifest quarantine: %s", type(exc).__name__)
+        source_rows = clean_rows
+
         # Assign deterministic, cross-family duplicate-safe Train/Validation splits.
         _assign_leak_safe_splits(source_rows)
         manifest, source_rows = _verified_snapshot(source_rows)
         version_sha = hashlib.sha256(_canonical(manifest)).hexdigest()
         if source_rows:
             dataset = await self.repo.one("""
-                SELECT id, version_sha256, manifest_storage_path, sample_count
+                SELECT id, version_sha256, manifest_storage_path, sample_count,
+                       COALESCE(to_jsonb(viread_ocr_dataset_versions)->>'dataset_status', 'ACTIVE') AS dataset_status
                 FROM public.viread_ocr_dataset_versions
                 WHERE source_flow='FLOW1_VERIFIED' AND version_sha256=:version_sha
             """, {"version_sha": version_sha})
+            if dataset and str(dataset.get("dataset_status") or "ACTIVE").upper() == "ARCHIVED":
+                await self._exec_optional_column_update(
+                    """
+                    UPDATE public.viread_ocr_dataset_versions
+                    SET dataset_status = 'ACTIVE',
+                        archived_at = NULL,
+                        archive_reason = NULL
+                    WHERE id = :id
+                    """,
+                    {"id": dataset["id"]},
+                )
         else:
             dataset = await self.repo.one("""
                 SELECT id, version_sha256, manifest_storage_path, sample_count

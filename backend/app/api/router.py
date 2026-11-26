@@ -22,10 +22,13 @@ from app.api.routes import (
     voice_studio,
 )
 from app.api.routes import admin_viread_training
+from app.api.routes import book_assets
+from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
 from app.api.routes import karaoke
 from app.api.routes import karaoke_processing
+from app.api.routes import ocr_extraction
 
 api_router = APIRouter()
 api_router.include_router(karaoke.router, prefix="/karaoke", tags=["Karaoke"])
@@ -69,3 +72,6 @@ api_router.include_router(
 api_router.include_router(tutor_question.router, prefix="/tutor", tags=["AI Tutor"])
 api_router.include_router(voice_studio.router, prefix="/voice", tags=["Voice"])
 api_router.include_router(child_progress.router, prefix="/tutor", tags=["AI Tutor"])
+api_router.include_router(ocr_extraction.router, prefix="/studio/ocr", tags=["Smart Book Studio OCR"])
+api_router.include_router(book_assets.router, prefix="/studio", tags=["Smart Book Studio Assets"])
+api_router.include_router(global_tasks.router, prefix="/studio", tags=["Smart Book Studio Tasks"])

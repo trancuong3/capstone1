@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, BookOpen, Eye, Image as ImageIcon } from "lucide-react";
 import Image from "next/image";
 import {
   memo,
@@ -17,6 +17,7 @@ import {
   isPrivateApiMediaUrl,
   revokePrivateBlobUrl,
 } from "@/lib/api/api-client";
+import { isStudioAuthenticatedMediaUrl } from "@/lib/api/book-assets-service";
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
 import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
@@ -28,6 +29,7 @@ import {
   wordStateForPage,
 } from "@/lib/reading/word-presentation";
 import { cn } from "@/lib/utils/cn";
+import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ReadingPageWordDTO } from "@/types/reading";
 
 interface BookPageViewerProps extends PageWordEvidence {
@@ -37,6 +39,9 @@ interface BookPageViewerProps extends PageWordEvidence {
   onWordClick?: (word: ReadingPageWordDTO) => void;
   onRefreshImageUrl?: (pageId: string) => Promise<string | null | undefined>;
   spokenWords?: Set<string>;
+  illustrationUrl?: string | null;
+  illustrationTextFree?: boolean;
+  initialReadingMode?: ReadingDisplayMode;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
@@ -145,6 +150,21 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
   );
 });
 
+function isSafeIllustrationUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("blob:") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("http://")
+  ) {
+    return trimmed;
+  }
+  return null;
+}
+
 export function BookPageViewer(props: BookPageViewerProps) {
   const refreshedPageIdsRef = useRef<Set<string>>(new Set());
   const claimExpiredImageRefresh = useCallback((pageId: string) => {
@@ -179,6 +199,9 @@ function PageSurface(
     onRefreshImageUrl,
     previewSnapshot,
     claimExpiredImageRefresh,
+    illustrationUrl,
+    illustrationTextFree,
+    initialReadingMode,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
@@ -215,8 +238,108 @@ function PageSurface(
   const activeImageUrl = refreshedImageUrl ?? page.image_url;
   const isPrivateSource = isPrivateApiMediaUrl(activeImageUrl);
 
+  // V2 3-mode Storybook Reading state (preserves legacy behavior when V2 props omitted)
+  const safeIllustrationUrl = isSafeIllustrationUrl(illustrationUrl);
+  const hasVerifiedIllustration =
+    Boolean(safeIllustrationUrl) && illustrationTextFree === true;
+  const isV2ModeEnabled =
+    illustrationUrl !== undefined || initialReadingMode !== undefined;
+  const illustrationNeedsAuth =
+    hasVerifiedIllustration &&
+    isStudioAuthenticatedMediaUrl(safeIllustrationUrl);
+
+  const [illustrationAuthState, setIllustrationAuthState] = useState<{
+    src: string;
+    blobUrl: string | null;
+    failed: boolean;
+  }>({ src: "", blobUrl: null, failed: false });
+  const [failedDirectIllustration, setFailedDirectIllustration] = useState<
+    string | null
+  >(null);
+
+  const defaultV2Mode: ReadingDisplayMode =
+    initialReadingMode === "ORIGINAL"
+      ? "ORIGINAL"
+      : initialReadingMode === "TEXT"
+        ? "TEXT"
+        : hasVerifiedIllustration
+          ? "ILLUSTRATED"
+          : "TEXT";
+
+  const [selectedReadingMode, setSelectedReadingMode] =
+    useState<ReadingDisplayMode>(defaultV2Mode);
+
   useEffect(() => {
-    if (!isPrivateSource || !activeImageUrl) {
+    if (!illustrationNeedsAuth || !safeIllustrationUrl) {
+      return;
+    }
+    const controller = new AbortController();
+    let createdBlob: string | null = null;
+    let active = true;
+
+    void fetchAuthenticatedBlobUrl(safeIllustrationUrl, controller.signal)
+      .then((blobUrl) => {
+        if (!active) {
+          revokePrivateBlobUrl(blobUrl);
+          return;
+        }
+        createdBlob = blobUrl;
+        setIllustrationAuthState({
+          src: safeIllustrationUrl,
+          blobUrl,
+          failed: false,
+        });
+      })
+      .catch(() => {
+        if (!active || controller.signal.aborted) return;
+        setIllustrationAuthState({
+          src: safeIllustrationUrl,
+          blobUrl: null,
+          failed: true,
+        });
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+      if (createdBlob) {
+        revokePrivateBlobUrl(createdBlob);
+      }
+    };
+  }, [illustrationNeedsAuth, safeIllustrationUrl]);
+
+  const resolvedIllustrationSrc = !hasVerifiedIllustration
+    ? null
+    : illustrationNeedsAuth
+      ? illustrationAuthState.src === safeIllustrationUrl &&
+        !illustrationAuthState.failed
+        ? illustrationAuthState.blobUrl
+        : null
+      : failedDirectIllustration !== safeIllustrationUrl
+        ? safeIllustrationUrl
+        : null;
+
+  const illustrationFailed =
+    hasVerifiedIllustration &&
+    (illustrationNeedsAuth
+      ? illustrationAuthState.src === safeIllustrationUrl &&
+        illustrationAuthState.failed
+      : failedDirectIllustration === safeIllustrationUrl);
+
+  const canShowIllustratedMode = hasVerifiedIllustration && !illustrationFailed;
+
+  const effectiveReadingMode: ReadingDisplayMode =
+    selectedReadingMode === "ILLUSTRATED" && !canShowIllustratedMode
+      ? "TEXT"
+      : selectedReadingMode === "ORIGINAL" && !activeImageUrl
+        ? "TEXT"
+        : selectedReadingMode;
+
+  const shouldLoadOriginalSource =
+    !isV2ModeEnabled || effectiveReadingMode === "ORIGINAL";
+
+  useEffect(() => {
+    if (!shouldLoadOriginalSource || !isPrivateSource || !activeImageUrl) {
       return;
     }
     const controller = new AbortController();
@@ -250,7 +373,12 @@ function PageSurface(
       }
       setPrivateBlobUrl(null);
     };
-  }, [activeImageUrl, isPrivateSource, privateRetryNonce]);
+  }, [
+    activeImageUrl,
+    isPrivateSource,
+    privateRetryNonce,
+    shouldLoadOriginalSource,
+  ]);
 
   const handleImageLoadError = useCallback(() => {
     if (isPrivateSource && !privateRetriedRef.current) {
@@ -333,15 +461,24 @@ function PageSurface(
   }, []);
   const rect = containImage(page.width, page.height, frame.width, frame.height);
   const overlay =
+    shouldLoadOriginalSource &&
     source !== null &&
     image !== null &&
     image !== "failed" &&
     canOverlayPage(page, rect, image.width, image.height);
-  const mode = overlay
+  const legacyMode = overlay
     ? "image-overlay"
     : source && image !== "failed"
       ? "image-reference"
       : "text";
+  const renderMode = isV2ModeEnabled
+    ? effectiveReadingMode === "ILLUSTRATED"
+      ? "illustrated"
+      : effectiveReadingMode === "TEXT"
+        ? "text"
+        : legacyMode
+    : legacyMode;
+
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
@@ -385,7 +522,8 @@ function PageSurface(
       )}
       data-page-id={page.page_id}
       data-page-revision-id={page.page_revision_id}
-      data-render-mode={mode}
+      data-render-mode={renderMode}
+      data-reading-mode={isV2ModeEnabled ? effectiveReadingMode : undefined}
       data-image-status={
         image === "failed"
           ? "failed"
@@ -408,6 +546,64 @@ function PageSurface(
           >
             {props.title ?? t("pageViewer.defaultBookTitle")}
           </h1>
+          {isV2ModeEnabled ? (
+            <div
+              aria-label="Chế độ đọc trang sách"
+              className="mt-2 inline-flex flex-wrap items-center gap-1.5"
+              data-testid="reading-mode-switcher"
+              role="tablist"
+            >
+              {canShowIllustratedMode ? (
+                <button
+                  aria-selected={effectiveReadingMode === "ILLUSTRATED"}
+                  className={cn(
+                    "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                    effectiveReadingMode === "ILLUSTRATED"
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:bg-canvas",
+                  )}
+                  onClick={() => setSelectedReadingMode("ILLUSTRATED")}
+                  role="tab"
+                  type="button"
+                >
+                  <ImageIcon aria-hidden="true" className="size-3.5" />
+                  Minh họa
+                </button>
+              ) : null}
+              <button
+                aria-selected={effectiveReadingMode === "TEXT"}
+                className={cn(
+                  "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  effectiveReadingMode === "TEXT"
+                    ? "border-primary bg-primary text-white shadow-xs"
+                    : "border-border bg-white text-ink hover:bg-canvas",
+                )}
+                onClick={() => setSelectedReadingMode("TEXT")}
+                role="tab"
+                type="button"
+              >
+                <BookOpen aria-hidden="true" className="size-3.5" />
+                Đọc chữ
+              </button>
+              {activeImageUrl ? (
+                <button
+                  aria-selected={effectiveReadingMode === "ORIGINAL"}
+                  className={cn(
+                    "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                    effectiveReadingMode === "ORIGINAL"
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:bg-canvas",
+                  )}
+                  onClick={() => setSelectedReadingMode("ORIGINAL")}
+                  role="tab"
+                  type="button"
+                >
+                  <Eye aria-hidden="true" className="size-3.5" />
+                  Trang gốc đối chiếu
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {props.illustration}
       </header>
@@ -418,7 +614,7 @@ function PageSurface(
         data-auto-follow={isDetached ? "paused" : "active"}
         tabIndex={0}
       >
-        {source && image !== "failed" ? (
+        {shouldLoadOriginalSource && source && image !== "failed" ? (
           <Image
             key={source}
             alt=""
@@ -440,7 +636,54 @@ function PageSurface(
             onError={handleImageLoadError}
           />
         ) : null}
-        {overlay && rect && source ? (
+
+        {isV2ModeEnabled && effectiveReadingMode === "ILLUSTRATED" ? (
+          <div className="flex flex-col gap-4" data-reading-panel="illustrated">
+            {resolvedIllustrationSrc ? (
+              <figure
+                className="overflow-hidden rounded-card border border-border/80 bg-cream/70 p-2 shadow-xs"
+                data-testid="storybook-illustration-card"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  alt={`Tranh minh họa trang ${page.page_number}`}
+                  className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                  onError={() => {
+                    if (illustrationNeedsAuth && safeIllustrationUrl) {
+                      setIllustrationAuthState({
+                        src: safeIllustrationUrl,
+                        blobUrl: null,
+                        failed: true,
+                      });
+                    } else if (safeIllustrationUrl) {
+                      setFailedDirectIllustration(safeIllustrationUrl);
+                    }
+                  }}
+                  src={resolvedIllustrationSrc}
+                />
+              </figure>
+            ) : (
+              <div
+                aria-busy="true"
+                className="h-44 w-full animate-pulse rounded-card bg-cream"
+                data-testid="storybook-illustration-loading"
+              />
+            )}
+            <BookPageContent
+              {...props}
+              onWordClick={handleSelectWord}
+              registerWordNode={registerTextNode}
+              scrollContainerRef={rootRef}
+            />
+          </div>
+        ) : isV2ModeEnabled && effectiveReadingMode === "TEXT" ? (
+          <BookPageContent
+            {...props}
+            onWordClick={handleSelectWord}
+            registerWordNode={registerTextNode}
+            scrollContainerRef={rootRef}
+          />
+        ) : overlay && rect && source ? (
           <div
             className="viread-learning-content relative mt-1 w-full overflow-hidden"
             dir="ltr"
@@ -491,27 +734,49 @@ function PageSurface(
         ) : (
           <>
             {source && image !== "failed" ? (
-              <details
-                onToggle={(event) => setReferenceOpen(event.currentTarget.open)}
-                className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
-              >
-                <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
-                  {t("pageViewer.viewPageImage")}
-                </summary>
-                {referenceOpen ? (
+              isV2ModeEnabled && effectiveReadingMode === "ORIGINAL" ? (
+                <div
+                  className="mb-3 rounded-control border border-border bg-white/80 p-2"
+                  data-testid="original-page-reference-panel"
+                >
+                  <p className="mb-1.5 text-xs font-semibold text-muted">
+                    Ảnh trang gốc (đối chiếu)
+                  </p>
                   <Image
                     src={source}
-                    alt={t("pageViewer.referencePageAlt", {
-                      page: page.page_number,
-                    })}
+                    alt={`Ảnh trang gốc trang ${page.page_number}`}
                     width={Math.max(1, page.width)}
                     height={Math.max(1, page.height)}
                     unoptimized
                     className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
                     onError={handleImageLoadError}
                   />
-                ) : null}
-              </details>
+                </div>
+              ) : (
+                <details
+                  onToggle={(event) =>
+                    setReferenceOpen(event.currentTarget.open)
+                  }
+                  className="mb-2 rounded-control border border-border bg-white/70 p-1.5"
+                >
+                  <summary className="min-h-11 cursor-pointer px-2 py-2.5 text-sm font-semibold text-primary">
+                    {t("pageViewer.viewPageImage")}
+                  </summary>
+                  {referenceOpen ? (
+                    <Image
+                      src={source}
+                      alt={t("pageViewer.referencePageAlt", {
+                        page: page.page_number,
+                      })}
+                      width={Math.max(1, page.width)}
+                      height={Math.max(1, page.height)}
+                      unoptimized
+                      className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
+                      onError={handleImageLoadError}
+                    />
+                  ) : null}
+                </details>
+              )
             ) : null}
             <BookPageContent
               {...props}

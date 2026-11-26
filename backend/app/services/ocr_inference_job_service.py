@@ -15,7 +15,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import APP_ENVIRONMENT, SUPABASE_PRIVATE_BOOKS_BUCKET
@@ -697,6 +697,103 @@ async def _persist_parent_post_ocr_failure(
         await db.commit()
 
 
+def _has_live_post_ocr_task(submission_id: UUID) -> bool:
+    expected_name = f"parent_submission_post_ocr_{submission_id}"
+    return any(
+        not task.done() and task.get_name() == expected_name
+        for task in list(_POST_OCR_TASKS)
+    )
+
+
+async def reconcile_orphaned_parent_submissions(
+    db: AsyncSession | None = None,
+    *,
+    stale_after_seconds: int = 90,
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS,
+    limit: int = 50,
+    reschedule: bool = True,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Reclaim `CHECKING` parent submissions orphaned after a Render web restart.
+
+    In `remote_worker` mode, Stage 2+3 post-OCR runs on the web tier without ML
+    weights. If the web dyno restarts mid-stage, rows stay in `CHECKING` with
+    `OcrStatus IN ('COMPLETED', 'NO_TEXT_DETECTED')` and pending proofread/tool
+    check. This reconciler cleanly re-schedules them (up to `max_attempts`) or
+    fails them closed so no submission remains stuck forever.
+    """
+    current_time = now or datetime.now(timezone.utc)
+    cutoff = current_time - timedelta(seconds=max(0, stale_after_seconds))
+    reclaimed_ids: list[UUID] = []
+    failed_ids: list[UUID] = []
+
+    async def _reconcile_in_session(session: AsyncSession) -> None:
+        query = (
+            select(ParentBookPageSubmission)
+            .where(
+                ParentBookPageSubmission.WorkflowStatus == "CHECKING",
+                ParentBookPageSubmission.OcrStatus.in_(("COMPLETED", "NO_TEXT_DETECTED")),
+                or_(
+                    ParentBookPageSubmission.ProofreadStatus == "PENDING",
+                    ParentBookPageSubmission.ToolCheckStatus == "PENDING",
+                ),
+            )
+            .order_by(ParentBookPageSubmission.UpdatedAt.asc())
+            .limit(max(1, min(limit, 200)))
+            .with_for_update(skip_locked=True)
+        )
+        rows = list((await session.scalars(query)).all())
+        for row in rows:
+            if _has_live_post_ocr_task(row.Id):
+                continue
+            updated_at = row.UpdatedAt
+            if stale_after_seconds > 0 and updated_at is not None and updated_at > cutoff:
+                continue
+
+            attempts = int(row.Attempts or 0)
+            if attempts >= max_attempts:
+                if row.ProofreadStatus == "PENDING" and not bool(row.IsImageOnly):
+                    row.ProofreadStatus = "FAILED"
+                    row.ProofreadErrorCode = "POST_OCR_ORPHANED_MAX_ATTEMPTS"
+                else:
+                    row.ToolCheckStatus = "FAILED"
+                    row.ToolCheckErrorCode = "POST_OCR_ORPHANED_MAX_ATTEMPTS"
+                    row.ToolCheckSuitability = None
+                row.WorkflowStatus = "CHECK_FAILED"
+                row.WorkerId = None
+                row.LeaseExpiresAt = None
+                row.OptimisticLockVersion = int(row.OptimisticLockVersion or 1) + 1
+                row.UpdatedAt = current_time
+                failed_ids.append(row.Id)
+            else:
+                row.Attempts = attempts + 1
+                row.WorkerId = None
+                row.LeaseExpiresAt = None
+                row.OptimisticLockVersion = int(row.OptimisticLockVersion or 1) + 1
+                row.UpdatedAt = current_time
+                reclaimed_ids.append(row.Id)
+
+        if reclaimed_ids or failed_ids:
+            await session.commit()
+
+    if db is not None:
+        await _reconcile_in_session(db)
+    else:
+        async with AsyncSessionLocal() as session:
+            await _reconcile_in_session(session)
+
+    if reschedule:
+        for submission_id in reclaimed_ids:
+            schedule_parent_submission_post_ocr(submission_id)
+
+    return {
+        "reclaimed_count": len(reclaimed_ids),
+        "failed_count": len(failed_ids),
+        "reclaimed_submission_ids": [str(item) for item in reclaimed_ids],
+        "failed_submission_ids": [str(item) for item in failed_ids],
+    }
+
+
 class OcrInferenceJobService:
     """Backend orchestrator for durable OCR inference jobs and remote worker leases."""
 
@@ -1047,11 +1144,12 @@ class OcrInferenceJobService:
         job_id: UUID,
         *,
         timeout_seconds: float | None = None,
-        poll_interval_seconds: float = 0.15,
+        poll_interval_seconds: float | None = None,
     ) -> OcrInferenceJob:
         deadline = asyncio.get_running_loop().time() + float(
             timeout_seconds or remote_sync_wait_timeout_seconds()
         )
+        attempt = 0
         while True:
             async with AsyncSessionLocal() as poll_db:
                 row = await OcrInferenceJobRepository(poll_db).get(job_id)
@@ -1065,7 +1163,15 @@ class OcrInferenceJobService:
                     status_code=status.HTTP_504_GATEWAY_TIMEOUT,
                     detail="Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
                 )
-            await asyncio.sleep(min(poll_interval_seconds, remaining))
+            if poll_interval_seconds is not None:
+                sleep_for = poll_interval_seconds
+            elif APP_ENVIRONMENT == "test":
+                sleep_for = 0.15
+            else:
+                # Adaptive backoff (0.5s -> 1.0s -> 1.5s) to avoid NullPool exhaustion on Supabase pooler.
+                sleep_for = 0.5 if attempt < 4 else (1.0 if attempt < 12 else 1.5)
+            attempt += 1
+            await asyncio.sleep(min(sleep_for, remaining))
 
     async def record_worker_heartbeat(
         self,

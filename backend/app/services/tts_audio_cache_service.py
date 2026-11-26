@@ -100,6 +100,19 @@ def canonical_tts_text(text: str) -> str:
     return unicodedata.normalize("NFC", " ".join(str(text).split())).strip()
 
 
+_FOLD_PUNCT_CHARS = ".,!?;:\"'()[]{}«»…-–—“”‘’"
+
+
+def folded_catalog_tts_text(text: str) -> str:
+    """Lowercase & strip surrounding punctuation per token for catalog cache compatibility."""
+    parts: list[str] = []
+    for raw in canonical_tts_text(text).split():
+        cleaned = raw.strip(_FOLD_PUNCT_CHARS).lower()
+        if cleaned:
+            parts.append(cleaned)
+    return " ".join(parts)
+
+
 ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Tuyệt vời!",
     "Con đọc rất tốt!",
@@ -365,6 +378,7 @@ class CachedTtsHit:
     storage_bucket: str
     storage_path: str
     cached_speed: float | None = None
+    normalized_text: str | None = None
 
 
 class TtsAudioCacheService:
@@ -664,10 +678,71 @@ class TtsAudioCacheService:
                 lookup_kwargs["require_word_timings"] = True
 
             entry = await self.repo.get_active_entry(**lookup_kwargs)
+            folded: str | None = None
+            folded_sha256: str | None = None
+            page_fallback_entry = None
+            if entry is None and target.scope == "CATALOG":
+                folded = folded_catalog_tts_text(normalized_text)
+                if folded and folded != canonical_tts_text(normalized_text):
+                    folded_sha256 = canonical_tts_sha256(folded)
+                    entry = await self.repo.get_active_entry(
+                        **{**lookup_kwargs, "content_sha256": folded_sha256}
+                    )
+                can_search_page_timed = (
+                    bool(folded)
+                    and target.page_id is not None
+                    and not normalized_text.startswith("phonics:")
+                    and (require_word_timings or " " in folded)
+                    and callable(
+                        getattr(self.repo, "get_active_timed_entries_for_page", None)
+                    )
+                )
+                if entry is None and can_search_page_timed:
+                    try:
+                        candidates = await self.repo.get_active_timed_entries_for_page(
+                            scope=target.scope,
+                            page_id=target.page_id,
+                            voice_id=voice_id,
+                            model_version=model_version,
+                            speed=speed,
+                            audio_formats=formats,
+                            allow_speed_fallback=allow_speed_fallback,
+                        )
+                    except TypeError:
+                        candidates = await self.repo.get_active_timed_entries_for_page(
+                            scope=target.scope,
+                            page_id=target.page_id,
+                            voice_id=voice_id,
+                            model_version=model_version,
+                            speed=speed,
+                            audio_formats=formats,
+                        )
+                    for candidate in candidates or []:
+                        cand_text = getattr(candidate, "NormalizedText", None)
+                        if (
+                            isinstance(cand_text, str)
+                            and folded_catalog_tts_text(cand_text) == folded
+                        ):
+                            cand_speed = getattr(candidate, "Speed", None)
+                            if (
+                                cand_speed is None
+                                or abs(float(cand_speed) - float(speed)) < 1e-6
+                                or not allow_speed_fallback
+                            ):
+                                entry = candidate
+                            elif page_fallback_entry is None:
+                                page_fallback_entry = candidate
+                            break
             if entry is None and allow_speed_fallback:
                 nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
                 if callable(nearest_fn):
                     entry = await nearest_fn(**lookup_kwargs)
+                    if entry is None and folded_sha256 is not None:
+                        entry = await nearest_fn(
+                            **{**lookup_kwargs, "content_sha256": folded_sha256}
+                        )
+                if entry is None and page_fallback_entry is not None:
+                    entry = page_fallback_entry
             if entry is None:
                 await self.repo.record_miss()
                 await self.db.commit()
@@ -684,7 +759,9 @@ class TtsAudioCacheService:
             entry_duration = entry.DurationSeconds
             entry_timings = entry.WordTimingsJson
             entry_scope = entry.Scope
-            entry_speed = float(entry.Speed) if entry.Speed is not None else float(speed)
+            raw_entry_speed = getattr(entry, "Speed", None)
+            entry_speed = float(raw_entry_speed) if raw_entry_speed is not None else float(speed)
+            entry_normalized_text = getattr(entry, "NormalizedText", None)
 
             if daily_limit > 0 and (daily_usage["bytes_served"] + entry_byte_size) > daily_limit:
                 await self._end_read_tx()
@@ -731,6 +808,7 @@ class TtsAudioCacheService:
                 storage_bucket=entry_bucket,
                 storage_path=entry_path,
                 cached_speed=entry_speed,
+                normalized_text=entry_normalized_text if isinstance(entry_normalized_text, str) else None,
             )
         except SQLAlchemyError as exc:
             await self._safe_rollback()

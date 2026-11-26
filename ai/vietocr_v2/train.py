@@ -7,6 +7,7 @@ import os
 import random
 import re
 import shutil
+import unicodedata
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
@@ -112,7 +113,12 @@ def _label_for_locked_vocabulary(label: str, vocabulary: str) -> str:
     fail early with a readable codepoint for any unsupported character that
     cannot be represented without changing its meaning.
     """
-    normalized = label.translate(_LOCKED_VOCAB_PUNCTUATION)
+    cleaned = "".join(
+        ch
+        for ch in unicodedata.normalize("NFC", str(label))
+        if unicodedata.category(ch) != "Cf"
+    )
+    normalized = cleaned.translate(_LOCKED_VOCAB_PUNCTUATION)
     unsupported = sorted(set(normalized).difference(vocabulary))
     if unsupported:
         details = ", ".join(f"U+{ord(char):04X} ({char!r})" for char in unsupported)
@@ -480,7 +486,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         raise ValueError("training requires at least two steps and one VGG freeze epoch")
     if progress_interval_steps < 1:
         raise ValueError("progress_interval_steps must be positive")
-    if any(row.split == "holdout" or row.split == "locked_test" for row in rows) and all(row.split != "train" for row in rows):
+    if any(row.split in {"holdout", "locked_test"} for row in rows):
         raise ValueError("holdout or Locked Test samples cannot be used as training data")
     original_parent = parent_checkpoint.lower() in {"original", ORIGINAL_CHECKPOINT_SHA256}
     prepare_vietocr_training_runtime()
@@ -520,8 +526,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                                   "scheduler": "CosineAnnealingLR",
                                   "preprocessing": PREPROCESSING_CONFIG,
                                   "training_weight_decay": cfg["training_weight_decay"], "image_aug": cfg["aug"]["image_aug"],
-                                  "dataset_version_sha256": dataset_version_sha256.lower(),
-                                  "local_manifest_sha256": sha256_file(manifest)})
+                                  "dataset_version_sha256": dataset_version_sha256.lower()})
     candidate_config_sha = job_config_sha256.lower() if job_config_sha256 else effective_config_sha
     random.seed(seed)
     __import__("numpy").random.seed(seed)

@@ -2927,12 +2927,9 @@ function ReadingSessionScreen({
               return;
             }
 
-            console.error("[REALTIME STT ERROR]", {
-              error: event.error,
-              recorderStarted,
-              browserRecognitionStarted,
-              isListeningActive: isListeningActiveRef.current,
-            });
+            console.error(
+              `[REALTIME STT ERROR] error=${String(event.error ?? "unknown")} recorderStarted=${String(recorderStarted)} browserRecognitionStarted=${String(browserRecognitionStarted)} isListeningActive=${String(isListeningActiveRef.current)}`,
+            );
 
             if (
               event.error === "not-allowed" ||

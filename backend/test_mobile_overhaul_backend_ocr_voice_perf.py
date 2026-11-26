@@ -1018,6 +1018,193 @@ class TestDashboardSummarySignedUrlCacheAndLightStartup(unittest.TestCase):
 
         asyncio.run(_scenario())
 
+    def test_health_remote_ocr_runs_concurrently_and_uses_safe_timeout(self):
+        import app.sever as sever_mod
+
+        self.assertGreaterEqual(sever_mod._remote_ocr_health_timeout_seconds(), 8.0)
+
+        async def _slow_db_probe(**_kwargs):
+            await asyncio.sleep(0.25)
+            return {
+                "ok": True,
+                "dns_resolved": True,
+                "ssl_enabled": True,
+                "pool_class": "NullPool",
+                "pooler_mode": "transaction",
+                "latency_ms": 250,
+                "error_type": None,
+            }
+
+        async def _slow_remote_ocr():
+            await asyncio.sleep(0.25)
+            return {
+                "mode": "remote_worker",
+                "ready": True,
+                "engines": {"vietocr": {"status": "HEALTHY", "detail_status": "inference_verified"}},
+                "workers": [{"worker_id": "win-ocr-test", "online": True, "status": "IDLE"}],
+                "queue": {"queued": 0, "succeeded": 5},
+                "heartbeat_ttl_seconds": 45,
+            }
+
+        with (
+            patch.dict(os.environ, {"VIREAD_OCR_MODE": "remote_worker"}, clear=False),
+            patch.object(sever_mod, "probe_database_connection", side_effect=_slow_db_probe),
+            patch.object(sever_mod, "collect_remote_ocr_health", side_effect=_slow_remote_ocr),
+        ):
+            client = TestClient(sever_mod.app)
+            t0 = time.perf_counter()
+            resp = client.get("/health")
+            elapsed = time.perf_counter() - t0
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["status"], "ok")
+        self.assertTrue(body["ocr"]["ready"])
+        self.assertEqual(body["ocr"]["workers"][0]["worker_id"], "win-ocr-test")
+        # Both 0.25s probes ran concurrently (< 0.45s instead of >= 0.50s sequential).
+        self.assertLess(elapsed, 0.45)
+
+    def test_profile_repository_dashboard_summary_runs_single_sql_query(self):
+        from app.repositories.profile_repository import ProfileRepository
+        from app.services.profile_service import ProfileAccessDeniedError, ProfileNotFoundError, ProfileService
+
+        parent_id = uuid4()
+        child1_id = uuid4()
+        child2_id = uuid4()
+        sess1_id = uuid4()
+        book1_id = uuid4()
+        now = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)
+
+        prof = SimpleNamespace(
+            Id=parent_id,
+            DisplayName="Mẹ An",
+            Role="parent",
+            Active=1,
+            CreatedAt=now,
+            ContactPhone=None,
+            AvatarPath=None,
+        )
+        c1 = SimpleNamespace(
+            Id=child1_id,
+            ParentId=parent_id,
+            Alias="Bé An",
+            Grade=1,
+            Settings={},
+            CreatedAt=now,
+            AvatarPath=None,
+        )
+        c2 = SimpleNamespace(
+            Id=child2_id,
+            ParentId=parent_id,
+            Alias="Bé Bình",
+            Grade=2,
+            Settings={},
+            CreatedAt=now - timedelta(days=1),
+            AvatarPath=None,
+        )
+        sess1 = SimpleNamespace(
+            Id=sess1_id,
+            ChildId=child1_id,
+            BookId=book1_id,
+            State="LISTENING",
+            StartedAt=now,
+            EndedAt=None,
+        )
+
+        executed_statements: list[object] = []
+
+        async def _fake_execute(stmt):
+            executed_statements.append(stmt)
+            res = MagicMock()
+            res.all.return_value = [
+                (prof, c1, sess1, "Truyện hay"),
+                (prof, c2, None, None),
+            ]
+            return res
+
+        fake_db = MagicMock()
+        fake_db.execute = AsyncMock(side_effect=_fake_execute)
+        fake_db.rollback = AsyncMock()
+
+        repo = ProfileRepository(fake_db)
+        service = ProfileService(repo)
+        summary = asyncio.run(service.get_dashboard_summary(parent_id))
+
+        self.assertEqual(fake_db.execute.await_count, 1)
+        # No avatars to sign -> must NOT waste a cross-region ROLLBACK round-trip.
+        fake_db.rollback.assert_not_awaited()
+        compiled_sql = str(executed_statements[0])
+        self.assertIn("LEFT OUTER JOIN", compiled_sql)
+        self.assertIn("row_number", compiled_sql.lower())
+        self.assertEqual(len(summary["children"]), 2)
+        self.assertEqual(summary["latest_sessions_by_child"][str(child1_id)]["book_title"], "Truyện hay")
+        self.assertNotIn(str(child2_id), summary["latest_sessions_by_child"])
+
+        # Missing profile -> ProfileNotFoundError
+        empty_res = MagicMock()
+        empty_res.all.return_value = []
+        fake_db.execute = AsyncMock(return_value=empty_res)
+        with self.assertRaises(ProfileNotFoundError):
+            asyncio.run(service.get_dashboard_summary(parent_id))
+
+        # Inactive profile -> ProfileAccessDeniedError
+        inactive_prof = SimpleNamespace(**{**prof.__dict__, "Active": 0})
+        inactive_res = MagicMock()
+        inactive_res.all.return_value = [(inactive_prof, None, None, None)]
+        fake_db.execute = AsyncMock(return_value=inactive_res)
+        with self.assertRaises(ProfileAccessDeniedError):
+            asyncio.run(service.get_dashboard_summary(parent_id))
+
+    def test_queue_depth_counts_executes_single_sql_query(self):
+        from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
+
+        now = datetime(2026, 11, 25, 16, 0, tzinfo=timezone.utc)
+        agg_row = SimpleNamespace(
+            queued=2,
+            claimed=1,
+            running=1,
+            failed_retryable=1,
+            dead_letter=0,
+            succeeded=10,
+            cancelled=0,
+            expired_leases=1,
+            oldest_pending_created=now - timedelta(seconds=12),
+            latest_succeeded_at=now - timedelta(seconds=3),
+        )
+        res = MagicMock()
+        res.one.return_value = agg_row
+        fake_db = MagicMock()
+        fake_db.execute = AsyncMock(return_value=res)
+
+        repo = OcrInferenceJobRepository(fake_db)
+        counts = asyncio.run(repo.queue_depth_counts(now=now))
+
+        self.assertEqual(fake_db.execute.await_count, 1)
+        self.assertEqual(counts["queued"], 2)
+        self.assertEqual(counts["pending_total"], 3)
+        self.assertEqual(counts["active_total"], 2)
+        self.assertEqual(counts["expired_leases"], 1)
+        self.assertEqual(counts["oldest_pending_job_age_seconds"], 12.0)
+        self.assertEqual(counts["latest_succeeded_at"], (now - timedelta(seconds=3)).isoformat())
+
+    def test_ocr_engine_and_worker_report_cuda_runtime_device_accurately(self):
+        from app.services import ocr_engine
+
+        fake_predictor = SimpleNamespace(config={"device": "cuda:0"})
+        with patch.object(ocr_engine, "_vietocr_engine", fake_predictor):
+            attached = ocr_engine._attach_vietocr_provenance(
+                {"text": "Xin chào", "words": [], "metadata": {"engine": "paddleocr_vietocr_dual", "engine_statuses": {"vietocr": "success"}}},
+                {"model_profile": "FLOW1_EXTERNAL_TRDG", "checkpoint_sha256": "abc", "model_load_status": "loaded"},
+            )
+            self.assertEqual(attached["metadata"]["runtime_device"], "cuda")
+
+            fallback = ocr_engine._attach_vietocr_provenance(
+                {"text": "Xin chào", "words": [], "metadata": {"engine": "tesseract", "engine_statuses": {"vietocr": "not_run"}}},
+                None,
+                skipped_reason="paddle_unavailable",
+            )
+            self.assertEqual(fallback["metadata"]["runtime_device"], "cpu")
+
 
 if __name__ == "__main__":
     unittest.main()

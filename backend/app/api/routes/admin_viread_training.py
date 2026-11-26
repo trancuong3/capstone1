@@ -111,6 +111,18 @@ async def get_viread_training_overview(
     return await VireadOcrTrainingService(db).overview(actor_id)
 
 
+@router.post("/admin/viread-training/flow2/trigger")
+async def trigger_viread_flow2_training(
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger Flow 2 snapshot materialization and enqueue a Colab training job immediately."""
+    await VireadOcrTrainingService(db)._admin(actor_id)
+    from app.jobs.viread_ocr_training_auto_worker import trigger_flow2_schedule_once
+
+    return await trigger_flow2_schedule_once(actor_id=actor_id)
+
+
 @router.get("/admin/viread-training/drive/status")
 async def get_viread_training_drive_status(
     actor_id: UUID = Depends(get_current_parent_id),
@@ -211,16 +223,26 @@ async def delete_viread_training_job(
     """Delete a terminal queue entry while retaining its dataset and run artifacts."""
     service = VireadOcrTrainingService(db)
     await service._admin(actor_id)
+    local_enabled = os.getenv("VIREAD_LOCAL_TRAINING_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    protected_statuses = [
+        "FALLBACK_QUEUED_COLAB",
+        "COLAB_RUNNING",
+        "WAITING_FOR_DATA",
+        "WAITING_FOR_COLAB_WORKER",
+        "COLAB_SUBMITTING",
+        "COLAB_SUBMITTED",
+        "COLAB_EXECUTING",
+    ]
+    if local_enabled:
+        protected_statuses.extend(["QUEUED", "LOCAL_RUNNING"])
     result = await db.execute(text("""
         DELETE FROM public.viread_ocr_training_jobs
         WHERE id=:job_id
-          AND status NOT IN (
-            'QUEUED', 'LOCAL_RUNNING', 'FALLBACK_QUEUED_COLAB',
-            'COLAB_RUNNING', 'WAITING_FOR_DATA', 'WAITING_FOR_COLAB_WORKER',
-            'COLAB_SUBMITTING', 'COLAB_SUBMITTED', 'COLAB_EXECUTING'
-          )
+          AND NOT (status = ANY(CAST(:protected_statuses AS text[])))
         RETURNING id
-    """), {"job_id": job_id})
+    """), {"job_id": job_id, "protected_statuses": protected_statuses})
     deleted_id = result.scalar_one_or_none()
     if deleted_id is None:
         exists = await db.execute(text(
@@ -320,7 +342,7 @@ async def retry_failed_viread_colab_training_job(
             FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE
         """), {"run_id": row["run_id"]})
         partial_run = partial_run_result.mappings().first()
-        if (not partial_run or partial_run["status"] != "TRAINING"
+        if (not partial_run or partial_run["status"] not in {"CREATED", "RUNNING"}
                 or partial_run["profile"] != row["profile"]
                 or str(partial_run["dataset_version_id"]) != str(row["dataset_version_id"])
                 or partial_run["manifest_sha256"] != row["manifest_sha256"]
@@ -1375,11 +1397,16 @@ async def finish_viread_colab_training_job(
     new_status = payload.status
     retry_delay = 0
     error_code = payload.error_code
+    worker_reported_error = None
     if payload.status == "FAILED":
         # Enterprise execution is polled through Google; manual/free Colab has no
         # execution identity and must not remain in COLAB_EXECUTING forever.
         new_status, default_error_code = _colab_worker_failure_state(job, payload.run_id)
-        error_code = payload.error_code or default_error_code
+        if new_status == "BLOCKED" and default_error_code == "COLAB_FAILURE_REQUIRES_RUN_RECOVERY":
+            worker_reported_error = payload.error_code
+            error_code = default_error_code
+        else:
+            error_code = payload.error_code or default_error_code
         if (job.get("metadata") or {}).get("operation") == "BENCHMARK_ONLY":
             # Evaluation failures leave the immutable candidate available for retry.
             new_status = "CANDIDATE"
@@ -1395,6 +1422,7 @@ async def finish_viread_colab_training_job(
           "error_code": error_code, "retry_delay": retry_delay,
           "progress": json.dumps({"stage": new_status.lower()}),
           "metadata": json.dumps({"runtime": runtime,
+                                  **({"worker_error_code": worker_reported_error} if worker_reported_error else {}),
                                   **({"evaluation_status": "FAILED"} if payload.status == "FAILED"
                                      and (job.get("metadata") or {}).get("operation") == "BENCHMARK_ONLY" else {})})})
     if payload.run_id and runtime:

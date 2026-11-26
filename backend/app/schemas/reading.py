@@ -48,6 +48,8 @@ class ReadingPageDTO(BaseModel):
     tts_audio_url: Optional[str] = None
     # Legacy or edited geometry has no measured, content-bound proof.
     image_overlay_safe: bool = False
+    illustration_url: Optional[str] = None
+    illustration_text_free: bool = False
     text: Optional[str] = None
     words: list[ReadingPageWordDTO]
     paragraph_start_line_indices: list[int] = Field(default_factory=list)

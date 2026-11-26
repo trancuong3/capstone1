@@ -361,6 +361,66 @@ const safeBackendMessageKeys: Record<string, string> = {
     "errors.backend.privateBookSuspendedOrUnavailable",
 };
 
+const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
+  DRIVE_QUOTA_EXCEEDED:
+    "Dung lượng Google Drive miễn phí sắp chạm ngưỡng an toàn. Hãy dọn Thùng rác Drive hoặc xóa snapshot/run cũ trước khi tiếp tục.",
+  DRIVE_ACCOUNT_EMAIL_MISMATCH:
+    "Tài khoản Google vừa chọn không khớp tài khoản chủ sở hữu Drive được khóa trên server.",
+  DRIVE_BRIDGE_ACCESS_DENIED:
+    "Apps Script Web App đang chặn truy cập. Trong script.google.com hãy Deploy lại với 'Who has access: Anyone' (bảo vệ bằng HMAC-SHA256).",
+  DRIVE_BRIDGE_SECRET_NOT_SET:
+    "Chưa cài VIREAD_BRIDGE_SECRET trong Script Properties của Apps Script Bridge.",
+  DRIVE_AUTH_FAILED:
+    "Xác thực chữ ký Apps Script Bridge hoặc phiên Google Drive thất bại. Hãy kiểm tra lại VIREAD_BRIDGE_SECRET.",
+  DRIVE_ENCRYPTION_KEY_MISSING:
+    "Server chưa cấu hình đủ VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự).",
+  GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER:
+    "Cloud server (Render) không thể đọc ổ G:\\ trên máy cá nhân; hãy kết nối qua Apps Script Bridge.",
+  GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST:
+    "Máy chủ Linux không hỗ trợ Google Drive for Desktop; hãy kết nối qua Apps Script Bridge.",
+  FLOW2_INGESTION_PAUSED:
+    "Luồng 2 đang tạm dừng thu thập (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+  UNRESOLVED_TRAINING_JOB_EXISTS:
+    "Đang có một job huấn luyện chưa kết thúc trong hàng đợi; hãy hoàn tất hoặc xử lý job đó trước.",
+  TRAIN_AND_VALIDATION_REQUIRED:
+    "Dataset Luồng 2 cần có đồng thời cả mẫu train và validation (tối thiểu 2 nhóm sách/trang độc lập).",
+  NO_ELIGIBLE_FLOW2_SAMPLES:
+    "Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot huấn luyện.",
+  "Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive":
+    "Cần áp dụng migration 20261121210000_flow2_google_drive_storage.sql trên database trước khi kết nối Google Drive.",
+  "A queued or running training job cannot be deleted":
+    "Không thể xóa job đang chờ worker hoặc đang chạy.",
+  "Only a pre-run failure or an unbenchmarked candidate with a recoverable Colab error can be retried":
+    "Chỉ có thể thử lại job lỗi trước khi tạo run hoặc candidate Colab có lỗi có thể khôi phục.",
+  "The pinned Locked Test is missing or no longer meets its integrity requirements":
+    "Locked Test gắn với job bị thiếu hoặc không còn đạt chuẩn toàn vẹn.",
+  "Locked Test is not ready":
+    "Locked Test chưa sẵn sàng hoặc chưa đủ số lượng mẫu/nhóm độc lập.",
+  "The active model has changed since this training job was created":
+    "Model active trên hệ thống đã đổi kể từ khi job này được tạo.",
+  "Another training job is already active":
+    "Đang có một job huấn luyện hoặc đánh giá khác đang hoạt động.",
+  "Candidate evaluation is already running or queued":
+    "Job đánh giá candidate này đã được xếp hàng hoặc đang chạy.",
+  "Pilot holdout does not meet minimum samples or groups":
+    "Tập holdout sạch chưa đạt mức tối thiểu 20 mẫu và 5 nhóm sách/trang độc lập để chạy Pilot.",
+};
+
+const SAFE_BACKEND_PREFIX_CODES = [
+  "DRIVE_QUOTA_EXCEEDED",
+  "DRIVE_ACCOUNT_EMAIL_MISMATCH",
+  "DRIVE_BRIDGE_ACCESS_DENIED",
+  "DRIVE_BRIDGE_SECRET_NOT_SET",
+  "DRIVE_AUTH_FAILED",
+  "DRIVE_ENCRYPTION_KEY_MISSING",
+  "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER",
+  "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST",
+  "FLOW2_INGESTION_PAUSED",
+  "UNRESOLVED_TRAINING_JOB_EXISTS",
+  "TRAIN_AND_VALIDATION_REQUIRED",
+  "NO_ELIGIBLE_FLOW2_SAMPLES",
+] as const;
+
 function errorCode(status: number): ServiceErrorCode {
   switch (status) {
     case 401:
@@ -403,7 +463,19 @@ async function safeBackendMessage(response: Response): Promise<string> {
     ) {
       if (typeof payload.detail === "string") {
         const key = safeBackendMessageKeys[payload.detail];
-        return key ? tApiError(key) : tApiError("errors.generic");
+        if (key) return tApiError(key);
+        const directFlow2 = safeFlow2BackendMessages[payload.detail];
+        if (directFlow2) return directFlow2;
+        const matchedCode = SAFE_BACKEND_PREFIX_CODES.find(
+          (code) =>
+            payload.detail === code ||
+            (typeof payload.detail === "string" &&
+              payload.detail.startsWith(`${code}:`)),
+        );
+        return matchedCode
+          ? (safeFlow2BackendMessages[matchedCode] ??
+              tApiError("errors.generic"))
+          : tApiError("errors.generic");
       }
       if (
         typeof payload.detail === "object" &&

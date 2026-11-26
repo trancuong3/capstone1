@@ -42,6 +42,7 @@ class VoiceListRead(BaseModel):
     default_voice_id: str
     local_worker_ready: bool = True
     google_tts_available: bool = False
+    cached_voice_ids: list[str] = Field(default_factory=list)
 
 
 class TimedSpeechRequest(BaseModel):

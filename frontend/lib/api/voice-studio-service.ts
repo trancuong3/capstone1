@@ -45,6 +45,7 @@ const voiceListSchema = z.object({
   default_voice_id: z.string(),
   local_worker_ready: z.boolean().optional(),
   google_tts_available: z.boolean().optional(),
+  cached_voice_ids: z.array(z.string()).optional(),
 });
 
 const timedSpeechSchema = z.object({

@@ -18,6 +18,7 @@ import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
+import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
 import type {
   GoogleDriveSelfTestResult,
@@ -121,6 +122,15 @@ function recoveryHint(
   ) {
     return t("training.drive.guides.DRIVE_SCOPE_MISMATCH");
   }
+  if (errorCode === "GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER") {
+    return "Cloud server (Render) không thể truy cập Google Drive Desktop (G:\\) trên máy cá nhân. Hãy chuyển sang Apps Script Bridge.";
+  }
+  if (errorCode === "GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST") {
+    return "Máy chủ Linux không hỗ trợ Google Drive for Desktop local mount. Hãy kết nối qua Apps Script Bridge.";
+  }
+  if (errorCode === "DRIVE_ENCRYPTION_KEY_MISSING") {
+    return "Thiếu biến VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự) trên server.";
+  }
   return t("training.drive.guides.genericCode", { code: errorCode });
 }
 
@@ -192,10 +202,12 @@ export function AdminVireadDrivePanel({
       if (typeof window !== "undefined") {
         window.location.assign(result.authorization_url);
       }
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: t("training.drive.notices.oauthInitFailed"),
+        text: isServiceError(err)
+          ? err.message
+          : t("training.drive.notices.oauthInitFailed"),
       });
     } finally {
       setBusyAction(null);
@@ -291,10 +303,12 @@ export function AdminVireadDrivePanel({
             : t("training.drive.notices.checkError")),
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: t("training.drive.notices.checkException"),
+        text: isServiceError(err)
+          ? err.message
+          : t("training.drive.notices.checkException"),
       });
     } finally {
       setBusyAction(null);
@@ -316,10 +330,12 @@ export function AdminVireadDrivePanel({
           : t("training.drive.notices.selfTestFailed"),
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: t("training.drive.notices.selfTestException"),
+        text: isServiceError(err)
+          ? err.message
+          : t("training.drive.notices.selfTestException"),
       });
     } finally {
       setBusyAction(null);
@@ -341,10 +357,12 @@ export function AdminVireadDrivePanel({
         text: t("training.drive.notices.disconnected"),
       });
       await onUpdated();
-    } catch {
+    } catch (err) {
       setFeedback({
         tone: "error",
-        text: t("training.drive.notices.disconnectFailed"),
+        text: isServiceError(err)
+          ? err.message
+          : t("training.drive.notices.disconnectFailed"),
       });
     } finally {
       setBusyAction(null);
@@ -387,6 +405,19 @@ export function AdminVireadDrivePanel({
         <div className="mt-3 flex items-start gap-2 rounded-control border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
           <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
           <p>{hint}</p>
+        </div>
+      ) : null}
+
+      {isDesktopConnected ? (
+        <div className="mt-3 flex items-start gap-2 rounded-control border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
+          <AlertTriangle aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <p>
+            Kết nối hiện tại đang dùng{" "}
+            <code className="font-mono text-xs">drive_desktop_sync</code> (chỉ
+            đọc được ổ G:\ trên máy Windows local). Để backend Cloud (Render) và
+            Google Colab đọc/ghi Drive, hãy chuyển sang{" "}
+            <strong>Apps Script Bridge</strong>.
+          </p>
         </div>
       ) : null}
 

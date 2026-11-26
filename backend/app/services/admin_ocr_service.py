@@ -4278,20 +4278,29 @@ class AdminOcrService:
         if page.LifecycleStatus != "ACTIVE":
             return {"stale_reason": "PAGE_NOT_ACTIVE"}
         if getattr(job, "JobKind", None) == JOB_KIND_ADMIN_REUPLOAD:
+            new_image_path = str(getattr(job, "ImagePath", page.ImagePath))
             new_width = int(getattr(job, "ImageWidth", None) or page.Width)
             new_height = int(getattr(job, "ImageHeight", None) or page.Height)
-            self.repo.set_page_image_source(
-                page,
-                image_path=str(getattr(job, "ImagePath", page.ImagePath)),
-                width=new_width,
-                height=new_height,
-            )
-            page.ProcessingMeta = {
-                **dict(page.ProcessingMeta or {}),
-                "image_sha256": getattr(job, "ImageSha256", None),
-                "ocr_job_id": str(getattr(job, "Id", "")),
-                **({"upload_id": str(upload_id_raw)} if upload_id_raw else {}),
-            }
+            metadata["source_image_path"] = new_image_path
+            metadata["source_image_width"] = new_width
+            metadata["source_image_height"] = new_height
+            if getattr(job, "ImageSha256", None):
+                metadata["image_sha256"] = getattr(job, "ImageSha256")
+            # Preserve live verified BookPage.ImagePath until Admin verifies this candidate
+            # revision (matching local replace_page_image() parity and preventing live bbox drift).
+            if page.CurrentVerifiedRevisionId is None:
+                self.repo.set_page_image_source(
+                    page,
+                    image_path=new_image_path,
+                    width=new_width,
+                    height=new_height,
+                )
+                page.ProcessingMeta = {
+                    **dict(page.ProcessingMeta or {}),
+                    "image_sha256": getattr(job, "ImageSha256", None),
+                    "ocr_job_id": str(getattr(job, "Id", "")),
+                    **({"upload_id": str(upload_id_raw)} if upload_id_raw else {}),
+                }
         next_number = await self.repo.next_revision_number(page.Id)
         revision = PageRevision(
             Id=revision_id,

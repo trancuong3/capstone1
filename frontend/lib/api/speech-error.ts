@@ -121,6 +121,7 @@ export function buildSpeechServiceError(params: {
         break;
       case "STT_TEMPORARILY_UNAVAILABLE":
       case "LOCAL_STT_UNAVAILABLE":
+      case "LOCAL_VOICE_UNCONFIGURED":
         code = "STT_TEMPORARILY_UNAVAILABLE";
         message = tSpeechError("errors.speech.sttTemporarilyUnavailable");
         retryable = true;
@@ -187,6 +188,7 @@ export function buildSpeechServiceError(params: {
         retryable = true;
         break;
       case "LOCAL_TTS_UNAVAILABLE":
+      case "LOCAL_VOICE_UNCONFIGURED":
         code = "TTS_UNAVAILABLE";
         message = tSpeechError("errors.speech.ttsLocalUnavailable");
         retryable = true;
@@ -246,5 +248,6 @@ export function buildSpeechServiceError(params: {
     status,
     request_id: requestId,
     retryable,
+    ...(providerCode ? { provider_code: providerCode } : {}),
   });
 }

@@ -718,7 +718,18 @@ class OcrRuntimeManager:
 
         meta = dict(result.get("metadata") or {})
         statuses = dict(meta.get("engine_statuses") or {})
-        meta["runtime_device"] = str(meta.get("runtime_device") or "cpu")
+        detected_device = str(meta.get("runtime_device") or "").strip().lower()
+        if not detected_device:
+            viet_cfg = getattr(getattr(ocr_engine, "_vietocr_engine", None), "config", None)
+            if isinstance(viet_cfg, dict) and viet_cfg.get("device"):
+                raw_dev = str(viet_cfg.get("device")).strip().lower()
+                detected_device = "cuda" if raw_dev.startswith("cuda") else raw_dev
+        if not detected_device and torch_mod is not None:
+            try:
+                detected_device = "cuda" if torch_mod.cuda.is_available() else "cpu"
+            except Exception:
+                detected_device = "cpu"
+        meta["runtime_device"] = detected_device or "cpu"
         provenance = (
             meta.get("vietocr_runtime_provenance")
             if isinstance(meta.get("vietocr_runtime_provenance"), dict)

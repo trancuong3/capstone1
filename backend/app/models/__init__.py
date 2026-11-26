@@ -33,3 +33,9 @@ from .parent_private_book import (
     ParentBookOcrContributionConsentEvent,
     ParentBookPageSubmission,
 )
+from .smart_book_studio import (
+    BookPresentationAsset,
+    BookStyleBible,
+    PageOcrExtraction,
+    SmartStudioJob,
+)

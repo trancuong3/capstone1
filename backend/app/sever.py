@@ -51,6 +51,7 @@ from app.services.ocr_inference_job_service import (
     is_heavy_workers_disabled,
     is_remote_ocr_mode,
     shutdown_post_ocr_tasks,
+    worker_heartbeat_ttl_seconds,
 )
 from app.services.runtime_diagnostics import (
     collect_ocr_health,
@@ -228,6 +229,10 @@ async def lifespan(_app: FastAPI):
                     latency_ms=db_probe["latency_ms"],
                     database_error_type=db_probe["error_type"],
                 )
+                if db_probe["ok"]:
+                    from app.api.routes.voice_studio import refresh_cached_public_voice_ids
+
+                    await refresh_cached_public_voice_ids(timeout=6.0)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -375,6 +380,28 @@ async def lifespan(_app: FastAPI):
             name="local_voice_worker_bootstrap",
         )
 
+    stop_smart_studio_worker = asyncio.Event()
+    smart_studio_worker_task = None
+    if APP_ENVIRONMENT != "test":
+        async def _run_smart_studio_worker() -> None:
+            if worker_startup_delay > 0:
+                try:
+                    await asyncio.wait_for(
+                        stop_smart_studio_worker.wait(),
+                        timeout=worker_startup_delay,
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    pass
+            from app.services.global_tasks_service import run_smart_studio_worker_loop
+
+            await run_smart_studio_worker_loop(stop_smart_studio_worker)
+
+        smart_studio_worker_task = asyncio.create_task(
+            _run_smart_studio_worker(),
+            name="smart_studio_worker",
+        )
+
     if _app is not None:
         _app.state.background_workers = {
             "viread_ocr_outbox": viread_outbox_task,
@@ -382,6 +409,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "smart_studio": smart_studio_worker_task,
             "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
             "local_trainer_process": local_trainer_process,
@@ -402,12 +430,14 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        stop_smart_studio_worker.set()
         if startup_db_probe_task is not None and not startup_db_probe_task.done():
             startup_db_probe_task.cancel()
 
         worker_tasks = (
             startup_db_probe_task,
             local_voice_bootstrap_task,
+            smart_studio_worker_task,
             viread_outbox_task,
             viread_training_task,
             book_quality_task,
@@ -428,6 +458,11 @@ async def lifespan(_app: FastAPI):
                 _shutdown_worker_task(
                     local_voice_bootstrap_task,
                     stop_local_voice_bootstrap,
+                    timeout=2.0,
+                ),
+                _shutdown_worker_task(
+                    smart_studio_worker_task,
+                    stop_smart_studio_worker,
                     timeout=2.0,
                 ),
                 _shutdown_worker_task(viread_outbox_task, stop_viread_ocr_outbox),
@@ -754,10 +789,19 @@ app.add_middleware(
     ],
 )
 
+def _remote_ocr_health_timeout_seconds() -> float:
+    raw = (os.getenv("VIREAD_HEALTH_OCR_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(2.5, min(15.0, float(raw)))
+        except ValueError:
+            pass
+    return 8.0
+
+
 @app.get("/health", tags=["System"])
 async def get_health(request: Request) -> dict[str, object]:
     """Read-only liveness/readiness check (SELECT 1 + worker states, zero secrets)."""
-    db_probe = await probe_database_connection(timeout=4.0)
     workers = getattr(request.app.state, "background_workers", None) or {}
     active_model_thread = workers.get("active_model_registry")
     local_trainer = workers.get("local_trainer_process")
@@ -778,27 +822,36 @@ async def get_health(request: Request) -> dict[str, object]:
             else ("running" if local_trainer.returncode is None else "stopped")
         ),
     }
-    ocr_payload: dict[str, object]
-    if is_remote_ocr_mode():
+
+    ocr_timeout = _remote_ocr_health_timeout_seconds()
+
+    async def _probe_remote_ocr() -> dict[str, object]:
         try:
-            remote_info = await asyncio.wait_for(collect_remote_ocr_health(), timeout=2.5)
-            ocr_payload = {
+            remote_info = await asyncio.wait_for(
+                collect_remote_ocr_health(), timeout=ocr_timeout
+            )
+            return {
                 "mode": "remote_worker",
                 "ready": bool(remote_info.get("ready", False)),
                 "engines": remote_info.get("engines", {}),
                 "workers": remote_info.get("workers", []),
                 "queue": remote_info.get("queue", {}),
-                "heartbeat_ttl_seconds": remote_info.get("heartbeat_ttl_seconds", 45),
+                "heartbeat_ttl_seconds": remote_info.get(
+                    "heartbeat_ttl_seconds", worker_heartbeat_ttl_seconds()
+                ),
             }
         except Exception:
-            ocr_payload = {
+            return {
                 "mode": "remote_worker",
                 "ready": False,
                 "engines": {},
                 "workers": [],
                 "queue": {},
+                "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+                "probe_degraded": True,
             }
-    else:
+
+    async def _probe_local_ocr() -> dict[str, object]:
         try:
             ocr_items = await asyncio.wait_for(asyncio.to_thread(collect_ocr_health), timeout=2.5)
             ocr_engines = {
@@ -825,10 +878,38 @@ async def get_health(request: Request) -> dict[str, object]:
         except Exception:
             ocr_engines = {}
             ocr_ready = False
-        ocr_payload = {
+        return {
             "mode": "local_inprocess",
             "ready": ocr_ready,
             "engines": ocr_engines,
+        }
+
+    # Run DB probe and OCR readiness probe concurrently so NullPool handshakes don't stack.
+    db_probe_res, ocr_payload = await asyncio.gather(
+        probe_database_connection(timeout=max(6.0, ocr_timeout)),
+        _probe_remote_ocr() if is_remote_ocr_mode() else _probe_local_ocr(),
+        return_exceptions=True,
+    )
+    if isinstance(db_probe_res, BaseException):
+        db_probe: dict[str, object] = {
+            "ok": False,
+            "dns_resolved": False,
+            "ssl_enabled": False,
+            "pool_class": type(engine.pool).__name__,
+            "pooler_mode": "unknown",
+            "latency_ms": 0,
+        }
+    else:
+        db_probe = db_probe_res
+    if isinstance(ocr_payload, BaseException):
+        ocr_payload = {
+            "mode": "remote_worker" if is_remote_ocr_mode() else "local_inprocess",
+            "ready": False,
+            "engines": {},
+            "workers": [],
+            "queue": {},
+            "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
+            "probe_degraded": True,
         }
 
     return {

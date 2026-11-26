@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import OcrInferenceJob, OcrWorkerHeartbeat
@@ -325,44 +325,71 @@ class OcrInferenceJobRepository:
 
     async def queue_depth_counts(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)
-        rows = (
+        # Consolidate status breakdown, expired leases, oldest pending age, and
+        # latest success timestamp into 1 SQL round-trip for low-latency /health.
+        row = (
             await self.db.execute(
-                select(OcrInferenceJob.Status, func.count(OcrInferenceJob.Id)).group_by(
-                    OcrInferenceJob.Status
+                select(
+                    func.sum(case((OcrInferenceJob.Status == "QUEUED", 1), else_=0)).label("queued"),
+                    func.sum(case((OcrInferenceJob.Status == "CLAIMED", 1), else_=0)).label("claimed"),
+                    func.sum(case((OcrInferenceJob.Status == "RUNNING", 1), else_=0)).label("running"),
+                    func.sum(
+                        case((OcrInferenceJob.Status == "FAILED_RETRYABLE", 1), else_=0)
+                    ).label("failed_retryable"),
+                    func.sum(
+                        case((OcrInferenceJob.Status == "DEAD_LETTER", 1), else_=0)
+                    ).label("dead_letter"),
+                    func.sum(
+                        case((OcrInferenceJob.Status == "SUCCEEDED", 1), else_=0)
+                    ).label("succeeded"),
+                    func.sum(
+                        case((OcrInferenceJob.Status == "CANCELLED", 1), else_=0)
+                    ).label("cancelled"),
+                    func.sum(
+                        case(
+                            (
+                                and_(
+                                    OcrInferenceJob.Status.in_(INFLIGHT_JOB_STATUSES),
+                                    OcrInferenceJob.LeaseExpiresAt.is_not(None),
+                                    OcrInferenceJob.LeaseExpiresAt <= ts,
+                                ),
+                                1,
+                            ),
+                            else_=0,
+                        )
+                    ).label("expired_leases"),
+                    func.min(
+                        case(
+                            (
+                                OcrInferenceJob.Status.in_(
+                                    ("QUEUED", "FAILED_RETRYABLE", "CLAIMED", "RUNNING")
+                                ),
+                                OcrInferenceJob.CreatedAt,
+                            ),
+                            else_=None,
+                        )
+                    ).label("oldest_pending_created"),
+                    func.max(
+                        case(
+                            (OcrInferenceJob.Status == "SUCCEEDED", OcrInferenceJob.CompletedAt),
+                            else_=None,
+                        )
+                    ).label("latest_succeeded_at"),
                 )
             )
-        ).all()
+        ).one()
         counts: dict[str, Any] = {
-            "queued": 0,
-            "claimed": 0,
-            "running": 0,
-            "failed_retryable": 0,
-            "dead_letter": 0,
-            "succeeded": 0,
-            "cancelled": 0,
-            "expired_leases": 0,
+            "queued": int(row.queued or 0),
+            "claimed": int(row.claimed or 0),
+            "running": int(row.running or 0),
+            "failed_retryable": int(row.failed_retryable or 0),
+            "dead_letter": int(row.dead_letter or 0),
+            "succeeded": int(row.succeeded or 0),
+            "cancelled": int(row.cancelled or 0),
+            "expired_leases": int(row.expired_leases or 0),
         }
-        for raw_status, count_val in rows:
-            key = str(raw_status or "").lower()
-            if key in counts:
-                counts[key] = int(count_val or 0)
-        expired_count = await self.db.scalar(
-            select(func.count(OcrInferenceJob.Id)).where(
-                OcrInferenceJob.Status.in_(INFLIGHT_JOB_STATUSES),
-                OcrInferenceJob.LeaseExpiresAt.is_not(None),
-                OcrInferenceJob.LeaseExpiresAt <= ts,
-            )
-        )
-        oldest_pending_created = await self.db.scalar(
-            select(func.min(OcrInferenceJob.CreatedAt)).where(
-                OcrInferenceJob.Status.in_(("QUEUED", "FAILED_RETRYABLE", "CLAIMED", "RUNNING"))
-            )
-        )
-        latest_succeeded_at = await self.db.scalar(
-            select(func.max(OcrInferenceJob.CompletedAt)).where(
-                OcrInferenceJob.Status == "SUCCEEDED"
-            )
-        )
+        oldest_pending_created = row.oldest_pending_created
+        latest_succeeded_at = row.latest_succeeded_at
         if oldest_pending_created is not None:
             if oldest_pending_created.tzinfo is None:
                 oldest_pending_created = oldest_pending_created.replace(tzinfo=timezone.utc)
@@ -371,7 +398,6 @@ class OcrInferenceJobRepository:
             oldest_age = None
         if latest_succeeded_at is not None and latest_succeeded_at.tzinfo is None:
             latest_succeeded_at = latest_succeeded_at.replace(tzinfo=timezone.utc)
-        counts["expired_leases"] = int(expired_count or 0)
         counts["pending_total"] = counts["queued"] + counts["failed_retryable"]
         counts["active_total"] = counts["claimed"] + counts["running"]
         counts["oldest_pending_job_age_seconds"] = oldest_age

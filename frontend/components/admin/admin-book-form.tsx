@@ -1,31 +1,43 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMemo } from "react";
-import { useForm } from "react-hook-form";
+import { useMemo, type ReactNode } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { z } from "zod";
+import { BookCover } from "@/components/books/book-cover";
 import { Button, ButtonLink } from "@/components/common/button";
 import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { AdminBookCreateDTO } from "@/types/admin";
+import type { AssetSourceType } from "@/types/book-assets";
 
 type AdminBookFormInitial = Omit<Partial<AdminBookCreateDTO>, "name"> & {
   readonly name?: string | null;
 };
 
 interface AdminBookFormProps {
+  bookId?: string;
   cancelHref?: string;
+  coverSourceType?: AssetSourceType | null;
+  coverStudioSlot?: ReactNode;
+  coverUrl?: string | null;
   initial?: AdminBookFormInitial;
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
+  showLiveCoverPreview?: boolean;
   submitLabel?: string;
 }
 
 export function AdminBookForm({
+  bookId = "draft-book",
   cancelHref = "/admin/books",
+  coverSourceType = null,
+  coverStudioSlot,
+  coverUrl = null,
   initial,
   onSubmit,
+  showLiveCoverPreview = false,
   submitLabel,
 }: AdminBookFormProps) {
   const t = useTranslations("admin");
@@ -61,6 +73,7 @@ export function AdminBookForm({
   );
   const resolvedSubmitLabel = submitLabel ?? t("books.form.defaultSubmit");
   const {
+    control,
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
@@ -75,6 +88,12 @@ export function AdminBookForm({
       max_grade: initial?.max_grade ?? 3,
     },
   });
+
+  const watchedTitle = useWatch({ control, name: "title" });
+  const watchedAuthor = useWatch({ control, name: "author" });
+  const watchedMinGrade = useWatch({ control, name: "min_grade" });
+  const watchedMaxGrade = useWatch({ control, name: "max_grade" });
+
   const submit = handleSubmit(async (value) => {
     try {
       await onSubmit({
@@ -89,11 +108,41 @@ export function AdminBookForm({
       });
     }
   });
+
   return (
     <form className="grid gap-4" noValidate onSubmit={submit}>
       {errors.root?.message ? (
         <StatusMessage tone="error">{errors.root.message}</StatusMessage>
       ) : null}
+      {showLiveCoverPreview ? (
+        <div
+          className="flex flex-wrap items-center gap-4 rounded-control border border-border bg-canvas/60 p-3"
+          data-testid="admin-book-live-cover-preview"
+        >
+          <BookCover
+            author={watchedAuthor || null}
+            book={{
+              id: bookId,
+              title: watchedTitle?.trim() || "Tiêu đề sách mới",
+              author: watchedAuthor || null,
+              min_grade: Number.isFinite(watchedMinGrade) ? watchedMinGrade : 1,
+              max_grade: Number.isFinite(watchedMaxGrade) ? watchedMaxGrade : 3,
+              lifecycle_status: "ACTIVE",
+            }}
+            coverSourceType={coverSourceType}
+            coverUrl={coverUrl}
+            size="medium"
+          />
+          <div className="min-w-0 flex-1 text-xs text-muted">
+            <p className="font-bold text-ink">Xem trước bìa chữ tự động</p>
+            <p className="mt-1">
+              Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc
+              nét theo tiêu đề, tác giả và khối lớp.
+            </p>
+          </div>
+        </div>
+      ) : null}
+      {coverStudioSlot}
       <TextField
         error={errors.name?.message}
         label={t("books.form.nameLabel")}

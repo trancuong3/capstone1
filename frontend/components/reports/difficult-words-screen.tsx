@@ -457,7 +457,7 @@ export function DifficultWordsScreen({
                   return (
                     <button
                       aria-pressed={active}
-                      className={`min-h-10 shrink-0 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors ${
+                      className={`min-h-11 shrink-0 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors ${
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"

@@ -39,13 +39,18 @@ import { LanguageSelector } from "@/components/i18n/language-selector";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
+import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
 import {
   clearUserCache,
+  DEFAULT_USER_CACHE_TTL_MS,
+  PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
@@ -114,15 +119,10 @@ export function AppShell({ children }: AppShellProps) {
   const previousUserIdRef = useRef<string | undefined>(undefined);
 
   const user = authRuntime.session?.user ?? null;
-  const userId = user?.id ?? null;
+  const userId = user?.id ?? authRuntime.initialUserId ?? null;
 
-  const initialSummary = useMemo(
-    () =>
-      readUserCacheWithStale<DashboardSummaryDTO>(userId, "dashboard-summary")
-        ?.data ?? null,
-    [userId],
-  );
-
+  const [cachedSummary, setCachedSummary] =
+    useState<DashboardSummaryDTO | null>(null);
   const [fetchedProfile, setFetchedProfile] = useState<ParentProfileDTO | null>(
     null,
   );
@@ -141,30 +141,30 @@ export function AppShell({ children }: AppShellProps) {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [hasSignOutError, setHasSignOutError] = useState(false);
 
-  const profile = fetchedProfile ?? initialSummary?.profile ?? null;
-  const appStoreSelectedChildId = appStore?.selectedChildId ?? null;
-  const appStoreValidatedChild = appStore?.validatedSelectedChild ?? null;
+  const profile = fetchedProfile ?? cachedSummary?.profile ?? null;
   const availableChildren = useMemo(
     () =>
       fetchedChildren.length > 0
         ? fetchedChildren
-        : (initialSummary?.children ?? []),
-    [fetchedChildren, initialSummary],
+        : (cachedSummary?.children ?? []),
+    [cachedSummary?.children, fetchedChildren],
   );
 
+  const selectedChildId = appStore?.selectedChildId ?? null;
+  const validatedSelectedChild = appStore?.validatedSelectedChild ?? null;
   const selectedChild = useMemo(() => {
-    const selectedId = appStoreSelectedChildId;
     if (
-      appStoreValidatedChild &&
-      (!selectedId || appStoreValidatedChild.id === selectedId)
+      validatedSelectedChild &&
+      (!selectedChildId || validatedSelectedChild.id === selectedChildId)
     ) {
-      return appStoreValidatedChild;
+      return validatedSelectedChild;
     }
-    if (!selectedId) return null;
+    if (!selectedChildId) return null;
     return (
-      availableChildren.find((candidate) => candidate.id === selectedId) ?? null
+      availableChildren.find((candidate) => candidate.id === selectedChildId) ??
+      null
     );
-  }, [appStoreSelectedChildId, appStoreValidatedChild, availableChildren]);
+  }, [availableChildren, selectedChildId, validatedSelectedChild]);
 
   const isAccountMenuVisible =
     accountMenu.isOpen && accountMenu.pathname === pathname;
@@ -208,23 +208,39 @@ export function AppShell({ children }: AppShellProps) {
     let isActive = true;
 
     const loadProfileAndSummary = async () => {
+      const cached =
+        readUserCacheWithStale<DashboardSummaryDTO>(
+          userId,
+          "dashboard-summary",
+          DEFAULT_USER_CACHE_TTL_MS,
+          PERSISTENT_USER_CACHE_MAX_STALE_MS,
+        )?.data ?? null;
+      if (isActive) {
+        setCachedSummary(cached);
+      }
+
       try {
         if (typeof profileService.getDashboardSummary === "function") {
           const summary = await profileService.getDashboardSummary();
           if (!isActive) return;
           setFetchedProfile(summary.profile);
           setFetchedChildren(summary.children);
+          setCachedSummary(summary);
           const ownerId = userId ?? summary.profile?.id ?? null;
           if (ownerId) {
-            writeUserCache(ownerId, "dashboard-summary", summary);
-            writeUserCache(ownerId, "children", summary.children);
+            writeUserCache(ownerId, "dashboard-summary", summary, {
+              persist: "local",
+            });
+            writeUserCache(ownerId, "children", summary.children, {
+              persist: "local",
+            });
           }
           return;
         }
         const nextProfile = await profileService.get();
         if (isActive) setFetchedProfile(nextProfile);
       } catch {
-        if (isActive && !initialSummary) {
+        if (isActive && !cached) {
           setFetchedProfile(null);
         }
       }
@@ -235,14 +251,14 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       isActive = false;
     };
-  }, [initialSummary, profileService, userId]);
+  }, [profileService, userId]);
 
   useEffect(() => {
     function handleProfileUpdated(event: Event) {
       const detail = (event as CustomEvent<{ displayName?: unknown }>).detail;
       if (typeof detail?.displayName !== "string") return;
       setFetchedProfile((current) => {
-        const base = current ?? initialSummary?.profile ?? null;
+        const base = current ?? cachedSummary?.profile ?? null;
         return base
           ? { ...base, display_name: detail.displayName as string }
           : base;
@@ -266,7 +282,7 @@ export function AppShell({ children }: AppShellProps) {
       );
       window.removeEventListener("viread:immersive-mode", handleImmersiveMode);
     };
-  }, [initialSummary?.profile, pathname]);
+  }, [cachedSummary?.profile, pathname]);
 
   useEffect(() => {
     if (!isAccountMenuVisible) return;
@@ -330,6 +346,7 @@ export function AppShell({ children }: AppShellProps) {
 
   useEffect(() => {
     clearPrivateMediaMemoryCache();
+    clearGlobalTasksMemoryCache();
     const prevId = previousUserIdRef.current;
     if (prevId !== undefined && prevId !== user?.id) {
       clearUserCache(prevId);
@@ -348,6 +365,7 @@ export function AppShell({ children }: AppShellProps) {
 
     try {
       clearPrivateMediaMemoryCache();
+      clearGlobalTasksMemoryCache();
       clearUserCache();
       await authService.signOut();
       dispatchI18nAuthSync({ userId: null, preferredLocale: null });
@@ -391,68 +409,179 @@ export function AppShell({ children }: AppShellProps) {
     items[nextIndex]?.focus();
   }
 
-  if (isReadingRoute || isBookRoute) {
+  const taskActorId = user?.id ?? null;
+  const taskActorRole = taskActorId
+    ? profile?.role === "admin"
+      ? "admin"
+      : "parent"
+    : null;
+
+  if (isReadingRoute) {
     return (
-      <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
-        {children}
-      </main>
+      <AiTaskCenterProvider
+        actorId={taskActorId}
+        actorRole={taskActorRole}
+        enabled={false}
+      >
+        <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
+          {children}
+        </main>
+      </AiTaskCenterProvider>
     );
   }
 
+  if (isBookRoute) {
+    return (
+      <AiTaskCenterProvider actorId={taskActorId} actorRole={taskActorRole}>
+        <main id="main-content" tabIndex={-1} className="min-h-dvh bg-canvas">
+          {children}
+        </main>
+      </AiTaskCenterProvider>
+    );
+  }
+
+  const autoSyncStudioTasks =
+    pathname.startsWith("/my-books") || pathname.startsWith("/book-scanner");
+
   return (
-    <div className="parent-shell flex min-h-dvh flex-col bg-canvas">
-      <a
-        className="sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
-        href="#main-content"
-      >
-        {t("navigation.parent.skipToContent")}
-      </a>
-      <header
-        className={cn(
-          "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
-          isMobileImmersive && "hidden xl:block",
-        )}
-      >
-        <nav
-          aria-label={t("navigation.parent.navLabel")}
+    <AiTaskCenterProvider
+      actorId={taskActorId}
+      actorRole={taskActorRole}
+      autoSyncOnMount={autoSyncStudioTasks}
+    >
+      <div className="parent-shell flex min-h-dvh flex-col bg-canvas">
+        <a
+          className="sr-only focus:fixed focus:start-4 focus:top-4 focus:z-[100] focus:not-sr-only focus:rounded-control focus:bg-white focus:px-4 focus:py-3 focus:font-semibold focus:text-primary focus:shadow-lg"
+          href="#main-content"
+        >
+          {t("navigation.parent.skipToContent")}
+        </a>
+        <header
           className={cn(
-            "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-4",
-            isChildOnboarding && "min-h-11",
+            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
+            isMobileImmersive && "hidden xl:block",
           )}
         >
-          <ViReadLogo
-            ariaLabel={t("navigation.footer.logoDashboardAria")}
-            className={cn(isChildOnboarding ? "text-label" : "xl:me-auto")}
-            href="/dashboard"
-            size="md"
-          />
+          <nav
+            aria-label={t("navigation.parent.navLabel")}
+            className={cn(
+              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-4",
+              isChildOnboarding && "min-h-11",
+            )}
+          >
+            <ViReadLogo
+              ariaLabel={t("navigation.footer.logoDashboardAria")}
+              className={cn(isChildOnboarding ? "text-label" : "xl:me-auto")}
+              href="/dashboard"
+              size="md"
+            />
 
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-3">
-            {!isChildOnboarding ? (
-              <>
-                <div
-                  className="relative flex min-w-0 items-center xl:hidden"
-                  ref={childSwitcherRef}
-                >
-                  {availableChildren.length > 0 && appStore ? (
-                    <>
-                      <button
-                        aria-expanded={isChildSwitcherVisible}
-                        aria-haspopup="listbox"
-                        aria-label={
-                          selectedChild
-                            ? t("navigation.childSwitcher.selectedAria", {
-                                alias: selectedChild.alias,
-                              })
-                            : t("navigation.childSwitcher.openAria")
-                        }
+            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-3">
+              {!isChildOnboarding ? (
+                <>
+                  <div
+                    className="relative flex min-w-0 items-center xl:hidden"
+                    ref={childSwitcherRef}
+                  >
+                    {availableChildren.length > 0 && appStore ? (
+                      <>
+                        <button
+                          aria-expanded={isChildSwitcherVisible}
+                          aria-haspopup="listbox"
+                          aria-label={
+                            selectedChild
+                              ? t("navigation.childSwitcher.selectedAria", {
+                                  alias: selectedChild.alias,
+                                })
+                              : t("navigation.childSwitcher.openAria")
+                          }
+                          className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          onClick={() =>
+                            setChildSwitcherOpenForPath((current) =>
+                              current === pathname ? null : pathname,
+                            )
+                          }
+                          type="button"
+                        >
+                          <span className="truncate">
+                            {selectedChild
+                              ? t("navigation.childSwitcher.compactLabel", {
+                                  alias: selectedChild.alias,
+                                  grade: selectedChild.grade,
+                                })
+                              : t("navigation.childSwitcher.selectChild")}
+                          </span>
+                          <ChevronDown
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0"
+                          />
+                        </button>
+
+                        {isChildSwitcherVisible ? (
+                          <div
+                            aria-label={t("navigation.childSwitcher.listAria")}
+                            className="absolute end-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
+                            role="listbox"
+                          >
+                            {availableChildren.map((child) => {
+                              const isSelected = selectedChild?.id === child.id;
+                              return (
+                                <button
+                                  aria-selected={isSelected}
+                                  className={cn(
+                                    "flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-start text-sm font-semibold transition-colors",
+                                    isSelected
+                                      ? "bg-sky text-primary-hover"
+                                      : "text-ink hover:bg-canvas",
+                                  )}
+                                  key={child.id}
+                                  onClick={() => {
+                                    appStore.selectChild(child.id);
+                                    appStore.setValidatedSelectedChild(child);
+                                    setChildSwitcherOpenForPath(null);
+                                  }}
+                                  role="option"
+                                  type="button"
+                                >
+                                  <span className="truncate">
+                                    {child.alias}{" "}
+                                    <span className="font-normal text-muted">
+                                      {t(
+                                        "navigation.childSwitcher.gradeLabel",
+                                        {
+                                          grade: child.grade,
+                                        },
+                                      )}
+                                    </span>
+                                  </span>
+                                  {isSelected ? (
+                                    <Check
+                                      aria-hidden="true"
+                                      className="size-4 shrink-0 text-primary"
+                                    />
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                            <div className="my-1 border-t border-border" />
+                            <Link
+                              className="flex min-h-11 items-center gap-2 rounded-control px-3 text-xs font-bold text-primary hover:bg-canvas"
+                              href="/children"
+                              onClick={() => setChildSwitcherOpenForPath(null)}
+                            >
+                              <UsersRound
+                                aria-hidden="true"
+                                className="size-4"
+                              />
+                              {t("navigation.childSwitcher.manageChildren")}
+                            </Link>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <Link
                         className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                        onClick={() =>
-                          setChildSwitcherOpenForPath((current) =>
-                            current === pathname ? null : pathname,
-                          )
-                        }
-                        type="button"
+                        href="/dashboard?focus=child-selection"
                       >
                         <span className="truncate">
                           {selectedChild
@@ -462,366 +591,306 @@ export function AppShell({ children }: AppShellProps) {
                               })
                             : t("navigation.childSwitcher.selectChild")}
                         </span>
-                        <ChevronDown
-                          aria-hidden="true"
-                          className="size-3.5 shrink-0"
-                        />
-                      </button>
+                      </Link>
+                    )}
+                  </div>
 
-                      {isChildSwitcherVisible ? (
-                        <div
-                          aria-label={t("navigation.childSwitcher.listAria")}
-                          className="absolute end-0 top-full z-50 mt-2 w-60 rounded-card border border-border bg-white p-2 shadow-lg"
-                          role="listbox"
-                        >
-                          {availableChildren.map((child) => {
-                            const isSelected = selectedChild?.id === child.id;
-                            return (
-                              <button
-                                aria-selected={isSelected}
-                                className={cn(
-                                  "flex min-h-12 w-full items-center justify-between gap-2 rounded-control px-3 text-start text-sm font-semibold transition-colors",
-                                  isSelected
-                                    ? "bg-sky text-primary-hover"
-                                    : "text-ink hover:bg-canvas",
-                                )}
-                                key={child.id}
-                                onClick={() => {
-                                  appStore.selectChild(child.id);
-                                  appStore.setValidatedSelectedChild(child);
-                                  setChildSwitcherOpenForPath(null);
-                                }}
-                                role="option"
-                                type="button"
-                              >
-                                <span className="truncate">
-                                  {child.alias}{" "}
-                                  <span className="font-normal text-muted">
-                                    {t("navigation.childSwitcher.gradeLabel", {
-                                      grade: child.grade,
-                                    })}
-                                  </span>
-                                </span>
-                                {isSelected ? (
-                                  <Check
-                                    aria-hidden="true"
-                                    className="size-4 shrink-0 text-primary"
-                                  />
-                                ) : null}
-                              </button>
-                            );
-                          })}
-                          <div className="my-1 border-t border-border" />
+                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-2 py-1 xl:flex xl:flex-none xl:flex-nowrap">
+                    {navigationItemsConfig.map(
+                      ({ href, icon: Icon, labelKey }) => {
+                        const isActive =
+                          (routeIsActive(pathname, href) &&
+                            !navigationItemsConfig.some(
+                              (other) =>
+                                other.href.length > href.length &&
+                                routeIsActive(pathname, other.href),
+                            )) ||
+                          (href === "/entertainment" &&
+                            (pathname === "/karaoke" ||
+                              pathname.startsWith("/karaoke/")));
+
+                        return (
                           <Link
-                            className="flex min-h-11 items-center gap-2 rounded-control px-3 text-xs font-bold text-primary hover:bg-canvas"
-                            href="/children"
-                            onClick={() => setChildSwitcherOpenForPath(null)}
+                            aria-current={isActive ? "page" : undefined}
+                            className={cn(
+                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
+                              isActive
+                                ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
+                                : "bg-white hover:bg-canvas",
+                            )}
+                            href={href}
+                            key={href}
+                            onClick={() =>
+                              setAccountMenu((current) => ({
+                                ...current,
+                                isOpen: false,
+                              }))
+                            }
+                            ref={isActive ? activeNavigationRef : undefined}
                           >
-                            <UsersRound aria-hidden="true" className="size-4" />
-                            {t("navigation.childSwitcher.manageChildren")}
+                            <Icon
+                              aria-hidden="true"
+                              className="size-4 shrink-0 sm:size-[18px]"
+                              strokeWidth={1.8}
+                            />
+                            <span className="whitespace-nowrap">
+                              {t(labelKey)}
+                            </span>
                           </Link>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <Link
-                      className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      href="/dashboard?focus=child-selection"
-                    >
-                      <span className="truncate">
-                        {selectedChild
-                          ? t("navigation.childSwitcher.compactLabel", {
-                              alias: selectedChild.alias,
-                              grade: selectedChild.grade,
-                            })
-                          : t("navigation.childSwitcher.selectChild")}
-                      </span>
-                    </Link>
-                  )}
-                </div>
+                        );
+                      },
+                    )}
+                  </div>
+                </>
+              ) : (
+                <span className="flex-1" />
+              )}
 
-                <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-2 py-1 xl:flex xl:flex-none xl:flex-nowrap">
-                  {navigationItemsConfig.map(
-                    ({ href, icon: Icon, labelKey }) => {
-                      const isActive =
-                        (routeIsActive(pathname, href) &&
-                          !navigationItemsConfig.some(
-                            (other) =>
-                              other.href.length > href.length &&
-                              routeIsActive(pathname, other.href),
-                          )) ||
-                        (href === "/entertainment" &&
-                          (pathname === "/karaoke" ||
-                            pathname.startsWith("/karaoke/")));
+              <div className="hidden shrink-0 xl:block">
+                <LanguageSelector variant="compact" />
+              </div>
 
-                      return (
-                        <Link
-                          aria-current={isActive ? "page" : undefined}
-                          className={cn(
-                            "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-2 xl:px-3 xl:text-label",
-                            isActive
-                              ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
-                              : "bg-white hover:bg-canvas",
-                          )}
-                          href={href}
-                          key={href}
-                          onClick={() =>
-                            setAccountMenu((current) => ({
-                              ...current,
-                              isOpen: false,
-                            }))
-                          }
-                          ref={isActive ? activeNavigationRef : undefined}
-                        >
-                          <Icon
-                            aria-hidden="true"
-                            className="size-4 shrink-0 sm:size-[18px]"
-                            strokeWidth={1.8}
-                          />
-                          <span className="whitespace-nowrap">
-                            {t(labelKey)}
-                          </span>
-                        </Link>
-                      );
-                    },
-                  )}
-                </div>
-              </>
-            ) : (
-              <span className="flex-1" />
-            )}
-
-            <div className="hidden shrink-0 xl:block">
-              <LanguageSelector variant="compact" />
-            </div>
-
-            <div className="relative shrink-0" ref={accountMenuRef}>
-              <button
-                aria-controls="parent-account-menu"
-                aria-expanded={isAccountMenuVisible}
-                aria-haspopup="menu"
-                aria-label={
-                  isAccountMenuVisible
-                    ? t("navigation.accountMenu.closeAria")
-                    : t("navigation.accountMenu.openAria")
-                }
-                className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-                onClick={() => {
-                  setChildSwitcherOpenForPath(null);
-                  if (isAccountMenuVisible) {
-                    setAccountMenu((current) => ({
-                      ...current,
-                      isOpen: false,
-                    }));
-                  } else {
-                    setAccountMenu({ isOpen: true, pathname });
-                  }
-                }}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" && !isAccountMenuVisible) {
-                    event.preventDefault();
-                    setAccountMenu({ isOpen: true, pathname });
-                  }
-                }}
-                ref={avatarButtonRef}
-                type="button"
-              >
-                <ProfileAvatar
-                  ariaLabel={t("accessibility.accountAvatar")}
-                  displayName={displayName}
-                  imageUrl={profile?.avatar_url}
-                  size="sm"
+              {!isChildOnboarding ? (
+                <GlobalTaskCenter
+                  className="shrink-0"
+                  hideOnPaths={["/children/new"]}
+                  variant="header-pill"
                 />
-              </button>
+              ) : null}
 
-              <div
-                aria-label={t("navigation.accountMenu.shortMenuAria")}
-                className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
-                hidden={!isAccountMenuVisible}
-                id="parent-account-menu"
-                onKeyDown={handleMenuKeyDown}
-                role="menu"
-              >
-                <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
+              <div className="relative shrink-0" ref={accountMenuRef}>
+                <button
+                  aria-controls="parent-account-menu"
+                  aria-expanded={isAccountMenuVisible}
+                  aria-haspopup="menu"
+                  aria-label={
+                    isAccountMenuVisible
+                      ? t("navigation.accountMenu.closeAria")
+                      : t("navigation.accountMenu.openAria")
+                  }
+                  className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                  onClick={() => {
+                    setChildSwitcherOpenForPath(null);
+                    if (isAccountMenuVisible) {
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }));
+                    } else {
+                      setAccountMenu({ isOpen: true, pathname });
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "ArrowDown" && !isAccountMenuVisible) {
+                      event.preventDefault();
+                      setAccountMenu({ isOpen: true, pathname });
+                    }
+                  }}
+                  ref={avatarButtonRef}
+                  type="button"
+                >
                   <ProfileAvatar
                     ariaLabel={t("accessibility.accountAvatar")}
                     displayName={displayName}
                     imageUrl={profile?.avatar_url}
-                    size="lg"
+                    size="sm"
                   />
-                  <p className="max-w-full break-words text-label font-semibold text-ink">
-                    {displayName ??
-                      t("navigation.accountMenu.defaultAccountLabel")}
-                  </p>
-                  {resolvedRoleLabel ? (
-                    <p className="text-sm font-semibold text-primary">
-                      {resolvedRoleLabel}
-                    </p>
-                  ) : null}
-                  {email ? (
-                    <p className="max-w-full break-all text-sm text-muted">
-                      {email}
-                    </p>
-                  ) : null}
-                </div>
-
-                <div className="my-2 border-t border-border" />
-                <Link
-                  aria-current={
-                    routeIsActive(pathname, "/profile") ? "page" : undefined
-                  }
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                    routeIsActive(pathname, "/profile")
-                      ? "bg-sky text-primary-hover"
-                      : "hover:bg-sky",
-                  )}
-                  href="/profile"
-                  onClick={() =>
-                    setAccountMenu((current) => ({
-                      ...current,
-                      isOpen: false,
-                    }))
-                  }
-                  role="menuitem"
-                  tabIndex={isAccountMenuVisible ? 0 : -1}
-                >
-                  <UserRound aria-hidden="true" className="size-5" />
-                  {t("navigation.parent.parentProfile")}
-                </Link>
-                <Link
-                  aria-current={
-                    routeIsActive(pathname, "/children") ? "page" : undefined
-                  }
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                    routeIsActive(pathname, "/children")
-                      ? "bg-sky text-primary-hover"
-                      : "hover:bg-sky",
-                  )}
-                  href="/children"
-                  onClick={() =>
-                    setAccountMenu((current) => ({
-                      ...current,
-                      isOpen: false,
-                    }))
-                  }
-                  role="menuitem"
-                  tabIndex={isAccountMenuVisible ? 0 : -1}
-                >
-                  <UsersRound aria-hidden="true" className="size-5" />
-                  {t("navigation.parent.children")}
-                </Link>
-
-                <div className="my-2 border-t border-border" />
-                <Link
-                  aria-current={
-                    routeIsActive(pathname, "/settings") ? "page" : undefined
-                  }
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                    routeIsActive(pathname, "/settings")
-                      ? "bg-sky text-primary-hover"
-                      : "hover:bg-sky",
-                  )}
-                  href="/settings"
-                  onClick={() =>
-                    setAccountMenu((current) => ({ ...current, isOpen: false }))
-                  }
-                  role="menuitem"
-                  tabIndex={isAccountMenuVisible ? 0 : -1}
-                >
-                  <Settings aria-hidden="true" className="size-5" />
-                  {t("navigation.parent.settings")}
-                </Link>
-                <Link
-                  aria-current={
-                    routeIsActive(pathname, "/help-support")
-                      ? "page"
-                      : undefined
-                  }
-                  className={cn(
-                    "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
-                    routeIsActive(pathname, "/help-support")
-                      ? "bg-sky text-primary-hover"
-                      : "hover:bg-sky",
-                  )}
-                  href="/help-support"
-                  onClick={() =>
-                    setAccountMenu((current) => ({ ...current, isOpen: false }))
-                  }
-                  role="menuitem"
-                  tabIndex={isAccountMenuVisible ? 0 : -1}
-                >
-                  <CircleHelp aria-hidden="true" className="size-5" />
-                  {t("navigation.parent.helpSupport")}
-                </Link>
-
-                <div className="my-2 border-t border-border" />
-                <div className="px-1 py-1">
-                  <p className="px-2 pb-1 text-xs font-semibold text-muted">
-                    {t("common.languageSelector.label")}
-                  </p>
-                  <LanguageSelector variant="menu" />
-                </div>
-
-                <div className="my-2 border-t border-border" />
-                <button
-                  className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-start text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
-                  disabled={isSigningOut}
-                  onClick={() => void handleSignOut()}
-                  role="menuitem"
-                  tabIndex={isAccountMenuVisible ? 0 : -1}
-                  type="button"
-                >
-                  <LogOut
-                    aria-hidden="true"
-                    className="size-5 viread-rtl-flip"
-                  />
-                  {isSigningOut
-                    ? t("auth.session.signingOut")
-                    : t("auth.session.signOut")}
                 </button>
+                <div
+                  aria-label={t("navigation.accountMenu.shortMenuAria")}
+                  className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
+                  hidden={!isAccountMenuVisible}
+                  id="parent-account-menu"
+                  onKeyDown={handleMenuKeyDown}
+                  role="menu"
+                >
+                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
+                    <ProfileAvatar
+                      ariaLabel={t("accessibility.accountAvatar")}
+                      displayName={displayName}
+                      imageUrl={profile?.avatar_url}
+                      size="lg"
+                    />
+                    <p className="max-w-full break-words text-label font-semibold text-ink">
+                      {displayName ??
+                        t("navigation.accountMenu.defaultAccountLabel")}
+                    </p>
+                    {resolvedRoleLabel ? (
+                      <p className="text-sm font-semibold text-primary">
+                        {resolvedRoleLabel}
+                      </p>
+                    ) : null}
+                    {email ? (
+                      <p className="max-w-full break-all text-sm text-muted">
+                        {email}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  <div className="my-2 border-t border-border" />
+                  <Link
+                    aria-current={
+                      routeIsActive(pathname, "/profile") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeIsActive(pathname, "/profile")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/profile"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <UserRound aria-hidden="true" className="size-5" />
+                    {t("navigation.parent.parentProfile")}
+                  </Link>
+                  <Link
+                    aria-current={
+                      routeIsActive(pathname, "/children") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeIsActive(pathname, "/children")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/children"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <UsersRound aria-hidden="true" className="size-5" />
+                    {t("navigation.parent.children")}
+                  </Link>
+
+                  <div className="my-2 border-t border-border" />
+                  <Link
+                    aria-current={
+                      routeIsActive(pathname, "/settings") ? "page" : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeIsActive(pathname, "/settings")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/settings"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <Settings aria-hidden="true" className="size-5" />
+                    {t("navigation.parent.settings")}
+                  </Link>
+                  <Link
+                    aria-current={
+                      routeIsActive(pathname, "/help-support")
+                        ? "page"
+                        : undefined
+                    }
+                    className={cn(
+                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      routeIsActive(pathname, "/help-support")
+                        ? "bg-sky text-primary-hover"
+                        : "hover:bg-sky",
+                    )}
+                    href="/help-support"
+                    onClick={() =>
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }))
+                    }
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                  >
+                    <CircleHelp aria-hidden="true" className="size-5" />
+                    {t("navigation.parent.helpSupport")}
+                  </Link>
+
+                  <div className="my-2 border-t border-border" />
+                  <div className="px-1 py-1">
+                    <p className="px-2 pb-1 text-xs font-semibold text-muted">
+                      {t("common.languageSelector.label")}
+                    </p>
+                    <LanguageSelector variant="menu" />
+                  </div>
+
+                  <div className="my-2 border-t border-border" />
+                  <button
+                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-start text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                    disabled={isSigningOut}
+                    onClick={() => void handleSignOut()}
+                    role="menuitem"
+                    tabIndex={isAccountMenuVisible ? 0 : -1}
+                    type="button"
+                  >
+                    <LogOut
+                      aria-hidden="true"
+                      className="size-5 viread-rtl-flip"
+                    />
+                    {isSigningOut
+                      ? t("auth.session.signingOut")
+                      : t("auth.session.signOut")}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        </nav>
-        {hasSignOutError ? (
-          <p
-            className="mx-auto mt-3 w-full max-w-[1376px] pb-2 text-label font-semibold text-danger"
-            role="alert"
-          >
-            {t("auth.session.signOutError")}
-          </p>
+          </nav>
+          {hasSignOutError ? (
+            <p
+              className="mx-auto mt-3 w-full max-w-[1376px] pb-2 text-label font-semibold text-danger"
+              role="alert"
+            >
+              {t("auth.session.signOutError")}
+            </p>
+          ) : null}
+        </header>
+
+        <main
+          id="main-content"
+          tabIndex={-1}
+          className={cn(
+            isImmersiveRoute
+              ? "w-full flex-1"
+              : "mx-auto w-full max-w-[1184px] px-4 sm:px-8",
+            !isImmersiveRoute && "min-w-0 flex-1",
+            !isImmersiveRoute &&
+              (isChildOnboarding
+                ? "pb-8 pt-4 sm:pb-10"
+                : isMobileImmersive
+                  ? "py-4 sm:py-6 xl:py-10"
+                  : "pb-24 pt-5 sm:pt-7 xl:py-10"),
+          )}
+        >
+          <ButtonSizeContext.Provider value="compact">
+            {children}
+          </ButtonSizeContext.Provider>
+        </main>
+
+        <SiteFooter className="hidden lg:block" variant="parent" />
+
+        {!isChildOnboarding && !isMobileImmersive ? (
+          <MobileBottomNav pathname={pathname} />
         ) : null}
-      </header>
-
-      <main
-        id="main-content"
-        tabIndex={-1}
-        className={cn(
-          isImmersiveRoute
-            ? "w-full flex-1"
-            : "mx-auto w-full max-w-[1184px] px-4 sm:px-8",
-          !isImmersiveRoute && "min-w-0 flex-1",
-          !isImmersiveRoute &&
-            (isChildOnboarding
-              ? "pb-8 pt-4 sm:pb-10"
-              : isMobileImmersive
-                ? "py-4 sm:py-6 xl:py-10"
-                : "pb-24 pt-5 sm:pt-7 xl:py-10"),
-        )}
-      >
-        <ButtonSizeContext.Provider value="compact">
-          {children}
-        </ButtonSizeContext.Provider>
-      </main>
-
-      <SiteFooter className="hidden lg:block" variant="parent" />
-
-      {!isChildOnboarding && !isMobileImmersive ? (
-        <MobileBottomNav pathname={pathname} />
-      ) : null}
-    </div>
+      </div>
+    </AiTaskCenterProvider>
   );
 }

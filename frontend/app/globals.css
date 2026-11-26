@@ -595,6 +595,12 @@
   [data-reading-end-hint="true"] {
     display: none;
   }
+  [data-reading-topbar="true"] [role="status"],
+  [data-reading-topbar="true"] [role="alert"] {
+    padding: 4px 10px;
+    font-size: 11px;
+    line-height: 1.25;
+  }
   .reading-dock {
     position: static;
     flex-shrink: 0;
@@ -602,12 +608,14 @@
     padding-bottom: 4px;
   }
   [data-reading-feedback="true"] {
-    margin-bottom: 4px;
-    max-height: 18dvh;
+    margin-bottom: 2px;
+    max-height: 13dvh;
   }
   [data-reading-feedback="true"] > * {
-    padding-top: 4px;
-    padding-bottom: 4px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    font-size: 12px;
+    line-height: 1.25;
   }
   [data-reading-progress-wrap="true"] {
     margin-top: 2px;
@@ -958,13 +966,16 @@ button:disabled {
   text-underline-offset: 4px;
 }
 .account-forgot {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   align-self: flex-end;
   text-decoration: underline;
   margin-top: -6px;
   padding-block: 4px;
 }
 .account-signup {
-  min-height: 40px;
+  min-height: 44px;
   text-decoration: underline;
 }
 @media (min-width: 768px) {

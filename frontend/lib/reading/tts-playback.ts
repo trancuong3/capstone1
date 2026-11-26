@@ -235,8 +235,12 @@ function canUseAllowedDeviceFallbackTts(): boolean {
   return canUseGoogleTtsFallback() && canUseBrowserSpeechSynthesis();
 }
 
-function shouldSkipBackendTtsForBrowserFallback(operation: Operation): boolean {
+function shouldSkipBackendTtsForBrowserFallback(
+  operation: Operation,
+  hasBackendCacheTarget = false,
+): boolean {
   if (
+    hasBackendCacheTarget ||
     !canUseAllowedDeviceFallbackTts() ||
     operation.voice.provider !== "local"
   ) {
@@ -1389,8 +1393,22 @@ export class TtsPlayback {
           cachedSpeed: number | null;
           key: string;
         }> | null = null;
-        let useBrowserFallback =
-          shouldSkipBackendTtsForBrowserFallback(operation);
+        const hasCacheTarget = Boolean(
+          options.bookId ||
+          options.pageId ||
+          options.pageRevisionId ||
+          options.coaching ||
+          options.wordSample ||
+          options.cacheScope === "CATALOG" ||
+          options.cacheScope === "COACHING" ||
+          this.defaultCacheContext?.bookId ||
+          this.defaultCacheContext?.pageId ||
+          this.defaultCacheContext?.pageRevisionId,
+        );
+        let useBrowserFallback = shouldSkipBackendTtsForBrowserFallback(
+          operation,
+          hasCacheTarget,
+        );
 
         for (let idx = 0; idx < chunks.length; idx += 1) {
           const chunk = chunks[idx];
@@ -1570,7 +1588,22 @@ export class TtsPlayback {
           options.onEnded?.();
         };
 
-        if (shouldSkipBackendTtsForBrowserFallback(operation)) {
+        const hasPhonicsCacheTarget = Boolean(
+          options.bookId ||
+          options.pageId ||
+          options.pageRevisionId ||
+          options.cacheScope === "CATALOG" ||
+          options.cacheScope === "COACHING" ||
+          this.defaultCacheContext?.bookId ||
+          this.defaultCacheContext?.pageId ||
+          this.defaultCacheContext?.pageRevisionId,
+        );
+        if (
+          shouldSkipBackendTtsForBrowserFallback(
+            operation,
+            hasPhonicsCacheTarget,
+          )
+        ) {
           await playPhonicsViaBrowser();
           return;
         }
@@ -2105,8 +2138,20 @@ export class TtsPlayback {
 
       let elapsed = 0;
       let completedChunks = 0;
-      let useBrowserFallback =
-        shouldSkipBackendTtsForBrowserFallback(operation);
+      const hasTimedCacheTarget = Boolean(
+        options.bookId ||
+        options.pageId ||
+        options.pageRevisionId ||
+        options.cacheScope === "CATALOG" ||
+        options.cacheScope === "COACHING" ||
+        this.defaultCacheContext?.bookId ||
+        this.defaultCacheContext?.pageId ||
+        this.defaultCacheContext?.pageRevisionId,
+      );
+      let useBrowserFallback = shouldSkipBackendTtsForBrowserFallback(
+        operation,
+        hasTimedCacheTarget,
+      );
       for (const chunk of splitSpeechText(text)) {
         await this.waitIfPaused(operation);
         this.ensure(operation);

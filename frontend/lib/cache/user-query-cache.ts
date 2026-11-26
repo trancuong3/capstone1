@@ -1,5 +1,12 @@
 export const DEFAULT_USER_CACHE_TTL_MS = 60_000;
+export const PERSISTENT_USER_CACHE_MAX_STALE_MS = 15 * 60_000;
 export const USER_CACHE_STORAGE_PREFIX = "viread_ucache:";
+
+export type UserCachePersistence = "session" | "local";
+
+export interface UserCacheWriteOptions {
+  readonly persist?: UserCachePersistence;
+}
 
 interface UserCacheRecord<T> {
   readonly userId: string;
@@ -38,6 +45,26 @@ function getSessionStorageSafe(): Storage | null {
   }
 }
 
+function getLocalStorageSafe(): Storage | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function removeFromAllStorages(storageKey: string): void {
+  for (const storage of [getSessionStorageSafe(), getLocalStorageSafe()]) {
+    if (!storage) continue;
+    try {
+      storage.removeItem(storageKey);
+    } catch {
+      // Ignore storage cleanup errors.
+    }
+  }
+}
+
 function cloneValue<T>(value: T): T {
   if (value === null || typeof value !== "object") {
     return value;
@@ -62,7 +89,8 @@ function containsForbiddenPayload(value: unknown, depth = 0): boolean {
     return (
       value.startsWith("blob:") ||
       value.includes("/books/my-books/") ||
-      value.includes("/books/admin/quality/user-books/")
+      value.includes("/books/admin/quality/user-books/") ||
+      value.includes("viread-private-books")
     );
   }
   if (Array.isArray(value)) {
@@ -83,23 +111,13 @@ function containsForbiddenPayload(value: unknown, depth = 0): boolean {
   return false;
 }
 
-function readRawRecord<T>(
+function readRecordFromStorage<T>(
+  storage: Storage | null,
+  storageKey: string,
   userId: string,
   key: string,
 ): UserCacheRecord<T> | null {
-  const storageKey = buildStorageKey(userId, key);
-  const inMemory = memoryCache.get(storageKey);
-  if (inMemory) {
-    if (inMemory.userId !== userId || inMemory.key !== key) {
-      memoryCache.delete(storageKey);
-    } else {
-      return inMemory as UserCacheRecord<T>;
-    }
-  }
-
-  const storage = getSessionStorageSafe();
   if (!storage) return null;
-
   try {
     const raw = storage.getItem(storageKey);
     if (!raw) return null;
@@ -114,14 +132,12 @@ function readRawRecord<T>(
       storage.removeItem(storageKey);
       return null;
     }
-    const record: UserCacheRecord<T> = {
+    return {
       userId: parsed.userId,
       key: parsed.key,
       updatedAt: parsed.updatedAt,
       data: parsed.data as T,
     };
-    memoryCache.set(storageKey, record);
-    return record;
   } catch {
     try {
       storage.removeItem(storageKey);
@@ -130,6 +146,45 @@ function readRawRecord<T>(
     }
     return null;
   }
+}
+
+function readRawRecord<T>(
+  userId: string,
+  key: string,
+): UserCacheRecord<T> | null {
+  const storageKey = buildStorageKey(userId, key);
+  const inMemory = memoryCache.get(storageKey);
+  if (inMemory) {
+    if (inMemory.userId !== userId || inMemory.key !== key) {
+      memoryCache.delete(storageKey);
+    } else {
+      return inMemory as UserCacheRecord<T>;
+    }
+  }
+
+  const fromSession = readRecordFromStorage<T>(
+    getSessionStorageSafe(),
+    storageKey,
+    userId,
+    key,
+  );
+  if (fromSession) {
+    memoryCache.set(storageKey, fromSession);
+    return fromSession;
+  }
+
+  const fromLocal = readRecordFromStorage<T>(
+    getLocalStorageSafe(),
+    storageKey,
+    userId,
+    key,
+  );
+  if (fromLocal) {
+    memoryCache.set(storageKey, fromLocal);
+    return fromLocal;
+  }
+
+  return null;
 }
 
 /**
@@ -156,11 +211,7 @@ export function readUserCache<T>(
   if (Date.now() - record.updatedAt > ttlMs) {
     const storageKey = buildStorageKey(normalizedUserId, normalizedKey);
     memoryCache.delete(storageKey);
-    try {
-      getSessionStorageSafe()?.removeItem(storageKey);
-    } catch {
-      // Ignore storage errors.
-    }
+    removeFromAllStorages(storageKey);
     return null;
   }
 
@@ -193,11 +244,7 @@ export function readUserCacheWithStale<T>(
   if (ageMs > maxStaleMs) {
     const storageKey = buildStorageKey(normalizedUserId, normalizedKey);
     memoryCache.delete(storageKey);
-    try {
-      getSessionStorageSafe()?.removeItem(storageKey);
-    } catch {
-      // Ignore storage errors.
-    }
+    removeFromAllStorages(storageKey);
     return null;
   }
 
@@ -216,6 +263,7 @@ export function writeUserCache<T>(
   userId: string | null | undefined,
   key: string,
   data: T,
+  options?: UserCacheWriteOptions,
 ): void {
   const normalizedUserId = normalizeSegment(userId);
   const normalizedKey = normalizeSegment(key);
@@ -239,17 +287,29 @@ export function writeUserCache<T>(
 
   memoryCache.set(storageKey, record);
 
-  const storage = getSessionStorageSafe();
-  if (!storage) return;
-  try {
-    storage.setItem(storageKey, JSON.stringify(record));
-  } catch {
-    // Ignore sessionStorage quota or privacy mode errors; memory cache remains valid.
+  const serialized = JSON.stringify(record);
+  const sessionStorageRef = getSessionStorageSafe();
+  if (sessionStorageRef) {
+    try {
+      sessionStorageRef.setItem(storageKey, serialized);
+    } catch {
+      // Ignore sessionStorage quota or privacy mode errors; memory cache remains valid.
+    }
+  }
+  if (options?.persist === "local") {
+    const localStorageRef = getLocalStorageSafe();
+    if (localStorageRef) {
+      try {
+        localStorageRef.setItem(storageKey, serialized);
+      } catch {
+        // Ignore localStorage quota or privacy mode errors.
+      }
+    }
   }
 }
 
 /**
- * Remove a single key for a specific user from memory and sessionStorage.
+ * Remove a single key for a specific user from memory, sessionStorage, and localStorage.
  */
 export function invalidateUserCacheKey(
   userId: string | null | undefined,
@@ -261,11 +321,7 @@ export function invalidateUserCacheKey(
 
   const storageKey = buildStorageKey(normalizedUserId, normalizedKey);
   memoryCache.delete(storageKey);
-  try {
-    getSessionStorageSafe()?.removeItem(storageKey);
-  } catch {
-    // Ignore storage errors.
-  }
+  removeFromAllStorages(storageKey);
 }
 
 /**
@@ -284,21 +340,21 @@ export function clearUserCache(userId?: string | null): void {
     }
   }
 
-  const storage = getSessionStorageSafe();
-  if (!storage) return;
-
-  try {
-    const keysToRemove: string[] = [];
-    for (let index = 0; index < storage.length; index += 1) {
-      const storageKey = storage.key(index);
-      if (storageKey && storageKey.startsWith(targetPrefix)) {
-        keysToRemove.push(storageKey);
+  for (const storage of [getSessionStorageSafe(), getLocalStorageSafe()]) {
+    if (!storage) continue;
+    try {
+      const keysToRemove: string[] = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const storageKey = storage.key(index);
+        if (storageKey && storageKey.startsWith(targetPrefix)) {
+          keysToRemove.push(storageKey);
+        }
       }
+      for (const storageKey of keysToRemove) {
+        storage.removeItem(storageKey);
+      }
+    } catch {
+      // Ignore storage cleanup errors.
     }
-    for (const storageKey of keysToRemove) {
-      storage.removeItem(storageKey);
-    }
-  } catch {
-    // Ignore storage cleanup errors.
   }
 }

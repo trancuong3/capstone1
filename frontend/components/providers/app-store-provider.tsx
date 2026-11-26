@@ -126,7 +126,7 @@ export function AppStoreProvider({
         if (
           previousUserId === null &&
           activeUserId !== null &&
-          current.userId === null
+          (current.userId === null || current.userId === activeUserId)
         ) {
           return {
             userId: activeUserId,

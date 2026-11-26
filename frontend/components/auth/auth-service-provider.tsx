@@ -23,6 +23,7 @@ export const AuthServiceContext = createContext<AuthService | null>(null);
 
 export interface AuthRuntimeState {
   hasProvider?: boolean;
+  initialUserId?: string | null;
   initializationFailure: AuthFailureReason | null;
   isPasswordRecovery: boolean;
   lastEvent: AuthStateEvent | null;
@@ -33,6 +34,7 @@ export interface AuthRuntimeState {
 
 const defaultAuthRuntimeState: AuthRuntimeState = {
   hasProvider: false,
+  initialUserId: null,
   initializationFailure: null,
   isPasswordRecovery: false,
   lastEvent: null,
@@ -47,6 +49,7 @@ export const AuthRuntimeContext = createContext<AuthRuntimeState>(
 
 interface AuthServiceProviderProps {
   children: ReactNode;
+  initialUserId?: string | null;
 
   /*
    * Giữ lại các props này để tương thích
@@ -59,13 +62,17 @@ interface AuthServiceProviderProps {
   scenario: string;
 }
 
-export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
+export function AuthServiceProvider({
+  children,
+  initialUserId = null,
+}: AuthServiceProviderProps) {
   const service = useMemo<AuthService>(() => createSupabaseAuthService(), []);
-  const lastUserIdRef = useRef<string | null>(null);
+  const lastUserIdRef = useRef<string | null>(initialUserId);
 
   const [runtime, setRuntime] = useState<AuthRuntimeState>(() => ({
     ...defaultAuthRuntimeState,
     hasProvider: true,
+    initialUserId,
     mode: "supabase",
     status: "initializing",
   }));
@@ -95,6 +102,7 @@ export function AuthServiceProvider({ children }: AuthServiceProviderProps) {
 
       setRuntime((current) => ({
         ...current,
+        initialUserId: nextUserId,
 
         isPasswordRecovery:
           event === "PASSWORD_RECOVERY"

@@ -42,6 +42,7 @@ from app.services.tts_audio_cache_service import (
     TtsAudioCacheService,
     canonical_phonics_key,
     canonical_tts_text,
+    folded_catalog_tts_text,
     is_tts_cache_enabled,
 )
 
@@ -392,6 +393,65 @@ class VoiceOrchestrator:
             )
             return fallback_audio
 
+    @staticmethod
+    def _align_cached_word_timings(
+        *,
+        words: list[str],
+        raw_timings: list[dict[str, Any]],
+        cached_text: str | None = None,
+    ) -> list[LocalTimedWord] | None:
+        if len(raw_timings) == len(words):
+            return [
+                LocalTimedWord(
+                    index=int(item["index"]),
+                    start=float(item["start"]),
+                    end=float(item["end"]),
+                )
+                for item in raw_timings
+            ]
+
+        req_spoken: list[tuple[int, str]] = []
+        for idx, token in enumerate(words):
+            folded_tok = folded_catalog_tts_text(token)
+            if folded_tok:
+                req_spoken.append((idx, folded_tok))
+        if not req_spoken:
+            return None
+
+        matched_by_req_idx: dict[int, dict[str, Any]] = {}
+        cached_tokens = canonical_tts_text(cached_text).split() if cached_text else []
+        if cached_tokens and len(cached_tokens) == len(raw_timings):
+            cached_spoken: list[tuple[str, dict[str, Any]]] = []
+            for tok, timing in zip(cached_tokens, raw_timings):
+                folded_tok = folded_catalog_tts_text(tok)
+                if folded_tok:
+                    cached_spoken.append((folded_tok, timing))
+            if len(cached_spoken) != len(req_spoken) or any(
+                r_tok != c_tok
+                for (_, r_tok), (c_tok, _) in zip(req_spoken, cached_spoken)
+            ):
+                return None
+            for (req_idx, _), (_, timing) in zip(req_spoken, cached_spoken):
+                matched_by_req_idx[req_idx] = timing
+        elif len(raw_timings) == len(req_spoken):
+            for (req_idx, _), timing in zip(req_spoken, raw_timings):
+                matched_by_req_idx[req_idx] = timing
+        else:
+            return None
+
+        aligned: list[LocalTimedWord] = []
+        prev_end = 0.0
+        for idx in range(len(words)):
+            item = matched_by_req_idx.get(idx)
+            if item is not None:
+                start = max(prev_end, float(item["start"]))
+                end = max(start, float(item["end"]))
+                aligned.append(LocalTimedWord(index=idx, start=start, end=end))
+                prev_end = end
+            else:
+                aligned.append(LocalTimedWord(index=idx, start=prev_end, end=prev_end))
+        return aligned
+
     async def synthesize_timed(
         self,
         *,
@@ -434,19 +494,15 @@ class VoiceOrchestrator:
                 audio_format=ctx.audio_format,
                 require_word_timings=True,
             )
-            if (
-                hit is not None
-                and isinstance(hit.word_timings_json, list)
-                and len(hit.word_timings_json) == len(words)
-            ):
-                timings = [
-                    LocalTimedWord(
-                        index=int(item["index"]),
-                        start=float(item["start"]),
-                        end=float(item["end"]),
-                    )
-                    for item in hit.word_timings_json
-                ]
+            if hit is not None and isinstance(hit.word_timings_json, list):
+                timings = self._align_cached_word_timings(
+                    words=words,
+                    raw_timings=hit.word_timings_json,
+                    cached_text=getattr(hit, "normalized_text", None),
+                )
+            else:
+                timings = None
+            if hit is not None and timings is not None:
                 logger.info(
                     "tts_timed_ok provider=precomputed_cache scope=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
                     hit.scope,
