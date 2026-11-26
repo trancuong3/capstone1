@@ -204,7 +204,45 @@ OperationalState = Literal[
     "Quota exhausted",
     "Unsupported",
     "Unknown",
+    "Standby",
+    "Scheduled",
+    "Local only",
 ]
+
+HealthDetailStatus = Literal[
+    "installed",
+    "initialized",
+    "loaded",
+    "healthy",
+    "failed",
+    "unknown",
+    "disabled",
+    "standby",
+    "cached",
+    "client_side",
+    "cloud_ready",
+    "scheduled",
+    "remote_delegated",
+    "local_only",
+]
+
+HealthServiceGroup = Literal["core", "voice", "ocr", "workers"]
+
+HealthExecutionMode = Literal[
+    "always_on",
+    "in_process",
+    "on_demand",
+    "cron_scheduled",
+    "remote_worker",
+    "remote_delegated",
+    "precomputed_cache",
+    "browser_wasm",
+    "cloud_ai",
+    "local_only",
+    "disabled_opt_in",
+]
+
+HealthCriticality = Literal["core", "important", "optional"]
 
 
 class AdminAudioCacheSummaryRead(BaseModel):
@@ -224,13 +262,16 @@ class AdminHealthItemRead(BaseModel):
     operational_state: OperationalState | None = None
     checked_at: datetime
     safe_message: str
-    detail_status: Literal[
-        "installed", "initialized", "loaded", "healthy", "failed", "unknown", "disabled"
-    ] | None = None
+    detail_status: HealthDetailStatus | None = None
     last_success_at: datetime | None = None
     oldest_pending_job_age_seconds: float | None = None
     queue_depth: int | None = None
     last_error: str | None = None
+    service_group: HealthServiceGroup | None = None
+    execution_mode: HealthExecutionMode | None = None
+    criticality: HealthCriticality | None = None
+    action_hint: str | None = None
+    can_wake: bool = False
 
 
 class AdminHealthRead(BaseModel):
@@ -238,3 +279,10 @@ class AdminHealthRead(BaseModel):
     checked_at: datetime
     services: list[AdminHealthItemRead]
     audio_cache: AdminAudioCacheSummaryRead | None = None
+    audio_cache_error: str | None = None
+
+
+class AdminOcrWorkerWakeupResponse(BaseModel):
+    status: Literal["woken", "unconfigured", "failed"]
+    woken: bool
+    detail: str

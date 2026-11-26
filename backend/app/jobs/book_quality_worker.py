@@ -26,7 +26,11 @@ from app.services.book_quality_analyzer import (
     page_gap_finding,
 )
 from app.services.book_quality_ollama import analyse_with_ollama
-from app.services.worker_telemetry import record_worker_error, record_worker_success
+from app.services.worker_telemetry import (
+    persist_worker_heartbeat_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -800,6 +804,191 @@ async def _process_claimed_scan(scan_id: UUID, worker_id: str) -> None:
         stop_heartbeat.set()
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+
+_EVENT_SCAN_TASKS: set[asyncio.Task[Any]] = set()
+_EVENT_SCAN_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+
+
+def _configured_enabled() -> bool:
+    return os.getenv("BOOK_QUALITY_SCAN_WORKER_ENABLED", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _event_scan_semaphore() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    sem = _EVENT_SCAN_SEMAPHORES.get(loop_id)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _EVENT_SCAN_SEMAPHORES[loop_id] = sem
+    return sem
+
+
+async def run_once(
+    *,
+    worker_id: str | None = None,
+    source: str = "event",
+    execution_mode: str = "on_demand",
+    session_factory: Any | None = None,
+    repository_cls: Any | None = None,
+    persist_heartbeat: bool = True,
+) -> bool:
+    """Claim and process a single queued/expired BookQualityScanRun (bounded & telemetry-safe)."""
+    if not _configured_enabled():
+        return False
+    effective_worker = worker_id or f"book-quality-event-{uuid4().hex[:8]}"
+    eff_session_factory = session_factory or AsyncSessionLocal
+    eff_repo_cls = repository_cls or BookContentQualityRepository
+    try:
+        async with eff_session_factory() as session:
+            run = await eff_repo_cls(session).claim_next_scan(
+                effective_worker, lease_seconds=LEASE_SECONDS
+            )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        record_worker_error("book_quality", exc)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "book_quality",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+            )
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="book_quality_queue_claim_failed",
+            stage="book_quality_worker",
+            include_traceback=True,
+        )
+        return False
+
+    if run is None:
+        record_worker_success("book_quality")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "book_quality",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=0,
+                source=source,
+            )
+        return False
+
+    try:
+        await _process_claimed_scan(run.Id, effective_worker)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        record_worker_error("book_quality", exc)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "book_quality",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+            )
+        raise
+
+    record_worker_success("book_quality")
+    if persist_heartbeat:
+        await persist_worker_heartbeat_with_factory(
+            eff_session_factory,
+            "book_quality",
+            execution_mode=execution_mode,
+            ok=True,
+            items_processed=1,
+            source=source,
+        )
+    return True
+
+
+async def _drain_scheduled_book_quality_scans(
+    *,
+    max_scans: int = 4,
+    source: str = "event",
+) -> int:
+    await asyncio.sleep(0)
+    sem = _event_scan_semaphore()
+    processed = 0
+    had_error: str | None = None
+    async with sem:
+        try:
+            for _ in range(max(1, max_scans)):
+                did_work = await run_once(
+                    source=source,
+                    execution_mode="on_demand",
+                    persist_heartbeat=False,
+                )
+                if not did_work:
+                    break
+                processed += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            had_error = type(exc).__name__
+            record_worker_error("book_quality", exc)
+        await persist_worker_heartbeat_with_factory(
+            AsyncSessionLocal,
+            "book_quality",
+            execution_mode="on_demand",
+            ok=had_error is None,
+            items_processed=processed,
+            source=source,
+            error_code=had_error,
+        )
+    return processed
+
+
+def schedule_book_quality_scan(
+    *,
+    force: bool = False,
+    source: str = "event",
+) -> asyncio.Task[Any] | None:
+    """Trigger bounded event-driven BookQualityScan execution when heavy workers are disabled."""
+    from app.database.config import APP_ENVIRONMENT
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if app_env == "test" or not is_heavy_workers_disabled() or not _configured_enabled():
+            return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    active_tasks = [t for t in list(_EVENT_SCAN_TASKS) if not t.done()]
+    if len(active_tasks) >= 2:
+        return active_tasks[-1]
+    task = loop.create_task(
+        _drain_scheduled_book_quality_scans(source=source),
+        name="book_quality_scan_event_drain",
+    )
+    _EVENT_SCAN_TASKS.add(task)
+    task.add_done_callback(_EVENT_SCAN_TASKS.discard)
+    return task
+
+
+async def shutdown_scheduled_book_quality_scans(*, timeout_seconds: float = 5.0) -> None:
+    if not _EVENT_SCAN_TASKS:
+        return
+    pending = [task for task in list(_EVENT_SCAN_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)
 
 
 async def run_worker(stop_event: asyncio.Event | None = None) -> None:

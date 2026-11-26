@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
 import { createHash, webcrypto } from "node:crypto";
@@ -97,10 +103,19 @@ describe("karaoke wizard rendering and explicit workflow", () => {
     const field = screen.getByLabelText("Lời bài hát");
     fireEvent.change(field, { target: { value: "Bé hát, vui! ×2" } });
     expect(field).toHaveValue("Bé hát, vui! ×2");
-    vi.mocked(window.confirm).mockReturnValueOnce(false);
     fireEvent.click(screen.getByRole("button", { name: "Mở rộng câu lặp" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Hủy",
+      }),
+    );
     expect(field).toHaveValue("Bé hát, vui! ×2");
     fireEvent.click(screen.getByRole("button", { name: "Mở rộng câu lặp" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Xác nhận mở rộng",
+      }),
+    );
     expect(field).toHaveValue("Bé hát, vui!\nBé hát, vui!");
     fireEvent.click(
       screen.getByRole("button", { name: "Hoàn tác mở rộng lời" }),
@@ -116,6 +131,11 @@ describe("karaoke wizard rendering and explicit workflow", () => {
     const field = screen.getByLabelText("Lời bài hát");
     fireEvent.change(field, { target: { value: "Bé hát ×2" } });
     fireEvent.click(screen.getByRole("button", { name: "Mở rộng câu lặp" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Xác nhận mở rộng",
+      }),
+    );
     fireEvent.change(field, { target: { value: "Lời mới của admin" } });
     expect(
       screen.queryByRole("button", { name: "Hoàn tác mở rộng lời" }),
@@ -193,6 +213,11 @@ describe("karaoke wizard rendering and explicit workflow", () => {
       content_fingerprint: "c".repeat(64),
     });
     fireEvent.click(screen.getByRole("button", { name: "Xuất bản bài hát" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Xác nhận xuất bản",
+      }),
+    );
     await screen.findByText("Bài hát đã xuất bản");
     expect(service.publish).toHaveBeenCalledTimes(1);
   });
@@ -264,10 +289,12 @@ describe("karaoke wizard rendering and explicit workflow", () => {
       cancelable: true,
       button: 0,
     });
-    const allowed = screen
-      .getByRole("link", { name: "Danh sách bài hát" })
-      .dispatchEvent(event);
+    const allowed = fireEvent(
+      screen.getByRole("link", { name: "Danh sách bài hát" }),
+      event,
+    );
     expect(allowed).toBe(false);
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
     expect(service.cancelProcessing).not.toHaveBeenCalled();
   });
 });

@@ -15,7 +15,13 @@
     "auditLogsTitle": "سجلات التدقيق",
     "healthTitle": "حالة التشغيل",
     "protectedLoadingAria": "جارٍ تحميل لوحة الإدارة",
-    "protectedLoadingStatus": "جارٍ تحميل بيانات الإدارة..."
+    "protectedLoadingStatus": "جارٍ تحميل بيانات الإدارة...",
+    "bookDetailTitle": "تفاصيل الكتاب",
+    "karaokeEditTitle": "تعديل الأغنية",
+    "karaokeNewTitle": "إنشاء أغنية جديدة",
+    "karaokeTitle": "إدارة الأغاني",
+    "ocrReviewTitle": "مراجعة OCR للصفحة",
+    "vireadTrainingTitle": "تدريب OCR"
   },
   "layout": {
     "skipToContent": "تخطي التنقل والانتقال إلى محتوى الإدارة",
@@ -35,7 +41,12 @@
     },
     "signOut": "تسجيل الخروج",
     "signingOut": "جاري تسجيل الخروج...",
-    "signOutError": "تعذر تسجيل الخروج في الوقت الحالي. يرجى المحاولة مرة أخرى."
+    "signOutError": "تعذر تسجيل الخروج في الوقت الحالي. يرجى المحاولة مرة أخرى.",
+    "groups": {
+      "content": "المحتوى",
+      "systemAi": "النظام والذكاء الاصطناعي",
+      "users": "المستخدمون"
+    }
   },
   "login": {
     "areaLabel": "منطقة الإدارة",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "جلسة تسجيل الدخول غير صالحة",
     "yes": "نعم",
     "no": "لا",
-    "notYet": "ليس بعد"
+    "notYet": "ليس بعد",
+    "breadcrumbAria": "مسار التنقل",
+    "clearSearch": "مسح البحث"
   },
   "auditLogs": {
     "title": "سجلات التدقيق",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "عرض تفاصيل البيانات الوصفية ({count} حرفاً)",
     "loadMoreError": "تعذر تحميل المزيد من السجلات. تبقى السجلات السابقة كما هي.",
     "retryLoadMore": "إعادة محاولة التحميل",
-    "loadMore": "تحميل المزيد"
+    "loadMore": "تحميل المزيد",
+    "clearFilters": "مسح عوامل التصفية",
+    "columns": {
+      "action": "الإجراء",
+      "metadata": "البيانات الوصفية",
+      "resource": "المورد",
+      "timestamp": "الطابع الزمني"
+    },
+    "drawerTitleFallback": "تفاصيل الحدث",
+    "eventIdLabel": "معرّف الحدث",
+    "filterActionPlaceholder": "مثال: book.read, parent.update…",
+    "filterAria": "عوامل تصفية سجل التدقيق",
+    "filterResourcePlaceholder": "مثال: book, parent, song…",
+    "inspectBtn": "التفاصيل",
+    "inspectEventAria": "فحص تفاصيل الحدث {action}",
+    "tableAria": "جدول سجلات التدقيق"
   },
   "health": {
     "title": "حالة التشغيل",
@@ -137,7 +165,14 @@
       "healthy": "تم التحقق",
       "failed": "حدث خطأ",
       "unknown": "لم يتم التحقق",
-      "disabled": "غير قيد التشغيل"
+      "disabled": "غير قيد التشغيل",
+      "cached": "ذاكرة تخزين مؤقت معدة مسبقًا",
+      "client_side": "يعمل في المتصفح",
+      "cloud_ready": "السحابة جاهزة",
+      "local_only": "محلي فقط",
+      "remote_delegated": "مفوّض عن بُعد",
+      "scheduled": "مجدول دوريًا",
+      "standby": "وضع الاستعداد"
     },
     "queueDepthLabel": "قائمة الانتظار",
     "queueDepthValue": "{count, plural, =0 {0 مهام} one {# مهمة} few {# مهام} many {# مهمة} other {# مهام}}",
@@ -186,8 +221,87 @@
       "Queued": "في قائمة الانتظار",
       "Quota exhausted": "تم تجاوز الحد",
       "Unsupported": "غير مدعوم",
-      "Unknown": "غير معروف"
-    }
+      "Unknown": "غير معروف",
+      "Local only": "محلي فقط",
+      "Scheduled": "مجدول",
+      "Standby": "وضع الاستعداد"
+    },
+    "actionHintLabel": "الإجراء المقترح",
+    "audioCacheErrorDetail": "رمز التشخيص: {code}",
+    "audioCacheErrorTitle": "تعذر تحميل إحصائيات ذاكرة التخزين المؤقت للصوت المعدّ مسبقًا",
+    "audioCachePercentUsed": "المستخدم {percent}",
+    "audioCacheUnlimited": "بلا حد",
+    "audioCacheUsageAria": "نسبة استخدام {label}: {percent}%",
+    "autoRefresh30s": "30 ث",
+    "autoRefresh60s": "60 ث",
+    "autoRefreshActive": "تحديث تلقائي كل {seconds} ثانية",
+    "autoRefreshLabel": "التحديث التلقائي",
+    "autoRefreshOff": "إيقاف",
+    "autoRefreshPaused": "تم إيقاف التحديث التلقائي مؤقتًا أثناء إخفاء علامة التبويب",
+    "clearTtsCache": "مسح ذاكرة TTS المؤقتة",
+    "clearTtsCacheError": "تعذر مسح ذاكرة TTS المؤقتة في المتصفح حاليًا.",
+    "clearTtsCacheSuccess": "تم مسح ذاكرة TTS المؤقتة في المتصفح.",
+    "clearWasmCache": "مسح ذاكرة نموذج STT المؤقتة",
+    "clearWasmCacheError": "تعذر مسح ذاكرة نموذج STT المؤقتة حاليًا.",
+    "clearWasmCacheSuccess": "تم مسح ذاكرة نموذج STT المؤقتة في المتصفح.",
+    "clearingCache": "جارٍ المسح…",
+    "deviceProbeError": "تعذر فحص قدرات الجهاز الحالي بالكامل.",
+    "dismissErrorAria": "إغلاق إشعار الخطأ",
+    "errorHttpStatus": "رمز HTTP {status}",
+    "errorRequestId": "معرّف الطلب: {requestId}",
+    "filterAria": "تصفية الخدمات حسب الحالة",
+    "filteredEmpty": "لا توجد خدمات تطابق عامل تصفية الحالة هذا.",
+    "filters": {
+      "all": "الكل",
+      "attention": "يحتاج إلى اهتمام",
+      "healthy": "نشط",
+      "local_only": "محلي فقط",
+      "standby": "وضع الاستعداد"
+    },
+    "groups": {
+      "core": "البنية التحتية الأساسية",
+      "coreDesc": "واجهة API وقاعدة البيانات وتخزين الكائنات الأساسية للمنصة.",
+      "localOnlyWorkers": "محلي فقط / مفوّض عن بُعد / معطّل بالإعدادات",
+      "localOnlyWorkersToggleHint": "{count} عنصر",
+      "ocr": "مسار OCR ومحركات الذكاء الاصطناعي",
+      "ocrDesc": "عامل OCR عن بُعد، و4 محركات للتعرف على النصوص، والتدقيق بالذكاء الاصطناعي.",
+      "voice": "الصوت وذاكرة التخزين المؤقت",
+      "voiceDesc": "تحويل النص إلى كلام، وتحويل الكلام إلى نص، ومستودع الصوت المعدّ مسبقًا.",
+      "workers": "العمليات الخلفية والمهام المجدولة",
+      "workersDesc": "المهام الدورية وقوائم انتظار الإشراف ومعالجات أحداث القراءة."
+    },
+    "kpiAria": "مؤشرات حالة الخدمات",
+    "kpiTotalDetail": "/ {total} خدمة",
+    "ocrEnginesSubheading": "محركات التعرف OCR",
+    "probeDevice": "فحص الجهاز",
+    "probingDevice": "جارٍ فحص الجهاز…",
+    "refreshTimeoutError": "انتهت مهلة طلب فحص الحالة بعد 15 ثانية.",
+    "refreshWarningBody": "يتم عرض أحدث لقطة محفوظة. يرجى المحاولة مرة أخرى.",
+    "refreshWarningTitle": "تعذر تحديث أحدث حالة",
+    "refreshing": "جارٍ التحديث…",
+    "resetFilter": "عرض جميع الخدمات",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "تطبيق PWA",
+    "sttInsecureContextWarning": "الاتصال ليس عبر HTTPS آمن؛ قد يتم حظر الميكروفون وبعض واجهات المتصفح.",
+    "sttMicNeedsHttps": "يلزم HTTPS لاستخدام الميكروفون",
+    "sttMicNoMediaDevices": "getUserMedia غير متاح",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "خطأ قراءة IndexedDB ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB غير متاح؛ لا يمكن تخزين نماذج STT أو ذاكرة TTS محليًا.",
+    "summaryAllHealthy": "تعمل جميع الخدمات الـ {healthy} بشكل مستقر.",
+    "summaryAria": "ملخص الحالة التشغيلية للنظام",
+    "summaryAttentionSegment": "{count} تحتاج إلى اهتمام",
+    "summaryHealthySegment": "{count} نشطة",
+    "summaryLocalOnlySegment": "{count} محلية فقط",
+    "summaryStandbySegment": "{count} في وضع الاستعداد",
+    "ttsCacheBrowserEmpty": "فارغة (0 عناصر)",
+    "ttsCacheBrowserError": "خطأ في الذاكرة المؤقتة ({code})",
+    "ttsCacheBrowserHitsMisses": "إصابات: {hits} · إخفاقات: {misses}",
+    "wakeOcrError": "تعذر إرسال أمر إيقاظ عامل OCR. يرجى المحاولة مرة أخرى.",
+    "wakeOcrRechecking": "إعادة الفحص تلقائيًا خلال بضع ثوانٍ…",
+    "wakeOcrWorker": "إيقاظ عامل OCR",
+    "wakingOcrWorker": "جارٍ الإيقاظ…"
   },
   "parents": {
     "title": "إدارة أولياء الأمور",
@@ -264,7 +378,8 @@
       "childGrade": "الصف {grade}",
       "authNotConfigured": "تعذر تحميل البريد الإلكتروني ورقم الهاتف لعدم تكوين الواجهة الخلفية بصلاحيات الوصول لـ Supabase Auth.",
       "authNotFound": "لم يتم العثور على حساب Supabase Auth مرتبط بهذا الملف الشخصي. لا تزال معلومات الملف الشخصي والأطفال معروضة.",
-      "authUnavailable": "تعذر تحميل معلومات الاتصال من Supabase Auth في الوقت الحالي. تحقق من التكوين أو حاول إعادة التحميل."
+      "authUnavailable": "تعذر تحميل معلومات الاتصال من Supabase Auth في الوقت الحالي. تحقق من التكوين أو حاول إعادة التحميل.",
+      "parentIdLabel": "معرّف ولي الأمر"
     },
     "modal": {
       "createTitle": "إضافة ولي أمر",
@@ -301,6 +416,16 @@
         "genericUpdate": "تعذر تحديث الحساب في الوقت الحالي. يرجى المحاولة مرة أخرى.",
         "fallback": "تعذر تحديث الحساب في الوقت الحالي. تم الاحتفاظ بالبيانات المدخلة."
       }
+    },
+    "copiedId": "تم النسخ",
+    "copyId": "نسخ المعرّف",
+    "copyIdAria": "نسخ المعرّف {id}",
+    "directoryAria": "قائمة حسابات أولياء الأمور",
+    "overviewAria": "نظرة عامة على أولياء الأمور",
+    "searchToolbarAria": "البحث عن أولياء الأمور",
+    "tableHeaders": {
+      "actions": "الإجراءات",
+      "parent": "ولي الأمر"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "يجب أن يكون الحد الأقصى للصف الدراسي عدداً صحيحاً من 1 إلى 5.",
         "maxRange": "يجب أن يكون الحد الأقصى للصف الدراسي بين 1 و 5.",
         "gradeOrder": "يجب ألا يكون الحد الأدنى للصف أكبر من الحد الأقصى للصف."
-      }
+      },
+      "authorPlaceholder": "مثال: شارل بيرو",
+      "livePreviewDesc": "عند عدم رفع صورة غلاف مخصصة، ينشئ ViRead تلقائيًا غلافًا نصيًا واضحًا استنادًا إلى العنوان والمؤلف والصف الدراسي.",
+      "livePreviewHeading": "معاينة غلاف الكتاب",
+      "livePreviewTitleFallback": "عنوان الكتاب الجديد",
+      "namePlaceholder": "مثال: القط ذو الحذاء (اسم داخلي للفهرس)",
+      "titlePlaceholder": "مثال: القط ذو الحذاء"
     },
     "detail": {
       "eyebrow": "تفاصيل الكتاب",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "تحقق الآن",
       "queuedNewPageBadge": "صفحة جديدة #{index} · محفوظة في قائمة انتظار OCR",
       "pageQueuedOfflineBadge": "محفوظة في قائمة انتظار OCR — بانتظار الخادم",
-      "pageQueuedOnlineBadge": "جارٍ إعادة تشغيل OCR…"
+      "pageQueuedOnlineBadge": "جارٍ إعادة تشغيل OCR…",
+      "copiedId": "تم النسخ",
+      "copyIdAria": "نسخ معرّف الكتاب",
+      "openOcrShort": "فتح مراجعة OCR",
+      "publishRuleToggle": "قواعد النشر لمكتبة الأطفال",
+      "statNeedsReview": "يحتاج لمراجعة",
+      "statProcessing": "قيد المعالجة",
+      "statTotalPages": "إجمالي الصفحات",
+      "statVerified": "تم التحقق",
+      "summaryStripAria": "ملخص الكتاب",
+      "toggleAiBatchBtn": "تشغيل مراجعة AI المجمّعة",
+      "toggleUploadBtn": "رفع الصفحات"
     },
     "editor": {
       "loading": "جاري تحميل البيانات الوصفية للكتاب...",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "تعذر إلغاء تنشيط الكتاب",
       "safetyBlocked": "لا يسمح قسم أسلام الأطفال (Child Safety) بهذا الكتاب في المكتبة بعد الآن. يرجى إكمال التحقق من OCR (OCR VERIFIED) والتأكد من مطابقة الأمان للمرشح (Candidate) لجميع الصفحات؛ ستستمر تطلعات مستوى HIGH أو NOT_RECOMMENDED في الحظر.",
       "invalidMetadata": "البيانات الوصفية الحالية غير صالحة. يرجى إصلاح العنوان ونطاق الصف في النموذج والحفظ قبل التنشيط.",
-      "genericToggleError": "الطلب غير مؤكد. يرجى التحقق من صلاحيات المسؤول (Admin) أو اتصال الخادم الخلفي والمحاولة مرة أخرى."
+      "genericToggleError": "الطلب غير مؤكد. يرجى التحقق من صلاحيات المسؤول (Admin) أو اتصال الخادم الخلفي والمحاولة مرة أخرى.",
+      "closeCoverStudio": "إغلاق استوديو الغلاف",
+      "coverDesc": "تحديث غلاف الكتاب (رفع أو قص 3:4 أو تدوير أو إنشاء غلاف بالذكاء الاصطناعي) دون تعديل صفحات القراءة أو المراجعات المؤكدة.",
+      "coverHeading": "غلاف الكتاب",
+      "dangerZoneActiveDesc": "يؤدي إيقاف التفعيل إلى إخفاء الكتاب من مكتبة أولياء الأمور مع الاحتفاظ بجميع الصفحات والمراجعات وسجل القراءة.",
+      "dangerZoneHeading": "دورة حياة الكتاب",
+      "dangerZoneRetiredDesc": "هذا الكتاب متوقف حاليًا. يمكنك إعادة تفعيله عندما تستوفي البيانات الوصفية وصفحات OCR المتطلبات.",
+      "openCoverStudio": "فتح استوديو الغلاف"
     },
     "uploader": {
       "heading": "تحميل صور صفحات الكتاب أو المستندات وتشغيل OCR",
@@ -526,11 +675,13 @@
         "noValidFiles": "لم يتم استبدال الصورة. تُحفظ الصورة القديمة؛ يرجى المحاولة مرة أخرى باستخدام الملف المحدد.",
         "someInvalidFiles": "بعض الملفات غير صالحة ولم يتم تحميلها. الملفات الصالحة لا تزال قيد المعالجة."
       },
-      "workerOfflineTitle": "خادم OCR متوقف مؤقتًا",
+      "workerOfflineTitle": "خدمة معالجة OCR غير متصلة حاليًا",
       "workerOfflineBody": "يمكنك رفع الصور أو ملفات PDF/DOCX الآن: سيتم حفظ الصفحات بأمان في قائمة الانتظار ومعالجتها تلقائيًا فور عودة خادم OCR.",
-      "workerUnreachableTitle": "تعذر التحقق من حالة خادم OCR",
+      "workerUnreachableTitle": "تعذر التحقق من حالة خدمة OCR",
       "workerUnreachableBody": "الخادم قيد التشغيل أو الشبكة بطيئة. يمكنك إعادة الفحص أو الرفع للحفظ في قائمة انتظار OCR.",
-      "recheckWorkerBtn": "إعادة فحص اتصال OCR"
+      "recheckWorkerBtn": "إعادة فحص اتصال OCR",
+      "workerOfflineDesc": "لا يزال بإمكانك رفع الصور أو ملفات PDF/DOCX الآن: سيضعها النظام في قائمة الانتظار بأمان ويشغّل OCR تلقائيًا عند عودة الخدمة للاتصال.",
+      "workerUnreachableDesc": "قد يكون الخادم قيد التشغيل أو هناك بطء في الشبكة. يمكنك إعادة فحص الاتصال أو رفع الملفات لوضعها في قائمة انتظار OCR."
     },
     "imagePreview": {
       "hideButton": "إعادة تحميل صورة الصفحة {pageNumber}.",
@@ -587,8 +738,25 @@
         "savedNoChanges": "لم يقترح الذكاء الاصطناعي أي تعديلات وأجرى فحص أمان. في انتظار مراجعة المسؤول للصور وحقوق الاستخدام والتحقق اليدوي.",
         "savedPrefix": "تم حفظ مسودة الذكاء الاصطناعي وتنتظر التحقق اليدوي من Admin: {detail}",
         "failedKeepReview": "فشل معالجة الذكاء الاصطناعي؛ تظل الصفحة في حالة NEEDS_REVIEW (غير معتمدة تلقائيًا). {detail}"
+      },
+      "statusBadges": {
+        "failed": "يحتاج إلى مراجعة",
+        "saved": "تم حفظ المسودة",
+        "verified": "تم التحقق"
       }
-    }
+    },
+    "emptyFilteredDesc": "جرّب تغيير كلمة البحث أو إعادة تعيين عوامل التصفية لعرض مكتبة الكتب بالكامل.",
+    "filterToolbarAria": "عوامل تصفية مكتبة الكتب",
+    "kpi": {
+      "activeBooks": "الكتب النشطة",
+      "childLibraryEligible": "مؤهل لمكتبة الأطفال",
+      "needsReview": "يحتاج لمراجعة OCR",
+      "needsReviewDetail": "{count} صفحة بانتظار المراجعة",
+      "total": "إجمالي الكتب"
+    },
+    "listAria": "قائمة كتب الإدارة",
+    "resetFilters": "إعادة تعيين",
+    "searchPlaceholder": "ابحث باسم الكتاب أو العنوان أو المؤلف…"
   },
   "metadataQuality": {
     "title": "جودة بيانات الكتاب",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "نطاق الصف غير صالح",
       "invalidGradeRangeDetail": "درجة خارج نطاق 1-5 أو تجاوز الحد الأدنى للدرجة الحد الأقصى",
       "duplicateGroups": "نسخ مكررة محتملة",
-      "duplicateGroupsDetail": "{count} كتب في مجموعات المرشحين"
+      "duplicateGroupsDetail": "{count} كتب في مجموعات المرشحين",
+      "missingMetadataSummary": "مؤلف مفقود: {missingAuthor} · صفوف غير صالحة: {invalidGrade}"
     },
     "issuesHeading": "الكتب التي تحتاج إلى مراجعة",
     "duplicateNote": "تم تحديد النسخ المكررة بناءً على العنوان والمؤلف بعد إزالة المسافات البيضاء وتجاهل حالة الأحرف",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "نشط",
       "RETIRED": "متوقف"
-    }
+    },
+    "searchPlaceholder": "ابحث بالعنوان أو المؤلف…"
   },
   "contentQuality": {
     "eyebrow": "إدارة جودة الكتب",
@@ -680,7 +850,9 @@
       "RESOLVED": "تم حل المشكلة",
       "REJECTED": "مرفوض",
       "REPORTED_BOOKS": "تم الإبلاغ عن الكتب",
-      "REPORTED_PAGES": "تم الإبلاغ عن الصفحات"
+      "REPORTED_PAGES": "تم الإبلاغ عن الصفحات",
+      "reportedScope": "الكتب المُبلّغ عنها",
+      "reportedScopeDetail": "الصفحات المُبلّغ عنها: {pages} · المرفوضة: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "معلومات الكتاب غير صحيحة",
@@ -859,7 +1031,14 @@
       "scanning": "جارٍ المسح…",
       "scanWholeBook": "مسح الكتاب بالكامل",
       "paginationAria": "تحقق من ترقيم صفحات الكتاب",
-      "itemLabel": "كتاب"
+      "itemLabel": "كتاب",
+      "kpiApprovedDetail": "جاهز: {ready} · موافقة المسؤول: {approved} · نُشر تلقائيًا: {published}",
+      "kpiApprovedGroup": "مؤهل / تمت الموافقة",
+      "kpiAria": "نظرة عامة على اعتماد الكتب وسلامتها",
+      "kpiCopyrightDetail": "السلامة وحقوق النشر معًا: {both}",
+      "kpiProcessingDetail": "قيد الفحص: {processing} · قديم: {stale} · فشل الفحص: {failed}",
+      "kpiProcessingGroup": "قيد المعالجة / يحتاج لإعادة فحص",
+      "statusBreakdownToggle": "عرض التوزيع التفصيلي حسب الحالة ({count} مجموعات)"
     },
     "bookDetail": {
       "subheading": "جودة الكتاب، تاريخ الذكاء الاصطناعي، النتائج، ومراجعة الإدارة",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "مراجعة وتحرير الصفحة",
       "rescanPage": "إعادة مسح هذه الصفحة",
       "noFindingThisScan": "لا توجد نتائج في هذه المراجعة.",
-      "noScanResultYet": "الصفحة لا تحتوي على نتائج المراجعة؛ يرجى الاطلاع على الحالة والسبب أعلاه."
+      "noScanResultYet": "الصفحة لا تحتوي على نتائج المراجعة؛ يرجى الاطلاع على الحالة والسبب أعلاه.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} صفحة مُعلّمة",
+      "compactMetricsToggle": "عرض تفاصيل مقاييس الذكاء الاصطناعي وسير العمل وتجزئة التقييم",
+      "compactOcrDetail": "تجزئة صالحة: {valid}/{total} · غير مفحوصة: {unscanned}",
+      "compactPipelineDetail": "قديمة: {stale} · قيد المعالجة: {processing}",
+      "compactSafetyDetail": "التدقيق اللغوي: {proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "تم تعليق الكتاب الخاص.",
       "rejected": "تم رفض إصدار الصفحة.",
       "suspendedWithTitle": "تم تعليق الكتاب الخاص \"{title}\" للعائلة المالكة. لا يمكنهم قراءته فورا."
-    }
+    },
+    "kpiAria": "نظرة عامة على قائمة انتظار كتب المستخدمين"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "غير متاح",
       "providerChecking": "التحقق",
       "noProviderEvents": "لم يتم تسجيل حدث المزود.",
-      "safetyDisclaimer": "نتائج الذكاء الاصطناعي لا تضمن سلامة المحتوى المطلقة. مع سير العمل الذكاء الاصطناعي، يمكنك حفظ المحتوى فقط كمؤكد بعد تأكيد المشرف على السلامة للمرشح الحالي الصحيح."
+      "safetyDisclaimer": "نتائج الذكاء الاصطناعي لا تضمن سلامة المحتوى المطلقة. مع سير العمل الذكاء الاصطناعي، يمكنك حفظ المحتوى فقط كمؤكد بعد تأكيد المشرف على السلامة للمرشح الحالي الصحيح.",
+      "emptyDesc": "شغّل التأكيد وتشغيل الذكاء الاصطناعي في شريط الإجراءات أدناه للتدقيق الإملائي وفحص سلامة الأطفال تلقائيًا.",
+      "emptyTitle": "لا توجد نتائج سلامة AI لهذه المراجعة بعد"
     },
     "tabs": {
       "words": "تحقق من الكلمات والمواقع",
@@ -1566,12 +1753,91 @@
       "noWords": "لا توجد كلمات في هذه المراجعة بعد.",
       "addWord": "إضافة كلمة",
       "deleteWord": "حذف كلمة",
-      "finishReview": "إنهاء المراجعة"
+      "finishReview": "إنهاء المراجعة",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "تاريخ معالجة OCR",
       "subtitle": "{title} · الصفحة {pageNumber} · المراجعة R{revisionNo}",
       "mobileCardAria": "اختر المراجعة {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "قبول الكتل الواضحة",
+      "blockCardAria": "كتلة {typeLabel}",
+      "circuitBreakerDesc": "تجاوزت نسبة النص المتوقع استبعاده 35% من الصفحة، لذا احتفظ النظام بهذه الكتل ونقلها إلى قسم يتطلب التحقق لمراجعتها يدويًا.",
+      "circuitBreakerTitle": "تم تفعيل حماية منع فقدان المحتوى",
+      "cropReviewTitle": "الاحتفاظ بإطار الصورة الأصلية لتجنب قص النص",
+      "decisions": {
+        "EXCLUDE": "مستبعد",
+        "KEEP": "الاحتفاظ",
+        "REVIEW": "يتطلب التحقق"
+      },
+      "editBtn": "تعديل النص",
+      "editLabel": "تعديل نص الكتلة",
+      "emptyClean": "لم يتم الاحتفاظ بأي كتل محتوى نظيفة بعد.",
+      "emptyExcluded": "لم يتم استبعاد أي تشويش أو أرقام صفحات في هذه الصفحة.",
+      "emptyReview": "لا توجد كتل متبقية تحتاج إلى التحقق في هذه الصفحة.",
+      "excludeBtn": "استبعاد",
+      "geometryMeta": "زاوية الميل المقدرة: {angle}° · مساحة الصفحة: {area}% · {gutterReason}",
+      "heading": "مراجعة استخراج محتوى OCR الذكي",
+      "headingWithPage": "مراجعة استخراج محتوى OCR الذكي — صفحة {pageNumber}",
+      "keepBtn": "الاحتفاظ",
+      "loaderDesc": "يفصل محتوى القراءة الرئيسي تلقائيًا عن أرقام الصفحات والعناوين المتكررة والنصوص الزائدة (دون حذف المحتوى الرئيسي تلقائيًا أبدًا).",
+      "loaderError": "تعذر تصنيف الكتل النصية الذكية لهذه الصفحة.",
+      "loaderOpenBtn": "فتح تصنيف الكتل النصية الذكية",
+      "loaderReextractBtn": "إعادة تحليل الكتل النصية",
+      "manualOverrideBadge": "معدّل يدويًا",
+      "noImageFallback": "لا توجد صورة أصلية مرفقة — لا تزال جميع الكتل النصية المحلّلة ({count}) معروضة.",
+      "notices": {
+        "acceptClearAll": "تم تأكيد جميع الكتل الواضحة ({confirmed}).",
+        "acceptClearRemoteRemaining": "تم قبول الكتل الواضحة. يتبقى {remaining} كتلة تتطلب التحقق اليدوي.",
+        "acceptClearWithRemaining": "تم تأكيد {confirmed} كتلة واضحة. لا تزال هناك {remaining} كتلة تحتاج إلى التحقق اليدوي.",
+        "editSaved": "تم تحديث نص الكتلة والاحتفاظ بها في محتوى القراءة.",
+        "emptyEditError": "لا يمكن أن يكون نص الكتلة فارغًا عند حفظ التعديلات.",
+        "excluded": "تم استبعاد الكتلة النصية من محتوى القراءة.",
+        "humanEditReason": "قام المستخدم بتعديل نص هذه الكتلة.",
+        "humanExcludeReason": "اختار المستخدم استبعاد هذه الكتلة.",
+        "humanKeepReason": "اختار المستخدم الاحتفاظ بهذه الكتلة.",
+        "humanRestoreReason": "تمت استعادة الكتلة إلى محتوى القراءة.",
+        "kept": "تم الاحتفاظ بالكتلة النصية في محتوى القراءة.",
+        "nothingToUndo": "لا توجد إجراءات للتراجع عنها.",
+        "restored": "تمت استعادة الكتلة النصية إلى محتوى القراءة.",
+        "saved": "تم حفظ تغييرات كتلة المحتوى.",
+        "undone": "تم التراجع عن آخر إجراء.",
+        "updateFailed": "تعذر تحديث القرار لهذه الكتلة. يرجى المحاولة مرة أخرى.",
+        "updated": "تم تحديث حالة كتلة المحتوى."
+      },
+      "originalImageAlt": "الصورة الأصلية لصفحة الكتاب",
+      "originalImageAltWithPage": "الصورة الأصلية للصفحة {pageNumber}",
+      "overlayAria": "تراكب مناطق النص المستخرج",
+      "previewEmpty": "لا يوجد نص قراءة متاح بعد التصفية.",
+      "previewHeading": "محتوى القراءة للطفل",
+      "previewReviewNotice": "تشمل المعاينة حاليًا {count} كتلة تحتاج إلى التحقق لضمان عدم فقدان أي محتوى للقراءة.",
+      "readingOrderMeta": "ترتيب القراءة #{order} · الثقة {confidence}%",
+      "reasonPrefix": "السبب:",
+      "restoreBtn": "استعادة",
+      "reviewBanner": "تم الاحتفاظ بالكتل أدناه مؤقتًا في المعاينة لتجنب فقدان النص. اختر الاحتفاظ أو الاستبعاد لكل كتلة.",
+      "saveEditBtn": "حفظ التعديل",
+      "shadowModeDesc": "يتم تسجيل قرارات تصفية التشويش للمقارنة ولا تعدّل نص القراءة الرسمي بعد.",
+      "shadowModeTitle": "يعمل في وضع المقارنة (Shadow)",
+      "summaryLine": "نوع الصفحة: {pageKind} · الاحتفاظ بنسبة {retention}% من الأحرف ({keep} محفوظة، {excluded} مستبعدة، {review} للتحقق)",
+      "tabs": {
+        "clean": "المحتوى النظيف",
+        "excluded": "المستبعد",
+        "original": "الصورة الأصلية",
+        "preview": "معاينة القراءة",
+        "review": "يتطلب التحقق"
+      },
+      "tabsAria": "أوضاع عرض استخراج OCR",
+      "undoBtn": "تراجع"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "مساحة عمل مراجعة OCR",
+      "draft": "النص والمراجعة",
+      "history": "سجل المراجعات",
+      "safety": "سلامة AI",
+      "smartBlocks": "الكتل الذكية V2",
+      "words": "الكلمات والمربعات"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "تم إغلاق الوظيفة ذات الخطأ في الإعداد. تم الاحتفاظ بالتشغيل والنقطة المرجعية، والمرشح لم يُقيّم/مُوافق عليه بعد؛ قد ينشئ النظام وظيفة جديدة وفقاً للإعداد المقفل الصحيح.",
       "closeDriftFailed": "لا يمكن إغلاق هذا المرشح؛ قد تكون الحالة أو النسب قد تغيرت.",
       "closeUnbenchmarkedSuccess": "تم إغلاق مرشح غير مُقاس؛ تم حفظ التشغيل والنسخة الاحتياطية. سيقوم النظام بإنشاء اختبار مقفل واستبدال المهمة تلقائيًا بمجرد توفر كمية كافية من البيانات المستقلة المؤكدة والمُنفصلة.",
-      "closeUnbenchmarkedFailed": "لا يمكن إغلاق المرشح. قد يكون العامل لا يزال يعمل، أو يمتلك المرشح بالفعل مقياس، أو تغيرت النسب."
+      "closeUnbenchmarkedFailed": "لا يمكن إغلاق المرشح. قد يكون العامل لا يزال يعمل، أو يمتلك المرشح بالفعل مقياس، أو تغيرت النسب.",
+      "flow2AlreadyTrained": "مجموعة بيانات وإعدادات Flow 2 الحالية لديها نتيجة تدريب سابقة بالفعل. أضف عينات VERIFIED جديدة أو قيّم النموذج المرشح الحالي.",
+      "flow2NoEligibleSamples": "لا توجد عينات Flow 2 نظيفة مؤهلة لإنشاء لقطة بيانات بعد.",
+      "flow2Paused": "تم إيقاف Flow 2 مؤقتًا (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "لا يمكن جدولة Flow 2 ({reason}).",
+      "flow2Scheduled": "تم إنشاء لقطة Flow 2 ({train} تدريب / {validation} تحقق) وجدولة المهمة {jobId} ({status}).",
+      "flow2TrainValRequired": "تحتوي اللقطة حاليًا على {train} تدريب و {validation} تحقق؛ يلزم وجود المجموعتين لجدولة Colab.",
+      "flow2TriggerFailed": "فشل إنشاء لقطة البيانات أو جدولة تدريب Flow 2.",
+      "flow2UnresolvedJob": "توجد مهمة تدريب غير مكتملة بالفعل في قائمة الانتظار؛ لم يتم إنشاء مهمة جديدة."
     },
     "flow1": {
       "badgeEyebrow": "تدفق 1 جديد · استبدال النموذج المباشر",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "يحظر تطبيق الويب Apps Script الوصول المجهول. في موقع script.google.com، قم بإعادة النشر مع خيار 'من لديه صلاحية الوصول: أي شخص (Anyone)' (مع الحفاظ على الحماية بتوقيع HMAC-SHA256).",
         "BRIDGE_SECRET_MISMATCH": "توقيع جسر Apps Script غير متطابق أو أن VIREAD_BRIDGE_SECRET مفقود من Script Properties في script.google.com.",
         "DRIVE_SCOPE_MISMATCH": "نطاق OAuth غير صحيح؛ يتطلب الحد الأدنى من صلاحية drive.file. يرجى إعادة الاتصال ومنح صلاحية المجلد الخاص بالتطبيق.",
-        "genericCode": "رمز الخطأ: {code}. تحقق من اتصال Google Drive أو انقر على فحص الاتصال والسعة."
+        "genericCode": "رمز الخطأ: {code}. تحقق من اتصال Google Drive أو انقر على فحص الاتصال والسعة.",
+        "DESKTOP_REQUIRES_WINDOWS": "لا تدعم خوادم Linux التثبيت المحلي لـ Google Drive for Desktop. يرجى الاتصال عبر Apps Script Bridge.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "لا يمكن لخوادم السحابة (Render) الوصول إلى Google Drive for Desktop (G:\\) على جهاز شخصي. يرجى التبديل إلى Apps Script Bridge.",
+        "ENCRYPTION_KEY_MISSING": "المتغير VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (‏>= 32 حرفًا) مفقود على الخادم."
       },
       "notices": {
         "redirectingOauth": "جارٍ إعادة التوجيه إلى صفحة المصادقة OAuth 2.0 الخاصة بـ Google (طلب الحد الأدنى من صلاحية drive.file فقط)…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "هل تريد قطع اتصال Google Drive عن التدفق 2؟ لن يتم حذف بيانات الكتب الأصلية والملفات المحفوظة على Drive؛ ستنتظر عناصر الصادر الجديدة بأمان (دون مزامنتها مع Supabase).",
         "disconnected": "تم قطع اتصال Google Drive بأمان وإزالة رمز التحديث من الخادم الخلفي.",
         "disconnectFailed": "تعذر قطع اتصال Google Drive في الوقت الحالي."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(قابل للقراءة فقط على محرك الأقراص G:\\ المحلي في Windows). لتمكين خادم السحابة (Render) و Google Colab من قراءة/كتابة Drive، انتقل إلى",
+      "desktopCloudWarningPrefix": "يستخدم الاتصال الحالي",
+      "disconnectModalConfirm": "قطع الاتصال",
+      "disconnectModalTitle": "قطع اتصال Google Drive؟"
+    },
+    "colabGuideAnd": "و",
+    "colabGuideMid1": "، اختر Runtime",
+    "colabGuideMid2": "، فعّل سِرَّي Colab Secrets",
+    "colabGuidePrefix": "افتح دفتر الملاحظات",
+    "colabGuideSuffix": "، ثم انقر على",
+    "colabGuideTitle": "دليل تشغيل Colab Free GPU T4 (مجانًا)",
+    "driveUnavailableDesc": "لم يُرجع الخادم حالة اتصال Google Drive لـ Flow 2 حاليًا.",
+    "driveUnavailableTitle": "لم يتم تهيئة Google Drive",
+    "errors": {
+      "loadFailed": "تعذر تحميل حالة التدريب. تحقق من صلاحيات المسؤول وترحيلات VietOCR V2.",
+      "serviceUnavailable": "خدمة إدارة تدريب VietOCR غير متاحة حاليًا."
+    },
+    "kpiGridAria": "مؤشرات تدريب OCR",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "استبدال نموذج Flow 1",
+      "flow2": "تدريب وتقييم Flow 2",
+      "overview": "نظرة عامة ووقت التشغيل"
+    },
+    "tabsAria": "أقسام تدريب OCR",
+    "triggerFlow2Btn": "إنشاء لقطة وجدولة تدريب Flow 2",
+    "workerExecutionModeLabel": "وضع التشغيل:",
+    "workerWebHeavyDisabled": "معطّل (استخدم زر التشغيل أدناه)",
+    "workerWebHeavyEnabled": "مفعّل",
+    "workerWebHeavyLabel": "عامل خلفية الويب:"
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "مسودة",
         "PUBLISHED": "مرئي",
         "HIDDEN": "غير مرئي"
-      }
+      },
+      "emptyTitle": "لا توجد أغانٍ بعد",
+      "filterAria": "عوامل تصفية مكتبة الأغاني",
+      "hasCoverBadge": "له غلاف",
+      "searchPlaceholder": "أدخل عنوان الأغنية أو المؤلف…"
     },
     "workspace": {
       "retryLoad": "حاول إعادة التحميل",
@@ -2357,6 +2667,24 @@
       "listenDraftFirst": "استمع إلى المسودة الحالية وأكدها أولًا.",
       "draftMissingReviewContent": "لا تحتوي المسودة على محتوى لتأكيد الاعتماد.",
       "noResultToPreview": "لا توجد نتيجة متاحة للاستماع بعد."
+    },
+    "confirm": {
+      "continueAction": "متابعة",
+      "editLyricsTitle": "تعديل الكلمات الموقّتة؟",
+      "expandRepeatsAction": "تأكيد التوسيع",
+      "expandRepeatsTitle": "توسيع رموز التكرار؟",
+      "leaveAction": "مغادرة الصفحة",
+      "leaveTitle": "مغادرة هذه الصفحة؟",
+      "publishAction": "تأكيد النشر",
+      "publishTitle": "نشر الأغنية؟",
+      "reloadAction": "إعادة تحميل النسخة المحفوظة",
+      "reloadTitle": "إعادة التحميل من الخادم؟",
+      "replaceAudioAction": "استبدال الصوت",
+      "replaceAudioTitle": "استبدال ملف صوت MP3؟",
+      "replaceLyricsAction": "استبدال الكلمات",
+      "replaceLyricsTitle": "استبدال جميع الكلمات الحالية؟",
+      "resplitAction": "تأكيد إعادة التقسيم",
+      "resplitTitle": "إعادة تقسيم المقاطع لهذا السطر؟"
     }
   },
   "pageUploadRuntime": {
@@ -2377,5 +2705,44 @@
     "reloadAfterUploadFailed": "تعذر إعادة تحميل قائمة الصفحات بعد الرفع. قد تكون البيانات قد حُفظت؛ أعد التحميل للتحقق.",
     "reprocessIncomplete": "لم تكتمل مهمة إعادة معالجة OCR للصفحة. يُرجى المحاولة مرة أخرى.",
     "reprocessQueuedWindows": "تم حفظ طلب إعادة OCR في قائمة الانتظار — سيُعالج تلقائيًا عند عودة خادم OCR"
+  },
+  "qualityHub": {
+    "description": "مراجعة البيانات الوصفية للكتب، ومعالجة بلاغات أولياء الأمور، واعتماد سلامة الكتب، والإشراف على كتب المستخدمين في شاشة موحدة.",
+    "eyebrow": "إدارة الجودة",
+    "tabs": {
+      "approval": "اعتماد وسلامة الكتب",
+      "metadata": "بيانات الكتب الوصفية",
+      "reports": "بلاغات المستخدمين",
+      "userBooks": "كتب المستخدمين و Flow 2"
+    },
+    "tabsAria": "أقسام إدارة جودة الكتب"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "جارٍ المعالجة في الخلفية…",
+    "closeAria": "إغلاق مركز مهام الذكاء الاصطناعي",
+    "defaultBookLabel": "كتاب",
+    "elapsedHours": "{hours} س",
+    "elapsedHoursMinutes": "{hours} س {minutes} د",
+    "elapsedMinutes": "{minutes} د",
+    "elapsedMinutesSeconds": "{minutes} د {seconds} ث",
+    "elapsedRunning": "قيد التشغيل منذ {elapsed}",
+    "elapsedSeconds": "{seconds} ث",
+    "emptyDescription": "عند رفع صفحات الكتب أو استخراج OCR أو إنشاء الأغلفة، سيظهر التقدم المباشر هنا.",
+    "emptyTitle": "لا توجد مهام ذكاء اصطناعي بعد",
+    "openAria": "فتح مركز مهام الذكاء الاصطناعي",
+    "pageSeparator": " • صفحة {pageNumber}",
+    "pillFailed": "مهام فاشلة ({count})",
+    "pillIdle": "مهام AI",
+    "pillRunning": "AI قيد التشغيل ({count})",
+    "pillWaitingReview": "يتطلب التحقق ({count})",
+    "processingAria": "جارٍ معالجة {title}",
+    "progressAria": "تقدم {title}",
+    "refreshAria": "تحديث قائمة المهام",
+    "stagePrefix": "المرحلة: {stage}",
+    "subtitle": "تستمر المهام الخلفية في العمل بأمان حتى عند الانتقال إلى صفحة أخرى.",
+    "title": "مركز مهام الذكاء الاصطناعي",
+    "viewResultAction": "عرض النتيجة",
+    "workerOfflineBanner": "بانتظار إعادة اتصال معالج الذكاء الاصطناعي. تم حفظ المهام بأمان وستستأنف تلقائيًا.",
+    "pillWaitingForWorker": "قائمة انتظار OCR ({count})"
   }
 }

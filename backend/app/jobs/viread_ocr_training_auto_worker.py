@@ -26,7 +26,11 @@ from app.services.viread_ocr_training_service import (
     ORIGINAL_VOCAB_SHA256,
     VireadOcrTrainingService,
 )
-from app.services.worker_telemetry import record_worker_error, record_worker_success
+from app.services.worker_telemetry import (
+    persist_worker_heartbeat_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 20
@@ -1466,6 +1470,48 @@ async def _pipeline_change_token() -> tuple[Any, ...]:
             int(row["flow2_pool_count"] or 0),
             bool(row["has_active_jobs"]),
         )
+
+
+async def run_maintenance_once(
+    *,
+    source: str = "cron",
+    execution_mode: str = "cron_scheduled",
+) -> dict[str, Any]:
+    """Lightweight cron maintenance pass: expire stale leases & poll/dispatch Colab jobs.
+
+    Strictly avoids PyTorch, dataset materialization, and local GPU probing so it runs
+    safely within <2s on Render Free 512 MiB web containers.
+    """
+    try:
+        await _expire_exhausted_jobs()
+        colab_activity = bool(await _dispatch_or_poll_colab_once())
+        record_worker_success("viread_ocr_training")
+        await persist_worker_heartbeat_with_factory(
+            AsyncSessionLocal,
+            "viread_ocr_training",
+            execution_mode=execution_mode,
+            ok=True,
+            items_processed=1 if colab_activity else 0,
+            source=source,
+        )
+        return {
+            "ok": True,
+            "colab_activity": colab_activity,
+        }
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        record_worker_error("viread_ocr_training", exc)
+        await persist_worker_heartbeat_with_factory(
+            AsyncSessionLocal,
+            "viread_ocr_training",
+            execution_mode=execution_mode,
+            ok=False,
+            items_processed=0,
+            source=source,
+            error_code=type(exc).__name__,
+        )
+        raise
 
 
 async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:

@@ -68,8 +68,20 @@
   --color-warning-surface: var(--ra-color-warning-surface);
   --color-desk: var(--ra-color-desk);
   --color-highlight: var(--ra-color-highlight);
+  --color-surface-subtle: #f3f7f5;
+  --color-admin-canvas: #f7f9f8;
+  --color-admin-border: #dbe6e1;
+  --color-admin-sidebar: #eef7f3;
   --radius-control: var(--ra-radius-16);
   --radius-card: var(--ra-radius-24);
+  --radius-pill: 9999px;
+}
+
+@layer base {
+  [data-admin-workspace="true"] {
+    --ra-color-canvas: #f7f9f8;
+    --ra-color-border: #dbe6e1;
+  }
 }
 
 .book-title {
@@ -517,37 +529,6 @@
     width: 72px;
     height: 48px;
   }
-  .catalog-admin-row {
-    display: grid;
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-    gap: 6px 24px;
-    align-items: start;
-    border-width: 0 0 1px;
-    border-radius: 0;
-    background: transparent;
-    padding: 16px 0 20px;
-  }
-  .catalog-admin-row > :nth-child(1),
-  .catalog-admin-row > :nth-child(2) {
-    grid-column: 1;
-  }
-  .catalog-admin-row > :nth-child(3) {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-  }
-  .catalog-admin-row > :nth-child(4) {
-    grid-column: 1/-1;
-  }
-  .catalog-admin-row > :last-child {
-    grid-column: 1/-1;
-    display: flex;
-    flex-wrap: wrap;
-    padding-top: 4px;
-  }
-  .catalog-admin-row > :last-child > * {
-    width: auto;
-  }
 }
 
 @media (max-height: 520px) {
@@ -901,7 +882,7 @@ button:disabled {
 
 /* Desktop reading room and staff workspace */
 :where(.parent-shell, .account-spread, .staff-login) main h1:not(.book-title),
-#admin-main-content h1 {
+:where(#admin-main-content) h1 {
   font-family: var(--font-sans);
   font-weight: 800;
   letter-spacing: -0.015em;
@@ -1071,100 +1052,6 @@ button:disabled {
   }
   .report-metric + .report-metric {
     border-inline-start: 1px solid var(--ra-color-border);
-  }
-}
-@media (min-width: 1280px) {
-  .admin-workspace {
-    display: grid;
-    grid-template-columns: 232px minmax(0, 1fr);
-    grid-template-rows: 1fr auto;
-    align-items: start;
-  }
-  .admin-workspace > header {
-    position: sticky;
-    top: 0;
-    grid-column: 1;
-    grid-row: 1/4;
-    height: 100dvh;
-    overflow-y: auto;
-    background: #d9efe7;
-    border: 0;
-    color: #144f49;
-  }
-  .admin-workspace > header > div {
-    min-height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    flex-wrap: nowrap;
-    gap: 24px;
-    padding: 28px 16px 20px;
-  }
-  .admin-workspace > header > div > div:first-child {
-    padding: 0 8px 18px;
-    border-bottom: 1px solid #aacfc2;
-  }
-  .admin-workspace > header > div > div:first-child > span {
-    color: #315d55;
-    border-color: #8ebdad;
-  }
-  .admin-workspace > header a[aria-label] {
-    color: #144f49;
-  }
-  .admin-workspace > header nav {
-    display: flex;
-    flex: 0 0 auto;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 4px;
-    padding: 0;
-  }
-  .admin-workspace > header nav a {
-    justify-content: flex-start;
-    gap: 12px;
-    border-radius: 5px;
-    font-size: 15px;
-    color: #294f4a;
-    font-weight: 600;
-    min-height: 44px;
-  }
-  .admin-workspace > header nav svg {
-    display: block;
-  }
-  .admin-workspace > header nav a:hover {
-    background: #c3e5d8;
-  }
-  .admin-workspace > header nav a[aria-current] {
-    background: var(--ra-color-primary);
-    color: white;
-  }
-  .admin-workspace > header button {
-    background: transparent;
-    border-top: 1px solid #aacfc2;
-    border-radius: 0;
-    margin-top: auto;
-    justify-content: flex-start;
-    color: #294f4a;
-  }
-  .admin-workspace > header button:focus-visible,
-  .admin-workspace > header a:focus-visible {
-    outline-color: #07584f;
-  }
-  .admin-workspace > main,
-  .admin-workspace > footer,
-  .admin-workspace > p {
-    grid-column: 2;
-  }
-  .admin-workspace > main {
-    padding: 40px clamp(28px, 3vw, 54px);
-    min-height: 80dvh;
-  }
-  .admin-workspace > footer > div {
-    flex-direction: row;
-    align-items: center;
-  }
-  .admin-workspace > footer p:last-child {
-    margin-inline-start: auto;
   }
 }
 

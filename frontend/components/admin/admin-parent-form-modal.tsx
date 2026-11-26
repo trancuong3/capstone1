@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
@@ -95,6 +95,7 @@ export function AdminParentFormModal({
   onSuccess,
 }: AdminParentFormModalProps) {
   const t = useTranslations("admin");
+  const formId = useId();
   const [values, setValues] = useState<AdminParentFormValues>(initialValues);
   const [fieldErrors, setFieldErrors] = useState<
     Partial<Record<keyof AdminParentFormValues, string>>
@@ -116,8 +117,7 @@ export function AdminParentFormModal({
     onClose();
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function submitForm() {
     if (saving || isLoading || submitLockRef.current) return;
 
     const displayName = values.display_name.trim();
@@ -203,10 +203,47 @@ export function AdminParentFormModal({
     onSuccess();
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submitForm();
+  }
+
   return (
     <Modal
+      closeOnBackdropClick={!saving}
+      closeOnEscape={!saving}
+      footer={
+        isLoading ? undefined : (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              disabled={saving}
+              fullWidth={false}
+              onClick={close}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              disabled={isLoading || saving}
+              form={formId}
+              fullWidth={false}
+              isLoading={saving}
+              size="admin"
+              type="submit"
+              variant="primary"
+            >
+              {mode === "create"
+                ? t("parents.modal.createSubmit")
+                : t("parents.modal.editSubmit")}
+            </Button>
+          </div>
+        )
+      }
       isOpen={isOpen}
       onClose={close}
+      showCloseButton={!saving}
       title={
         mode === "create"
           ? t("parents.modal.createTitle")
@@ -225,7 +262,12 @@ export function AdminParentFormModal({
           </p>
         </div>
       ) : (
-        <form className="grid gap-4" noValidate onSubmit={handleSubmit}>
+        <form
+          className="grid gap-4"
+          id={formId}
+          noValidate
+          onSubmit={handleSubmit}
+        >
           {formError ? (
             <StatusMessage tone="error" title={formError}>
               {t("parents.modal.errorPreservedHint")}
@@ -275,22 +317,6 @@ export function AdminParentFormModal({
               {t("parents.modal.contactSyncNote")}
             </p>
           )}
-          <div className="flex flex-col gap-4">
-            <Button
-              className="order-last"
-              disabled={saving}
-              onClick={close}
-              type="button"
-              variant="secondary"
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button disabled={isLoading} isLoading={saving} type="submit">
-              {mode === "create"
-                ? t("parents.modal.createSubmit")
-                : t("parents.modal.editSubmit")}
-            </Button>
-          </div>
         </form>
       )}
     </Modal>

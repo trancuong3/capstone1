@@ -1,16 +1,21 @@
 "use client";
 
 import {
+  ArrowLeft,
   CalendarDays,
+  Hash,
   Mail,
   Pencil,
   Phone,
   RefreshCw,
-  UsersRound,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminBadge,
+  AdminLoading,
+  AdminPageHeader,
+} from "@/components/admin/admin-ui";
 import {
   AdminParentFormModal,
   type AdminParentFormValues,
@@ -146,32 +151,39 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
       ? t("common.notProvided")
       : t("common.notAvailable");
 
+  const resolvedTitle =
+    parent?.display_name?.trim() || t("parents.detail.titleFallback");
+
   return (
     <>
       <AdminPageHeader
+        breadcrumbs={[
+          { label: t("layout.nav.parents"), href: "/admin/parents" },
+          { label: resolvedTitle },
+        ]}
         eyebrow={t("parents.eyebrow")}
-        title={
-          parent?.display_name?.trim() || t("parents.detail.titleFallback")
-        }
+        title={resolvedTitle}
         description={t("parents.detail.description")}
         actions={
           <>
             {parent ? (
               <Button
-                className="sm:w-auto"
+                fullWidth={false}
                 onClick={openEdit}
+                size="admin"
                 variant="secondary"
               >
-                <Pencil aria-hidden className="size-5" />
+                <Pencil aria-hidden className="size-4" />
                 {t("parents.detail.editProfile")}
               </Button>
             ) : null}
             <ButtonLink
-              className="sm:w-auto"
+              fullWidth={false}
               href="/admin/parents"
-              variant="quiet"
+              size="admin"
+              variant="outline"
             >
-              <UsersRound aria-hidden className="size-5" />
+              <ArrowLeft aria-hidden className="size-4 viread-rtl-flip" />
               {t("parents.detail.backToList")}
             </ButtonLink>
           </>
@@ -180,7 +192,7 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
 
       {actionNotice ? (
         <div
-          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-semibold"
+          className="mb-4 rounded-xl border border-primary/25 bg-sky/40 px-4 py-3 text-sm font-semibold text-primary-hover"
           role="status"
         >
           {actionNotice}
@@ -219,53 +231,54 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                     : t("parents.detail.genericDesc")}
             </p>
             {error === "auth" ? (
-              <ButtonLink href="/admin/login" className="sm:w-auto">
+              <ButtonLink fullWidth={false} href="/admin/login" size="admin">
                 {t("common.signInAgain")}
               </ButtonLink>
             ) : error === "not-found" || error === "forbidden" ? null : (
               <Button
-                className="sm:w-auto"
+                fullWidth={false}
                 onClick={() => void load()}
-                variant="secondary"
+                size="admin"
+                variant="outline"
               >
-                <RefreshCw aria-hidden className="size-5" />
+                <RefreshCw aria-hidden className="size-4" />
                 {t("common.retry")}
               </Button>
             )}
           </div>
         </StatusMessage>
       ) : parent ? (
-        <div className="grid gap-6">
-          <Card className="bg-white">
-            <h2 className="text-xl font-bold text-ink">
+        <div className="grid gap-5">
+          <Card className="bg-white p-5">
+            <h2 className="text-lg font-extrabold text-ink">
               {t("parents.detail.infoHeading")}
             </h2>
 
-            <dl className="grid gap-4 sm:grid-cols-2">
-              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
-                  <Mail aria-hidden className="size-4" />
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
+                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+                  <Mail aria-hidden className="size-3.5" />
                   {t("parents.emailLabel")}
                 </dt>
-                <dd className="break-words font-semibold">
+                <dd className="break-words text-sm font-semibold text-ink">
                   {parent.email?.trim() || fallbackContact}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
-                  <Phone aria-hidden className="size-4" />
+              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
+                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+                  <Phone aria-hidden className="size-3.5" />
                   {t("parents.detail.phone")}
                 </dt>
-                <dd className="break-words font-semibold">
+                <dd className="break-words text-sm font-semibold text-ink tabular-nums">
                   {parent.phone?.trim() || fallbackContact}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
-                <dt className="mb-1 flex items-center gap-2 text-sm font-semibold text-muted">
-                  <CalendarDays aria-hidden className="size-4" />
+              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
+                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+                  <CalendarDays aria-hidden className="size-3.5" />
                   {t("parents.detail.profileCreatedAt")}
                 </dt>
-                <dd className="font-semibold">
+                <dd className="text-sm font-semibold text-ink tabular-nums">
                   {formatDate(parent.created_at, {
                     year: "numeric",
                     month: "2-digit",
@@ -274,17 +287,20 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                   })}
                 </dd>
               </div>
-              <div className="min-w-0 rounded-control border border-border bg-white px-4 py-3">
-                <dt className="mb-1 text-sm font-semibold text-muted">
-                  ID Parent
+              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
+                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
+                  <Hash aria-hidden className="size-3.5" />
+                  {t("parents.detail.parentIdLabel", undefined, "Mã phụ huynh")}
                 </dt>
-                <dd className="break-all font-semibold">{parent.id}</dd>
+                <dd className="break-all font-mono text-xs font-semibold text-ink">
+                  {parent.id}
+                </dd>
               </div>
             </dl>
 
             {contactNotice ? (
               <div
-                className="rounded-control border border-border bg-canvas p-4 text-sm text-muted"
+                className="rounded-control border border-border bg-surface-subtle/60 px-3.5 py-2.5 text-sm text-muted"
                 role="status"
               >
                 {contactNotice}
@@ -292,16 +308,16 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
             ) : null}
           </Card>
 
-          <section aria-labelledby="children-heading" className="grid gap-4">
+          <section aria-labelledby="children-heading" className="grid gap-3.5">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2
                   id="children-heading"
-                  className="text-xl font-semibold text-ink"
+                  className="text-lg font-extrabold text-ink"
                 >
                   {t("parents.detail.linkedChildrenHeading")}
                 </h2>
-                <p className="mt-1 text-sm text-muted">
+                <p className="mt-0.5 text-sm text-muted">
                   {t("parents.detail.linkedChildrenCount", {
                     count: parent.children.length,
                   })}
@@ -315,28 +331,30 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                 description={t("parents.detail.noChildrenDesc")}
               />
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {parent.children.map((child) => (
                   <Card
-                    className="items-center bg-white p-5 text-center sm:p-6"
+                    className="flex-row items-center gap-3.5 bg-white p-4 text-start"
                     key={child.id}
                   >
                     <div
                       aria-hidden="true"
-                      className="grid size-14 shrink-0 place-items-center rounded-full bg-sky text-lg font-bold text-primary"
+                      className="grid size-11 shrink-0 place-items-center rounded-full border border-primary/20 bg-sky text-base font-extrabold text-primary-hover"
                     >
                       {child.alias.trim().charAt(0).toLocaleUpperCase(locale) ||
                         "B"}
                     </div>
-                    <div className="min-w-0">
-                      <h3 className="break-words text-lg font-bold text-ink">
+                    <div className="min-w-0 flex-1">
+                      <h3 className="truncate text-base font-bold text-ink">
                         {child.alias}
                       </h3>
-                      <p className="mt-1 text-sm text-muted">
-                        {t("parents.detail.childGrade", {
-                          grade: child.grade,
-                        })}
-                      </p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <AdminBadge tone="info">
+                          {t("parents.detail.childGrade", {
+                            grade: child.grade,
+                          })}
+                        </AdminBadge>
+                      </div>
                     </div>
                   </Card>
                 ))}

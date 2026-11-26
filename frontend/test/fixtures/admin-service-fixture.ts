@@ -403,6 +403,13 @@ export function createAdminServiceFixture() {
         checked_at: createdAt,
         services: [],
       }),
+      wakeOcrWorker: vi
+        .fn<AdminServices["health"]["wakeOcrWorker"]>()
+        .mockResolvedValue({
+          status: "ok",
+          woken: true,
+          detail: "Remote OCR worker wakeup sent.",
+        }),
     },
   } satisfies AdminServices;
 }

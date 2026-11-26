@@ -178,6 +178,7 @@ export const ADMIN_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
 interface MobileBottomNavProps {
   readonly pathname: string;
   readonly ariaLabel?: string;
+  readonly hideAbove?: "lg" | "xl";
   readonly moreTitle?: string;
   readonly sheetId?: string;
   readonly tabs?: readonly MobileNavTabItem[];
@@ -187,6 +188,7 @@ interface MobileBottomNavProps {
 export function MobileBottomNav({
   pathname,
   ariaLabel,
+  hideAbove = "xl",
   moreTitle,
   sheetId = "parent-mobile-more-sheet",
   tabs = PARENT_MOBILE_PRIMARY_TABS,
@@ -208,7 +210,10 @@ export function MobileBottomNav({
     <>
       <nav
         aria-label={resolvedAriaLabel}
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(35,62,64,0.06)] backdrop-blur-sm xl:hidden"
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 border-t border-border bg-white/95 pb-[env(safe-area-inset-bottom)] shadow-[0_-4px_16px_rgba(35,62,64,0.06)] backdrop-blur-sm",
+          hideAbove === "lg" ? "lg:hidden" : "xl:hidden",
+        )}
         data-testid="mobile-bottom-nav"
       >
         <div
