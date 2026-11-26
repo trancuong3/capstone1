@@ -503,7 +503,9 @@ class TestVietnameseNormalizerAndTimingProjection(unittest.TestCase):
         self.assertEqual(normalize_vietnamese_tts_text("đ", for_phonics_step=True), "đờ")
         self.assertEqual(normalize_vietnamese_tts_text("b", for_phonics_step=True), "bờ")
 
-        # Trailing-quote period guard: NEVER produce "“Xin chào!”."
+        # Curly quotes stripped cleanly in normalized speech; trailing-quote period guard preserved
+        self.assertEqual(normalize_vietnamese_tts_text("“Xin chào!”"), "Xin chào!")
+        self.assertEqual(normalize_vietnamese_tts_text("‘Tạm biệt!’"), "Tạm biệt!")
         self.assertEqual(ensure_tts_terminal_punctuation("“Xin chào!”"), "“Xin chào!”")
         self.assertEqual(ensure_tts_terminal_punctuation("Xin chào"), "Xin chào.")
 

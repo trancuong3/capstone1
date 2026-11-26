@@ -2191,6 +2191,8 @@ def decode_stt_window_sync(
     t_d0 = time.perf_counter()
     if samples16.size < 400:
         return "", [], (time.perf_counter() - t_d0) * 1000.0
+    if float(np.max(np.abs(samples16))) <= 0.0008:
+        return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
     arr = preprocess_audio_for_stt(samples16)
     # Gate trailing silence padding on VOICED speech duration (excluding pre-roll/tail),
