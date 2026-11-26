@@ -1,3 +1,5 @@
+import type { DashboardSummaryDTO } from "@/types/profile";
+
 export const DEFAULT_USER_CACHE_TTL_MS = 60_000;
 export const PERSISTENT_USER_CACHE_MAX_STALE_MS = 15 * 60_000;
 export const USER_CACHE_STORAGE_PREFIX = "viread_ucache:";
@@ -90,7 +92,9 @@ function containsForbiddenPayload(value: unknown, depth = 0): boolean {
       value.startsWith("blob:") ||
       value.includes("/books/my-books/") ||
       value.includes("/books/admin/quality/user-books/") ||
-      value.includes("viread-private-books")
+      value.includes("viread-private-books") ||
+      value.includes("/studio/assets/") ||
+      /[?&]token=/i.test(value)
     );
   }
   if (Array.isArray(value)) {
@@ -111,6 +115,52 @@ function containsForbiddenPayload(value: unknown, depth = 0): boolean {
   return false;
 }
 
+function stripForbiddenMediaUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  if (containsForbiddenPayload(url)) return null;
+  return url;
+}
+
+/**
+ * Strips signed or private media URLs before caching child profile entries.
+ */
+export function sanitizeChildProfileForCache<
+  T extends { readonly avatar_url?: string | null },
+>(child: T): T {
+  if (!("avatar_url" in child)) {
+    return child;
+  }
+  return {
+    ...child,
+    avatar_url: stripForbiddenMediaUrl(child.avatar_url),
+  };
+}
+
+/**
+ * Strips parent PII (`contact_phone`) and signed/private avatar URLs before
+ * writing dashboard summary data to browser storage.
+ */
+export function sanitizeDashboardSummaryForCache(
+  summary: DashboardSummaryDTO,
+): DashboardSummaryDTO {
+  return {
+    ...summary,
+    profile: summary.profile
+      ? {
+          ...summary.profile,
+          contact_phone: null,
+          avatar_url: stripForbiddenMediaUrl(summary.profile.avatar_url),
+          children: summary.profile.children.map((child) =>
+            sanitizeChildProfileForCache(child),
+          ),
+        }
+      : null,
+    children: summary.children.map((child) =>
+      sanitizeChildProfileForCache(child),
+    ),
+  };
+}
+
 function readRecordFromStorage<T>(
   storage: Storage | null,
   storageKey: string,
@@ -127,7 +177,8 @@ function readRecordFromStorage<T>(
       parsed.userId !== userId ||
       parsed.key !== key ||
       typeof parsed.updatedAt !== "number" ||
-      !("data" in parsed)
+      !("data" in parsed) ||
+      containsForbiddenPayload(parsed.data)
     ) {
       storage.removeItem(storageKey);
       return null;

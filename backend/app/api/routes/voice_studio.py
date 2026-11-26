@@ -41,22 +41,35 @@ from app.services.voice_orchestrator import VoicePolicyContext
 router = APIRouter()
 
 _CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS = 300.0
+_CACHED_PUBLIC_VOICE_IDS_ERROR_BACKOFF_SECONDS = 30.0
 _cached_public_voice_ids: tuple[float, list[str]] | None = None
+_cached_public_voice_ids_backoff_until: float = 0.0
 _cached_public_voice_ids_task: asyncio.Task[list[str]] | None = None
 
 
 def clear_cached_public_voice_ids_cache() -> None:
     """Clear the in-memory cache of precomputed public TTS voice IDs."""
-    global _cached_public_voice_ids, _cached_public_voice_ids_task
+    global _cached_public_voice_ids, _cached_public_voice_ids_backoff_until, _cached_public_voice_ids_task
     _cached_public_voice_ids = None
+    _cached_public_voice_ids_backoff_until = 0.0
     if _cached_public_voice_ids_task is not None and not _cached_public_voice_ids_task.done():
         _cached_public_voice_ids_task.cancel()
     _cached_public_voice_ids_task = None
 
 
+async def shutdown_cached_public_voice_ids_task() -> None:
+    """Cancel and await any pending background voice-ID refresh task on shutdown."""
+    global _cached_public_voice_ids_task
+    task = _cached_public_voice_ids_task
+    _cached_public_voice_ids_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
     """Query active CATALOG/COACHING voice IDs in `tts_audio_cache_entries` and update memory cache."""
-    global _cached_public_voice_ids
+    global _cached_public_voice_ids, _cached_public_voice_ids_backoff_until
     if not is_tts_cache_enabled():
         return []
 
@@ -67,8 +80,12 @@ async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
     try:
         voice_ids = await asyncio.wait_for(_query(), timeout=timeout)
     except Exception:
+        _cached_public_voice_ids_backoff_until = (
+            time.monotonic() + _CACHED_PUBLIC_VOICE_IDS_ERROR_BACKOFF_SECONDS
+        )
         return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
 
+    _cached_public_voice_ids_backoff_until = 0.0
     _cached_public_voice_ids = (time.monotonic(), list(voice_ids))
     return voice_ids
 
@@ -85,6 +102,9 @@ async def _get_cached_public_voice_ids() -> list[str]:
         and (now - _cached_public_voice_ids[0]) < _CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS
     ):
         return list(_cached_public_voice_ids[1])
+
+    if now < _cached_public_voice_ids_backoff_until:
+        return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
 
     if _cached_public_voice_ids_task is None or _cached_public_voice_ids_task.done():
         _cached_public_voice_ids_task = asyncio.create_task(refresh_cached_public_voice_ids())
@@ -201,6 +221,9 @@ async def timed_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    fallback_reason = getattr(speech, "fallback_reason", None)
+    if getattr(speech, "used_fallback_voice", False) and fallback_reason:
+        response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
 
     return TimedSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),

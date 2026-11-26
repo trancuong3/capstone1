@@ -64,12 +64,25 @@ export default function ReadingReportPage() {
 
     try {
       await deleteReadingReport(targetId);
-      setReports((prev) => {
-        const next = prev.filter((report) => report.report_id !== targetId);
-        const maxPage = Math.max(1, Math.ceil(next.length / REPORTS_PER_PAGE));
-        setReportPage((current) => Math.min(current, maxPage));
-        return next;
-      });
+      const nextReports = reports.filter(
+        (report) => report.report_id !== targetId,
+      );
+      const nextGroups = groupSessionReportsByPageRevision(nextReports);
+      const nextGroupIndex = Math.min(
+        selectedGroupIndex,
+        Math.max(0, nextGroups.length - 1),
+      );
+      const nextAdditionalCount =
+        nextGroups[nextGroupIndex]?.additionalReports.length ?? 0;
+      const maxPage = Math.max(
+        1,
+        Math.ceil(nextAdditionalCount / REPORTS_PER_PAGE),
+      );
+
+      setReports((prev) =>
+        prev.filter((report) => report.report_id !== targetId),
+      );
+      setReportPage((current) => Math.min(current, maxPage));
       setPendingDeleteId(null);
     } catch (err) {
       setDeleteError(
@@ -207,7 +220,12 @@ export default function ReadingReportPage() {
   const primaryReport = activeGroup.primaryReport;
   const primaryImmutable = isImmutableFirstPassReport(primaryReport);
   const additionalReports = activeGroup.additionalReports;
-  const startIdx = (reportPage - 1) * REPORTS_PER_PAGE;
+  const maxReportPage = Math.max(
+    1,
+    Math.ceil(additionalReports.length / REPORTS_PER_PAGE),
+  );
+  const safeReportPage = Math.min(reportPage, maxReportPage);
+  const startIdx = (safeReportPage - 1) * REPORTS_PER_PAGE;
   const visibleAdditional = additionalReports.slice(
     startIdx,
     startIdx + REPORTS_PER_PAGE,
@@ -400,7 +418,7 @@ export default function ReadingReportPage() {
             ariaLabel="Phân trang lượt đối chiếu bổ sung"
             itemLabel="lượt đối chiếu"
             onPageChange={setReportPage}
-            page={reportPage}
+            page={safeReportPage}
             pageSize={REPORTS_PER_PAGE}
             total={additionalReports.length}
           />

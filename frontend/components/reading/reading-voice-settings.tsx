@@ -22,6 +22,7 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   getActiveSessionVoiceLock,
+  getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
   lockSessionVoice,
@@ -148,7 +149,7 @@ export function ReadingVoiceSettings({
   const policy = useSyncExternalStore(
     subscribeVoicePolicy,
     getVoicePolicyPreferences,
-    getVoicePolicyPreferences,
+    getDefaultVoicePolicyPreferences,
   );
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
@@ -626,11 +627,13 @@ export function ReadingVoiceSettings({
                 {filteredVoices.map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
                   const cachedVoiceIds =
-                    loadState.status === "ready" &&
-                    loadState.data.cached_voice_ids &&
-                    loadState.data.cached_voice_ids.length > 0
-                      ? loadState.data.cached_voice_ids
-                      : [defaultVoiceId];
+                    loadState.status === "ready"
+                      ? loadState.data.cached_voice_ids !== undefined
+                        ? loadState.data.cached_voice_ids
+                        : defaultVoiceId
+                          ? [defaultVoiceId]
+                          : []
+                      : [];
                   const isCachedOffline =
                     loadState.status === "ready" &&
                     loadState.data.local_worker_ready === false &&
@@ -687,10 +690,11 @@ export function ReadingVoiceSettings({
             loadState.data.local_worker_ready === false
               ? (() => {
                   const cachedIds =
-                    loadState.data.cached_voice_ids &&
-                    loadState.data.cached_voice_ids.length > 0
+                    loadState.data.cached_voice_ids !== undefined
                       ? loadState.data.cached_voice_ids
-                      : [];
+                      : defaultVoiceId
+                        ? [defaultVoiceId]
+                        : [];
                   const cachedNames = loadState.data.voices
                     .filter((v) => cachedIds.includes(v.voice_id))
                     .map((v) => voiceTitle(v));
@@ -701,7 +705,9 @@ export function ReadingVoiceSettings({
                     >
                       {cachedNames.length > 1
                         ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
-                        : "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới."}
+                        : cachedNames.length === 1
+                          ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng ${cachedNames[0]}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                          : "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu."}
                     </p>
                   );
                 })()
@@ -870,9 +876,9 @@ export function ReadingVoiceSettings({
                 (!voiceHealth.google.stt_configured &&
                   !voiceHealth.google.tts_configured) ? (
                   <p className="text-[11px] leading-relaxed text-muted">
-                    Khi máy chưa cấu hình khóa Google Cloud API trong{" "}
-                    <code className="font-mono">backend/.env</code>, ViRead sẽ
-                    tự động dùng Google/Trình duyệt Online làm dự phòng.
+                    Khi máy chủ chưa cấu hình khóa Google Cloud API, ViRead sẽ
+                    tự động dùng giọng đọc trực tuyến của trình duyệt làm dự
+                    phòng.
                   </p>
                 ) : null}
               </div>

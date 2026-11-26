@@ -7,6 +7,13 @@ export interface SegmentAudioQualityMeta {
   readonly speechDurationMs: number;
 }
 
+export interface SegmentWordTimingMeta {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  readonly type?: string;
+}
+
 export interface SegmentResultMeta {
   readonly epoch?: number;
   readonly sessionId?: string | null;
@@ -17,6 +24,7 @@ export interface SegmentResultMeta {
   readonly audioEndedAt?: number | null;
   readonly speechDurationMs?: number | null;
   readonly audioQuality?: SegmentAudioQualityMeta;
+  readonly words?: readonly SegmentWordTimingMeta[];
 }
 
 export interface BrowserRecognitionResultLike {
@@ -31,6 +39,7 @@ export interface BrowserRecognitionResultLike {
   readonly audioEndedAt?: number | null;
   readonly speechDurationMs?: number | null;
   readonly audioQuality?: SegmentAudioQualityMeta;
+  readonly words?: readonly SegmentWordTimingMeta[];
 }
 
 export interface BrowserRecognitionEventLike {
@@ -51,7 +60,8 @@ export function extractSegmentResultMeta(
     result.onsetAt !== undefined ||
     result.audioEndedAt !== undefined ||
     result.speechDurationMs !== undefined ||
-    result.audioQuality !== undefined;
+    result.audioQuality !== undefined ||
+    result.words !== undefined;
   if (!hasMeta) return undefined;
   return {
     epoch: result.epoch,
@@ -63,6 +73,7 @@ export function extractSegmentResultMeta(
     audioEndedAt: result.audioEndedAt,
     speechDurationMs: result.speechDurationMs,
     audioQuality: result.audioQuality,
+    words: result.words,
   };
 }
 

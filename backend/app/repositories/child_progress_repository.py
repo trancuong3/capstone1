@@ -81,14 +81,23 @@ class ChildProgressRepository:
 
     async def word_retries(self, child_id: UUID, since: datetime) -> list[RetryEventRow]:
         result = await self.db.execute(
-            select(ReadingEvent.SessionId, ReadingEvent.Status, ReadingEvent.CreatedAt,
-                   ReadingEvent.PageId, ReadingEvent.PageRevisionId, ReadingEvent.WordId, ReadingEvent.Metadata)
+            select(
+                ReadingEvent.SessionId,
+                ReadingEvent.Status,
+                ReadingEvent.CreatedAt,
+                ReadingEvent.PageId,
+                ReadingEvent.PageRevisionId,
+                ReadingEvent.WordId,
+                ReadingEvent.Metadata,
+                ReadingEvent.Type,
+            )
             .join(ReadingSession, ReadingSession.Id == ReadingEvent.SessionId)
             .where(
                 ReadingSession.ChildId == child_id,
                 ReadingSession.StartedAt >= since,
-                ReadingEvent.Type == "WORD_RETRY",
+                ReadingEvent.Type.in_(("WORD_RETRY", "READ_EXAMPLE")),
             )
+            .order_by(ReadingEvent.CreatedAt.desc(), ReadingEvent.Id.desc())
             .limit(MAX_EVENTS)
         )
         return [RetryEventRow(*row) for row in result.all()]

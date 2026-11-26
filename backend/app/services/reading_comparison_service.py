@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -21,8 +23,17 @@ class ReadingComparisonService:
     """Owns authorization, page/revision validation and report lifecycle."""
 
     def __init__(self, db: AsyncSession):
+        self.db = db
         self.content = ReadingContentService(ReadingContentRepository(db))
         self.repository = ReadingComparisonRepository(db)
+
+    async def _release_read_transaction(self) -> None:
+        db = getattr(self, "db", None) or getattr(self.repository, "db", None)
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
 
     @staticmethod
     def _to_read(
@@ -74,9 +85,6 @@ class ReadingComparisonService:
         if not reference_text.strip():
             raise HTTPException(status_code=422, detail="Book text is empty.")
 
-        session = await self.repository.lock_session(session_id, actor_id=actor_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Reading session not found")
         initial_assessment = None
         if payload.finalize:
             if not page.words:
@@ -95,12 +103,40 @@ class ReadingComparisonService:
         elif payload.initial_assessment is not None:
             raise HTTPException(status_code=422, detail="Word evidence requires a final assessment")
 
+        # Release the read transaction before offloading CPU-heavy DP alignment
+        # so no DB connection permit or row lock is held during alignment.
+        await self._release_read_transaction()
+        result = await asyncio.to_thread(align_text, reference_text, transcript)
+        words = (
+            [word.model_dump() for word in payload.words]
+            if payload.words is not None
+            else None
+        )
+        summary = await asyncio.to_thread(
+            summarize_alignment,
+            result["alignment"],
+            words=words,
+            threshold=1.0,
+        )
+        if payload.finalize:
+            summary = {**summary, "assessment_version": 1,
+                       "initial_assessment": initial_assessment}
+
+        session = await self.repository.lock_session(session_id, actor_id=actor_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Reading session not found")
+
         finalized = await self.repository.finalized_for_page(
             session_id, page.page_id, page.page_revision_id,
         )
         if finalized is not None:
+            finalized_initial = (
+                finalized.Summary.get("initial_assessment")
+                if isinstance(finalized.Summary, dict)
+                else None
+            )
             if (finalized.Transcript != transcript or (payload.finalize
-                    and finalized.Summary.get("initial_assessment") != initial_assessment)):
+                    and finalized_initial != initial_assessment)):
                 raise HTTPException(status_code=409, detail="The initial assessment is immutable")
             return self._to_read(finalized)
         if session.State in {"COMPLETED", "FINISHED", "ABORTED"}:
@@ -110,21 +146,6 @@ class ReadingComparisonService:
             for row in await self.repository.list_for_session(session_id)
         ):
             raise HTTPException(status_code=409, detail="A legacy comparison cannot be replaced with a new initial assessment")
-
-        result = align_text(reference_text, transcript)
-        words = (
-            [word.model_dump() for word in payload.words]
-            if payload.words is not None
-            else None
-        )
-        summary = summarize_alignment(
-            result["alignment"],
-            words=words,
-            threshold=1.0,
-        )
-        if payload.finalize:
-            summary = {**summary, "assessment_version": 1,
-                       "initial_assessment": initial_assessment}
 
         # Safe retry after a lost HTTP response: return an already-persisted
         # identical comparison instead of creating a duplicate report.

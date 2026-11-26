@@ -607,6 +607,7 @@ export function DifficultWordPracticePanel({
       }
     },
     [
+      echoGuard,
       phonicsLesson,
       playCue,
       speechPlayer,
@@ -1394,7 +1395,9 @@ export function DifficultWordPracticePanel({
       schedulePoll();
     },
     [
+      echoGuard,
       finalizeCaptureAndEvaluate,
+      phonicsLesson,
       practiceSessionLockId,
       speechRecorder,
       speechService,

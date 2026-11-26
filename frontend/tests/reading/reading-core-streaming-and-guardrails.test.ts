@@ -239,7 +239,7 @@ describe("LocalSegmentSpeechRecognition WS /voice/stt-stream & HTTP fallback", (
       expect(FakeWebSocket.instances).toHaveLength(1);
       const ws = FakeWebSocket.instances[0];
       expect(ws.url).toBe("wss://localhost:8443/_viread_api/voice/stt-stream");
-      expect(ws.protocols).toEqual(["viread-stt-v1", "bearer.jwt-token-123"]);
+      expect(ws.protocols).toEqual(["viread-stt-v1"]);
 
       ws.triggerOpen();
       ws.triggerMessage({ type: "ready" });

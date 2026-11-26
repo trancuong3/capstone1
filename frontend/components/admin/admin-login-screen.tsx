@@ -48,7 +48,7 @@ export function AdminLoginScreen({
     formState: { errors, isSubmitting },
   } = useForm<AdminLoginRequest>({
     resolver: zodResolver(schema),
-    defaultValues: { email: "admin@example.com", password: "" },
+    defaultValues: { email: "", password: "" },
   });
   const submit = handleSubmit(async (values) => {
     setNotice(null);

@@ -314,6 +314,9 @@ export function PictureDescriptionScreen() {
     null,
   );
 
+  const mountedRef = useRef(true);
+  const sessionEpochRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
   const isRecordingVoiceRef = useRef(false);
   const browserRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(
     null,
@@ -322,6 +325,7 @@ export function PictureDescriptionScreen() {
     new BrowserTranscriptCollector(),
   );
   const requestControllerRef = useRef<AbortController | null>(null);
+  const sttControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const unmountActionsRef = useRef({
     cancelRecorder: recorder.cancel,
@@ -329,6 +333,10 @@ export function PictureDescriptionScreen() {
   });
 
   const childId = childState.status === "ready" ? childState.child.id : null;
+
+  useEffect(() => {
+    sessionIdRef.current = session?.session_id ?? null;
+  }, [session?.session_id]);
 
   useEffect(() => {
     if (!uploadPreviewUrl) return;
@@ -345,10 +353,20 @@ export function PictureDescriptionScreen() {
   });
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      sessionEpochRef.current += 1;
       isRecordingVoiceRef.current = false;
       requestControllerRef.current?.abort();
-      browserRecognitionRef.current?.abort();
+      sttControllerRef.current?.abort();
+      sttControllerRef.current = null;
+      try {
+        browserRecognitionRef.current?.abort();
+      } catch {
+        // Ignore browser recognition abort errors on unmount.
+      }
+      browserRecognitionRef.current = null;
       unmountActionsRef.current.stopSpeech();
       unmountActionsRef.current.cancelRecorder();
     };
@@ -442,10 +460,29 @@ export function PictureDescriptionScreen() {
     [playingSpeechKey, speechPlayer, stopSpeechPlayback],
   );
 
+  const stopVoiceCaptureAndStt = useCallback(() => {
+    sessionEpochRef.current += 1;
+    isRecordingVoiceRef.current = false;
+    sttControllerRef.current?.abort();
+    sttControllerRef.current = null;
+    try {
+      browserRecognitionRef.current?.abort();
+    } catch {
+      // Ignore browser recognition abort errors.
+    }
+    browserRecognitionRef.current = null;
+    collectorRef.current.reset();
+    recorder.cancel();
+    setIsRecordingVoice(false);
+    setIsTranscribing(false);
+    setLiveTranscript("");
+  }, [recorder]);
+
   const openSession = useCallback(
     (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
-      isRecordingVoiceRef.current = false;
+      stopVoiceCaptureAndStt();
+      sessionIdRef.current = loaded.session_id;
       const newestAttempt = loaded.attempts[0] ?? null;
       setSession(loaded);
       setSelectedAttemptId(newestAttempt?.attempt_id ?? null);
@@ -462,7 +499,7 @@ export function PictureDescriptionScreen() {
       setEvaluateError(null);
       setVoiceMessage(null);
     },
-    [stopSpeechPlayback],
+    [stopSpeechPlayback, stopVoiceCaptureAndStt],
   );
 
   const handleResumeSession = async (
@@ -630,6 +667,7 @@ export function PictureDescriptionScreen() {
 
   const startVoiceRecording = async () => {
     if (isRecordingVoice || isTranscribing || isEvaluating) return;
+    const captureEpoch = sessionEpochRef.current;
     stopSpeechPlayback();
     setVoiceMessage(null);
     setActionError(null);
@@ -639,11 +677,19 @@ export function PictureDescriptionScreen() {
     try {
       await recorder.start();
     } catch {
+      if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+        return;
+      }
       isRecordingVoiceRef.current = false;
       setIsRecordingVoice(false);
       setVoiceMessage(
         "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
       );
+      return;
+    }
+
+    if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+      recorder.cancel();
       return;
     }
 
@@ -663,13 +709,22 @@ export function PictureDescriptionScreen() {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.onresult = (event) => {
+          if (
+            !mountedRef.current ||
+            !isRecordingVoiceRef.current ||
+            sessionEpochRef.current !== captureEpoch
+          ) {
+            return;
+          }
           collectorRef.current.addResults(event);
           setLiveTranscript(collectLiveTranscript(collectorRef.current, event));
         };
         recognition.onend = () => {
           collectorRef.current.completeRecognitionCycle();
           if (
+            mountedRef.current &&
             isRecordingVoiceRef.current &&
+            sessionEpochRef.current === captureEpoch &&
             !recognitionFailed &&
             browserRecognitionRef.current === recognition
           ) {
@@ -693,10 +748,16 @@ export function PictureDescriptionScreen() {
 
   const stopVoiceRecording = async () => {
     if (!isRecordingVoice) return;
+    const captureEpoch = sessionEpochRef.current;
+    const activeSessionId = session?.session_id ?? null;
     isRecordingVoiceRef.current = false;
     setIsRecordingVoice(false);
     setIsTranscribing(true);
-    setVoiceMessage("Đang chuyển giọng nói của bé bằng ElevenLabs...");
+    setVoiceMessage("Đang chuyển giọng nói tiếng Việt của bé thành chữ...");
+
+    sttControllerRef.current?.abort();
+    const sttController = new AbortController();
+    sttControllerRef.current = sttController;
 
     const liveSnapshot = liveTranscript;
     try {
@@ -705,12 +766,19 @@ export function PictureDescriptionScreen() {
       // Ignore browser recognition stop errors.
     }
 
+    const isStaleCapture = () =>
+      !mountedRef.current ||
+      sttController.signal.aborted ||
+      sessionEpochRef.current !== captureEpoch ||
+      sessionIdRef.current !== activeSessionId;
+
     try {
       const audioBlob = await recorder.stop();
+      if (isStaleCapture()) return;
       const browserFallback = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveSnapshot,
       );
-      let elevenLabsText: string | null = null;
+      let sttTranscript: string | null = null;
 
       if (audioBlob && audioBlob.size > 0) {
         const keyterms = session
@@ -722,14 +790,18 @@ export function PictureDescriptionScreen() {
           const sttResult = await speechService.transcribe(audioBlob, {
             languageCode: "vi",
             keyterms,
+            signal: sttController.signal,
           });
-          elevenLabsText = sttResult.text?.trim() || null;
+          if (isStaleCapture()) return;
+          sttTranscript = sttResult.text?.trim() || null;
         } catch {
-          elevenLabsText = null;
+          if (isStaleCapture()) return;
+          sttTranscript = null;
         }
       }
 
-      const finalTranscript = elevenLabsText || browserFallback || null;
+      if (isStaleCapture()) return;
+      const finalTranscript = sttTranscript || browserFallback || null;
       if (!finalTranscript) {
         setVoiceMessage(
           "Cô chưa nghe rõ tiếng bé nói. Bé hãy bấm micro nói lại hoặc gõ chữ nhé!",
@@ -743,14 +815,19 @@ export function PictureDescriptionScreen() {
       });
       setInputMode("VOICE");
       setVoiceMessage(
-        elevenLabsText
-          ? "Đã chuyển giọng nói bằng ElevenLabs! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé."
+        sttTranscript
+          ? "Đã chuyển giọng nói tiếng Việt thành chữ! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé."
           : "Đã ghi lại lời kể của bé! Bé có thể đọc lại hoặc sửa trước khi gửi chấm bài nhé.",
       );
     } finally {
-      setIsTranscribing(false);
-      setLiveTranscript("");
-      browserRecognitionRef.current = null;
+      if (sttControllerRef.current === sttController) {
+        sttControllerRef.current = null;
+      }
+      if (mountedRef.current && sessionEpochRef.current === captureEpoch) {
+        setIsTranscribing(false);
+        setLiveTranscript("");
+        browserRecognitionRef.current = null;
+      }
     }
   };
 
@@ -910,12 +987,8 @@ export function PictureDescriptionScreen() {
           <Button
             onClick={() => {
               stopSpeechPlayback();
-              isRecordingVoiceRef.current = false;
-              browserRecognitionRef.current?.abort();
-              browserRecognitionRef.current = null;
-              recorder.cancel();
-              setIsRecordingVoice(false);
-              setLiveTranscript("");
+              stopVoiceCaptureAndStt();
+              sessionIdRef.current = null;
               setShowHints(false);
               setShowSampleSentences(false);
               setPracticeTab("PRACTICE");
@@ -1512,7 +1585,7 @@ export function PictureDescriptionScreen() {
                   </section>
                 ) : null}
 
-                {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
+                {/* Child Input Area (Mic + Realtime Text + ViRead Vietnamese TTS + Textarea) */}
                 <section className="rounded-card border border-border bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-extrabold text-ink">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { Skeleton } from "@/components/common/skeleton";
@@ -114,6 +114,10 @@ export function ReadingReport({ result, sessionId }: Props) {
 
   const hesitations = result.summary.hesitations.filter(isHesitation);
   const hesitationSeconds = result.summary.hesitation_seconds;
+  const selfCorrectedWordIds = useMemo(
+    () => new Set(result.self_corrected_word_ids ?? []),
+    [result.self_corrected_word_ids],
+  );
 
   return (
     <div className="space-y-5 rounded-card border border-border bg-white p-4 sm:p-6">
@@ -153,9 +157,7 @@ export function ReadingReport({ result, sessionId }: Props) {
                   comparisonResult={result}
                   page={page}
                   readOnly
-                  selfCorrectedWordIds={
-                    new Set(result.self_corrected_word_ids ?? [])
-                  }
+                  selfCorrectedWordIds={selfCorrectedWordIds}
                 />
               </article>
             )}

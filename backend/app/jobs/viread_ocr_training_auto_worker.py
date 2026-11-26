@@ -47,6 +47,34 @@ async def _download_training_object(
     return await asyncio.to_thread(download_object, reference)
 
 
+def _sha256_file_sync(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_bytes_if_missing_sync(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.is_file():
+        path.write_bytes(data)
+
+
+def _read_json_sync(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_json_sync(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+
+
+def _write_handle_chunk_sync(handle, data: bytes, aggregate_digest) -> None:
+    handle.write(data)
+    aggregate_digest.update(data)
+
+
 async def _stream_training_object_to_file(
     reference: str,
     handle,
@@ -77,8 +105,7 @@ async def _stream_training_object_to_file(
     data = await asyncio.to_thread(download_object, reference)
     if len(data) != expected_bytes or hashlib.sha256(data).hexdigest() != expected_sha256:
         raise ValueError("ACTIVE_CHECKPOINT_SHARD_MISMATCH")
-    handle.write(data)
-    aggregate_digest.update(data)
+    await asyncio.to_thread(_write_handle_chunk_sync, handle, data, aggregate_digest)
 
 
 def _work_root() -> Path:
@@ -352,7 +379,9 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
         target = "LOCAL" if local_ready else "COLAB"
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
         repo_root = Path(__file__).resolve().parents[3]
-        training_config, config_sha = _training_config("FLOW1_EXTERNAL_TRDG", repo_root)
+        training_config, config_sha = await asyncio.to_thread(
+            _training_config, "FLOW1_EXTERNAL_TRDG", repo_root
+        )
         prior = await db.execute(text("""
             SELECT generation, metadata->>'candidate_disposition' AS disposition
             FROM public.viread_ocr_training_jobs
@@ -441,7 +470,9 @@ async def _schedule_ready_flow2(locked_test: dict[str, Any] | None = None) -> in
         target = "LOCAL" if local_ready else "COLAB"
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
         repo_root = Path(__file__).resolve().parents[3]
-        training_config, config_sha = _training_config("FLOW2_ADMIN_VERIFIED", repo_root)
+        training_config, config_sha = await asyncio.to_thread(
+            _training_config, "FLOW2_ADMIN_VERIFIED", repo_root
+        )
         prior = await db.execute(text("""
             SELECT generation, metadata->>'candidate_disposition' AS disposition
             FROM public.viread_ocr_training_jobs
@@ -555,7 +586,7 @@ async def _claim_local_job(worker_id: str) -> dict[str, Any] | None:
             expired_ids = [UUID(str(row["id"])) for row in expired.mappings().all()]
             work_root = _work_root() / "viread-vietocr-training"
             for job_id in expired_ids:
-                resumable = (work_root / str(job_id) / "latest.pt").is_file()
+                resumable = await asyncio.to_thread((work_root / str(job_id) / "latest.pt").is_file)
                 if resumable:
                     await db.execute(text("""
                         UPDATE public.viread_ocr_training_jobs SET status='BLOCKED',
@@ -602,22 +633,81 @@ async def _claim_local_job(worker_id: str) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
-async def _heartbeat(job_id: UUID, worker_id: str, stop: asyncio.Event, progress: dict[str, Any]) -> None:
+async def _heartbeat(
+    job_id: UUID,
+    worker_id: str,
+    stop: asyncio.Event,
+    progress: dict[str, Any],
+    *,
+    lease_lost: asyncio.Event | None = None,
+) -> None:
     while not stop.is_set():
         try:
             await asyncio.wait_for(stop.wait(), timeout=60)
             return
         except TimeoutError:
             pass
+        try:
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(text("""
+                    UPDATE public.viread_ocr_training_jobs SET
+                        lease_expires_at=now() + (:lease_seconds * interval '1 second'),
+                        progress=CAST(:progress AS jsonb), updated_at=now()
+                    WHERE id=:id AND worker_id=:worker_id AND status='LOCAL_RUNNING'
+                """), {"id": job_id, "worker_id": worker_id, "lease_seconds": LEASE_SECONDS,
+                      "progress": json.dumps(progress)})
+                await db.commit()
+            rowcount = getattr(result, "rowcount", None)
+            if rowcount == 0:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="viread_local_training_lease_lost",
+                    stage="heartbeat",
+                    job_id=str(job_id),
+                    worker_id=worker_id,
+                )
+                if lease_lost is not None:
+                    lease_lost.set()
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="viread_local_training_heartbeat_failed",
+                stage="heartbeat",
+                job_id=str(job_id),
+                worker_id=worker_id,
+                error_code=type(exc).__name__.upper(),
+            )
+            continue
+
+
+async def _release_local_claim_on_cancel(job_id: UUID, worker_id: str) -> None:
+    try:
         async with AsyncSessionLocal() as db:
             await db.execute(text("""
-                UPDATE public.viread_ocr_training_jobs SET
-                    lease_expires_at=now() + (:lease_seconds * interval '1 second'),
-                    progress=CAST(:progress AS jsonb), updated_at=now()
+                UPDATE public.viread_ocr_training_jobs
+                SET status='QUEUED',
+                    worker_id=NULL,
+                    lease_expires_at=NULL,
+                    attempts=GREATEST(0, attempts - 1),
+                    updated_at=now()
                 WHERE id=:id AND worker_id=:worker_id AND status='LOCAL_RUNNING'
-            """), {"id": job_id, "worker_id": worker_id, "lease_seconds": LEASE_SECONDS,
-                  "progress": json.dumps(progress)})
+            """), {"id": job_id, "worker_id": worker_id})
             await db.commit()
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="viread_local_training_claim_release_failed",
+            stage="shutdown",
+            job_id=str(job_id),
+            worker_id=worker_id,
+            error_code=type(exc).__name__.upper(),
+        )
 
 
 async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path, Path, Path]:
@@ -647,30 +737,28 @@ async def _materialize_dataset(job: dict[str, Any], run_dir: Path) -> tuple[Path
     )
     if hashlib.sha256(receipt_bytes).hexdigest() != job["manifest_sha256"]:
         raise ValueError("DATASET_RECEIPT_HASH_MISMATCH")
-    run_dir.mkdir(parents=True, exist_ok=True)
     receipt_path = run_dir / "dataset-receipt.json"
-    if not receipt_path.exists():
-        receipt_path.write_bytes(receipt_bytes)
     image_dir = run_dir / "source-images"
-    image_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(_write_bytes_if_missing_sync, receipt_path, receipt_bytes)
+    await asyncio.to_thread(image_dir.mkdir, parents=True, exist_ok=True)
     rows = []
     for index, sample in enumerate(samples):
         image_path = image_dir / f"{sample['image_sha256']}.png"
-        if not image_path.is_file():
+        if not await asyncio.to_thread(image_path.is_file):
             image_bytes = await _download_training_object(
                 sample["image_storage_path"],
                 expected_sha256=sample["image_sha256"],
             )
             if hashlib.sha256(image_bytes).hexdigest() != sample["image_sha256"]:
                 raise ValueError("DATASET_IMAGE_HASH_MISMATCH")
-            image_path.write_bytes(image_bytes)
+            await asyncio.to_thread(_write_bytes_if_missing_sync, image_path, image_bytes)
         rows.append({"image": image_path.as_posix(), "label": sample["label"],
                      "group_id": sample["source_group_id"], "source_flow": sample["source_flow"],
                      "split": sample["split"], "image_sha256": sample["image_sha256"],
                      "verified": sample["source_flow"] == "FLOW1_VERIFIED",
                      "annotation_id": sample["source_annotation_id"] or f"admin:{index}"})
     manifest_path = run_dir / "training.jsonl"
-    write_jsonl(manifest_path, rows)
+    await asyncio.to_thread(write_jsonl, manifest_path, rows)
     return manifest_path, receipt_path, run_dir
 
 
@@ -693,7 +781,9 @@ async def _active_parent(job: dict[str, Any], run_dir: Path) -> str:
         raise ValueError("ACTIVE_CHECKPOINT_MANIFEST_MISMATCH")
     output = run_dir / "parent-v2.pth"
     digest = hashlib.sha256()
-    with output.open("wb") as stream:
+    await asyncio.to_thread(output.parent.mkdir, parents=True, exist_ok=True)
+    stream = await asyncio.to_thread(output.open, "wb")
+    try:
         for chunk in artifact.get("chunks", []):
             await _stream_training_object_to_file(
                 chunk["path"],
@@ -702,6 +792,8 @@ async def _active_parent(job: dict[str, Any], run_dir: Path) -> str:
                 expected_bytes=int(chunk["bytes"]),
                 expected_sha256=str(chunk["sha256"]).lower(),
             )
+    finally:
+        await asyncio.to_thread(stream.close)
     if digest.hexdigest() != active["checkpoint_sha256"]:
         raise ValueError("ACTIVE_CHECKPOINT_HASH_MISMATCH")
     return str(output)
@@ -728,17 +820,24 @@ async def _register_candidate(job: dict[str, Any], candidate: dict[str, Any]) ->
             await db.commit()
         existing_run = await service.repo.one("SELECT status FROM public.viread_ocr_training_runs WHERE id=:id", {"id": run_id})
         path = Path(candidate["candidate_path"])
+        checkpoint_size = await asyncio.to_thread(lambda: path.stat().st_size)
         if existing_run and existing_run["status"] not in {"CANDIDATE", "BENCHMARKED"}:
-            with path.open("rb") as stream:
+            stream = await asyncio.to_thread(path.open, "rb")
+            try:
                 chunk_index = 0
-                while data := stream.read(MAX_SHARD_BYTES):
+                while True:
+                    data = await asyncio.to_thread(stream.read, MAX_SHARD_BYTES)
+                    if not data:
+                        break
                     await service.upload_checkpoint_chunk(actor_id, run_id, chunk_index, data)
                     chunk_index += 1
+            finally:
+                await asyncio.to_thread(stream.close)
             await service.complete_run(actor_id, run_id, TrainingRunComplete(
                 profile=job["profile"], parent_checkpoint_sha256=candidate["parent_checkpoint_sha256"],
                 manifest_sha256=candidate["manifest_sha256"], config_sha256=candidate["config_sha256"],
                 architecture_sha256=candidate["architecture_sha256"], vocabulary_sha256=candidate["vocabulary_sha256"],
-                checkpoint_sha256=candidate["checkpoint_sha256"], checkpoint_bytes=path.stat().st_size,
+                checkpoint_sha256=candidate["checkpoint_sha256"], checkpoint_bytes=checkpoint_size,
                 step=candidate["steps"],
             ))
         elif existing_run and existing_run["status"] == "CANDIDATE":
@@ -746,7 +845,7 @@ async def _register_candidate(job: dict[str, Any], candidate: dict[str, Any]) ->
                 profile=job["profile"], parent_checkpoint_sha256=candidate["parent_checkpoint_sha256"],
                 manifest_sha256=candidate["manifest_sha256"], config_sha256=candidate["config_sha256"],
                 architecture_sha256=candidate["architecture_sha256"], vocabulary_sha256=candidate["vocabulary_sha256"],
-                checkpoint_sha256=candidate["checkpoint_sha256"], checkpoint_bytes=path.stat().st_size,
+                checkpoint_sha256=candidate["checkpoint_sha256"], checkpoint_bytes=checkpoint_size,
                 step=candidate["steps"],
             ))
         await db.execute(text("""
@@ -796,29 +895,28 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
     if hashlib.sha256(receipt_bytes).hexdigest() != locked["version_sha256"]:
         raise ValueError("LOCKED_TEST_RECEIPT_HASH_MISMATCH")
     receipt_path = run_dir / "locked-test-receipt.json"
-    if not receipt_path.exists():
-        receipt_path.write_bytes(receipt_bytes)
+    await asyncio.to_thread(_write_bytes_if_missing_sync, receipt_path, receipt_bytes)
     cache = run_dir / "locked-test-images"
-    cache.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(cache.mkdir, parents=True, exist_ok=True)
     for row in locked_rows:
         image_path = cache / row["image_sha256"]
-        if not image_path.is_file():
+        if not await asyncio.to_thread(image_path.is_file):
             data = await _download_training_object(
                 row["image_storage_path"],
                 expected_sha256=row["image_sha256"],
             )
             if hashlib.sha256(data).hexdigest() != row["image_sha256"]:
                 raise ValueError("LOCKED_TEST_IMAGE_HASH_MISMATCH")
-            image_path.write_bytes(data)
+            await asyncio.to_thread(_write_bytes_if_missing_sync, image_path, data)
     original_path = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
-    if not original_path.exists():
+    if not await asyncio.to_thread(original_path.exists):
         from vietocr.tool.utils import download_weights
         downloaded = Path(await asyncio.to_thread(download_weights,
                                                    "https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
-        if hashlib.sha256(downloaded.read_bytes()).hexdigest() != ORIGINAL_CHECKPOINT_SHA256:
+        if await asyncio.to_thread(_sha256_file_sync, downloaded) != ORIGINAL_CHECKPOINT_SHA256:
             raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-        shutil.copyfile(downloaded, original_path)
-    if hashlib.sha256(original_path.read_bytes()).hexdigest() != ORIGINAL_CHECKPOINT_SHA256:
+        await asyncio.to_thread(shutil.copyfile, downloaded, original_path)
+    if await asyncio.to_thread(_sha256_file_sync, original_path) != ORIGINAL_CHECKPOINT_SHA256:
         raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
     parent_path = await _active_parent(job, run_dir)
     async with AsyncSessionLocal() as db:
@@ -831,8 +929,8 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
         raise ValueError("ACTIVE_PARENT_CHANGED_BEFORE_BENCHMARK")
     from ai.vietocr_v2.benchmark import run_locked_benchmark
     report_path = run_dir / f"production-{locked['version_sha256']}-{job['parent_checkpoint_sha256']}.json"
-    if report_path.exists():
-        report = json.loads(report_path.read_text(encoding="utf-8"))
+    if await asyncio.to_thread(report_path.exists):
+        report = await asyncio.to_thread(_read_json_sync, report_path)
     else:
         report = await asyncio.to_thread(
             run_locked_benchmark, manifest_path=str(receipt_path),
@@ -843,7 +941,8 @@ async def _benchmark_candidate(job: dict[str, Any], run_id: UUID, candidate_path
             parent_checkpoint=parent_path, active_checkpoint=parent_path,
             parent_profile=active_row["profile"], active_profile=active_row["profile"],
         )
-    if (report.get("candidate_checkpoint_sha256") != hashlib.sha256(candidate_path.read_bytes()).hexdigest()
+    candidate_actual_sha = await asyncio.to_thread(_sha256_file_sync, candidate_path)
+    if (report.get("candidate_checkpoint_sha256") != candidate_actual_sha
             or report.get("locked_manifest_sha256") != locked["version_sha256"]):
         raise ValueError("BENCHMARK_CANDIDATE_HASH_MISMATCH")
     outputs = [BenchmarkOutput(sample_id=item["sample_id"], group_id=item["group_id"],
@@ -883,9 +982,12 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
         raise RuntimeError("CUDA_UNAVAILABLE_AFTER_CLAIM")
     candidate_record = run_dir / "candidate.json"
     stable_candidate = run_dir / "candidate.pth"
-    if candidate_record.is_file() and stable_candidate.is_file():
-        candidate = json.loads(candidate_record.read_text(encoding="utf-8"))
-        if hashlib.sha256(stable_candidate.read_bytes()).hexdigest() != candidate.get("checkpoint_sha256"):
+    has_persisted_candidate = await asyncio.to_thread(
+        lambda: candidate_record.is_file() and stable_candidate.is_file()
+    )
+    if has_persisted_candidate:
+        candidate = await asyncio.to_thread(_read_json_sync, candidate_record)
+        if await asyncio.to_thread(_sha256_file_sync, stable_candidate) != candidate.get("checkpoint_sha256"):
             raise ValueError("PERSISTED_CANDIDATE_HASH_MISMATCH")
         candidate["candidate_path"] = str(stable_candidate)
     else:
@@ -909,31 +1011,36 @@ async def _process_local_job(job: dict[str, Any], progress: dict[str, Any]) -> N
                 or config.get("architecture_sha256") != ORIGINAL_ARCHITECTURE_SHA256
                 or config.get("vocabulary_sha256") != ORIGINAL_VOCAB_SHA256):
             raise ValueError("JOB_TRAINING_PARAMETERS_MISMATCH")
-        if (hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "train.py").read_bytes()).hexdigest()
-                != config.get("trainer_sha256")
-                or hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "requirements.txt").read_bytes()).hexdigest()
-                != config.get("requirements_sha256")
-                or hashlib.sha256((repo_root / "ai" / "vietocr_v2" / "requirements-colab.txt").read_bytes()).hexdigest()
-                != config.get("colab_requirements_sha256")):
+        trainer_sha, req_sha, colab_req_sha = await asyncio.to_thread(
+            lambda: (
+                _sha256_file_sync(repo_root / "ai" / "vietocr_v2" / "train.py"),
+                _sha256_file_sync(repo_root / "ai" / "vietocr_v2" / "requirements.txt"),
+                _sha256_file_sync(repo_root / "ai" / "vietocr_v2" / "requirements-colab.txt"),
+            )
+        )
+        if (trainer_sha != config.get("trainer_sha256")
+                or req_sha != config.get("requirements_sha256")
+                or colab_req_sha != config.get("colab_requirements_sha256")):
             raise ValueError("WORKER_CODE_OR_DEPENDENCY_LOCK_MISMATCH")
         from ai.vietocr_v2.train import run_training
         progress.update({"stage": "training", "completed_steps": 0,
                          "total_steps": int(config["steps"])})
+        has_resume_checkpoint = await asyncio.to_thread((run_dir / "latest.pt").is_file)
         candidate = await asyncio.to_thread(
             run_training, profile=job["profile"], manifest_path=str(manifest),
             output_dir=str(run_dir), parent_checkpoint=parent,
             total_steps=int(config["steps"]),
             dataset_receipt_path=str(receipt), dataset_version_sha256=job["manifest_sha256"],
             batch_size=int(config["batch_size"]), seed=int(config["seed"]),
-            resume=(run_dir / "latest.pt").is_file(),
+            resume=has_resume_checkpoint,
             freeze_epochs=int(config["freeze_epochs"]), use_fp16=bool(config["fp16"]),
             job_config_sha256=job["config_sha256"],
             progress_callback=lambda completed, total: progress.update(
                 {"stage": "training", "completed_steps": completed, "total_steps": total}),
         )
-        shutil.copyfile(candidate["candidate_path"], stable_candidate)
+        await asyncio.to_thread(shutil.copyfile, candidate["candidate_path"], stable_candidate)
         candidate["candidate_path"] = str(stable_candidate)
-        candidate_record.write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+        await asyncio.to_thread(_write_json_sync, candidate_record, candidate)
     if candidate.get("config_sha256") != job.get("config_sha256"):
         raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
     run_id = await _register_candidate(job, candidate)
@@ -955,17 +1062,27 @@ async def _run_local_once(worker_id: str) -> bool:
     job["worker_id"] = worker_id
     job_id = UUID(str(job["id"]))
     heartbeat_stop = asyncio.Event()
+    lease_lost = asyncio.Event()
     progress: dict[str, Any] = {"stage": "preparing"}
-    heartbeat = asyncio.create_task(_heartbeat(job_id, worker_id, heartbeat_stop, progress))
+    heartbeat = asyncio.create_task(
+        _heartbeat(job_id, worker_id, heartbeat_stop, progress, lease_lost=lease_lost)
+    )
     try:
         await _process_local_job(job, progress)
     except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                asyncio.wait_for(_release_local_claim_on_cancel(job_id, worker_id), timeout=3.0)
+            )
+        except Exception:
+            pass
         raise
     except Exception as exc:
         error_code = type(exc).__name__[:64]
         resource_failure = any(term in str(exc).upper() for term in ("CUDA", "OUT OF MEMORY", "VRAM"))
         work_root = _work_root() / "viread-vietocr-training" / str(job_id)
-        if resource_failure and not (work_root / "latest.pt").is_file():
+        has_local_resume = await asyncio.to_thread((work_root / "latest.pt").is_file)
+        if resource_failure and not has_local_resume:
             await _set_job(job_id, status="FALLBACK_QUEUED_COLAB", target="COLAB",
                            error_code=error_code, worker_id=worker_id,
                            metadata={"fallback_reason": error_code})
@@ -988,6 +1105,8 @@ async def _run_local_once(worker_id: str) -> bool:
                        fallback=resource_failure)
     finally:
         heartbeat_stop.set()
+        if not heartbeat.done():
+            heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)
     return True
 

@@ -1097,13 +1097,28 @@ export function AdminOcrReviewScreen({
           ) {
             return;
           }
+          setCandidateEditPending(false);
           try {
             const latest = await ocr.getLatestWorkflow(
               pageId,
               requestedRevision,
             );
+            if (
+              !mountedRef.current ||
+              candidateSyncRequestRef.current !== requestId ||
+              detail?.page_revision_id !== requestedRevision
+            ) {
+              return;
+            }
             if (latest) setAiWorkflow(latest);
           } catch {
+            if (
+              !mountedRef.current ||
+              candidateSyncRequestRef.current !== requestId ||
+              detail?.page_revision_id !== requestedRevision
+            ) {
+              return;
+            }
             setNotice(
               isServiceError(cause)
                 ? "Không thể lưu Candidate cho Safety rescan: " + cause.message
@@ -1223,7 +1238,11 @@ export function AdminOcrReviewScreen({
           paddleLineScore,
         )
       ) {
-        setWordFilter("review");
+        setWordFilter(
+          matchesWordFilter(selectedStatus, "review", selected, paddleLineScore)
+            ? "review"
+            : "all",
+        );
       }
 
       const element =
@@ -1932,7 +1951,8 @@ export function AdminOcrReviewScreen({
   }
 
   async function reprocess() {
-    if (!detail) return;
+    if (!detail || detail.lifecycle_status !== "ACTIVE" || busy !== null)
+      return;
     const generation = ++revisionChoiceRequestIdRef.current;
     setBusy("reprocess");
     setNotice(null);
@@ -1956,11 +1976,16 @@ export function AdminOcrReviewScreen({
         "Đã tạo revision mới từ ảnh trong Supabase Storage. Revision cũ vẫn được giữ nguyên.",
       );
     } catch {
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
       setNotice(
         "Không thể chạy lại OCR. Kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
       );
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
@@ -2014,11 +2039,16 @@ export function AdminOcrReviewScreen({
         "Đã OCR ảnh mới cho đúng trang này. Bản mới đang chờ duyệt; ảnh và nội dung dùng cho lượt đọc chỉ chuyển sang bản mới sau khi xác minh.",
       );
     } catch {
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
       setNotice(
         "Không thể tải ảnh mới hoặc chạy OCR. Dữ liệu hiện tại được giữ lại; hãy kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
       );
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
@@ -2231,19 +2261,33 @@ export function AdminOcrReviewScreen({
               (maximum, word) => Math.max(maximum, word.word_index),
               -1,
             ) + 1;
+          const defaultWordText = "Từ";
           const nextWord: AdminRevisionWordDTO = {
             word_index: nextIndex,
             line_index: words.at(-1)?.line_index ?? 0,
-            text: "Từ mới",
-            normalized_text: normalizeVietnameseWord("Từ mới"),
+            text: defaultWordText,
+            normalized_text: normalizeVietnameseWord(defaultWordText),
             bbox: [0.1, 0.1, 0.1, 0.05],
             ocr_confidence: null,
             ocr_review_status: "needs_review",
           };
-          setWords((current) => [...current, nextWord]);
-          setDraftText((current) => `${current.trim()} Từ mới`.trim());
+          const nextWords = [...words, nextWord];
+          const nextText = `${draftText.trim()} ${defaultWordText}`
+            .trim()
+            .normalize("NFC");
+          const synced = syncPageTextToWords(nextText, nextWords);
+          if (synced.status === "synchronized") {
+            setWords([...synced.words]);
+            setWordSyncError(null);
+          } else {
+            setWords(nextWords);
+            setWordSyncError(
+              "Không thể đồng bộ văn bản sau khi thêm từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu.",
+            );
+          }
+          setDraftText(nextText);
+          setCandidateEditPending(true);
           setSelectedWord(nextIndex);
-          setWordSyncError(null);
           draftEditVersionRef.current += 1;
         }}
         onComplete={() => router.push(viewHref("review"))}
@@ -2273,6 +2317,7 @@ export function AdminOcrReviewScreen({
           }
           setWords([...synced.words]);
           setDraftText(nextText.normalize("NFC"));
+          setCandidateEditPending(true);
           setSelectedWord(nextWords[0]?.word_index ?? null);
           setWordSyncError(null);
           draftEditVersionRef.current += 1;

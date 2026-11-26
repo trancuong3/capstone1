@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
@@ -96,6 +97,7 @@ export function ComprehensionQuestion({
   sessionId,
 }: ComprehensionQuestionProps) {
   const { comprehensionService } = useReadingServices();
+  const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
   const echoGuard = useMemo(() => new EchoGuard(), []);
@@ -124,8 +126,10 @@ export function ComprehensionQuestion({
   const flowGenRef = useRef(0);
   const playbackSeqRef = useRef(0);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const prefetchAbortRef = useRef<AbortController | null>(null);
   const remindTimerRef = useRef<number | null>(null);
   const voiceSettleTimerRef = useRef<number | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
   const remindedForQuestionRef = useRef(false);
   const isSubmittingRef = useRef(false);
   const solvedQuestionIdRef = useRef<string | null>(null);
@@ -151,9 +155,17 @@ export function ComprehensionQuestion({
     }
   }, []);
 
+  const clearRestartTimer = useCallback(() => {
+    if (restartTimerRef.current !== null) {
+      window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
   const stopVoiceRecognition = useCallback(() => {
     clearRemindTimer();
     clearVoiceSettleTimer();
+    clearRestartTimer();
     const rec = recognitionRef.current;
     recognitionRef.current = null;
     if (rec) {
@@ -170,10 +182,12 @@ export function ComprehensionQuestion({
         // Already stopped
       }
     }
-  }, [clearRemindTimer, clearVoiceSettleTimer]);
+  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer]);
 
   const stopAllVoice = useCallback(() => {
     flowGenRef.current += 1;
+    prefetchAbortRef.current?.abort();
+    prefetchAbortRef.current = null;
     stopVoiceRecognition();
     speechPlayerRef.current.stop();
     setReadingChoiceId(null);
@@ -184,8 +198,11 @@ export function ComprehensionQuestion({
     mountedRef.current = true;
     const cleanupVoice = () => {
       flowGenRef.current += 1;
+      prefetchAbortRef.current?.abort();
+      prefetchAbortRef.current = null;
       clearRemindTimer();
       clearVoiceSettleTimer();
+      clearRestartTimer();
       const rec = recognitionRef.current;
       recognitionRef.current = null;
       if (rec) {
@@ -213,19 +230,26 @@ export function ComprehensionQuestion({
       window.removeEventListener("pagehide", handlePageHide);
       cleanupVoice();
     };
-  }, [clearRemindTimer, clearVoiceSettleTimer]);
+  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer]);
 
   const speakGuarded = useCallback(
-    async (text: string, gen: number): Promise<boolean> => {
+    async (
+      text: string,
+      gen: number,
+      options?: { readonly adaptPersona?: boolean },
+    ): Promise<boolean> => {
       if (!mountedRef.current || gen !== flowGenRef.current) return false;
-      const personaText = adaptTextToTeacherPersona(
-        text,
-        getEffectiveTeacherPersona().gender,
-      );
+      const spokenText =
+        options?.adaptPersona === false
+          ? text
+          : adaptTextToTeacherPersona(
+              text,
+              getEffectiveTeacherPersona().gender,
+            );
       const id = `quiz-tts-${(playbackSeqRef.current += 1)}`;
-      echoGuard.playbackStarted(id, personaText, performance.now());
+      echoGuard.playbackStarted(id, spokenText, performance.now());
       try {
-        await speechPlayerRef.current.play(personaText, { coaching: true });
+        await speechPlayerRef.current.play(spokenText, { coaching: true });
         return mountedRef.current && gen === flowGenRef.current;
       } catch {
         return mountedRef.current && gen === flowGenRef.current;
@@ -321,12 +345,32 @@ export function ComprehensionQuestion({
       const storyHint = nextResult.story_hint?.trim() || null;
       if (source !== "voice") {
         if (!nextResult.is_correct && storyHint) {
-          setFeedbackNote(
-            adaptTextToTeacherPersona(
-              storyHint,
-              getEffectiveTeacherPersona().gender,
-            ),
-          );
+          // Keep story_hint verbatim so book characters ("Cô Tấm", "cô tiên") are never altered.
+          setFeedbackNote(storyHint);
+          // Read story_hint aloud even on touch mistakes so Grade-1 readers hear
+          // the clue immediately; tapping any other choice barges in via stopAllVoice().
+          if (
+            gen === flowGenRef.current &&
+            !voicePausedRef.current &&
+            typeof window !== "undefined" &&
+            (Boolean(getSpeechRecognitionCtor()) ||
+              isAndroidNativeSpeechAvailable() ||
+              typeof window.AudioContext === "function" ||
+              Boolean(window.speechSynthesis?.getVoices?.().length))
+          ) {
+            setVoicePhase("reading");
+            const stillCurrent = await speakGuarded(storyHint, gen, {
+              adaptPersona: false,
+            });
+            if (
+              stillCurrent &&
+              mountedRef.current &&
+              !voicePausedRef.current &&
+              activeQuestionRef.current?.question.id === submittedQuestionId
+            ) {
+              setVoicePhase("idle");
+            }
+          }
         }
         return;
       }
@@ -346,19 +390,17 @@ export function ComprehensionQuestion({
       } else {
         const chosen = activeValue.choices.find((c) => c.value === answer);
         const encourage = storyHint
-          ? adaptTextToTeacherPersona(
-              chosen ? `Con vừa chọn ${chosen.label}. ${storyHint}` : storyHint,
-              getEffectiveTeacherPersona().gender,
-            )
+          ? chosen
+            ? `Con vừa chọn ${chosen.label}. ${storyHint}`
+            : storyHint
           : chosen
-            ? adaptTextToTeacherPersona(
-                `Con vừa chọn ${chosen.label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!`,
-                getEffectiveTeacherPersona().gender,
-              )
+            ? `Con vừa chọn ${chosen.label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!`
             : prompts.next("quizTryAgain");
         setFeedbackNote(encourage);
         setVoicePhase("reading");
-        const stillCurrent = await speakGuarded(encourage, gen);
+        const stillCurrent = await speakGuarded(encourage, gen, {
+          adaptPersona: !storyHint && !chosen,
+        });
         if (
           stillCurrent &&
           mountedRef.current &&
@@ -427,6 +469,7 @@ export function ComprehensionQuestion({
       let processedUpTo = -1;
       let fatalError = false;
       let consecutiveRestarts = 0;
+      let networkErrorStreak = 0;
       let maxEpochSeen = -1;
 
       const isItemFencedIn = (
@@ -544,6 +587,7 @@ export function ComprehensionQuestion({
             continue;
           }
           consecutiveRestarts = 0;
+          networkErrorStreak = 0;
 
           const analysis = analyzeComprehensionVoiceInput(
             transcript,
@@ -626,13 +670,20 @@ export function ComprehensionQuestion({
           event.error === "not-allowed" ||
           event.error === "service-not-allowed" ||
           event.error === "stt-unavailable" ||
-          event.error === "network" ||
+          event.error === "local-stt-unavailable" ||
           event.error === "audio-capture" ||
           event.error === "language-not-supported"
         ) {
           fatalError = true;
           stopVoiceRecognition();
           setVoicePhase("idle");
+        } else if (event.error === "network") {
+          networkErrorStreak += 1;
+          if (networkErrorStreak >= 3) {
+            fatalError = true;
+            stopVoiceRecognition();
+            setVoicePhase("idle");
+          }
         }
       };
 
@@ -655,11 +706,35 @@ export function ComprehensionQuestion({
             return;
           }
           consecutiveRestarts += 1;
-          try {
-            rec.start();
-          } catch {
-            stopVoiceRecognition();
-            setVoicePhase("idle");
+          const backoffMs =
+            networkErrorStreak > 0
+              ? Math.min(4_000, 500 * 2 ** (networkErrorStreak - 1))
+              : 0;
+          const restartNow = () => {
+            if (
+              recognitionRef.current !== rec ||
+              !mountedRef.current ||
+              gen !== flowGenRef.current ||
+              voicePausedRef.current ||
+              isSubmittingRef.current
+            ) {
+              return;
+            }
+            try {
+              rec.start();
+            } catch {
+              stopVoiceRecognition();
+              setVoicePhase("idle");
+            }
+          };
+          if (backoffMs > 0) {
+            clearRestartTimer();
+            restartTimerRef.current = window.setTimeout(() => {
+              restartTimerRef.current = null;
+              restartNow();
+            }, backoffMs);
+          } else {
+            restartNow();
           }
         }
       };
@@ -673,6 +748,7 @@ export function ComprehensionQuestion({
     },
     [
       clearRemindTimer,
+      clearRestartTimer,
       clearVoiceSettleTimer,
       echoGuard,
       prompts,
@@ -704,14 +780,93 @@ export function ComprehensionQuestion({
       remindedForQuestionRef.current = false;
       setVoicePhase("reading");
 
-      if (!(await speakGuarded(value.question.prompt, gen))) return;
+      // Start the question prompt first so it gets first priority on the local voice
+      // worker (lowest TTFA), then pre-fetch choices B/C/D in background with an
+      // AbortSignal tied to stopAllVoice() / unmount.
+      // Never apply teacher-persona rewrite to story questions or answer choices!
+      const questionPromise = speakGuarded(value.question.prompt, gen, {
+        adaptPersona: false,
+      });
+
+      if (value.choices.length > 1) {
+        const prefetchChoices = value.choices.slice(1).map((choice, offset) => {
+          const letter = choiceLetterForSpeech(choice, offset + 1);
+          return `Đáp án ${letter}: ${choice.label}`;
+        });
+        const prefetchController = new AbortController();
+        prefetchAbortRef.current = prefetchController;
+        const player = speechPlayerRef.current;
+        const waitForQuestionDispatch = () =>
+          new Promise<void>((resolve) => {
+            if (prefetchController.signal.aborted) {
+              resolve();
+              return;
+            }
+            const timer = window.setTimeout(() => {
+              prefetchController.signal.removeEventListener("abort", onAbort);
+              resolve();
+            }, 50);
+            const onAbort = () => {
+              window.clearTimeout(timer);
+              resolve();
+            };
+            prefetchController.signal.addEventListener("abort", onAbort, {
+              once: true,
+            });
+          });
+        if (typeof player.prefetch === "function") {
+          void (async () => {
+            await waitForQuestionDispatch();
+            for (const phrase of prefetchChoices) {
+              if (
+                !mountedRef.current ||
+                gen !== flowGenRef.current ||
+                prefetchController.signal.aborted
+              ) {
+                break;
+              }
+              await player.prefetch!(phrase, {
+                coaching: true,
+                signal: prefetchController.signal,
+              });
+            }
+          })();
+        } else if (typeof speechService.synthesize === "function") {
+          void (async () => {
+            await waitForQuestionDispatch();
+            for (const phrase of prefetchChoices) {
+              if (
+                !mountedRef.current ||
+                gen !== flowGenRef.current ||
+                prefetchController.signal.aborted
+              ) {
+                break;
+              }
+              try {
+                await speechService.synthesize(phrase, {
+                  sessionId,
+                  signal: prefetchController.signal,
+                });
+              } catch {
+                // Best-effort warmup only
+              }
+            }
+          })();
+        }
+      }
+
+      if (!(await questionPromise)) return;
 
       for (let i = 0; i < value.choices.length; i += 1) {
         const choice = value.choices[i];
         const letter = choiceLetterForSpeech(choice, i);
         if (!mountedRef.current || gen !== flowGenRef.current) return;
         setReadingChoiceId(choice.id);
-        const ok = await speakGuarded(`Đáp án ${letter}: ${choice.label}`, gen);
+        const ok = await speakGuarded(
+          `Đáp án ${letter}: ${choice.label}`,
+          gen,
+          { adaptPersona: false },
+        );
         if (!ok) {
           if (mountedRef.current) setReadingChoiceId(null);
           return;
@@ -726,7 +881,7 @@ export function ComprehensionQuestion({
         startVoiceListenRef.current(value, gen);
       }
     },
-    [prompts, sessionId, speakGuarded, stopAllVoice],
+    [prompts, sessionId, speakGuarded, speechService, stopAllVoice],
   );
 
   useEffect(() => {
@@ -759,6 +914,32 @@ export function ComprehensionQuestion({
       active = false;
     };
   }, [comprehensionService, loadKey, sessionId]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const handleBackground = () => {
+      if (document.hidden) {
+        stopAllVoice();
+        setVoicePhase("idle");
+      }
+    };
+    const handleAndroidBackground = () => {
+      stopAllVoice();
+      setVoicePhase("idle");
+    };
+    document.addEventListener("visibilitychange", handleBackground);
+    document.addEventListener(
+      "viread:android-background",
+      handleAndroidBackground,
+    );
+    return () => {
+      document.removeEventListener("visibilitychange", handleBackground);
+      document.removeEventListener(
+        "viread:android-background",
+        handleAndroidBackground,
+      );
+    };
+  }, [stopAllVoice]);
 
   const handleToggleVoicePause = () => {
     if (voicePausedByUser) {
@@ -926,13 +1107,10 @@ export function ComprehensionQuestion({
 
             {result ? (
               <StatusMessage tone={result.is_correct ? "success" : "warning"}>
-                {adaptTextToTeacherPersona(
-                  feedbackNote ??
-                    (result.is_correct
-                      ? "Đúng rồi. Bé nhớ rất tốt."
-                      : "Gần đúng rồi, thử lại nhé."),
-                  getEffectiveTeacherPersona().gender,
-                )}
+                {feedbackNote ??
+                  (result.is_correct
+                    ? "Đúng rồi. Bé nhớ rất tốt."
+                    : "Gần đúng rồi, thử lại nhé.")}
               </StatusMessage>
             ) : (
               <p
@@ -940,25 +1118,15 @@ export function ComprehensionQuestion({
                 aria-live="polite"
                 className="text-center text-body text-muted"
               >
-                {feedbackNote
-                  ? adaptTextToTeacherPersona(
-                      feedbackNote,
-                      getEffectiveTeacherPersona().gender,
-                    )
-                  : voicePhase === "reading"
+                {feedbackNote ??
+                  (voicePhase === "reading"
                     ? adaptTextToTeacherPersona(
                         "Cô đang đọc câu hỏi và các đáp án cho bé nghe…",
-                        getEffectiveTeacherPersona().gender,
+                        teacherPersona.gender,
                       )
                     : voicePhase === "listening"
-                      ? adaptTextToTeacherPersona(
-                          "Bé nói đáp án A, B, C hoặc chạm vào lựa chọn bé thích nhé.",
-                          getEffectiveTeacherPersona().gender,
-                        )
-                      : adaptTextToTeacherPersona(
-                          "Không cần vội. Bé cứ nghĩ một chút nhé.",
-                          getEffectiveTeacherPersona().gender,
-                        )}
+                      ? "Bé nói đáp án A, B, C hoặc chạm vào lựa chọn bé thích nhé."
+                      : "Không cần vội. Bé cứ nghĩ một chút nhé.")}
               </p>
             )}
 

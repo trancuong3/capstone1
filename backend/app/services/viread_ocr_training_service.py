@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -11,6 +12,7 @@ import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -30,6 +32,7 @@ from app.services.training_storage import (
     flow2_storage_provider_setting,
     is_gdrive_ref,
     sign_worker_artifact_token,
+    validate_logical_path,
 )
 from app.services.viread_drive_connection_service import VireadDriveConnectionService
 from app.services.viread_training_storage_quota import ensure_database_capacity, ensure_storage_capacity
@@ -441,6 +444,16 @@ class VireadOcrTrainingService:
                 raise _storage_http_error(exc) from exc
         return await asyncio.to_thread(hash_storage_object, reference, aggregate)
 
+    async def _release_read_txn(self) -> None:
+        rollback = getattr(self.repo, "rollback", None)
+        if callable(rollback):
+            try:
+                res = rollback()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+
     def _artifact_download_url(
         self,
         reference: str,
@@ -459,7 +472,7 @@ class VireadOcrTrainingService:
                 )
                 return (
                     f"/books/admin/viread-training/worker/jobs/{job_id}/artifact-stream"
-                    f"?worker_id={worker_id}&token={token}"
+                    f"?worker_id={quote(worker_id, safe='')}&token={quote(token, safe='')}"
                 )
             return None
         return create_signed_image_url(reference)
@@ -515,7 +528,16 @@ class VireadOcrTrainingService:
                 cached_meta = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
                 if cached_meta is None:
                     try:
-                        m_bytes = await self._read_artifact_bytes(active["storage_path"])
+                        active_router = (
+                            await self._artifact_router()
+                            if is_gdrive_ref(active["storage_path"])
+                            else None
+                        )
+                        await self._release_read_txn()
+                        m_bytes = await self._read_artifact_bytes(
+                            active["storage_path"],
+                            router=active_router,
+                        )
                         m_json = json.loads(m_bytes.decode("utf-8"))
                         m_info = m_json.get("model_info", {})
                         cached_meta = {
@@ -768,7 +790,13 @@ class VireadOcrTrainingService:
             "storage_summary": storage_summary,
         }
 
-    async def register_dataset(self, actor_id: UUID, payload: DatasetImport) -> dict[str, Any]:
+    async def register_dataset(
+        self,
+        actor_id: UUID,
+        payload: DatasetImport,
+        *,
+        commit: bool = True,
+    ) -> dict[str, Any]:
         await self._admin(actor_id)
         samples = [item.model_dump() for item in payload.samples]
         if len({item["sample_id"] for item in samples}) != len(samples):
@@ -811,6 +839,8 @@ class VireadOcrTrainingService:
 
         has_drive_samples = any(is_gdrive_ref(item["image_storage_path"]) for item in samples)
         verify_router = await self._artifact_router() if has_drive_samples else None
+        if commit:
+            await self._release_read_txn()
         semaphore = asyncio.Semaphore(8)
 
         async def verify_object(item: dict[str, Any]) -> None:
@@ -855,6 +885,8 @@ class VireadOcrTrainingService:
         manifest_drive_id: str | None = None
         if use_drive_manifest:
             router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
+            if commit:
+                await self._release_read_txn()
             try:
                 stored_manifest = await asyncio.to_thread(
                     router.put,
@@ -872,6 +904,8 @@ class VireadOcrTrainingService:
         else:
             storage_path = f"ocr-training/manifests/{manifest_folder}/{version_sha}.json"
             await ensure_storage_capacity(self.db, len(encoded), existing_object_path=storage_path)
+            if commit:
+                await self._release_read_txn()
         try:
             if not use_drive_manifest:
                 await asyncio.to_thread(upload_object, storage_path, encoded, "application/json", upsert=True)
@@ -921,13 +955,16 @@ class VireadOcrTrainingService:
                     WHERE dataset_version_id = :dataset_id
                       AND image_storage_path LIKE 'gdrive://%'
                 """, {"dataset_id": result["id"]})
-            await self.repo.commit()
+            if commit:
+                await self.repo.commit()
             return result
         except HTTPException:
-            await self.repo.rollback()
+            if commit:
+                await self.repo.rollback()
             raise
         except Exception:
-            await self.repo.rollback()
+            if commit:
+                await self.repo.rollback()
             raise
 
     async def _locked_test_readiness(self) -> dict[str, Any]:
@@ -1273,12 +1310,18 @@ class VireadOcrTrainingService:
                             "storage_provider": StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value,
                             "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
             ))
-        imported = await self.register_dataset(actor_id, DatasetImport(
-            source_flow="LOCKED_TEST", samples=pilot_samples, split_seed=seed,
-            provenance={"auto_created": True, "evaluation_type": "PILOT", "seed": seed,
-                        "sampling_policy": "seeded balanced verified holdout; max 8 samples per document; single-use",
-                        "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS},
-        ))
+        imported = await self.register_dataset(
+            actor_id,
+            DatasetImport(
+                source_flow="LOCKED_TEST",
+                samples=pilot_samples,
+                split_seed=seed,
+                provenance={"auto_created": True, "evaluation_type": "PILOT", "seed": seed,
+                            "sampling_policy": "seeded balanced verified holdout; max 8 samples per document; single-use",
+                            "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS},
+            ),
+            commit=False,
+        )
         await self._record_evaluation_cohort(UUID(str(imported["id"])), imported["version_sha256"],
                                              "PILOT", seed, len(pilot_samples), group_count, actor_id)
         await self.repo.commit()
@@ -1447,17 +1490,20 @@ class VireadOcrTrainingService:
                             "storage_provider": StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value,
                             "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
             ))
-        imported = await self.register_dataset(actor_id, DatasetImport(
-            source_flow="LOCKED_TEST", samples=locked_samples,
-            split_seed="viread-locked-test-admin-verified-v1",
-            provenance={"auto_created": True,
-                        "policy": "verified_holdout_excluding_all_train_validation_and_prior_locked_test",
-                        "minimum_samples": MIN_LOCKED_PAIRS,
-                        "minimum_groups": MIN_LOCKED_GROUPS,
-                        "eligible_source_flows": ["FLOW1_VERIFIED", "FLOW2_EXTERNAL"]},
-        ))
-        # register_dataset commits new versions; an idempotent hit may return before committing.
-        await self.repo.commit()
+        imported = await self.register_dataset(
+            actor_id,
+            DatasetImport(
+                source_flow="LOCKED_TEST",
+                samples=locked_samples,
+                split_seed="viread-locked-test-admin-verified-v1",
+                provenance={"auto_created": True,
+                            "policy": "verified_holdout_excluding_all_train_validation_and_prior_locked_test",
+                            "minimum_samples": MIN_LOCKED_PAIRS,
+                            "minimum_groups": MIN_LOCKED_GROUPS,
+                            "eligible_source_flows": ["FLOW1_VERIFIED", "FLOW2_EXTERNAL"]},
+            ),
+            commit=False,
+        )
         await self._record_evaluation_cohort(
             UUID(str(imported["id"])), imported["version_sha256"], "PRODUCTION",
             "viread-locked-test-admin-verified-v1", len(locked_samples), group_count, actor_id,
@@ -1837,7 +1883,14 @@ class VireadOcrTrainingService:
             raise HTTPException(status_code=503, detail="Active model registry is not initialized")
         if active["storage_path"] is None:
             return {**active, "source_url": "https://vocr.vn/data/vietocr/vgg_transformer.pth", "chunks": []}
-        raw = await self._read_artifact_bytes(active["storage_path"])
+        artifact_router = (
+            await self._artifact_router()
+            if is_gdrive_ref(active["storage_path"])
+            else None
+        )
+        if job_id is None:
+            await self._release_read_txn()
+        raw = await self._read_artifact_bytes(active["storage_path"], router=artifact_router)
         try:
             manifest = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -1951,6 +2004,7 @@ class VireadOcrTrainingService:
         folder = {"FLOW2_EXTERNAL": "external", "FLOW2_TRDG": "trdg", "LOCKED_TEST": "locked-test"}[source_flow]
         path = f"ocr-training/{'locked-test' if source_flow == 'LOCKED_TEST' else 'flow1/' + folder}/{digest[:2]}/{digest}-{safe_name}"
         await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
+        await self._release_read_txn()
         await asyncio.to_thread(upload_object, path, data, content_type, upsert=True)
         return {"source_flow": source_flow, "image_storage_path": path, "image_sha256": digest,
                 "byte_count": len(data), "content_type": content_type}
@@ -2098,6 +2152,7 @@ class VireadOcrTrainingService:
         drive_file_id: str | None = None
         if use_drive:
             logical_path = f"checkpoints/{run_id}/chunk-{chunk_index:04d}-{digest[:12]}.part"
+            await self._release_read_txn()
             try:
                 stored = await asyncio.to_thread(
                     router.put,
@@ -2115,6 +2170,7 @@ class VireadOcrTrainingService:
         else:
             path = f"ocr-training/checkpoints/{run_id}/{chunk_index:04d}-{digest}.part"
             await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
+            await self._release_read_txn()
             await asyncio.to_thread(upload_object, path, data, "application/octet-stream", upsert=True)
         try:
             await self.repo.execute("""
@@ -2324,6 +2380,7 @@ class VireadOcrTrainingService:
         digest = hashlib.sha256(data).hexdigest()
         path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/{chunk_index:04d}-{digest}.part"
         await ensure_storage_capacity(self.db, len(data), existing_object_path=path)
+        await self._release_read_txn()
         await asyncio.to_thread(upload_object, path, data, "application/octet-stream", upsert=True)
         return {
             "upload_id": str(upload_id),
@@ -2484,19 +2541,35 @@ class VireadOcrTrainingService:
                 raise HTTPException(status_code=422, detail="chunks_json must be a valid JSON array")
             if not isinstance(chunks, list) or not chunks:
                 raise HTTPException(status_code=422, detail="Chunks list cannot be empty")
-            if [int(c.get("index", -1)) for c in chunks] != list(range(len(chunks))):
+            if any(not isinstance(c, dict) for c in chunks):
+                raise HTTPException(status_code=422, detail="Chunks list must contain objects")
+            try:
+                chunk_indices = [int(c.get("index", -1)) for c in chunks]
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail="Chunks are incomplete or not contiguous")
+            if chunk_indices != list(range(len(chunks))):
                 raise HTTPException(status_code=422, detail="Chunks are incomplete or not contiguous")
 
-            expected_prefix = f"ocr-training/checkpoints/flow1-manual/{upload_id}/"
+            chunk_path_re = re.compile(
+                rf"^ocr-training/checkpoints/flow1-manual/{re.escape(str(upload_id))}/\d{{4}}-[0-9a-f]{{64}}\.part$"
+            )
+            verified_chunk_paths: list[str] = []
             for c in chunks:
-                if not str(c.get("path", "")).startswith(expected_prefix):
-                    raise HTTPException(status_code=422, detail="Chunk storage path prefix is invalid")
-                newly_uploaded_paths.append(c["path"])
+                raw_chunk_path = c.get("path")
+                if not isinstance(raw_chunk_path, str):
+                    raise HTTPException(status_code=422, detail="Chunk storage path is invalid")
+                try:
+                    clean_chunk_path = validate_logical_path(raw_chunk_path, require_known_category=False)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail="Chunk storage path is invalid") from exc
+                if clean_chunk_path != raw_chunk_path or not chunk_path_re.fullmatch(clean_chunk_path):
+                    raise HTTPException(status_code=422, detail="Chunk storage path is invalid")
+                verified_chunk_paths.append(clean_chunk_path)
+            newly_uploaded_paths.extend(verified_chunk_paths)
 
             aggregate_digest = hashlib.sha256()
             total_bytes = 0
-            for c in chunks:
-                chunk_path = c["path"]
+            for c, chunk_path in zip(chunks, verified_chunk_paths, strict=True):
                 chunk_digest, chunk_bytes = await asyncio.to_thread(hash_storage_object, chunk_path, aggregate_digest)
                 if chunk_bytes != int(c["bytes"]) or chunk_digest != c["sha256"]:
                     raise HTTPException(status_code=422, detail="Checkpoint shard failed integrity verification")
@@ -2988,7 +3061,13 @@ class VireadOcrTrainingService:
         """, {"run_id": run_id})
         if not run or run["status"] not in {"CANDIDATE", "BENCHMARKED"} or not run["checkpoint_storage_path"]:
             raise HTTPException(status_code=404, detail="Retained candidate checkpoint is unavailable")
-        raw = await self._read_artifact_bytes(run["checkpoint_storage_path"])
+        artifact_router = (
+            await self._artifact_router()
+            if is_gdrive_ref(run["checkpoint_storage_path"])
+            else None
+        )
+        await self._release_read_txn()
+        raw = await self._read_artifact_bytes(run["checkpoint_storage_path"], router=artifact_router)
         try:
             manifest = json.loads(raw)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:

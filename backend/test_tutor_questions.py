@@ -528,6 +528,177 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(nxt.completed)
         self.assertEqual(nxt.total, 0)
 
+    def test_release_and_commit_never_read_expired_orm_attributes(self):
+        """Regression for real AsyncSession MissingGreenlet after release()/commit()."""
+
+        class _ExpiringProxy:
+            def __init__(self, target):
+                object.__setattr__(self, "_target", target)
+                object.__setattr__(self, "_expired", False)
+
+            def __getattr__(self, name):
+                if object.__getattribute__(self, "_expired"):
+                    raise RuntimeError(
+                        f"MissingGreenlet simulated: accessed expired attribute {name!r}"
+                    )
+                return getattr(object.__getattribute__(self, "_target"), name)
+
+            def __setattr__(self, name, value):
+                setattr(object.__getattribute__(self, "_target"), name, value)
+
+        class ExpiringRepository(FakeRepository):
+            def __init__(self):
+                super().__init__()
+                self._proxies = []
+
+            def _wrap(self, obj):
+                if obj is None:
+                    return None
+                proxy = _ExpiringProxy(obj)
+                self._proxies.append(proxy)
+                return proxy
+
+            def _expire_all(self):
+                for proxy in self._proxies:
+                    object.__setattr__(proxy, "_expired", True)
+
+            async def owned_session(self, session_id, parent_id):
+                return self._wrap(await super().owned_session(session_id, parent_id))
+
+            async def owned_session_for_update(self, session_id, parent_id):
+                return self._wrap(await super().owned_session_for_update(session_id, parent_id))
+
+            async def questions(self, session_id):
+                return [self._wrap(q) for q in await super().questions(session_id)]
+
+            async def question(self, session_id, question_id):
+                return self._wrap(await super().question(session_id, question_id))
+
+            question_for_update = question
+
+            async def answers(self, question_ids):
+                return [self._wrap(a) for a in await super().answers(question_ids)]
+
+            def add_answer(self, answer):
+                super().add_answer(answer)
+
+            async def commit(self):
+                await super().commit()
+                self._expire_all()
+
+            async def release(self):
+                await super().release()
+                self._expire_all()
+
+            async def refresh(self, instance):
+                self._expire_all()
+                return None
+
+        repo = ExpiringRepository()
+        service = make_service(repo)
+        q_id = uuid4()
+        repo.question_rows.append(
+            ComprehensionQuestion(
+                Id=q_id,
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="Chú mèo thích nằm ở đâu?",
+                ExpectedAnswer="Bên cửa sổ",
+                AcceptedAnswers=["bên cửa sổ"],
+                SourceSpan={
+                    "start_word_index": 7,
+                    "end_word_index_exclusive": 14,
+                    "sentence_index": None,
+                    "choices": ["Bên cửa sổ", "Trên mái nhà", "Dưới gầm bàn"],
+                    "generation": {"source": "RULE_BASED"},
+                },
+                Difficulty="EASY",
+            )
+        )
+
+        generated = run(service.generate_for_session(repo.session.Id, PARENT_ID))
+        self.assertFalse(generated.created)
+        self.assertEqual(generated.total, 1)
+
+        wrong_first = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        self.assertFalse(wrong_first.is_correct)
+        self.assertEqual(wrong_first.question_id, q_id)
+
+        wrong_dup = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "trên mái nhà"))
+        self.assertEqual(wrong_dup.answer_id, wrong_first.answer_id)
+
+        right = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Bên cửa sổ"))
+        self.assertTrue(right.is_correct)
+        right_dup = run(service.submit_answer(repo.session.Id, q_id, PARENT_ID, "Trên mái nhà"))
+        self.assertTrue(right_dup.is_correct)
+        self.assertEqual(right_dup.answer_id, right.answer_id)
+
+    def test_story_hint_masks_single_char_kinship_accepted_answers_and_uses_token_anti_leak(self):
+        class TokenRepo(FakeRepository):
+            def __init__(self, tokens):
+                super().__init__()
+                self._tokens = tokens
+
+            async def revision_word_texts(self, revision_id):
+                return list(self._tokens)
+
+        cases = [
+            (
+                ["Bé", "cầm", "cái", "ô", "màu", "đỏ", "đi", "học."],
+                "Chiếc ô",
+                ["chiếc ô"],
+                {"start_word_index": 2, "end_word_index_exclusive": 4},
+                lambda h: h is not None and "…" in h and " ô " not in f" {normalize_text(h)} ",
+            ),
+            (
+                ["Hôm", "nay", "bà", "kể", "chuyện", "cho", "bé", "nghe."],
+                "Bà",
+                ["bà"],
+                {"start_word_index": 2, "end_word_index_exclusive": 3},
+                lambda h: h is not None and "…" in h and " bà " not in f" {normalize_text(h)} ",
+            ),
+            (
+                ["Mèo", "mướp", "trèo", "lên", "cây", "cau", "cao."],
+                "Mèo mướp",
+                ["mèo mướp", "cây cau"],
+                {"start_word_index": 0, "end_word_index_exclusive": 2},
+                lambda h: h is not None and "cây" not in normalize_text(h) and "cau" not in normalize_text(h),
+            ),
+            (
+                ["Bé", "nhìn", "thấy", "con", "cò", "trắng", "bay", "qua."],
+                "Con cò",
+                ["con cò", "con"],
+                {"start_word_index": 3, "end_word_index_exclusive": 5},
+                lambda h: h is not None and "trắng bay qua" in h,
+            ),
+            (
+                ["Cô", "giáo", "tặng", "bé", "cái", "ô", "xanh."],
+                "ô",
+                ["ô"],
+                {"start_word_index": 5, "end_word_index_exclusive": 6},
+                lambda h: h is not None and "Cô giáo" in h and "…" in h,
+            ),
+        ]
+        for tokens, exp, acc, span, check in cases:
+            repo = TokenRepo(tokens)
+            service = make_service(repo)
+            q = ComprehensionQuestion(
+                Id=uuid4(),
+                SessionId=repo.session.Id,
+                PageId=repo.page.page_id,
+                PageRevisionId=repo.page.revision_id,
+                Type="FACTUAL",
+                Prompt="p",
+                ExpectedAnswer=exp,
+                AcceptedAnswers=acc,
+                SourceSpan=span,
+                Difficulty="EASY",
+            )
+            hint = run(service._build_story_hint(q))
+            self.assertTrue(check(hint), f"Failed for {exp!r}: got {hint!r}")
+
 
 class RouteTests(unittest.TestCase):
     def client(self, authenticated=True):

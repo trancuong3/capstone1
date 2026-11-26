@@ -706,7 +706,7 @@ async def _process(event: dict[str, Any]) -> None:
     if not image_path:
         raise ValueError("verified revision page has no source image path")
     image_bytes = await asyncio.to_thread(download_object, image_path)
-    crops = _line_crops(image_bytes, words)
+    crops = await asyncio.to_thread(_line_crops, image_bytes, words)
     if not crops:
         raise ValueError("verified revision contains no usable line crops")
 
@@ -1235,6 +1235,17 @@ async def run_once() -> bool:
             expected_attempts=attempts,
             error_code=exc.code[:64],
         )
+    except asyncio.CancelledError:
+        try:
+            await asyncio.shield(
+                asyncio.wait_for(
+                    _release_claim_on_cancel(event["id"], expected_attempts=attempts),
+                    timeout=3.0,
+                )
+            )
+        except Exception:
+            pass
+        raise
     except OutboxLeaseLost:
         await _release_claim_on_cancel(event["id"], expected_attempts=attempts)
     except Exception as exc:

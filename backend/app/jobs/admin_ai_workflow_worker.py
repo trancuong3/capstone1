@@ -132,10 +132,23 @@ async def _progress_loop(
             return
         if update is not None:
             latest = update
-        async with AsyncSessionLocal() as session:
-            updated = await AdminAiWorkflowRepository(session).update_progress(
-                workflow_id, worker_id, latest[0], latest[1], lease_seconds=LEASE_SECONDS
+        try:
+            async with AsyncSessionLocal() as session:
+                updated = await AdminAiWorkflowRepository(session).update_progress(
+                    workflow_id, worker_id, latest[0], latest[1], lease_seconds=LEASE_SECONDS
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ai_workflow_progress_heartbeat_failed",
+                stage="heartbeat",
+                workflow_id=str(workflow_id),
+                error_code=type(exc).__name__.upper(),
             )
+            continue
         if not updated:
             return
         # A timeout is a lease heartbeat; non-empty updates persist real chunk progress.
@@ -518,11 +531,12 @@ async def _fail(
 
 
 async def _process(workflow_id: UUID, worker_id: str) -> None:
-    snapshot = await _load(workflow_id)
-    if snapshot is None or snapshot.get("worker_id") != worker_id:
-        return
-    stage = str(snapshot["stage"])
+    stage = "UNKNOWN"
     try:
+        snapshot = await _load(workflow_id)
+        if snapshot is None or snapshot.get("worker_id") != worker_id:
+            return
+        stage = str(snapshot["stage"])
         if stage == "PROOFREADING":
             await _run_proofreading(snapshot, worker_id)
         elif stage == "CHILD_SAFETY_SCANNING":
@@ -555,7 +569,53 @@ async def _process(workflow_id: UUID, worker_id: str) -> None:
             f"HTTP_{exc.status_code}",
         )
     except Exception as exc:
+        if stage == "UNKNOWN":
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ai_workflow_load_failed",
+                stage="workflow_load",
+                workflow_id=str(workflow_id),
+                error_code=type(exc).__name__.upper(),
+            )
+            try:
+                async with AsyncSessionLocal() as session:
+                    await AdminAiWorkflowRepository(session).release_claim(
+                        workflow_id, worker_id
+                    )
+            except Exception as release_exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="admin_ai_workflow_claim_release_failed",
+                    workflow_id=str(workflow_id),
+                    stage=stage,
+                    error_code=type(release_exc).__name__.upper(),
+                )
+            return
         await _fail(workflow_id, worker_id, stage, type(exc).__name__.upper())
+
+
+def _reap_done_tasks(tasks: set[asyncio.Task[None]]) -> set[asyncio.Task[None]]:
+    remaining: set[asyncio.Task[None]] = set()
+    for task in tasks:
+        if not task.done():
+            remaining.add(task)
+            continue
+        if task.cancelled():
+            continue
+        exc = task.exception()
+        if exc is not None:
+            record_worker_error("admin_ai_workflow", exc)
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ai_workflow_task_failed",
+                stage="worker_loop",
+                task_name=task.get_name(),
+                error_code=type(exc).__name__.upper(),
+            )
+    return remaining
 
 
 async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: int = POLL_SECONDS) -> None:
@@ -578,14 +638,15 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
     active: set[asyncio.Task[None]] = set()
     try:
         while not stop.is_set() or active:
-            active = {task for task in active if not task.done()}
+            active = _reap_done_tasks(active)
             if stop.is_set() or len(active) >= capacity:
                 if active:
-                    _done, pending = await asyncio.wait(
+                    done, pending = await asyncio.wait(
                         active,
                         timeout=poll_seconds,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
+                    _reap_done_tasks(set(done))
                     active = set(pending)
                 continue
             workflow_id = None
@@ -612,11 +673,13 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
                 ))
                 continue
             if active:
-                await asyncio.wait(
+                done, pending = await asyncio.wait(
                     active,
                     timeout=poll_seconds,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                _reap_done_tasks(set(done))
+                active = set(pending)
             else:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=poll_seconds)

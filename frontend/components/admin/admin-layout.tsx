@@ -14,6 +14,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { clearAdminBookAiBatchSessions } from "@/components/admin/admin-book-ai-batch-review";
 import { Button, ButtonSizeContext } from "@/components/common/button";
 import { ViReadLogo } from "@/components/common/viread-logo";
 import {
@@ -23,6 +24,8 @@ import {
 } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
 
@@ -72,7 +75,10 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     setHasSignOutError(false);
     setIsSigningOut(true);
     try {
+      clearAdminBookAiBatchSessions();
+      clearPrivateMediaMemoryCache();
       clearUserCache();
+      resetApiReadCacheForActorSwitch();
       await auth.signOut();
       router.replace("/admin/login");
       router.refresh();

@@ -680,7 +680,16 @@
     height: auto;
     min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 8px 16px 14px;
+  }
+}
+
+@media (max-height: 440px) {
+  .reader-bookplate,
+  .reader-sheet:not([data-render-mode="image-overlay"]) .reader-bookplate,
+  .reader-sheet[data-render-mode="image-overlay"] .reader-bookplate {
+    display: none;
   }
 }
 

@@ -136,6 +136,11 @@ class VoiceOrchestrator:
         self.local = local_provider or LocalVoiceProvider()
         self.google = google_provider or GoogleCloudVoiceProvider()
 
+    async def aclose(self) -> None:
+        aclose = getattr(self.local, "aclose", None)
+        if callable(aclose):
+            await aclose()
+
     async def get_status(self) -> dict[str, Any]:
         local_health = await self.local.get_health()
         is_configured = (
@@ -383,7 +388,9 @@ class VoiceOrchestrator:
             audio = await self.google.synthesize(
                 text=text, voice_id=backup_voice_id, speed=speed
             )
-            fallback_audio = replace(audio, used_fallback_voice=True)
+            fallback_audio = replace(
+                audio, used_fallback_voice=True, fallback_reason=local_err.code
+            )
             logger.info(
                 "tts_ok provider=google fallback=1 reason=%s voice=%s ms=%.1f session=- request_id=%s",
                 local_err.code,
@@ -584,7 +591,9 @@ class VoiceOrchestrator:
                 timed.resolved_voice_id,
                 get_request_id(),
             )
-            return replace(timed, used_fallback_voice=True)
+            return replace(
+                timed, used_fallback_voice=True, fallback_reason=local_err.code
+            )
 
     async def synthesize_phonics(
         self,
@@ -726,7 +735,9 @@ class VoiceOrchestrator:
                 phonics.resolved_voice_id,
                 get_request_id(),
             )
-            return phonics
+            return replace(
+                phonics, used_fallback_voice=True, fallback_reason=local_err.code
+            )
 
     async def transcribe(
         self,
@@ -779,13 +790,16 @@ class VoiceOrchestrator:
             if fut is not None and not fut.done():
                 fut.set_result(result)
             return result
-        except Exception as exc:
+        except BaseException as exc:
             if fut is not None and not fut.done():
-                fut.set_exception(exc)
-                _ = fut.exception()
+                if isinstance(exc, asyncio.CancelledError):
+                    fut.cancel()
+                else:
+                    fut.set_exception(exc)
+                    _ = fut.exception()
             raise
         finally:
-            if dedup_key is not None:
+            if dedup_key is not None and _turn_inflight.get(dedup_key) is fut:
                 _turn_inflight.pop(dedup_key, None)
 
     async def _transcribe_once(

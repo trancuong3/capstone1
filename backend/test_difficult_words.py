@@ -1075,6 +1075,56 @@ class ReadingComparisonSelfCorrectedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mot_entry.consecutive_correct_count, 1)
         self.assertEqual(mot_entry.sources[0].context_phrase, "Bé có một bông hoa.")
 
+    def test_display_text_strips_edge_punctuation_preserving_vietnamese_tones_and_d(self):
+        from app.services.difficult_words_service import (
+            _WordAccumulator,
+            clean_difficult_word_display_text,
+        )
+
+        self.assertEqual(clean_difficult_word_display_text('“mưa.”'), "mưa")
+        self.assertEqual(clean_difficult_word_display_text("Đường!"), "Đường")
+        self.assertEqual(clean_difficult_word_display_text("?đồng,"), "đồng")
+        self.assertEqual(clean_difficult_word_display_text("  'trời;'  "), "trời")
+
+        acc = _WordAccumulator(normalized_word="đường")
+        acc.observe(display_text="“Đường!”", seen_at=NOW)
+        self.assertEqual(acc.display_counter.most_common(1)[0][0], "Đường")
+
+    async def test_start_practice_attempt_and_history_sanitize_display_text(self):
+        repo = InMemoryPracticeRepo()
+        service = DifficultWordsService(repo, make_access())
+        attempt = await service.start_attempt(
+            CHILD_A,
+            ACTOR,
+            DifficultWordPracticeStartRequest(
+                normalized_word="đường",
+                display_text="“Đường,”",
+                request_id=uuid4(),
+            ),
+        )
+        self.assertEqual(attempt.display_text, "Đường")
+
+        repo.attempts.append(
+            DifficultWordPracticeAttempt(
+                Id=uuid4(),
+                ChildId=CHILD_A,
+                ParentId=ACTOR,
+                NormalizedWord="mèo",
+                DisplayText="“Mèo.”",
+                AttemptNumber=1,
+                State="COMPLETED",
+                AssessmentStatus="CORRECT",
+                RecognitionSource="BROWSER_SPEECH",
+                AssessmentVersion=1,
+                StartedAt=NOW,
+                CompletedAt=NOW,
+            )
+        )
+        history = await service.practice_history(CHILD_A, ACTOR)
+        display_by_norm = {item.normalized_word: item.display_text for item in history.items}
+        self.assertEqual(display_by_norm["đường"], "Đường")
+        self.assertEqual(display_by_norm["mèo"], "Mèo")
+
 
 if __name__ == "__main__":
     unittest.main()

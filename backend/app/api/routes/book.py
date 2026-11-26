@@ -1,13 +1,18 @@
 """HTTP routes for books, parent catalog, and admin catalog reads."""
 from __future__ import annotations
 
-from typing import List, Literal
+import asyncio
+import inspect
+from typing import Any, List, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_parent_id, get_db
+from app.api.deps import get_current_parent_id, get_db, require_active_profile_id
+from app.database.role_cache import get_cached_profile_role
 from app.schemas import BookCreate, BookPageResponse, BookResponse
 from app.schemas.book import (
     AdminBookMetadataResponse,
@@ -20,6 +25,7 @@ from app.schemas.book import (
     AdminRevisionSummaryRead,
     CatalogBookResponse,
     CatalogPagePreviewResponse,
+    PublicBookResponse,
 )
 from app.repositories.metadata_quality_repository import MetadataQualityRepository
 from app.repositories.admin_book_repository import AdminBookRepository
@@ -57,9 +63,66 @@ async def get_admin_metadata_quality(
     )
 
 
-@router.get("/", response_model=List[BookResponse])
+async def _verify_optional_active_actor(
+    request: Request,
+    db: AsyncSession,
+) -> UUID | None:
+    """Cryptographically verify optional Bearer JWT + active profile before minting signed URLs.
+
+    Unauthenticated requests (no Authorization header) return None so public catalog
+    metadata stays available without minting Storage signed URLs. Any supplied
+    Authorization header MUST verify to an active parent/admin profile or fail closed.
+    """
+    auth_header = (request.headers.get("authorization") or "").strip()
+    if not auth_header:
+        return None
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+    token = auth_header[7:].strip()
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+    overrides = getattr(getattr(request, "app", None), "dependency_overrides", None) or {}
+    override = overrides.get(require_active_profile_id) or overrides.get(get_current_parent_id)
+    if override is not None:
+        sig = inspect.signature(override)
+        override_kwargs: dict[str, Any] = {}
+        for param_name, param in sig.parameters.items():
+            if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                continue
+            if param_name == "credentials":
+                override_kwargs[param_name] = credentials
+            elif param_name == "db":
+                override_kwargs[param_name] = db
+            elif param_name == "request":
+                override_kwargs[param_name] = request
+        result = override(**override_kwargs)
+        actor_id = await result if inspect.isawaitable(result) else result
+        actor_uuid = actor_id if isinstance(actor_id, UUID) else UUID(str(actor_id))
+        if require_active_profile_id in overrides:
+            return actor_uuid
+    else:
+        actor_uuid = await asyncio.to_thread(get_current_parent_id, credentials)
+
+    role = await get_cached_profile_role(db, actor_uuid)
+    if role not in ("parent", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or unavailable",
+        )
+    return actor_uuid
+
+
+@router.get("/", response_model=List[PublicBookResponse])
 async def get_books(db: AsyncSession = Depends(get_db)):
-    """Return all books through the service/repository flow."""
+    """Return eligible catalog books without exposing internal admin creator IDs."""
     return await BookService(db).list_books()
 
 
@@ -79,37 +142,79 @@ async def get_book_pages(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the pages for an eligible catalog book without leaking raw internal paths."""
-    from urllib.parse import urlsplit
-    from app.services.storage_service import create_signed_image_url
+    """Return pages for an eligible catalog book; mint signed URLs only for verified active users."""
+    from app.services.storage_service import create_signed_image_urls
 
+    verified_actor_id = await _verify_optional_active_actor(request, db)
     pages = await BookService(db).list_pages(book_id)
-    has_bearer = bool((request.headers.get("authorization") or "").strip())
+
+    # Snapshot scalar page fields and release the DB read transaction before Storage I/O.
+    page_snapshots = [
+        (
+            page.Id,
+            page.BookId,
+            page.PageNumber,
+            str(getattr(page, "ImagePath", "") or "").strip(),
+            page.Width,
+            page.Height,
+            page.LifecycleStatus,
+            page.CurrentVerifiedRevisionId,
+            page.CreatedAt,
+        )
+        for page in pages
+    ]
+    if hasattr(db, "rollback") and inspect.iscoroutinefunction(db.rollback):
+        await db.rollback()
+
+    signed_by_path: dict[str, str] = {}
+    if verified_actor_id is not None:
+        raw_paths_to_sign: list[str] = []
+        for _, _, _, raw_image_path, *_ in page_snapshots:
+            if not raw_image_path or "://" in raw_image_path:
+                continue
+            if raw_image_path not in raw_paths_to_sign:
+                raw_paths_to_sign.append(raw_image_path)
+        if raw_paths_to_sign:
+            try:
+                signed_urls = await asyncio.to_thread(
+                    create_signed_image_urls,
+                    raw_paths_to_sign,
+                )
+                signed_by_path = dict(zip(raw_paths_to_sign, signed_urls))
+            except Exception:
+                signed_by_path = {}
+
     sanitized: list[BookPageResponse] = []
-    for page in pages:
-        raw_image_path = str(getattr(page, "ImagePath", "") or "").strip()
+    for (
+        page_id,
+        row_book_id,
+        page_number,
+        raw_image_path,
+        width,
+        height,
+        lifecycle_status,
+        verified_rev_id,
+        created_at,
+    ) in page_snapshots:
         safe_image_url = ""
         parsed = urlsplit(raw_image_path)
         if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
             safe_image_url = raw_image_path
-        elif has_bearer and raw_image_path and "://" not in raw_image_path:
-            try:
-                safe_image_url = create_signed_image_url(raw_image_path) or ""
-            except Exception:
-                safe_image_url = ""
+        elif verified_actor_id is not None and raw_image_path in signed_by_path:
+            safe_image_url = signed_by_path[raw_image_path] or ""
         sanitized.append(
             BookPageResponse(
-                Id=page.Id,
-                BookId=page.BookId,
-                PageNumber=page.PageNumber,
+                Id=page_id,
+                BookId=row_book_id,
+                PageNumber=page_number,
                 ImagePath=safe_image_url,
-                Width=page.Width,
-                Height=page.Height,
+                Width=width,
+                Height=height,
                 FeaturePath=None,
                 ProcessingMeta={},
-                LifecycleStatus=page.LifecycleStatus,
-                CurrentVerifiedRevisionId=page.CurrentVerifiedRevisionId,
-                CreatedAt=page.CreatedAt,
+                LifecycleStatus=lifecycle_status,
+                CurrentVerifiedRevisionId=verified_rev_id,
+                CreatedAt=created_at,
             )
         )
     return sanitized

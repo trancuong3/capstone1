@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 from datetime import datetime, timezone
 
 from app.database.config import READING_PRESENCE_POLL_SECONDS, SUPABASE_ADMIN_KEY
@@ -60,14 +61,28 @@ def validate_worker_configuration() -> None:
         )
 
 
-async def run_worker(*, once: bool = False) -> int:
+async def run_worker(
+    *, once: bool = False, stop_event: asyncio.Event | None = None
+) -> int:
     validate_worker_configuration()
+    effective_stop = stop_event if stop_event is not None else asyncio.Event()
+    if stop_event is None:
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, effective_stop.set)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
     try:
         if once:
+            if effective_stop.is_set():
+                return 0
             return await process_due_alerts_once()
-        while True:
+        while not effective_stop.is_set():
             try:
                 await process_due_alerts_once()
+            except asyncio.CancelledError:
+                raise
             except Exception as error:
                 record_worker_error(_WORKER_KEY, error)
                 log_diagnostic(
@@ -77,7 +92,17 @@ async def run_worker(*, once: bool = False) -> int:
                     stage="scheduler",
                     exception=error,
                 )
-            await asyncio.sleep(READING_PRESENCE_POLL_SECONDS)
+            if effective_stop.is_set():
+                break
+            try:
+                await asyncio.wait_for(
+                    effective_stop.wait(),
+                    timeout=READING_PRESENCE_POLL_SECONDS,
+                )
+                break
+            except TimeoutError:
+                pass
+        return 0
     finally:
         await engine.dispose()
 

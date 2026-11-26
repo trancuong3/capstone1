@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import os
+import time
 import unicodedata
 from typing import Annotated, Any
 from uuid import UUID
@@ -31,6 +32,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db, require_active_profile_id
+from app.database.config import CORS_ALLOWED_ORIGINS
 from app.database.role_cache import get_cached_profile_role
 from app.database.session import AsyncSessionLocal
 from app.providers.elevenlabs_voice_provider import VoiceProviderError
@@ -93,12 +95,52 @@ def _resolve_audio_content_type(raw_content_type: str | None, filename: str) -> 
     return "audio/webm"
 
 
+def _has_valid_audio_magic(audio: bytes) -> bool:
+    """Inspect magic bytes for supported audio containers when Content-Type is absent."""
+    if not audio or len(audio) < 4:
+        return False
+    # WAV (RIFF....WAVE)
+    if len(audio) >= 12 and audio[:4] == b"RIFF" and audio[8:12] == b"WAVE":
+        return True
+    # WebM / Matroska EBML header
+    if audio[:4] == b"\x1a\x45\xdf\xa3":
+        return True
+    # Ogg / Opus / Vorbis
+    if audio[:4] == b"OggS":
+        return True
+    # FLAC
+    if audio[:4] == b"fLaC":
+        return True
+    # MP3 with ID3 tag or MPEG / ADTS frame sync (0xFFE0 mask)
+    if audio[:3] == b"ID3":
+        return True
+    if audio[0] == 0xFF and (audio[1] & 0xE0) == 0xE0:
+        return True
+    # MP4 / M4A ISO Base Media (`....ftyp`)
+    if len(audio) >= 12 and audio[4:8] == b"ftyp":
+        return True
+    return False
+
+
 _DEFAULT_ORCHESTRATORS: dict[tuple[str, str, str, str], VoiceOrchestrator] = {}
 
 
 def clear_default_voice_orchestrators() -> None:
     """Reset pooled VoiceOrchestrator instances (used by tests)."""
     _DEFAULT_ORCHESTRATORS.clear()
+
+
+async def close_default_voice_orchestrators() -> None:
+    """Close and clear all cached VoiceOrchestrator HTTP pools on lifespan shutdown."""
+    cached = list(_DEFAULT_ORCHESTRATORS.values())
+    _DEFAULT_ORCHESTRATORS.clear()
+    for orch in cached:
+        aclose = getattr(orch, "aclose", None)
+        if callable(aclose):
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 
 def get_voice_orchestrator() -> VoiceOrchestrator:
@@ -280,6 +322,9 @@ async def text_to_speech(
         "X-Voice-Model-Version": audio.model_version,
         "X-Voice-Fallback": "1" if audio.used_fallback_voice else "0",
     }
+    fallback_reason = getattr(audio, "fallback_reason", None)
+    if audio.used_fallback_voice and fallback_reason:
+        headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
     return Response(
         content=audio.content,
         media_type=audio.content_type,
@@ -335,6 +380,9 @@ async def phonics_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    fallback_reason = getattr(speech, "fallback_reason", None)
+    if getattr(speech, "used_fallback_voice", False) and fallback_reason:
+        response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
 
     return PhonicsSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),
@@ -405,6 +453,11 @@ async def speech_to_text(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail={"code": "AUDIO_TOO_LARGE"},
         )
+    if not file.content_type and not _has_valid_audio_magic(audio):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail={"code": "UNSUPPORTED_AUDIO"},
+        )
 
     content_type = _resolve_audio_content_type(file.content_type, filename)
 
@@ -463,10 +516,6 @@ def _extract_ws_handshake_auth(websocket: WebSocket) -> tuple[str | None, str | 
             continue
         if proto == "viread-stt-v1":
             accepted_subprotocol = "viread-stt-v1"
-        elif proto.startswith("bearer.") and token is None:
-            candidate = proto[len("bearer.") :].strip()
-            if candidate:
-                token = candidate
 
     return token, accepted_subprotocol
 
@@ -520,9 +569,46 @@ def open_local_stt_ws(url: str, headers: dict[str, str]):
     )
 
 
+_WS_MAX_TEXT_BYTES = 64 * 1024
+_WS_MAX_BINARY_BYTES = 1 * 1024 * 1024
+_WS_DEFAULT_MAX_SESSION_SECONDS = 300.0
+_WS_DEFAULT_IDLE_TIMEOUT_SECONDS = 60.0
+
+
+def _ws_max_session_seconds() -> float:
+    raw = (os.getenv("VIREAD_STT_WS_MAX_SESSION_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(1.0, float(raw))
+        except ValueError:
+            pass
+    return _WS_DEFAULT_MAX_SESSION_SECONDS
+
+
+def _ws_idle_timeout_seconds() -> float:
+    raw = (os.getenv("VIREAD_STT_WS_IDLE_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(0.5, float(raw))
+        except ValueError:
+            pass
+    return _WS_DEFAULT_IDLE_TIMEOUT_SECONDS
+
+
+def _is_ws_origin_allowed(websocket: WebSocket) -> bool:
+    """Validate browser Origin header against CORS_ALLOWED_ORIGINS when present."""
+    origin = (websocket.headers.get("origin") or "").strip()
+    if not origin:
+        return True
+    return origin in CORS_ALLOWED_ORIGINS
+
+
 @router.websocket("/stt-stream")
 async def speech_to_text_stream(websocket: WebSocket) -> None:
     """Authenticated WebSocket proxy to the local streaming STT worker (zero audio/text logs)."""
+    if not _is_ws_origin_allowed(websocket):
+        raise WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+
     handshake_token, accepted_subprotocol = _extract_ws_handshake_auth(websocket)
     has_override = (
         require_active_profile_id in websocket.app.dependency_overrides
@@ -540,17 +626,33 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
         await websocket.accept(subprotocol=accepted_subprotocol)
         try:
             raw_first = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+            if len(raw_first.encode("utf-8")) > _WS_MAX_TEXT_BYTES:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "MESSAGE_TOO_LARGE",
+                        "message": "WebSocket control message exceeds maximum allowed size.",
+                        "retryable": False,
+                    }
+                )
+                await websocket.close(code=1009)
+                return
             first_msg = json.loads(raw_first)
+        except WebSocketDisconnect:
+            return
         except Exception:
-            await websocket.send_json(
-                {
-                    "type": "error",
-                    "code": "UNAUTHORIZED",
-                    "message": "Authentication required",
-                    "retryable": False,
-                }
-            )
-            await websocket.close(code=4401)
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "UNAUTHORIZED",
+                        "message": "Authentication required",
+                        "retryable": False,
+                    }
+                )
+                await websocket.close(code=4401)
+            except Exception:
+                pass
             return
 
         if not isinstance(first_msg, dict):
@@ -601,6 +703,10 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
     orchestrator = get_voice_orchestrator()
     worker_ws_url = orchestrator.local.get_ws_stt_url()
     worker_headers = orchestrator.local.get_ws_auth_headers()
+    max_session_s = _ws_max_session_seconds()
+    idle_timeout_s = _ws_idle_timeout_seconds()
+    session_deadline = time.monotonic() + max_session_s
+    close_code = 1000
 
     try:
         async with open_local_stt_ws(worker_ws_url, worker_headers) as worker_ws:
@@ -608,26 +714,122 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
                 await worker_ws.send(json.dumps(pending_start_payload, ensure_ascii=False))
 
             async def _pump_client_to_worker() -> None:
+                nonlocal close_code
                 while True:
-                    message = await websocket.receive()
+                    remaining_session = session_deadline - time.monotonic()
+                    if remaining_session <= 0:
+                        close_code = 4408
+                        try:
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "SESSION_TIMEOUT",
+                                    "message": "Streaming session reached maximum allowed duration.",
+                                    "retryable": True,
+                                }
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            await worker_ws.send(json.dumps({"type": "stop"}))
+                        except Exception:
+                            pass
+                        break
+
+                    wait_budget = min(idle_timeout_s, remaining_session)
+                    try:
+                        message = await asyncio.wait_for(
+                            websocket.receive(), timeout=wait_budget
+                        )
+                    except asyncio.TimeoutError:
+                        timed_out_session = (session_deadline - time.monotonic()) <= 0
+                        close_code = 4408
+                        try:
+                            await websocket.send_json(
+                                {
+                                    "type": "error",
+                                    "code": "SESSION_TIMEOUT" if timed_out_session else "IDLE_TIMEOUT",
+                                    "message": (
+                                        "Streaming session reached maximum allowed duration."
+                                        if timed_out_session
+                                        else "Streaming session closed due to inactivity."
+                                    ),
+                                    "retryable": True,
+                                }
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            await worker_ws.send(json.dumps({"type": "stop"}))
+                        except Exception:
+                            pass
+                        break
+
                     msg_type = message.get("type")
                     if msg_type == "websocket.disconnect":
+                        try:
+                            await worker_ws.send(json.dumps({"type": "stop"}))
+                        except Exception:
+                            pass
                         break
                     raw_bytes = message.get("bytes")
                     if raw_bytes is not None:
+                        if len(raw_bytes) > _WS_MAX_BINARY_BYTES:
+                            close_code = 1009
+                            try:
+                                await websocket.send_json(
+                                    {
+                                        "type": "error",
+                                        "code": "MESSAGE_TOO_LARGE",
+                                        "message": "Audio frame exceeds maximum allowed size.",
+                                        "retryable": False,
+                                    }
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                await worker_ws.send(json.dumps({"type": "stop"}))
+                            except Exception:
+                                pass
+                            break
                         await worker_ws.send(raw_bytes)
                         continue
                     raw_text = message.get("text")
                     if raw_text is not None:
+                        if len(raw_text.encode("utf-8")) > _WS_MAX_TEXT_BYTES:
+                            close_code = 1009
+                            try:
+                                await websocket.send_json(
+                                    {
+                                        "type": "error",
+                                        "code": "MESSAGE_TOO_LARGE",
+                                        "message": "Control message exceeds maximum allowed size.",
+                                        "retryable": False,
+                                    }
+                                )
+                            except Exception:
+                                pass
+                            try:
+                                await worker_ws.send(json.dumps({"type": "stop"}))
+                            except Exception:
+                                pass
+                            break
                         # Strip any accidental token field before forwarding to local worker.
+                        is_stop = False
                         try:
                             parsed = json.loads(raw_text)
-                            if isinstance(parsed, dict) and "token" in parsed:
-                                parsed = {k: v for k, v in parsed.items() if k != "token"}
-                                raw_text = json.dumps(parsed, ensure_ascii=False)
+                            if isinstance(parsed, dict):
+                                if str(parsed.get("type") or "").strip().lower() == "stop":
+                                    is_stop = True
+                                if "token" in parsed:
+                                    parsed = {k: v for k, v in parsed.items() if k != "token"}
+                                    raw_text = json.dumps(parsed, ensure_ascii=False)
                         except Exception:
                             pass
                         await worker_ws.send(raw_text)
+                        if is_stop:
+                            # Stop reading further client messages so worker_task can drain final frames.
+                            break
 
             async def _pump_worker_to_client() -> None:
                 async for worker_msg in worker_ws:
@@ -643,10 +845,22 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
                     {client_task, worker_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-                for task in _done:
+                # Do NOT prematurely cancel worker_task when client finishes sending ("stop"):
+                # let worker_task drain the final "final" JSON frame cleanly before closing!
+                if client_task in _done and worker_task in pending and close_code == 1000:
+                    try:
+                        await asyncio.wait_for(worker_task, timeout=4.0)
+                    except (asyncio.TimeoutError, WebSocketDisconnect, websockets.exceptions.ConnectionClosed):
+                        pass
+                    except Exception:
+                        pass
+                for task in (client_task, worker_task):
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(client_task, worker_task, return_exceptions=True)
+                for task in (client_task, worker_task):
+                    if task.cancelled():
+                        continue
                     exc = task.exception()
                     if exc is not None and not isinstance(
                         exc, (WebSocketDisconnect, websockets.exceptions.ConnectionClosed)
@@ -678,6 +892,6 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
             pass
     else:
         try:
-            await websocket.close()
+            await websocket.close(code=close_code)
         except Exception:
             pass

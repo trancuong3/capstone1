@@ -67,6 +67,9 @@ describe("admin components", () => {
     );
     const user = userEvent.setup();
     render(withAdminFixture(<AdminLoginScreen scenario="default" />, services));
+    const emailInput = screen.getByLabelText("Email quản trị");
+    expect(emailInput).toHaveValue("");
+    await user.type(emailInput, "admin@example.com");
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -89,6 +92,10 @@ describe("admin components", () => {
         services,
       ),
     );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     await waitFor(() =>
@@ -105,6 +112,10 @@ describe("admin components", () => {
         services,
       ),
     );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     await waitFor(() =>
@@ -118,6 +129,10 @@ describe("admin components", () => {
         <AdminLoginScreen nextPath="//evil.example/admin" scenario="default" />,
         services,
       ),
+    );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
     );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));

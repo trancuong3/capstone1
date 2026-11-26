@@ -416,13 +416,17 @@ class BookStyleBibleService:
         if role not in ("admin", "parent"):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
         book = await self.repo.get_book(book_id)
-        if book is None:
+        if book is None or bool(getattr(book, "IsDeleted", False)):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
         if is_book_private(book):
-            if role == "parent" and book.OwnerParentId != actor_id:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
-            if role != "parent" and role != "admin":
-                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+            if role != "admin":
+                if book.OwnerParentId != actor_id:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found")
+                if book.LifecycleStatus != "ACTIVE" or (book.ModerationStatus or "ACTIVE") != "ACTIVE":
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Sách riêng đang tạm khóa kiểm duyệt hoặc không còn khả dụng.",
+                    )
         else:
             if role != "admin":
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")

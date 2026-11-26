@@ -25,6 +25,8 @@ export function useKaraokePlayer(
   }, []);
   const blocked = useRef(false);
   const playPending = useRef(false);
+  const volumeRef = useRef(0.6);
+  const rateRef = useRef(1);
   const [currentMs, setCurrentMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [ended, setEnded] = useState(false);
@@ -37,9 +39,15 @@ export function useKaraokePlayer(
   const [rate, setRateState] = useState(1);
 
   useEffect(() => {
+    blocked.current = false;
+    playPending.current = false;
+    segmentEnd.current = null;
+    segmentLoop.current = null;
     const audio = new Audio();
     audio.preload = "metadata";
-    audio.volume = 0.6;
+    audio.volume = volumeRef.current;
+    audio.playbackRate = rateRef.current;
+    audio.preservesPitch = true;
     audioRef.current = audio;
     let disposed = false;
     let frame = 0;
@@ -161,6 +169,10 @@ export function useKaraokePlayer(
     audio.load();
     return () => {
       disposed = true;
+      blocked.current = false;
+      playPending.current = false;
+      segmentEnd.current = null;
+      segmentLoop.current = null;
       document.removeEventListener("visibilitychange", onVisibilityChange);
       document.removeEventListener(
         "viread:android-background",
@@ -175,6 +187,14 @@ export function useKaraokePlayer(
       audio.removeAttribute("src");
       audio.load();
       audioRef.current = null;
+      setCurrentMs(0);
+      setPlaying(false);
+      setEnded(false);
+      setSegmentFinished(false);
+      setLoopPass(0);
+      setWaiting(false);
+      setReady(false);
+      setError("");
     };
   }, [url, durationMs, invalidate]);
 
@@ -249,6 +269,7 @@ export function useKaraokePlayer(
   const setVolume = useCallback((value: number) => {
     if (!Number.isFinite(value)) return;
     const next = Math.max(0, Math.min(1, value));
+    volumeRef.current = next;
     if (audioRef.current) audioRef.current.volume = next;
     setVolumeState(next);
   }, []);
@@ -257,6 +278,7 @@ export function useKaraokePlayer(
   }, []);
   const setRate = useCallback((value: number) => {
     if (![0.75, 1].includes(value)) return;
+    rateRef.current = value;
     if (audioRef.current) {
       audioRef.current.playbackRate = value;
       audioRef.current.preservesPitch = true;

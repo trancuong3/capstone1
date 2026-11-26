@@ -45,7 +45,7 @@ vi.mock("@/lib/supabase/config", () => ({
 }));
 
 function installMemoryIndexedDb(): void {
-  const dbs = new Map<string, Map<string, unknown>>();
+  const dbs = new Map<string, Map<string, Map<string, unknown>>>();
   const makeRequest = <T>(run: () => T) => {
     const req: {
       result: T | undefined;
@@ -74,45 +74,58 @@ function installMemoryIndexedDb(): void {
 
   vi.stubGlobal("indexedDB", {
     open: (name: string) => {
-      let storeMap = dbs.get(name);
-      const isNew = !storeMap;
-      if (!storeMap) {
-        storeMap = new Map<string, unknown>();
-        dbs.set(name, storeMap);
+      let stores = dbs.get(name);
+      const isNew = !stores;
+      if (!stores) {
+        stores = new Map<string, Map<string, unknown>>();
+        dbs.set(name, stores);
       }
+      const getStoreMap = (storeName: string) => {
+        let map = stores!.get(storeName);
+        if (!map) {
+          map = new Map<string, unknown>();
+          stores!.set(storeName, map);
+        }
+        return map;
+      };
       const dbObj = {
         objectStoreNames: { contains: () => true },
-        createObjectStore: vi.fn(),
+        createObjectStore: vi.fn((storeName: string) => getStoreMap(storeName)),
         close: vi.fn(),
         transaction: () => {
           const tx: {
             oncomplete: (() => void) | null;
             onerror: (() => void) | null;
-            objectStore: () => Record<string, unknown>;
+            onabort: (() => void) | null;
+            objectStore: (storeName: string) => Record<string, unknown>;
           } = {
             oncomplete: null,
             onerror: null,
-            objectStore: () => ({
-              get: (key: string) => makeRequest(() => storeMap!.get(key)),
-              getAll: () => makeRequest(() => Array.from(storeMap!.values())),
-              put: (value: { key: string }) =>
-                makeRequest(() => {
-                  storeMap!.set(value.key, value);
-                  queueMicrotask(() => tx.oncomplete?.());
-                  return value.key;
-                }),
-              delete: (key: string) =>
-                makeRequest(() => {
-                  storeMap!.delete(key);
-                  return undefined;
-                }),
-              clear: () =>
-                makeRequest(() => {
-                  storeMap!.clear();
-                  queueMicrotask(() => tx.oncomplete?.());
-                  return undefined;
-                }),
-            }),
+            onabort: null,
+            objectStore: (storeName: string) => {
+              const storeMap = getStoreMap(storeName);
+              return {
+                get: (key: string) => makeRequest(() => storeMap.get(key)),
+                getAll: () => makeRequest(() => Array.from(storeMap.values())),
+                put: (value: { key: string }) =>
+                  makeRequest(() => {
+                    storeMap.set(value.key, value);
+                    queueMicrotask(() => tx.oncomplete?.());
+                    return value.key;
+                  }),
+                delete: (key: string) =>
+                  makeRequest(() => {
+                    storeMap.delete(key);
+                    return undefined;
+                  }),
+                clear: () =>
+                  makeRequest(() => {
+                    storeMap.clear();
+                    queueMicrotask(() => tx.oncomplete?.());
+                    return undefined;
+                  }),
+              };
+            },
           };
           return tx;
         },

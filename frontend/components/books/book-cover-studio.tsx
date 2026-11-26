@@ -103,6 +103,14 @@ export function BookCoverStudio({
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [summary, setSummary] = useState<BookAssetsSummaryDTO | null>(null);
   const [loadedBookId, setLoadedBookId] = useState<string | null>(null);
@@ -151,7 +159,11 @@ export function BookCoverStudio({
 
   useEffect(() => {
     return () => {
-      if (stagedPreviewUrl && typeof URL.revokeObjectURL === "function") {
+      if (
+        stagedPreviewUrl &&
+        typeof URL !== "undefined" &&
+        typeof URL.revokeObjectURL === "function"
+      ) {
         URL.revokeObjectURL(stagedPreviewUrl);
       }
     };
@@ -159,12 +171,7 @@ export function BookCoverStudio({
 
   const clearStagedFile = useCallback(() => {
     setStagedFile(null);
-    setStagedPreviewUrl((prev) => {
-      if (prev && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(prev);
-      }
-      return null;
-    });
+    setStagedPreviewUrl(null);
     setRotation(0);
     setCropPreset("FULL");
   }, []);
@@ -178,22 +185,19 @@ export function BookCoverStudio({
 
       try {
         const prepared = await preprocessScanImage(file, { maxLongEdge: 2048 });
+        if (!mountedRef.current) return;
         const readyFile = prepared.file;
         const previewUrl =
           typeof URL !== "undefined" &&
           typeof URL.createObjectURL === "function"
             ? URL.createObjectURL(readyFile)
             : null;
-        setStagedPreviewUrl((prev) => {
-          if (prev && typeof URL.revokeObjectURL === "function") {
-            URL.revokeObjectURL(prev);
-          }
-          return previewUrl;
-        });
+        setStagedPreviewUrl(previewUrl);
         setStagedFile(readyFile);
         setRotation(0);
         setCropPreset("FULL");
       } catch {
+        if (!mountedRef.current) return;
         setNotice({
           tone: "error",
           message:

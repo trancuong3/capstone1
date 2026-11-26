@@ -8,6 +8,7 @@ Never logs audio bytes, child transcripts, or secret values.
 from __future__ import annotations
 
 import base64
+import binascii
 import io
 import os
 import struct
@@ -304,8 +305,17 @@ class GoogleCloudVoiceProvider:
                 status_code=502, code="GOOGLE_STT_REJECTED"
             )
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+        except (ValueError, TypeError) as exc:
+            raise VoiceProviderError(
+                status_code=502, code="GOOGLE_STT_INVALID_RESPONSE"
+            ) from exc
         results = payload.get("results") or []
+        if not isinstance(results, list):
+            results = []
         transcript_parts: list[str] = []
         words_out: list[dict[str, Any]] = []
         confidences: list[float] = []
@@ -415,8 +425,22 @@ class GoogleCloudVoiceProvider:
         if resp.status_code >= 400:
             raise VoiceProviderError(status_code=502, code="GOOGLE_TTS_REJECTED")
 
-        audio_b64 = resp.json().get("audioContent") or ""
-        wav_bytes = base64.b64decode(audio_b64)
+        try:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+            audio_b64 = payload.get("audioContent") or ""
+            if not isinstance(audio_b64, str) or not audio_b64:
+                raise VoiceProviderError(
+                    status_code=502, code="GOOGLE_TTS_EMPTY_AUDIO"
+                )
+            wav_bytes = base64.b64decode(audio_b64, validate=True)
+        except VoiceProviderError:
+            raise
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise VoiceProviderError(
+                status_code=502, code="GOOGLE_TTS_INVALID_RESPONSE"
+            ) from exc
         if not wav_bytes:
             raise VoiceProviderError(
                 status_code=502, code="GOOGLE_TTS_EMPTY_AUDIO"
@@ -453,7 +477,12 @@ class GoogleCloudVoiceProvider:
         wav_bytes, meta = await self._synthesize_wav_raw(
             text=" ".join(words), voice_id=voice_id, speed=speed
         )
-        duration, _, _ = _wav_duration_and_pcm(wav_bytes)
+        try:
+            duration, _, _ = _wav_duration_and_pcm(wav_bytes)
+        except (wave.Error, EOFError, struct.error, ValueError) as exc:
+            raise VoiceProviderError(
+                status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
+            ) from exc
         duration = max(0.05, round(duration, 3))
         weights = [max(1, len(w)) for w in words]
         total = float(sum(weights))
@@ -500,7 +529,12 @@ class GoogleCloudVoiceProvider:
             wav_bytes, _ = await self._synthesize_wav_raw(
                 text=str(step["spoken_text"]), voice_id=voice_id, speed=speed
             )
-            _, step_sr, pcm = _wav_duration_and_pcm(wav_bytes)
+            try:
+                _, step_sr, pcm = _wav_duration_and_pcm(wav_bytes)
+            except (wave.Error, EOFError, struct.error, ValueError) as exc:
+                raise VoiceProviderError(
+                    status_code=502, code="GOOGLE_TTS_INVALID_AUDIO"
+                ) from exc
             sr = step_sr
             step_samples = len(pcm) // 2
             start_s = round(cursor_samples / sr, 3)

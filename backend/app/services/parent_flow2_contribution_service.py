@@ -175,97 +175,103 @@ def extract_line_crops_with_boxes(
     with Image.open(BytesIO(image_bytes)) as src:
         src.load()
         page = src.convert("RGB")
-    if page.width <= 0 or page.height <= 0:
-        return []
+    try:
+        if page.width <= 0 or page.height <= 0:
+            return []
 
-    by_line: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for w in words:
-        by_line[int(w["line_index"])].append(w)
+        by_line: dict[int, list[dict[str, Any]]] = defaultdict(list)
+        for w in words:
+            by_line[int(w["line_index"])].append(w)
 
-    results: list[dict[str, Any]] = []
-    for line_index, line_words in sorted(by_line.items()):
-        line_words.sort(key=lambda item: int(item["word_index"]))
-        bounds: list[tuple[float, float, float, float]] = []
-        tokens: list[str] = []
-        valid_geometry = True
-        for word in line_words:
-            box = word.get("bounding_box")
-            if not isinstance(box, list) or len(box) != 4:
-                valid_geometry = False
-                break
-            x, y, bw, bh = (float(v) for v in box)
-            if (
-                not all(math.isfinite(v) for v in (x, y, bw, bh))
-                or x < 0
-                or y < 0
-                or bw <= 0
-                or bh <= 0
-                or x + bw > 1.001
-                or y + bh > 1.001
-            ):
-                valid_geometry = False
-                break
-            bounds.append(
-                (x * page.width, y * page.height, (x + bw) * page.width, (y + bh) * page.height)
-            )
-            token = str(word.get("text") or "").strip()
-            if token:
-                tokens.append(token)
-        if not valid_geometry or not bounds or not tokens:
-            continue
+        results: list[dict[str, Any]] = []
+        for line_index, line_words in sorted(by_line.items()):
+            line_words.sort(key=lambda item: int(item["word_index"]))
+            bounds: list[tuple[float, float, float, float]] = []
+            tokens: list[str] = []
+            valid_geometry = True
+            for word in line_words:
+                box = word.get("bounding_box")
+                if not isinstance(box, list) or len(box) != 4:
+                    valid_geometry = False
+                    break
+                x, y, bw, bh = (float(v) for v in box)
+                if (
+                    not all(math.isfinite(v) for v in (x, y, bw, bh))
+                    or x < 0
+                    or y < 0
+                    or bw <= 0
+                    or bh <= 0
+                    or x + bw > 1.001
+                    or y + bh > 1.001
+                ):
+                    valid_geometry = False
+                    break
+                bounds.append(
+                    (x * page.width, y * page.height, (x + bw) * page.width, (y + bh) * page.height)
+                )
+                token = str(word.get("text") or "").strip()
+                if token:
+                    tokens.append(token)
+            if not valid_geometry or not bounds or not tokens:
+                continue
 
-        left = min(b[0] for b in bounds)
-        top = min(b[1] for b in bounds)
-        right = max(b[2] for b in bounds)
-        bottom = max(b[3] for b in bounds)
-        pad_y = max(2, round((bottom - top) * 0.12))
-        crop_box = [
-            max(0, math.floor(left)),
-            max(0, math.floor(top - pad_y)),
-            min(page.width, math.ceil(right)),
-            min(page.height, math.ceil(bottom + pad_y)),
-        ]
-        if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
-            continue
+            left = min(b[0] for b in bounds)
+            top = min(b[1] for b in bounds)
+            right = max(b[2] for b in bounds)
+            bottom = max(b[3] for b in bounds)
+            pad_y = max(2, round((bottom - top) * 0.12))
+            crop_box = [
+                max(0, math.floor(left)),
+                max(0, math.floor(top - pad_y)),
+                min(page.width, math.ceil(right)),
+                min(page.height, math.ceil(bottom + pad_y)),
+            ]
+            if crop_box[2] <= crop_box[0] or crop_box[3] <= crop_box[1]:
+                continue
 
-        try:
-            proposed_label = normalize_and_validate_ocr_label(" ".join(tokens))
-        except ValueError:
-            continue
+            try:
+                proposed_label = normalize_and_validate_ocr_label(" ".join(tokens))
+            except ValueError:
+                continue
 
-        cropped = page.crop(tuple(crop_box))
-        quality_ok, quality_metrics, quality_reject = evaluate_line_crop_quality(cropped)
-        if not quality_ok:
+            cropped = page.crop(tuple(crop_box))
+            try:
+                quality_ok, quality_metrics, quality_reject = evaluate_line_crop_quality(cropped)
+                if not quality_ok:
+                    results.append(
+                        {
+                            "line_index": line_index,
+                            "eligible": False,
+                            "reject_reason": quality_reject,
+                            "quality_metrics": quality_metrics,
+                        }
+                    )
+                    continue
+
+                buf = BytesIO()
+                cropped.save(buf, format="PNG", optimize=True)
+                png_bytes = buf.getvalue()
+            finally:
+                cropped.close()
+            if not png_bytes:
+                continue
+            image_sha256 = hashlib.sha256(png_bytes).hexdigest()
+            pii_flags = detect_line_pii(proposed_label)
             results.append(
                 {
                     "line_index": line_index,
-                    "eligible": False,
-                    "reject_reason": quality_reject,
+                    "eligible": True,
+                    "crop_box": crop_box,
+                    "png_bytes": png_bytes,
+                    "image_sha256": image_sha256,
+                    "proposed_label": proposed_label,
+                    "pii_flags": pii_flags,
                     "quality_metrics": quality_metrics,
                 }
             )
-            continue
-
-        buf = BytesIO()
-        cropped.save(buf, format="PNG", optimize=True)
-        png_bytes = buf.getvalue()
-        if not png_bytes:
-            continue
-        image_sha256 = hashlib.sha256(png_bytes).hexdigest()
-        pii_flags = detect_line_pii(proposed_label)
-        results.append(
-            {
-                "line_index": line_index,
-                "eligible": True,
-                "crop_box": crop_box,
-                "png_bytes": png_bytes,
-                "image_sha256": image_sha256,
-                "proposed_label": proposed_label,
-                "pii_flags": pii_flags,
-                "quality_metrics": quality_metrics,
-            }
-        )
-    return results
+        return results
+    finally:
+        page.close()
 
 
 def _submission_passed_private_gates(sub: ParentBookPageSubmission | None) -> bool:
@@ -424,17 +430,15 @@ class ParentFlow2ContributionService:
         payload: ParentOcrContributionUpdateRequest,
     ) -> ParentOcrContributionStateRead:
         await self._require_parent(actor_id)
-        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
-        if book is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if book.VisibilityScope != VISIBILITY_PARENT_PRIVATE or book.OwnerParentId != actor_id:
-            raise HTTPException(status_code=403, detail="Access denied")
-
-        now = datetime.now(timezone.utc)
-        consent = await self.repo.get_consent(book.Id, lock=True)
 
         if payload.enabled:
-            if book.LifecycleStatus != "ACTIVE" or book.ModerationStatus != MODERATION_ACTIVE:
+            # Phase 1: Unlocked validation + snapshot of eligible pages BEFORE releasing DB transaction
+            book_snap = await self.repo.get_owned_private_book(book_id, actor_id)
+            if book_snap is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if book_snap.VisibilityScope != VISIBILITY_PARENT_PRIVATE or book_snap.OwnerParentId != actor_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            if book_snap.LifecycleStatus != "ACTIVE" or book_snap.ModerationStatus != MODERATION_ACTIVE:
                 raise HTTPException(
                     status_code=409,
                     detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp mẫu OCR.",
@@ -444,6 +448,77 @@ class ParentFlow2ContributionService:
                     status_code=422,
                     detail="Bạn cần xác nhận có quyền cho phép sử dụng ảnh cắt dòng chữ và nhãn cho huấn luyện OCR Flow 2.",
                 )
+
+            pages_snap = await self.repo.list_active_committed_pages(book_snap.Id)
+            download_jobs: list[tuple[UUID, UUID, str, str, list[dict[str, Any]]]] = []
+            for page_row, rev_row in pages_snap:
+                sub_row = await self.repo.get_committed_submission_for_revision(
+                    book_snap.Id, page_row.Id, rev_row.Id
+                )
+                if not _submission_passed_private_gates(sub_row):
+                    continue
+                rights_basis = (
+                    sub_row.SourceType
+                    if sub_row is not None and sub_row.SourceType in SOURCE_TYPE_LABELS
+                    else parse_book_source_type(book_snap.SourceDeclaration)
+                )
+                if rights_basis not in ALLOWED_TRAINING_RIGHTS:
+                    continue
+                src_path = str(
+                    (rev_row.ProcessingMeta or {}).get("source_image_path") or page_row.ImagePath or ""
+                ).strip()
+                src_hash = str(rev_row.ContentHash or "").strip()
+                if not src_path or not src_hash:
+                    continue
+                rev_words = await self.repo.list_revision_words(rev_row.Id)
+                if not rev_words:
+                    continue
+                word_dicts = [
+                    {
+                        "word_index": int(w.WordIndex),
+                        "line_index": int(w.LineIndex),
+                        "text": w.Text,
+                        "bounding_box": list(w.BoundingBox or []),
+                    }
+                    for w in rev_words
+                ]
+                download_jobs.append((page_row.Id, rev_row.Id, src_path, src_hash, word_dicts))
+
+            # Release DB read transaction before any Storage downloads or PIL cropping
+            await self.repo.rollback()
+
+            # Phase 2: Download & crop outside DB locks
+            preloaded_crops: dict[tuple[UUID, UUID, str, str], list[dict[str, Any]] | None] = {}
+            for p_id, r_id, src_path, src_hash, word_dicts in download_jobs:
+                key = (p_id, r_id, src_path, src_hash)
+                try:
+                    image_bytes = await asyncio.to_thread(
+                        download_object, src_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+                    )
+                    preloaded_crops[key] = await asyncio.to_thread(
+                        extract_line_crops_with_boxes, image_bytes, word_dicts
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to download private page image for Flow 2 recruitment: %s",
+                        type(exc).__name__,
+                    )
+                    preloaded_crops[key] = None
+
+            # Phase 3: Acquire canonical Book -> Consent locks and persist atomically
+            book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+            if book is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if book.VisibilityScope != VISIBILITY_PARENT_PRIVATE or book.OwnerParentId != actor_id:
+                raise HTTPException(status_code=403, detail="Access denied")
+            if book.LifecycleStatus != "ACTIVE" or book.ModerationStatus != MODERATION_ACTIVE:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp mẫu OCR.",
+                )
+
+            now = datetime.now(timezone.utc)
+            consent = await self.repo.get_consent(book.Id, lock=True)
 
             if consent is None:
                 consent = ParentBookOcrContributionConsent(
@@ -500,7 +575,9 @@ class ParentFlow2ContributionService:
                 # Idempotent re-enable: do not bump consent_version or create duplicate events
                 consent.UpdatedAt = now
 
-            recruitment = await self.recruit_book_pages(book, consent)
+            recruitment = await self.recruit_book_pages(
+                book, consent, preloaded_crops=preloaded_crops
+            )
             await self.repo.add_audit_log(
                 actor_id=actor_id,
                 action="parent_private_book.ocr_contribution.opted_in",
@@ -522,7 +599,14 @@ class ParentFlow2ContributionService:
                 last_recruitment_skipped_pages=recruitment["skipped_pages"],
             )
 
-        # Turning OFF consent (OPT_OUT)
+        # Turning OFF consent (OPT_OUT) — canonical Book -> Consent lock order
+        book = await self.repo.get_owned_private_book(book_id, actor_id, lock=True)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.VisibilityScope != VISIBILITY_PARENT_PRIVATE or book.OwnerParentId != actor_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+        now = datetime.now(timezone.utc)
+        consent = await self.repo.get_consent(book.Id, lock=True)
         revoke_reason = payload.revoke_reason or "PARENT_OPTED_OUT"
         if consent is None:
             consent = ParentBookOcrContributionConsent(
@@ -587,6 +671,8 @@ class ParentFlow2ContributionService:
         self,
         book: Book,
         consent: ParentBookOcrContributionConsent,
+        *,
+        preloaded_crops: dict[tuple[UUID, UUID, str, str], list[dict[str, Any]] | None] | None = None,
     ) -> dict[str, int]:
         """Automatically recruit all eligible active committed pages of an opted-in book."""
         if (
@@ -605,12 +691,26 @@ class ParentFlow2ContributionService:
             sub = await self.repo.get_committed_submission_for_revision(
                 book.Id, page.Id, rev.Id
             )
+            src_path = str(
+                (rev.ProcessingMeta or {}).get("source_image_path") or page.ImagePath or ""
+            ).strip()
+            src_hash = str(rev.ContentHash or "").strip()
+            crop_key = (page.Id, rev.Id, src_path, src_hash)
+            has_preloaded = preloaded_crops is not None and crop_key in preloaded_crops
+            if has_preloaded and preloaded_crops is not None and preloaded_crops[crop_key] is None:
+                skipped_pages += 1
+                continue
             page_res = await self.recruit_committed_page(
                 book=book,
                 page=page,
                 revision=rev,
                 submission=sub,
                 consent=consent,
+                preloaded_extracted=(
+                    preloaded_crops[crop_key]
+                    if has_preloaded and preloaded_crops is not None
+                    else None
+                ),
             )
             recruited += page_res["recruited_candidates"]
             if page_res["page_skipped"]:
@@ -624,6 +724,7 @@ class ParentFlow2ContributionService:
         page: BookPage,
         revision: PageRevision,
         submission: ParentBookPageSubmission | None,
+        preloaded_image_bytes: bytes | None = None,
     ) -> dict[str, int]:
         """Hook called after add_page_to_book() commits a page; recruits only if book is OPTED_IN."""
         consent = await self.repo.get_consent(book.Id)
@@ -635,6 +736,7 @@ class ParentFlow2ContributionService:
             revision=revision,
             submission=submission,
             consent=consent,
+            preloaded_image_bytes=preloaded_image_bytes,
         )
 
     async def recruit_committed_page(
@@ -645,6 +747,8 @@ class ParentFlow2ContributionService:
         revision: PageRevision,
         submission: ParentBookPageSubmission | None,
         consent: ParentBookOcrContributionConsent,
+        preloaded_image_bytes: bytes | None = None,
+        preloaded_extracted: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Enforce all Section 3 gates for one committed page and insert line candidates."""
         if (
@@ -677,28 +781,45 @@ class ParentFlow2ContributionService:
         if not source_image_path or not source_content_hash:
             return {"recruited_candidates": 0, "page_skipped": True, "reason": "MISSING_IMAGE_OR_HASH"}
 
-        words = await self.repo.list_revision_words(revision.Id)
-        if not words:
-            return {"recruited_candidates": 0, "page_skipped": True, "reason": "NO_REVISION_WORDS"}
+        book_id = book.Id
+        owner_parent_id = book.OwnerParentId
+        page_id = page.Id
+        revision_id = revision.Id
+        submission_id = submission.Id if submission is not None else None
+        consent_version = int(consent.ConsentVersion)
 
-        word_dicts = [
-            {
-                "word_index": int(w.WordIndex),
-                "line_index": int(w.LineIndex),
-                "text": w.Text,
-                "bounding_box": list(w.BoundingBox or []),
-            }
-            for w in words
-        ]
-        try:
-            image_bytes = await asyncio.to_thread(
-                download_object, source_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
-            )
-        except Exception as exc:
-            logger.warning("Failed to download private page image for Flow 2 recruitment: %s", type(exc).__name__)
-            return {"recruited_candidates": 0, "page_skipped": True, "reason": "IMAGE_DOWNLOAD_FAILED"}
+        if preloaded_extracted is not None:
+            extracted = preloaded_extracted
+        else:
+            words = await self.repo.list_revision_words(revision_id)
+            if not words:
+                return {"recruited_candidates": 0, "page_skipped": True, "reason": "NO_REVISION_WORDS"}
 
-        extracted = await asyncio.to_thread(extract_line_crops_with_boxes, image_bytes, word_dicts)
+            word_dicts = [
+                {
+                    "word_index": int(w.WordIndex),
+                    "line_index": int(w.LineIndex),
+                    "text": w.Text,
+                    "bounding_box": list(w.BoundingBox or []),
+                }
+                for w in words
+            ]
+            if preloaded_image_bytes is not None:
+                image_bytes = preloaded_image_bytes
+            else:
+                in_nested_fn = getattr(self.db, "in_nested_transaction", None)
+                if not (callable(in_nested_fn) and in_nested_fn()):
+                    await self.repo.rollback()
+                try:
+                    image_bytes = await asyncio.to_thread(
+                        download_object, source_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to download private page image for Flow 2 recruitment: %s", type(exc).__name__)
+                    return {"recruited_candidates": 0, "page_skipped": True, "reason": "IMAGE_DOWNLOAD_FAILED"}
+
+            extracted = await asyncio.to_thread(extract_line_crops_with_boxes, image_bytes, word_dicts)
+
         now = datetime.now(timezone.utc)
         recruited = 0
 
@@ -710,16 +831,30 @@ class ParentFlow2ContributionService:
             proposed_label = str(line["proposed_label"])
             pii_flags = list(line.get("pii_flags") or [])
             pii_status = "FLAGGED_PII" if pii_flags else "CLEAR"
-            idempotency_key = f"{book.Id}:{page.Id}:{revision.Id}:{line_index}:{image_sha256}"
+            idempotency_key = f"{book_id}:{page_id}:{revision_id}:{line_index}:{image_sha256}"
 
             existing = await self.repo.get_candidate_by_idempotency_key(idempotency_key)
             if existing is not None:
-                # Idempotent: never duplicate; if previously revoked and now opted back in cleanly, reopen for verification
+                # Idempotent: never duplicate; if previously revoked and now opted back in cleanly,
+                # reopen for fresh Admin verification and clear all stale decision/outbox/sample fields.
                 if existing.Status == "REVOKED" and pii_status == "CLEAR":
-                    existing.ConsentVersion = int(consent.ConsentVersion)
+                    existing.ConsentVersion = consent_version
                     existing.Status = "PENDING_VERIFICATION"
+                    existing.ProposedLabel = proposed_label
+                    existing.RightsBasis = rights_basis
+                    existing.VerifiedLabel = None
+                    existing.VerifiedLabelSha256 = None
+                    existing.VerifiedBy = None
+                    existing.VerifiedAt = None
+                    existing.RejectionCode = None
+                    existing.RejectionReason = None
+                    existing.OutboxEventId = None
+                    existing.SampleId = None
                     existing.RevokedAt = None
                     existing.RevokeReason = None
+                    existing.PiiCheckStatus = "CLEAR"
+                    existing.PiiFlagsJson = []
+                    existing.QualityMetricsJson = line["quality_metrics"]
                     existing.UpdatedAt = now
                     recruited += 1
                 continue
@@ -727,12 +862,12 @@ class ParentFlow2ContributionService:
             # If PII is detected, record as REJECTED immediately so it can NEVER enter training
             if pii_status == "FLAGGED_PII":
                 cand = ParentBookFlow2Candidate(
-                    BookId=book.Id,
-                    OwnerParentId=book.OwnerParentId,
-                    PageId=page.Id,
-                    RevisionId=revision.Id,
-                    SubmissionId=submission.Id if submission is not None else None,
-                    ConsentVersion=int(consent.ConsentVersion),
+                    BookId=book_id,
+                    OwnerParentId=owner_parent_id,
+                    PageId=page_id,
+                    RevisionId=revision_id,
+                    SubmissionId=submission_id,
+                    ConsentVersion=consent_version,
                     LineIndex=line_index,
                     IdempotencyKey=idempotency_key,
                     SourceImagePath=source_image_path,
@@ -755,7 +890,7 @@ class ParentFlow2ContributionService:
 
             # Check if an Admin ALREADY verified this exact revision+line+image+content_hash
             prior_verified = await self.repo.get_prior_admin_verified_candidate(
-                revision_id=revision.Id,
+                revision_id=revision_id,
                 line_index=line_index,
                 image_sha256=image_sha256,
                 source_content_hash=source_content_hash,
@@ -765,12 +900,12 @@ class ParentFlow2ContributionService:
                 continue
 
             cand = ParentBookFlow2Candidate(
-                BookId=book.Id,
-                OwnerParentId=book.OwnerParentId,
-                PageId=page.Id,
-                RevisionId=revision.Id,
-                SubmissionId=submission.Id if submission is not None else None,
-                ConsentVersion=int(consent.ConsentVersion),
+                BookId=book_id,
+                OwnerParentId=owner_parent_id,
+                PageId=page_id,
+                RevisionId=revision_id,
+                SubmissionId=submission_id,
+                ConsentVersion=consent_version,
                 LineIndex=line_index,
                 IdempotencyKey=idempotency_key,
                 SourceImagePath=source_image_path,
@@ -878,7 +1013,7 @@ class ParentFlow2ContributionService:
         self,
         actor_id: UUID,
         *,
-        status_filter: str | None = "PENDING_VERIFICATION",
+        status_filter: str | None = None,
         book_id: UUID | None = None,
         limit: int = 25,
         offset: int = 0,
@@ -905,27 +1040,76 @@ class ParentFlow2ContributionService:
     async def admin_read_candidate_crop_image(
         self, actor_id: UUID, candidate_id: UUID
     ) -> tuple[bytes, str]:
-        """Stream ONLY the cropped line PNG to an authenticated Admin (never Parent B / Child B)."""
+        """Stream ONLY the cropped line PNG to an authenticated Admin after live book/consent verification."""
         await self._require_admin(actor_id)
         cand = await self.repo.get_candidate(candidate_id)
-        if cand is None:
+        if cand is None or cand.Status == "REVOKED":
             raise HTTPException(status_code=404, detail="Resource not found")
 
+        book = await self.repo.get_private_book(cand.BookId)
+        if (
+            book is None
+            or bool(getattr(book, "IsDeleted", False))
+            or book.LifecycleStatus != "ACTIVE"
+        ):
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.ModerationStatus != MODERATION_ACTIVE:
+            raise HTTPException(
+                status_code=403,
+                detail="Sách riêng đang bị đình chỉ nên không thể xem ảnh đóng góp.",
+            )
+
+        consent = await self.repo.get_consent(cand.BookId)
+        if consent is None or consent.Status != "OPTED_IN":
+            raise HTTPException(
+                status_code=403,
+                detail="Phụ huynh đã tắt hoặc thu hồi quyền đóng góp OCR cho sách này.",
+            )
+
+        source_image_path = str(cand.SourceImagePath)
+        crop_box = list(cand.CropBoxJson or [])
+        cand_id = cand.Id
+        cand_book_id = cand.BookId
+        cand_page_id = cand.PageId
+        cand_revision_id = cand.RevisionId
+        cand_line_index = int(cand.LineIndex)
+        if len(crop_box) != 4:
+            raise HTTPException(status_code=409, detail="Invalid line crop geometry")
+
+        await self.repo.add_audit_log(
+            actor_id=actor_id,
+            action="admin.flow2_candidate.crop_viewed",
+            resource_type="parent_book_flow2_candidate",
+            resource_id=cand_id,
+            metadata={
+                "book_id": str(cand_book_id),
+                "page_id": str(cand_page_id),
+                "revision_id": str(cand_revision_id),
+                "line_index": cand_line_index,
+            },
+        )
+        await self.repo.commit()
+
         image_bytes = await asyncio.to_thread(
-            download_object, cand.SourceImagePath, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
+            download_object, source_image_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
         )
 
         def _render_crop() -> bytes:
             with Image.open(BytesIO(image_bytes)) as src:
                 src.load()
                 rgb = src.convert("RGB")
-                box = list(cand.CropBoxJson or [])
-                if len(box) != 4:
-                    raise HTTPException(status_code=409, detail="Invalid line crop geometry")
-                cropped = rgb.crop((int(box[0]), int(box[1]), int(box[2]), int(box[3])))
-                out = BytesIO()
-                cropped.save(out, format="PNG", optimize=True)
-                return out.getvalue()
+                try:
+                    cropped = rgb.crop(
+                        (int(crop_box[0]), int(crop_box[1]), int(crop_box[2]), int(crop_box[3]))
+                    )
+                    try:
+                        out = BytesIO()
+                        cropped.save(out, format="PNG", optimize=True)
+                        return out.getvalue()
+                    finally:
+                        cropped.close()
+                finally:
+                    rgb.close()
 
         png_bytes = await asyncio.to_thread(_render_crop)
         return png_bytes, "image/png"
@@ -937,6 +1121,14 @@ class ParentFlow2ContributionService:
         payload: AdminFlow2CandidateDecisionRequest,
     ) -> AdminFlow2CandidateDecisionResponse:
         await self._require_admin(actor_id)
+        # Canonical lock order: Book -> Consent -> Candidate (prevents AB-BA deadlock
+        # with parent opt-out / book delete / book suspend).
+        cand_preview = await self.repo.get_candidate(candidate_id)
+        if cand_preview is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+
+        book = await self.repo.get_private_book(cand_preview.BookId, lock=True)
+        consent = await self.repo.get_consent(cand_preview.BookId, lock=True)
         cand = await self.repo.get_candidate(candidate_id, lock=True)
         if cand is None:
             raise HTTPException(status_code=404, detail="Resource not found")
@@ -1022,8 +1214,6 @@ class ParentFlow2ContributionService:
                 detail=f"Mẫu đang ở trạng thái {cand.Status}, không thể xác nhận duyệt.",
             )
 
-        book = await self.repo.get_private_book(cand.BookId)
-        consent = await self.repo.get_consent(cand.BookId)
         page, rev = await self.repo.get_page_and_revision(cand.PageId, cand.RevisionId)
 
         if (

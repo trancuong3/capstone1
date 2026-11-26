@@ -380,9 +380,12 @@ async def lifespan(_app: FastAPI):
             name="local_voice_worker_bootstrap",
         )
 
+    smart_studio_worker_enabled = os.getenv(
+        "VIREAD_SMART_STUDIO_WORKER_ENABLED", "true"
+    ).strip().lower() not in {"0", "false", "no", "off"}
     stop_smart_studio_worker = asyncio.Event()
     smart_studio_worker_task = None
-    if APP_ENVIRONMENT != "test":
+    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and smart_studio_worker_enabled:
         async def _run_smart_studio_worker() -> None:
             if worker_startup_delay > 0:
                 try:
@@ -492,6 +495,20 @@ async def lifespan(_app: FastAPI):
         try:
             await admin_ocr_correction_jobs.shutdown()
         except asyncio.CancelledError:
+            pass
+
+        try:
+            from app.api.routes.voice_studio import shutdown_cached_public_voice_ids_task
+
+            await shutdown_cached_public_voice_ids_task()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            from app.api.routes.voice import close_default_voice_orchestrators
+
+            await close_default_voice_orchestrators()
+        except (asyncio.CancelledError, Exception):
             pass
 
         try:
@@ -811,6 +828,8 @@ async def get_health(request: Request) -> dict[str, object]:
         "book_quality": _task_runtime_state(workers.get("book_quality")),
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
+        "smart_studio_worker": _task_runtime_state(workers.get("smart_studio")),
+        "local_voice_bootstrap": _task_runtime_state(workers.get("local_voice_bootstrap")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None

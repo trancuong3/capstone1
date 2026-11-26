@@ -290,14 +290,13 @@ class GlobalTasksService:
 
         # Server-assigned priority cap prevents untrusted parents from starving interactive reading.
         effective_priority = payload.priority if actor_role == "admin" else min(int(payload.priority), 50)
-        _ = authorized_book_id
 
         try:
             job, created = await self.repo.create_or_get_idempotent(
                 job_type=payload.job_type,
                 actor_id=actor_id,
                 actor_role=actor_role,
-                book_id=payload.book_id,
+                book_id=authorized_book_id,
                 book_page_id=payload.book_page_id,
                 source_revision_id=payload.source_revision_id,
                 input_hash=payload.input_hash,
@@ -1163,6 +1162,88 @@ class GlobalTasksService:
         )
 
 
+async def verify_smart_studio_job_fence_in_tx(
+    db: AsyncSession,
+    *,
+    job_id: UUID,
+    lease_token: UUID,
+    expected_revision_id: UUID | None = None,
+    book_page_id: UUID | None = None,
+    now: datetime | None = None,
+) -> tuple[SmartStudioJob | None, str | None]:
+    """Lock and verify active lease, non-cancellation, and revision fence inside the current txn.
+
+    Returns `(job, None)` while keeping the row lock active so callers can write active
+    `BookPresentationAsset` rows and commit atomically in the SAME transaction.
+    Raises `StaleLeaseError` / `JobCancelledError` on lease/cancel fence, or returns
+    `(job, "STALE")` after marking the job `STALE` if superseded.
+    """
+    current = now or datetime.now(timezone.utc)
+    repo = GlobalTasksRepository(db)
+    job = await repo.get_job(job_id, lock=True)
+    if job is None or job.Status == "CANCELLED":
+        if callable(getattr(db, "rollback", None)):
+            await db.rollback()
+        raise JobCancelledError(f"Job {job_id} is cancelled or missing")
+
+    if job.LeaseToken is None or job.LeaseToken != lease_token:
+        if callable(getattr(db, "rollback", None)):
+            await db.rollback()
+        raise StaleLeaseError(
+            f"Stale lease token for job {job_id}; refusing write from superseded worker"
+        )
+
+    if job.Status == "CANCEL_REQUESTED":
+        job.Status = "CANCELLED"
+        job.Stage = "CANCELLED"
+        job.LeaseToken = None
+        job.LeaseExpiresAt = None
+        job.WorkerId = None
+        job.CompletedAt = current
+        job.UpdatedAt = current
+        await db.commit()
+        raise JobCancelledError(f"Job {job_id} cancel requested before asset write")
+
+    if job.Status == "STALE":
+        job.LeaseToken = None
+        job.LeaseExpiresAt = None
+        job.WorkerId = None
+        job.CompletedAt = job.CompletedAt or current
+        job.UpdatedAt = current
+        await db.commit()
+        return job, "STALE"
+
+    target_rev = job.SourceRevisionId or expected_revision_id
+    target_page = job.BookPageId or book_page_id
+    if target_rev is not None and target_page is not None:
+        active_rev = await repo.get_active_page_revision_id(target_page)
+        if active_rev is not None and active_rev != target_rev:
+            job.Status = "STALE"
+            job.Stage = "STALE"
+            job.LeaseToken = None
+            job.LeaseExpiresAt = None
+            job.WorkerId = None
+            job.ErrorCode = "SOURCE_REVISION_SUPERSEDED"
+            job.ErrorMessageVi = (
+                "Trang sách đã có phiên bản mới hơn; kết quả cũ đã bị bỏ qua để tránh ghi đè."
+            )
+            job.CompletedAt = current
+            job.UpdatedAt = current
+            await db.commit()
+            return job, "STALE"
+
+    return job, None
+
+
+def _map_non_success_studio_status(raw_status: str) -> GlobalTaskStatus:
+    upper = (raw_status or "").strip().upper()
+    if upper == "WAITING_FOR_QUOTA":
+        return "WAITING_FOR_QUOTA"
+    if upper in ("SUPERSEDED_BY_USER_UPLOAD", "STALE"):
+        return "STALE"
+    return "FAILED"
+
+
 async def process_one_smart_studio_job(
     db: AsyncSession,
     *,
@@ -1175,18 +1256,40 @@ async def process_one_smart_studio_job(
     if job is None or not job.LeaseToken:
         return False
 
+    job_id = job.Id
     lease_token = job.LeaseToken
+    job_type = job.JobType
+    job_actor_id = job.ActorId
+    job_book_id = job.BookId
+    job_page_id = job.BookPageId
+    source_revision_id = job.SourceRevisionId
+    attempt_count = int(job.AttemptCount or 1)
+    max_attempts = int(job.MaxAttempts or 3)
+    job_stage = str(job.Stage or "PROCESSING")
+    job_progress_completed = job.ProgressCompleted
+    job_progress_total = job.ProgressTotal
+    job_progress_unit = job.ProgressUnit
+    checkpoints = dict(job.CheckpointsJson) if isinstance(job.CheckpointsJson, dict) else {}
+
+    async def _is_job_still_leased() -> bool:
+        current_job = await svc.repo.get_job(job_id, lock=False)
+        return (
+            current_job is not None
+            and current_job.LeaseToken == lease_token
+            and current_job.Status in ("RUNNING", "CANCEL_REQUESTED")
+        )
+
     try:
-        if job.JobType in ("STYLE_BIBLE", "BOOK_STYLE_BIBLE") and job.BookId is not None:
+        if job_type in ("STYLE_BIBLE", "BOOK_STYLE_BIBLE") and job_book_id is not None:
             from app.services.book_style_bible import BookStyleBibleService
 
             res = await BookStyleBibleService(db).build_for_actor(
-                job.ActorId,
-                job.BookId,
+                job_actor_id,
+                job_book_id,
                 force_refresh=True,
             )
             await svc.commit_stage_result(
-                job_id=job.Id,
+                job_id=job_id,
                 lease_token=lease_token,
                 stage="STYLE_ANALYSIS",
                 checkpoint_data={"style_context_hash": res.context_hash},
@@ -1198,131 +1301,162 @@ async def process_one_smart_studio_job(
             )
             return True
 
-        if job.JobType in ("COVER_GENERATE", "BOOK_COVER_AI") and job.BookId is not None:
+        if job_type in ("COVER_GENERATE", "BOOK_COVER_AI") and job_book_id is not None:
             from app.schemas.book_assets import BookCoverGenerateRequest
             from app.services.book_cover_service import BookCoverService
 
+            force_regen = bool(checkpoints.get("force_regenerate", False))
+            prompt_hint = checkpoints.get("prompt_hint")
             res = await BookCoverService(db).generate_ai_cover(
-                job.ActorId,
-                job.BookId,
+                job_actor_id,
+                job_book_id,
                 BookCoverGenerateRequest(
-                    force_regenerate=True,
-                    idempotency_key=f"worker:{job.Id}:{job.AttemptCount}",
+                    force_regenerate=force_regen,
+                    prompt_hint=str(prompt_hint) if isinstance(prompt_hint, str) and prompt_hint.strip() else None,
+                    idempotency_key=f"worker:{job_id}:{attempt_count}",
                 ),
+                existing_job_id=job_id,
+                existing_lease_token=lease_token,
             )
-            if res.status == "SUCCEEDED" and res.cover is not None:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="COVER_GEN",
-                    checkpoint_data={"asset_id": str(res.cover.id)},
-                    next_status="SUCCEEDED",
-                    result_ref={"asset_id": str(res.cover.id)},
-                    progress_completed=2,
-                    progress_total=2,
-                    progress_unit="bước",
-                )
-            else:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="COVER_GEN",
-                    mark_stage_completed=False,
-                    next_status="FAILED",
-                    error_code=res.status,
-                    error_message_vi=res.message_vi,
-                )
+            if await _is_job_still_leased():
+                if res.status == "SUCCEEDED" and res.cover is not None:
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage="COVER_GEN",
+                        checkpoint_data={"asset_id": str(res.cover.id)},
+                        next_status="SUCCEEDED",
+                        result_ref={"asset_id": str(res.cover.id)},
+                        progress_completed=2,
+                        progress_total=2,
+                        progress_unit="bước",
+                    )
+                else:
+                    mapped_status = _map_non_success_studio_status(res.status)
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage=(
+                            "WAITING_FOR_QUOTA"
+                            if mapped_status == "WAITING_FOR_QUOTA"
+                            else res.status[:40]
+                            if mapped_status == "STALE"
+                            else "COVER_GEN"
+                        ),
+                        mark_stage_completed=False,
+                        next_status=mapped_status,
+                        error_code=res.status,
+                        error_message_vi=res.message_vi,
+                    )
             return True
 
         if (
-            job.JobType in ("ILLUSTRATION_EXTRACT", "PAGE_ILLUSTRATION_EXTRACT")
-            and job.BookId is not None
-            and job.BookPageId is not None
+            job_type in ("ILLUSTRATION_EXTRACT", "PAGE_ILLUSTRATION_EXTRACT")
+            and job_book_id is not None
+            and job_page_id is not None
         ):
             from app.schemas.book_assets import PageIllustrationExtractRequest
             from app.services.book_illustration_service import BookIllustrationService
 
             res = await BookIllustrationService(db).extract_page_illustration(
-                job.ActorId,
-                job.BookId,
-                job.BookPageId,
+                job_actor_id,
+                job_book_id,
+                job_page_id,
                 PageIllustrationExtractRequest(),
+                existing_job_id=job_id,
+                existing_lease_token=lease_token,
+                existing_source_revision_id=source_revision_id,
             )
-            if res.status == "EXTRACTED_VERIFIED" and res.asset is not None:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="ILLUSTRATION_EXTRACT",
-                    checkpoint_data={"asset_id": str(res.asset.id)},
-                    next_status="SUCCEEDED",
-                    result_ref={"asset_id": str(res.asset.id)},
-                    progress_completed=1,
-                    progress_total=1,
-                    progress_unit="trang",
-                )
-            else:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="ILLUSTRATION_EXTRACT",
-                    mark_stage_completed=False,
-                    next_status="FAILED",
-                    error_code=res.status,
-                    error_message_vi=res.message_vi,
-                )
+            if await _is_job_still_leased():
+                if res.status == "EXTRACTED_VERIFIED" and res.asset is not None:
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage="ILLUSTRATION_EXTRACT",
+                        checkpoint_data={"asset_id": str(res.asset.id)},
+                        next_status="SUCCEEDED",
+                        result_ref={"asset_id": str(res.asset.id)},
+                        progress_completed=1,
+                        progress_total=1,
+                        progress_unit="trang",
+                    )
+                else:
+                    mapped_status = _map_non_success_studio_status(res.status)
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage="ILLUSTRATION_EXTRACT",
+                        mark_stage_completed=False,
+                        next_status=mapped_status,
+                        error_code=res.status,
+                        error_message_vi=res.message_vi,
+                    )
             return True
 
         if (
-            job.JobType in ("ILLUSTRATION_GENERATE", "PAGE_ILLUSTRATION_AI")
-            and job.BookId is not None
-            and job.BookPageId is not None
+            job_type in ("ILLUSTRATION_GENERATE", "PAGE_ILLUSTRATION_AI")
+            and job_book_id is not None
+            and job_page_id is not None
         ):
             from app.schemas.book_assets import PageIllustrationGenerateRequest
             from app.services.book_illustration_service import BookIllustrationService
 
+            prompt_hint = checkpoints.get("prompt_hint")
             res = await BookIllustrationService(db).generate_page_illustration(
-                job.ActorId,
-                job.BookId,
-                job.BookPageId,
+                job_actor_id,
+                job_book_id,
+                job_page_id,
                 PageIllustrationGenerateRequest(
-                    idempotency_key=f"worker:{job.Id}:{job.AttemptCount}",
+                    prompt_hint=str(prompt_hint) if isinstance(prompt_hint, str) and prompt_hint.strip() else None,
+                    idempotency_key=f"worker:{job_id}:{attempt_count}",
                 ),
+                existing_job_id=job_id,
+                existing_lease_token=lease_token,
+                existing_source_revision_id=source_revision_id,
             )
-            if res.status == "SUCCEEDED" and res.asset is not None:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="ILLUSTRATION_GEN",
-                    checkpoint_data={"asset_id": str(res.asset.id)},
-                    next_status="SUCCEEDED",
-                    result_ref={"asset_id": str(res.asset.id)},
-                    progress_completed=2,
-                    progress_total=2,
-                    progress_unit="bước",
-                )
-            else:
-                await svc.commit_stage_result(
-                    job_id=job.Id,
-                    lease_token=lease_token,
-                    stage="ILLUSTRATION_GEN",
-                    mark_stage_completed=False,
-                    next_status="FAILED",
-                    error_code=res.status,
-                    error_message_vi=res.message_vi,
-                )
+            if await _is_job_still_leased():
+                if res.status == "SUCCEEDED" and res.asset is not None:
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage="ILLUSTRATION_GEN",
+                        checkpoint_data={"asset_id": str(res.asset.id)},
+                        next_status="SUCCEEDED",
+                        result_ref={"asset_id": str(res.asset.id)},
+                        progress_completed=2,
+                        progress_total=2,
+                        progress_unit="bước",
+                    )
+                else:
+                    mapped_status = _map_non_success_studio_status(res.status)
+                    await svc.commit_stage_result(
+                        job_id=job_id,
+                        lease_token=lease_token,
+                        stage=(
+                            "WAITING_FOR_QUOTA"
+                            if mapped_status == "WAITING_FOR_QUOTA"
+                            else "STALE"
+                            if mapped_status == "STALE"
+                            else "ILLUSTRATION_GEN"
+                        ),
+                        mark_stage_completed=False,
+                        next_status=mapped_status,
+                        error_code=res.status,
+                        error_message_vi=res.message_vi,
+                    )
             return True
 
         # Unsupported or externally-driven job type: release cleanly to WAITING_FOR_WORKER
         await svc.commit_stage_result(
-            job_id=job.Id,
+            job_id=job_id,
             lease_token=lease_token,
-            stage=str(job.Stage or "QUEUED"),
+            stage=job_stage or "QUEUED",
             mark_stage_completed=False,
             checkpoint_data={"dispatched_by": worker_id},
             next_status="WAITING_FOR_WORKER",
-            progress_completed=job.ProgressCompleted,
-            progress_total=job.ProgressTotal,
-            progress_unit=job.ProgressUnit,
+            progress_completed=job_progress_completed,
+            progress_total=job_progress_total,
+            progress_unit=job_progress_unit,
         )
         return True
     except (StaleLeaseError, JobCancelledError):
@@ -1330,20 +1464,20 @@ async def process_one_smart_studio_job(
     except Exception as exc:
         logger.warning(
             "smart_studio_job_execution_failed job_id=%s type=%s err=%s",
-            job.Id,
-            job.JobType,
+            job_id,
+            job_type,
             type(exc).__name__,
         )
         try:
             next_state: GlobalTaskStatus = (
                 "FAILED"
-                if int(job.AttemptCount or 1) >= int(job.MaxAttempts or 3)
+                if attempt_count >= max_attempts
                 else "RETRY_SCHEDULED"
             )
             await svc.commit_stage_result(
-                job_id=job.Id,
+                job_id=job_id,
                 lease_token=lease_token,
-                stage=str(job.Stage or "PROCESSING"),
+                stage=job_stage,
                 mark_stage_completed=False,
                 next_status=next_state,
                 error_code="WORKER_EXECUTION_ERROR",

@@ -23,7 +23,9 @@ const STATUS_FILTERS: readonly {
   key: "" | Flow2CandidateStatus;
   label: string;
 }[] = [
+  { key: "", label: "Tất cả" },
   { key: "PENDING_VERIFICATION", label: "Chờ xác minh mẫu" },
+  { key: "VERIFIED", label: "Đã xác minh" },
   { key: "SYNC_QUEUED", label: "Chờ đồng bộ Drive" },
   { key: "SYNCED", label: "Đã đồng bộ Flow 2" },
   { key: "REJECTED", label: "Đã từ chối" },
@@ -179,11 +181,20 @@ export function AdminFlow2CandidatesPanel() {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-4">
         <div className="flex flex-wrap gap-2">
           {STATUS_FILTERS.map((f) => {
-            const count = page?.summary[f.key] ?? 0;
+            const summaryTotal = page
+              ? Object.values(page.summary).reduce(
+                  (sum, value) => sum + value,
+                  0,
+                )
+              : 0;
+            const count =
+              f.key === ""
+                ? summaryTotal || (statusFilter === "" ? (page?.total ?? 0) : 0)
+                : (page?.summary[f.key] ?? 0);
             const active = statusFilter === f.key;
             return (
               <button
-                key={f.key}
+                key={f.key || "ALL"}
                 className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
                   active
                     ? "border-primary bg-primary text-white"

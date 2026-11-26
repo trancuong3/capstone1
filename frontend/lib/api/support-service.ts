@@ -1,5 +1,7 @@
 "use client";
 
+import { z } from "zod";
+
 import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
@@ -9,6 +11,12 @@ import type {
   SupportFeedbackRequest,
   SupportFeedbackResponse,
 } from "@/types/support";
+
+const supportFeedbackResponseSchema = z.object({
+  accepted: z.literal(true),
+  delivery_status: z.literal("accepted_by_smtp"),
+  detail: z.string(),
+});
 
 export class SupportFeedbackError extends Error {
   constructor(
@@ -66,6 +74,8 @@ export function createSupportService(): SupportService {
           },
           body: JSON.stringify(request),
           cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
         });
       } catch {
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
@@ -88,18 +98,12 @@ export function createSupportService(): SupportService {
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
       }
 
-      if (
-        typeof payload !== "object" ||
-        payload === null ||
-        !("accepted" in payload) ||
-        payload.accepted !== true ||
-        !("delivery_status" in payload) ||
-        payload.delivery_status !== "accepted_by_smtp"
-      ) {
+      const parsed = supportFeedbackResponseSchema.safeParse(payload);
+      if (!parsed.success) {
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
       }
 
-      return payload as SupportFeedbackResponse;
+      return parsed.data;
     },
   };
 }

@@ -60,7 +60,10 @@ async def create_picture_session(
 ):
     upload_bytes: bytes | None = None
     if image is not None:
-        upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+        try:
+            upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+        finally:
+            await image.close()
         if len(upload_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

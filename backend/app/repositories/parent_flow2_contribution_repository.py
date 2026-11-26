@@ -2,11 +2,26 @@
 from __future__ import annotations
 
 from datetime import datetime
+import logging
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
+
+
+def _is_undefined_table_error(exc: BaseException) -> bool:
+    for candidate in (exc, getattr(exc, "orig", None), getattr(exc, "__cause__", None)):
+        if candidate is None:
+            continue
+        sqlstate = getattr(candidate, "sqlstate", None) or getattr(candidate, "pgcode", None)
+        if sqlstate == "42P01":
+            return True
+        if "undefinedtable" in type(candidate).__name__.lower():
+            return True
+    return False
 
 from app.models import (
     AuditLog,
@@ -44,13 +59,13 @@ class ParentFlow2ContributionRepository:
             is_private_book_owned_by(actor_id, include_retired=False),
         )
         if lock:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_private_book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
         stmt = select(Book).where(Book.Id == book_id, is_private_book())
         if lock:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_consent(
@@ -60,7 +75,7 @@ class ParentFlow2ContributionRepository:
             ParentBookOcrContributionConsent.BookId == book_id
         )
         if lock:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def list_consents_for_books(
@@ -214,7 +229,7 @@ class ParentFlow2ContributionRepository:
             ParentBookFlow2Candidate.Id == candidate_id
         )
         if lock:
-            stmt = stmt.with_for_update()
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.db.execute(stmt)).scalar_one_or_none()
 
     async def get_page_and_revision(
@@ -304,7 +319,47 @@ class ParentFlow2ContributionRepository:
                 )
                 ON CONFLICT (event_type, candidate_id)
                     WHERE event_type = 'PARENT_CONTRIBUTION_CANDIDATE' AND candidate_id IS NOT NULL
-                DO UPDATE SET updated_at = public.viread_ocr_outbox.updated_at
+                DO UPDATE SET
+                    page_id = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN EXCLUDED.page_id
+                        ELSE public.viread_ocr_outbox.page_id
+                    END,
+                    revision_id = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN EXCLUDED.revision_id
+                        ELSE public.viread_ocr_outbox.revision_id
+                    END,
+                    actor_id = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN EXCLUDED.actor_id
+                        ELSE public.viread_ocr_outbox.actor_id
+                    END,
+                    payload = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN EXCLUDED.payload
+                        ELSE public.viread_ocr_outbox.payload
+                    END,
+                    status = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN 'PENDING'
+                        ELSE public.viread_ocr_outbox.status
+                    END,
+                    attempts = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN 0
+                        ELSE public.viread_ocr_outbox.attempts
+                    END,
+                    last_error_code = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN NULL
+                        ELSE public.viread_ocr_outbox.last_error_code
+                    END,
+                    locked_at = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN NULL
+                        ELSE public.viread_ocr_outbox.locked_at
+                    END,
+                    available_at = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN now()
+                        ELSE public.viread_ocr_outbox.available_at
+                    END,
+                    updated_at = CASE
+                        WHEN public.viread_ocr_outbox.status IN ('SKIPPED', 'FAILED') THEN now()
+                        ELSE public.viread_ocr_outbox.updated_at
+                    END
                 RETURNING id
                 """
             ),
@@ -517,9 +572,18 @@ class ParentFlow2ContributionRepository:
                         {"dataset_ids": archived_dataset_ids, "now": now},
                     )
                     cancelled_jobs = int(res_jobs.rowcount or 0)
-            except Exception:
-                # Table may not exist in minimal unit-test schemas without training jobs table
-                cancelled_jobs = 0
+            except Exception as exc:
+                if _is_undefined_table_error(exc):
+                    # Table may not exist in minimal unit-test schemas without training jobs table
+                    logger.warning(
+                        "Skipping Flow 2 training-job cancellation because viread_ocr_training_jobs table does not exist"
+                    )
+                    cancelled_jobs = 0
+                else:
+                    logger.exception(
+                        "Failed to cancel queued Flow 2 training jobs during consent revocation"
+                    )
+                    raise
 
         return {
             "revoked_candidates": len(revoked_cand_ids),

@@ -432,21 +432,35 @@ class AdminOcrService:
                 reason="Page state could not be proven to be an uncommitted PROCESSING placeholder",
             )
 
-    async def require_admin(self, actor_id: UUID) -> None:
-        if await self.repo.role(actor_id) != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    @staticmethod
+    async def _close_upload_file(file: UploadFile | None) -> None:
+        if file is None:
+            return
+        close_fn = getattr(file, "close", None)
+        if callable(close_fn):
+            try:
+                res = close_fn()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
 
-    async def _read_validate_image(self, file: UploadFile) -> tuple[bytes, str, str, int, int]:
-        if not file.filename:
-            raise HTTPException(status_code=422, detail="An image file is required")
-        data = await file.read(MAX_IMAGE_BYTES + 1)
-        if len(data) > MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=413, detail="Image exceeds the 12 MB limit")
-        if not data:
-            raise HTTPException(status_code=422, detail="Image file is empty")
-        declared_type = (file.content_type or "").split(";", 1)[0].strip().lower()
-        if declared_type not in {"image/jpeg", "image/png", "image/webp"}:
-            raise HTTPException(status_code=415, detail="Only JPEG, PNG, and WebP images are supported")
+    async def _rollback_if_possible(self) -> None:
+        rollback = getattr(self.db, "rollback", None)
+        if callable(rollback):
+            try:
+                res = rollback()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+
+    @staticmethod
+    def _verify_and_normalize_image_bytes(
+        data: bytes,
+        declared_type: str,
+        filename: str,
+    ) -> tuple[bytes, str, str, int, int]:
         try:
             with Image.open(BytesIO(data)) as image:
                 if max(image.size) > MAX_IMAGE_DIMENSION:
@@ -471,12 +485,14 @@ class AdminOcrService:
                         save_options = {"optimize": True}
                     save_image.save(output, format=image_format, **save_options)
                     data = output.getvalue()
+        except HTTPException:
+            raise
         except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
             raise HTTPException(status_code=422, detail="The uploaded file is not a valid image") from exc
         actual = ALLOWED_FORMATS.get(image_format)
         if actual is None or actual[0] != declared_type:
             raise HTTPException(status_code=415, detail="File content does not match the declared image type")
-        suffix = PurePath(file.filename).suffix.lower()
+        suffix = PurePath(filename).suffix.lower()
         allowed_extensions = {"JPEG": {".jpg", ".jpeg"}, "PNG": {".png"}, "WEBP": {".webp"}}
         if suffix not in allowed_extensions.get(image_format, set()):
             raise HTTPException(status_code=415, detail="File extension does not match the image content")
@@ -485,6 +501,32 @@ class AdminOcrService:
         if not data or len(data) > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Normalized image exceeds the 12 MB limit")
         return data, actual[0], actual[1], width, height
+
+    async def require_admin(self, actor_id: UUID) -> None:
+        if await self.repo.role(actor_id) != "admin":
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+
+    async def _read_validate_image(self, file: UploadFile) -> tuple[bytes, str, str, int, int]:
+        try:
+            if not file.filename:
+                raise HTTPException(status_code=422, detail="An image file is required")
+            data = await file.read(MAX_IMAGE_BYTES + 1)
+            if len(data) > MAX_IMAGE_BYTES:
+                raise HTTPException(status_code=413, detail="Image exceeds the 12 MB limit")
+            if not data:
+                raise HTTPException(status_code=422, detail="Image file is empty")
+            declared_type = (file.content_type or "").split(";", 1)[0].strip().lower()
+            if declared_type not in {"image/jpeg", "image/png", "image/webp"}:
+                raise HTTPException(status_code=415, detail="Only JPEG, PNG, and WebP images are supported")
+            filename = file.filename
+        finally:
+            await self._close_upload_file(file)
+        return await run_in_threadpool(
+            self._verify_and_normalize_image_bytes,
+            data,
+            declared_type,
+            filename,
+        )
 
     @staticmethod
     def _normalize_confidence(value: object) -> float | None:
@@ -1361,18 +1403,21 @@ class AdminOcrService:
         upload_id: UUID | None = None,
         page_number: int | None = None,
     ) -> AdminRevisionDetailRead:
-        started_at = time.perf_counter()
-        log_diagnostic(
-            logger,
-            logging.INFO,
-            event="admin_ocr_upload_started",
-            stage="request_received",
-            book_id=str(book_id),
-        )
-        await self.require_admin(actor_id)
-        await self.db.rollback()
+        try:
+            started_at = time.perf_counter()
+            log_diagnostic(
+                logger,
+                logging.INFO,
+                event="admin_ocr_upload_started",
+                stage="request_received",
+                book_id=str(book_id),
+            )
+            await self.require_admin(actor_id)
+            await self._rollback_if_possible()
 
-        data, content_type, extension, width, height = await self._read_validate_image(file)
+            data, content_type, extension, width, height = await self._read_validate_image(file)
+        finally:
+            await self._close_upload_file(file)
         _, result = await self._ingest_validated_page_image(
             actor_id,
             book_id,
@@ -1554,7 +1599,20 @@ class AdminOcrService:
                     page_id, object_path, object_may_exist=storage_uploaded,
                     book_id=book_id, started_at=started_at,
                 )
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="admin_ocr_engine_unavailable",
+                    stage="ocr_processing",
+                    exception=exc,
+                    book_id=str(book_id),
+                    page_id=str(page_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="OCR engine is currently unavailable; please try again later",
+                ) from exc
             except OcrNoTextDetected as exc:
                 await self._abort_page_upload(
                     page_id, object_path, object_may_exist=storage_uploaded,
@@ -1585,7 +1643,20 @@ class AdminOcrService:
                     book_id=book_id, started_at=started_at,
                 )
                 if _is_ocr_exception(exc, "OcrEngineUnavailable"):
-                    raise HTTPException(status_code=503, detail=str(exc)) from exc
+                    log_diagnostic(
+                        logger,
+                        logging.ERROR,
+                        event="admin_ocr_engine_unavailable",
+                        stage="ocr_processing",
+                        exception=exc,
+                        book_id=str(book_id),
+                        page_id=str(page_id),
+                        elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                    )
+                    raise HTTPException(
+                        status_code=503,
+                        detail="OCR engine is currently unavailable; please try again later",
+                    ) from exc
                 if _is_ocr_exception(exc, "OcrNoTextDetected"):
                     raise HTTPException(
                         status_code=422,
@@ -1720,26 +1791,31 @@ class AdminOcrService:
             stage="request_received",
             book_id=str(book_id),
         )
-        await self.require_admin(actor_id)
-        await self.db.rollback()
+        try:
+            await self.require_admin(actor_id)
+            await self._rollback_if_possible()
 
-        book = await self.repo.book(book_id)
-        if book is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Book not found")
-        book_lifecycle_status = str(book.LifecycleStatus)
-        await self.db.rollback()
-        if book_lifecycle_status != "ACTIVE":
-            raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
+            book = await self.repo.book(book_id)
+            if book is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Book not found")
+            book_lifecycle_status = str(book.LifecycleStatus)
+            await self._rollback_if_possible()
+            if book_lifecycle_status != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
 
-        raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
+            raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
+            filename = file.filename
+            content_type = file.content_type
+        finally:
+            await self._close_upload_file(file)
         if len(raw_data) > MAX_DOCUMENT_BYTES:
             raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
 
         bundle = await run_in_threadpool(
             rasterize_uploaded_document,
-            filename=file.filename,
-            content_type=file.content_type,
+            filename=filename,
+            content_type=content_type,
             data=raw_data,
         )
 
@@ -1848,39 +1924,42 @@ class AdminOcrService:
         self, actor_id: UUID, page_id: UUID, file: UploadFile, *, upload_id: UUID | None = None,
     ) -> AdminRevisionDetailRead:
         started_at = time.perf_counter()
-        await self.require_admin(actor_id)
-        probe = await self.repo.page(page_id)
-        if probe is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Page not found")
-        book_id = probe.BookId
-        await self.db.rollback()
+        try:
+            await self.require_admin(actor_id)
+            probe = await self.repo.page(page_id)
+            if probe is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Page not found")
+            book_id = probe.BookId
+            await self._rollback_if_possible()
 
-        book = await self.repo.book(book_id, lock=True)
-        if book is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Book not found")
-        if book.LifecycleStatus != "ACTIVE":
-            await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Cannot replace a page in a retired book")
-        page = await self.repo.page(page_id, lock=True)
-        if page is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Page not found")
-        if page.BookId != book_id or page.LifecycleStatus != "ACTIVE":
-            await self.db.rollback()
-            raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+            book = await self.repo.book(book_id, lock=True)
+            if book is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Book not found")
+            if book.LifecycleStatus != "ACTIVE":
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=409, detail="Cannot replace a page in a retired book")
+            page = await self.repo.page(page_id, lock=True)
+            if page is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Page not found")
+            if page.BookId != book_id or page.LifecycleStatus != "ACTIVE":
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
 
-        expected_verified_revision_id = page.CurrentVerifiedRevisionId
-        previous_image_path = page.ImagePath
-        previous_width = page.Width
-        previous_height = page.Height
-        existing_revisions = await self.repo.revisions(page_id)
-        expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
-        previous_uploads = [(row.Id, dict(row.ProcessingMeta or {})) for row in existing_revisions] if upload_id else []
-        await self.db.rollback()
+            expected_verified_revision_id = page.CurrentVerifiedRevisionId
+            previous_image_path = page.ImagePath
+            previous_width = page.Width
+            previous_height = page.Height
+            existing_revisions = await self.repo.revisions(page_id)
+            expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
+            previous_uploads = [(row.Id, dict(row.ProcessingMeta or {})) for row in existing_revisions] if upload_id else []
+            await self._rollback_if_possible()
 
-        data, content_type, extension, width, height = await self._read_validate_image(file)
+            data, content_type, extension, width, height = await self._read_validate_image(file)
+        finally:
+            await self._close_upload_file(file)
         image_digest = hashlib.sha256(data).hexdigest()
         if upload_id:
             for saved_id, saved_meta in previous_uploads:
@@ -1936,7 +2015,20 @@ class AdminOcrService:
                 object_path, object_may_exist=storage_uploaded,
                 book_id=book_id, page_id=page_id, started_at=started_at,
             )
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_reupload_engine_unavailable",
+                stage="ocr_processing",
+                exception=exc,
+                book_id=str(book_id),
+                page_id=str(page_id),
+                elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="OCR engine is currently unavailable; please try again later",
+            ) from exc
         except OcrNoTextDetected as exc:
             await self._cleanup_uploaded_object(
                 object_path, object_may_exist=storage_uploaded,
@@ -1967,7 +2059,20 @@ class AdminOcrService:
                 book_id=book_id, page_id=page_id, started_at=started_at,
             )
             if _is_ocr_exception(exc, "OcrEngineUnavailable"):
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="admin_ocr_reupload_engine_unavailable",
+                    stage="ocr_processing",
+                    exception=exc,
+                    book_id=str(book_id),
+                    page_id=str(page_id),
+                    elapsed_ms=int((time.perf_counter() - started_at) * 1000),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="OCR engine is currently unavailable; please try again later",
+                ) from exc
             if _is_ocr_exception(exc, "OcrNoTextDetected"):
                 raise HTTPException(
                     status_code=422,
@@ -3308,7 +3413,19 @@ class AdminOcrService:
             image_bytes = await run_in_threadpool(download_object, source_image_path)
             ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
         except OcrEngineUnavailable as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ocr_reprocess_engine_unavailable",
+                stage="ocr_processing",
+                exception=exc,
+                book_id=str(page_book_id),
+                page_id=str(page_id),
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="OCR engine is currently unavailable; please try again later",
+            ) from exc
         except OcrNoTextDetected as exc:
             raise HTTPException(
                 status_code=422,
@@ -3321,7 +3438,19 @@ class AdminOcrService:
             ) from exc
         except Exception as exc:
             if _is_ocr_exception(exc, "OcrEngineUnavailable"):
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                log_diagnostic(
+                    logger,
+                    logging.ERROR,
+                    event="admin_ocr_reprocess_engine_unavailable",
+                    stage="ocr_processing",
+                    exception=exc,
+                    book_id=str(page_book_id),
+                    page_id=str(page_id),
+                )
+                raise HTTPException(
+                    status_code=503,
+                    detail="OCR engine is currently unavailable; please try again later",
+                ) from exc
             if _is_ocr_exception(exc, "OcrNoTextDetected"):
                 raise HTTPException(
                     status_code=422,
@@ -3523,6 +3652,7 @@ class AdminOcrService:
         prepared = await self.prepare_ai_correction(
             actor_id, page_id, draft_text, words
         )
+        await self._rollback_if_possible()
         corrected_text = await self.run_prepared_ai_correction(prepared)
         return {"corrected_text": corrected_text}
 
@@ -3787,13 +3917,13 @@ class AdminOcrService:
             raise OcrEngineUnavailable(
                 "Remote OCR worker is offline; cannot reprocess page synchronously"
             )
-        resolved_sha = (
-            str(source_sha256)
-            if isinstance(source_sha256, str) and len(source_sha256) == 64
-            else hashlib.sha256(
+        if isinstance(source_sha256, str) and len(source_sha256) == 64:
+            resolved_sha = str(source_sha256)
+        else:
+            await self._rollback_if_possible()
+            resolved_sha = hashlib.sha256(
                 await run_in_threadpool(download_object, source_image_path)
             ).hexdigest()
-        )
         await job_service.cancel_for_page(page_id, reason="SUPERSEDED_BY_ADMIN_REPROCESS")
         job = await job_service.enqueue_job(
             job_kind=JOB_KIND_ADMIN_REPROCESS,
@@ -3835,9 +3965,12 @@ class AdminOcrService:
         *,
         upload_id: UUID | None = None,
     ) -> dict[str, object]:
-        await self.require_admin(actor_id)
-        await self.db.rollback()
-        data, content_type, extension, width, height = await self._read_validate_image(file)
+        try:
+            await self.require_admin(actor_id)
+            await self._rollback_if_possible()
+            data, content_type, extension, width, height = await self._read_validate_image(file)
+        finally:
+            await self._close_upload_file(file)
         image_digest = hashlib.sha256(data).hexdigest()
         job_service = OcrInferenceJobService(self.db)
         if upload_id is not None:
@@ -3913,26 +4046,31 @@ class AdminOcrService:
         upload_id: UUID | None = None,
     ) -> dict[str, object]:
         """Rasterize a PDF/DOCX document and enqueue all pages asynchronously (202 Accepted)."""
-        await self.require_admin(actor_id)
-        await self.db.rollback()
+        try:
+            await self.require_admin(actor_id)
+            await self._rollback_if_possible()
 
-        book = await self.repo.book(book_id)
-        if book is None:
-            await self.db.rollback()
-            raise HTTPException(status_code=404, detail="Book not found")
-        book_lifecycle_status = str(book.LifecycleStatus)
-        await self.db.rollback()
-        if book_lifecycle_status != "ACTIVE":
-            raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
+            book = await self.repo.book(book_id)
+            if book is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Book not found")
+            book_lifecycle_status = str(book.LifecycleStatus)
+            await self._rollback_if_possible()
+            if book_lifecycle_status != "ACTIVE":
+                raise HTTPException(status_code=409, detail="Cannot upload pages to a retired book")
 
-        raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
+            raw_data = await file.read(MAX_DOCUMENT_BYTES + 1)
+            filename = file.filename
+            content_type = file.content_type
+        finally:
+            await self._close_upload_file(file)
         if len(raw_data) > MAX_DOCUMENT_BYTES:
             raise HTTPException(status_code=413, detail="Document exceeds the 50 MB limit")
 
         bundle = await run_in_threadpool(
             rasterize_uploaded_document,
-            filename=file.filename,
-            content_type=file.content_type,
+            filename=filename,
+            content_type=content_type,
             data=raw_data,
         )
 
@@ -4043,39 +4181,58 @@ class AdminOcrService:
         await self.require_admin(actor_id)
         page = await self.repo.page(page_id, lock=True)
         if page is None:
-            await self.db.rollback()
+            await self._rollback_if_possible()
             raise HTTPException(status_code=404, detail="Page not found")
         if page.LifecycleStatus != "ACTIVE":
-            await self.db.rollback()
+            await self._rollback_if_possible()
             raise HTTPException(status_code=409, detail="Cannot reprocess an inactive or retired page")
+        book_id = page.BookId
+        page_image_path = page.ImagePath
+        page_width = page.Width
+        page_height = page.Height
         expected_verified_revision_id = page.CurrentVerifiedRevisionId
         revisions = await self.repo.revisions(page.Id)
         expected_latest_revision_id = revisions[0].Id if revisions else None
         latest_meta = dict(revisions[0].ProcessingMeta or {}) if revisions else {}
         candidate_path = latest_meta.get("source_image_path")
         source_path = (
-            candidate_path if isinstance(candidate_path, str) and candidate_path else page.ImagePath
+            candidate_path if isinstance(candidate_path, str) and candidate_path else page_image_path
         )
         source_sha = latest_meta.get("source_image_sha256")
         if not (isinstance(source_sha, str) and len(source_sha) == 64):
+            await self._rollback_if_possible()
             source_sha = hashlib.sha256(
                 await run_in_threadpool(download_object, source_path)
             ).hexdigest()
+            page = await self.repo.page(page_id, lock=True)
+            if page is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Page not found")
+            if page.LifecycleStatus != "ACTIVE":
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=409, detail="Cannot reprocess an inactive or retired page")
+            book_id = page.BookId
+            page_image_path = page.ImagePath
+            page_width = page.Width
+            page_height = page.Height
+            expected_verified_revision_id = page.CurrentVerifiedRevisionId
+            revisions = await self.repo.revisions(page.Id)
+            expected_latest_revision_id = revisions[0].Id if revisions else None
         job_service = OcrInferenceJobService(self.db)
-        await job_service.cancel_for_page(page.Id, reason="SUPERSEDED_BY_ADMIN_REPROCESS")
+        await job_service.cancel_for_page(page_id, reason="SUPERSEDED_BY_ADMIN_REPROCESS")
         job = await job_service.enqueue_job(
             job_kind=JOB_KIND_ADMIN_REPROCESS,
             owner_user_id=actor_id,
-            book_id=page.BookId,
-            page_id=page.Id,
+            book_id=book_id,
+            page_id=page_id,
             image_path=source_path,
             image_sha256=str(source_sha),
-            image_width=int(latest_meta.get("source_image_width") or page.Width or 0) or None,
-            image_height=int(latest_meta.get("source_image_height") or page.Height or 0) or None,
+            image_width=int(latest_meta.get("source_image_width") or page_width or 0) or None,
+            image_height=int(latest_meta.get("source_image_height") or page_height or 0) or None,
             priority=PRIORITY_ADMIN_OCR,
             expected_verified_revision_id=expected_verified_revision_id,
             expected_latest_revision_id=expected_latest_revision_id,
-            processing_meta={"expected_page_image_path": page.ImagePath},
+            processing_meta={"expected_page_image_path": page_image_path},
         )
         await self.db.commit()
         return OcrInferenceJobService.serialize_job(job)
@@ -4088,28 +4245,36 @@ class AdminOcrService:
         *,
         upload_id: UUID | None = None,
     ) -> dict[str, object]:
-        await self.require_admin(actor_id)
-        probe = await self.repo.page(page_id)
-        if probe is None:
-            raise HTTPException(status_code=404, detail="Page not found")
-        book = await self.repo.book(probe.BookId, lock=True)
-        if book is None:
-            raise HTTPException(status_code=404, detail="Book not found")
-        if book.LifecycleStatus != "ACTIVE":
-            raise HTTPException(status_code=409, detail="Cannot edit pages of an archived book")
-        page = await self.repo.page(page_id, lock=True)
-        if page is None or page.LifecycleStatus != "ACTIVE":
-            raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
+        try:
+            await self.require_admin(actor_id)
+            probe = await self.repo.page(page_id)
+            if probe is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Page not found")
+            book = await self.repo.book(probe.BookId, lock=True)
+            if book is None:
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=404, detail="Book not found")
+            if book.LifecycleStatus != "ACTIVE":
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=409, detail="Cannot edit pages of an archived book")
+            page = await self.repo.page(page_id, lock=True)
+            if page is None or page.LifecycleStatus != "ACTIVE":
+                await self._rollback_if_possible()
+                raise HTTPException(status_code=409, detail="Page is no longer active; reload and retry")
 
-        expected_verified_revision_id = page.CurrentVerifiedRevisionId
-        previous_image_path = page.ImagePath
-        existing_revisions = await self.repo.revisions(page_id)
-        expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
-        await self.db.rollback()
+            book_id = book.Id
+            expected_verified_revision_id = page.CurrentVerifiedRevisionId
+            previous_image_path = page.ImagePath
+            existing_revisions = await self.repo.revisions(page_id)
+            expected_latest_revision_id = existing_revisions[0].Id if existing_revisions else None
+            await self._rollback_if_possible()
 
-        data, content_type, extension, width, height = await self._read_validate_image(file)
+            data, content_type, extension, width, height = await self._read_validate_image(file)
+        finally:
+            await self._close_upload_file(file)
         image_digest = hashlib.sha256(data).hexdigest()
-        object_path = f"books/{book.Id}/pages/{page_id}/{uuid4().hex}.{extension}"
+        object_path = f"books/{book_id}/pages/{page_id}/{uuid4().hex}.{extension}"
 
         job_service = OcrInferenceJobService(self.db)
         if upload_id is not None:
@@ -4120,6 +4285,7 @@ class AdminOcrService:
                 if existing_job.ImageSha256 != image_digest:
                     raise HTTPException(status_code=409, detail="Upload identity already belongs to a different image")
                 return OcrInferenceJobService.serialize_job(existing_job)
+            await self._rollback_if_possible()
 
         await run_in_threadpool(upload_object, object_path, data, content_type)
         try:
@@ -4127,7 +4293,7 @@ class AdminOcrService:
             job = await job_service.enqueue_job(
                 job_kind=JOB_KIND_ADMIN_REUPLOAD,
                 owner_user_id=actor_id,
-                book_id=book.Id,
+                book_id=book_id,
                 page_id=page_id,
                 image_path=object_path,
                 image_sha256=image_digest,
@@ -4146,11 +4312,11 @@ class AdminOcrService:
             await self.db.commit()
             return OcrInferenceJobService.serialize_job(job)
         except Exception:
-            await self.db.rollback()
+            await self._rollback_if_possible()
             await self._cleanup_uploaded_object(
                 object_path,
                 object_may_exist=True,
-                book_id=book.Id,
+                book_id=book_id,
                 page_id=page_id,
                 started_at=time.perf_counter(),
             )
@@ -4320,5 +4486,5 @@ class AdminOcrService:
 
     async def image_url(self, page: BookPage) -> str:
         image_path = page.ImagePath
-        await self.db.rollback()
-        return create_signed_image_url(image_path)
+        await self._rollback_if_possible()
+        return await run_in_threadpool(create_signed_image_url, image_path)

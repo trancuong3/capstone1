@@ -6,7 +6,10 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
-import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
+import {
+  invalidateApiReadCache,
+  runCoalescedApiGet,
+} from "@/lib/api/read-cache";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const safeMessage = "Có lỗi xảy ra. Vui lòng thử lại sau.";
@@ -381,6 +384,28 @@ const safeBackendMessages: Record<string, string> = {
     "Trang hiện không ở trạng thái chờ Admin phê duyệt.",
   "Sách riêng đang bị đình chỉ hoặc không còn khả dụng.":
     "Sách riêng đang bị đình chỉ hoặc không còn khả dụng.",
+  BOOK_BLOCKED_BY_CHILD_SAFETY:
+    "Sách này hiện bị chặn theo chính sách an toàn trẻ em nên chưa thể mở đọc.",
+  CONTENT_NOT_READY:
+    "Nội dung sách chưa sẵn sàng để đọc. Vui lòng thử lại sau khi hoàn tất xử lý.",
+  READING_RANGE_NOT_CONTIGUOUS:
+    "Khoảng trang đọc cần liên tiếp và bắt đầu từ trang có số nhỏ hơn hoặc bằng trang kết thúc.",
+  INVALID_BOOK_METADATA:
+    "Thông tin mô tả sách chưa hợp lệ. Vui lòng kiểm tra lại và thử lưu lại.",
+  PARENT_CONFLICT:
+    "Thông tin tài khoản phụ huynh bị xung đột hoặc đã tồn tại. Vui lòng tải lại trang và kiểm tra lại.",
+  AUTH_PROVIDER_UNAVAILABLE:
+    "Dịch vụ xác thực đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.",
+  DATABASE_OPERATION_FAILED:
+    "Hệ thống dữ liệu đang gặp sự cố tạm thời. Vui lòng thử lại sau.",
+  PARENT_AUTH_OPERATION_FAILED:
+    "Không thể hoàn tất thao tác xác thực tài khoản phụ huynh lúc này. Vui lòng thử lại sau.",
+  PROCESSING_UNAVAILABLE:
+    "Dịch vụ xử lý tài liệu và OCR đang tạm thời không khả dụng. Vui lòng thử lại sau.",
+  PROVIDER_NOT_CONFIGURED:
+    "Dịch vụ tích hợp trên máy chủ chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.",
+  REVISION_CONFLICT:
+    "Phiên bản nội dung đã thay đổi trước đó. Hãy tải lại trang để cập nhật bản mới nhất.",
 };
 
 function errorCode(status: number): ServiceErrorCode {
@@ -418,21 +443,22 @@ function failure(
 async function safeBackendMessage(response: Response): Promise<string> {
   try {
     const payload: unknown = await response.clone().json();
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "detail" in payload
-    ) {
-      if (typeof payload.detail === "string") {
-        return safeBackendMessages[payload.detail] ?? safeMessage;
+    if (typeof payload === "object" && payload !== null) {
+      if ("detail" in payload) {
+        if (typeof payload.detail === "string") {
+          return safeBackendMessages[payload.detail] ?? safeMessage;
+        }
+        if (
+          typeof payload.detail === "object" &&
+          payload.detail !== null &&
+          "code" in payload.detail &&
+          typeof payload.detail.code === "string"
+        ) {
+          return safeBackendMessages[payload.detail.code] ?? safeMessage;
+        }
       }
-      if (
-        typeof payload.detail === "object" &&
-        payload.detail !== null &&
-        "code" in payload.detail &&
-        typeof payload.detail.code === "string"
-      ) {
-        return safeBackendMessages[payload.detail.code] ?? safeMessage;
+      if ("code" in payload && typeof payload.code === "string") {
+        return safeBackendMessages[payload.code] ?? safeMessage;
       }
     }
   } catch {
@@ -511,7 +537,7 @@ export async function requestApi<T>(
     if (!response.ok) {
       if (response.status === 401) {
         invalidateBrowserTokenCache();
-        clearApiReadCache();
+        invalidateApiReadCache();
       }
       const backendMessage = await safeBackendMessage(response);
       const correlation =
@@ -544,11 +570,11 @@ export async function requestApi<T>(
   };
 
   if (method !== "GET") {
-    clearApiReadCache();
+    invalidateApiReadCache();
     try {
       return await executeFetch(signal);
     } finally {
-      clearApiReadCache();
+      invalidateApiReadCache();
     }
   }
 

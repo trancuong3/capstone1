@@ -1234,6 +1234,7 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
                 "VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL": "cuongtran290605@gmail.com",
                 "VIREAD_GDRIVE_OAUTH_CLIENT_ID": "",
                 "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
+                "VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS": str(tmpdir),
             }
             with patch.dict(os.environ, env, clear=False):
                 # Wrong owner email rejected with 403

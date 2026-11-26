@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -40,6 +42,7 @@ from app.services.training_storage.google_drive_desktop_store import (
     detect_google_drive_desktop_mounts,
     drive_desktop_config_readiness,
     resolve_flow2_sync_root,
+    validate_flow2_sync_root_allowed,
 )
 from app.services.training_storage.google_drive_oauth import (
     GOOGLE_DRIVE_REQUIRED_SCOPE,
@@ -74,12 +77,52 @@ _sync_store_cache: tuple[float, DriveStoreType | None] = (0.0, None)
 _warm_store_cache: dict[tuple[str, str], DriveStoreType] = {}
 _SYNC_STORE_CACHE_TTL_SECONDS = 60.0
 
+_desktop_readiness_lock = threading.Lock()
+_desktop_readiness_cache: tuple[float, tuple[Any, ...], dict[str, Any]] | None = None
+_DESKTOP_READINESS_CACHE_TTL_SECONDS = 30.0
+
+
+def invalidate_desktop_mount_probe_cache() -> None:
+    global _desktop_readiness_cache
+    with _desktop_readiness_lock:
+        _desktop_readiness_cache = None
+
+
+def _desktop_readiness_cache_key() -> tuple[Any, ...]:
+    return (
+        id(drive_desktop_config_readiness),
+        (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip(),
+        (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower(),
+        (os.getenv("VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS") or "").strip(),
+        (os.getenv("VIREAD_GDRIVE_DESKTOP_ROOT") or "").strip(),
+        (os.getenv("LOCALAPPDATA") or "").strip(),
+    )
+
+
+async def _get_cached_desktop_readiness() -> dict[str, Any]:
+    global _desktop_readiness_cache
+    now = time.monotonic()
+    key = _desktop_readiness_cache_key()
+    with _desktop_readiness_lock:
+        cached = _desktop_readiness_cache
+        if cached is not None and cached[0] > now and cached[1] == key:
+            return copy.deepcopy(cached[2])
+    fresh = await asyncio.to_thread(drive_desktop_config_readiness)
+    with _desktop_readiness_lock:
+        _desktop_readiness_cache = (
+            time.monotonic() + _DESKTOP_READINESS_CACHE_TTL_SECONDS,
+            key,
+            copy.deepcopy(fresh),
+        )
+    return fresh
+
 
 def invalidate_sync_google_drive_store_cache() -> None:
     global _sync_store_cache
     with _sync_store_lock:
         _sync_store_cache = (0.0, None)
         _warm_store_cache.clear()
+    invalidate_desktop_mount_probe_cache()
 
 
 def _set_sync_google_drive_store_cache(store: DriveStoreType | None) -> None:
@@ -211,10 +254,15 @@ def _serialize_connection_status(
     row: dict[str, Any] | None,
     *,
     migration_applied: bool,
+    desktop_readiness: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     readiness = oauth_config_readiness()
     bridge_readiness = apps_script_config_readiness()
-    desktop_readiness = drive_desktop_config_readiness()
+    resolved_desktop_readiness = (
+        desktop_readiness
+        if desktop_readiness is not None
+        else drive_desktop_config_readiness()
+    )
     configured_provider = flow2_storage_provider_setting().value
     if not migration_applied:
         return {
@@ -226,7 +274,7 @@ def _serialize_connection_status(
             "oauth_configured": readiness["oauth_configured"],
             "oauth_readiness": readiness,
             "apps_script_readiness": bridge_readiness,
-            "drive_desktop_readiness": desktop_readiness,
+            "drive_desktop_readiness": resolved_desktop_readiness,
             "required_account_email": readiness.get("required_account_email"),
             "account_email": None,
             "account_display_name": None,
@@ -257,6 +305,18 @@ def _serialize_connection_status(
     else:
         connection_mode = None
     subfolders = row.get("subfolder_ids") if (row and isinstance(row.get("subfolder_ids"), dict)) else {}
+    raw_root_path = str(row.get("root_folder_path") or "").strip() if row else ""
+    if (
+        is_drive_desktop
+        or not raw_root_path
+        or " (" in raw_root_path
+        or ":\\" in raw_root_path
+        or ":/" in raw_root_path
+        or raw_root_path.startswith(("/", "\\"))
+    ):
+        safe_root_folder_path = DRIVE_ROOT_DISPLAY_PATH
+    else:
+        safe_root_folder_path = raw_root_path
     return {
         "provider": configured_provider,
         "migration_applied": True,
@@ -266,14 +326,14 @@ def _serialize_connection_status(
         "oauth_configured": readiness["oauth_configured"],
         "oauth_readiness": readiness,
         "apps_script_readiness": bridge_readiness,
-        "drive_desktop_readiness": desktop_readiness,
+        "drive_desktop_readiness": resolved_desktop_readiness,
         "required_account_email": readiness.get("required_account_email"),
         "account_email": row.get("account_email") if row else None,
         "account_display_name": row.get("account_display_name") if row else None,
         "oauth_scope": scope_val or None,
         "scope_valid": scope_valid,
         "root_folder_id": row.get("root_folder_id") if row else None,
-        "root_folder_path": (row.get("root_folder_path") if row else None) or DRIVE_ROOT_DISPLAY_PATH,
+        "root_folder_path": safe_root_folder_path,
         "subfolder_ids": dict(subfolders),
         "quota": _compute_quota_summary(row),
         "last_health_check_at": _iso_or_none(row.get("last_health_check_at")) if row else None,
@@ -336,8 +396,10 @@ def build_google_drive_store_from_row(
                 code="DRIVE_DESKTOP_CREDENTIAL_CORRUPTED",
                 http_status=500,
             )
+        stored_root = resolve_flow2_sync_root(str(cred.get("root_dir") or ""))
+        validated_root = validate_flow2_sync_root_allowed(stored_root)
         store = GoogleDriveDesktopStore(
-            root_dir=str(cred.get("root_dir") or ""),
+            root_dir=validated_root,
             account_email=str(cred.get("account_email") or row.get("account_email") or "") or None,
         )
     elif scope_val == APPS_SCRIPT_BRIDGE_SCOPE:
@@ -448,12 +510,39 @@ class VireadDriveConnectionService:
         self.repo = VireadDriveConnectionRepository(db)
         self._session = session
 
+    async def _release_read_txn(self) -> None:
+        rollback = getattr(self.db, "rollback", None)
+        if callable(rollback):
+            try:
+                res = rollback()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+
+    async def _build_store_async(self, row: dict[str, Any]) -> DriveStoreType:
+        scope_val = str(row.get("oauth_scope") or "").strip()
+        if scope_val == DRIVE_DESKTOP_SYNC_SCOPE:
+            return await asyncio.to_thread(
+                build_google_drive_store_from_row,
+                row,
+                session=self._session,
+            )
+        return build_google_drive_store_from_row(row, session=self._session)
+
     async def get_status(self) -> dict[str, Any]:
         row, migration_applied = await self.repo.get_primary()
-        return _serialize_connection_status(row, migration_applied=migration_applied)
+        await self._release_read_txn()
+        desktop_readiness = await _get_cached_desktop_readiness()
+        return _serialize_connection_status(
+            row,
+            migration_applied=migration_applied,
+            desktop_readiness=desktop_readiness,
+        )
 
     async def get_connected_store(self) -> DriveStoreType:
         row, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied:
             raise DriveNotConnectedError(
                 "Flow 2 Google Drive database migration has not been applied yet"
@@ -462,7 +551,7 @@ class VireadDriveConnectionService:
             raise DriveNotConnectedError(
                 "Google Drive is not connected for Flow 2 training; connect it in Admin Training"
             )
-        store = build_google_drive_store_from_row(row, session=self._session)
+        store = await self._build_store_async(row)
         _set_sync_google_drive_store_cache(store)
         return store
 
@@ -477,7 +566,7 @@ class VireadDriveConnectionService:
         row, migration_applied = await self.repo.get_primary()
         if migration_applied and row and row.get("status") == "CONNECTED":
             try:
-                drive_store = build_google_drive_store_from_row(row, session=self._session)
+                drive_store = await self._build_store_async(row)
                 _set_sync_google_drive_store_cache(drive_store)
             except TrainingStorageError as exc:
                 drive_init_error = exc
@@ -524,6 +613,7 @@ class VireadDriveConnectionService:
         state: str,
     ) -> dict[str, Any]:
         _, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
@@ -602,7 +692,12 @@ class VireadDriveConnectionService:
         )
         _set_sync_google_drive_store_cache(store)
         row_with_token = {**row, "encrypted_refresh_token": encrypted_token}
-        return _serialize_connection_status(row_with_token, migration_applied=True)
+        desktop_readiness = await _get_cached_desktop_readiness()
+        return _serialize_connection_status(
+            row_with_token,
+            migration_applied=True,
+            desktop_readiness=desktop_readiness,
+        )
 
     async def connect_apps_script(
         self,
@@ -613,6 +708,7 @@ class VireadDriveConnectionService:
     ) -> dict[str, Any]:
         """Connect Flow 2 Google Drive via owner-deployed Apps Script Web App (0 card, no GCP billing)."""
         _, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
@@ -695,7 +791,12 @@ class VireadDriveConnectionService:
         )
         _set_sync_google_drive_store_cache(store)
         row_with_token = {**row, "encrypted_refresh_token": encrypted_cred}
-        return _serialize_connection_status(row_with_token, migration_applied=True)
+        desktop_readiness = await _get_cached_desktop_readiness()
+        return _serialize_connection_status(
+            row_with_token,
+            migration_applied=True,
+            desktop_readiness=desktop_readiness,
+        )
 
     async def connect_drive_desktop(
         self,
@@ -706,6 +807,7 @@ class VireadDriveConnectionService:
     ) -> dict[str, Any]:
         """Connect Flow 2 Google Drive via official Google Drive for Desktop synced mount (Advanced-Protection safe)."""
         _, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied:
             raise HTTPException(
                 status_code=503,
@@ -720,55 +822,63 @@ class VireadDriveConnectionService:
         required_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
 
         try:
-            detected = detect_google_drive_desktop_mounts()
-            raw_path = (sync_root_path or "").strip()
-            if not raw_path:
-                if detected:
-                    raw_path = str(detected[0]["drive_root"])
-                else:
-                    raise DriveNotConnectedError(
-                        "Google Drive for Desktop mount was not auto-detected; install/sign into Google Drive for Desktop or provide the G:\\My Drive path"
-                    )
-            flow2_root = resolve_flow2_sync_root(raw_path)
+            def _prepare_and_bootstrap_desktop() -> tuple[Any, str | None, GoogleDriveDesktopStore, str, dict[str, str], StorageQuotaStatus]:
+                detected = detect_google_drive_desktop_mounts()
+                raw_path = (sync_root_path or "").strip()
+                if not raw_path:
+                    if detected:
+                        raw_path = str(detected[0]["drive_root"])
+                    else:
+                        raise DriveNotConnectedError(
+                            "Google Drive for Desktop mount was not auto-detected; install/sign into Google Drive for Desktop or configure a valid sync mount path"
+                        )
+                resolved_root = resolve_flow2_sync_root(raw_path)
+                allowed_root = validate_flow2_sync_root_allowed(resolved_root, detected_mounts=detected)
 
-            # Determine verified owner email from DriveFS metadata, explicit input, or server pinning
-            detected_email = next(
-                (str(m.get("account_email") or "").strip().lower() for m in detected if m.get("account_email")),
-                None,
-            )
-            requested_email = (account_email or "").strip().lower() or None
-            if required_email:
-                if detected_email and detected_email != required_email:
-                    raise DrivePermissionError(
-                        f"Google Drive for Desktop is signed in as {detected_email}, not required owner {required_email}",
-                        code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
-                        http_status=403,
-                    )
-                if requested_email and requested_email != required_email:
-                    raise DrivePermissionError(
-                        f"Google Drive must be connected with required owner account ({required_email}), not {requested_email}",
-                        code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
-                        http_status=403,
-                    )
-            effective_email = detected_email or requested_email or required_email
+                # Determine verified owner email from DriveFS metadata, explicit input, or server pinning
+                detected_email = next(
+                    (str(m.get("account_email") or "").strip().lower() for m in detected if m.get("account_email")),
+                    None,
+                )
+                requested_email = (account_email or "").strip().lower() or None
+                if required_email:
+                    if detected_email and detected_email != required_email:
+                        raise DrivePermissionError(
+                            f"Google Drive for Desktop is signed in as {detected_email}, not required owner {required_email}",
+                            code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                            http_status=403,
+                        )
+                    if requested_email and requested_email != required_email:
+                        raise DrivePermissionError(
+                            f"Google Drive must be connected with required owner account ({required_email}), not {requested_email}",
+                            code="DRIVE_ACCOUNT_EMAIL_MISMATCH",
+                            http_status=403,
+                        )
+                resolved_email = detected_email or requested_email or required_email
 
-            store = GoogleDriveDesktopStore(root_dir=flow2_root, account_email=effective_email)
-
-            def _bootstrap_desktop() -> tuple[str, dict[str, str], StorageQuotaStatus]:
-                root_id, subs = store.ensure_directory_tree()
-                health = store.health_check()
+                desktop_store = GoogleDriveDesktopStore(root_dir=allowed_root, account_email=resolved_email)
+                r_id, subs = desktop_store.ensure_directory_tree()
+                health = desktop_store.health_check()
                 if not health.healthy:
                     raise TrainingStorageError(
                         health.detail or "Google Drive for Desktop folder is not writable",
                         code=health.error_code or "DRIVE_DESKTOP_IO_ERROR",
                         http_status=503,
                     )
-                quota = health.quota or store.quota_check(incoming_bytes=0)
-                return root_id, subs, quota
+                q = health.quota or desktop_store.quota_check(incoming_bytes=0)
+                return allowed_root, resolved_email, desktop_store, r_id, subs, q
 
-            root_id, subfolders, quota = await asyncio.to_thread(_bootstrap_desktop)
+            flow2_root, effective_email, store, root_id, subfolders, quota = await asyncio.to_thread(
+                _prepare_and_bootstrap_desktop
+            )
         except (DriveAuthError, DrivePermissionError, DriveQuotaExceededError, DriveNotConnectedError, TrainingStorageError) as exc:
             raise _http_exception_from_storage_error(exc) from exc
+        except OSError as exc:
+            logger.warning("Google Drive Desktop connect I/O failure: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="DRIVE_DESKTOP_IO_ERROR: Google Drive for Desktop folder is not accessible",
+            ) from exc
 
         cred_blob = json.dumps(
             {
@@ -787,7 +897,7 @@ class VireadDriveConnectionService:
             encrypted_refresh_token=encrypted_cred,
             token_key_fingerprint=fingerprint,
             root_folder_id=root_id,
-            root_folder_path=f"{DRIVE_ROOT_DISPLAY_PATH} ({flow2_root})",
+            root_folder_path=DRIVE_ROOT_DISPLAY_PATH,
             subfolder_ids=subfolders,
             quota_limit_bytes=quota.limit_bytes,
             quota_usage_bytes=quota.usage_bytes,
@@ -796,15 +906,27 @@ class VireadDriveConnectionService:
             connected_by=actor_id,
         )
         _set_sync_google_drive_store_cache(store)
+        invalidate_desktop_mount_probe_cache()
         row_with_token = {**row, "encrypted_refresh_token": encrypted_cred}
-        return _serialize_connection_status(row_with_token, migration_applied=True)
+        desktop_readiness = await _get_cached_desktop_readiness()
+        return _serialize_connection_status(
+            row_with_token,
+            migration_applied=True,
+            desktop_readiness=desktop_readiness,
+        )
 
     async def check_health(self) -> dict[str, Any]:
         row, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied or not row or row.get("status") == "DISCONNECTED":
-            return _serialize_connection_status(row, migration_applied=migration_applied)
+            desktop_readiness = await _get_cached_desktop_readiness()
+            return _serialize_connection_status(
+                row,
+                migration_applied=migration_applied,
+                desktop_readiness=desktop_readiness,
+            )
         try:
-            store = build_google_drive_store_from_row(row, session=self._session)
+            store = await self._build_store_async(row)
         except TrainingStorageError as exc:
             updated = await self.repo.update_health_and_quota(
                 status="ERROR",
@@ -813,7 +935,12 @@ class VireadDriveConnectionService:
             )
             invalidate_sync_google_drive_store_cache()
             merged = {**(row or {}), **(updated or {})}
-            return _serialize_connection_status(merged, migration_applied=True)
+            desktop_readiness = await _get_cached_desktop_readiness()
+            return _serialize_connection_status(
+                merged,
+                migration_applied=True,
+                desktop_readiness=desktop_readiness,
+            )
 
         health = await asyncio.to_thread(store.health_check)
         quota = health.quota
@@ -834,7 +961,12 @@ class VireadDriveConnectionService:
         else:
             invalidate_sync_google_drive_store_cache()
         merged = {**(row or {}), **(updated or {})}
-        payload = _serialize_connection_status(merged, migration_applied=True)
+        desktop_readiness = await _get_cached_desktop_readiness()
+        payload = _serialize_connection_status(
+            merged,
+            migration_applied=True,
+            desktop_readiness=desktop_readiness,
+        )
         payload["health_detail"] = health.detail
         return payload
 
@@ -844,6 +976,12 @@ class VireadDriveConnectionService:
             result = await asyncio.to_thread(store.self_test)
         except TrainingStorageError as exc:
             raise _http_exception_from_storage_error(exc) from exc
+        except OSError as exc:
+            logger.warning("Google Drive self-test I/O failure: %s", exc)
+            raise HTTPException(
+                status_code=503,
+                detail="DRIVE_DESKTOP_IO_ERROR: Google Drive storage self-test failed",
+            ) from exc
 
         if result.quota is not None:
             await self.repo.update_health_and_quota(
@@ -872,8 +1010,14 @@ class VireadDriveConnectionService:
 
     async def disconnect(self) -> dict[str, Any]:
         row, migration_applied = await self.repo.get_primary()
+        await self._release_read_txn()
         if not migration_applied:
-            return _serialize_connection_status(None, migration_applied=False)
+            desktop_readiness = await _get_cached_desktop_readiness()
+            return _serialize_connection_status(
+                None,
+                migration_applied=False,
+                desktop_readiness=desktop_readiness,
+            )
         revoked = False
         if (
             row
@@ -889,7 +1033,12 @@ class VireadDriveConnectionService:
                     revoked = False
         updated = await self.repo.mark_disconnected()
         invalidate_sync_google_drive_store_cache()
-        payload = _serialize_connection_status(updated, migration_applied=True)
+        desktop_readiness = await _get_cached_desktop_readiness()
+        payload = _serialize_connection_status(
+            updated,
+            migration_applied=True,
+            desktop_readiness=desktop_readiness,
+        )
         payload["google_token_revoked"] = revoked
         return payload
 

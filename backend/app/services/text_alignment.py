@@ -105,18 +105,26 @@ def detect_repeated_words(alignment):
 
     for i, item in enumerate(alignment):
         if item["status"] != "INSERT":
-            continue    
+            continue
 
         word = item.get("spoken_word")
         if not word:
             continue
 
-        previous = alignment[i - 1] if i > 0 else None
-        next_item = (
-            alignment[i + 1]
-            if i + 1 < len(alignment)
-            else None
-        )
+        # Walk across contiguous INSERT runs so triple/stutter repeats
+        # (e.g. "mèo mèo mèo") resolve to their anchored book word.
+        left_idx = i - 1
+        while left_idx >= 0 and alignment[left_idx].get("status") == "INSERT":
+            left_idx -= 1
+        previous = alignment[left_idx] if left_idx >= 0 else None
+
+        right_idx = i + 1
+        while (
+            right_idx < len(alignment)
+            and alignment[right_idx].get("status") == "INSERT"
+        ):
+            right_idx += 1
+        next_item = alignment[right_idx] if right_idx < len(alignment) else None
 
         matched_item = None
 
@@ -147,10 +155,11 @@ def detect_repeated_words(alignment):
             item["word"] for item in repeated_items
         ],
         "repeated_items": repeated_items,
-        "repeated_book_indices": list({
+        "repeated_book_indices": list(dict.fromkeys(
             item["book_index"] for item in repeated_items
-        }),
+        )),
     }
+
 
 def detect_hesitations(words, threshold=2.0):
     hesitations = []
@@ -160,9 +169,22 @@ def detect_hesitations(words, threshold=2.0):
 
     words = sorted(words, key=lambda word: word["start"])
 
-    for i in range(1, len(words)):
-        current = words[i - 1]
-        next_word = words[i]
+    # Align indices against the normalized token stream used by align_text()
+    # so punctuation-only entries or hyphenated multi-token words do not drift.
+    normalized_entries = []
+    token_cursor = 0
+    for word in words:
+        tokens = normalize_text(str(word.get("text", "")))
+        if not tokens:
+            continue
+        first_idx = token_cursor
+        last_idx = token_cursor + len(tokens) - 1
+        token_cursor += len(tokens)
+        normalized_entries.append((word, first_idx, last_idx))
+
+    for i in range(1, len(normalized_entries)):
+        current, _, current_last_idx = normalized_entries[i - 1]
+        next_word, next_first_idx, _ = normalized_entries[i]
 
         pause = next_word["start"] - current["end"]
 
@@ -173,8 +195,8 @@ def detect_hesitations(words, threshold=2.0):
             hesitations.append({
                 "after_word": current["text"],
                 "before_word": next_word["text"],
-                "after_spoken_index": i - 1,
-                "before_spoken_index": i,
+                "after_spoken_index": current_last_idx,
+                "before_spoken_index": next_first_idx,
                 "pause": round(pause, 2),
             })
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 import re
 import unicodedata
@@ -12,10 +13,20 @@ from uuid import UUID
 
 from fastapi import HTTPException, status
 from pydantic import TypeAdapter, ValidationError
+from sqlalchemy import or_, select
 
 from app.api.routes.reading import HistoryService
-from app.models import ReadingEvent
+from app.models import (
+    Book,
+    BookPage,
+    ChildProfile,
+    PageRevision,
+    PageRevisionWord,
+    ReadingEvent,
+    ReadingSession,
+)
 from app.models.difficult_word_practice import DifficultWordPracticeAttempt
+from app.policies.book_access import is_catalog_book, is_private_book_owned_by
 from app.providers.elevenlabs_voice_provider import (
     Transcription,
     VoiceProviderError,
@@ -55,6 +66,21 @@ UNUSABLE_AUDIO_QUALITY_STATUSES = {
 }
 
 _PUNCTUATION_STRIP_RE = re.compile(r"^[\W_]+|[\W_]+$", re.UNICODE)
+_DISPLAY_EDGE_PUNCT_RE = re.compile(
+    r'^[\s.,!?;:…“”"\'\‘\’\(\)\[\]\{\}«»—–\-]+|[\s.,!?;:…“”"\'\‘\’\(\)\[\]\{\}«»—–\-]+$',
+    re.UNICODE,
+)
+
+
+def clean_difficult_word_display_text(value: Any) -> str:
+    """Strip leading/trailing punctuation from display_text while preserving NFC Vietnamese tones and đ."""
+    if not isinstance(value, str):
+        return ""
+    nfc = unicodedata.normalize("NFC", value).strip()
+    stripped = _DISPLAY_EDGE_PUNCT_RE.sub("", nfc).strip()
+    return re.sub(r"\s+", " ", stripped)
+
+
 _NON_SPEECH_TAG_RE = re.compile(
     r"\[[^\]]*\]|\((?:tiếng|âm\s*thanh|nhạc|ồn|cười|ho|thở|applause|laughter|music|noise)[^)]*\)",
     re.UNICODE | re.IGNORECASE,
@@ -448,7 +474,7 @@ class _WordAccumulator:
         page_number: int | None = None,
         context_phrase: str | None = None,
     ) -> None:
-        cleaned = unicodedata.normalize("NFC", display_text).strip()
+        cleaned = clean_difficult_word_display_text(display_text)
         if cleaned:
             self.display_counter[cleaned] += 1
         seen_utc = _ensure_utc(seen_at)
@@ -485,11 +511,12 @@ class _WordAccumulator:
         self,
         progress: DifficultWordProgressSummaryRead,
     ) -> DifficultWordRead:
-        display_text = (
+        raw_display = (
             self.display_counter.most_common(1)[0][0]
             if self.display_counter
             else self.normalized_word
         )
+        display_text = clean_difficult_word_display_text(raw_display) or self.normalized_word
         difficulty_score = round(
             self.mispronunciation_count * 2.0
             + self.omission_count * 2.0
@@ -684,7 +711,7 @@ class DifficultWordsService:
             attempt_no = meta.get("retry_attempt")
             attempt_num = attempt_no if type(attempt_no) is int and attempt_no >= 1 else 1
             raw_display = meta.get("target_word") or ((word_text_by_id or {}).get(event.WordId) if event.WordId else None) or norm
-            display_text = unicodedata.normalize("NFC", str(raw_display)).strip()[:120] or norm
+            display_text = clean_difficult_word_display_text(str(raw_display))[:120] or norm
             raw_recognized = meta.get("recognized_text")
             spoken_transcript = (
                 unicodedata.normalize("NFC", raw_recognized).strip()[:160]
@@ -1373,6 +1400,176 @@ class DifficultWordsService:
 
         return (resolved_status, resolved_source, spoken_transcript, calibrated_confidence)
 
+    async def _release_db(self) -> bool:
+        """End an open DB transaction so no permit or lock is held across external STT HTTP calls."""
+        db = getattr(self.repository, "db", None)
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+            return True
+        return False
+
+    async def _validate_optional_context_fks(
+        self,
+        child_id: UUID,
+        actor_id: UUID,
+        *,
+        book_id: UUID | None = None,
+        session_id: UUID | None = None,
+        page_id: UUID | None = None,
+        page_revision_id: UUID | None = None,
+        word_id: UUID | None = None,
+    ) -> None:
+        """Verify optional client-supplied context foreign keys exist and belong to the actor/hierarchy."""
+        if (
+            book_id is None
+            and session_id is None
+            and page_id is None
+            and page_revision_id is None
+            and word_id is None
+        ):
+            return
+        db = getattr(self.repository, "db", None)
+        if db is None:
+            return
+
+        book_visibility = or_(
+            is_catalog_book(),
+            is_private_book_owned_by(actor_id, include_retired=True),
+        )
+        expected_book_id: UUID | None = None
+
+        if session_id is not None:
+            session_row = await db.scalar(
+                select(ReadingSession)
+                .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+                .where(
+                    ReadingSession.Id == session_id,
+                    ReadingSession.ChildId == child_id,
+                    ChildProfile.ParentId == actor_id,
+                )
+                .limit(1)
+            )
+            if session_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Reading session not found",
+                )
+            expected_book_id = getattr(session_row, "BookId", None)
+
+        if book_id is not None:
+            if expected_book_id is not None and expected_book_id != book_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Book does not match reading session",
+                )
+            found_book_id = await db.scalar(
+                select(Book.Id)
+                .where(Book.Id == book_id, book_visibility)
+                .limit(1)
+            )
+            if found_book_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Book not found",
+                )
+            expected_book_id = book_id
+
+        expected_page_id: UUID | None = page_id
+        if page_id is not None:
+            page_book_id = await db.scalar(
+                select(BookPage.BookId)
+                .join(Book, Book.Id == BookPage.BookId)
+                .where(BookPage.Id == page_id, book_visibility)
+                .limit(1)
+            )
+            if page_book_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Book page not found",
+                )
+            if expected_book_id is not None and page_book_id != expected_book_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Page does not belong to the referenced book",
+                )
+            expected_book_id = page_book_id
+
+        if page_revision_id is not None:
+            rev_row = (
+                await db.execute(
+                    select(PageRevision.PageId, BookPage.BookId)
+                    .join(BookPage, BookPage.Id == PageRevision.PageId)
+                    .join(Book, Book.Id == BookPage.BookId)
+                    .where(PageRevision.Id == page_revision_id, book_visibility)
+                    .limit(1)
+                )
+            ).first()
+            if rev_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Page revision not found",
+                )
+            rev_page_id, rev_book_id = rev_row[0], rev_row[1]
+            if expected_page_id is not None and rev_page_id != expected_page_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Page revision does not belong to the referenced page",
+                )
+            if expected_book_id is not None and rev_book_id != expected_book_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Page revision does not belong to the referenced book",
+                )
+            expected_page_id = rev_page_id
+            expected_book_id = rev_book_id
+
+        if word_id is not None:
+            word_row = (
+                await db.execute(
+                    select(
+                        PageRevisionWord.PageRevisionId,
+                        PageRevision.PageId,
+                        BookPage.BookId,
+                    )
+                    .join(
+                        PageRevision,
+                        PageRevision.Id == PageRevisionWord.PageRevisionId,
+                    )
+                    .join(BookPage, BookPage.Id == PageRevision.PageId)
+                    .join(Book, Book.Id == BookPage.BookId)
+                    .where(PageRevisionWord.Id == word_id, book_visibility)
+                    .limit(1)
+                )
+            ).first()
+            if word_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Word not found",
+                )
+            word_rev_id, word_page_id, word_book_id = (
+                word_row[0],
+                word_row[1],
+                word_row[2],
+            )
+            if page_revision_id is not None and word_rev_id != page_revision_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Word does not belong to the referenced page revision",
+                )
+            if expected_page_id is not None and word_page_id != expected_page_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Word does not belong to the referenced page",
+                )
+            if expected_book_id is not None and word_book_id != expected_book_id:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="Word does not belong to the referenced book",
+                )
+
     async def start_attempt(
         self,
         child_id: UUID,
@@ -1385,11 +1582,25 @@ class DifficultWordsService:
         normalized_word = normalize_vietnamese_practice_word(payload.normalized_word)
         if not normalized_word:
             raise HTTPException(status_code=422, detail="INVALID_PRACTICE_WORD")
-        display_text = unicodedata.normalize(
-            "NFC", (payload.display_text or payload.normalized_word).strip()
+        display_text = clean_difficult_word_display_text(
+            payload.display_text or payload.normalized_word
         )[:120]
         if not display_text:
             display_text = normalized_word
+
+        await self._validate_optional_context_fks(
+            child_id,
+            actor_id,
+            book_id=payload.book_id,
+            session_id=payload.session_id,
+            page_id=payload.page_id,
+            page_revision_id=payload.page_revision_id,
+            word_id=payload.word_id,
+        )
+
+        lock_fn = getattr(self.repository, "lock_practice_request", None)
+        if callable(lock_fn):
+            await lock_fn(child_id, payload.request_id)
 
         existing = await self.repository.find_practice_attempt_by_request(
             child_id, actor_id, normalized_word, payload.request_id
@@ -1553,13 +1764,16 @@ class DifficultWordsService:
                 detail="EMPTY_AUDIO",
             )
 
+        attempt_display_text = attempt.DisplayText
+        released = await self._release_db()
+
         (
             resolved_status,
             resolved_source,
             spoken_transcript,
             calibrated_confidence,
         ) = await self._evaluate_audio_payload(
-            display_text=attempt.DisplayText,
+            display_text=attempt_display_text,
             audio_bytes=audio_bytes,
             filename=filename,
             content_type=content_type,
@@ -1567,6 +1781,29 @@ class DifficultWordsService:
             browser_transcript=browser_transcript,
             browser_confidence=browser_confidence,
         )
+
+        if released:
+            attempt = await self.repository.get_practice_attempt(
+                child_id, attempt_id, actor_id
+            )
+            if attempt is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="DIFFICULT_WORD_ATTEMPT_NOT_FOUND",
+                )
+            if attempt.State == "COMPLETED":
+                if attempt.CompletionRequestId == completion_request_id:
+                    word_attempts = await self.repository.list_practice_attempts(
+                        child_id, actor_id, normalized_word=attempt.NormalizedWord
+                    )
+                    next_word = await self._next_recommended_word(
+                        child_id, actor_id, attempt.NormalizedWord
+                    )
+                    return self._to_attempt_read(attempt, word_attempts, next_word)
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="DIFFICULT_WORD_ATTEMPT_ALREADY_COMPLETED",
+                )
 
         now = datetime.now(timezone.utc)
         attempt.CompletionRequestId = completion_request_id
@@ -1617,11 +1854,21 @@ class DifficultWordsService:
         norm = normalize_vietnamese_practice_word(normalized_word)
         if not norm:
             raise HTTPException(status_code=422, detail="INVALID_PRACTICE_WORD")
-        clean_display = unicodedata.normalize(
-            "NFC", (display_text or normalized_word).strip()
-        )[:120] or norm
+        clean_display = (
+            clean_difficult_word_display_text(display_text or normalized_word)[:120]
+            or norm
+        )
 
-        await self.repository.lock_practice_request(child_id, request_id)
+        await self._validate_optional_context_fks(
+            child_id,
+            actor_id,
+            book_id=book_id,
+            session_id=session_id,
+            page_id=page_id,
+            page_revision_id=page_revision_id,
+            word_id=word_id,
+        )
+
         storage_ready = await self.repository.is_practice_storage_ready()
         if storage_ready:
             existing = await self.repository.find_practice_attempt_by_request(
@@ -1675,6 +1922,9 @@ class DifficultWordsService:
                 detail="DIFFICULT_WORD_PRACTICE_STORAGE_UNAVAILABLE",
             )
 
+        # Release DB connection/transaction before slow external STT HTTP calls.
+        await self._release_db()
+
         (
             resolved_status,
             resolved_source,
@@ -1690,6 +1940,39 @@ class DifficultWordsService:
             browser_confidence=browser_confidence,
             context_phrase=context_phrase,
         )
+
+        # Acquire per-request advisory lock only for the short persistence phase
+        # and re-check idempotency so concurrent requests never duplicate rows.
+        await self.repository.lock_practice_request(child_id, request_id)
+        if storage_ready:
+            existing = await self.repository.find_practice_attempt_by_request(
+                child_id, actor_id, norm, request_id
+            )
+            if existing is not None and existing.State == "COMPLETED":
+                _, _, word_attempts = await self._load_merged_attempts(
+                    child_id, actor_id, normalized_word=norm
+                )
+                next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                return self._to_attempt_read(existing, word_attempts, next_word)
+        if callable(find_retry):
+            existing_event = await find_retry(child_id, actor_id, norm, request_id)
+            if existing_event is not None:
+                _, _, word_attempts = await self._load_merged_attempts(
+                    child_id, actor_id, normalized_word=norm
+                )
+                matching = next(
+                    (a for a in word_attempts if a.Id == existing_event.Id),
+                    word_attempts[-1] if word_attempts else None,
+                )
+                if matching is not None:
+                    next_word = await self._next_recommended_word(child_id, actor_id, norm)
+                    return self._to_attempt_read(
+                        matching,
+                        word_attempts,
+                        next_word,
+                        persistence_backend="READING_EVENT",
+                        resolved_in_session=matching.AssessmentStatus == "CORRECT",
+                    )
 
         now = datetime.now(timezone.utc)
         saved_table_row: DifficultWordPracticeAttempt | None = None
@@ -1755,7 +2038,7 @@ class DifficultWordsService:
                 WordId=target_word,
                 Type="WORD_RETRY",
                 StartMs=0,
-                EndMs=min(32767, max(0, audio_duration_ms or 0)),
+                EndMs=min(2_147_483_647, max(0, audio_duration_ms or 0)),
                 Confidence=calibrated_confidence,
                 Status=event_status,
                 Metadata={
@@ -1855,7 +2138,10 @@ class DifficultWordsService:
                 DifficultWordPracticeHistoryItemRead(
                     attempt_id=row.Id,
                     normalized_word=row.NormalizedWord,
-                    display_text=row.DisplayText,
+                    display_text=(
+                        clean_difficult_word_display_text(row.DisplayText)
+                        or row.NormalizedWord
+                    ),
                     attempt_number=row.AttemptNumber,
                     state=row.State,
                     assessment_status=row.AssessmentStatus,

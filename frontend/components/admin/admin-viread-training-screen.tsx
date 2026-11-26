@@ -52,16 +52,37 @@ export function AdminVireadTrainingScreen() {
     "Đã rà soát báo cáo Locked Test và chấp thuận bản VietOCR V2.",
   );
   const oauthCallbackHandled = useRef(false);
+  const mountedRef = useRef(true);
+  const loadRequestIdRef = useRef(0);
+  const actionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      loadRequestIdRef.current += 1;
+      actionRequestIdRef.current += 1;
+    };
+  }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
+    if (!mountedRef.current) return;
     setError(false);
     if (!vireadTraining) {
       setError(true);
       return;
     }
     try {
-      setData(await vireadTraining.overview());
+      const nextData = await vireadTraining.overview();
+      if (!mountedRef.current || requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setData(nextData);
     } catch {
+      if (!mountedRef.current || requestId !== loadRequestIdRef.current) {
+        return;
+      }
       setError(true);
     }
   }, [vireadTraining]);
@@ -86,6 +107,8 @@ export function AdminVireadTrainingScreen() {
     // does not drop an OAuth callback whose query parameters were already consumed.
     void (async () => {
       await Promise.resolve();
+      if (!mountedRef.current) return;
+      const actionId = ++actionRequestIdRef.current;
       if (oauthError) {
         setMessage(
           `Google OAuth đã bị hủy hoặc từ chối (${oauthError}). Chưa có token nào được lưu.`,
@@ -104,26 +127,70 @@ export function AdminVireadTrainingScreen() {
           code,
           state,
         });
+        if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+          return;
+        }
         setMessage(
           `Đã kết nối Google Drive Luồng 2 thành công (${connected.account_email ?? "tài khoản đã xác thực"}) với phạm vi tối thiểu drive.file.`,
         );
         await load();
       } catch {
+        if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+          return;
+        }
         setMessage(
           "Không thể hoàn tất xác thực OAuth Google Drive (state hết hạn, không khớp phiên Admin hoặc thiếu phạm vi drive.file). Vui lòng thử kết nối lại.",
         );
       } finally {
-        setBusy(false);
+        if (mountedRef.current && actionId === actionRequestIdRef.current) {
+          setBusy(false);
+        }
       }
     })();
   }, [load, vireadTraining]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
-    const interval = globalThis.setInterval(() => void load(), 30_000);
+    let interval: ReturnType<typeof globalThis.setInterval> | null = null;
+
+    const stopPolling = () => {
+      if (interval !== null) {
+        globalThis.clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const startPolling = () => {
+      stopPolling();
+      if (typeof document !== "undefined" && document.hidden) return;
+      interval = globalThis.setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        void load();
+      }, 30_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        stopPolling();
+      } else {
+        startPolling();
+      }
+    };
+
+    startPolling();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
     return () => {
       globalThis.clearTimeout(timeout);
-      globalThis.clearInterval(interval);
+      stopPolling();
+      if (typeof document !== "undefined") {
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange,
+        );
+      }
     };
   }, [load]);
 
@@ -147,10 +214,14 @@ export function AdminVireadTrainingScreen() {
     benchmark_id?: string;
   }) {
     if (!vireadTraining || busy || reason.trim().length < 8) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.decide({ ...input, reason: reason.trim() });
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         input.action === "APPROVE"
           ? "Đã ghi quyết định phê duyệt. Backend sẽ tải model đã kiểm tra."
@@ -158,51 +229,74 @@ export function AdminVireadTrainingScreen() {
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Không thể lưu quyết định. Hãy kiểm tra trạng thái và thử lại.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function retry(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.retry(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Đã đưa lại job lỗi vào hàng đợi. Colab sẽ nhận đúng snapshot dữ liệu khi bạn chạy worker.",
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Không thể thử lại job này. Job có thể đã tạo run, model gốc đã đổi hoặc một job khác đang chạy.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function deleteJob(jobId: string) {
     if (!vireadTraining || busy || deletingJobId) return;
+    const actionId = ++actionRequestIdRef.current;
     setDeletingJobId(jobId);
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.deleteJob(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Đã xóa job cũ. Dataset, run và checkpoint được giữ; hàng đợi sẽ tạo job mới theo cấu hình backend hiện tại nếu dữ liệu vẫn đủ điều kiện.",
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Không thể xóa job. Job có thể đang chờ hoặc đang chạy; hãy làm mới trạng thái rồi thử lại.",
       );
     } finally {
-      setDeletingJobId(null);
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setDeletingJobId(null);
+        setBusy(false);
+      }
     }
   }
 
@@ -211,6 +305,7 @@ export function AdminVireadTrainingScreen() {
     evaluationType: "PILOT" | "PRODUCTION",
   ) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
@@ -218,56 +313,82 @@ export function AdminVireadTrainingScreen() {
         jobId,
         evaluationType,
       );
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         `${evaluationType === "PILOT" ? "Pilot" : "Production"} đã vào hàng đợi: ${result.sample_count} mẫu, ${result.group_count} nhóm. Worker chỉ benchmark checkpoint có sẵn; không train lại.`,
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         evaluationType === "PRODUCTION" && data?.locked_test?.status !== "READY"
           ? "Chưa đủ Locked Test Production độc lập. Candidate được giữ nguyên; có thể dùng Pilot để kiểm tra nhanh pipeline."
           : "Không thể xếp đánh giá. Candidate hoặc cohort có thể đã đổi trạng thái; hãy tải lại trang.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function closeMismatchedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.discardMismatchedCandidate(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Đã đóng job lỗi cấu hình. Run và checkpoint được giữ nguyên, candidate chưa được benchmark/duyệt; hệ thống có thể tạo job mới theo cấu hình đã khóa đúng.",
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function closeUnbenchmarkedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.closeUnbenchmarkedCandidate(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Đã đóng candidate chưa benchmark; run và checkpoint được giữ nguyên. Hệ thống sẽ tự tạo Locked Test và job thay thế khi đủ holdout VERIFIED độc lập.",
       );
       await load();
     } catch {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 

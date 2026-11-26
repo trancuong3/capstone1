@@ -54,10 +54,37 @@ def _revision_snapshot_hash(revision) -> str:
     ).hexdigest()
 
 
-async def _heartbeat(scan_id: UUID, worker_id: str, stop: asyncio.Event) -> None:
+async def _assert_lease_held(
+    repo: BookContentQualityRepository,
+    scan_id: UUID,
+    worker_id: str | None,
+) -> BookQualityScanRun | None:
+    if worker_id is None:
+        return None
+    now = datetime.now(timezone.utc)
+    run = await repo.scan_run(scan_id, lock=True)
+    if (
+        run is None
+        or run.Status != "RUNNING"
+        or run.WorkerId != worker_id
+        or (run.LeaseExpiresAt is not None and run.LeaseExpiresAt <= now)
+    ):
+        raise WorkerLeaseLost("Book quality scan lease was lost")
+    return run
+
+
+async def _heartbeat(
+    scan_id: UUID,
+    worker_id: str,
+    stop: asyncio.Event,
+    lease_lost: asyncio.Event,
+    *,
+    heartbeat_seconds: float | None = None,
+) -> None:
+    interval = HEARTBEAT_SECONDS if heartbeat_seconds is None else heartbeat_seconds
     while not stop.is_set():
         try:
-            await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SECONDS)
+            await asyncio.wait_for(stop.wait(), timeout=interval)
             return
         except TimeoutError:
             pass
@@ -66,11 +93,13 @@ async def _heartbeat(scan_id: UUID, worker_id: str, stop: asyncio.Event) -> None
                 alive = await BookContentQualityRepository(session).renew_scan_lease(
                     scan_id, worker_id, lease_seconds=LEASE_SECONDS
                 )
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            logger.exception("Book quality worker heartbeat failed")
-            stop.set()
-            return
+            logger.exception("Book quality worker heartbeat failed; will retry on next interval")
+            continue
         if not alive:
+            lease_lost.set()
             stop.set()
             return
 
@@ -112,21 +141,33 @@ def _finding_row(
     )
 
 
-async def _process_page_scan(page_scan_id: UUID) -> None:
+async def _process_page_scan(
+    page_scan_id: UUID,
+    *,
+    scan_id: UUID | None = None,
+    worker_id: str | None = None,
+) -> None:
     text_snapshot: str | None = None
     page_number = 0
     book_id: UUID | None = None
     page_id: UUID | None = None
     revision_id: UUID | None = None
     expected_content_hash: str | None = None
+    effective_scan_id: UUID | None = scan_id
     should_run_ai = False
 
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
+        if effective_scan_id is not None and worker_id is not None:
+            await _assert_lease_held(repo, effective_scan_id, worker_id)
         context = await repo.scan_page_context(page_scan_id)
         if context is None:
             return
         page_scan, page, revision = context
+        if effective_scan_id is None:
+            effective_scan_id = page_scan.ScanRunId
+            if effective_scan_id is not None and worker_id is not None:
+                await _assert_lease_held(repo, effective_scan_id, worker_id)
         if page_scan.Status in ("COMPLETED", "NOT_SCANNABLE", "STALE"):
             return
         if page_scan.Status == "FAILED" and int(page_scan.AttemptCount or 0) >= MAX_PAGE_ATTEMPTS:
@@ -294,6 +335,8 @@ async def _process_page_scan(page_scan_id: UUID) -> None:
 
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
+        if effective_scan_id is not None and worker_id is not None:
+            await _assert_lease_held(repo, effective_scan_id, worker_id)
         context = await repo.scan_page_context(page_scan_id)
         if context is None:
             return
@@ -371,10 +414,17 @@ async def _process_page_scan(page_scan_id: UUID) -> None:
         await session.commit()
 
 
-async def _add_cross_page_findings(scan_id: UUID) -> None:
+async def _add_cross_page_findings(
+    scan_id: UUID,
+    *,
+    worker_id: str | None = None,
+) -> None:
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
-        run = await repo.scan_run(scan_id)
+        if worker_id is not None:
+            run = await _assert_lease_held(repo, scan_id, worker_id)
+        else:
+            run = await repo.scan_run(scan_id)
         pages = await repo.page_scans(scan_id)
         if run is not None and run.Scope == "PAGE":
             return
@@ -467,10 +517,15 @@ async def _add_cross_page_findings(scan_id: UUID) -> None:
 
 
 async def _update_scan_progress(scan_id: UUID, worker_id: str) -> None:
+    now = datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
         run = await repo.scan_run(scan_id, lock=True)
-        if run is None or run.WorkerId != worker_id:
+        if (
+            run is None
+            or run.WorkerId != worker_id
+            or (run.LeaseExpiresAt is not None and run.LeaseExpiresAt <= now)
+        ):
             return
         pages = await repo.page_scans(scan_id)
         run.CompletedPages = sum(row.Status == "COMPLETED" for row in pages)
@@ -551,43 +606,61 @@ async def _finalize_scan(scan_id: UUID, worker_id: str) -> None:
 
 async def _process_claimed_scan(scan_id: UUID, worker_id: str) -> None:
     stop_heartbeat = asyncio.Event()
+    lease_lost = asyncio.Event()
     heartbeat_task = asyncio.create_task(
-        _heartbeat(scan_id, worker_id, stop_heartbeat)
+        _heartbeat(scan_id, worker_id, stop_heartbeat, lease_lost)
     )
     try:
+        book_missing = False
+        page_scans: list[BookQualityPageScan] = []
         async with AsyncSessionLocal() as session:
             repo = BookContentQualityRepository(session)
-            run = await repo.scan_run(scan_id)
+            run = await _assert_lease_held(repo, scan_id, worker_id)
             if run is None:
                 return
             if run.BookId is None:
-                await _mark_scan_unavailable(
-                    scan_id,
-                    "Sách đã bị xóa trước khi scan bắt đầu.",
-                    worker_id=worker_id,
-                )
-                return
-            page_scans = await repo.create_book_page_snapshots(run)
-            run.TotalPages = len(page_scans)
-            if run.Scope == "PAGE" and not page_scans:
-                run.ErrorSummary = (
-                    "Trang đích không còn tồn tại; không có page snapshot để kiểm tra."
-                )
-            await session.commit()
+                book_missing = True
+                await session.rollback()
+            else:
+                page_scans = await repo.create_book_page_snapshots(run)
+                run.TotalPages = len(page_scans)
+                if run.Scope == "PAGE" and not page_scans:
+                    run.ErrorSummary = (
+                        "Trang đích không còn tồn tại; không có page snapshot để kiểm tra."
+                    )
+                await session.commit()
+
+        if book_missing:
+            # Run outside the previous AsyncSessionLocal context to avoid nested-session self-deadlock
+            await _mark_scan_unavailable(
+                scan_id,
+                "Sách đã bị xóa trước khi scan bắt đầu.",
+                worker_id=worker_id,
+            )
+            return
 
         for page_scan in page_scans:
-            if stop_heartbeat.is_set():
+            if lease_lost.is_set():
                 raise WorkerLeaseLost("Book quality scan lease was lost")
             for _ in range(MAX_PAGE_ATTEMPTS):
+                if lease_lost.is_set():
+                    raise WorkerLeaseLost("Book quality scan lease was lost")
                 try:
-                    await _process_page_scan(page_scan.Id)
+                    await _process_page_scan(
+                        page_scan.Id,
+                        scan_id=scan_id,
+                        worker_id=worker_id,
+                    )
                     break
+                except WorkerLeaseLost:
+                    lease_lost.set()
+                    raise
                 except Exception:
                     logger.exception("Book quality page scan attempt failed")
                     async with AsyncSessionLocal() as session:
-                        current = await BookContentQualityRepository(
-                            session
-                        ).scan_page_context(page_scan.Id)
+                        repo = BookContentQualityRepository(session)
+                        await _assert_lease_held(repo, scan_id, worker_id)
+                        current = await repo.scan_page_context(page_scan.Id)
                         if current is None:
                             break
                         current_scan = current[0]
@@ -601,12 +674,14 @@ async def _process_claimed_scan(scan_id: UUID, worker_id: str) -> None:
                         await session.commit()
                     if attempt_count >= MAX_PAGE_ATTEMPTS:
                         break
+            if lease_lost.is_set():
+                raise WorkerLeaseLost("Book quality scan lease was lost")
             await _update_scan_progress(scan_id, worker_id)
 
-        if stop_heartbeat.is_set():
+        if lease_lost.is_set():
             raise WorkerLeaseLost("Book quality scan lease was lost")
-        await _add_cross_page_findings(scan_id)
-        if stop_heartbeat.is_set():
+        await _add_cross_page_findings(scan_id, worker_id=worker_id)
+        if lease_lost.is_set():
             raise WorkerLeaseLost("Book quality scan lease was lost")
         await _finalize_scan(scan_id, worker_id)
     except asyncio.CancelledError:

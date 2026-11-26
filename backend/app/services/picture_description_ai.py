@@ -384,7 +384,7 @@ def _prepare_vision_image_sync(image_bytes: bytes, mime_type: str) -> tuple[byte
             if resized and len(resized) < len(image_bytes):
                 return resized, "image/jpeg"
             return image_bytes, mime_type
-    except (UnidentifiedImageError, OSError, ValueError):
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         return image_bytes, mime_type
 
 
@@ -410,6 +410,11 @@ def _mark_model_cooldown(model: str) -> None:
 
 def _clear_model_cooldown(model: str) -> None:
     _MODEL_COOLDOWN_UNTIL.pop(model, None)
+
+
+def _escape_prompt_fence(value: str) -> str:
+    """Escape XML-like tag delimiters so untrusted text cannot break out of prompt fences."""
+    return value.replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _clean_text(value: Any, fallback: str = "", *, max_len: int = 400) -> str:
@@ -1470,7 +1475,8 @@ class GeminiPictureDescriptionAI:
         *,
         stage: str,
         prompt: str,
-        image_bytes: bytes,
+        image_bytes: bytes | None = None,
+        encoded_image: str | None = None,
         response_schema: dict[str, Any],
         temperature: float,
     ) -> tuple[dict[str, Any] | None, str | None, PictureAiError | None]:
@@ -1480,8 +1486,11 @@ class GeminiPictureDescriptionAI:
         if self._transport is None and time.monotonic() < _OLLAMA_UNREACHABLE_UNTIL:
             return None, None, None
 
-        prepared_bytes = await asyncio.to_thread(_prepare_ollama_image_sync, image_bytes)
-        encoded_image = base64.b64encode(prepared_bytes).decode("ascii")
+        if encoded_image is None:
+            if image_bytes is None:
+                raise ValueError("image_bytes or encoded_image is required")
+            prepared_bytes = await asyncio.to_thread(_prepare_ollama_image_sync, image_bytes)
+            encoded_image = base64.b64encode(prepared_bytes).decode("ascii")
         schema_text = json.dumps(response_schema, ensure_ascii=False, separators=(",", ":"))
         payload = {
             "model": self.config.ollama_model,
@@ -1686,7 +1695,7 @@ class GeminiPictureDescriptionAI:
         parsed, model, ollama_error = await self._try_ollama(
             stage=stage,
             prompt=prompt,
-            image_bytes=prepared_bytes,
+            encoded_image=encoded_image,
             response_schema=response_schema,
             temperature=temperature,
         )
@@ -1859,15 +1868,16 @@ class GeminiPictureDescriptionAI:
             f"- {_clean_text(question, max_len=180)}"
             for question in guiding_questions[:3]
         )
-        # Fence untrusted child transcript to neutralize prompt-injection attempts.
+        # Fence untrusted child transcript and escape tag delimiters to neutralize prompt-injection attempts.
         safe_transcript = _clean_text(child_transcript, max_len=1800)
+        fenced_transcript = _escape_prompt_fence(safe_transcript)
 
         history_block = ""
         if previous_transcript:
-            safe_prev = _clean_text(previous_transcript, max_len=600)
+            safe_prev = _escape_prompt_fence(_clean_text(previous_transcript, max_len=600))
             prev_score_label = f"{int(previous_score)}/10" if previous_score is not None else "chưa rõ"
             prev_tip_line = (
-                f"\nGợi ý cô đã dặn lượt trước: {_clean_text(previous_tip, max_len=240)}"
+                f"\nGợi ý cô đã dặn lượt trước: {_escape_prompt_fence(_clean_text(previous_tip, max_len=240))}"
                 if previous_tip
                 else ""
             )
@@ -1886,7 +1896,7 @@ class GeminiPictureDescriptionAI:
             f"Tiêu đề bức tranh: {safe_title}\n"
             f"Câu hỏi gợi ý:\n{questions_block}\n"
             f"{history_block}"
-            f"<child_description>{safe_transcript}</child_description>\n\n"
+            f"<child_description>{fenced_transcript}</child_description>\n\n"
             "Hãy đối chiếu bài mô tả với các chi tiết CÓ THẬT trong bức tranh đính kèm và chấm theo tiêu chí hợp lý cho Lớp "
             f"{grade} rồi trả về 1 JSON object:\n"
             "- is_relevant: true nếu bài nói/viết thật sự mô tả các nhân vật, vật thể hoặc khung cảnh có trong bức tranh; false nếu là chữ vô nghĩa, lệch hoàn toàn sang chủ đề không có trong tranh hoặc chỉ toàn ký tự linh tinh.\n"
