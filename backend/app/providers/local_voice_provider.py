@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import ipaddress
 import logging
 import math
@@ -211,6 +212,7 @@ class LocalSynthesizedAudio:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    fallback_reason: str | None = None
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
@@ -235,6 +237,7 @@ class LocalTimedSpeech:
     model_version: str
     provider: str = "local"
     used_fallback_voice: bool = False
+    fallback_reason: str | None = None
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
@@ -259,10 +262,33 @@ class LocalPhonicsSpeech:
     region: str
     model_version: str
     provider: str = "local"
+    used_fallback_voice: bool = False
+    fallback_reason: str | None = None
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
     fallback_reason: str | None = None
+
+
+def fix_wav_header_sizes(content: bytes) -> bytes:
+    """Rewrite streaming/placeholder RIFF & data chunk sizes to exact byte counts."""
+    if (
+        len(content) < 44
+        or content[:4] != b"RIFF"
+        or content[8:12] != b"WAVE"
+        or content[36:40] != b"data"
+    ):
+        return content
+    actual_riff = len(content) - 8
+    actual_data = len(content) - 44
+    cur_riff = struct.unpack_from("<I", content, 4)[0]
+    cur_data = struct.unpack_from("<I", content, 40)[0]
+    if cur_riff == actual_riff and cur_data == actual_data:
+        return content
+    patched = bytearray(content)
+    struct.pack_into("<I", patched, 4, actual_riff)
+    struct.pack_into("<I", patched, 40, actual_data)
+    return bytes(patched)
 
 
 @dataclass(frozen=True, slots=True)
@@ -413,6 +439,8 @@ class LocalVoiceProvider:
         self._client: httpx.AsyncClient | None = None
         self._recovery_task: asyncio.Task[bool] | None = None
         self._remote_unavailable_until: float = 0.0
+        self._inflight_client_counts: dict[int, int] = {}
+        self._deferred_close_clients: dict[int, Any] = {}
 
     def _schedule_background_recovery(self) -> None:
         if not self.is_loopback or not is_local_voice_worker_autostart_armed():
@@ -536,7 +564,33 @@ class LocalVoiceProvider:
         )
         return self._client
 
-    async def _reset_client(self) -> None:
+    def _acquire_client(self) -> httpx.AsyncClient:
+        client = self._get_client()
+        cid = id(client)
+        self._inflight_client_counts[cid] = self._inflight_client_counts.get(cid, 0) + 1
+        return client
+
+    async def _release_client(self, client: Any) -> None:
+        cid = id(client)
+        remaining = self._inflight_client_counts.get(cid, 0) - 1
+        if remaining > 0:
+            self._inflight_client_counts[cid] = remaining
+            return
+        self._inflight_client_counts.pop(cid, None)
+        deferred = self._deferred_close_clients.pop(cid, None)
+        if deferred is not None:
+            await self._close_single_client(deferred)
+
+    @staticmethod
+    async def _close_single_client(client: Any) -> None:
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose) and not getattr(client, "is_closed", False):
+            try:
+                await aclose()
+            except Exception:
+                pass
+
+    async def _reset_client(self, *, force_close: bool = False) -> None:
         clients_to_close: list[Any] = []
         if self._client is not None and callable(getattr(self._client, "aclose", None)):
             clients_to_close.append(self._client)
@@ -551,16 +605,20 @@ class LocalVoiceProvider:
                         clients_to_close.append(shared)
             except RuntimeError:
                 pass
+        if force_close:
+            for deferred in list(self._deferred_close_clients.values()):
+                if deferred not in clients_to_close:
+                    clients_to_close.append(deferred)
+            self._deferred_close_clients.clear()
         for client in clients_to_close:
-            aclose = getattr(client, "aclose", None)
-            if callable(aclose) and not getattr(client, "is_closed", False):
-                try:
-                    await aclose()
-                except Exception:
-                    pass
+            cid = id(client)
+            if not force_close and self._inflight_client_counts.get(cid, 0) > 0:
+                self._deferred_close_clients[cid] = client
+                continue
+            await self._close_single_client(client)
 
     async def aclose(self) -> None:
-        await self._reset_client()
+        await self._reset_client(force_close=True)
 
     async def _post_with_retry(
         self,
@@ -589,7 +647,7 @@ class LocalVoiceProvider:
         last_exc: Exception | None = None
         for attempt in range(retry_limit + 3):
             backoff_s = backoffs[min(retries_used, len(backoffs) - 1)]
-            client = self._get_client()
+            client = self._acquire_client()
             try:
                 resp = await client.post(
                     url,
@@ -599,31 +657,12 @@ class LocalVoiceProvider:
                     data=data,
                     files=files,
                 )
-                if resp.status_code == 503 and retries_used < retry_limit:
-                    worker_code = _extract_worker_error_code(resp)
-                    if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
-                        retries_used += 1
-                        await asyncio.sleep(backoff_s)
-                        continue
-                if (
-                    resp.status_code in (400, 401, 403)
-                    and attempt == 0
-                    and self.is_loopback
-                    and not self._get_token()
-                    and is_local_voice_worker_autostart_armed()
-                    and await self._is_incompatible_auth_worker()
-                ):
-                    await self._reset_client()
-                    recovered = await ensure_local_voice_worker_running(
-                        base_url=self.base_url
-                    )
-                    if recovered:
-                        continue
-                return resp
             except httpx.ConnectTimeout as exc:
+                await self._release_client(client)
                 # Fail fast within the 5s connect budget instead of hanging on a dead tunnel.
                 raise exc
             except httpx.ConnectError as exc:
+                await self._release_client(client)
                 last_exc = exc
                 await self._reset_client()
                 if not self.is_loopback or retries_used >= retry_limit:
@@ -636,7 +675,9 @@ class LocalVoiceProvider:
                     if recovered:
                         continue
                 await asyncio.sleep(backoff_s)
+                continue
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
+                await self._release_client(client)
                 last_exc = exc
                 await self._reset_client()
                 # Allow 1 instant keepalive-socket reconnect without consuming the timeout/busy retry budget.
@@ -649,12 +690,40 @@ class LocalVoiceProvider:
                     continue
                 raise
             except httpx.TimeoutException as exc:
+                await self._release_client(client)
                 last_exc = exc
                 if retries_used < retry_limit:
                     retries_used += 1
                     await asyncio.sleep(backoff_s)
                     continue
                 raise
+            except BaseException:
+                await self._release_client(client)
+                raise
+            else:
+                await self._release_client(client)
+
+            if resp.status_code == 503 and retries_used < retry_limit:
+                worker_code = _extract_worker_error_code(resp)
+                if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
+                    retries_used += 1
+                    await asyncio.sleep(backoff_s)
+                    continue
+            if (
+                resp.status_code in (400, 401, 403)
+                and attempt == 0
+                and self.is_loopback
+                and not self._get_token()
+                and is_local_voice_worker_autostart_armed()
+                and await self._is_incompatible_auth_worker()
+            ):
+                await self._reset_client()
+                recovered = await ensure_local_voice_worker_running(
+                    base_url=self.base_url
+                )
+                if recovered:
+                    continue
+            return resp
         assert last_exc is not None
         raise last_exc
 
@@ -673,8 +742,8 @@ class LocalVoiceProvider:
                 "latency_ms": 0,
             }
         started = time.perf_counter()
+        client = self._acquire_client()
         try:
-            client = self._get_client()
             resp = await asyncio.wait_for(
                 client.get(
                     f"{self.base_url}/health",
@@ -794,14 +863,16 @@ class LocalVoiceProvider:
                 "tts_error_code": "LOCAL_TTS_UNAVAILABLE",
                 "latency_ms": int((time.perf_counter() - started) * 1000),
             }
+        finally:
+            await self._release_client(client)
 
     async def list_voices(self) -> tuple[list[dict[str, Any]], bool]:
         if not self.base_url:
             return [dict(v) for v in STATIC_LOCAL_VOICES], False
         if not self.is_loopback and time.monotonic() < self._remote_unavailable_until:
             return [dict(v) for v in STATIC_LOCAL_VOICES], False
+        client = self._acquire_client()
         try:
-            client = self._get_client()
             resp = await asyncio.wait_for(
                 client.get(
                     f"{self.base_url}/voices",
@@ -813,12 +884,16 @@ class LocalVoiceProvider:
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
                 payload = resp.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("expected JSON object")
                 model_ver = str(
                     payload.get("model_version") or LOCAL_TTS_MODEL_VERSION
                 )
                 raw_voices = payload.get("voices") or []
                 mapped: list[dict[str, Any]] = []
                 for item in raw_voices:
+                    if not isinstance(item, dict):
+                        continue
                     vid = str(item.get("voice_id") or "")
                     if not vid:
                         continue
@@ -848,6 +923,8 @@ class LocalVoiceProvider:
         except Exception:
             if not self.is_loopback:
                 self._remote_unavailable_until = time.monotonic() + 15.0
+        finally:
+            await self._release_client(client)
         return [dict(v) for v in STATIC_LOCAL_VOICES], False
 
     @staticmethod
@@ -918,7 +995,11 @@ class LocalVoiceProvider:
             )
 
         content_type = resp.headers.get("content-type", "audio/wav").split(";")[0]
-        audio_bytes = fix_wav_header_sizes(resp.content) if "wav" in content_type.lower() else resp.content
+        audio_bytes = (
+            fix_wav_header_sizes(resp.content)
+            if "wav" in content_type.lower()
+            else resp.content
+        )
         return LocalSynthesizedAudio(
             content=audio_bytes,
             content_type=content_type,
@@ -985,13 +1066,29 @@ class LocalVoiceProvider:
                 status_code=503, code="LOCAL_TTS_UNAVAILABLE"
             )
 
-        payload = resp.json()
-        media_type = str(payload.get("media_type") or "audio/wav")
-        raw_audio = base64.b64decode(payload.get("audio_base64") or "")
-        audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
-        duration = float(payload.get("duration_seconds") or 0.0)
-        raw_words = payload.get("words") or []
-        if not audio or duration <= 0 or len(raw_words) != len(words):
+        try:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+            raw_b64 = payload.get("audio_base64")
+            if not isinstance(raw_b64, str) or not raw_b64:
+                raise ValueError("missing audio_base64")
+            media_type = str(payload.get("media_type") or "audio/wav")
+            raw_audio = base64.b64decode(raw_b64, validate=True)
+            audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
+            duration = float(payload.get("duration_seconds") or 0.0)
+            raw_words = payload.get("words") or []
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise LocalVoiceTechnicalError(
+                status_code=502, code="LOCAL_TTS_ALIGNMENT_INVALID"
+            ) from exc
+        if (
+            not audio
+            or not math.isfinite(duration)
+            or duration <= 0
+            or not isinstance(raw_words, list)
+            or len(raw_words) != len(words)
+        ):
             raise LocalVoiceTechnicalError(
                 status_code=502, code="LOCAL_TTS_ALIGNMENT_INVALID"
             )
@@ -999,8 +1096,17 @@ class LocalVoiceProvider:
         timed_words: list[LocalTimedWord] = []
         prev_end = 0.0
         for idx, item in enumerate(raw_words):
-            start = float(item.get("start", 0.0))
-            end = float(item.get("end", start))
+            if not isinstance(item, dict):
+                raise LocalVoiceTechnicalError(
+                    status_code=502, code="LOCAL_TTS_ALIGNMENT_INVALID"
+                )
+            try:
+                start = float(item.get("start", 0.0))
+                end = float(item.get("end", start))
+            except (ValueError, TypeError) as exc:
+                raise LocalVoiceTechnicalError(
+                    status_code=502, code="LOCAL_TTS_ALIGNMENT_INVALID"
+                ) from exc
             if (
                 not (math.isfinite(start) and math.isfinite(end))
                 or start < 0
@@ -1080,31 +1186,66 @@ class LocalVoiceProvider:
                 status_code=503, code="LOCAL_TTS_UNAVAILABLE"
             )
 
-        payload = resp.json()
-        media_type = str(payload.get("media_type") or "audio/wav")
-        raw_audio = base64.b64decode(payload.get("audio_base64") or "")
-        audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
-        duration = float(payload.get("duration_seconds") or 0.0)
-        raw_timings = payload.get("step_timings") or []
-        if not audio or duration <= 0 or len(raw_timings) != len(steps):
+        try:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+            raw_b64 = payload.get("audio_base64")
+            if not isinstance(raw_b64, str) or not raw_b64:
+                raise ValueError("missing audio_base64")
+            media_type = str(payload.get("media_type") or "audio/wav")
+            raw_audio = base64.b64decode(raw_b64, validate=True)
+            audio = fix_wav_header_sizes(raw_audio) if "wav" in media_type.lower() else raw_audio
+            duration = float(payload.get("duration_seconds") or 0.0)
+            raw_timings = payload.get("step_timings") or []
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise LocalVoiceTechnicalError(
+                status_code=502, code="LOCAL_PHONICS_ALIGNMENT_INVALID"
+            ) from exc
+        if (
+            not audio
+            or not math.isfinite(duration)
+            or duration <= 0
+            or not isinstance(raw_timings, list)
+            or len(raw_timings) != len(steps)
+        ):
             raise LocalVoiceTechnicalError(
                 status_code=502, code="LOCAL_PHONICS_ALIGNMENT_INVALID"
             )
 
         timings: list[LocalPhonicsStepTiming] = []
-        prev_start = 0.0
+        prev_end = 0.0
         for idx, item in enumerate(raw_timings):
-            start = max(prev_start, min(duration, float(item.get("start", 0.0))))
-            end = max(start, min(duration, float(item.get("end", start))))
+            if not isinstance(item, dict):
+                raise LocalVoiceTechnicalError(
+                    status_code=502, code="LOCAL_PHONICS_ALIGNMENT_INVALID"
+                )
+            try:
+                raw_start = float(item.get("start", 0.0))
+                raw_end = float(item.get("end", raw_start))
+            except (ValueError, TypeError) as exc:
+                raise LocalVoiceTechnicalError(
+                    status_code=502, code="LOCAL_PHONICS_ALIGNMENT_INVALID"
+                ) from exc
+            if (
+                not (math.isfinite(raw_start) and math.isfinite(raw_end))
+                or raw_start < 0
+                or raw_end < raw_start
+            ):
+                raise LocalVoiceTechnicalError(
+                    status_code=502, code="LOCAL_PHONICS_ALIGNMENT_INVALID"
+                )
+            start = round(max(prev_end, min(duration, raw_start)), 3)
+            end = round(max(start, min(duration, raw_end)), 3)
             timings.append(
                 LocalPhonicsStepTiming(
                     id=str(item.get("id") or steps[idx]["id"]),
                     index=idx,
-                    start=round(start, 3),
-                    end=round(end, 3),
+                    start=start,
+                    end=end,
                 )
             )
-            prev_start = start
+            prev_end = end
 
         return LocalPhonicsSpeech(
             audio=audio,
@@ -1173,8 +1314,17 @@ class LocalVoiceProvider:
                 status_code=503, code="LOCAL_STT_UNAVAILABLE"
             )
 
-        payload = resp.json()
+        try:
+            payload = resp.json()
+            if not isinstance(payload, dict):
+                raise ValueError("expected JSON object")
+        except (ValueError, TypeError) as exc:
+            raise LocalVoiceTechnicalError(
+                status_code=502, code="LOCAL_STT_INVALID_RESPONSE"
+            ) from exc
         raw_words = payload.get("words") or []
+        if not isinstance(raw_words, list):
+            raw_words = []
         safe_words: list[dict[str, Any]] = []
         for item in raw_words:
             if not isinstance(item, dict):

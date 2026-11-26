@@ -342,7 +342,10 @@ async def lifespan(_app: FastAPI):
     smart_studio_worker_enabled = (
         smart_studio_override
         if smart_studio_override is not None
-        else (not heavy_workers_disabled)
+        else (
+            not heavy_workers_disabled
+            and _optional_bool_env("VIREAD_SMART_STUDIO_WORKER_ENABLED") is not False
+        )
     )
 
     warmup_enabled = (
@@ -587,6 +590,20 @@ async def lifespan(_app: FastAPI):
         try:
             await admin_ocr_correction_jobs.shutdown()
         except asyncio.CancelledError:
+            pass
+
+        try:
+            from app.api.routes.voice_studio import shutdown_cached_public_voice_ids_task
+
+            await shutdown_cached_public_voice_ids_task()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            from app.api.routes.voice import close_default_voice_orchestrators
+
+            await close_default_voice_orchestrators()
+        except (asyncio.CancelledError, Exception):
             pass
 
         try:
@@ -907,6 +924,8 @@ async def get_health(request: Request) -> dict[str, object]:
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
         "smart_studio": _task_runtime_state(workers.get("smart_studio")),
+        "smart_studio_worker": _task_runtime_state(workers.get("smart_studio")),
+        "local_voice_bootstrap": _task_runtime_state(workers.get("local_voice_bootstrap")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None

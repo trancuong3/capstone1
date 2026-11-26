@@ -28,9 +28,19 @@ _DIFFICULTY_TO_LEVEL = {"EASY": 1, "MEDIUM": 2, "HARD": 3}
 _CHOICE_IDS = "ABCD"
 _HINT_FUNCTION_WORDS = frozenset(
     "và là của có không cho các một những được trong với này đó khi thì mà đã sẽ rất cũng như "
-    "ở đi ra vào lên xuống lại còn nhưng nên vì để từ tôi bạn em anh chị ông bà con cái chiếc "
-    "cô thầy chú bác bên trên dưới ngoài trước sau".split()
+    "ở đi ra vào lên xuống lại còn nhưng nên vì để từ cái chiếc "
+    "bên trên dưới ngoài trước sau".split()
 )
+
+
+def _contains_token_sequence(haystack: list[str], needle: list[str]) -> bool:
+    if not needle or len(needle) > len(haystack):
+        return False
+    span = len(needle)
+    return any(
+        haystack[idx : idx + span] == needle
+        for idx in range(len(haystack) - span + 1)
+    )
 
 
 def _stored_choices(question: ComprehensionQuestion) -> list[str] | None:
@@ -144,13 +154,14 @@ class TutorQuestionService:
 
         existing = await self._tutor_questions(session_id)
         if existing:
-            await self.repository.release()
-            return TutorQuestionSetRead(
+            response = TutorQuestionSetRead(
                 session_id=session_id,
                 total=len(existing),
                 source=self._source_of(existing[0]),
                 created=False,
             )
+            await self.repository.release()
+            return response
         if not self.config.enabled:
             await self.repository.release()
             return TutorQuestionSetRead(
@@ -177,13 +188,14 @@ class TutorQuestionService:
             )
         existing = await self._tutor_questions(session_id)
         if existing:
-            await self.repository.release()
-            return TutorQuestionSetRead(
+            response = TutorQuestionSetRead(
                 session_id=session_id,
                 total=len(existing),
                 source=self._source_of(existing[0]),
                 created=False,
             )
+            await self.repository.release()
+            return response
 
         base = datetime.now(timezone.utc)
         rows: list[ComprehensionQuestion] = []
@@ -316,12 +328,13 @@ class TutorQuestionService:
             )
 
         forbidden_phrases = [tokenize(item) for item in answer_texts if tokenize(item)]
-        expected_tokens = tokenize(question.ExpectedAnswer or "")
-        forbidden_single_tokens = {
-            tok
-            for tok in expected_tokens
-            if len(tok) >= 2 and tok not in _HINT_FUNCTION_WORDS
-        }
+        forbidden_single_tokens: set[str] = set()
+        for phrase in forbidden_phrases:
+            content_tokens = [tok for tok in phrase if tok not in _HINT_FUNCTION_WORDS]
+            targets = content_tokens if content_tokens else phrase
+            for tok in targets:
+                if tok:
+                    forbidden_single_tokens.add(tok)
 
         norm_window = [normalize_text(tok) for tok in window_tokens]
         masked = [False] * len(window_tokens)
@@ -351,18 +364,17 @@ class TutorQuestionService:
             return None
 
         excerpt = " ".join(redacted_parts).strip()
-        clue = f"Con nhớ lại chi tiết trong bài đọc: “{excerpt}” rồi chọn lại nhé!"
 
-        # Final anti-leak verification before returning.
-        norm_clue = normalize_text(clue)
-        clue_tokens = set(tokenize(clue))
-        for item in answer_texts:
-            norm_item = normalize_text(item)
-            if norm_item and norm_item in norm_clue:
+        # Final anti-leak verification on the excerpt only (never on the static clue frame)
+        # using whole-token matching so single-character answers like "ô" do not collide with "cô".
+        excerpt_tokens = tokenize(excerpt)
+        excerpt_token_set = set(excerpt_tokens)
+        for phrase in forbidden_phrases:
+            if _contains_token_sequence(excerpt_tokens, phrase):
                 return None
-        if forbidden_single_tokens & clue_tokens:
+        if forbidden_single_tokens & excerpt_token_set:
             return None
-        return clue
+        return f"Con nhớ lại chi tiết trong bài đọc: “{excerpt}” rồi chọn lại nhé!"
 
     async def submit_answer(
         self, session_id: UUID, question_id: UUID, actor_id: UUID, answer: str
@@ -379,8 +391,8 @@ class TutorQuestionService:
         already_correct = next((item for item in previous if item.IsCorrect), None)
         if already_correct is not None:
             # Re-submitting or concurrent tap+STT after success must not create contradictory history.
-            await self.repository.release()
-            return TutorAnswerResultRead(
+            # Build response before release() expires ORM attributes on AsyncSession.
+            response = TutorAnswerResultRead(
                 answer_id=already_correct.Id,
                 question_id=question.Id,
                 submitted_answer=already_correct.Answer,
@@ -389,14 +401,15 @@ class TutorQuestionService:
                 feedback_code="CORRECT",
                 story_hint=None,
             )
+            await self.repository.release()
+            return response
 
         normalized_answer = normalize_text(answer)
         if previous and normalize_text(previous[-1].Answer) == normalized_answer:
             # Deduplicate concurrent tap+STT or network retries of the exact same attempt.
             latest = previous[-1]
             hint = None if latest.IsCorrect else await self._build_story_hint(question)
-            await self.repository.release()
-            return TutorAnswerResultRead(
+            response = TutorAnswerResultRead(
                 answer_id=latest.Id,
                 question_id=question.Id,
                 submitted_answer=latest.Answer,
@@ -405,6 +418,8 @@ class TutorQuestionService:
                 feedback_code="CORRECT" if latest.IsCorrect else "TRY_AGAIN",
                 story_hint=hint,
             )
+            await self.repository.release()
+            return response
 
         accepted = {normalize_text(question.ExpectedAnswer)}
         if isinstance(question.AcceptedAnswers, list):
@@ -412,9 +427,11 @@ class TutorQuestionService:
                 normalize_text(item) for item in question.AcceptedAnswers if isinstance(item, str)
             )
         is_correct = normalized_answer in accepted
+        question_id_val = question.Id
+        story_hint = None if is_correct else await self._build_story_hint(question)
 
         record = ComprehensionAnswer(
-            QuestionId=question.Id,
+            QuestionId=question_id_val,
             Answer=answer,
             IsCorrect=is_correct,
             Score=1.0 if is_correct else 0.0,
@@ -422,10 +439,9 @@ class TutorQuestionService:
         self.repository.add_answer(record)
         await self.repository.commit()
         await self.repository.refresh(record)
-        story_hint = None if is_correct else await self._build_story_hint(question)
         return TutorAnswerResultRead(
             answer_id=record.Id,
-            question_id=question.Id,
+            question_id=question_id_val,
             submitted_answer=answer,
             is_correct=is_correct,
             score=1.0 if is_correct else 0.0,

@@ -259,11 +259,18 @@ async def create_consent(
 
 @router.get("/logs", response_model=List[AuditLogResponse])
 async def get_audit_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(require_admin_id),
     db: AsyncSession = Depends(get_db),
 ):
     """Raw audit records are restricted to active administrators."""
-    result = await db.execute(select(AuditLog))
+    result = await db.execute(
+        select(AuditLog)
+        .order_by(AuditLog.CreatedAt.desc(), AuditLog.Id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
     return result.scalars().all()
 
 

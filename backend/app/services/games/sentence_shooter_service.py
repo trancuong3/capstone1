@@ -452,7 +452,7 @@ class SentenceShooterService:
         completed_round_id: UUID,
     ) -> SentenceShooterNextRoundRead:
         await self._require_parent(actor_id)
-        game_session = await self.repository.session_for_parent(session_id, actor_id, lock=True)
+        game_session = await self.repository.session_for_parent(session_id, actor_id, lock=False)
         if game_session is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         if game_session.Status != "IN_PROGRESS":
@@ -460,7 +460,7 @@ class SentenceShooterService:
         completed_round = await self.repository.game_round(
             session_id,
             completed_round_id,
-            lock=True,
+            lock=False,
         )
         if (
             completed_round is None

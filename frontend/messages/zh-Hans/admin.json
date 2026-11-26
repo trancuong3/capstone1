@@ -1246,9 +1246,10 @@
       "reuploadCreated": "已为此页面运行新图片的 OCR。新版本正在等待审核；用于阅读的图片和内容仅在验证后切换到新版本。",
       "reuploadError": "无法加载新图片或运行 OCR。当前数据已保留；请检查 Storage、Tesseract 5.x、vie.traineddata 后重试。",
       "aiRejectedAll": "已忽略 AI 建议。当前草稿保持不变。",
-      "wordDeleteSyncError": "删除单词后无法同步文本。请在保存前检查内容和单词列表。"
+      "wordDeleteSyncError": "删除单词后无法同步文本。请在保存前检查内容和单词列表。",
+      "wordAddSyncError": "添加词语后无法同步文本。请在保存前检查内容与词语列表。"
     },
-    "newWordPlaceholder": "新单词",
+    "newWordPlaceholder": "词",
     "loading": "正在加载图片和修订版本…",
     "errors": {
       "notFoundTitle": "页面未找到",

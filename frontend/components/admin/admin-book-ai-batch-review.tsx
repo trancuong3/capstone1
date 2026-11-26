@@ -55,6 +55,7 @@ interface BatchSession {
   readonly progress: BatchProgress | null;
   readonly processing: boolean;
   readonly notice: BatchNotice | null;
+  readonly completedRunId: number;
 }
 
 const emptyBatchSession: BatchSession = {
@@ -62,10 +63,27 @@ const emptyBatchSession: BatchSession = {
   progress: null,
   processing: false,
   notice: null,
+  completedRunId: 0,
 };
 const batchSessions = new Map<string, BatchSession>();
 const batchListeners = new Map<string, Set<() => void>>();
 const batchControllers = new Map<string, AbortController>();
+
+export function clearAdminBookAiBatchSessions(): void {
+  const affectedBookIds = new Set<string>([
+    ...batchSessions.keys(),
+    ...batchControllers.keys(),
+    ...batchListeners.keys(),
+  ]);
+  for (const controller of batchControllers.values()) {
+    controller.abort();
+  }
+  batchControllers.clear();
+  batchSessions.clear();
+  for (const bookId of affectedBookIds) {
+    batchListeners.get(bookId)?.forEach((listener) => listener());
+  }
+}
 
 function getBatchSession(bookId: string) {
   return batchSessions.get(bookId) ?? emptyBatchSession;
@@ -182,15 +200,31 @@ export function AdminBookAiBatchReview({
     () => getBatchSession(bookId),
     () => emptyBatchSession,
   );
-  const { results, progress, processing, notice } = session;
-  const mountedRef = useRef(false);
+  const { results, progress, processing, notice, completedRunId } = session;
+  const onCompletedRef = useRef(onCompleted);
+  const lastCompletedRunRef = useRef({
+    bookId,
+    runId: completedRunId,
+  });
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+    onCompletedRef.current = onCompleted;
+  }, [onCompleted]);
+
+  useEffect(() => {
+    if (lastCompletedRunRef.current.bookId !== bookId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      return;
+    }
+    if (completedRunId < lastCompletedRunRef.current.runId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      return;
+    }
+    if (!processing && completedRunId > lastCompletedRunRef.current.runId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      onCompletedRef.current();
+    }
+  }, [bookId, completedRunId, processing]);
 
   const skippedPageIds = useSkippedAiPageIds(bookId);
 
@@ -228,6 +262,9 @@ export function AdminBookAiBatchReview({
     )
       return;
     const controller = new AbortController();
+    const isActiveController = () =>
+      batchControllers.get(bookId) === controller;
+    const nextRunId = getBatchSession(bookId).completedRunId + 1;
     batchControllers.set(bookId, controller);
     updateBatchSession(bookId, (current) => ({
       ...current,
@@ -238,6 +275,7 @@ export function AdminBookAiBatchReview({
     let completed: BatchPageResult[] = [];
 
     for (const [index, item] of waitingPages.entries()) {
+      if (!isActiveController() || controller.signal.aborted) break;
       const pageId = item.processing.page_id;
       const revisionId = item.processing.page_revision_id;
       updateBatchSession(bookId, (current) => ({
@@ -250,12 +288,13 @@ export function AdminBookAiBatchReview({
           totalChunks: 0,
         },
       }));
-      if (controller.signal.aborted) break;
+      if (!isActiveController() || controller.signal.aborted) break;
 
       let draftSaved = false;
       let detail: AdminPageRevisionDetailDTO | null = null;
       try {
         detail = await ocr.getRevision(pageId, revisionId);
+        if (!isActiveController() || controller.signal.aborted) break;
         if (
           detail.page_id !== pageId ||
           detail.page_revision_id !== revisionId ||
@@ -273,7 +312,7 @@ export function AdminBookAiBatchReview({
           originalText,
           detail.words,
           (workflowProgress) => {
-            if (controller.signal.aborted) return;
+            if (!isActiveController() || controller.signal.aborted) return;
             updateBatchSession(bookId, (current) => ({
               ...current,
               progress: {
@@ -287,7 +326,7 @@ export function AdminBookAiBatchReview({
           },
           controller.signal,
         );
-        if (controller.signal.aborted) break;
+        if (!isActiveController() || controller.signal.aborted) break;
         if (workflow.status === "FAILED" || !workflow.proofread_text) {
           throw new Error(
             t("books.aiBatch.errors.workflowIncomplete", {
@@ -307,6 +346,7 @@ export function AdminBookAiBatchReview({
           prepared.request.corrected_text,
           prepared.request.words,
         );
+        if (!isActiveController()) break;
         draftSaved = true;
         markAiPageRevisionSkipped(bookId, revisionId);
         if (
@@ -336,9 +376,8 @@ export function AdminBookAiBatchReview({
           ...current,
           results: [...completed],
         }));
-        if (mountedRef.current) onCompleted();
       } catch (cause) {
-        if (controller.signal.aborted) break;
+        if (!isActiveController() || controller.signal.aborted) break;
         const previousResult = completed.find(
           (result) => result.pageId === pageId,
         );
@@ -379,41 +418,33 @@ export function AdminBookAiBatchReview({
           completed = [...completed, failedResult];
         }
       }
+      if (!isActiveController()) break;
       updateBatchSession(bookId, (current) => ({
         ...current,
         results: [...completed],
       }));
     }
 
-    if (batchControllers.get(bookId) === controller)
-      batchControllers.delete(bookId);
-    updateBatchSession(bookId, (current) => ({
-      ...current,
-      progress: null,
-      processing: false,
-    }));
+    if (!isActiveController()) return;
+    batchControllers.delete(bookId);
+
+    let finalNotice: BatchNotice;
     if (controller.signal.aborted) {
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: "warning",
-          title: t("books.aiBatch.stoppedTitle"),
-          message: t("books.aiBatch.stoppedMessage", {
-            verified: formatNumber(
-              completed.filter((item) => item.status === "verified").length,
-            ),
-          }),
-        },
-      }));
+      finalNotice = {
+        tone: "warning",
+        title: t("books.aiBatch.stoppedTitle"),
+        message: t("books.aiBatch.stoppedMessage", {
+          verified: formatNumber(
+            completed.filter((item) => item.status === "verified").length,
+          ),
+        }),
+      };
     } else if (completed.length === 0) {
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: "info",
-          title: t("books.aiBatch.noneTitle"),
-          message: t("books.aiBatch.noneMessage"),
-        },
-      }));
+      finalNotice = {
+        tone: "info",
+        title: t("books.aiBatch.noneTitle"),
+        message: t("books.aiBatch.noneMessage"),
+      };
     } else {
       const verifiedCount = completed.filter(
         (item) => item.status === "verified",
@@ -424,20 +455,23 @@ export function AdminBookAiBatchReview({
       const failedCount = completed.filter(
         (item) => item.status === "failed",
       ).length;
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
-          title: t("books.aiBatch.doneTitle"),
-          message: t("books.aiBatch.doneMessage", {
-            verified: formatNumber(verifiedCount),
-            saved: formatNumber(savedCount),
-            failed: formatNumber(failedCount),
-          }),
-        },
-      }));
+      finalNotice = {
+        tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
+        title: t("books.aiBatch.doneTitle"),
+        message: t("books.aiBatch.doneMessage", {
+          verified: formatNumber(verifiedCount),
+          saved: formatNumber(savedCount),
+          failed: formatNumber(failedCount),
+        }),
+      };
     }
-    if (mountedRef.current) onCompleted();
+    updateBatchSession(bookId, (current) => ({
+      ...current,
+      progress: null,
+      processing: false,
+      notice: finalNotice,
+      completedRunId: nextRunId,
+    }));
   }
 
   function stopReview() {

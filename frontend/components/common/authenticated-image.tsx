@@ -37,12 +37,17 @@ export function AuthenticatedImage({
     fallbackLabel ?? tCommon("states.imageLoadFailed");
   const needsAuth = isPrivateApiMediaUrl(src);
   const retriedSrcRef = useRef<string | null>(null);
+  const onImageErrorRef = useRef(onImageError);
   const [retryNonce, setRetryNonce] = useState(0);
   const [resolved, setResolved] = useState<{
     src: string;
     blobUrl: string | null;
     failed: boolean;
   }>({ src: "", blobUrl: null, failed: false });
+
+  useEffect(() => {
+    onImageErrorRef.current = onImageError;
+  }, [onImageError]);
 
   useEffect(() => {
     if (!needsAuth) {
@@ -71,7 +76,7 @@ export function AuthenticatedImage({
           return;
         }
         setResolved({ src, blobUrl: null, failed: true });
-        onImageError?.();
+        onImageErrorRef.current?.();
       });
 
     return () => {
@@ -81,7 +86,7 @@ export function AuthenticatedImage({
         revokePrivateBlobUrl(createdBlob);
       }
     };
-  }, [needsAuth, onImageError, retryNonce, src]);
+  }, [needsAuth, retryNonce, src]);
 
   const effectiveSrc = needsAuth
     ? resolved.src === src
@@ -131,7 +136,7 @@ export function AuthenticatedImage({
           setRetryNonce((value) => value + 1);
           return;
         }
-        onImageError?.();
+        onImageErrorRef.current?.();
       }}
     />
   );

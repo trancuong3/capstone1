@@ -140,8 +140,28 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
       };
       req.onsuccess = () => {
         const db = req.result;
+        let settled = false;
+        const finish = (status: WasmModelCacheStatus) => {
+          if (settled) return;
+          settled = true;
+          try {
+            db.close();
+          } catch {
+            // Ignore close error
+          }
+          resolve(status);
+        };
+        const emptyStatus: WasmModelCacheStatus = {
+          ready: false,
+          cachedFiles: 0,
+          expectedFiles: MODEL_FILE_SPECS.length,
+          cachedBytes: 0,
+          totalBytes: SHERPA_WASM_MODEL_BYTES,
+        };
         try {
           const tx = db.transaction(IDB_STORE, "readonly");
+          tx.onabort = () => finish(emptyStatus);
+          tx.onerror = () => finish(emptyStatus);
           const store = tx.objectStore(IDB_STORE);
           let cachedFiles = 0;
           let cachedBytes = 0;
@@ -158,8 +178,7 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
               }
               pending -= 1;
               if (pending === 0) {
-                db.close();
-                resolve({
+                finish({
                   ready: cachedFiles === MODEL_FILE_SPECS.length,
                   cachedFiles,
                   expectedFiles: MODEL_FILE_SPECS.length,
@@ -171,8 +190,7 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
             getReq.onerror = () => {
               pending -= 1;
               if (pending === 0) {
-                db.close();
-                resolve({
+                finish({
                   ready: cachedFiles === MODEL_FILE_SPECS.length,
                   cachedFiles,
                   expectedFiles: MODEL_FILE_SPECS.length,
@@ -183,14 +201,7 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
             };
           }
         } catch {
-          db.close();
-          resolve({
-            ready: false,
-            cachedFiles: 0,
-            expectedFiles: MODEL_FILE_SPECS.length,
-            cachedBytes: 0,
-            totalBytes: SHERPA_WASM_MODEL_BYTES,
-          });
+          finish(emptyStatus);
         }
       };
       req.onerror = () =>
@@ -508,9 +519,11 @@ export class BrowserWasmSttClient {
       try {
         worker.terminate();
       } catch {
-        // Ignore termination failure on already dead worker
+        // Ignore terminate failure on already-dead worker
       }
-      this.worker = null;
+      if (this.worker === worker) {
+        this.worker = null;
+      }
       this.readyPromise = null;
       this.failAllPending(failure);
     };
@@ -558,6 +571,20 @@ export class BrowserWasmSttClient {
           worker.postMessage({ type: "cancel", id });
         } catch {
           // Ignore cancel on dead worker
+        }
+        if (payload.type === "init" && this.worker === worker) {
+          this.worker = null;
+          this.readyPromise = null;
+          try {
+            worker.postMessage({ type: "dispose", id: "init_timeout_dispose" });
+          } catch {
+            // Ignore
+          }
+          try {
+            worker.terminate();
+          } catch {
+            // Ignore
+          }
         }
         reject(new Error("WASM STT request timed out"));
       }, timeoutMs);

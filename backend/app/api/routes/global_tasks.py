@@ -16,6 +16,7 @@ from app.schemas.global_tasks import (
     ReconcileTasksResponse,
 )
 from app.services.global_tasks_service import GlobalTasksService
+from app.services.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -38,6 +39,7 @@ async def list_global_tasks(
     active_only: bool = Query(default=False),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_tasks_read", default_max=180, default_window=60.0)),
 ) -> GlobalTaskListResponse:
     """List actor-scoped durable studio tasks & active background workflows."""
     _apply_no_store(response)
@@ -58,6 +60,7 @@ async def create_global_task(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_tasks_write", default_max=60, default_window=60.0)),
 ) -> GlobalTaskActionResponse:
     """Create a durable idempotent studio job deduplicated on `(actor_id, idempotency_key)`."""
     _apply_no_store(response)
@@ -76,6 +79,7 @@ async def retry_global_task(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_tasks_write", default_max=60, default_window=60.0)),
 ) -> GlobalTaskActionResponse:
     """Ownership-verified retry resuming from persisted checkpoints."""
     _apply_no_store(response)
@@ -88,6 +92,7 @@ async def cancel_global_task(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_tasks_write", default_max=60, default_window=60.0)),
 ) -> GlobalTaskActionResponse:
     """Ownership-verified cooperative cancellation (`CANCELLED` or `CANCEL_REQUESTED`)."""
     _apply_no_store(response)
@@ -99,6 +104,9 @@ async def reconcile_global_tasks(
     response: Response,
     _admin_id: UUID = Depends(require_admin_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(
+        rate_limit("studio_tasks_write", default_max=60, default_window=60.0, actor_dependency=require_admin_id)
+    ),
 ) -> ReconcileTasksResponse:
     """Admin-only manual trigger for expired-lease reclamation, revision fencing, and R-01 healing."""
     _apply_no_store(response)
@@ -110,6 +118,7 @@ async def get_studio_capabilities(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_tasks_read", default_max=180, default_window=60.0)),
 ) -> CapabilitiesHealthResponse:
     """Real-time AI provider capability matrix & circuit-breaker health (zero secrets)."""
     _apply_no_store(response)

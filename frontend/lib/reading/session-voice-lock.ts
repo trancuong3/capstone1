@@ -167,6 +167,10 @@ function notifyListeners(): void {
   listeners.forEach((fn) => fn());
 }
 
+export function getDefaultVoicePolicyPreferences(): VoicePolicyPreferences {
+  return DEFAULT_POLICY;
+}
+
 export function getVoicePolicyPreferences(): VoicePolicyPreferences {
   if (typeof window === "undefined") return DEFAULT_POLICY;
   if (cachedPolicy !== null) return cachedPolicy;
@@ -294,7 +298,11 @@ export function lockSessionVoice(
     !overrides?.forceUpdate &&
     !isLegacyExternalVoiceId(existing.voiceId)
   ) {
+    const changedActive = activeSessionId !== cleanSessionId;
     activeSessionId = cleanSessionId;
+    if (changedActive) {
+      notifyListeners();
+    }
     return existing;
   }
 

@@ -581,10 +581,19 @@ class BookContentQualityService:
                 unsuitable = True
             if workflow.Suitability == "REVIEW_REQUIRED":
                 review_required = True
-            if getattr(workflow, "ImageSafetyStatus", None) == "ADMIN_FLAGGED_UNSAFE":
+            image_safety_status = getattr(workflow, "ImageSafetyStatus", None)
+            if image_safety_status == "ADMIN_FLAGGED_UNSAFE":
                 unsuitable = True
                 page_blockers.append(
                     f"Trang {page.PageNumber}: Ảnh trang đã bị đánh dấu không an toàn cho trẻ em."
+                )
+            elif (
+                image_safety_status is not None
+                and image_safety_status != "ADMIN_CONFIRMED_SAFE"
+                and saved_workflow.get("image_safety_status") != "ADMIN_CONFIRMED_SAFE"
+            ):
+                page_blockers.append(
+                    f"Trang {page.PageNumber}: Ảnh trang chưa được Admin xác nhận an toàn."
                 )
             if not (
                 workflow.SafetyStatus in {"PROVISIONAL", "CONFIRMED", "AUTO_CONFIRMED"}
@@ -852,7 +861,7 @@ class BookContentQualityService:
         reporter_name: str | None,
         history: list[BookContentReportHistory],
         *,
-        include_internal_findings: bool = True,
+        include_internal_findings: bool = False,
     ) -> BookContentReportDetail:
         related_rows = (
             await self.repository.findings_for_report(report.Id)
@@ -910,7 +919,9 @@ class BookContentQualityService:
             if detail is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
             history = await self.repository.report_history(previous.Id)
-            return await self._report_detail_response(detail[0], detail[1], history)
+            return await self._report_detail_response(
+                detail[0], detail[1], history, include_internal_findings=False
+            )
 
         now = datetime.now(timezone.utc)
         if await self.repository.count_recent_reports(
@@ -1023,6 +1034,7 @@ class BookContentQualityService:
                 report,
                 row[1] if row else report.ReporterNameSnapshot,
                 history,
+                include_internal_findings=False,
             )
 
             await self.repository.commit()
@@ -1048,7 +1060,7 @@ class BookContentQualityService:
                         )
                     history = await self.repository.report_history(duplicate.Id)
                     return await self._report_detail_response(
-                        detail[0], detail[1], history
+                        detail[0], detail[1], history, include_internal_findings=False
                     )
             raise
         except BaseException:
@@ -1129,7 +1141,9 @@ class BookContentQualityService:
         if row is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         history = await self.repository.report_history(report_id)
-        return await self._report_detail_response(row[0], row[1], history)
+        return await self._report_detail_response(
+            row[0], row[1], history, include_internal_findings=True
+        )
 
     async def update_report_status(
         self, actor_id: UUID, report_id: UUID, payload: BookContentReportStatusUpdate
@@ -1150,7 +1164,9 @@ class BookContentQualityService:
         if new_status == old_status:
             row = await self.repository.report_detail(report_id)
             history = await self.repository.report_history(report_id)
-            return await self._report_detail_response(row[0], row[1], history)
+            return await self._report_detail_response(
+                row[0], row[1], history, include_internal_findings=True
+            )
         if new_status not in allowed.get(old_status, set()):
             raise HTTPException(
                 status_code=409, detail="Invalid report status transition"
@@ -1227,7 +1243,9 @@ class BookContentQualityService:
 
         row = await self.repository.report_detail(report_id)
         history = await self.repository.report_history(report_id)
-        return await self._report_detail_response(row[0], row[1], history)
+        return await self._report_detail_response(
+            row[0], row[1], history, include_internal_findings=True
+        )
 
     async def enqueue_scan(
         self,
@@ -1351,6 +1369,7 @@ class BookContentQualityService:
         workflow_repository = AdminAiWorkflowRepository(self.repository.db)
         workflow_service = AdminAiWorkflowService(self.repository.db)
         now = datetime.now(timezone.utc)
+        pending_starts: list[tuple[UUID, AdminAiWorkflowCreate]] = []
         for page, revision, workflow, *_ in rows:
             if (
                 page.LifecycleStatus != "ACTIVE"
@@ -1364,7 +1383,6 @@ class BookContentQualityService:
                     continue
                 if workflow.Status == "FAILED":
                     AdminAiWorkflowService.prepare_retry(workflow, actor_id, now)
-                    await self.repository.db.commit()
                     continue
                 if (
                     workflow.Status == "READY_FOR_ADMIN_REVIEW"
@@ -1377,7 +1395,6 @@ class BookContentQualityService:
                     AdminAiWorkflowService.prepare_safety_rescan(
                         workflow, actor_id, now, "Book Quality scan requested"
                     )
-                    await self.repository.db.commit()
                     continue
 
             words = await ocr_repository.words(revision.Id)
@@ -1414,9 +1431,8 @@ class BookContentQualityService:
             )
             if existing_for_input is not None and existing_for_input.Status == "FAILED":
                 AdminAiWorkflowService.prepare_retry(existing_for_input, actor_id, now)
-                await self.repository.db.commit()
                 continue
-            await workflow_service.start(actor_id, page.Id, payload)
+            pending_starts.append((page.Id, payload))
 
         if callable(getattr(self.repository.db, "commit", None)) and callable(
             getattr(self.repository, "book", None)
@@ -1425,6 +1441,9 @@ class BookContentQualityService:
         from app.jobs.admin_ai_workflow_worker import schedule_admin_ai_workflow
 
         schedule_admin_ai_workflow()
+
+        for target_page_id, start_payload in pending_starts:
+            await workflow_service.start(actor_id, target_page_id, start_payload)
 
     async def list_book_scans(
         self, actor_id: UUID, book_id: UUID
@@ -1953,9 +1972,25 @@ class BookContentQualityService:
                     or workflow.SafetyInputHash != workflow.CandidateHash
                 ):
                     page_blockers.append(f"{page_label}: Child Safety thiếu hoặc stale")
-                if getattr(workflow, "ImageSafetyStatus", None) == "ADMIN_FLAGGED_UNSAFE":
+                image_safety_status = getattr(workflow, "ImageSafetyStatus", None)
+                saved_rev_meta = revision.ProcessingMeta if isinstance(revision.ProcessingMeta, dict) else {}
+                saved_wf_meta = saved_rev_meta.get("admin_ai_workflow")
+                saved_image_safety = (
+                    saved_wf_meta.get("image_safety_status")
+                    if isinstance(saved_wf_meta, dict)
+                    else None
+                )
+                if image_safety_status == "ADMIN_FLAGGED_UNSAFE":
                     page_blockers.append(
                         f"{page_label}: Ảnh trang đã bị đánh dấu không an toàn cho trẻ em"
+                    )
+                elif (
+                    image_safety_status is not None
+                    and image_safety_status != "ADMIN_CONFIRMED_SAFE"
+                    and saved_image_safety != "ADMIN_CONFIRMED_SAFE"
+                ):
+                    page_blockers.append(
+                        f"{page_label}: Ảnh trang chưa được Admin xác nhận an toàn"
                     )
             if (
                 current.page_count == 0
@@ -2036,14 +2071,27 @@ class BookContentQualityService:
                 workflow.OcrApprovedBy = workflow.OcrApprovedBy or actor_id
                 workflow.FinalApprovedTextHash = workflow.CandidateHash
                 revision_meta = dict(revision.ProcessingMeta or {})
-                revision_meta["admin_ai_workflow"] = {
-                    "workflow_id": str(workflow.Id),
-                    "candidate_hash": workflow.CandidateHash,
-                    "safety_status": "CONFIRMED",
-                    "safety_input_hash": workflow.SafetyInputHash,
-                    "approval_scope": "BOOK_LEVEL_EXISTING_VERIFIED_REVISION",
-                    "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
-                }
+                existing_wf_meta = revision_meta.get("admin_ai_workflow")
+                merged_wf_meta = (
+                    dict(existing_wf_meta) if isinstance(existing_wf_meta, dict) else {}
+                )
+                merged_wf_meta.update(
+                    {
+                        "workflow_id": str(workflow.Id),
+                        "candidate_hash": workflow.CandidateHash,
+                        "safety_status": "CONFIRMED",
+                        "safety_input_hash": workflow.SafetyInputHash,
+                        "approval_scope": "BOOK_LEVEL_EXISTING_VERIFIED_REVISION",
+                        "assessment_policy": BOOK_APPROVAL_POLICY_VERSION,
+                    }
+                )
+                wf_image_safety = getattr(workflow, "ImageSafetyStatus", None)
+                if wf_image_safety is not None and "image_safety_status" not in merged_wf_meta:
+                    merged_wf_meta["image_safety_status"] = wf_image_safety
+                wf_image_sha = getattr(workflow, "SourceImageSha256", None)
+                if wf_image_sha and "source_image_sha256" not in merged_wf_meta:
+                    merged_wf_meta["source_image_sha256"] = wf_image_sha
+                revision_meta["admin_ai_workflow"] = merged_wf_meta
                 revision.ProcessingMeta = revision_meta
                 workflow.ReviewEvents = list(workflow.ReviewEvents or []) + [{
                     "event": "BOOK_LEVEL_SAFETY_CONFIRMED",

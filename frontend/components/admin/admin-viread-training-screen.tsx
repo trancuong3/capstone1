@@ -57,16 +57,37 @@ export function AdminVireadTrainingScreen() {
     t("training.approvalDefaultReason"),
   );
   const oauthCallbackHandled = useRef(false);
+  const mountedRef = useRef(true);
+  const loadRequestIdRef = useRef(0);
+  const actionRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      loadRequestIdRef.current += 1;
+      actionRequestIdRef.current += 1;
+    };
+  }, []);
 
   const load = useCallback(async () => {
+    const requestId = ++loadRequestIdRef.current;
+    if (!mountedRef.current) return;
     setError(null);
     if (!vireadTraining) {
       setError("Dịch vụ quản trị huấn luyện VietOCR chưa sẵn sàng.");
       return;
     }
     try {
-      setData(await vireadTraining.overview());
+      const nextData = await vireadTraining.overview();
+      if (!mountedRef.current || requestId !== loadRequestIdRef.current) {
+        return;
+      }
+      setData(nextData);
     } catch (err) {
+      if (!mountedRef.current || requestId !== loadRequestIdRef.current) {
+        return;
+      }
       setError(
         isServiceError(err)
           ? err.message
@@ -94,6 +115,8 @@ export function AdminVireadTrainingScreen() {
     // does not drop an OAuth callback before completion, and clean the URL in finally.
     void (async () => {
       await Promise.resolve();
+      if (!mountedRef.current) return;
+      const actionId = ++actionRequestIdRef.current;
       if (oauthError) {
         setMessage(t("training.notices.oauthCancelled", { error: oauthError }));
         window.history.replaceState({}, document.title, cleanUrl);
@@ -110,6 +133,9 @@ export function AdminVireadTrainingScreen() {
           code,
           state,
         });
+        if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+          return;
+        }
         setMessage(
           t("training.notices.driveConnected", {
             account:
@@ -119,6 +145,9 @@ export function AdminVireadTrainingScreen() {
         );
         await load();
       } catch (err) {
+        if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+          return;
+        }
         setMessage(
           isServiceError(err)
             ? err.message
@@ -126,17 +155,55 @@ export function AdminVireadTrainingScreen() {
         );
       } finally {
         window.history.replaceState({}, document.title, cleanUrl);
-        setBusy(false);
+        if (mountedRef.current && actionId === actionRequestIdRef.current) {
+          setBusy(false);
+        }
       }
     })();
   }, [load, vireadTraining, t]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
-    const interval = globalThis.setInterval(() => void load(), 30_000);
+    let interval: ReturnType<typeof globalThis.setInterval> | null = null;
+
+    const stopPolling = () => {
+      if (interval !== null) {
+        globalThis.clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const startPolling = () => {
+      stopPolling();
+      if (typeof document !== "undefined" && document.hidden) return;
+      interval = globalThis.setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        void load();
+      }, 30_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        stopPolling();
+      } else {
+        startPolling();
+      }
+    };
+
+    startPolling();
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
+
     return () => {
       globalThis.clearTimeout(timeout);
-      globalThis.clearInterval(interval);
+      stopPolling();
+      if (typeof document !== "undefined") {
+        document.removeEventListener(
+          "visibilitychange",
+          handleVisibilityChange,
+        );
+      }
     };
   }, [load]);
 
@@ -160,10 +227,14 @@ export function AdminVireadTrainingScreen() {
     benchmark_id?: string;
   }) {
     if (!vireadTraining || busy || reason.trim().length < 8) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.decide({ ...input, reason: reason.trim() });
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         input.action === "APPROVE"
           ? t("training.notices.approvedDecision")
@@ -171,22 +242,31 @@ export function AdminVireadTrainingScreen() {
       );
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : t("training.notices.decisionFailed"),
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function triggerFlow2() {
     if (!vireadTraining?.triggerFlow2 || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       const result = await vireadTraining.triggerFlow2();
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       if (result.scheduled > 0) {
         setMessage(
           `Đã tạo snapshot Luồng 2 (${result.train_count ?? 0} train / ${result.validation_count ?? 0} validation) và xếp hàng job ${result.job_id ?? ""} (${result.status ?? "WAITING_FOR_COLAB_WORKER"}).`,
@@ -216,53 +296,76 @@ export function AdminVireadTrainingScreen() {
       }
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : "Không thể tạo snapshot hoặc xếp hàng train Luồng 2.",
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function retry(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.retry(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(t("training.notices.retryJobSuccess"));
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : t("training.notices.retryJobFailed"),
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function deleteJob(jobId: string) {
     if (!vireadTraining || busy || deletingJobId) return;
+    const actionId = ++actionRequestIdRef.current;
     setDeletingJobId(jobId);
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.deleteJob(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(t("training.notices.deleteJobSuccess"));
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : t("training.notices.deleteJobFailed"),
       );
     } finally {
-      setDeletingJobId(null);
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setDeletingJobId(null);
+        setBusy(false);
+      }
     }
   }
 
@@ -271,6 +374,7 @@ export function AdminVireadTrainingScreen() {
     evaluationType: "PILOT" | "PRODUCTION",
   ) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
@@ -278,6 +382,9 @@ export function AdminVireadTrainingScreen() {
         jobId,
         evaluationType,
       );
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         t("training.notices.queueEvalSuccess", {
           type: evaluationType === "PILOT" ? "Pilot" : "Production",
@@ -287,6 +394,9 @@ export function AdminVireadTrainingScreen() {
       );
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
@@ -298,45 +408,65 @@ export function AdminVireadTrainingScreen() {
             : t("training.notices.queueEvalFailed"),
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function closeMismatchedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.discardMismatchedCandidate(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(t("training.notices.closeDriftSuccess"));
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : t("training.notices.closeDriftFailed"),
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 
   async function closeUnbenchmarkedCandidate(jobId: string) {
     if (!vireadTraining || busy) return;
+    const actionId = ++actionRequestIdRef.current;
     setBusy(true);
     setMessage(null);
     try {
       await vireadTraining.closeUnbenchmarkedCandidate(jobId);
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(t("training.notices.closeUnbenchmarkedSuccess"));
       await load();
     } catch (err) {
+      if (!mountedRef.current || actionId !== actionRequestIdRef.current) {
+        return;
+      }
       setMessage(
         isServiceError(err)
           ? err.message
           : t("training.notices.closeUnbenchmarkedFailed"),
       );
     } finally {
-      setBusy(false);
+      if (mountedRef.current && actionId === actionRequestIdRef.current) {
+        setBusy(false);
+      }
     }
   }
 

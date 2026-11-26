@@ -17,6 +17,19 @@ import { loadLocaleMessages } from "@/messages/loader";
 import { viMessages } from "@/messages/vi";
 import "./globals.css";
 
+function readErrorDigest(error: unknown): string | null {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "digest" in error &&
+    typeof error.digest === "string" &&
+    error.digest.trim().length > 0
+  ) {
+    return error.digest.trim();
+  }
+  return null;
+}
+
 export default function GlobalErrorPage({
   error,
   reset,
@@ -35,7 +48,8 @@ export default function GlobalErrorPage({
   });
 
   useEffect(() => {
-    console.error(error);
+    const digest = readErrorDigest(error);
+    console.error("[ViReadGlobalError]", digest ? { error, digest } : error);
   }, [error]);
 
   useEffect(() => {
@@ -82,18 +96,39 @@ export default function GlobalErrorPage({
     "common.errorPage.backHome",
   );
 
+  const handleRetry = () => {
+    if (typeof retry === "function") {
+      retry();
+      return;
+    }
+    if (typeof reset === "function") {
+      reset();
+      return;
+    }
+    window.location.reload();
+  };
+
   return (
     <html lang={meta.bcp47} dir={meta.dir}>
       <body className="min-h-dvh bg-canvas text-ink">
         <title>{title}</title>
         <main className="mx-auto flex min-h-dvh w-full max-w-[640px] flex-col justify-center gap-4 px-4 py-12">
-          <div className="rounded-card border border-border bg-white p-6 shadow-sm">
-            <h1 className="text-heading font-extrabold text-ink">{title}</h1>
+          <section
+            aria-labelledby="global-error-title"
+            className="rounded-card border border-border bg-white p-6 shadow-sm"
+            role="alert"
+          >
+            <h1
+              className="text-heading font-extrabold text-ink"
+              id="global-error-title"
+            >
+              {title}
+            </h1>
             <p className="mt-3 text-body text-muted">{description}</p>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
               <button
                 className="inline-flex min-h-12 items-center justify-center rounded-control bg-primary px-6 py-2.5 text-button font-bold text-white hover:bg-primary-hover focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
-                onClick={() => (retry ?? reset)?.()}
+                onClick={handleRetry}
                 type="button"
               >
                 {retryLabel}
@@ -105,7 +140,7 @@ export default function GlobalErrorPage({
                 {homeLabel}
               </a>
             </div>
-          </div>
+          </section>
         </main>
       </body>
     </html>

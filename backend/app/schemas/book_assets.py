@@ -186,6 +186,7 @@ class PageIllustrationGenerateResponse(BaseModel):
         "BLOCKED_NO_IMAGE_PROVIDER",
         "WAITING_FOR_QUOTA",
         "REJECTED_CONTAINS_TEXT",
+        "STALE",
     ]
     job_id: UUID | None = None
     provider_name: str | None = None

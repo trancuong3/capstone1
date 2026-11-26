@@ -1246,9 +1246,10 @@
       "reuploadCreated": "OCR effectué sur une nouvelle image pour cette page. La nouvelle version est en attente de révision ; l'image et le contenu utilisés pour la lecture ne basculeront vers la nouvelle version qu'après vérification.",
       "reuploadError": "Impossible de charger la nouvelle image ou d'exécuter l'OCR. Les données actuelles sont conservées ; vérifiez le stockage, Tesseract 5.x, vie.traineddata et réessayez.",
       "aiRejectedAll": "Suggestion de l'IA ignorée. Le brouillon actuel est conservé.",
-      "wordDeleteSyncError": "Impossible de synchroniser le texte après la suppression d'un mot. Vérifiez le contenu et la liste de mots avant d'enregistrer."
+      "wordDeleteSyncError": "Impossible de synchroniser le texte après la suppression d'un mot. Vérifiez le contenu et la liste de mots avant d'enregistrer.",
+      "wordAddSyncError": "Impossible de synchroniser le texte après l'ajout d'un mot. Vérifiez le contenu et la liste de mots avant d'enregistrer."
     },
-    "newWordPlaceholder": "Nouveau mot",
+    "newWordPlaceholder": "Mot",
     "loading": "Chargement de l'image et de la révision…",
     "errors": {
       "notFoundTitle": "Page introuvable",

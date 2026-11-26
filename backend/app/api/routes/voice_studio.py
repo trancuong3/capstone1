@@ -37,10 +37,14 @@ from app.services.voice_orchestrator import VoicePolicyContext
 
 router = APIRouter()
 
-
 def clear_cached_public_voice_ids_cache() -> None:
     """Clear the in-memory cache of precomputed public TTS voice IDs."""
     TtsAudioCacheService.clear_cached_public_voice_ids_cache()
+
+
+async def shutdown_cached_public_voice_ids_task() -> None:
+    """Cancel and await any pending background voice-ID refresh task on shutdown."""
+    await TtsAudioCacheService.shutdown_cached_public_voice_ids_task()
 
 
 async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
@@ -158,6 +162,9 @@ async def timed_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    fallback_reason = getattr(speech, "fallback_reason", None)
+    if getattr(speech, "used_fallback_voice", False) and fallback_reason:
+        response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
 
     return TimedSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),

@@ -22,6 +22,7 @@ const SHORT_TRAIL_CAP_SECONDS = 0.2;
 const TRAILING_PAD_SECONDS = 0.35;
 const IDB_NAME = "viread-wasm-models-v1";
 const IDB_STORE = "files";
+const FETCH_TIMEOUT_MS = 60_000;
 
 const MODEL_FILES = [
   {
@@ -49,6 +50,8 @@ const MODEL_FILES = [
 let wasmModulePromise = null;
 let recognizerPromise = null;
 let recognizerInstance = null;
+let loadEpoch = 0;
+const activeFetchControllers = new Set();
 const cancelledIds = new Set();
 
 function trackCancel(id) {
@@ -99,6 +102,8 @@ async function readCachedFile(db, key) {
       const req = tx.objectStore(IDB_STORE).get(key);
       req.onsuccess = () => resolve(req.result ? req.result.buffer : null);
       req.onerror = () => resolve(null);
+      tx.onabort = () => resolve(null);
+      tx.onerror = () => resolve(null);
     } catch {
       resolve(null);
     }
@@ -119,6 +124,7 @@ async function writeCachedFile(db, key, buffer) {
       });
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
     } catch {
       resolve();
     }
@@ -133,6 +139,7 @@ async function deleteCachedFile(db, key) {
       tx.objectStore(IDB_STORE).delete(key);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
+      tx.onabort = () => resolve();
     } catch {
       resolve();
     }
@@ -161,9 +168,15 @@ function ensureWasmModule() {
   return wasmModulePromise;
 }
 
-async function fetchAndVerifyModelFile(db, spec) {
+async function fetchAndVerifyModelFile(db, spec, epoch) {
+  if (epoch !== loadEpoch) {
+    throw new Error("WASM STT init disposed");
+  }
   const cacheKey = `${MODEL_VERSION}/${spec.name}`;
   const cached = await readCachedFile(db, cacheKey);
+  if (epoch !== loadEpoch) {
+    throw new Error("WASM STT init disposed");
+  }
   if (cached && cached.byteLength === spec.expectedBytes) {
     const hash = await sha256Hex(cached);
     if (hash === spec.sha256) {
@@ -172,14 +185,49 @@ async function fetchAndVerifyModelFile(db, spec) {
     await deleteCachedFile(db, cacheKey);
   }
 
-  const resp = await fetch(`${HF_BASE_URL}/${spec.name}`, {
-    mode: "cors",
-    credentials: "omit",
-  });
-  if (!resp.ok) {
-    throw new Error(`Model fetch failed (${spec.name}): HTTP ${resp.status}`);
+  const controller =
+    typeof AbortController === "function" ? new AbortController() : null;
+  let timeoutId = null;
+  let timedOut = false;
+  if (controller) {
+    activeFetchControllers.add(controller);
+    if (typeof setTimeout === "function") {
+      timeoutId = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, FETCH_TIMEOUT_MS);
+    }
   }
-  const buffer = await resp.arrayBuffer();
+  let buffer;
+  try {
+    const fetchOpts = {
+      mode: "cors",
+      credentials: "omit",
+    };
+    if (controller) {
+      fetchOpts.signal = controller.signal;
+    }
+    const resp = await fetch(`${HF_BASE_URL}/${spec.name}`, fetchOpts);
+    if (!resp.ok) {
+      throw new Error(`Model fetch failed (${spec.name}): HTTP ${resp.status}`);
+    }
+    buffer = await resp.arrayBuffer();
+  } catch (err) {
+    if (timedOut) {
+      throw new Error(`Model fetch timed out (${spec.name})`);
+    }
+    throw err;
+  } finally {
+    if (timeoutId !== null && typeof clearTimeout === "function") {
+      clearTimeout(timeoutId);
+    }
+    if (controller) {
+      activeFetchControllers.delete(controller);
+    }
+  }
+  if (epoch !== loadEpoch) {
+    throw new Error("WASM STT init disposed");
+  }
   if (buffer.byteLength !== spec.expectedBytes) {
     throw new Error(
       `Model size mismatch (${spec.name}): got ${buffer.byteLength}, expected ${spec.expectedBytes}`,
@@ -197,10 +245,14 @@ async function ensureRecognizer() {
   if (recognizerInstance) return recognizerInstance;
   if (recognizerPromise) return recognizerPromise;
 
-  recognizerPromise = (async () => {
+  const epoch = loadEpoch;
+  const pending = (async () => {
     const [M, db] = await Promise.all([ensureWasmModule(), openModelsDb()]);
     try {
       for (let i = 0; i < MODEL_FILES.length; i += 1) {
+        if (epoch !== loadEpoch) {
+          throw new Error("WASM STT init disposed");
+        }
         const spec = MODEL_FILES[i];
         self.postMessage({
           type: "progress",
@@ -209,7 +261,7 @@ async function ensureRecognizer() {
           index: i,
           total: MODEL_FILES.length,
         });
-        const bytes = await fetchAndVerifyModelFile(db, spec);
+        const bytes = await fetchAndVerifyModelFile(db, spec, epoch);
         try {
           M.FS_unlink(`/${spec.name}`);
         } catch {
@@ -222,9 +274,13 @@ async function ensureRecognizer() {
         try {
           db.close();
         } catch {
-          // Ignore IDB close errors
+          // Ignore close failure
         }
       }
+    }
+
+    if (epoch !== loadEpoch) {
+      throw new Error("WASM STT init disposed");
     }
 
     const OfflineRecognizerCtor =
@@ -284,14 +340,26 @@ async function ensureRecognizer() {
       );
     }
 
+    if (epoch !== loadEpoch) {
+      try {
+        recognizer.free();
+      } catch {
+        // Ignore cleanup failure
+      }
+      throw new Error("WASM STT init disposed");
+    }
+
     recognizerInstance = recognizer;
     return recognizer;
   })().catch((err) => {
-    recognizerPromise = null;
+    if (recognizerPromise === pending) {
+      recognizerPromise = null;
+    }
     throw err;
   });
 
-  return recognizerPromise;
+  recognizerPromise = pending;
+  return pending;
 }
 
 /**
@@ -465,6 +533,15 @@ self.onmessage = async (event) => {
   }
 
   if (msg.type === "dispose") {
+    loadEpoch += 1;
+    for (const controller of activeFetchControllers) {
+      try {
+        controller.abort();
+      } catch {
+        // Ignore abort failure
+      }
+    }
+    activeFetchControllers.clear();
     if (recognizerInstance) {
       try {
         recognizerInstance.free();

@@ -60,6 +60,29 @@ const HOMOPHONE_LETTER_ALIASES: readonly (readonly string[])[] = [
 
 const SINGLE_TOKEN_EXPLICIT_MARKERS = new Set(["chọn", "câu", "chữ", "ý"]);
 
+const CONTENT_CLASSIFIER_WORDS = new Set([
+  "chiếc",
+  "cái",
+  "con",
+  "quả",
+  "trái",
+  "quyển",
+  "cuốn",
+  "bông",
+  "lá",
+  "cây",
+  "chú",
+  "cô",
+  "bác",
+  "ông",
+  "bà",
+  "bạn",
+  "người",
+  "một",
+  "các",
+  "những",
+]);
+
 const ORDINAL_ALIASES: readonly (readonly string[])[] = [
   ["một", "1", "nhất", "đầu"],
   ["hai", "2", "nhì"],
@@ -627,6 +650,48 @@ function matchContentChoice(
   if (best && best.score - secondScore >= 0.2) {
     return { kind: "unique", choice: best.choice };
   }
+
+  // Grade-1 short distinctive content answer (e.g. "ô" for "Chiếc ô", "dê" for "Con dê",
+  // "xe" for "Xe đạp"): match uniquely when the child speaks a single non-classifier content
+  // word that belongs to exactly ONE visible choice label (never hijacking active ordinals
+  // like "ba" when >= 3 choices exist so ordinal ambiguity still prompts clarification).
+  if (evalTokens.length === 1) {
+    const singleToken = evalTokens[0];
+    const matchesActiveOrdinal = Boolean(
+      singleToken &&
+      ORDINAL_ALIASES.some(
+        (aliases, idx) => idx < choices.length && aliases.includes(singleToken),
+      ),
+    );
+    if (
+      singleToken &&
+      !matchesActiveOrdinal &&
+      !CONTENT_CLASSIFIER_WORDS.has(singleToken) &&
+      !FILLER_OR_POLITE_WORDS.has(singleToken) &&
+      !CHOICE_MARKER_TOKENS.has(singleToken)
+    ) {
+      const uniqueContentMatches: ComprehensionChoiceUI[] = [];
+      for (const choice of choices) {
+        const labelTokens = tokenizeVietnameseText(choice.label).map(
+          normalizeContentToken,
+        );
+        const distinctiveTokens = labelTokens.filter(
+          (t) =>
+            !CONTENT_CLASSIFIER_WORDS.has(t) && !FILLER_OR_POLITE_WORDS.has(t),
+        );
+        if (distinctiveTokens.includes(singleToken)) {
+          uniqueContentMatches.push(choice);
+        }
+      }
+      if (uniqueContentMatches.length === 1) {
+        return { kind: "unique", choice: uniqueContentMatches[0] };
+      }
+      if (uniqueContentMatches.length >= 2) {
+        return { kind: "ambiguous", candidates: uniqueContentMatches };
+      }
+    }
+  }
+
   if (candidatesSharingToken.length >= 2) {
     return { kind: "ambiguous", candidates: candidatesSharingToken };
   }

@@ -1246,9 +1246,10 @@
       "reuploadCreated": "Ran OCR on a new image for this page. The new version is pending review; the image and content used for reading will only switch to the new version after verification.",
       "reuploadError": "Unable to load new image or run OCR. Current data is retained; check Storage, Tesseract 5.x, vie.traineddata, and try again.",
       "aiRejectedAll": "AI suggestion dismissed. Current draft is retained.",
-      "wordDeleteSyncError": "Unable to sync text after deleting word. Check content and word list before saving."
+      "wordDeleteSyncError": "Unable to sync text after deleting word. Check content and word list before saving.",
+      "wordAddSyncError": "Unable to sync text after adding word. Check content and word list before saving."
     },
-    "newWordPlaceholder": "New word",
+    "newWordPlaceholder": "Word",
     "loading": "Loading image and revision…",
     "errors": {
       "notFoundTitle": "Page not found",

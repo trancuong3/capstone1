@@ -292,9 +292,9 @@
     "restartFromScratch": "התחלה מחדש (ניסיון חדש)",
     "micUnavailable": "אין גישה למיקרופון במכשיר זה. ניתן להקליד תיאור בתיבת הטקסט למטה",
     "micListening": "מקשיב לתיאור של הילד...",
-    "transcribingSpeech": "ממיר את הקול של הילד באמצעות ElevenLabs...",
+    "transcribingSpeech": "ממיר את הקול של הילד לטקסט...",
     "unclearVoice": "הצג לא ברור. לחץ על המיקרופון כדי לנסות שוב או הקלד את התגובה",
-    "transcribedElevenLabs": "הקול הומר באמצעות ElevenLabs! ניתן להאזין שוב או לערוך לפני שליחת הבדיקה.",
+    "transcribedElevenLabs": "הקול הומר לטקסט! ניתן להאזין שוב או לערוך לפני שליחת הבדיקה.",
     "transcribedBrowser": "הסיפור נרשם! ניתן להאזין שוב או לערוך לפני שליחת הבדיקה.",
     "emptySubmissionError": "הקליט או כתוב משפט אחד לפחות המתאר את התמונה.",
     "sources": {

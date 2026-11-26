@@ -1246,9 +1246,10 @@
       "reuploadCreated": "このページ用に新しい画像のOCRを実行しました。新しいバージョンは承認待ちです。読書に使用される画像とコンテンツは、検証後にのみ新しいバージョンに切り替わります。",
       "reuploadError": "新しい画像の読み込みまたはOCR実行ができませんでした。現在のデータは保持されています。Storage、Tesseract 5.x、vie.traineddataを確認して再試行してください。",
       "aiRejectedAll": "AI提案を破棄しました。現在のドラフトは保持されています。",
-      "wordDeleteSyncError": "単語削除後にテキストを同期できませんでした。保存前にコンテンツと単語リストを確認してください。"
+      "wordDeleteSyncError": "単語削除後にテキストを同期できませんでした。保存前にコンテンツと単語リストを確認してください。",
+      "wordAddSyncError": "単語の追加後にテキストを同期できませんでした。保存前に本文と単語リストを確認してください。"
     },
-    "newWordPlaceholder": "新しい単語",
+    "newWordPlaceholder": "単語",
     "loading": "画像とリビジョンを読み込み中…",
     "errors": {
       "notFoundTitle": "ページが見つかりません",

@@ -10,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Sequence
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import requests
 from fastapi import HTTPException, status
@@ -156,6 +156,57 @@ def _upload_failure_detail(http_status: int | None, error_code: str | None) -> s
     return "Could not save the image to Supabase Storage"
 
 
+_SCHEME_PREFIX_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+
+
+def _has_control_chars(value: str) -> bool:
+    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+
+
+def _validate_object_path(
+    object_path: str | None,
+    *,
+    detail: str = "The stored image is not a Storage object path",
+) -> str:
+    """Reject empty, traversal, backslash, query/fragment, control-char, and URI-scheme paths."""
+    if not isinstance(object_path, str) or not object_path or object_path != object_path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    if _has_control_chars(object_path):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    if object_path.startswith(("/", "\\")) or "\\" in object_path or "?" in object_path or "#" in object_path:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    if "://" in object_path or _SCHEME_PREFIX_RE.match(object_path):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    segments = object_path.split("/")
+    if any(seg in {"", ".", ".."} for seg in segments):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=detail,
+        )
+    # Guard against single or double percent-encoded traversal / separators / control chars.
+    decoded = object_path
+    for _ in range(2):
+        decoded = unquote(decoded)
+        if _has_control_chars(decoded) or "\\" in decoded or any(seg in {".", ".."} for seg in decoded.split("/")):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=detail,
+            )
+    return object_path
+
+
 def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Path | None:
     """Isolated local filesystem storage for test/local runs only (never production)."""
     if APP_ENVIRONMENT == "production":
@@ -169,13 +220,9 @@ def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Pat
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Supabase Storage is not configured",
         )
-    if not object_path or object_path.startswith(("/", "\\", "http://", "https://")) or ".." in object_path.split("/"):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The stored image is not a Storage object path",
-        )
+    clean_path = _validate_object_path(object_path)
     base = (Path(raw_root).resolve() / normalized_bucket).resolve()
-    target = (base / object_path).resolve()
+    target = (base / clean_path).resolve()
     if not target.is_relative_to(base):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -192,6 +239,7 @@ def upload_object(
     bucket_name: str | None = None,
     upsert: bool = False,
 ) -> None:
+    object_path = _validate_object_path(object_path)
     local_target = _local_storage_path(object_path, bucket_name)
     if local_target is not None:
         local_target.parent.mkdir(parents=True, exist_ok=True)
@@ -239,6 +287,7 @@ def upload_object(
 
 
 def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
+    object_path = _validate_object_path(object_path)
     try:
         local_target = _local_storage_path(object_path, bucket_name)
         if local_target is not None:
@@ -267,11 +316,7 @@ def delete_object(object_path: str, *, bucket_name: str | None = None) -> None:
 
 
 def download_object(object_path: str, *, bucket_name: str | None = None) -> bytes:
-    if not object_path or object_path.startswith(("http://", "https://")):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The stored image is not a Storage object path",
-        )
+    object_path = _validate_object_path(object_path)
     local_target = _local_storage_path(object_path, bucket_name)
     if local_target is not None:
         if not local_target.is_file():
@@ -314,11 +359,10 @@ def hash_storage_object(object_path: str, aggregate_digest: object | None = None
     ``aggregate_digest`` may be a hashlib digest updated with the same streamed
     bytes, allowing callers to verify both each shard and the assembled file.
     """
-    if not object_path or object_path.startswith(("/", "http://", "https://")):
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="The stored checkpoint is not a Storage object path",
-        )
+    object_path = _validate_object_path(
+        object_path,
+        detail="The stored checkpoint is not a Storage object path",
+    )
     bucket_name = _bucket_name()
     if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
         raise HTTPException(
@@ -365,7 +409,7 @@ _SIGN_BATCH_SIZE = 50
 
 def _validate_image_reference(image_path: str | None) -> tuple[bool, str]:
     """Return `(is_external_url, clean_reference)` or raise 503 for invalid paths."""
-    if not isinstance(image_path, str) or not image_path.strip():
+    if not isinstance(image_path, str) or not image_path.strip() or _has_control_chars(image_path):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stored image reference is invalid",
@@ -382,7 +426,7 @@ def _validate_image_reference(image_path: str | None) -> tuple[bool, str]:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Stored image reference is invalid",
         )
-    return False, image_path
+    return False, _validate_object_path(image_path, detail="Stored image reference is invalid")
 
 
 def _normalize_signed_url(signed: object) -> str:

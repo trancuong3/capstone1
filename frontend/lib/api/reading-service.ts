@@ -225,6 +225,8 @@ const practiceStateSchema = z
     );
   });
 
+const MAX_RETRY_EVENT_MS = 2_147_483_647;
+
 export function createReadingService(): ReadingService {
   return {
     async getPracticeState(sessionId): Promise<ReadingPracticeStateDTO> {
@@ -350,11 +352,22 @@ export function createReadingService(): ReadingService {
       };
     },
     async createRetryEvent(input: CreateRetryEventInput): Promise<void> {
-      const startMs = Math.min(32767, Math.max(0, Math.floor(input.startMs)));
+      const rawStartMs = Number.isFinite(input.startMs)
+        ? Math.floor(input.startMs)
+        : 0;
+      const startMs = Math.min(MAX_RETRY_EVENT_MS, Math.max(0, rawStartMs));
       const endMs =
         input.endMs === null
           ? null
-          : Math.min(32767, Math.max(startMs, Math.floor(input.endMs)));
+          : Math.min(
+              MAX_RETRY_EVENT_MS,
+              Math.max(
+                startMs,
+                Number.isFinite(input.endMs)
+                  ? Math.floor(input.endMs)
+                  : startMs,
+              ),
+            );
 
       await withRequestDeadline(
         (signal) =>

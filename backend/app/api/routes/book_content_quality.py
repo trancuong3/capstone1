@@ -21,12 +21,14 @@ from app.schemas.book_content_quality import (
     BookQualityBookPage,
     BookQualityFindingRead,
     BookQualityFindingUpdate,
+    BookQualityReportAdminPage,
     BookQualityScanDetail,
     BookQualityScanRead,
     BookRightsEvidenceRead,
     BookRightsEvidenceUpsert,
 )
 from app.services.book_content_quality_service import BookContentQualityService
+from app.services.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -44,6 +46,9 @@ async def create_parent_book_report(
     book_id: UUID,
     payload: BookContentReportCreate,
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("book_content_report", default_max=20, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a Parent report and its durable full-book scan request atomically."""
@@ -71,7 +76,7 @@ async def get_my_book_report(
     return await _service(db).get_parent_report(actor_id, report_id)
 
 
-@router.get("/admin/quality/reports")
+@router.get("/admin/quality/reports", response_model=BookQualityReportAdminPage)
 async def list_admin_book_reports(
     report_status: Literal["OPEN", "UNDER_REVIEW", "RESOLVED", "REJECTED"] | None = Query(default=None, alias="status"),
     issue_type: Literal[

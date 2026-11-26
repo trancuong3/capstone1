@@ -1246,9 +1246,10 @@
       "reuploadCreated": "해당 페이지에 대해 새 이미지로 OCR을 실행했습니다. 새 버전은 검토 대기 중이며, 읽기에 사용되는 이미지와 콘텐츠는 검증 후에만 새 버전으로 전환됩니다.",
       "reuploadError": "새 이미지를 불러오거나 OCR을 실행할 수 없습니다. 현재 데이터는 유지됩니다. Storage, Tesseract 5.x, vie.traineddata를 확인하고 다시 시도하세요.",
       "aiRejectedAll": "AI 제안을 취소했습니다. 현재 초안은 그대로 유지됩니다.",
-      "wordDeleteSyncError": "단어 삭제 후 텍스트를 동기화할 수 없습니다. 저장하기 전에 콘텐츠와 단어 목록을 확인하세요."
+      "wordDeleteSyncError": "단어 삭제 후 텍스트를 동기화할 수 없습니다. 저장하기 전에 콘텐츠와 단어 목록을 확인하세요.",
+      "wordAddSyncError": "단어를 추가한 후 텍스트를 동기화할 수 없습니다. 저장 전에 본문과 단어 목록을 확인하세요."
     },
-    "newWordPlaceholder": "새 단어",
+    "newWordPlaceholder": "단어",
     "loading": "이미지 및 리비전 불러오는 중…",
     "errors": {
       "notFoundTitle": "페이지를 찾을 수 없습니다",

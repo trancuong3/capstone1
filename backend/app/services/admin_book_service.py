@@ -4,7 +4,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, InterfaceError, OperationalError, SQLAlchemyError
 
 from app.repositories.admin_book_repository import AdminBookRepository
 from app.schemas.admin_book import AdminBookSoftDeleteResponse, AdminBookWriteRequest
@@ -41,6 +41,8 @@ class AdminBookService:
                 status_code=409,
                 detail="Could not create book with the current database constraints",
             ) from None
+        except (OperationalError, InterfaceError):
+            raise
         except SQLAlchemyError:
             raise HTTPException(
                 status_code=500,
@@ -62,6 +64,8 @@ class AdminBookService:
             )
             return AdminBookMetadataResponse.model_validate(updated)
         except HTTPException:
+            raise
+        except (OperationalError, InterfaceError):
             raise
         except SQLAlchemyError:
             raise HTTPException(
@@ -124,6 +128,8 @@ class AdminBookService:
             return response
         except HTTPException:
             raise
+        except (OperationalError, InterfaceError):
+            raise
         except SQLAlchemyError:
             raise HTTPException(
                 status_code=500,
@@ -145,6 +151,8 @@ class AdminBookService:
             )
             return AdminBookSoftDeleteResponse(book_id=book_id, is_deleted=True)
         except HTTPException:
+            raise
+        except (OperationalError, InterfaceError):
             raise
         except SQLAlchemyError:
             raise HTTPException(

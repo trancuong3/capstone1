@@ -203,7 +203,8 @@ class GoogleDriveTrainingStore(TrainingArtifactStore):
         self._access_token = access_token
         self._access_token_expires_at = access_token_expires_at
         self._granted_scope = granted_scope
-        self._session = session or requests.Session()
+        self._provided_session = session
+        self._session_local = threading.local()
         self._min_free_buffer_bytes = (
             min_free_buffer_bytes
             if min_free_buffer_bytes is not None
@@ -233,6 +234,23 @@ class GoogleDriveTrainingStore(TrainingArtifactStore):
             for name, folder_id in self._subfolder_ids.items():
                 if name in ALLOWED_DRIVE_CATEGORIES and folder_id:
                     self._folder_cache[(self._root_folder_id, name)] = folder_id
+
+    def _get_session(self) -> requests.Session:
+        if self._provided_session is not None:
+            return self._provided_session
+        sess = getattr(self._session_local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._session_local.session = sess
+        return sess
+
+    @property
+    def _session(self) -> requests.Session:
+        return self._get_session()
+
+    @_session.setter
+    def _session(self, value: requests.Session | None) -> None:
+        self._provided_session = value
 
     @property
     def root_folder_id(self) -> str | None:

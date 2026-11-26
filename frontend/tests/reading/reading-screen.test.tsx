@@ -3426,4 +3426,46 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await screen.findByLabelText("Trang sách 5");
     expect(screen.queryByTestId("phonics-lesson-card")).toBeNull();
   });
+
+  it("does not auto-reopen the microphone when handleReadSample fails with a TTS error", async () => {
+    let recStartCount = 0;
+    class TrackingRecognition {
+      onresult: null = null;
+      onerror: null = null;
+      onend: (() => void) | null = null;
+      start() {
+        recStartCount += 1;
+      }
+      stop() {
+        this.onend?.();
+      }
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: TrackingRecognition,
+    });
+    speechPlayerMock.playWithWordTimings.mockRejectedValueOnce(
+      new Error("TTS_UNAVAILABLE"),
+    );
+
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    // Start mic listening first so wasListening = true when tapping "Nghe đọc mẫu"
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Bé đọc với nhận diện giọng nói",
+      }),
+    );
+    await waitFor(() => expect(recStartCount).toBe(1));
+
+    await user.click(
+      screen.getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+    );
+    expect(
+      await screen.findByText(/Mình chưa phát được âm thanh/i),
+    ).toBeInTheDocument();
+    // Microphone must NOT have been auto-reopened after TTS failure
+    expect(recStartCount).toBe(1);
+  });
 });

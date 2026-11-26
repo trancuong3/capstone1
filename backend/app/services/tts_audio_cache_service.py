@@ -126,25 +126,34 @@ ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Mình cùng đọc tiếp trang tiếp theo nào.",
     # Real fixed coaching cues spoken by reading-screen.tsx & interactive-prompts.ts
     "Cô đọc mẫu cho con nhé.",
+    "Thầy đọc mẫu cho con nhé.",
     "Đến lượt con đọc nhé.",
     "Con nghe từ này nhé.",
     "Con nghe cô đọc từ này nhé.",
+    "Con nghe thầy đọc từ này nhé.",
     "Mình cùng nghe từ này nào.",
     "Mình đọc chậm hơn chút nhé.",
     "Con nghe cô đọc thật chậm nha.",
+    "Con nghe thầy đọc thật chậm nha.",
     "Mình đọc chậm từng tiếng nhé.",
     "Không sao đâu. Con nghe cô đọc nhé.",
+    "Không sao đâu. Con nghe thầy đọc nhé.",
     "Đến lượt con. Con đọc lại nhé.",
     "Để cô đánh vần chậm giúp con nhé!",
+    "Để thầy đánh vần chậm giúp con nhé!",
     "Mình đánh vần từng bước chữ này nha!",
     "Cô tách từng âm giúp con dễ đọc nhé!",
+    "Thầy tách từng âm giúp con dễ đọc nhé!",
     "Con nghe cô đánh vần chậm từng âm nào!",
+    "Con nghe thầy đánh vần chậm từng âm nào!",
     "Mình ghép từng tiếng cho dễ đọc nha con!",
     "Cô đánh vần dẫn đường giúp con nhé!",
+    "Thầy đánh vần dẫn đường giúp con nhé!",
     "Con đã cố gắng rất tốt rồi. Mình đọc tiếp nhé!",
     "Không sao đâu, từ này mình luyện thêm sau. Đọc tiếp nào!",
     "Con làm tốt lắm rồi. Mình sang từ tiếp theo nhé!",
     "Con đọc xong trang này trôi chảy quá! Cô khen nhé!",
+    "Con đọc xong trang này trôi chảy quá! Thầy khen nhé!",
     "Giỏi quá, mình lật sang trang tiếp theo nhé!",
     "Tuyệt vời, con đọc rõ lắm! Mình sang trang mới nào!",
     "Hoan hô con, trang này con đọc mượt mà quá!",
@@ -486,22 +495,35 @@ def preferred_cache_formats(
 
 
 _CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS = 300.0
+_CACHED_PUBLIC_VOICE_IDS_ERROR_BACKOFF_SECONDS = 30.0
 _cached_public_voice_ids: tuple[float, list[str]] | None = None
+_cached_public_voice_ids_backoff_until: float = 0.0
 _cached_public_voice_ids_task: asyncio.Task[list[str]] | None = None
 
 
 def clear_cached_public_voice_ids_cache() -> None:
     """Clear the in-memory cache of precomputed public TTS voice IDs."""
-    global _cached_public_voice_ids, _cached_public_voice_ids_task
+    global _cached_public_voice_ids, _cached_public_voice_ids_backoff_until, _cached_public_voice_ids_task
     _cached_public_voice_ids = None
+    _cached_public_voice_ids_backoff_until = 0.0
     if _cached_public_voice_ids_task is not None and not _cached_public_voice_ids_task.done():
         _cached_public_voice_ids_task.cancel()
     _cached_public_voice_ids_task = None
 
 
+async def shutdown_cached_public_voice_ids_task() -> None:
+    """Cancel and await any pending background voice-ID refresh task on shutdown."""
+    global _cached_public_voice_ids_task
+    task = _cached_public_voice_ids_task
+    _cached_public_voice_ids_task = None
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
     """Query active CATALOG/COACHING voice IDs in `tts_audio_cache_entries` and update cache."""
-    global _cached_public_voice_ids
+    global _cached_public_voice_ids, _cached_public_voice_ids_backoff_until
     if not is_tts_cache_enabled():
         return []
 
@@ -512,8 +534,12 @@ async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
     try:
         voice_ids = await asyncio.wait_for(_query(), timeout=timeout)
     except Exception:
+        _cached_public_voice_ids_backoff_until = (
+            time.monotonic() + _CACHED_PUBLIC_VOICE_IDS_ERROR_BACKOFF_SECONDS
+        )
         return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
 
+    _cached_public_voice_ids_backoff_until = 0.0
     _cached_public_voice_ids = (time.monotonic(), list(voice_ids))
     return voice_ids
 
@@ -535,6 +561,9 @@ async def get_cached_public_voice_ids(*, inline_timeout: float | None = None) ->
         and (now - _cached_public_voice_ids[0]) < _CACHED_PUBLIC_VOICE_IDS_TTL_SECONDS
     ):
         return list(_cached_public_voice_ids[1])
+
+    if now < _cached_public_voice_ids_backoff_until:
+        return list(_cached_public_voice_ids[1]) if _cached_public_voice_ids is not None else []
 
     if _cached_public_voice_ids_task is None or _cached_public_voice_ids_task.done():
         _cached_public_voice_ids_task = asyncio.create_task(refresh_cached_public_voice_ids())
@@ -615,6 +644,10 @@ class TtsAudioCacheService:
     @staticmethod
     def clear_cached_public_voice_ids_cache() -> None:
         clear_cached_public_voice_ids_cache()
+
+    @staticmethod
+    async def shutdown_cached_public_voice_ids_task() -> None:
+        await shutdown_cached_public_voice_ids_task()
 
     @staticmethod
     async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
@@ -819,13 +852,16 @@ class TtsAudioCacheService:
         if norm_scope == "PRIVATE":
             if actor_id is None:
                 return None
+            # Require explicit book_id/page_id before permitting PRIVATE cache writes.
             return ResolvedCacheTarget(
                 scope="PRIVATE",
                 owner_parent_id=actor_id,
                 book_id=book_id,
                 page_id=page_id,
                 page_revision_id=page_revision_id,
-                can_store_on_miss=True,
+                can_store_on_miss=bool(
+                    allow_cache_write and (book_id is not None or page_id is not None)
+                ),
             )
         if norm_scope == "CATALOG":
             # Read-only lookup for precomputed catalog vocabulary/pages when no DB book_id is given;
@@ -970,9 +1006,9 @@ class TtsAudioCacheService:
                                 or not allow_speed_fallback
                             ):
                                 entry = candidate
-                            elif page_fallback_entry is None:
+                                break
+                            if page_fallback_entry is None:
                                 page_fallback_entry = candidate
-                            break
             if entry is None and allow_speed_fallback:
                 nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
                 if callable(nearest_fn):
@@ -1129,6 +1165,15 @@ class TtsAudioCacheService:
                 if not is_coaching_text_allowlisted(normalized_text):
                     return False
 
+        if (
+            target.scope == "PRIVATE"
+            and (
+                target.owner_parent_id is None
+                or (target.book_id is None and target.page_id is None)
+            )
+        ):
+            return False
+
         compressed_bytes, stored_format = await asyncio.to_thread(
             transcode_to_mp3_64k,
             audio_bytes,
@@ -1147,6 +1192,29 @@ class TtsAudioCacheService:
             audio_format=stored_format,
             model_version=model_version,
         )
+
+        # Check if an ACTIVE entry already owns this exact Storage object so a DB error
+        # never deletes a pre-existing live object!
+        preexisting_live_object = False
+        try:
+            existing_entry = await self.repo.get_active_entry(
+                scope=target.scope,
+                owner_parent_id=target.owner_parent_id,
+                content_sha256=content_sha256,
+                voice_id=voice_id,
+                model_version=model_version,
+                speed=speed,
+                audio_formats=[stored_format],
+            )
+            if existing_entry is not None and (
+                str(existing_entry.StorageBucket) == bucket
+                and str(existing_entry.StoragePath) == storage_path
+            ):
+                preexisting_live_object = True
+        except Exception:
+            preexisting_live_object = False
+
+        uploaded_new_object = False
 
         async def _storage_path_owned_by_active_row(
             target_bucket: str, target_path: str
@@ -1172,6 +1240,7 @@ class TtsAudioCacheService:
                 bucket_name=bucket,
                 upsert=True,
             )
+            uploaded_new_object = True
             entry, replaced = await self.repo.upsert_active_entry(
                 scope=target.scope,
                 owner_parent_id=target.owner_parent_id,
@@ -1193,14 +1262,19 @@ class TtsAudioCacheService:
             evicted_objects = await self._enforce_lru_quota(
                 max_bytes=max_bytes,
                 keep_entry_id=entry.Id,
+                scope=target.scope,
+                owner_parent_id=target.owner_parent_id,
             )
             await self.db.commit()
         except Exception as exc:
             await self._safe_rollback()
             still_owned = await _storage_path_owned_by_active_row(bucket, storage_path)
-            if not still_owned:
-                await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
-            elif isinstance(exc, IntegrityError):
+            if uploaded_new_object and not preexisting_live_object and not still_owned:
+                try:
+                    await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+                except Exception:
+                    pass
+            elif still_owned and isinstance(exc, IntegrityError):
                 # A concurrent writer committed the exact same active entry; keep its blob intact.
                 return True
             log_diagnostic(
@@ -1225,9 +1299,39 @@ class TtsAudioCacheService:
         *,
         max_bytes: int,
         keep_entry_id: UUID | None = None,
+        scope: str | None = None,
+        owner_parent_id: UUID | None = None,
     ) -> list[tuple[str, str]]:
         assert self.repo is not None
-        total = await self.repo.total_active_bytes()
+        partition_scopes: tuple[str, ...] | None = None
+        partition_owner: UUID | None = None
+        if scope == "PRIVATE":
+            partition_scopes = ("PRIVATE",)
+            partition_owner = owner_parent_id
+        elif scope in ("CATALOG", "COACHING"):
+            partition_scopes = ("CATALOG", "COACHING")
+
+        scoped_repo = True
+        try:
+            total = await self.repo.total_active_bytes(
+                scopes=partition_scopes,
+                owner_parent_id=partition_owner,
+            )
+        except TypeError:
+            scoped_repo = False
+            total = await self.repo.total_active_bytes()
+
+        if not scoped_repo and partition_scopes is not None:
+            entries_map = getattr(self.repo, "entries", None)
+            if isinstance(entries_map, dict):
+                total = sum(
+                    int(getattr(e, "ByteSize", 0) or 0)
+                    for e in entries_map.values()
+                    if getattr(e, "Status", None) == "ACTIVE"
+                    and getattr(e, "Scope", None) in partition_scopes
+                    and (partition_owner is None or getattr(e, "OwnerParentId", None) == partition_owner)
+                )
+
         if total <= max_bytes:
             return []
 
@@ -1238,11 +1342,29 @@ class TtsAudioCacheService:
         for _ in range(10):
             if total <= max_bytes:
                 break
-            candidates = await self.repo.list_lru_eviction_candidates(
-                exclude_ids=tuple(exclude_ids), limit=batch_size
-            )
+            batch_scoped = scoped_repo
+            try:
+                candidates = await self.repo.list_lru_eviction_candidates(
+                    exclude_ids=tuple(exclude_ids),
+                    scopes=partition_scopes,
+                    owner_parent_id=partition_owner,
+                    limit=batch_size,
+                )
+            except TypeError:
+                batch_scoped = False
+                candidates = await self.repo.list_lru_eviction_candidates(
+                    exclude_ids=tuple(exclude_ids), limit=batch_size
+                )
             if not candidates:
                 break
+            raw_count = len(candidates)
+            if not batch_scoped and partition_scopes is not None:
+                candidates = [
+                    item
+                    for item in candidates
+                    if getattr(item, "Scope", None) in partition_scopes
+                    and (partition_owner is None or getattr(item, "OwnerParentId", None) == partition_owner)
+                ]
             progressed = False
             for item in candidates:
                 if total <= max_bytes:
@@ -1254,7 +1376,7 @@ class TtsAudioCacheService:
                 evict_objects.append((str(item.StorageBucket), str(item.StoragePath)))
                 total -= int(item.ByteSize or 0)
                 progressed = True
-            if not progressed or len(candidates) < batch_size:
+            if not progressed or raw_count < batch_size:
                 break
         if evict_ids:
             await self.repo.mark_entries_status(evict_ids, status="DELETED")
@@ -1267,9 +1389,15 @@ class TtsAudioCacheService:
         page_id: UUID | None = None,
         page_revision_id: UUID | None = None,
         commit: bool = False,
-    ) -> int:
+    ) -> int | list[tuple[str, str]]:
+        """Mark matching TTS cache rows STALE.
+
+        When `commit=True`, commits and deletes stale Storage objects post-commit, returning the count.
+        When `commit=False`, does NOT touch Storage yet and returns `list[(bucket, path)]` so the
+        caller can call `delete_stale_tts_objects(stale_paths)` AFTER committing its transaction.
+        """
         if self.repo is None or self.db is None:
-            return 0
+            return 0 if commit else []
         try:
             if hasattr(self.db, "begin_nested"):
                 async with self.db.begin_nested():
@@ -1296,10 +1424,12 @@ class TtsAudioCacheService:
                 stage="tts_cache",
                 exception=exc,
             )
-            return 0
+            return 0 if commit else []
 
-        for bucket, path in stale_objects:
-            await asyncio.to_thread(delete_object, path, bucket_name=bucket)
+        if not commit:
+            return list(stale_objects)
+
+        await delete_stale_tts_objects(stale_objects)
         return len(stale_objects)
 
     async def get_summary(self) -> dict[str, Any]:
@@ -1358,6 +1488,21 @@ class TtsAudioCacheService:
                 pass
 
 
+async def delete_stale_tts_objects(stale_objects: list[tuple[str, str]]) -> None:
+    """Delete invalidated TTS cache objects from Storage AFTER the caller commits DB."""
+    for bucket, path in stale_objects:
+        try:
+            await asyncio.to_thread(delete_object, path, bucket_name=bucket)
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_post_commit_delete_failed",
+                stage="tts_cache",
+                exception=exc,
+            )
+
+
 async def invalidate_tts_cache_best_effort(
     db: AsyncSession | None,
     *,
@@ -1365,10 +1510,10 @@ async def invalidate_tts_cache_best_effort(
     page_id: UUID | None = None,
     page_revision_id: UUID | None = None,
     commit: bool = False,
-) -> int:
+) -> int | list[tuple[str, str]]:
     """Safely mark affected TTS cache rows STALE without breaking legacy/minimal DB schemas."""
     if db is None or not isinstance(db, AsyncSession):
-        return 0
+        return 0 if commit else []
     service = TtsAudioCacheService(db)
     if not commit and hasattr(db, "begin_nested"):
         try:
@@ -1387,7 +1532,7 @@ async def invalidate_tts_cache_best_effort(
                 stage="tts_cache",
                 exception=exc,
             )
-            return 0
+            return []
     return await service.invalidate_target(
         book_id=book_id,
         page_id=page_id,

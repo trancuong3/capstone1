@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Prioriza local, con respaldo automático en línea",
     "googleSttFallback": "Respaldo de Google para reconocimiento de voz (STT)",
     "googleTtsFallback": "Respaldo de Google para pronunciación (TTS)",
-    "missingGoogleKeyHint": "Si la clave de API de Google Cloud no está configurada en backend/.env, ViRead usará automáticamente Google/Navegador en línea como respaldo.",
+    "missingGoogleKeyHint": "Si la clave de API de Google Cloud no está configurada en el servidor, ViRead usará automáticamente Google/Navegador en línea como respaldo.",
     "useDefaultVoice": "Usar voz predeterminada",
     "preview": "Vista previa",
     "stopPreview": "Detener vista previa",

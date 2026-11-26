@@ -1,17 +1,22 @@
 """OpenCV clean text-free illustration extraction, CLAHE restoration & mandatory text-free gate (0 VND, Render Free 512 MiB safe)."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import ipaddress
 import logging
 import re
+import socket
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any, Callable
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import cv2
+import httpx
 import numpy as np
 from fastapi import HTTPException, status
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -343,11 +348,10 @@ def _decode_bgr_safely(image_bytes: bytes) -> np.ndarray:
             status_code=HTTP_422,
             detail="Ảnh trang sách không hợp lệ (chỉ hỗ trợ JPG, PNG hoặc WEBP).",
         )
-    prev_limit = Image.MAX_IMAGE_PIXELS
-    Image.MAX_IMAGE_PIXELS = MAX_COVER_PIXELS
     try:
         with Image.open(BytesIO(image_bytes)) as source:
-            if source.width * source.height > MAX_COVER_PIXELS:
+            width, height = source.size
+            if width <= 0 or height <= 0 or (width * height) > MAX_COVER_PIXELS:
                 raise HTTPException(
                     status_code=HTTP_422,
                     detail="Ảnh vượt quá giới hạn an toàn 25 megapixel.",
@@ -363,8 +367,6 @@ def _decode_bgr_safely(image_bytes: bytes) -> np.ndarray:
             status_code=HTTP_422,
             detail="Không thể giải mã ảnh trang sách.",
         ) from exc
-    finally:
-        Image.MAX_IMAGE_PIXELS = prev_limit
 
 
 def _apply_gentle_clahe_restore(crop_bgr: np.ndarray) -> np.ndarray:
@@ -625,6 +627,131 @@ def _bucket_for_book(book: Book) -> str:
     return SUPABASE_STORAGE_BUCKET or "books"
 
 
+_MAX_PAGE_DOWNLOAD_BYTES = 12 * 1024 * 1024
+
+
+def _is_global_ip_str(raw_ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return False
+    return bool(
+        addr.is_global
+        and not addr.is_private
+        and not addr.is_loopback
+        and not addr.is_link_local
+        and not addr.is_multicast
+        and not addr.is_reserved
+    )
+
+
+async def _validate_and_download_page_image(
+    image_path: str | None,
+    *,
+    is_private_book: bool,
+    bucket: str,
+) -> bytes:
+    cleaned = (image_path or "").strip()
+    if not cleaned:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored page image path is invalid",
+        )
+    lower = cleaned.lower()
+    if lower.startswith(("http://", "https://")):
+        if is_private_book or not lower.startswith("https://"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stored page image path is invalid",
+            )
+        parsed = urlsplit(cleaned)
+        host = (parsed.hostname or "").strip().lower()
+        if (
+            parsed.scheme != "https"
+            or not host
+            or host in {"localhost", "localhost.localdomain"}
+            or parsed.username is not None
+            or parsed.password is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Stored page image URL is invalid",
+            )
+        try:
+            ipaddress.ip_address(host)
+            if not _is_global_ip_str(host):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Stored page image URL host is not allowed",
+                )
+        except ValueError:
+            try:
+                infos = await asyncio.to_thread(
+                    socket.getaddrinfo, host, parsed.port or 443, type=socket.SOCK_STREAM
+                )
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Stored page image URL could not be resolved",
+                ) from exc
+            resolved_ips = {info[4][0] for info in infos if info and info[4]}
+            if not resolved_ips or not all(_is_global_ip_str(ip) for ip in resolved_ips):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Stored page image URL host is not allowed",
+                )
+        try:
+            async with httpx.AsyncClient(
+                timeout=20.0, trust_env=False, follow_redirects=False
+            ) as client:
+                async with client.stream("GET", cleaned) as resp:
+                    if resp.status_code != 200:
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail="Could not download catalog page image",
+                        )
+                    buf = bytearray()
+                    async for chunk in resp.aiter_bytes(65536):
+                        buf.extend(chunk)
+                        if len(buf) > _MAX_PAGE_DOWNLOAD_BYTES:
+                            raise HTTPException(
+                                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                                detail="Catalog page image exceeds safe size limit",
+                            )
+                    return bytes(buf)
+        except HTTPException:
+            raise
+        except httpx.HTTPError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not download catalog page image",
+            ) from exc
+
+    safe_path = _validate_relative_storage_path(cleaned)
+    return await asyncio.to_thread(download_object, safe_path, bucket_name=bucket)
+
+
+def _encode_and_verify_ai_illustration(
+    raw_bytes: bytes,
+    *,
+    canonical_text: str | None,
+    ocr_check_fn: OcrCheckFn | None,
+) -> tuple[bytes, int, int, str, TextFreeVerificationResult]:
+    img_bgr = _decode_bgr_safely(raw_bytes)
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    webp_bytes, out_w, out_h = _encode_optimized_webp(
+        Image.fromarray(rgb), max_bytes=MAX_ILLUSTRATION_WEBP_BYTES
+    )
+    asset_hash = hashlib.sha256(webp_bytes).hexdigest()
+    verification = verify_illustration_text_free(
+        img_bgr,
+        canonical_text=canonical_text,
+        ocr_check_fn=ocr_check_fn,
+        image_bytes=webp_bytes,
+    )
+    return webp_bytes, out_w, out_h, asset_hash, verification
+
+
 class BookIllustrationService:
     """Orchestrates text-free page illustration extraction, generation, and moderation.
 
@@ -654,6 +781,9 @@ class BookIllustrationService:
         payload: PageIllustrationExtractRequest,
         *,
         page_image_bytes_override: bytes | None = None,
+        existing_job_id: UUID | None = None,
+        existing_lease_token: UUID | None = None,
+        existing_source_revision_id: UUID | None = None,
     ) -> PageIllustrationExtractResponse:
         book, _role = await self.cover_service.authorize_book_write(actor_id, book_id)
         page = await self.repo.get_page(book.Id, page_id)
@@ -662,9 +792,17 @@ class BookIllustrationService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Book page not found"
             )
 
+        resolved_book_id = book.Id
+        resolved_page_id = page.Id
+        private_book = is_book_private(book)
+        owner_id = book.OwnerParentId if private_book else None
+        bucket = _bucket_for_book(book)
+        raw_image_path = page.ImagePath
+
         revision_id, revision_text, revision_bboxes = await self.repo.get_page_revision_context(
             page
         )
+        expected_revision_id = existing_source_revision_id or revision_id
         word_bboxes = payload.word_bboxes if payload.word_bboxes else revision_bboxes
         canonical_text = (
             payload.canonical_text
@@ -672,13 +810,21 @@ class BookIllustrationService:
             else revision_text
         )
 
+        # Release read transaction before Storage/network I/O & OpenCV CPU work.
+        if callable(getattr(self.db, "rollback", None)):
+            await self.db.rollback()
+
         if page_image_bytes_override is not None:
             source_bytes = page_image_bytes_override
         else:
-            bucket = _bucket_for_book(book)
-            source_bytes = download_object(page.ImagePath, bucket_name=bucket)
+            source_bytes = await _validate_and_download_page_image(
+                raw_image_path,
+                is_private_book=private_book,
+                bucket=bucket,
+            )
 
-        extraction = extract_clean_illustration_from_bytes(
+        extraction = await asyncio.to_thread(
+            extract_clean_illustration_from_bytes,
             source_bytes,
             word_bboxes=word_bboxes,
             canonical_text=canonical_text,
@@ -702,13 +848,12 @@ class BookIllustrationService:
                 ),
             )
 
-        owner_id = book.OwnerParentId if is_book_private(book) else None
-        scope = f"private/{owner_id}" if is_book_private(book) else "catalog"
+        scope = f"private/{owner_id}" if private_book else "catalog"
         storage_path = _validate_relative_storage_path(
-            f"studio/illustrations/{scope}/{book.Id}/{page.Id}/{extraction.asset_hash[:16]}_{uuid4().hex[:8]}.webp"
+            f"studio/illustrations/{scope}/{resolved_book_id}/{resolved_page_id}/{extraction.asset_hash[:16]}_{uuid4().hex[:8]}.webp"
         )
-        bucket = _bucket_for_book(book)
-        upload_object(
+        await asyncio.to_thread(
+            upload_object,
             storage_path,
             extraction.webp_bytes,
             "image/webp",
@@ -719,11 +864,38 @@ class BookIllustrationService:
         is_verified = extraction.verification.text_free_verified
         moderation_status = "APPROVED" if is_verified else "REJECTED"
         source_type = "ENHANCED_CROP" if extraction.restored_with_clahe else "ORIGINAL_CROP"
+        managed_by_worker = existing_job_id is not None and existing_lease_token is not None
 
         try:
+            if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+                from app.services.global_tasks_service import (
+                    GlobalTasksService,
+                    verify_smart_studio_job_fence_in_tx,
+                )
+
+                _fenced_job, fence_status = await verify_smart_studio_job_fence_in_tx(
+                    self.db,
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    expected_revision_id=expected_revision_id,
+                    book_page_id=resolved_page_id,
+                )
+                if fence_status == "STALE":
+                    await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+                    return PageIllustrationExtractResponse(
+                        status="FAILED",
+                        asset=None,
+                        text_free_verified=False,
+                        text_density_score=extraction.verification.text_density_score,
+                        ocr_overlap_score=extraction.verification.ocr_overlap_score,
+                        artwork_area_ratio=extraction.artwork_area_ratio,
+                        recommended_reading_mode="TEXT",
+                        message_vi="Trang sách đã chuyển sang phiên bản mới hơn; kết quả trích xuất cũ bị bỏ qua.",
+                    )
+
             asset = await self.repo.create_page_illustration_asset(
-                book_id=book.Id,
-                book_page_id=page.Id,
+                book_id=resolved_book_id,
+                book_page_id=resolved_page_id,
                 source_revision_id=revision_id,
                 owner_id=owner_id,
                 source_type=source_type,
@@ -738,6 +910,7 @@ class BookIllustrationService:
                 is_active=is_verified,
                 provider_name="opencv_local",
                 model_id="opencv-clahe-textfree-v2",
+                job_id=existing_job_id,
                 metadata_json={
                     "crop_bbox_norm": extraction.crop_bbox_norm,
                     "artwork_area_ratio": extraction.artwork_area_ratio,
@@ -749,10 +922,51 @@ class BookIllustrationService:
                     "restored_with_clahe": extraction.restored_with_clahe,
                 },
             )
-            await self.db.commit()
-        except Exception:
-            await self.db.rollback()
-            delete_object(storage_path, bucket_name=bucket)
+            if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+                from app.services.global_tasks_service import GlobalTasksService
+
+                outcome = await GlobalTasksService(self.db).commit_stage_result(
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    stage="ILLUSTRATION_EXTRACT",
+                    mark_stage_completed=is_verified,
+                    checkpoint_data={"asset_id": str(asset.Id)} if is_verified else None,
+                    next_status="SUCCEEDED" if is_verified else "FAILED",
+                    result_ref={"asset_id": str(asset.Id)} if is_verified else None,
+                    progress_completed=1 if is_verified else None,
+                    progress_total=1 if is_verified else None,
+                    progress_unit="trang" if is_verified else None,
+                    error_code=None if is_verified else extraction.status,
+                    error_message_vi=(
+                        None
+                        if is_verified
+                        else "Vùng ảnh trích xuất vẫn chứa chữ truyện trùng lặp nên đã bị từ chối tự động."
+                    ),
+                )
+                if not outcome.get("accepted"):
+                    await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+                    return PageIllustrationExtractResponse(
+                        status="FAILED",
+                        asset=None,
+                        text_free_verified=False,
+                        text_density_score=extraction.verification.text_density_score,
+                        ocr_overlap_score=extraction.verification.ocr_overlap_score,
+                        artwork_area_ratio=extraction.artwork_area_ratio,
+                        recommended_reading_mode="TEXT",
+                        message_vi="Tác vụ trích xuất đã bị hủy hoặc phiên bản trang đã thay đổi.",
+                    )
+            else:
+                await self.db.commit()
+        except BaseException:
+            if callable(getattr(self.db, "rollback", None)):
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+            try:
+                await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+            except Exception:
+                pass
             raise
 
         recommended: ReadingDisplayMode = "ILLUSTRATED" if is_verified else "TEXT"
@@ -781,6 +995,10 @@ class BookIllustrationService:
         book_id: UUID,
         page_id: UUID,
         payload: PageIllustrationGenerateRequest,
+        *,
+        existing_job_id: UUID | None = None,
+        existing_lease_token: UUID | None = None,
+        existing_source_revision_id: UUID | None = None,
     ) -> PageIllustrationGenerateResponse:
         book, role = await self.cover_service.authorize_book_write(actor_id, book_id)
         page = await self.repo.get_page(book.Id, page_id)
@@ -789,39 +1007,49 @@ class BookIllustrationService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="Book page not found"
             )
 
+        resolved_book_id = book.Id
+        resolved_page_id = page.Id
+        private_book = is_book_private(book)
+        owner_id = book.OwnerParentId if private_book else None
+        bucket = _bucket_for_book(book)
+        managed_by_worker = existing_job_id is not None
+
         revision_id, canonical_text, _bboxes = await self.repo.get_page_revision_context(page)
+        expected_revision_id = existing_source_revision_id or revision_id
         style_bible = await self.style_bible_service.get_or_build_for_book(book)
-        provider = detect_image_generation_provider(is_private_book=is_book_private(book))
+        provider = detect_image_generation_provider(is_private_book=private_book)
 
         input_hash = hashlib.sha256(
-            f"{book.Id}:{page.Id}:{revision_id}:{style_bible.context_hash}:{payload.prompt_hint or ''}".encode(
+            f"{resolved_book_id}:{resolved_page_id}:{revision_id}:{style_bible.context_hash}:{payload.prompt_hint or ''}".encode(
                 "utf-8"
             )
         ).hexdigest()
         idem_key = (
             (payload.idempotency_key or "").strip()
-            or f"ill-gen:{page.Id}:{input_hash[:16]}:{uuid4().hex[:8]}"
+            or f"ill-gen:{resolved_page_id}:{input_hash[:16]}:{uuid4().hex[:8]}"
         )
 
         if not provider.available:
-            job = await self.repo.record_studio_job(
-                job_type="ILLUSTRATION_GENERATE",
-                actor_id=actor_id,
-                actor_role=role,
-                book_id=book.Id,
-                book_page_id=page.Id,
-                source_revision_id=revision_id,
-                input_hash=input_hash,
-                idempotency_key=idem_key,
-                stage="BLOCKED_NO_IMAGE_PROVIDER",
-                status_value="FAILED",
-                error_code=provider.reason_code,
-                error_message_vi=provider.message_vi,
-            )
-            await self.db.commit()
+            job = None
+            if not managed_by_worker:
+                job = await self.repo.record_studio_job(
+                    job_type="ILLUSTRATION_GENERATE",
+                    actor_id=actor_id,
+                    actor_role=role,
+                    book_id=resolved_book_id,
+                    book_page_id=resolved_page_id,
+                    source_revision_id=revision_id,
+                    input_hash=input_hash,
+                    idempotency_key=idem_key,
+                    stage="BLOCKED_NO_IMAGE_PROVIDER",
+                    status_value="FAILED",
+                    error_code=provider.reason_code,
+                    error_message_vi=provider.message_vi,
+                )
+                await self.db.commit()
             return PageIllustrationGenerateResponse(
                 status="BLOCKED_NO_IMAGE_PROVIDER",
-                job_id=job.Id if job is not None else None,
+                job_id=existing_job_id if managed_by_worker else (job.Id if job is not None else None),
                 provider_name=None,
                 model_id=None,
                 asset=None,
@@ -842,64 +1070,68 @@ class BookIllustrationService:
             f"{style_bible.bible.prompt_prefix} "
             f"Illustrate this Vietnamese children's story moment without ANY text: {scene_snippet}."
         )
-        if payload.idempotency_key and payload.idempotency_key.strip():
-            existing_job = None
-            try:
-                async with self.db.begin_nested():
-                    existing_job = await self.db.scalar(
-                        select(SmartStudioJob).where(
-                            SmartStudioJob.ActorId == actor_id,
-                            SmartStudioJob.IdempotencyKey == idem_key,
-                        )
-                    )
-            except (SQLAlchemyError, AttributeError):
+        job = None
+        if not managed_by_worker:
+            if payload.idempotency_key and payload.idempotency_key.strip():
                 existing_job = None
-            if existing_job is not None and existing_job.Status in (
-                "SUCCEEDED",
-                "RUNNING",
-                "QUEUED",
-                "WAITING_FOR_QUOTA",
-            ):
-                existing_ills, _ = await self.repo.list_page_illustrations(
-                    book.Id, page_id=page.Id
-                )
-                current_ill = next((item for item in existing_ills if item.IsActive), None)
-                return PageIllustrationGenerateResponse(
-                    status=(
-                        "SUCCEEDED"
-                        if existing_job.Status == "SUCCEEDED"
-                        else "WAITING_FOR_QUOTA"
-                        if existing_job.Status == "WAITING_FOR_QUOTA"
-                        else "QUEUED"
-                    ),
-                    job_id=existing_job.Id,
-                    provider_name=provider.provider_name,
-                    model_id=provider.model_id,
-                    asset=asset_to_dto(current_ill) if current_ill is not None else None,
-                    recommended_reading_mode=(
-                        "ILLUSTRATED"
-                        if current_ill is not None and current_ill.TextFreeVerified
-                        else "TEXT"
-                    ),
-                    message_vi="Yêu cầu tạo minh họa AI này đã được tiếp nhận trước đó (tránh tạo trùng).",
-                )
-        job = await self.repo.record_studio_job(
-            job_type="ILLUSTRATION_GENERATE",
-            actor_id=actor_id,
-            actor_role=role,
-            book_id=book.Id,
-            book_page_id=page.Id,
-            source_revision_id=revision_id,
-            input_hash=input_hash,
-            idempotency_key=idem_key,
-            stage="IMAGE_GENERATING",
-            status_value="RUNNING",
-        )
-        if job is not None:
-            now_start = datetime.now(timezone.utc)
-            job.LeaseExpiresAt = now_start + timedelta(seconds=90)
-            job.UpdatedAt = now_start
-        await self.db.commit()
+                try:
+                    async with self.db.begin_nested():
+                        existing_job = await self.db.scalar(
+                            select(SmartStudioJob).where(
+                                SmartStudioJob.ActorId == actor_id,
+                                SmartStudioJob.IdempotencyKey == idem_key,
+                            )
+                        )
+                except (SQLAlchemyError, AttributeError):
+                    existing_job = None
+                if existing_job is not None and existing_job.Status in (
+                    "SUCCEEDED",
+                    "RUNNING",
+                    "QUEUED",
+                    "WAITING_FOR_QUOTA",
+                ):
+                    existing_ills, _ = await self.repo.list_page_illustrations(
+                        resolved_book_id, page_id=resolved_page_id
+                    )
+                    current_ill = next((item for item in existing_ills if item.IsActive), None)
+                    return PageIllustrationGenerateResponse(
+                        status=(
+                            "SUCCEEDED"
+                            if existing_job.Status == "SUCCEEDED"
+                            else "WAITING_FOR_QUOTA"
+                            if existing_job.Status == "WAITING_FOR_QUOTA"
+                            else "QUEUED"
+                        ),
+                        job_id=existing_job.Id,
+                        provider_name=provider.provider_name,
+                        model_id=provider.model_id,
+                        asset=asset_to_dto(current_ill) if current_ill is not None else None,
+                        recommended_reading_mode=(
+                            "ILLUSTRATED"
+                            if current_ill is not None and current_ill.TextFreeVerified
+                            else "TEXT"
+                        ),
+                        message_vi="Yêu cầu tạo minh họa AI này đã được tiếp nhận trước đó (tránh tạo trùng).",
+                    )
+            job = await self.repo.record_studio_job(
+                job_type="ILLUSTRATION_GENERATE",
+                actor_id=actor_id,
+                actor_role=role,
+                book_id=resolved_book_id,
+                book_page_id=resolved_page_id,
+                source_revision_id=revision_id,
+                input_hash=input_hash,
+                idempotency_key=idem_key,
+                stage="IMAGE_GENERATING",
+                status_value="RUNNING",
+            )
+            if job is not None:
+                now_start = datetime.now(timezone.utc)
+                job.LeaseExpiresAt = now_start + timedelta(seconds=90)
+                job.UpdatedAt = now_start
+            await self.db.commit()
+        elif callable(getattr(self.db, "rollback", None)):
+            await self.db.rollback()
 
         try:
             http_status, raw_bytes = await self._image_transport(provider, prompt)
@@ -915,7 +1147,7 @@ class BookIllustrationService:
                 await self.db.commit()
             return PageIllustrationGenerateResponse(
                 status="WAITING_FOR_QUOTA",
-                job_id=job.Id if job is not None else None,
+                job_id=existing_job_id if managed_by_worker else (job.Id if job is not None else None),
                 provider_name=provider.provider_name,
                 model_id=provider.model_id,
                 asset=None,
@@ -930,7 +1162,7 @@ class BookIllustrationService:
                 await self.db.commit()
             return PageIllustrationGenerateResponse(
                 status="BLOCKED_NO_IMAGE_PROVIDER",
-                job_id=job.Id if job is not None else None,
+                job_id=existing_job_id if managed_by_worker else (job.Id if job is not None else None),
                 provider_name=provider.provider_name,
                 model_id=provider.model_id,
                 asset=None,
@@ -938,28 +1170,20 @@ class BookIllustrationService:
                 message_vi="Nhà cung cấp tạo ảnh AI tạm thời không khả dụng.",
             )
 
-        img_bgr = _decode_bgr_safely(raw_bytes)
-        rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        webp_bytes, out_w, out_h = _encode_optimized_webp(
-            Image.fromarray(rgb), max_bytes=MAX_ILLUSTRATION_WEBP_BYTES
-        )
-        asset_hash = hashlib.sha256(webp_bytes).hexdigest()
-
-        # MANDATORY Text-Free Gate on AI-generated illustration too!
-        verification = verify_illustration_text_free(
-            img_bgr,
+        webp_bytes, out_w, out_h, asset_hash, verification = await asyncio.to_thread(
+            _encode_and_verify_ai_illustration,
+            raw_bytes,
             canonical_text=canonical_text,
             ocr_check_fn=self._ocr_check_fn,
-            image_bytes=webp_bytes,
         )
 
         # Revision fencing: verify page's verified revision did not advance while AI image generated!
-        latest_page = await self.repo.get_page(page.BookId, page.Id)
+        latest_page = await self.repo.get_page(resolved_book_id, resolved_page_id)
         if (
-            revision_id is not None
+            expected_revision_id is not None
             and latest_page is not None
             and latest_page.CurrentVerifiedRevisionId is not None
-            and latest_page.CurrentVerifiedRevisionId != revision_id
+            and latest_page.CurrentVerifiedRevisionId != expected_revision_id
         ):
             if job is not None:
                 now_stale = datetime.now(timezone.utc)
@@ -970,8 +1194,8 @@ class BookIllustrationService:
                 job.LeaseExpiresAt = None
                 await self.db.commit()
             return PageIllustrationGenerateResponse(
-                status="BLOCKED_NO_IMAGE_PROVIDER",
-                job_id=job.Id if job is not None else None,
+                status="STALE",
+                job_id=existing_job_id if managed_by_worker else (job.Id if job is not None else None),
                 provider_name=provider.provider_name,
                 model_id=provider.model_id,
                 asset=None,
@@ -979,19 +1203,52 @@ class BookIllustrationService:
                 message_vi="Nội dung trang đã được cập nhật sang phiên bản mới nên ảnh AI cũ được đánh dấu STALE.",
             )
 
-        owner_id = book.OwnerParentId if is_book_private(book) else None
-        scope = f"private/{owner_id}" if is_book_private(book) else "catalog"
+        if callable(getattr(self.db, "rollback", None)):
+            await self.db.rollback()
+
+        scope = f"private/{owner_id}" if private_book else "catalog"
         storage_path = _validate_relative_storage_path(
-            f"studio/illustrations/{scope}/{book.Id}/{page.Id}/ai_{asset_hash[:16]}_{uuid4().hex[:8]}.webp"
+            f"studio/illustrations/{scope}/{resolved_book_id}/{resolved_page_id}/ai_{asset_hash[:16]}_{uuid4().hex[:8]}.webp"
         )
-        bucket = _bucket_for_book(book)
-        upload_object(storage_path, webp_bytes, "image/webp", bucket_name=bucket, upsert=False)
+        await asyncio.to_thread(
+            upload_object,
+            storage_path,
+            webp_bytes,
+            "image/webp",
+            bucket_name=bucket,
+            upsert=False,
+        )
 
         is_verified = verification.text_free_verified
+        target_job_id = existing_job_id if managed_by_worker else (job.Id if job is not None else None)
         try:
+            if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+                from app.services.global_tasks_service import (
+                    verify_smart_studio_job_fence_in_tx,
+                )
+
+                _fenced_job, fence_status = await verify_smart_studio_job_fence_in_tx(
+                    self.db,
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    expected_revision_id=expected_revision_id,
+                    book_page_id=resolved_page_id,
+                )
+                if fence_status == "STALE":
+                    await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+                    return PageIllustrationGenerateResponse(
+                        status="STALE",
+                        job_id=existing_job_id,
+                        provider_name=provider.provider_name,
+                        model_id=provider.model_id,
+                        asset=None,
+                        recommended_reading_mode="TEXT",
+                        message_vi="Nội dung trang đã được cập nhật sang phiên bản mới nên ảnh AI cũ được đánh dấu STALE.",
+                    )
+
             asset = await self.repo.create_page_illustration_asset(
-                book_id=book.Id,
-                book_page_id=page.Id,
+                book_id=resolved_book_id,
+                book_page_id=resolved_page_id,
                 source_revision_id=revision_id,
                 owner_id=owner_id,
                 source_type="AI_GENERATED",
@@ -1006,29 +1263,69 @@ class BookIllustrationService:
                 is_active=is_verified,
                 provider_name=provider.provider_name,
                 model_id=provider.model_id,
-                job_id=job.Id if job is not None else None,
+                job_id=target_job_id,
                 metadata_json={
                     "text_density_score": verification.text_density_score,
                     "ocr_overlap_score": verification.ocr_overlap_score,
                 },
             )
-            if job is not None:
-                now_done = datetime.now(timezone.utc)
-                job.Status = "SUCCEEDED" if is_verified else "FAILED"
-                job.Stage = "COMPLETED" if is_verified else "REJECTED_CONTAINS_TEXT"
-                job.CompletedAt = now_done
-                job.UpdatedAt = now_done
-                job.LeaseExpiresAt = None
-                job.ResultRefJson = {"asset_id": str(asset.Id)}
-            await self.db.commit()
-        except Exception:
-            await self.db.rollback()
-            delete_object(storage_path, bucket_name=bucket)
+            if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+                from app.services.global_tasks_service import GlobalTasksService
+
+                outcome = await GlobalTasksService(self.db).commit_stage_result(
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    stage="ILLUSTRATION_GEN",
+                    mark_stage_completed=is_verified,
+                    checkpoint_data={"asset_id": str(asset.Id)} if is_verified else None,
+                    next_status="SUCCEEDED" if is_verified else "FAILED",
+                    result_ref={"asset_id": str(asset.Id)} if is_verified else None,
+                    progress_completed=2 if is_verified else None,
+                    progress_total=2 if is_verified else None,
+                    progress_unit="bước" if is_verified else None,
+                    error_code=None if is_verified else "REJECTED_CONTAINS_TEXT",
+                    error_message_vi=(
+                        None
+                        if is_verified
+                        else "Ảnh AI tạo ra chứa ký tự/chữ không hợp lệ nên đã bị từ chối tự động."
+                    ),
+                )
+                if not outcome.get("accepted"):
+                    await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+                    return PageIllustrationGenerateResponse(
+                        status="STALE",
+                        job_id=existing_job_id,
+                        provider_name=provider.provider_name,
+                        model_id=provider.model_id,
+                        asset=None,
+                        recommended_reading_mode="TEXT",
+                        message_vi="Nội dung trang đã được cập nhật hoặc tác vụ bị hủy trước khi lưu.",
+                    )
+            else:
+                if job is not None:
+                    now_done = datetime.now(timezone.utc)
+                    job.Status = "SUCCEEDED" if is_verified else "FAILED"
+                    job.Stage = "COMPLETED" if is_verified else "REJECTED_CONTAINS_TEXT"
+                    job.CompletedAt = now_done
+                    job.UpdatedAt = now_done
+                    job.LeaseExpiresAt = None
+                    job.ResultRefJson = {"asset_id": str(asset.Id)}
+                await self.db.commit()
+        except BaseException:
+            if callable(getattr(self.db, "rollback", None)):
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+            try:
+                await asyncio.to_thread(delete_object, storage_path, bucket_name=bucket)
+            except Exception:
+                pass
             raise
 
         return PageIllustrationGenerateResponse(
             status="SUCCEEDED" if is_verified else "REJECTED_CONTAINS_TEXT",
-            job_id=job.Id if job is not None else None,
+            job_id=target_job_id,
             provider_name=provider.provider_name,
             model_id=provider.model_id,
             asset=asset_to_dto(asset),

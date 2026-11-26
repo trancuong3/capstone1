@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "로컬 우선, 온라인 자동 전환 활성화",
     "googleSttFallback": "음성 인식(STT)을 위한 Google 대체 사용",
     "googleTtsFallback": "발음(TTS)을 위한 Google 대체 사용",
-    "missingGoogleKeyHint": "backend/.env에 Google Cloud API 키가 설정되지 않은 경우, ViRead는 자동으로 Google/브라우저 온라인을 대체 수단으로 사용합니다.",
+    "missingGoogleKeyHint": "서버에 Google Cloud API 키가 설정되지 않은 경우, ViRead는 자동으로 Google/브라우저 온라인을 대체 수단으로 사용합니다.",
     "useDefaultVoice": "기본 음성 사용",
     "preview": "미리듣기",
     "stopPreview": "미리듣기 중지",

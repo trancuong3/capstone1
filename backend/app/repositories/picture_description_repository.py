@@ -357,7 +357,7 @@ class PictureDescriptionRepository:
                     ),
                 ),
             )
-            .with_for_update()
+            .with_for_update(of=PictureDescriptionSession)
         )
         if session_obj is None:
             raise LookupError("Session not found")
@@ -366,7 +366,10 @@ class PictureDescriptionRepository:
         session_obj.AttemptsCount = attempt.AttemptNumber
         session_obj.BestStars = max(int(session_obj.BestStars), new_best_stars)
         session_obj.BestScore = max(int(session_obj.BestScore), new_best_score)
-        session_obj.Status = new_status
+        if session_obj.Status == "COMPLETED" or new_status == "COMPLETED":
+            session_obj.Status = "COMPLETED"
+        else:
+            session_obj.Status = new_status
         session_obj.UpdatedAt = updated_at
 
         self.db.add(attempt)

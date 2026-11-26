@@ -51,6 +51,7 @@ class RetryEventRow:
     page_revision_id: UUID | None = None
     word_id: UUID | None = None
     metadata: Any = None
+    event_type: str = "WORD_RETRY"
 
 
 @dataclass(frozen=True)
@@ -282,6 +283,8 @@ def compute_window(
     minutes_by_session = {s.id: session_minutes(s) for s in window_sessions}
     compared_sessions: set[UUID] = set()
     weekly_words: dict[int, list[int]] = defaultdict(lambda: [0, 0])  # correct, reached
+    days = (end - start).days + 1
+    bucket_count = max(1, -(-days // 7))
 
     reports = first_pass_reports(reports)
     for report in reports:
@@ -304,7 +307,9 @@ def compute_window(
         for word, counter in analysis["heard"].items():
             metrics.heard_as[word].update(counter)
         compared_sessions.add(report.session_id)
-        bucket = weekly_words[(local_date(report.created_at) - start).days // 7]
+        raw_bucket = (local_date(report.created_at) - start).days // 7
+        bucket_index = max(0, min(bucket_count - 1, raw_bucket))
+        bucket = weekly_words[bucket_index]
         bucket[0] += analysis["correct"]
         bucket[1] += analysis["reached"]
 
@@ -313,7 +318,11 @@ def compute_window(
     )
 
     for retry in retries:
-        if retry.session_id in window_ids and inside(retry.created_at):
+        if (
+            retry.event_type == "WORD_RETRY"
+            and retry.session_id in window_ids
+            and inside(retry.created_at)
+        ):
             if retry.status == "CONFIRMED":
                 metrics.retry_confirmed += 1
             elif retry.status == "FAILED":
@@ -327,8 +336,9 @@ def compute_window(
             for row in sorted(reports, key=lambda row: row.created_at, reverse=True)
             if row.session_id == session_id and row.page_id is not None and row.page_revision_id is not None]
         evidence_retries = [SimpleNamespace(SessionId=row.session_id, PageId=row.page_id,
-            PageRevisionId=row.page_revision_id, WordId=row.word_id, Type="WORD_RETRY",
-            Status=row.status, Metadata=row.metadata) for row in retries if row.session_id == session_id]
+            PageRevisionId=row.page_revision_id, WordId=row.word_id, Type=row.event_type,
+            Status=row.status, Metadata=row.metadata, CreatedAt=row.created_at)
+            for row in retries if row.session_id == session_id]
         assessment = aggregate_assessment(session_id, evidence_reports, evidence_retries)["assessment"]
         if assessment is not None:
             canonical_sessions += 1
@@ -355,8 +365,7 @@ def compute_window(
     metrics.comprehension_by_type = {k: v for k, v in by_type.items() if v[0] > 0}
 
     # Weekly series (7-day buckets starting at `start`).
-    days = (end - start).days + 1
-    for index in range(max(1, -(-days // 7))):
+    for index in range(bucket_count):
         week_start = start + timedelta(days=index * 7)
         week_end = min(end, week_start + timedelta(days=6))
         week_sessions = [

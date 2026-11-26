@@ -326,7 +326,7 @@ class Flow1ModelReplacementTests(unittest.IsolatedAsyncioTestCase):
         actor_id = uuid4()
         upload_id = uuid4()
 
-        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000.part", "sha256": "a"*64, "bytes": 100}]
+        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000-{'a'*64}.part", "sha256": "a"*64, "bytes": 100}]
         # Candidate CER (15.0) is worse than baseline (12.0)
         comparison_dict = {
             "models": {"baseline": "vgg_transformer", "finetuned_model_only": "vgg_transformer-v2"},
@@ -353,7 +353,7 @@ class Flow1ModelReplacementTests(unittest.IsolatedAsyncioTestCase):
     async def test_activate_rejects_invalid_yaml(self):
         actor_id = uuid4()
         upload_id = uuid4()
-        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000.part", "sha256": "a"*64, "bytes": 100}]
+        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000-{'a'*64}.part", "sha256": "a"*64, "bytes": 100}]
         comparison_dict = {
             "models": {"baseline": "vgg_transformer", "finetuned_model_only": "vgg_transformer-v2"},
             "sgk_test": {
@@ -385,7 +385,7 @@ class Flow1ModelReplacementTests(unittest.IsolatedAsyncioTestCase):
         target_data = b"target chunk bytes"
         target_sha = hashlib.sha256(target_data).hexdigest()
 
-        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000.part", "sha256": target_sha, "bytes": len(target_data)}]
+        chunks_data = [{"index": 0, "path": f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000-{target_sha}.part", "sha256": target_sha, "bytes": len(target_data)}]
         comparison_dict = {
             "models": {"baseline": "vgg", "finetuned": "v2"},
             "sgk": {"cer_pct": {"baseline": 10.0, "finetuned": 5.0}, "wer_pct": {"baseline": 20.0, "finetuned": 10.0}},
@@ -426,8 +426,9 @@ class Flow1ModelReplacementTests(unittest.IsolatedAsyncioTestCase):
     async def test_activate_storage_quota_failure_cleans_up_new_shards(self):
         actor_id = uuid4()
         upload_id = uuid4()
-        chunk_path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000.part"
-        chunks_data = [{"index": 0, "path": chunk_path, "sha256": "ch0", "bytes": 100}]
+        chunk_sha = "b" * 64
+        chunk_path = f"ocr-training/checkpoints/flow1-manual/{upload_id}/0000-{chunk_sha}.part"
+        chunks_data = [{"index": 0, "path": chunk_path, "sha256": chunk_sha, "bytes": 100}]
 
         comparison_dict = {
             "models": {"baseline": "vgg", "finetuned": "v2"},
@@ -456,7 +457,7 @@ class Flow1ModelReplacementTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("app.services.viread_ocr_training_service.ensure_storage_capacity", side_effect=fake_ensure_cap), \
              patch("app.services.viread_ocr_training_service.upload_object"), \
-             patch("app.services.viread_ocr_training_service.hash_storage_object", return_value=("ch0", 100)), \
+             patch("app.services.viread_ocr_training_service.hash_storage_object", return_value=(chunk_sha, 100)), \
              patch("app.services.viread_ocr_training_service.delete_object", side_effect=lambda p: deleted_paths.append(p)):
 
             with self.assertRaises(HTTPException) as ctx:

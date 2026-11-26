@@ -46,6 +46,14 @@ class BookResponse(BookBase):
     CreatedAt: datetime
     model_config = ConfigDict(from_attributes=True)
 
+
+class PublicBookResponse(BookBase):
+    """Sanitized public catalog book DTO that omits internal admin creator UUIDs."""
+
+    Id: UUID
+    CreatedAt: datetime
+    model_config = ConfigDict(from_attributes=True)
+
 # --- BOOK PAGE ---
 class BookPageBase(BaseModel):
     PageNumber: int = Field(..., gt=0)

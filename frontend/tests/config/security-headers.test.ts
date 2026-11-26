@@ -89,4 +89,28 @@ describe("Next.js HTTP security headers", () => {
       }
     },
   );
+
+  it("applies Playwright dev memory guardrails only for development auth-fixture runs", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "1");
+    vi.resetModules();
+    const { default: playwrightDevConfig } = await import("@/next.config");
+    expect(playwrightDevConfig.experimental).toMatchObject({
+      devMemoryThresholdRestart: false,
+      serverComponentsHmrCache: false,
+      webpackMemoryOptimizations: true,
+    });
+
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "1");
+    vi.resetModules();
+    const { default: prodConfig } = await import("@/next.config");
+    expect(prodConfig.experimental).toBeUndefined();
+
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("PLAYWRIGHT_AUTH_FIXTURES", "");
+    vi.resetModules();
+    const { default: normalDevConfig } = await import("@/next.config");
+    expect(normalDevConfig.experimental).toBeUndefined();
+  });
 });

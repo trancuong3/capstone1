@@ -24,6 +24,16 @@ from app.models.book_content_quality import (
 )
 
 
+def _escape_ilike_pattern(raw: str) -> str:
+    escaped = (
+        raw.strip()
+        .replace("\\", "\\\\")
+        .replace("%", "\\%")
+        .replace("_", "\\_")
+    )
+    return f"%{escaped}%"
+
+
 class BookContentQualityRepository:
     """Persistence-only queries and writes for book content quality management."""
 
@@ -69,7 +79,7 @@ class BookContentQualityRepository:
         return await self.db.scalar(select(Profile.DisplayName).where(Profile.Id == actor_id))
 
     async def book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
-        query = select(Book).where(Book.Id == book_id)
+        query = select(Book).where(Book.Id == book_id, is_catalog_book())
         if lock:
             query = query.with_for_update()
         return await self.db.scalar(query)
@@ -241,7 +251,7 @@ class BookContentQualityRepository:
             needs_review_count,
         ).where(is_catalog_book())
         if search and search.strip():
-            pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+            pattern = _escape_ilike_pattern(search)
             query = query.where(
                 or_(Book.Title.ilike(pattern, escape="\\"), Book.Name.ilike(pattern, escape="\\"))
             )
@@ -578,7 +588,7 @@ class BookContentQualityRepository:
         if created_before is not None:
             filters.append(BookContentReport.CreatedAt <= created_before)
         if search and search.strip():
-            pattern = "%" + search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            pattern = _escape_ilike_pattern(search)
             filters.append(
                 or_(
                     BookContentReport.BookTitleSnapshot.ilike(pattern, escape="\\"),
@@ -1030,7 +1040,7 @@ class BookContentQualityRepository:
         ).where(is_catalog_book())
         count_query = select(func.count(Book.Id)).where(is_catalog_book())
         if search and search.strip():
-            pattern = "%" + search.strip().replace("%", "\\%").replace("_", "\\_") + "%"
+            pattern = _escape_ilike_pattern(search)
             condition = or_(
                 Book.Title.ilike(pattern, escape="\\"),
                 Book.Name.ilike(pattern, escape="\\"),
@@ -1094,6 +1104,22 @@ class BookContentQualityRepository:
                 .with_for_update(skip_locked=True)
             )
             if locked_book_id is None:
+                await self.db.rollback()
+                return None
+            # Re-check under the Book row lock to close the TOCTOU window
+            # between the initial SELECT snapshot and acquiring the Book lock.
+            conflict_run_id = await self.db.scalar(
+                select(BookQualityScanRun.Id)
+                .where(
+                    BookQualityScanRun.BookId == run.BookId,
+                    BookQualityScanRun.Status == "RUNNING",
+                    BookQualityScanRun.LeaseExpiresAt.is_not(None),
+                    BookQualityScanRun.LeaseExpiresAt > now,
+                    BookQualityScanRun.Id != run.Id,
+                )
+                .limit(1)
+            )
+            if conflict_run_id is not None:
                 await self.db.rollback()
                 return None
         run.Status = "RUNNING"

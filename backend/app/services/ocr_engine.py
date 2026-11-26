@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import hashlib
 import json
+import math
 from contextlib import nullcontext
 import os
 from importlib.metadata import PackageNotFoundError, version as package_version
@@ -11,6 +12,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 import unicodedata
 from weakref import WeakKeyDictionary
 from typing import Any
@@ -57,8 +59,12 @@ from app.database.config import SUPABASE_ADMIN_KEY, SUPABASE_URL, supabase_admin
 # (`requirements-web.txt`) never crash with ModuleNotFoundError if ocr_engine is
 # accidentally imported.
 jiwer = None
-pytesseract = None
-Output = None
+try:
+    import pytesseract
+    from pytesseract import Output
+except ImportError:
+    pytesseract = None
+    Output = None
 
 
 def _ensure_jiwer():
@@ -175,10 +181,22 @@ _vietocr_verified_runtime: WeakKeyDictionary[Any, dict[str, Any]] = WeakKeyDicti
 _scan_runtime_context = threading.local()
 _OCR_RUNTIME_PROVENANCE_VERSION = "vietocr_loaded_checkpoint_v1"
 _active_model_info_cache: tuple[float, dict[str, Any] | None] = (0.0, None)
+_active_model_retry_after: float = 0.0
+_active_model_failure_count: int = 0
+_ACTIVE_MODEL_CACHE_TTL_SECONDS = 300.0
+_ACTIVE_MODEL_RETRY_BASE_SECONDS = 15.0
+_ACTIVE_MODEL_RETRY_MAX_SECONDS = 300.0
 _active_model_cache_lock = threading.Lock()
+_V2_PREPROCESSING_PROFILES = frozenset({
+    "FLOW1_EXTERNAL_TRDG",
+    "FLOW2_ADMIN_VERIFIED",
+    "FLOW1_VERIFIED",
+    "FLOW2_EXTERNAL_TRDG",
+})
 _ORIGINAL_VIETOCR_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 _ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
 _ORIGINAL_VOCAB_SIZE = 229
+_SHA256_HEX_RE = re.compile(r"[0-9a-f]{64}")
 
 
 def _verified_vietocr_instance(
@@ -352,30 +370,44 @@ def _sha256_path(path: str) -> str:
 
 def set_active_viread_model_cache(item: dict[str, Any] | None) -> None:
     """Immediately update the in-memory active model cache after an Admin decision."""
-    global _active_model_info_cache
+    global _active_model_info_cache, _active_model_retry_after, _active_model_failure_count
     with _active_model_cache_lock:
-        _active_model_info_cache = (__import__("time").monotonic(), item)
+        _active_model_info_cache = (time.monotonic(), item)
+        _active_model_failure_count = 0
+        _active_model_retry_after = 0.0
 
 
 def _active_viread_model() -> dict[str, Any] | None:
-    """Return cached pointer; fetch once lazily on first OCR request if never loaded."""
+    """Return cached pointer; refresh on cold start or TTL expiry with backoff cooldown."""
+    now = time.monotonic()
     with _active_model_cache_lock:
         ts, cached = _active_model_info_cache
-    if ts == 0.0:
-        return refresh_active_viread_model()
-    return cached
+        retry_after = _active_model_retry_after
+    if ts > 0.0 and (now - ts) < _ACTIVE_MODEL_CACHE_TTL_SECONDS:
+        return cached
+    if now < retry_after:
+        return cached
+    return refresh_active_viread_model()
+
+
+def _record_active_model_refresh_miss(now: float) -> dict[str, Any] | None:
+    global _active_model_retry_after, _active_model_failure_count
+    with _active_model_cache_lock:
+        _active_model_failure_count += 1
+        backoff = min(
+            _ACTIVE_MODEL_RETRY_MAX_SECONDS,
+            _ACTIVE_MODEL_RETRY_BASE_SECONDS * (2 ** min(_active_model_failure_count - 1, 6)),
+        )
+        _active_model_retry_after = now + backoff
+        return _active_model_info_cache[1]
 
 
 def refresh_active_viread_model() -> dict[str, Any] | None:
-    """Refresh the private pointer with a short network timeout; retain the last good value on errors."""
-    global _active_model_info_cache
-    now = __import__("time").monotonic()
-    with _active_model_cache_lock:
-        cached = _active_model_info_cache[1]
+    """Refresh the private pointer with a short network timeout; retain last good value with cooldown backoff."""
+    global _active_model_info_cache, _active_model_retry_after, _active_model_failure_count
+    now = time.monotonic()
     if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
-        with _active_model_cache_lock:
-            _active_model_info_cache = (now, cached)
-        return cached
+        return _record_active_model_refresh_miss(now)
     try:
         response = requests.get(
             f"{SUPABASE_URL.rstrip('/')}/rest/v1/viread_ocr_active_model",
@@ -385,19 +417,17 @@ def refresh_active_viread_model() -> dict[str, Any] | None:
         )
         response.raise_for_status()
         rows = response.json()
-        item = rows[0] if rows else None
+        item = rows[0] if isinstance(rows, list) and rows else None
         if not isinstance(item, dict):
-            with _active_model_cache_lock:
-                _active_model_info_cache = (now, cached)
-            return cached
+            return _record_active_model_refresh_miss(now)
         with _active_model_cache_lock:
             _active_model_info_cache = (now, item)
+            _active_model_failure_count = 0
+            _active_model_retry_after = 0.0
         return item
     except Exception as exc:
         logger.debug("VietOCR active model registry is unavailable: %s", type(exc).__name__)
-        with _active_model_cache_lock:
-            _active_model_info_cache = (now, cached)
-        return cached
+        return _record_active_model_refresh_miss(now)
 
 
 def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds: int = 300) -> None:
@@ -416,9 +446,9 @@ def run_active_viread_model_worker(stop_event: threading.Event, *, poll_seconds:
 
 
 def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
-    expected_sha = str(active.get("checkpoint_sha256", "")).lower()
+    expected_sha = str(active.get("checkpoint_sha256", "")).strip().lower()
     manifest_path = active.get("storage_path")
-    if len(expected_sha) != 64 or not isinstance(manifest_path, str) or not manifest_path:
+    if not _SHA256_HEX_RE.fullmatch(expected_sha) or not isinstance(manifest_path, str) or not manifest_path:
         raise ValueError("active VietOCR V2 checkpoint pointer is invalid")
     from app.services import storage_service
     from app.services.training_storage.references import is_gdrive_ref
@@ -433,7 +463,10 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     manifest = json.loads(manifest_bytes.decode("utf-8"))
     if manifest.get("checkpoint_sha256") != expected_sha or not isinstance(manifest.get("chunks"), list):
         raise ValueError("active VietOCR V2 shard manifest does not match its database pointer")
-    local_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.pth")
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    local_path = os.path.join(str(temp_root), f"viread-vietocr-v2-{expected_sha}.pth")
+    if Path(local_path).resolve().parent != temp_root:
+        raise ValueError("active VietOCR V2 checkpoint cache path is invalid")
     if not (os.path.isfile(local_path) and _sha256_path(local_path) == expected_sha):
         digest = hashlib.sha256()
         # Unique per-attempt scratch file: multiple Render workers may attempt
@@ -445,7 +478,7 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
                 mode="wb",
                 prefix=f"viread-vietocr-v2-{expected_sha}-",
                 suffix=".assembling",
-                dir=tempfile.gettempdir(),
+                dir=str(temp_root),
                 delete=False,
             ) as output:
                 temporary = output.name
@@ -455,7 +488,9 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
                 for item in chunks:
                     shard_ref = str(item["path"])
                     expected_bytes = int(item["bytes"])
-                    expected_chunk_sha = str(item["sha256"]).lower()
+                    expected_chunk_sha = str(item["sha256"]).strip().lower()
+                    if not _SHA256_HEX_RE.fullmatch(expected_chunk_sha):
+                        raise ValueError("VietOCR V2 checkpoint shard hash is invalid")
                     if is_gdrive_ref(shard_ref):
                         shard_digest = hashlib.sha256()
                         shard_len = 0
@@ -487,7 +522,12 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
     config_meta = manifest.get("config")
     if isinstance(config_meta, dict) and config_meta.get("storage_path"):
         cfg_path = config_meta["storage_path"]
-        cfg_expected_sha = config_meta.get("sha256")
+        raw_cfg_sha = config_meta.get("sha256")
+        cfg_expected_sha: str | None = None
+        if raw_cfg_sha is not None:
+            cfg_expected_sha = str(raw_cfg_sha).strip().lower()
+            if not _SHA256_HEX_RE.fullmatch(cfg_expected_sha):
+                raise ValueError("active VietOCR V2 config hash is invalid")
         cfg_bytes = _download_artifact(cfg_path, expected_hash=cfg_expected_sha)
         cfg_actual_sha = hashlib.sha256(cfg_bytes).hexdigest()
         if cfg_expected_sha and cfg_actual_sha != cfg_expected_sha:
@@ -497,12 +537,13 @@ def _v2_artifact_from_storage(active: dict[str, Any]) -> tuple[str, dict[str, An
             raise ValueError("active VietOCR V2 config must be a YAML mapping")
         custom_config = parsed
         config_sha = cfg_actual_sha
-        local_cfg_path = os.path.join(tempfile.gettempdir(), f"viread-vietocr-v2-{expected_sha}.yml")
-        try:
-            with open(local_cfg_path, "wb") as f:
-                f.write(cfg_bytes)
-        except OSError:
-            pass
+        local_cfg_path = os.path.join(str(temp_root), f"viread-vietocr-v2-{expected_sha}.yml")
+        if Path(local_cfg_path).resolve().parent == temp_root:
+            try:
+                with open(local_cfg_path, "wb") as f:
+                    f.write(cfg_bytes)
+            except OSError:
+                pass
 
     return local_path, custom_config, config_sha
 
@@ -537,13 +578,17 @@ def _v2_checkpoint_from_storage(active: dict[str, Any]) -> str:
 
 def evict_cached_viread_checkpoint(checkpoint_sha256: str) -> bool:
     """Safely unlink cached temp checkpoint weights and config from tempdir."""
-    sha = (checkpoint_sha256 or "").strip().lower()
-    if len(sha) != 64:
+    if not isinstance(checkpoint_sha256, str):
+        return False
+    sha = checkpoint_sha256.strip().lower()
+    if not _SHA256_HEX_RE.fullmatch(sha):
         return False
     evicted = False
-    temp_dir = tempfile.gettempdir()
+    temp_root = Path(tempfile.gettempdir()).resolve()
     for ext in (".pth", ".yml", ".yaml"):
-        target = os.path.join(temp_dir, f"viread-vietocr-v2-{sha}{ext}")
+        target = os.path.join(str(temp_root), f"viread-vietocr-v2-{sha}{ext}")
+        if Path(target).resolve().parent != temp_root:
+            continue
         if os.path.isfile(target):
             try:
                 os.unlink(target)
@@ -1117,17 +1162,79 @@ def _dewarp_strip_with_safe_border(
     )
 
 
+def _clamp_normalized_bbox(
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    orig_width: int,
+    orig_height: int,
+) -> list[float] | None:
+    if orig_width <= 0 or orig_height <= 0:
+        return None
+    if not all(
+        isinstance(val, (int, float))
+        and not isinstance(val, (bool, np.bool_))
+        and math.isfinite(float(val))
+        for val in (left, top, width, height)
+    ):
+        return None
+    orig_w_f = float(orig_width)
+    orig_h_f = float(orig_height)
+    left_f = float(left)
+    top_f = float(top)
+    width_f = float(width)
+    height_f = float(height)
+    x0 = max(0.0, min(1.0, left_f / orig_w_f))
+    y0 = max(0.0, min(1.0, top_f / orig_h_f))
+    if left_f >= 0.0 and (left_f + width_f) <= orig_w_f:
+        span_w = max(0.0, width_f / orig_w_f)
+    else:
+        x1 = max(0.0, min(1.0, (left_f + width_f) / orig_w_f))
+        span_w = max(0.0, x1 - x0)
+    if top_f >= 0.0 and (top_f + height_f) <= orig_h_f:
+        span_h = max(0.0, height_f / orig_h_f)
+    else:
+        y1 = max(0.0, min(1.0, (top_f + height_f) / orig_h_f))
+        span_h = max(0.0, y1 - y0)
+    norm_x = max(0.0, min(0.9999, x0))
+    norm_y = max(0.0, min(0.9999, y0))
+    max_w = max(0.0001, 1.0 - norm_x)
+    max_h = max(0.0001, 1.0 - norm_y)
+    norm_w = max(0.0001, min(max_w, span_w))
+    norm_h = max(0.0001, min(max_h, span_h))
+    if norm_x + norm_w > 1.0:
+        norm_w = max(0.0001, math.nextafter(1.0 - norm_x, 0.0))
+    if norm_y + norm_h > 1.0:
+        norm_h = max(0.0001, math.nextafter(1.0 - norm_y, 0.0))
+    return [norm_x, norm_y, norm_w, norm_h]
+
+
 def _extract_curved_lines_from_items(
     raw_items: list, image: np.ndarray
 ) -> list[dict[str, Any]]:
-    if not raw_items:
+    if (
+        not raw_items
+        or image is None
+        or getattr(image, "size", 0) == 0
+        or getattr(image, "ndim", 0) < 2
+    ):
         return []
 
     img_h, img_w = image.shape[:2]
+    if img_h < 2 or img_w < 2:
+        return []
     temp_items = []
 
     for raw in raw_items:
-        pts = _order_quad_points(raw[0])
+        if not raw or len(raw) == 0:
+            continue
+        try:
+            pts = _order_quad_points(raw[0])
+        except Exception:
+            continue
+        if pts.shape != (4, 2) or not np.all(np.isfinite(pts)):
+            continue
         p_text = str(raw[1][0]) if (len(raw) > 1 and raw[1]) else ""
         try:
             raw_confidence = raw[1][1] if (len(raw) > 1 and raw[1]) else None
@@ -1142,7 +1249,7 @@ def _extract_curved_lines_from_items(
         raw_w = max(np.linalg.norm(pts[0] - pts[1]), np.linalg.norm(pts[2] - pts[3]))
         raw_h = max(np.linalg.norm(pts[0] - pts[3]), np.linalg.norm(pts[1] - pts[2]))
 
-        if raw_w < 8 or raw_h < 8:
+        if not (math.isfinite(float(raw_w)) and math.isfinite(float(raw_h))) or raw_w < 8 or raw_h < 8:
             continue
 
         vec_x = (pts[1] - pts[0]) / max(1.0, float(raw_w))
@@ -1158,9 +1265,18 @@ def _extract_curved_lines_from_items(
 
         padded_pts[:, 0] = np.clip(padded_pts[:, 0], 0, img_w - 1)
         padded_pts[:, 1] = np.clip(padded_pts[:, 1], 0, img_h - 1)
+        if not np.all(np.isfinite(padded_pts)):
+            continue
 
         crop_w = int(max(np.linalg.norm(padded_pts[0] - padded_pts[1]), np.linalg.norm(padded_pts[2] - padded_pts[3])))
         crop_h = int(max(np.linalg.norm(padded_pts[0] - padded_pts[3]), np.linalg.norm(padded_pts[1] - padded_pts[2])))
+        if crop_w < 2 or crop_h < 2:
+            continue
+        px = padded_pts[:, 0]
+        py = padded_pts[:, 1]
+        poly_area = 0.5 * abs(float(np.dot(px, np.roll(py, -1)) - np.dot(py, np.roll(px, -1))))
+        if not math.isfinite(poly_area) or poly_area < 1.0:
+            continue
 
         temp_items.append((padded_pts, crop_w, crop_h, p_text, p_conf))
 
@@ -1171,25 +1287,42 @@ def _extract_curved_lines_from_items(
 
     for pts, crop_w, crop_h, p_text, p_conf in temp_items:
         pts_std = np.float32([[0, 0], [crop_w, 0], [crop_w, crop_h], [0, crop_h]])
-        matrix = cv2.getPerspectiveTransform(pts, pts_std)
-        rect_img = cv2.warpPerspective(
-            image,
-            matrix,
-            (crop_w, crop_h),
-            borderMode=cv2.BORDER_REPLICATE,
-            flags=cv2.INTER_CUBIC,
-        )
+        try:
+            matrix = cv2.getPerspectiveTransform(pts.astype(np.float32), pts_std)
+            if (
+                matrix is None
+                or matrix.shape != (3, 3)
+                or not np.all(np.isfinite(matrix))
+                or abs(float(np.linalg.det(matrix))) < 1e-12
+            ):
+                continue
+            rect_img = cv2.warpPerspective(
+                image,
+                matrix,
+                (crop_w, crop_h),
+                borderMode=cv2.BORDER_REPLICATE,
+                flags=cv2.INTER_CUBIC,
+            )
+            if (
+                rect_img is None
+                or getattr(rect_img, "size", 0) == 0
+                or rect_img.shape[0] < 1
+                or rect_img.shape[1] < 1
+            ):
+                continue
 
-        # VietOCR scales every line to a fixed 32 px height. The quad is
-        # already padded by ~20% of the text height, which keeps Vietnamese
-        # marks inside the crop; stretching it further (the previous 1.3x
-        # strip plus a white frame) only shrank the glyphs and made tone marks
-        # such as hỏi/huyền indistinguishable. Measured on the ground-truth
-        # fixtures: line word accuracy 90.5% -> 97.8%, CER 0.032 -> 0.015
-        # (docs/ocr-color-benchmark.md).
-        dewarped_img = cv2.copyMakeBorder(
-            rect_img, 4, 4, 8, 8, cv2.BORDER_REPLICATE
-        )
+            # VietOCR scales every line to a fixed 32 px height. The quad is
+            # already padded by ~20% of the text height, which keeps Vietnamese
+            # marks inside the crop; stretching it further (the previous 1.3x
+            # strip plus a white frame) only shrank the glyphs and made tone marks
+            # such as hỏi/huyền indistinguishable. Measured on the ground-truth
+            # fixtures: line word accuracy 90.5% -> 97.8%, CER 0.032 -> 0.015
+            # (docs/ocr-color-benchmark.md).
+            dewarped_img = cv2.copyMakeBorder(
+                rect_img, 4, 4, 8, 8, cv2.BORDER_REPLICATE
+            )
+        except (cv2.error, ValueError, np.linalg.LinAlgError):
+            continue
 
         tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
 
@@ -1248,13 +1381,25 @@ def _segment_words_by_ink(
     if geometry is not None:
         geometry["reliable"] = False
     num_words = len(words)
+    if (
+        num_words == 0
+        or rect_img is None
+        or getattr(rect_img, "size", 0) == 0
+        or getattr(rect_img, "ndim", 0) < 2
+    ):
+        return []
     c_h, c_w = rect_img.shape[:2]
-    if num_words == 0 or c_w < 8 or c_h < 6:
+    if c_w < 8 or c_h < 6:
         return []
 
     # Segment glyphs, not the dark background surrounding light text.
     # Keep original coordinates: normalization changes intensity only.
-    gray = _normalize_text_background(cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY))
+    raw_gray = (
+        rect_img
+        if rect_img.ndim == 2
+        else cv2.cvtColor(rect_img, cv2.COLOR_BGR2GRAY)
+    )
+    gray = _normalize_text_background(raw_gray)
     block_sz = max(11, (c_h | 1))
     binary = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, block_sz, 10
@@ -1339,8 +1484,9 @@ def _segment_words_by_ink(
             if diff == 0:
                 break
 
-    if best_segments is None:
-        best_segments = []
+    if not best_segments:
+        step = 1.0 / num_words
+        return [(i * step, norm_y0, (i + 1) * step, norm_y1) for i in range(num_words)]
 
     # Equal-count connected glyph groups are evidence; forced splits/merges
     # and blank crops may retain positions for review, but never enable overlay.
@@ -1370,7 +1516,7 @@ def _segment_words_by_ink(
         x_end = c[0] + c[1]
         mid_left = x_start + int(c[1] * 0.25)
         mid_right = x_start + int(c[1] * 0.75)
-        if mid_left < mid_right:
+        if mid_left < mid_right and mid_left >= 0 and mid_right <= len(v_proj):
             split_pt = mid_left + int(np.argmin(v_proj[mid_left:mid_right]))
         else:
             split_pt = (x_start + x_end) // 2
@@ -1381,8 +1527,8 @@ def _segment_words_by_ink(
 
     result_boxes: list[tuple[float, float, float, float]] = []
     for i, comp in enumerate(best_segments):
-        x_start = max(0, comp[0])
-        x_end = min(c_w, comp[0] + comp[1])
+        x_start = max(0, min(c_w - 1, comp[0]))
+        x_end = max(x_start + 1, min(c_w, comp[0] + comp[1]))
 
         sub_bin = binary[:, x_start:x_end]
         sub_cols = np.where(np.sum(sub_bin > 0, axis=0) > 0)[0]
@@ -1418,7 +1564,7 @@ def _map_curved_word_boxes(
     orig_height: int,
     *, geometry: dict[str, Any] | None = None,
 ) -> list[list[float]]:
-    if not words:
+    if not words or orig_width <= 0 or orig_height <= 0:
         return []
 
     rect_img = item["rect_img"]
@@ -1426,6 +1572,11 @@ def _map_curved_word_boxes(
     tl, tr, br, bl = pts[0], pts[1], pts[2], pts[3]
 
     word_spans = _segment_words_by_ink(rect_img, words, geometry=geometry)
+    if len(word_spans) != len(words):
+        if geometry is not None:
+            geometry["reliable"] = False
+        step = 1.0 / len(words)
+        word_spans = [(i * step, 0.0, (i + 1) * step, 1.0) for i in range(len(words))]
     boxes: list[list[float]] = []
 
     for rx0, ry0, rx1, ry1 in word_spans:
@@ -1439,12 +1590,15 @@ def _map_curved_word_boxes(
         word_ymin = float(min(pt_tl[1], pt_tr[1], pt_bl[1], pt_br[1]))
         word_ymax = float(max(pt_tl[1], pt_tr[1], pt_bl[1], pt_br[1]))
 
-        norm_x = max(0.0, min(0.9999, word_xmin / orig_width))
-        norm_y = max(0.0, min(0.9999, word_ymin / orig_height))
-        norm_w = max(0.0001, min(1.0 - norm_x, (word_xmax - word_xmin) / orig_width))
-        norm_h = max(0.0001, min(1.0 - norm_y, (word_ymax - word_ymin) / orig_height))
-
-        boxes.append([round(norm_x, 6), round(norm_y, 6), round(norm_w, 6), round(norm_h, 6)])
+        clamped = _clamp_normalized_bbox(
+            word_xmin,
+            word_ymin,
+            word_xmax - word_xmin,
+            word_ymax - word_ymin,
+            orig_width,
+            orig_height,
+        )
+        boxes.append(clamped or [0.0, 0.0, 0.0001, 0.0001])
 
     return boxes
 
@@ -1475,14 +1629,17 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
         raise OcrEngineUnavailable("pytesseract is not installed")
     configured_binary = _resolve_tesseract_command()
     if configured_binary:
-        _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+        with _tesseract_config_lock:
+            _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
         _ensure_tesseract_language_data()
 
     array = np.frombuffer(image_bytes, dtype=np.uint8)
     image = cv2.imdecode(array, cv2.IMREAD_COLOR)
-    if image is None:
+    if image is None or getattr(image, "size", 0) == 0 or getattr(image, "ndim", 0) < 2:
         raise ValueError("Image decoding failed")
     orig_height, orig_width = image.shape[:2]
+    if orig_width <= 0 or orig_height <= 0:
+        raise ValueError("Image decoding failed")
 
     target_lang = os.getenv("TESSERACT_LANG", "vie")
     gray = _normalize_text_background(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
@@ -1513,9 +1670,9 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             w = int(result["width"][index])
             h = int(result["height"][index])
             conf = float(result["conf"][index])
-            block_num = int(result.get("block_num", [0] * (index + 1))[index])
-            par_num = int(result.get("par_num", [0] * (index + 1))[index])
-            line_num = int(result["line_num"][index])
+            block_num = max(0, int(result.get("block_num", [0] * (index + 1))[index]))
+            par_num = max(0, int(result.get("par_num", [0] * (index + 1))[index]))
+            line_num = max(0, int(result["line_num"][index]))
         except (KeyError, TypeError, ValueError, IndexError):
             continue
 
@@ -1532,7 +1689,7 @@ def _extract_text_and_boxes_tesseract(image_bytes: bytes) -> dict[str, object]:
             line_index_map[line_key] = len(line_index_map)
         seq_line_index = line_index_map[line_key]
 
-        confidence = conf / 100.0 if 0 <= conf <= 100 else None
+        confidence = conf / 100.0 if (math.isfinite(conf) and 0 <= conf <= 100) else None
         words.append({
             "word_index": len(words),
             "line_index": seq_line_index,
@@ -1737,7 +1894,7 @@ def _recognize_uncertain_word_crops(
         else:
             try:
                 vietocr_crops = crops
-                if _inference_model_profile(vietocr_engine) in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                if _inference_model_profile(vietocr_engine) in _V2_PREPROCESSING_PROFILES:
                     vietocr_crops = [preprocess_line_array(crop) for crop in crops]
                 pil_crops = [
                     Image.fromarray(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
@@ -1837,6 +1994,7 @@ def _recognize_uncertain_word_crops(
 
 
 _tesseract_language_data_checked = False
+_tesseract_config_lock = threading.Lock()
 
 
 def _ensure_tesseract_language_data() -> None:
@@ -1846,34 +2004,37 @@ def _ensure_tesseract_language_data() -> None:
     itself, older builds as its parent. Probe once instead of assuming.
     """
     global _tesseract_language_data_checked
-    if _tesseract_language_data_checked:
-        return
-    _tesseract_language_data_checked = True
-    language = os.getenv("TESSERACT_LANG", "vie").split("+")[0]
-    local_data = _backend_root / "tessdata"
-    if not (local_data / f"{language}.traineddata").is_file():
-        return
-
-    def language_available() -> bool:
-        _pt, _ = _ensure_pytesseract()
-        if _pt is None:
-            return False
-        try:
-            return language in _pt.get_languages(config="")
-        except Exception:
-            return False
-
-    if language_available():
-        return
-    previous = os.environ.get("TESSDATA_PREFIX")
-    for candidate in (str(local_data), str(_backend_root)):
-        os.environ["TESSDATA_PREFIX"] = candidate
-        if language_available():
+    with _tesseract_config_lock:
+        if _tesseract_language_data_checked:
             return
-    if previous is None:
-        os.environ.pop("TESSDATA_PREFIX", None)
-    else:
-        os.environ["TESSDATA_PREFIX"] = previous
+        try:
+            language = os.getenv("TESSERACT_LANG", "vie").split("+")[0]
+            local_data = _backend_root / "tessdata"
+            if not (local_data / f"{language}.traineddata").is_file():
+                return
+
+            def language_available() -> bool:
+                _pt, _ = _ensure_pytesseract()
+                if _pt is None:
+                    return False
+                try:
+                    return language in _pt.get_languages(config="")
+                except Exception:
+                    return False
+
+            if language_available():
+                return
+            previous = os.environ.get("TESSDATA_PREFIX")
+            for candidate in (str(local_data), str(_backend_root)):
+                os.environ["TESSDATA_PREFIX"] = candidate
+                if language_available():
+                    return
+            if previous is None:
+                os.environ.pop("TESSDATA_PREFIX", None)
+            else:
+                os.environ["TESSDATA_PREFIX"] = previous
+        finally:
+            _tesseract_language_data_checked = True
 
 
 def _configure_tesseract() -> bool:
@@ -1883,7 +2044,8 @@ def _configure_tesseract() -> bool:
     configured_binary = _resolve_tesseract_command()
     if not configured_binary:
         return False
-    _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
+    with _tesseract_config_lock:
+        _pt.pytesseract.tesseract_cmd = configured_binary.strip('"\'')
     _ensure_tesseract_language_data()
     return True
 
@@ -1932,7 +2094,7 @@ def _normalized_box(
     y1 = min(max((top + box_height) / height, 0.0), 1.0)
     if x1 - x0 <= 0 or y1 - y0 <= 0:
         return None
-    return [x0, y0, x1 - x0, y1 - y0]
+    return _clamp_normalized_bbox(left, top, box_width, box_height, width, height)
 
 
 def _attach_tesseract_line_readings(
@@ -2435,7 +2597,7 @@ def _extract_text_and_boxes_dual_engine(
             try:
                 with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
                     prediction_image = line_img_pil
-                    if _inference_model_profile(vietocr_engine) in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
+                    if _inference_model_profile(vietocr_engine) in _V2_PREPROCESSING_PROFILES:
                         prediction_image = Image.fromarray(
                             cv2.cvtColor(preprocess_line_array(dewarped_img_scaled), cv2.COLOR_BGR2RGB)
                         )
@@ -2710,9 +2872,9 @@ def _extract_text_and_boxes_dual_engine(
     ]
     formatted_text = "\n".join(lines_output)
 
-    try:
-        debug_path = os.getenv("OCR_DEBUG_BOXES_PATH", "").strip()
-        if debug_path:
+    debug_path = os.getenv("OCR_DEBUG_BOXES_PATH", "").strip()
+    if debug_path:
+        try:
             debug_vis = image.copy()
             for w in words_output:
                 bx, by, bw, bh = w["bbox"]
@@ -2722,8 +2884,8 @@ def _extract_text_and_boxes_dual_engine(
                 y2 = int(round((by + bh) * orig_height))
                 cv2.rectangle(debug_vis, (x1, y1), (x2, y2), (0, 255, 0), 1)
             cv2.imwrite(os.path.abspath(debug_path), debug_vis)
-    except Exception:
-        pass
+        except Exception:
+            pass
 
     return {
         "text": formatted_text,

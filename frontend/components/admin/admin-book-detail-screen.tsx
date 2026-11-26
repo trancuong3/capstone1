@@ -45,6 +45,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     title: string;
     message: string;
   } | null>(null);
+  const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
   const load = useCallback(
     async (options?: { resetPage?: boolean }) => {
@@ -98,14 +99,17 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     [bookId, books, pageSize, pages],
   );
   const refreshPages = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     try {
       const nextPages = (await pages.list(bookId)).filter(
         (item) => item.processing.lifecycle_status === "ACTIVE",
       );
+      if (requestId !== requestIdRef.current) return;
       const maxPage = Math.max(1, Math.ceil(nextPages.length / pageSize));
       setPageNumber((current) => Math.min(current, maxPage));
       setItems(nextPages);
     } catch {
+      if (requestId !== requestIdRef.current) return;
       setPageActionNotice({
         tone: "error",
         title: t("books.detail.refreshErrorTitle"),
@@ -122,7 +126,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     setPageActionNotice(null);
     try {
       const result = await pages.retire(pageId);
-      if (requestId !== requestIdRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       if (
         result.lifecycle_status !== "RETIRED" ||
         result.page_id !== pageId ||
@@ -147,20 +151,22 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       });
       await load();
     } catch {
-      if (requestId !== requestIdRef.current) return;
+      if (!mountedRef.current || requestId !== requestIdRef.current) return;
       setPageActionNotice({
         tone: "error",
         title: t("books.detail.deletePageErrorTitle"),
         message: t("books.detail.deletePageErrorMsg"),
       });
     } finally {
-      if (requestId === requestIdRef.current) setRetiringPageId(null);
+      if (mountedRef.current) setRetiringPageId(null);
     }
   }
 
   useEffect(() => {
+    mountedRef.current = true;
     const timeout = globalThis.setTimeout(() => void load(), 0);
     return () => {
+      mountedRef.current = false;
       globalThis.clearTimeout(timeout);
       requestIdRef.current += 1;
     };
