@@ -154,6 +154,14 @@ export function setCachedGlobalTasksSnapshot(
   actorTaskMemoryCache.set(key, snapshot);
 }
 
+export const STUDIO_TASKS_CHANGED_EVENT = "viread:tasks-changed";
+
+export function emitStudioTasksChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(STUDIO_TASKS_CHANGED_EVENT));
+  }
+}
+
 export function clearGlobalTasksMemoryCache(): void {
   actorTaskMemoryCache.clear();
 }

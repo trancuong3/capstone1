@@ -4,11 +4,12 @@ import { cn } from "@/lib/utils/cn";
 
 interface TextFieldProps extends InputHTMLAttributes<HTMLInputElement> {
   error?: string;
+  errorRole?: "alert" | "status";
   label: string;
 }
 
 export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
-  function TextField({ className, error, id, label, ...props }, ref) {
+  function TextField({ className, error, errorRole, id, label, ...props }, ref) {
     const generatedId = useId();
     const inputId = id ?? generatedId;
     const errorId = `${inputId}-error`;
@@ -33,7 +34,11 @@ export const TextField = forwardRef<HTMLInputElement, TextFieldProps>(
           {...props}
         />
         {error ? (
-          <p className="mt-2 text-label font-semibold text-danger" id={errorId}>
+          <p
+            className="mt-2 text-label font-semibold text-danger"
+            id={errorId}
+            role={errorRole}
+          >
             {error}
           </p>
         ) : null}

@@ -248,6 +248,7 @@ export function GlobalTaskCenter({
   }
 
   const {
+    actorRole,
     tasks,
     waitingReviewCount,
     failedCount,
@@ -261,6 +262,9 @@ export function GlobalTaskCenter({
     retryTask,
     cancelTask,
   } = taskCenter;
+
+  const fullTasksPageHref =
+    actorRole === "admin" ? "/admin/tasks" : "/studio/tasks";
 
   const pillText =
     activeCount > 0
@@ -630,6 +634,18 @@ export function GlobalTaskCenter({
                   );
                 })
               )}
+            </div>
+
+            <div className="border-t border-border bg-canvas/40 px-4 py-3 sm:px-5">
+              <Link
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control border border-border bg-white px-4 text-xs font-bold text-primary transition-colors hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+                data-testid="global-task-center-full-page-link"
+                href={fullTasksPageHref}
+                onClick={closePanel}
+              >
+                Mở trang quản lý tác vụ đầy đủ
+                <ExternalLink aria-hidden="true" className="size-3.5" />
+              </Link>
             </div>
           </section>
         </div>

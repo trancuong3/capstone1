@@ -7,16 +7,19 @@ import {
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { RefreshCw, UploadCloud } from "lucide-react";
+import Link from "next/link";
+import { ExternalLink, Loader2, RefreshCw, UploadCloud } from "lucide-react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { STUDIO_TASKS_CHANGED_EVENT } from "@/lib/api/global-tasks-service";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
   hasRetryableAdminBookUploads,
+  rehydrateAdminBookUploadTasks,
   retryAdminBookUpload,
   runAdminBookUpload,
   subscribeAdminBookUploadSession,
@@ -178,6 +181,43 @@ export function AdminPageUploader({
     () => emptyAdminBookUploadSession,
   );
   const lastCompletedRunIdRef = useRef(0);
+  const hadActiveServerTasksRef = useRef(false);
+
+  // Rehydrate durable active upload/OCR jobs from GET /studio/tasks after reload or route switch.
+  useEffect(() => {
+    let active = true;
+    let controller: AbortController | null = null;
+
+    const syncServerTasks = () => {
+      controller?.abort();
+      controller = new AbortController();
+      void rehydrateAdminBookUploadTasks(bookId, {
+        signal: controller.signal,
+      }).then((tasks) => {
+        if (!active) return;
+        const hasActive = tasks.length > 0;
+        if (hadActiveServerTasksRef.current && !hasActive) {
+          onUploaded();
+        }
+        hadActiveServerTasksRef.current = hasActive;
+      });
+    };
+
+    syncServerTasks();
+    if (typeof window !== "undefined") {
+      window.addEventListener(STUDIO_TASKS_CHANGED_EVENT, syncServerTasks);
+      window.addEventListener("viread:android-resume", syncServerTasks);
+    }
+
+    return () => {
+      active = false;
+      controller?.abort();
+      if (typeof window !== "undefined") {
+        window.removeEventListener(STUDIO_TASKS_CHANGED_EVENT, syncServerTasks);
+        window.removeEventListener("viread:android-resume", syncServerTasks);
+      }
+    };
+  }, [bookId, onUploaded]);
 
   useEffect(() => {
     let active = true;
@@ -427,6 +467,61 @@ export function AdminPageUploader({
           {t("books.uploader.submit")}
         </Button>
       </form>
+      {session.serverTasks.length > 0 ? (
+        <div
+          className="mt-4 space-y-2 rounded-control border border-primary/25 bg-white p-3.5"
+          data-testid="rehydrated-server-tasks"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="inline-flex items-center gap-1.5 text-sm font-bold text-primary-hover">
+              <Loader2 aria-hidden="true" className="size-4 animate-spin" />
+              Tác vụ nền đang chạy trên máy chủ ({session.serverTasks.length})
+            </p>
+            <Link
+              className="inline-flex min-h-11 items-center gap-1 rounded-control px-2.5 text-xs font-bold text-primary underline hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+              href="/admin/tasks"
+            >
+              Mở trung tâm tác vụ
+              <ExternalLink aria-hidden="true" className="size-3.5" />
+            </Link>
+          </div>
+          <div className="grid gap-2">
+            {session.serverTasks.map((task) => {
+              const hasMeasured =
+                !task.is_indeterminate &&
+                task.progress_completed !== null &&
+                task.progress_total !== null &&
+                task.progress_total > 0 &&
+                task.progress_pct !== null;
+              return (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-canvas/50 px-3 py-2 text-xs"
+                  key={`${task.source}-${task.id}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-bold text-ink">
+                      {task.title_vi}
+                    </p>
+                    <p className="text-muted">
+                      {task.stage_label_vi}
+                      {task.page_number ? ` · Trang ${task.page_number}` : ""}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-primary/25 bg-sky px-2.5 py-0.5 font-semibold text-primary-hover">
+                    {task.status_label_vi}
+                  </span>
+                  {hasMeasured ? (
+                    <span className="font-semibold tabular-nums text-ink">
+                      {task.progress_completed}/{task.progress_total} (
+                      {Math.round(task.progress_pct!)}%)
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       {session.progress.length ? (
         <div className="mt-5 grid gap-2" aria-live="polite">
           {session.progress.map((item) => (

@@ -2723,6 +2723,26 @@ class ParentPrivateBookService:
                     pass
             raise
 
+        # Non-fatal V2 post-commit hook: persist PageOcrExtraction + extract clean artwork
+        try:
+            from app.services.ocr_content_extraction import persist_committed_parent_page_v2
+
+            await persist_committed_parent_page_v2(
+                self.db,
+                actor_id=actor_id,
+                book_id=book.Id,
+                page_id=created_page.Id,
+                revision_id=created_rev.Id,
+                submission=sub,
+                image_bytes=image_bytes,
+                trigger_illustration_extract=True,
+            )
+        except Exception:
+            logger.warning(
+                "Non-fatal Smart Book Studio V2 post-commit hook skipped for page %s",
+                created_page.Id,
+            )
+
         await self.db.refresh(sub)
         await self._refresh_after_commit(book, created_page, created_rev)
         # Phase 4: Recruit Flow 2 line candidates AFTER releasing Book/Submission locks (reusing in-memory image bytes)

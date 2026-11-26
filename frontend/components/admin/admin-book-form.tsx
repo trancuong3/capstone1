@@ -26,6 +26,7 @@ interface AdminBookFormProps {
   initial?: AdminBookFormInitial;
   onSubmit: (value: AdminBookCreateDTO) => Promise<void>;
   showLiveCoverPreview?: boolean;
+  submitErrorFallback?: string;
   submitLabel?: string;
 }
 
@@ -38,6 +39,7 @@ export function AdminBookForm({
   initial,
   onSubmit,
   showLiveCoverPreview = false,
+  submitErrorFallback,
   submitLabel,
 }: AdminBookFormProps) {
   const t = useTranslations("admin");
@@ -104,10 +106,21 @@ export function AdminBookForm({
       });
     } catch {
       setError("root", {
-        message: t("books.form.genericSaveError"),
+        message: submitErrorFallback ?? t("books.form.genericSaveError"),
       });
     }
   });
+
+  const resolvedMinGrade = Number.isFinite(watchedMinGrade)
+    ? watchedMinGrade
+    : 1;
+  const resolvedMaxGrade = Number.isFinite(watchedMaxGrade)
+    ? watchedMaxGrade
+    : 3;
+  const gradePreviewLabel =
+    resolvedMinGrade === resolvedMaxGrade
+      ? `Lớp ${resolvedMinGrade}`
+      : `Lớp ${resolvedMinGrade}–${resolvedMaxGrade}`;
 
   return (
     <form className="grid gap-4" noValidate onSubmit={submit}>
@@ -120,24 +133,30 @@ export function AdminBookForm({
           data-testid="admin-book-live-cover-preview"
         >
           <BookCover
-            author={watchedAuthor || null}
+            author={watchedAuthor?.trim() || null}
             book={{
               id: bookId,
               title: watchedTitle?.trim() || "Tiêu đề sách mới",
-              author: watchedAuthor || null,
-              min_grade: Number.isFinite(watchedMinGrade) ? watchedMinGrade : 1,
-              max_grade: Number.isFinite(watchedMaxGrade) ? watchedMaxGrade : 3,
+              author: watchedAuthor?.trim() || null,
+              min_grade: resolvedMinGrade,
+              max_grade: resolvedMaxGrade,
               lifecycle_status: "ACTIVE",
             }}
             coverSourceType={coverSourceType}
             coverUrl={coverUrl}
+            grade={gradePreviewLabel}
             size="medium"
           />
           <div className="min-w-0 flex-1 text-xs text-muted">
-            <p className="font-bold text-ink">Xem trước bìa chữ tự động</p>
+            <p className="font-bold text-ink">
+              {coverUrl
+                ? "Xem trước ảnh bìa đã chọn"
+                : "Xem trước bìa chữ tự động"}
+            </p>
             <p className="mt-1">
-              Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc
-              nét theo tiêu đề, tác giả và khối lớp.
+              {coverUrl
+                ? "Ảnh bìa sẽ được chuẩn hóa 3:4 WebP và ưu tiên hiển thị cao nhất cho sách này."
+                : "Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc nét theo tiêu đề, tác giả và khối lớp."}
             </p>
           </div>
         </div>
@@ -145,19 +164,24 @@ export function AdminBookForm({
       {coverStudioSlot}
       <TextField
         error={errors.name?.message}
+        errorRole="alert"
         label={t("books.form.nameLabel")}
+        maxLength={250}
         required
         {...register("name")}
       />
       <TextField
         error={errors.title?.message}
+        errorRole="alert"
         label={t("books.form.titleLabel")}
+        maxLength={250}
         required
         {...register("title")}
       />
       <TextField
         error={errors.author?.message}
         label={t("books.form.authorLabel")}
+        maxLength={250}
         {...register("author")}
       />
       <div className="grid gap-4 sm:grid-cols-2">
