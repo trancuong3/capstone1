@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import re
@@ -36,6 +37,7 @@ from app.database.config import (
 )
 from app.database.integrity import postgres_integrity_error_metadata
 from app.database.session import (
+    AsyncSessionLocal,
     DatabaseConcurrencyLimitExceeded,
     engine,
     probe_database_connection,
@@ -94,6 +96,82 @@ logger = logging.getLogger(__name__)
 
 
 _WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5.0
+
+
+def _optional_bool_env(name: str) -> bool | None:
+    """Parse an optional boolean environment override (None when unset/blank)."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+async def _prewarm_tts_public_voice_ids_nonfatal(*, timeout: float = 6.0) -> None:
+    """Best-effort startup prewarm of cached public TTS voice IDs without failing boot."""
+    prewarmed = False
+    try:
+        from app.services.tts_audio_cache_service import TtsAudioCacheService
+
+        raw_attr = inspect.getattr_static(
+            TtsAudioCacheService, "prewarm_cached_public_voice_ids", None
+        )
+        if raw_attr is not None:
+            is_instance_method = (
+                inspect.isfunction(raw_attr)
+                and next(iter(inspect.signature(raw_attr).parameters), None) == "self"
+            )
+            if is_instance_method:
+                async with AsyncSessionLocal() as prewarm_db:
+                    service = TtsAudioCacheService(prewarm_db)
+                    prewarm_fn = getattr(service, "prewarm_cached_public_voice_ids")
+                    sig = inspect.signature(prewarm_fn)
+                    accepts_timeout = "timeout" in sig.parameters or any(
+                        p.kind == inspect.Parameter.VAR_KEYWORD
+                        for p in sig.parameters.values()
+                    )
+                    if accepts_timeout:
+                        await prewarm_fn(timeout=timeout)
+                    else:
+                        await prewarm_fn()
+            else:
+                prewarm_fn = getattr(TtsAudioCacheService, "prewarm_cached_public_voice_ids")
+                sig = inspect.signature(prewarm_fn)
+                accepts_timeout = "timeout" in sig.parameters or any(
+                    p.kind == inspect.Parameter.VAR_KEYWORD
+                    for p in sig.parameters.values()
+                )
+                if accepts_timeout:
+                    await prewarm_fn(timeout=timeout)
+                else:
+                    await prewarm_fn()
+            prewarmed = True
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="tts_cache_voice_ids_prewarm_failed",
+            stage="lifespan_startup",
+            database_error_type=type(exc).__name__,
+        )
+
+    if not prewarmed:
+        try:
+            from app.api.routes.voice_studio import refresh_cached_public_voice_ids
+
+            await refresh_cached_public_voice_ids(timeout=timeout)
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="tts_cache_voice_ids_prewarm_failed",
+                stage="lifespan_startup",
+                database_error_type=type(exc).__name__,
+            )
 
 
 def _background_worker_startup_delay_seconds() -> float:
@@ -230,9 +308,7 @@ async def lifespan(_app: FastAPI):
                     database_error_type=db_probe["error_type"],
                 )
                 if db_probe["ok"]:
-                    from app.api.routes.voice_studio import refresh_cached_public_voice_ids
-
-                    await refresh_cached_public_voice_ids(timeout=6.0)
+                    await _prewarm_tts_public_voice_ids_nonfatal(timeout=6.0)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -251,6 +327,19 @@ async def lifespan(_app: FastAPI):
 
     heavy_workers_disabled = is_heavy_workers_disabled()
     remote_ocr_mode = is_remote_ocr_mode()
+
+    lightweight_workers_override = _optional_bool_env("VIREAD_ENABLE_LIGHTWEIGHT_WORKERS")
+    lightweight_workers_enabled = (
+        lightweight_workers_override
+        if lightweight_workers_override is not None
+        else (not heavy_workers_disabled)
+    )
+    smart_studio_override = _optional_bool_env("VIREAD_ENABLE_SMART_STUDIO_WORKER")
+    smart_studio_worker_enabled = (
+        smart_studio_override
+        if smart_studio_override is not None
+        else (not heavy_workers_disabled)
+    )
 
     warmup_enabled = (
         not remote_ocr_mode
@@ -292,7 +381,7 @@ async def lifespan(_app: FastAPI):
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
     worker_startup_delay = _background_worker_startup_delay_seconds()
-    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and not worker_disabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and not worker_disabled:
         book_quality_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_book_quality_worker, stop_book_quality_worker, worker_startup_delay
@@ -302,7 +391,7 @@ async def lifespan(_app: FastAPI):
     workflow_worker_enabled = os.getenv(
         "ADMIN_AI_WORKFLOW_WORKER_ENABLED", "true"
     ).strip().lower() not in {"0", "false", "no", "off"}
-    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and workflow_worker_enabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and workflow_worker_enabled:
         admin_ai_workflow_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_admin_ai_workflow_worker,
@@ -314,7 +403,7 @@ async def lifespan(_app: FastAPI):
     parent_book_worker_enabled = os.getenv(
         "PARENT_BOOK_WORKER_ENABLED", "true"
     ).strip().lower() not in {"0", "false", "no", "off"}
-    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and parent_book_worker_enabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and parent_book_worker_enabled:
         parent_book_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_parent_book_submission_worker,
@@ -327,7 +416,7 @@ async def lifespan(_app: FastAPI):
         "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
     ).strip().lower() not in {"0", "false", "no", "off"}
     stop_viread_ocr_outbox = asyncio.Event()
-    if APP_ENVIRONMENT != "test" and not heavy_workers_disabled and ocr_outbox_enabled:
+    if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and ocr_outbox_enabled:
         viread_outbox_task = asyncio.create_task(
             _run_worker_with_startup_delay(
                 run_viread_ocr_outbox_worker,
@@ -382,7 +471,7 @@ async def lifespan(_app: FastAPI):
 
     stop_smart_studio_worker = asyncio.Event()
     smart_studio_worker_task = None
-    if APP_ENVIRONMENT != "test":
+    if APP_ENVIRONMENT != "test" and smart_studio_worker_enabled:
         async def _run_smart_studio_worker() -> None:
             if worker_startup_delay > 0:
                 try:
@@ -811,6 +900,7 @@ async def get_health(request: Request) -> dict[str, object]:
         "book_quality": _task_runtime_state(workers.get("book_quality")),
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
+        "smart_studio": _task_runtime_state(workers.get("smart_studio")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None
