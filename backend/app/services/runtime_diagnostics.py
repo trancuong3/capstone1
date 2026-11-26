@@ -421,10 +421,14 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
     from app.database.session import AsyncSessionLocal
     from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
     from app.services.ocr_inference_job_service import worker_heartbeat_ttl_seconds
+    from sqlalchemy.ext.asyncio import AsyncSession
 
     now = datetime.now(timezone.utc)
     ttl_seconds = worker_heartbeat_ttl_seconds()
     async with AsyncSessionLocal() as db:
+        if isinstance(db, AsyncSession):
+            # Read-only health queries skip BEGIN/ROLLBACK round-trips over cross-region pooler.
+            await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
         repo = OcrInferenceJobRepository(db)
         workers = await repo.list_worker_heartbeats(limit=10)
         queue = await repo.queue_depth_counts(now=now)

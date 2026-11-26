@@ -38,6 +38,7 @@ from app.models import Book, BookPage, PageRevision, PageRevisionWord, TtsAudioC
 from app.providers.local_voice_provider import (  # noqa: E402
     DEFAULT_LOCAL_VOICE_ID,
     LOCAL_TTS_MODEL_VERSION,
+    STATIC_LOCAL_VOICES,
 )
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository  # noqa: E402
 from app.services.tts_audio_cache_service import (  # noqa: E402
@@ -486,8 +487,11 @@ async def run_precompute(
         except Exception as exc:
             stats["errors"] += 1
             logger.warning(
-                "precompute_item_failed scope=%s error=%s",
+                "precompute_item_failed voice=%s scope=%s words=%d kind=%s error=%s",
+                voice_id,
                 target.scope,
+                len(tokens) if tokens else (len(phonics_steps) if phonics_steps else len(text.split())),
+                "phonics" if phonics_steps else ("timed" if tokens else ("word" if is_word_sample else "tts")),
                 type(exc).__name__,
             )
 
@@ -495,11 +499,34 @@ async def run_precompute(
     return stats
 
 
+def resolve_precompute_voice_ids(voice_id: str, voices_arg: str | None) -> list[str]:
+    """Resolve one or more target local voice IDs (`--voices all` or comma-separated list)."""
+    if not voices_arg or not voices_arg.strip():
+        return [voice_id]
+    cleaned = voices_arg.strip()
+    if cleaned.lower() == "all":
+        return [str(v["voice_id"]) for v in STATIC_LOCAL_VOICES]
+    selected: list[str] = []
+    seen: set[str] = set()
+    for part in cleaned.split(","):
+        vid = part.strip()
+        if vid and vid not in seen:
+            seen.add(vid)
+            selected.append(vid)
+    return selected or [voice_id]
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Precompute ViRead TTS cache clips (64 kbps MP3).")
     parser.add_argument("--scope", choices=("catalog", "private", "all", "coaching"), default="catalog")
     parser.add_argument("--book-id", type=str, default=None)
     parser.add_argument("--voice-id", type=str, default=DEFAULT_LOCAL_VOICE_ID)
+    parser.add_argument(
+        "--voices",
+        type=str,
+        default=None,
+        help="Optional comma-separated voice IDs or 'all' for all 8 curated regional voices.",
+    )
     parser.add_argument("--speed", type=float, default=DEFAULT_PRECOMPUTE_SPEED)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--worker-url", type=str, default=None)
@@ -514,28 +541,44 @@ async def _async_main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = _parse_args()
     book_uuid = UUID(args.book_id) if args.book_id else None
+    voice_ids = resolve_precompute_voice_ids(args.voice_id, args.voices)
+    total_stats = {"planned": 0, "cached_hit": 0, "synthesized": 0, "skipped_quota": 0, "errors": 0}
     try:
-        stats = await run_precompute(
-            scope=args.scope,
-            book_id=book_uuid,
-            voice_id=args.voice_id,
-            speed=args.speed,
-            dry_run=args.dry_run,
-            limit=args.limit,
-            include_words=not args.no_words,
-            include_coaching=not args.no_coaching,
-            include_phonics=not args.no_phonics,
-            worker_url=args.worker_url,
-        )
-        print(
-            "precompute_summary",
-            f"planned={stats['planned']}",
-            f"cached_hit={stats['cached_hit']}",
-            f"synthesized={stats['synthesized']}",
-            f"skipped_quota={stats['skipped_quota']}",
-            f"errors={stats['errors']}",
-        )
-        return 0 if stats["errors"] == 0 else 1
+        for vid in voice_ids:
+            stats = await run_precompute(
+                scope=args.scope,
+                book_id=book_uuid,
+                voice_id=vid,
+                speed=args.speed,
+                dry_run=args.dry_run,
+                limit=args.limit,
+                include_words=not args.no_words,
+                include_coaching=not args.no_coaching,
+                include_phonics=not args.no_phonics,
+                worker_url=args.worker_url,
+            )
+            for k in total_stats:
+                total_stats[k] += stats[k]
+            print(
+                "precompute_summary",
+                f"voice={vid}",
+                f"planned={stats['planned']}",
+                f"cached_hit={stats['cached_hit']}",
+                f"synthesized={stats['synthesized']}",
+                f"skipped_quota={stats['skipped_quota']}",
+                f"errors={stats['errors']}",
+            )
+        if len(voice_ids) > 1:
+            print(
+                "precompute_total",
+                f"voices={len(voice_ids)}",
+                f"planned={total_stats['planned']}",
+                f"cached_hit={total_stats['cached_hit']}",
+                f"synthesized={total_stats['synthesized']}",
+                f"skipped_quota={total_stats['skipped_quota']}",
+                f"errors={total_stats['errors']}",
+            )
+        return 0 if total_stats["errors"] == 0 else 1
     finally:
         await engine.dispose()
 

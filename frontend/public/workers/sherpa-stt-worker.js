@@ -384,16 +384,19 @@ function preprocessChildVoice(input, sampleRate) {
 }
 
 /**
- * Estimate voiced speech span in seconds using 20ms frame energy when caller
- * does not pass explicit `voicedDurationMs` from client VAD.
+ * Estimate voiced speech span and leading silence in seconds using 20ms frame
+ * energy so we never double-pad pre-roll silence or append trailing silence to
+ * short isolated words.
  */
-function estimateVoicedDurationSeconds(samples, sampleRate) {
+function analyzeSpeechWindowSeconds(samples, sampleRate) {
   const n = samples.length;
-  if (!n) return 0;
+  if (!n) return { voicedSeconds: 0, leadingSilenceSeconds: 0 };
   const sr = sampleRate > 0 ? sampleRate : SAMPLE_RATE;
   const frameLen = Math.max(1, Math.round(sr * 0.02));
   const numFrames = Math.floor(n / frameLen);
-  if (numFrames <= 0) return n / sr;
+  if (numFrames <= 0) {
+    return { voicedSeconds: n / sr, leadingSilenceSeconds: 0 };
+  }
 
   const frameRms = new Float32Array(numFrames);
   let maxFrameRms = 0;
@@ -411,7 +414,7 @@ function estimateVoicedDurationSeconds(samples, sampleRate) {
 
   const thresh = Math.max(0.004, maxFrameRms * 0.14);
   if (maxFrameRms < thresh) {
-    return 0;
+    return { voicedSeconds: 0, leadingSilenceSeconds: n / sr };
   }
 
   let firstActive = -1;
@@ -422,8 +425,13 @@ function estimateVoicedDurationSeconds(samples, sampleRate) {
       lastActive = f;
     }
   }
-  if (firstActive === -1) return 0;
-  return ((lastActive - firstActive + 1) * frameLen) / sr;
+  if (firstActive === -1) {
+    return { voicedSeconds: 0, leadingSilenceSeconds: n / sr };
+  }
+  return {
+    voicedSeconds: ((lastActive - firstActive + 1) * frameLen) / sr,
+    leadingSilenceSeconds: (firstActive * frameLen) / sr,
+  };
 }
 
 self.onmessage = async (event) => {
@@ -501,18 +509,18 @@ self.onmessage = async (event) => {
         return;
       }
 
-      // Prepend 0.18s lead pad (matches server voice_worker) and append 0.35s
-      // trailing silence ONLY when *voiced* speech duration >= 1.2s (never total
-      // buffer length inflated by 0.45s pre-roll), avoiding short-word hallucinations.
+      // Maintain ~0.18s clean lead silence (never double-stacking existing pre-roll)
+      // and append 0.35s trailing silence ONLY when *voiced* speech duration >= 1.2s,
+      // preventing both leading and trailing collocation hallucinations on short words.
       const sr =
         typeof msg.sampleRate === "number" && msg.sampleRate > 0
           ? msg.sampleRate
           : SAMPLE_RATE;
       const preprocessed = preprocessChildVoice(input, sr);
-      const estimatedVoicedSeconds = estimateVoicedDurationSeconds(
-        preprocessed,
-        sr,
-      );
+      const {
+        voicedSeconds: estimatedVoicedSeconds,
+        leadingSilenceSeconds: existingLeadSeconds,
+      } = analyzeSpeechWindowSeconds(preprocessed, sr);
       if (
         estimatedVoicedSeconds <= 0 &&
         (msg.voicedDurationMs === undefined ||
@@ -528,15 +536,33 @@ self.onmessage = async (event) => {
         msg.voicedDurationMs >= 0
           ? msg.voicedDurationMs / 1000
           : estimatedVoicedSeconds;
-      const leadPadSamples = Math.round(LEAD_PAD_SECONDS * sr);
+      let audioForDecode = preprocessed;
+      let leadPadSamples = 0;
+      if (
+        voicedDurationSeconds < MIN_PAD_DURATION_SECONDS &&
+        existingLeadSeconds > LEAD_PAD_SECONDS
+      ) {
+        const trimSamples = Math.round(
+          (existingLeadSeconds - LEAD_PAD_SECONDS) * sr,
+        );
+        if (trimSamples > 0 && trimSamples < preprocessed.length) {
+          audioForDecode = preprocessed.subarray(trimSamples);
+        }
+      } else {
+        const missingLeadSeconds = Math.max(
+          0,
+          LEAD_PAD_SECONDS - existingLeadSeconds,
+        );
+        leadPadSamples = Math.round(missingLeadSeconds * sr);
+      }
       const trailPadSamples =
         voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS
           ? Math.round(TRAILING_PAD_SECONDS * sr)
           : 0;
       const waveform = new Float32Array(
-        leadPadSamples + preprocessed.length + trailPadSamples,
+        leadPadSamples + audioForDecode.length + trailPadSamples,
       );
-      waveform.set(preprocessed, leadPadSamples);
+      waveform.set(audioForDecode, leadPadSamples);
 
       const t0 = self.performance ? self.performance.now() : Date.now();
       const stream = recognizer.createStream();
