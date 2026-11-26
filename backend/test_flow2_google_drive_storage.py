@@ -1295,6 +1295,68 @@ class TestAppsScriptDriveBridge(unittest.TestCase):
             store.quota_check()
         self.assertEqual(html_err.exception.code, "DRIVE_BRIDGE_ACCESS_DENIED")
 
+    def test_retries_transient_bridge_error_and_caches_quota_within_safe_ttl(self):
+        from app.services.training_storage.base import DrivePermissionError
+        from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
+
+        server = InMemoryAppsScriptBridgeServer(secret=self.SECRET)
+        raw_session = server.make_session()
+        raw_post = raw_session.post
+        action_log: list[str] = []
+        put_failures_left = {"count": 2}
+        force_fatal = {"active": False}
+
+        def _post_with_faults(*args, **kwargs):
+            envelope = kwargs.get("json") or {}
+            action = str(envelope.get("action") or "")
+            action_log.append(action)
+            if action == "put_file" and force_fatal["active"]:
+                return InMemoryAppsScriptBridgeServer._json_resp(
+                    {"ok": False, "error_code": "DRIVE_PERMISSION_DENIED", "message": "Forbidden"}
+                )
+            if action == "put_file" and put_failures_left["count"] > 0:
+                put_failures_left["count"] -= 1
+                return InMemoryAppsScriptBridgeServer._json_resp(
+                    {"ok": False, "error_code": "DRIVE_BRIDGE_ERROR", "message": "Temporary lock busy"}
+                )
+            return raw_post(*args, **kwargs)
+
+        raw_session.post = _post_with_faults
+        now_clock = {"t": 100.0}
+        with patch("app.services.training_storage.google_apps_script_store.time.monotonic", side_effect=lambda: now_clock["t"]):
+            store = GoogleAppsScriptDriveStore(
+                web_app_url=self.VALID_URL,
+                bridge_secret=self.SECRET,
+                session=raw_session,
+                max_retries=3,
+                sleep_fn=lambda _s: None,
+            )
+            p1 = b"first-line-image"
+            p2 = b"second-line-image"
+            s1 = store.put("verified-samples/g1/line-0.png", p1, content_type="image/png", expected_sha256=hashlib.sha256(p1).hexdigest())
+            self.assertTrue(s1.reference.startswith("gdrive://"))
+            # 1 quota call + 3 put_file attempts (2 transient DRIVE_BRIDGE_ERROR + 1 ok)
+            self.assertEqual(action_log.count("quota"), 1)
+            self.assertEqual(action_log.count("put_file"), 3)
+
+            # Second put within 45s TTL and > 500 MiB free MUST reuse cached quota (no extra quota RPC)
+            now_clock["t"] = 120.0
+            store.put("verified-samples/g1/line-1.png", p2, content_type="image/png", expected_sha256=hashlib.sha256(p2).hexdigest())
+            self.assertEqual(action_log.count("quota"), 1)
+
+            # Advancing past 45s TTL refreshes quota
+            now_clock["t"] = 150.0
+            p3 = b"third-line-image"
+            store.put("verified-samples/g1/line-2.png", p3, content_type="image/png", expected_sha256=hashlib.sha256(p3).hexdigest())
+            self.assertEqual(action_log.count("quota"), 2)
+
+            # Fatal permission error MUST fail immediately with 0 retries
+            force_fatal["active"] = True
+            puts_before = action_log.count("put_file")
+            with self.assertRaises(DrivePermissionError):
+                store.put("verified-samples/g1/line-3.png", b"x", content_type="image/png")
+            self.assertEqual(action_log.count("put_file") - puts_before, 1)
+
     def test_open_stream_with_metadata_single_call_eager_validation(self):
         from app.services.training_storage.google_apps_script_store import GoogleAppsScriptDriveStore
 

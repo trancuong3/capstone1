@@ -18,6 +18,7 @@ const IDB_NAME = "viread-tts-audio-v1";
 const IDB_VERSION = 2;
 const IDB_STORE = "entries";
 const IDB_META_STORE = "meta";
+const IDB_OP_TIMEOUT_MS = 4_000;
 
 export interface CachedWordTimingRecord {
   readonly index: number;
@@ -87,15 +88,35 @@ export interface BrowserTtsCacheStats {
   readonly quotaBytes: number;
   readonly hits: number;
   readonly misses: number;
+  readonly error?: string | null;
 }
 
 let cacheHits = 0;
 let cacheMisses = 0;
-let cachedDbPromise: Promise<IDBDatabase | null> | null = null;
+let cachedDbPromise: Promise<TtsDbOpenResult> | null = null;
 let cachedDbInstance: IDBDatabase | null = null;
 let cachedIndexedDbRef: IDBFactory | null = null;
 const pendingMetaTouches = new Map<string, StoredTtsMeta>();
 let metaTouchTimer: ReturnType<typeof setTimeout> | null = null;
+
+function sanitizeByteSize(
+  byteSize: unknown,
+  fallbackBuffer?: ArrayBuffer | null,
+): number {
+  if (byteSize !== undefined && byteSize !== null) {
+    return typeof byteSize === "number" &&
+      Number.isFinite(byteSize) &&
+      byteSize > 0
+      ? byteSize
+      : 0;
+  }
+  const fallback = fallbackBuffer?.byteLength;
+  return typeof fallback === "number" &&
+    Number.isFinite(fallback) &&
+    fallback > 0
+    ? fallback
+    : 0;
+}
 
 export function shouldPersistTtsCacheEntry(options: {
   scope?: TtsCacheScope | null;
@@ -126,6 +147,11 @@ export function buildTtsBrowserCacheKey(input: {
   ]);
 }
 
+interface TtsDbOpenResult {
+  readonly db: IDBDatabase | null;
+  readonly error: string | null;
+}
+
 function resetCachedDbHandle(): void {
   if (metaTouchTimer !== null) {
     clearTimeout(metaTouchTimer);
@@ -154,19 +180,35 @@ function releaseDbHandle(db: IDBDatabase, forceClose = false): void {
   safeCloseDb(db);
 }
 
-function openTtsDb(): Promise<IDBDatabase | null> {
-  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+function openTtsDbWithReason(): Promise<TtsDbOpenResult> {
+  if (typeof indexedDB === "undefined") {
+    return Promise.resolve({ db: null, error: "INDEXEDDB_UNAVAILABLE" });
+  }
   if (cachedIndexedDbRef !== indexedDB) {
     resetCachedDbHandle();
     cachedIndexedDbRef = indexedDB;
   }
   if (cachedDbInstance) {
-    return Promise.resolve(cachedDbInstance);
+    return Promise.resolve({ db: cachedDbInstance, error: null });
   }
   if (cachedDbPromise) {
     return cachedDbPromise;
   }
-  const openPromise = new Promise<IDBDatabase | null>((resolve) => {
+  const openPromise = new Promise<TtsDbOpenResult>((resolve) => {
+    let settled = false;
+    const finish = (result: TtsDbOpenResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (!result.db && cachedDbPromise === openPromise) {
+        cachedDbPromise = null;
+      }
+      resolve(result);
+    };
+    const timer = setTimeout(
+      () => finish({ db: null, error: "INDEXEDDB_TIMEOUT" }),
+      IDB_OP_TIMEOUT_MS,
+    );
     try {
       const req = indexedDB.open(IDB_NAME, IDB_VERSION);
       req.onupgradeneeded = () => {
@@ -193,7 +235,7 @@ function openTtsDb(): Promise<IDBDatabase | null> {
                     metaStore.put({
                       key: rec.key,
                       scope: rec.scope === "COACHING" ? "COACHING" : "CATALOG",
-                      byteSize: rec.byteSize ?? rec.buffer?.byteLength ?? 0,
+                      byteSize: sanitizeByteSize(rec.byteSize, rec.buffer),
                       createdAt: rec.createdAt ?? Date.now(),
                       lastAccessedAt: rec.lastAccessedAt ?? Date.now(),
                     } satisfies StoredTtsMeta);
@@ -209,6 +251,10 @@ function openTtsDb(): Promise<IDBDatabase | null> {
       };
       req.onsuccess = () => {
         const db = req.result;
+        if (settled) {
+          safeCloseDb(db);
+          return;
+        }
         if (isReusableDbHandle(db)) {
           cachedDbInstance = db;
           try {
@@ -229,23 +275,21 @@ function openTtsDb(): Promise<IDBDatabase | null> {
         } else if (cachedDbPromise === openPromise) {
           cachedDbPromise = null;
         }
-        resolve(db);
+        finish({ db, error: null });
       };
-      req.onerror = () => {
-        if (cachedDbPromise === openPromise) {
-          cachedDbPromise = null;
-        }
-        resolve(null);
-      };
+      req.onerror = () => finish({ db: null, error: "INDEXEDDB_OPEN_ERROR" });
+      req.onblocked = () => finish({ db: null, error: "INDEXEDDB_BLOCKED" });
     } catch {
-      if (cachedDbPromise === openPromise) {
-        cachedDbPromise = null;
-      }
-      resolve(null);
+      finish({ db: null, error: "INDEXEDDB_OPEN_ERROR" });
     }
   });
   cachedDbPromise = openPromise;
   return openPromise;
+}
+
+async function openTtsDb(): Promise<IDBDatabase | null> {
+  const { db } = await openTtsDbWithReason();
+  return db;
 }
 
 function safeCloseDb(db: IDBDatabase): void {
@@ -464,7 +508,7 @@ async function putStoredTtsEntry(input: {
           const retained: StoredTtsMeta[] = [];
           for (const item of existing) {
             if (item.key === input.key) continue;
-            totalBytes += item.byteSize;
+            totalBytes += sanitizeByteSize(item.byteSize);
             retained.push(item);
           }
           retained.sort((a, b) => a.lastAccessedAt - b.lastAccessedAt);
@@ -474,7 +518,10 @@ async function putStoredTtsEntry(input: {
           ) {
             const evicted = retained.shift();
             if (evicted) {
-              totalBytes = Math.max(0, totalBytes - evicted.byteSize);
+              totalBytes = Math.max(
+                0,
+                totalBytes - sanitizeByteSize(evicted.byteSize),
+              );
               store.delete(evicted.key);
               metaStore?.delete(evicted.key);
             }
@@ -688,53 +735,96 @@ export async function putCachedPhonicsTts(input: {
 }
 
 export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
+  const unavailableStats = (error: string): BrowserTtsCacheStats => ({
+    supported: false,
+    entryCount: 0,
+    usedBytes: 0,
+    quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
+    hits: cacheHits,
+    misses: cacheMisses,
+    error,
+  });
+
   if (typeof indexedDB === "undefined") {
-    return {
-      supported: false,
-      entryCount: 0,
-      usedBytes: 0,
-      quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
-      hits: cacheHits,
-      misses: cacheMisses,
-    };
+    return unavailableStats("INDEXEDDB_UNAVAILABLE");
   }
-  const db = await openTtsDb();
+  const { db, error: openError } = await openTtsDbWithReason();
   if (!db) {
-    return {
-      supported: false,
-      entryCount: 0,
-      usedBytes: 0,
-      quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
-      hits: cacheHits,
-      misses: cacheMisses,
-    };
+    return unavailableStats(openError ?? "INDEXEDDB_OPEN_ERROR");
   }
   return new Promise((resolve) => {
     let settled = false;
-    const emptyStats = (): BrowserTtsCacheStats => ({
-      supported: true,
-      entryCount: 0,
-      usedBytes: 0,
-      quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
-      hits: cacheHits,
-      misses: cacheMisses,
-    });
     const finish = (stats: BrowserTtsCacheStats) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       releaseDbHandle(db);
       resolve(stats);
     };
+    const timer = setTimeout(
+      () => finish(unavailableStats("INDEXEDDB_TIMEOUT")),
+      IDB_OP_TIMEOUT_MS,
+    );
     try {
-      const hasMetaStore = db.objectStoreNames.contains(IDB_META_STORE);
-      const targetStore = hasMetaStore ? IDB_META_STORE : IDB_STORE;
+      const targetStore = db.objectStoreNames.contains(IDB_META_STORE)
+        ? IDB_META_STORE
+        : IDB_STORE;
+      if (!db.objectStoreNames.contains(targetStore)) {
+        finish({
+          supported: true,
+          entryCount: 0,
+          usedBytes: 0,
+          quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
+          hits: cacheHits,
+          misses: cacheMisses,
+          error: null,
+        });
+        return;
+      }
       const tx = db.transaction(targetStore, "readonly");
-      const objStore = tx.objectStore(targetStore);
-      readAllMetaFromStore(
-        objStore,
-        hasMetaStore ? objStore : null,
-        (items) => {
-          const usedBytes = items.reduce((sum, item) => sum + item.byteSize, 0);
+      tx.onerror = () =>
+        finish(unavailableStats("INDEXEDDB_TRANSACTION_ERROR"));
+      tx.onabort = () =>
+        finish(unavailableStats("INDEXEDDB_TRANSACTION_ABORTED"));
+      const objectStore = tx.objectStore(targetStore);
+      if (typeof objectStore.openCursor === "function") {
+        let entryCount = 0;
+        let usedBytes = 0;
+        const cursorReq = objectStore.openCursor();
+        cursorReq.onsuccess = () => {
+          const cursor = cursorReq.result;
+          if (!cursor) {
+            finish({
+              supported: true,
+              entryCount,
+              usedBytes,
+              quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
+              hits: cacheHits,
+              misses: cacheMisses,
+              error: null,
+            });
+            return;
+          }
+          const rec = cursor.value as
+            { byteSize?: unknown; buffer?: ArrayBuffer | null } | undefined;
+          entryCount += 1;
+          usedBytes += sanitizeByteSize(rec?.byteSize, rec?.buffer);
+          cursor.continue();
+        };
+        cursorReq.onerror = () =>
+          finish(unavailableStats("INDEXEDDB_CURSOR_ERROR"));
+      } else {
+        const req = objectStore.getAll();
+        req.onsuccess = () => {
+          const items =
+            (req.result as Array<{
+              byteSize?: unknown;
+              buffer?: ArrayBuffer | null;
+            }>) ?? [];
+          let usedBytes = 0;
+          for (const item of items) {
+            usedBytes += sanitizeByteSize(item?.byteSize, item?.buffer);
+          }
           finish({
             supported: true,
             entryCount: items.length,
@@ -742,19 +832,18 @@ export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
             quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
             hits: cacheHits,
             misses: cacheMisses,
+            error: null,
           });
-        },
-        () => finish(emptyStats()),
-      );
-      tx.onerror = () => finish(emptyStats());
-      tx.onabort = () => finish(emptyStats());
+        };
+        req.onerror = () => finish(unavailableStats("INDEXEDDB_READ_ERROR"));
+      }
     } catch {
-      finish(emptyStats());
+      finish(unavailableStats("INDEXEDDB_TRANSACTION_ERROR"));
     }
   });
 }
 
-export async function clearBrowserTtsCacheForTests(): Promise<void> {
+export async function clearBrowserTtsCache(): Promise<boolean> {
   cacheHits = 0;
   cacheMisses = 0;
   if (metaTouchTimer !== null) {
@@ -762,33 +851,45 @@ export async function clearBrowserTtsCacheForTests(): Promise<void> {
     metaTouchTimer = null;
   }
   pendingMetaTouches.clear();
-  const db = await openTtsDb();
+  if (typeof indexedDB === "undefined") {
+    resetCachedDbHandle();
+    return false;
+  }
+  const { db } = await openTtsDbWithReason();
   if (!db) {
     resetCachedDbHandle();
-    return;
+    return false;
   }
-  await new Promise<void>((resolve) => {
+  return new Promise<boolean>((resolve) => {
     let settled = false;
-    const finish = () => {
+    const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       safeCloseDb(db);
       resetCachedDbHandle();
-      resolve();
+      resolve(ok);
     };
+    const timer = setTimeout(() => finish(false), IDB_OP_TIMEOUT_MS);
     try {
       const hasMetaStore = db.objectStoreNames.contains(IDB_META_STORE);
       const stores = hasMetaStore ? [IDB_STORE, IDB_META_STORE] : [IDB_STORE];
       const tx = db.transaction(stores, "readwrite");
-      tx.objectStore(IDB_STORE).clear();
+      tx.oncomplete = () => finish(true);
+      tx.onerror = () => finish(false);
+      tx.onabort = () => finish(false);
+      const clearEntriesReq = tx.objectStore(IDB_STORE).clear();
+      clearEntriesReq.onerror = () => finish(false);
       if (hasMetaStore) {
-        tx.objectStore(IDB_META_STORE).clear();
+        const clearMetaReq = tx.objectStore(IDB_META_STORE).clear();
+        clearMetaReq.onerror = () => finish(false);
       }
-      tx.oncomplete = finish;
-      tx.onerror = finish;
-      tx.onabort = finish;
     } catch {
-      finish();
+      finish(false);
     }
   });
+}
+
+export async function clearBrowserTtsCacheForTests(): Promise<void> {
+  await clearBrowserTtsCache();
 }

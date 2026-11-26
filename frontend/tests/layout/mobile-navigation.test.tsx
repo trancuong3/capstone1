@@ -330,5 +330,7 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     ).toHaveAttribute("href", "/admin/health");
     expect(screen.getByRole("contentinfo").className).toContain("hidden");
     expect(screen.getByRole("contentinfo").className).toContain("lg:block");
+    expect(mobileNav.className).toContain("lg:hidden");
+    expect(mobileNav.className).not.toContain("xl:hidden");
   });
 });

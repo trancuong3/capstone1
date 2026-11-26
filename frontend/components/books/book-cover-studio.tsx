@@ -26,6 +26,7 @@ import {
   createBookAssetsService,
   type BookAssetsService,
 } from "@/lib/api/book-assets-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { cn } from "@/lib/utils/cn";
@@ -230,6 +231,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(saved);
+      emitStudioTasksChanged();
       clearStagedFile();
       setNotice({
         tone: "info",
@@ -269,6 +271,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(null);
+      emitStudioTasksChanged();
       setNotice({
         tone: "info",
         title: "Đã gỡ ảnh bìa",
@@ -292,6 +295,7 @@ export function BookCoverStudio({
       const res = await service.generateAiCover(bookId, {
         prompt_hint: aiPromptHint.trim() || null,
       });
+      emitStudioTasksChanged();
       if (res.status === "SUCCEEDED" && res.cover) {
         setSummary((prev) =>
           prev
@@ -317,7 +321,11 @@ export function BookCoverStudio({
               ? "Tạm hết hạn mức tạo ảnh AI"
               : res.status === "SUPERSEDED_BY_USER_UPLOAD"
                 ? "Đang giữ ảnh bìa người dùng tải lên"
-                : "Chưa có nhà cung cấp tạo ảnh AI",
+                : res.status === "REJECTED_CONTAINS_TEXT"
+                  ? "Ảnh bìa AI bị chặn do phát hiện ký tự"
+                  : res.status === "QUEUED"
+                    ? "Đã xếp hàng tạo bìa AI"
+                    : "Chưa có nhà cung cấp tạo ảnh AI",
           message: res.message_vi,
         });
       }

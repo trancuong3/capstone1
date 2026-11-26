@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import datetime
 from typing import Literal
@@ -333,6 +334,17 @@ async def ai_correct_page_text(
     )
 
 
+async def _sync_admin_ocr_job_to_db(job: AdminOcrCorrectionJob) -> None:
+    """Best-effort durable status sync using an isolated DB session (never touches request session)."""
+    try:
+        from app.database.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as bg_db:
+            await admin_ocr_correction_jobs.persist_job_mirror(bg_db, job)
+    except Exception:
+        logger.debug("admin_ocr_job_bg_mirror_skipped job_id=%s", job.job_id)
+
+
 @router.post(
     "/admin/pages/{page_id}/ai-correct/jobs",
     response_model=AdminOcrAiCorrectionJobRead,
@@ -348,6 +360,12 @@ async def start_ai_correct_page_job(
     prepared = await service.prepare_ai_correction(
         actor_id, page_id, payload.draft_text, payload.words
     )
+    book_id, durable_supported = (
+        await admin_ocr_correction_jobs.resolve_page_book_id_with_support(db, page_id)
+    )
+    input_hash = hashlib.sha256(
+        f"admin-ai-correct:{page_id}:{payload.draft_text}".encode("utf-8")
+    ).hexdigest()
 
     async def run_correction(on_progress):
         return await AdminOcrService.run_prepared_ai_correction(
@@ -361,6 +379,9 @@ async def start_ai_correct_page_job(
             total_chunks=prepared.total_chunks,
             operation=run_correction,
             idempotency_key=payload.idempotency_key,
+            book_id=book_id,
+            input_hash=input_hash,
+            durable_sync=_sync_admin_ocr_job_to_db if durable_supported else None,
         )
     except OcrCorrectionQueueFull as exc:
         raise HTTPException(
@@ -368,6 +389,8 @@ async def start_ai_correct_page_job(
             detail="AI OCR đang xử lý quá nhiều yêu cầu. Hãy đợi tác vụ hiện tại hoàn tất rồi thử lại.",
             headers={"Retry-After": "5"},
         ) from exc
+    if durable_supported:
+        await admin_ocr_correction_jobs.persist_job_mirror(db, job)
     return _job_read(job)
 
 
@@ -382,7 +405,7 @@ async def get_ai_correct_page_job(
     db: AsyncSession = Depends(get_db),
 ):
     await AdminOcrService(db).require_admin(actor_id)
-    job = admin_ocr_correction_jobs.get(job_id, actor_id, page_id)
+    job = await admin_ocr_correction_jobs.get_durable(db, job_id, actor_id, page_id)
     if job is None:
         raise HTTPException(status_code=404, detail="AI OCR job not found")
     return _job_read(job)
@@ -399,7 +422,7 @@ async def cancel_ai_correct_page_job(
     db: AsyncSession = Depends(get_db),
 ):
     await AdminOcrService(db).require_admin(actor_id)
-    job = admin_ocr_correction_jobs.cancel(job_id, actor_id, page_id)
+    job = await admin_ocr_correction_jobs.cancel_durable(db, job_id, actor_id, page_id)
     if job is None:
         raise HTTPException(status_code=404, detail="AI OCR job not found")
     return _job_read(job)

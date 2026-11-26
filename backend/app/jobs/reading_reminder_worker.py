@@ -274,19 +274,25 @@ async def deliver_claimed_occurrences(
 
 async def process_due_reminders_once(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
-    async with _advisory_lock_guard(READING_REMINDER_ADVISORY_LOCK_KEY) as acquired:
-        if not acquired:
-            logger.info("reading_reminder_skipped_lock_held")
-            return 0
-        async with AsyncSessionLocal() as session:
-            repository = ReadingManagementRepository(session)
-            await repository.create_due_occurrences_for_worker(now)
-            claims = await repository.claim_due_email_occurrences(
-                now, max_attempts=READING_REMINDER_MAX_ATTEMPTS
-            )
-            delivered = await deliver_claimed_occurrences(repository, claims, now)
-        record_worker_success(_WORKER_KEY)
-        return delivered
+    try:
+        async with _advisory_lock_guard(READING_REMINDER_ADVISORY_LOCK_KEY) as acquired:
+            if not acquired:
+                logger.info("reading_reminder_skipped_lock_held")
+                return 0
+            async with AsyncSessionLocal() as session:
+                repository = ReadingManagementRepository(session)
+                await repository.create_due_occurrences_for_worker(now)
+                claims = await repository.claim_due_email_occurrences(
+                    now, max_attempts=READING_REMINDER_MAX_ATTEMPTS
+                )
+                delivered = await deliver_claimed_occurrences(repository, claims, now)
+            record_worker_success(_WORKER_KEY)
+            return delivered
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        record_worker_error(_WORKER_KEY, error)
+        raise
 
 
 def validate_worker_configuration() -> None:

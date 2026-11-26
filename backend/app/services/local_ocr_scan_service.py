@@ -33,6 +33,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import OcrInferenceJob
 from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
 from app.schemas.reading import (
+    LocalOcrPageScanJobListRead,
     LocalOcrPageScanJobRead,
     LocalOcrPageScanRead,
     LocalOcrProvenanceRead,
@@ -758,6 +759,7 @@ class LocalOcrScanService:
         *,
         worker_online: bool,
         request_id: str,
+        queue_position: int | None = None,
     ) -> LocalOcrPageScanJobRead:
         now_fallback = datetime.now(timezone.utc)
         created_at = job.CreatedAt or now_fallback
@@ -765,6 +767,12 @@ class LocalOcrScanService:
         proc_meta = dict(job.ProcessingMeta or {})
         effective_req_id = str(proc_meta.get("request_id") or request_id or "")
         effective_idem = self._parse_optional_uuid(proc_meta.get("idempotency_key"))
+        raw_file_name = proc_meta.get("file_name")
+        file_name = (
+            str(raw_file_name).strip()[:180]
+            if isinstance(raw_file_name, str) and raw_file_name.strip()
+            else None
+        )
         result_dto: LocalOcrPageScanRead | None = None
         error_code = job.ErrorCode
         error_message = job.ErrorMessage
@@ -805,6 +813,8 @@ class LocalOcrScanService:
             worker_online=worker_online,
             created_at=created_at,
             updated_at=updated_at,
+            file_name=file_name,
+            queue_position=queue_position if job_status in ("QUEUED", "FAILED_RETRYABLE") else None,
             error_code=error_code,
             error_message=error_message,
             result=result_dto,
@@ -865,11 +875,13 @@ class LocalOcrScanService:
         await self._release_db_read_txn()
         scan_req_id = uuid4()
         storage_path = f"local-scans/{actor_id}/{scan_req_id}.jpg"
+        upload_file_name = (getattr(file, "filename", None) or "").strip()[:180] or None
         proc_meta: dict[str, Any] = {
             "request_id": request_id,
             "child_id": str(child_id) if child_id else None,
             "idempotency_key": str(effective_idem_uuid) if effective_idem_uuid else None,
-            "temp_image_ttl_hours": 24,
+            "file_name": upload_file_name,
+            "temp_image_ttl_hours": 72,
         }
 
         if not is_remote_ocr_mode():
@@ -1011,8 +1023,84 @@ class LocalOcrScanService:
             except Exception:
                 pass
 
+        queue_position: int | None = None
+        if job.Status in ("QUEUED", "FAILED_RETRYABLE"):
+            positions = await self._safe_queue_positions(job_service, [job.Id])
+            queue_position = positions.get(job.Id)
+
         return await self._serialize_scan_job(
-            job, worker_online=worker_online, request_id=request_id
+            job,
+            worker_online=worker_online,
+            request_id=request_id,
+            queue_position=queue_position,
+        )
+
+    @staticmethod
+    async def _safe_queue_positions(
+        job_service: OcrInferenceJobService,
+        job_ids: list[UUID],
+    ) -> dict[UUID, int]:
+        if not job_ids:
+            return {}
+        get_positions = getattr(job_service.repo, "get_queue_positions", None)
+        if not callable(get_positions):
+            return {}
+        return await get_positions(job_ids)
+
+    async def list_scan_page_jobs(
+        self,
+        actor_id: UUID,
+        *,
+        request_id: str,
+        active_only: bool = True,
+        limit: int = 10,
+    ) -> LocalOcrPageScanJobListRead:
+        """List authenticated parent's own queued/recent page scan OCR jobs (survives reloads)."""
+        role = await self.repository.profile_role(actor_id)
+        if role != "parent":
+            raise HTTPException(status_code=403, detail="Parent access required")
+
+        job_service = OcrInferenceJobService(self.repository.db)
+        rows = await job_service.repo.list_local_scans_for_owner(
+            actor_id,
+            active_only=active_only,
+            limit=limit,
+        )
+        queued_ids = [row.Id for row in rows if row.Status in ("QUEUED", "FAILED_RETRYABLE")]
+        positions = await self._safe_queue_positions(job_service, queued_ids)
+        first_queued = next(
+            (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
+            None,
+        )
+        if first_queued is not None:
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=first_queued.Id,
+                created_at=first_queued.CreatedAt,
+                reason="local_scan_list_nudge",
+            )
+
+        serialized_jobs: list[LocalOcrPageScanJobRead] = []
+        for row in rows:
+            serialized_jobs.append(
+                await self._serialize_scan_job(
+                    row,
+                    worker_online=False,
+                    request_id=request_id,
+                    queue_position=positions.get(row.Id),
+                )
+            )
+        await self._release_db_read_txn()
+        worker_online = await job_service.has_online_worker()
+        return LocalOcrPageScanJobListRead(
+            worker_online=worker_online,
+            jobs=[
+                item.model_copy(update={"worker_online": worker_online})
+                for item in serialized_jobs
+            ],
         )
 
     async def get_scan_page_job(
@@ -1054,8 +1142,16 @@ class LocalOcrScanService:
                 await self.repository.db.rollback()
                 job = await job_service.repo.get(job_id) or job
 
+        queue_position: int | None = None
+        if job.Status in ("QUEUED", "FAILED_RETRYABLE"):
+            positions = await self._safe_queue_positions(job_service, [job.Id])
+            queue_position = positions.get(job.Id)
+
         serialized = await self._serialize_scan_job(
-            job, worker_online=False, request_id=request_id
+            job,
+            worker_online=False,
+            request_id=request_id,
+            queue_position=queue_position,
         )
         if not (
             getattr(self.repository.db, "new", None)
@@ -1114,7 +1210,11 @@ async def cleanup_expired_local_scan_objects(
     limit: int = 100,
     db: Any | None = None,
 ) -> int:
-    """Sweep temporary `local-scans/` objects in private Storage older than max_age_hours."""
+    """Sweep temporary `local-scans/` objects in private Storage for terminal jobs older than max_age_hours.
+
+    Active/queued jobs (`QUEUED`, `CLAIMED`, `RUNNING`, `FAILED_RETRYABLE`) are NEVER cleaned up
+    while waiting for the remote OCR worker (even when the laptop worker is turned off for 24-72+ hours).
+    """
     from sqlalchemy import select
     from app.database.session import AsyncSessionLocal
 
@@ -1128,6 +1228,7 @@ async def cleanup_expired_local_scan_objects(
             select(OcrInferenceJob)
             .where(
                 OcrInferenceJob.JobKind == JOB_KIND_LOCAL_SCAN,
+                OcrInferenceJob.Status.in_(("SUCCEEDED", "DEAD_LETTER", "CANCELLED")),
                 OcrInferenceJob.CreatedAt <= cutoff,
             )
             .order_by(OcrInferenceJob.CreatedAt.asc())

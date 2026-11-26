@@ -16,6 +16,8 @@ const adminBookDtoSchema = z.object({
   min_grade: z.number().int(),
   max_grade: z.number().int(),
   lifecycle_status: z.enum(["ACTIVE", "RETIRED"]),
+  cover_url: z.string().nullable().optional(),
+  cover_source_type: z.string().nullable().optional(),
 });
 const adminBookSoftDeleteSchema = z.object({
   book_id: z.guid(),

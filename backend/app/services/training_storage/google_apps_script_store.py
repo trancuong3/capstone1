@@ -177,6 +177,10 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         self._lock = threading.Lock()
         self._root_folder_id: str | None = root_folder_id
         self._subfolder_ids: dict[str, str] = {str(k): str(v) for k, v in (subfolder_ids or {}).items() if v}
+        self._quota_cache_ttl_seconds = 45.0
+        self._quota_cache_safe_floor_bytes = 500 * 1024 * 1024
+        self._cached_quota: StorageQuotaStatus | None = None
+        self._cached_quota_at: float = 0.0
 
     def _get_session(self) -> requests.Session:
         if self._provided_session is not None:
@@ -287,27 +291,33 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 )
 
             try:
-                parsed = json.loads(raw_text)
-            except ValueError as exc:
-                raise DriveTransientError(
-                    "Apps Script Drive bridge returned invalid JSON payload",
-                    code="DRIVE_BRIDGE_INVALID_RESPONSE",
-                    http_status=502,
-                ) from exc
+                try:
+                    parsed = json.loads(raw_text)
+                except ValueError as exc:
+                    raise DriveTransientError(
+                        "Apps Script Drive bridge returned invalid JSON payload",
+                        code="DRIVE_BRIDGE_INVALID_RESPONSE",
+                        http_status=502,
+                    ) from exc
 
-            if not isinstance(parsed, dict):
-                raise DriveTransientError(
-                    "Apps Script Drive bridge returned unexpected payload type",
-                    code="DRIVE_BRIDGE_INVALID_RESPONSE",
-                    http_status=502,
-                )
+                if not isinstance(parsed, dict):
+                    raise DriveTransientError(
+                        "Apps Script Drive bridge returned unexpected payload type",
+                        code="DRIVE_BRIDGE_INVALID_RESPONSE",
+                        http_status=502,
+                    )
 
-            if not parsed.get("ok"):
-                self._raise_for_bridge_error(
-                    str(parsed.get("error_code") or "DRIVE_BRIDGE_ERROR"),
-                    str(parsed.get("message") or "Google Apps Script Drive bridge rejected request"),
-                )
-            return parsed
+                if not parsed.get("ok"):
+                    self._raise_for_bridge_error(
+                        str(parsed.get("error_code") or "DRIVE_BRIDGE_ERROR"),
+                        str(parsed.get("message") or "Google Apps Script Drive bridge rejected request"),
+                    )
+                return parsed
+            except DriveTransientError:
+                if attempt < self._max_retries:
+                    self._sleep(self._compute_backoff(attempt))
+                    continue
+                raise
 
         raise DriveTransientError("Google Apps Script Drive bridge request exhausted retries")
 
@@ -368,15 +378,74 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         )
 
     def _assert_quota_for_upload(self, incoming_bytes: int) -> StorageQuotaStatus:
-        quota = self.quota_check(incoming_bytes=incoming_bytes)
+        upload_bytes = max(0, int(incoming_bytes))
+        now = time.monotonic()
+        with self._lock:
+            cached = self._cached_quota
+            if (
+                cached is not None
+                and (now - self._cached_quota_at) <= self._quota_cache_ttl_seconds
+                and cached.can_accept_upload
+                and cached.available_bytes is not None
+            ):
+                safe_floor = max(self._quota_cache_safe_floor_bytes, self._min_free_buffer_bytes * 2)
+                remaining_after = cached.available_bytes - upload_bytes
+                budget_ok = (
+                    self._max_training_budget_bytes is None
+                    or cached.usage_in_drive_bytes is None
+                    or (cached.usage_in_drive_bytes + upload_bytes) <= self._max_training_budget_bytes
+                )
+                if remaining_after > safe_floor and budget_ok:
+                    updated = replace(
+                        cached,
+                        available_bytes=remaining_after,
+                        usage_bytes=(
+                            (cached.usage_bytes + upload_bytes)
+                            if cached.usage_bytes is not None
+                            else None
+                        ),
+                        usage_in_drive_bytes=(
+                            (cached.usage_in_drive_bytes + upload_bytes)
+                            if cached.usage_in_drive_bytes is not None
+                            else None
+                        ),
+                    )
+                    self._cached_quota = updated
+                    return updated
+
+        quota = self.quota_check(incoming_bytes=upload_bytes)
         if not quota.can_accept_upload:
+            with self._lock:
+                self._cached_quota = None
+                self._cached_quota_at = 0.0
             raise DriveQuotaExceededError(
                 quota.detail or "Google Drive free storage quota would be exceeded; upload halted safely",
-                required_bytes=incoming_bytes + self._min_free_buffer_bytes,
+                required_bytes=upload_bytes + self._min_free_buffer_bytes,
                 available_bytes=quota.available_bytes,
                 limit_bytes=quota.limit_bytes,
                 usage_bytes=quota.usage_bytes,
             )
+        with self._lock:
+            safe_floor = max(self._quota_cache_safe_floor_bytes, self._min_free_buffer_bytes * 2)
+            if quota.available_bytes is not None and (quota.available_bytes - upload_bytes) > safe_floor:
+                self._cached_quota = replace(
+                    quota,
+                    available_bytes=max(0, quota.available_bytes - upload_bytes),
+                    usage_bytes=(
+                        (quota.usage_bytes + upload_bytes)
+                        if quota.usage_bytes is not None
+                        else None
+                    ),
+                    usage_in_drive_bytes=(
+                        (quota.usage_in_drive_bytes + upload_bytes)
+                        if quota.usage_in_drive_bytes is not None
+                        else None
+                    ),
+                )
+                self._cached_quota_at = time.monotonic()
+            else:
+                self._cached_quota = None
+                self._cached_quota_at = 0.0
         return quota
 
     def _prepare_upload_stream(

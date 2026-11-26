@@ -2,9 +2,10 @@
 
 import { ArrowLeft, CircleHelp, Volume2 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ChildProfileDTO } from "@/types/child";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
@@ -94,6 +95,8 @@ interface ReadingLayoutProps {
   assistedWordIds?: ReadonlySet<string>;
   companionBubble?: CompanionBubbleState | null;
   isCompanionSpeaking?: boolean;
+  readingMode?: ReadingDisplayMode | null;
+  onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
   topBar?: ReactNode;
 }
@@ -156,12 +159,24 @@ export function ReadingLayout({
   assistedWordIds,
   companionBubble = null,
   isCompanionSpeaking = false,
+  readingMode,
+  onReadingModeChange,
   previewSnapshot,
   topBar,
 }: ReadingLayoutProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tc = useTranslations("child");
+  const [internalReadingMode, setInternalReadingMode] =
+    useState<ReadingDisplayMode | null>(null);
+  const activeReadingMode =
+    readingMode !== undefined ? readingMode : internalReadingMode;
+  const handleReadingModeChange = onReadingModeChange ?? setInternalReadingMode;
+  const pageHasVerifiedIllustration =
+    Boolean(page.illustration_url) && page.illustration_text_free === true;
+  const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
+    activeReadingMode ??
+    (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
@@ -259,12 +274,11 @@ export function ReadingLayout({
       >
         <BookPageViewer
           title={bookTitle}
-          illustrationUrl={page.illustration_url || undefined}
-          illustrationTextFree={
-            page.illustration_url
-              ? Boolean(page.illustration_text_free)
-              : undefined
-          }
+          illustrationUrl={page.illustration_url ?? null}
+          illustrationTextFree={pageHasVerifiedIllustration}
+          initialReadingMode={resolvedInitialReadingMode}
+          readingMode={activeReadingMode}
+          onReadingModeChange={handleReadingModeChange}
           illustration={
             book && (
               <BookCover

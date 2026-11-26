@@ -321,7 +321,7 @@
     "overviewAria": "Quick status overview",
     "overviewChipTitle": "Source page {page}: {status}",
     "workerFailuresSummary": "{count} pages encountered OCR/AI errors (the service may be busy or temporarily offline). Pages that are ready or pending Admin review are unaffected — click \"Retry check\" on the specific error pages.",
-    "windowsOcrQueueWaiting": "Waiting for Windows OCR server (safe queue — {count} pages saved and will be processed automatically once the server is active).",
+    "windowsOcrQueueWaiting": "Saved in the OCR queue ({count} pages) — Waiting for the OCR server to come back online. Recognition will start automatically once it reconnects.",
     "ocrRunningStatus": "OCR processing {running} pages",
     "ocrQueuedSuffix": " ({count} pages queued)",
     "ocrOtherPagesStillVisible": ". Completed pages remain visible for immediate action.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "Cancelled pending upload.",
     "cancelSubmissionErrorFallback": "Cannot cancel this page.",
     "pageNumberHeading": "Page {page}",
-    "pageItemLabel": "pages"
+    "pageItemLabel": "pages",
+    "workerOfflineUploadNotice": "The OCR server is temporarily offline — You can still upload images or PDF/DOCX files to save them in the queue; recognition will start automatically when the server comes back online.",
+    "queuedWaitingWorkerBadge": "Saved in OCR queue — Waiting for OCR server",
+    "queuedWaitingWorkerShort": "Saved in OCR queue — Auto-recognizes when server reconnects",
+    "reasonQueuedOffline": "This page is safely saved in the OCR queue and will be recognized automatically once the OCR server comes back online."
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead OCR for {title}",

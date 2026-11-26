@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 
 import { AdminBookEditorScreen } from "@/components/admin/admin-book-editor-screen";
-import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { getServerI18n } from "@/lib/i18n/server";
 import { viMessages } from "@/messages/vi";
@@ -28,14 +27,12 @@ export default async function Page({
   const { bookId } = await params;
   const query = await searchParams;
   return (
-    <AdminServicesProvider>
-      <AdminBookEditorScreen
-        bookId={bookId}
-        issue={query.issue}
-        returnTo={
-          query.returnTo === "metadata-quality" ? "metadata-quality" : "detail"
-        }
-      />
-    </AdminServicesProvider>
+    <AdminBookEditorScreen
+      bookId={bookId}
+      issue={query.issue}
+      returnTo={
+        query.returnTo === "metadata-quality" ? "metadata-quality" : "detail"
+      }
+    />
   );
 }

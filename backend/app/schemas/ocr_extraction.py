@@ -306,6 +306,7 @@ class AnalyzeBlocksRequest(BaseModel):
     boundary: DocumentBoundaryResult | None = None
     target_spread_side: Literal["LEFT", "RIGHT"] | None = None
     semantic_ai_json: str | dict[str, Any] | None = None
+    run_semantic_ai: bool = False
 
 
 class PageExtractRequest(BaseModel):
@@ -319,6 +320,23 @@ class PageExtractRequest(BaseModel):
     include_cross_page: bool = True
     boundary: DocumentBoundaryResult | None = None
     semantic_ai_json: str | dict[str, Any] | None = None
+    run_semantic_ai: bool = False
+
+
+class ApplyExtractionToDraftRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_revision_id: UUID | None = None
+
+
+class ApplyExtractionToDraftResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: UUID
+    revision_id: UUID
+    applied_word_count: int = Field(ge=0)
+    canonical_text: str
+    status: Literal["APPLIED"] = "APPLIED"
 
 
 class BlockDecisionUpdateItem(BaseModel):

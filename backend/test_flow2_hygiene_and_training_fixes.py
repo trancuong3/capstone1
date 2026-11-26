@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import hashlib
 import os
 from pathlib import Path
 import sys
@@ -308,6 +309,155 @@ class Flow2RetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(res["status"], "WAITING_FOR_COLAB_WORKER")
             self.assertEqual(res["recovery_mode"], "partial_checkpoint_upload")
             self.assertTrue(db.committed)
+
+
+class Flow2LockedTestCleanIngestAndNonTimeoutTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ensure_locked_test_accepts_clean_ingest_releases_txn_before_io_and_skips_third_pass(self):
+        from app.services import viread_ocr_training_service as training_svc
+        from app.services.training_storage.base import StorageProvider
+        from app.services.training_storage.router import TrainingArtifactStoreRouter
+
+        with tempfile.TemporaryDirectory() as tmp:
+            store = GoogleDriveDesktopStore(root_dir=tmp)
+            router = TrainingArtifactStoreRouter(
+                drive_store_factory=lambda: store,
+                write_provider=StorageProvider.GOOGLE_DRIVE,
+            )
+
+            events: list[str] = []
+            get_calls = 0
+            orig_get = router.get
+            orig_put = router.put
+
+            def spied_get(ref, **kwargs):
+                nonlocal get_calls
+                get_calls += 1
+                events.append("router.get")
+                return orig_get(ref, **kwargs)
+
+            def spied_put(logical_path, data, **kwargs):
+                events.append(f"router.put:{logical_path.split('/', 1)[0]}")
+                return orig_put(logical_path, data, **kwargs)
+
+            router.get = spied_get
+            router.put = spied_put
+
+            samples_src = []
+            for idx, (gid, label) in enumerate([
+                ("kntt-tv4-t1-p019", "Tiếng đàn bầu ngân vang"),
+                ("ctst-tv4-t1-p053", "Cô giáo em hiền hậu"),
+            ]):
+                img = _crisp_line_image(260, 48)
+                for off in range(10, 240, 18):
+                    img.paste((idx * 40, 10, 10), (off, 6, off + 3, 40))
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                raw = buf.getvalue()
+                sha = hashlib.sha256(raw).hexdigest()
+                stored = orig_put(f"verified-samples/{gid}/line-{idx:04d}-{sha[:12]}.png", raw, content_type="image/png", expected_sha256=sha)
+                samples_src.append({
+                    "sample_id": str(uuid4()),
+                    "source_flow": "FLOW1_VERIFIED",
+                    "group_id": gid,
+                    "image_storage_path": stored.reference,
+                    "image_sha256": sha,
+                    "label": label,
+                    "source_page_id": None,
+                    "source_revision_id": None,
+                    "provenance": {
+                        "verified_by_admin": True,
+                        "verification_source": "admin",
+                        "ingest_pipeline": "flow2_clean_ingest_v1",
+                        "rights_basis": "owner_supplied",
+                        "verified_by": "admin:test",
+                    },
+                })
+
+            captured_sql: list[str] = []
+            dataset_id = uuid4()
+            cohort_id = uuid4()
+            locked_version_sha: str | None = None
+
+            class _Repo:
+                async def execute(self, sql, params=None):
+                    sql_norm = " ".join(str(sql).split())
+                    captured_sql.append(sql_norm)
+                    if "pg_advisory_xact_lock" in sql_norm:
+                        events.append("lock")
+                    return _EmptyResult()
+
+                async def one(self, sql, params=None):
+                    nonlocal locked_version_sha
+                    sql_norm = " ".join(str(sql).split())
+                    captured_sql.append(sql_norm)
+                    if "WITH locked_versions AS" in sql_norm:
+                        if locked_version_sha is not None and "router.put:locked-tests" in events:
+                            return {
+                                "version_id": dataset_id,
+                                "manifest_sha256": locked_version_sha,
+                                "sample_count": 2,
+                                "group_count": 2,
+                            }
+                        return None
+                    if "WITH verified_holdout AS" in sql_norm and "FROM safe_holdout" in sql_norm:
+                        return {"sample_count": 2, "group_count": 2}
+                    if "FROM public.viread_ocr_dataset_versions WHERE source_flow=:source_flow" in sql_norm:
+                        return None
+                    if "INSERT INTO public.viread_ocr_dataset_versions" in sql_norm:
+                        locked_version_sha = params["version_sha"]
+                        return {
+                            "id": dataset_id,
+                            "source_flow": "LOCKED_TEST",
+                            "version_sha256": params["version_sha"],
+                            "manifest_storage_path": params["storage_path"],
+                            "sample_count": params["sample_count"],
+                            "is_locked_test": True,
+                        }
+                    if "FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=" in sql_norm:
+                        return None
+                    if "INSERT INTO public.viread_ocr_evaluation_cohorts" in sql_norm:
+                        return {"id": cohort_id, "evaluation_type": "PRODUCTION", "manifest_sha256": params["manifest_sha"], "sample_count": 2, "group_count": 2}
+                    return None
+
+                async def all(self, sql, params=None):
+                    captured_sql.append(" ".join(str(sql).split()))
+                    return list(samples_src)
+
+                async def commit(self):
+                    events.append("commit")
+
+                async def rollback(self):
+                    events.append("rollback")
+
+            svc = training_svc.VireadOcrTrainingService(MagicMock())
+            svc.repo = _Repo()
+            svc._admin = AsyncMock()
+            svc._artifact_router = AsyncMock(return_value=router)
+
+            with (
+                patch.object(training_svc, "MIN_LOCKED_PAIRS", 2),
+                patch.object(training_svc, "MIN_LOCKED_GROUPS", 2),
+                patch.object(training_svc, "ensure_database_capacity", new=AsyncMock(return_value={})),
+            ):
+                res = await svc.ensure_locked_test(uuid4())
+
+            self.assertEqual(res["status"], "READY")
+            self.assertEqual(res["sample_count"], 2)
+            self.assertEqual(res["group_count"], 2)
+            # Clean-ingest holdout predicate & anti-leakage checks present in readiness + creation queries
+            holdout_queries = [q for q in captured_sql if "WITH verified_holdout AS" in q]
+            self.assertGreaterEqual(len(holdout_queries), 2)
+            for q in holdout_queries:
+                self.assertIn("flow2_clean_ingest_v1", q)
+                self.assertIn("rights_basis", q)
+                self.assertIn("verified_by", q)
+                self.assertIn("viread_ocr_outbox", q)
+            # Read txn MUST be released before Drive I/O, and advisory lock ONLY acquired afterward
+            self.assertIn("rollback", events)
+            self.assertLess(events.index("rollback"), events.index("router.get"))
+            self.assertLess(events.index("router.put:locked-tests"), events.index("lock"))
+            # Each source image downloaded ONLY ONCE (register_dataset skipped 3rd-pass re-read)
+            self.assertEqual(get_calls, 2)
 
 
 if __name__ == "__main__":

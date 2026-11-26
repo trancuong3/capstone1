@@ -602,6 +602,22 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         contact_info_status: "available",
         children: state.emptyChildren ? [] : [child],
       });
+    if (path === "/parent-notifications/preferences")
+      return respond(route, {
+        weekly_digest_enabled: true,
+        inactivity_alert_enabled: true,
+        inactivity_days: 5,
+        milestone_enabled: true,
+        digest_weekday: 6,
+        timezone: "Asia/Ho_Chi_Minh",
+        quiet_hours_start: 21,
+        quiet_hours_end: 7,
+        max_emails_per_week: 4,
+        delivery_configured: true,
+        delivery_provider: "resend",
+        updated_at: timestamp,
+      });
+    if (path === "/parent-notifications/history") return respond(route, []);
     if (path === "/profiles/children")
       return respond(route, state.emptyChildren ? [] : [child]);
     if (path === `/profiles/children/${ids.child}`)
@@ -936,8 +952,20 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       path === `/books/admin/catalog/${state.createdBook.id}/pages`
     )
       return respond(route, []);
+    if (
+      state.createdBook &&
+      path === `/books/admin/catalog/${state.createdBook.id}/ocr-jobs`
+    )
+      return respond(route, []);
     if (path === `/books/admin/catalog/${ids.book}`)
       return respond(route, book);
+    if (path === `/books/admin/catalog/${ids.book}/ocr-jobs`)
+      return respond(route, []);
+    if (
+      path === "/reading/scan-page-ocr/jobs" &&
+      route.request().method() === "GET"
+    )
+      return respond(route, { worker_online: true, jobs: [] });
     if (path === `/books/admin/catalog/${ids.book}/pages`)
       return respond(
         route,

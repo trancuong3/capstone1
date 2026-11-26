@@ -6,6 +6,7 @@ import {
   BookOpen,
   CheckCircle2,
   Clock3,
+  FileSearch,
   FileUp,
   Image as ImageIcon,
   Lock,
@@ -15,6 +16,7 @@ import {
   Send,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -28,8 +30,10 @@ import {
   type FormEvent,
 } from "react";
 
+import { SmartOcrBlockReviewLoader } from "@/components/admin/smart-ocr-block-review";
 import { BookCover } from "@/components/books/book-cover";
 import { BookCoverStudio } from "@/components/books/book-cover-studio";
+import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
 import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -41,6 +45,7 @@ import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import {
   fetchOcrWorkerHealth,
   type OcrWorkerHealthSnapshot,
@@ -167,6 +172,7 @@ function describeToolCheckScope(
 function lockReasonForSubmission(
   sub: ParentPageSubmissionDTO,
   t: BooksTranslateFn,
+  ocrWorkerOffline = false,
 ): string | null {
   if (sub.can_add_to_book) return null;
   if (sub.workflow_status === "ADDED_TO_BOOK") {
@@ -176,6 +182,9 @@ function lockReasonForSubmission(
     return t("privateManager.reasonBlocked");
   }
   if (sub.workflow_status === "CHECKING") {
+    if (ocrWorkerOffline && sub.ocr_status === "PENDING") {
+      return t("privateManager.reasonQueuedOffline");
+    }
     return t("privateManager.reasonChecking");
   }
   if (sub.workflow_status === "NEEDS_ADMIN_REVIEW") {
@@ -360,6 +369,10 @@ function ParentPrivateBookManagerContent({
   const [confirmDeletePageId, setConfirmDeletePageId] = useState<string | null>(
     null,
   );
+  const [illustrationStudioPageId, setIllustrationStudioPageId] = useState<
+    string | null
+  >(null);
+  const [smartOcrPageId, setSmartOcrPageId] = useState<string | null>(null);
 
   const loadDetail = useCallback(
     async (silent = false) => {
@@ -437,13 +450,34 @@ function ParentPrivateBookManagerContent({
     workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
   }, [ocrWorkerHealth]);
 
+  // Probe OCR worker health once on book view so parents immediately see reassuring
+  // offline-queue guidance even before uploading new pages.
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    void fetchOcrWorkerHealth(controller.signal)
+      .then((snapshot) => {
+        if (active && snapshot) {
+          lastHealthCheckAtRef.current = Date.now();
+          setOcrWorkerHealth(snapshot);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [bookId]);
+
   useEffect(() => {
     if (!hasCheckingSubmission) return;
     let active = true;
     let timerId: number | null = null;
     let idleTicks = 0;
-    const BASE_POLL_MS = 3_000;
-    const MAX_POLL_MS = 15_000;
+    const ONLINE_BASE_POLL_MS = 3_000;
+    const ONLINE_MAX_POLL_MS = 6_000;
+    const OFFLINE_MIN_POLL_MS = 12_000;
+    const OFFLINE_MAX_POLL_MS = 15_000;
     const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
 
     const clearTimer = () => {
@@ -469,12 +503,14 @@ function ParentPrivateBookManagerContent({
 
     const nextDelayMs = () => {
       const offline = workerOnlineRef.current === false;
-      const step = offline
-        ? Math.min(4, idleTicks + 1)
-        : Math.min(3, idleTicks);
+      if (offline) {
+        // Gentle 12-15s cadence while laptop OCR worker is offline to protect Render DB.
+        return idleTicks <= 1 ? OFFLINE_MIN_POLL_MS : OFFLINE_MAX_POLL_MS;
+      }
+      const step = Math.min(2, idleTicks);
       return Math.min(
-        MAX_POLL_MS,
-        Math.round(BASE_POLL_MS * Math.pow(1.6, step)),
+        ONLINE_MAX_POLL_MS,
+        Math.round(ONLINE_BASE_POLL_MS * Math.pow(1.35, step)),
       );
     };
 
@@ -526,7 +562,11 @@ function ParentPrivateBookManagerContent({
     };
 
     void maybePollWorkerHealth(true);
-    scheduleNext(BASE_POLL_MS);
+    scheduleNext(
+      workerOnlineRef.current === false
+        ? OFFLINE_MIN_POLL_MS
+        : ONLINE_BASE_POLL_MS,
+    );
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibilityChange);
     }
@@ -569,6 +609,7 @@ function ParentPrivateBookManagerContent({
           format: response.source_format,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -626,6 +667,7 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.commitErrorFallback")));
@@ -655,6 +697,7 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -672,6 +715,7 @@ function ParentPrivateBookManagerContent({
     try {
       await service.retrySubmission(bookId, sub.id, "AUTO");
       setActionNotice(t("privateManager.retriedNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.retryErrorFallback")));
@@ -694,6 +738,7 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(t("privateManager.editedSubmissionNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -803,6 +848,7 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -828,6 +874,7 @@ function ParentPrivateBookManagerContent({
           page: page.page_number,
         }),
       );
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -875,6 +922,7 @@ function ParentPrivateBookManagerContent({
         sub.source_note,
       );
       setActionNotice(t("privateManager.replacedSubmissionImageNotice"));
+      emitStudioTasksChanged();
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1111,8 +1159,15 @@ function ParentPrivateBookManagerContent({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-bold text-primary hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+              href="/studio/tasks"
+            >
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              Trung tâm tác vụ
+            </Link>
             <Button
-              className="min-h-10 w-auto px-3 text-xs"
+              className="min-h-11 w-auto px-3 text-xs"
               disabled={isSuspended || busyKey !== null}
               onClick={() => {
                 setShowEditBookForm(false);
@@ -1406,14 +1461,14 @@ function ParentPrivateBookManagerContent({
           </p>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+        <div className="grid min-w-0 gap-4 md:grid-cols-2">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             {t("privateManager.chooseFileLabel")}
             <input
               ref={fileInputRef}
               accept={ACCEPTED_UPLOAD_EXTENSIONS}
               aria-label={t("privateManager.chooseFileAria")}
-              className="block w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:me-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
+              className="block w-full min-w-0 max-w-full cursor-pointer rounded-control border border-dashed border-primary/50 bg-canvas p-3 text-sm text-ink file:me-3 file:rounded-control file:border-0 file:bg-primary file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white hover:file:bg-primary-hover"
               disabled={uploading || isSuspended}
               onChange={(event) => {
                 const file = event.target.files?.[0] ?? null;
@@ -1432,11 +1487,11 @@ function ParentPrivateBookManagerContent({
             ) : null}
           </label>
 
-          <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
+          <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             {t("privateManager.uploadSourceLabel")}
             <select
               aria-label={t("privateManager.uploadSourceAria")}
-              className="min-h-12 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+              className="min-h-12 w-full min-w-0 max-w-full truncate rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
               disabled={uploading || isSuspended}
               onChange={(event) =>
                 setUploadSourceType(event.target.value as SourceUsageType)
@@ -1465,6 +1520,16 @@ function ParentPrivateBookManagerContent({
           />
         </label>
 
+        {ocrWorkerOffline ? (
+          <div
+            className="rounded-control border border-amber-300 bg-amber-50/80 px-3.5 py-2.5 text-xs font-medium text-amber-950"
+            data-testid="private-book-worker-offline-notice"
+            role="status"
+          >
+            {t("privateManager.workerOfflineUploadNotice")}
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center gap-3">
           <Button
             className="sm:w-auto"
@@ -1478,10 +1543,17 @@ function ParentPrivateBookManagerContent({
               : t("privateManager.uploadButton")}
           </Button>
           {hasCheckingSubmission ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
-              <Clock3 aria-hidden="true" className="size-4 animate-spin" />
-              {t("privateManager.autoPollingHint")}
-            </span>
+            ocrWorkerOffline && pendingOcrCount > 0 ? (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-900">
+                <Clock3 aria-hidden="true" className="size-4" />
+                {t("privateManager.queuedWaitingWorkerShort")}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <Clock3 aria-hidden="true" className="size-4 animate-spin" />
+                {t("privateManager.autoPollingHint")}
+              </span>
+            )
           ) : null}
         </div>
       </form>
@@ -1578,9 +1650,17 @@ function ParentPrivateBookManagerContent({
                 className="flex flex-wrap gap-1.5 border-t border-border pt-3"
               >
                 {activeSubmissions.map((sub, index) => {
-                  const chipStyle =
-                    WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                    "border-border bg-canvas text-ink";
+                  const isChipQueuedOffline =
+                    ocrWorkerOffline &&
+                    sub.workflow_status === "CHECKING" &&
+                    sub.ocr_status === "PENDING";
+                  const chipStyle = isChipQueuedOffline
+                    ? "border-amber-300 bg-amber-50 text-amber-950"
+                    : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                      "border-border bg-canvas text-ink");
+                  const chipLabel = isChipQueuedOffline
+                    ? t("privateManager.queuedWaitingWorkerBadge")
+                    : sub.workflow_status_label;
                   return (
                     <button
                       key={`map-${sub.id}`}
@@ -1602,14 +1682,12 @@ function ParentPrivateBookManagerContent({
                       }}
                       title={t("privateManager.overviewChipTitle", {
                         page: sub.source_page_number,
-                        status: sub.workflow_status_label,
+                        status: chipLabel,
                       })}
                       type="button"
                     >
                       <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">
-                        · {sub.workflow_status_label}
-                      </span>
+                      <span className="font-normal">· {chipLabel}</span>
                     </button>
                   );
                 })}
@@ -1666,10 +1744,22 @@ function ParentPrivateBookManagerContent({
             ) : null}
             <div className="flex flex-col gap-4">
               {visibleSubmissions.map((sub) => {
-                const badgeStyle =
-                  WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                  "border-border bg-canvas text-ink";
-                const lockReason = lockReasonForSubmission(sub, t);
+                const isQueuedOffline =
+                  ocrWorkerOffline &&
+                  sub.workflow_status === "CHECKING" &&
+                  sub.ocr_status === "PENDING";
+                const badgeStyle = isQueuedOffline
+                  ? "border-amber-300 bg-amber-50 text-amber-950"
+                  : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                    "border-border bg-canvas text-ink");
+                const badgeLabel = isQueuedOffline
+                  ? t("privateManager.queuedWaitingWorkerBadge")
+                  : sub.workflow_status_label;
+                const lockReason = lockReasonForSubmission(
+                  sub,
+                  t,
+                  ocrWorkerOffline,
+                );
                 const isEditing = editingSubId === sub.id;
                 const isReviewFormOpen = reviewFormSubId === sub.id;
                 const isSubBusy =
@@ -1726,8 +1816,13 @@ function ParentPrivateBookManagerContent({
                           <div className="flex flex-wrap items-center gap-2">
                             <span
                               className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${badgeStyle}`}
+                              data-testid={
+                                isQueuedOffline
+                                  ? "submission-queued-offline-badge"
+                                  : undefined
+                              }
                             >
-                              {sub.workflow_status_label}
+                              {badgeLabel}
                             </span>
                             {sub.is_image_only ? (
                               <span className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950">
@@ -2309,6 +2404,9 @@ function ParentPrivateBookManagerContent({
               {visibleCommittedPages.map((page) => {
                 const isEditingPage = editingPageId === page.page_id;
                 const isConfirmingDelete = confirmDeletePageId === page.page_id;
+                const isIllustrationStudioOpen =
+                  illustrationStudioPageId === page.page_id;
+                const isSmartOcrOpen = smartOcrPageId === page.page_id;
                 const isPageBusy =
                   busyKey !== null && busyKey.endsWith(`:${page.page_id}`);
                 return (
@@ -2393,6 +2491,38 @@ function ParentPrivateBookManagerContent({
                         </>
                       ) : null}
                       <button
+                        aria-label={`Mở tranh minh họa trang ${page.page_number}`}
+                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-primary/30 bg-sky/50 px-2.5 text-xs font-semibold text-primary-hover hover:bg-sky disabled:opacity-50"
+                        disabled={isSuspended || isPageBusy || busyKey !== null}
+                        onClick={() => {
+                          setSmartOcrPageId(null);
+                          setIllustrationStudioPageId((prev) =>
+                            prev === page.page_id ? null : page.page_id,
+                          );
+                        }}
+                        type="button"
+                      >
+                        <ImageIcon aria-hidden="true" className="size-3.5" />
+                        {isIllustrationStudioOpen
+                          ? "Đóng minh họa"
+                          : "Minh họa trang"}
+                      </button>
+                      <button
+                        aria-label={`Xem khối chữ OCR trang ${page.page_number}`}
+                        className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas disabled:opacity-50"
+                        disabled={isPageBusy || busyKey !== null}
+                        onClick={() => {
+                          setIllustrationStudioPageId(null);
+                          setSmartOcrPageId((prev) =>
+                            prev === page.page_id ? null : page.page_id,
+                          );
+                        }}
+                        type="button"
+                      >
+                        <FileSearch aria-hidden="true" className="size-3.5" />
+                        {isSmartOcrOpen ? "Đóng khối OCR" : "Khối chữ OCR"}
+                      </button>
+                      <button
                         aria-label={t(
                           "privateManager.deleteCommittedPageAria",
                           { page: page.page_number },
@@ -2411,6 +2541,34 @@ function ParentPrivateBookManagerContent({
                         {t("privateManager.deletePageAction")}
                       </button>
                     </div>
+
+                    {isIllustrationStudioOpen ? (
+                      <div className="pt-1">
+                        <PageIllustrationStudio
+                          actorRole="parent"
+                          autoLoad
+                          bookId={book.id}
+                          canonicalText={
+                            page.verified_text || page.verified_text_preview
+                          }
+                          compact
+                          pageId={page.page_id}
+                          pageNumber={page.page_number}
+                        />
+                      </div>
+                    ) : null}
+
+                    {isSmartOcrOpen ? (
+                      <div className="rounded-control border border-border bg-canvas/50 p-3">
+                        <SmartOcrBlockReviewLoader
+                          canApplyToDraft={false}
+                          isRevisionVerified
+                          pageId={page.page_id}
+                          pageImageUrl={page.image_url}
+                          pageNumber={page.page_number}
+                        />
+                      </div>
+                    ) : null}
 
                     {isEditingPage ? (
                       <div className="flex flex-col gap-2.5 rounded-control border border-amber-300 bg-amber-50/70 p-3 text-xs">

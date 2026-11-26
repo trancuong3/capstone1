@@ -1156,7 +1156,11 @@ async def match_page_global_from_camera(
 
 from fastapi import Form, Header, Request
 from app.repositories.local_ocr_scan_repository import LocalOcrScanRepository
-from app.schemas.reading import LocalOcrPageScanJobRead, LocalOcrPageScanRead
+from app.schemas.reading import (
+    LocalOcrPageScanJobListRead,
+    LocalOcrPageScanJobRead,
+    LocalOcrPageScanRead,
+)
 from app.services.local_ocr_scan_service import LocalOcrScanService
 
 
@@ -1213,6 +1217,27 @@ async def enqueue_scan_page_ocr_job(
         child_id=child_id,
         idempotency_key=idempotency_key,
         idempotency_key_raw=idempotency_key_header,
+    )
+
+
+@router.get(
+    "/scan-page-ocr/jobs",
+    response_model=LocalOcrPageScanJobListRead,
+)
+async def list_scan_page_ocr_jobs(
+    request: Request,
+    active_only: bool = Query(default=True),
+    limit: int = Query(default=10, ge=1, le=20),
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    """List authenticated parent's own queued/recent async page scan OCR jobs."""
+    request_id = str(getattr(request.state, "request_id", ""))
+    return await LocalOcrScanService(LocalOcrScanRepository(db)).list_scan_page_jobs(
+        actor_id,
+        request_id=request_id,
+        active_only=active_only,
+        limit=limit,
     )
 
 

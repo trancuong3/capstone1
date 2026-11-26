@@ -321,7 +321,7 @@
     "overviewAria": "סקירה מהירה של מצב הדפים",
     "overviewChipTitle": "דף מקור {page}: {status}",
     "workerFailuresSummary": "{count} דפים נתקל בטעויות OCR/AI (השירות עשוי להיות עסוק או לא זמין זמנית). דפים מוכנים או בממתין לביקורת מנהל אינם מושפעים — לחץ \"נסה שוב\" בדפים עם שגיאות.",
-    "windowsOcrQueueWaiting": "ממתין להפעלת שרת OCR Windows (תור בטוח — {count} דפים נשמרו בטוח ויתקבלו אוטומטית כאשר השרת פעיל).",
+    "windowsOcrQueueWaiting": "נשמר בתור ה-OCR ({count} עמודים) — ממתין לחזרת שרת ה-OCR לפעולה. הזיהוי יתחיל אוטומטית ברגע שיתחבר מחדש.",
     "ocrRunningStatus": "מזהה OCR {running} דפים",
     "ocrQueuedSuffix": " ({count} דפים בתור הבא)",
     "ocrOtherPagesStillVisible": ". דפים שהושלמו עדיין נראים במלואם לפעולה מיידית.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "ההעלאה הממתינה בוטלה.",
     "cancelSubmissionErrorFallback": "לא ניתן לבטל עמוד זה.",
     "pageNumberHeading": "דף {page}",
-    "pageItemLabel": "עמודים"
+    "pageItemLabel": "עמודים",
+    "workerOfflineUploadNotice": "שרת ה-OCR כבוי זמנית — עדיין ניתן להעלות תמונות או קבצי PDF/DOCX כדי לשמור אותם בתור; הזיהוי יתחיל אוטומטית ברגע שהשרת יחזור לפעול.",
+    "queuedWaitingWorkerBadge": "נשמר בתור OCR — ממתין לשרת",
+    "queuedWaitingWorkerShort": "נשמר בתור OCR — זיהוי אוטומטי כשהשרת יחזור",
+    "reasonQueuedOffline": "עמוד זה נשמר בבטחה בתור ה-OCR ויזוהה אוטומטית ברגע ששרת ה-OCR יחזור לפעול."
   },
   "ocrContribution": {
     "cardAria": "תרום דוגמאות לשיפור ViRead OCR עבור {title}",

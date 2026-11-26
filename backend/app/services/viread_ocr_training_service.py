@@ -918,12 +918,89 @@ class VireadOcrTrainingService:
             "flow2_blockers": flow2_blockers,
         }
 
+    _VERIFIED_HOLDOUT_SOURCE_SQL = """
+                    SELECT sample.id::text AS sample_id, sample.source_flow,
+                           COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                           sample.image_storage_path, sample.image_sha256, sample.label,
+                           sample.source_page_id, sample.source_revision_id, sample.provenance
+                    FROM public.viread_ocr_samples sample
+                    LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+                    WHERE sample.split='holdout'
+                      AND sample.source_flow='FLOW1_VERIFIED'
+                      AND sample.dataset_version_id IS NULL
+                      AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
+                      AND sample.provenance->>'verified_by_admin'='true'
+                      AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
+                      AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
+                      AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
+                      AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
+                      AND (
+                          (
+                              sample.source_page_id IS NOT NULL
+                              AND sample.source_revision_id IS NOT NULL
+                              AND EXISTS (
+                                  SELECT 1 FROM public.viread_ocr_outbox outbox
+                                  WHERE outbox.page_id=sample.source_page_id
+                                    AND outbox.revision_id=sample.source_revision_id
+                                    AND outbox.status='DONE'
+                              )
+                          )
+                          OR (
+                              COALESCE(sample.provenance->>'ingest_pipeline', '') = 'flow2_clean_ingest_v1'
+                              AND COALESCE(sample.provenance->>'rights_basis', '') IN (
+                                  'owner_supplied', 'owner_authorized', 'licensed', 'public_domain', 'cc_by', 'cc0'
+                              )
+                              AND COALESCE(BTRIM(sample.provenance->>'verified_by'), '') <> ''
+                              AND COALESCE(to_jsonb(sample)->>'sync_status', 'SYNCED') = 'SYNCED'
+                          )
+                      )
+                    UNION ALL
+                    SELECT sample.id::text AS sample_id, sample.source_flow,
+                           COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
+                           sample.image_storage_path, sample.image_sha256, sample.label,
+                           sample.source_page_id, sample.source_revision_id, sample.provenance
+                    FROM public.viread_ocr_samples sample
+                    LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
+                    WHERE sample.split='holdout'
+                      AND sample.source_flow='FLOW2_EXTERNAL'
+                      AND sample.dataset_version_id IS NOT NULL
+                      AND sample.provenance->>'verified'='true'
+                      AND sample.provenance->>'annotation_id' IS NOT NULL
+    """
+
+    _SAFE_HOLDOUT_EXCLUSIONS_SQL = """
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM public.viread_ocr_samples used
+                        WHERE used.split IN ('train','validation')
+                          AND used.image_sha256 = holdout.image_sha256
+                    )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM public.viread_ocr_samples used
+                        LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
+                        WHERE used.split IN ('train','validation')
+                          AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
+                    )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM public.viread_ocr_samples locked
+                        WHERE locked.source_flow = 'LOCKED_TEST'
+                          AND locked.image_sha256 = holdout.image_sha256
+                    )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM public.viread_ocr_samples locked
+                        LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
+                        WHERE locked.source_flow = 'LOCKED_TEST'
+                          AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
+                    )
+    """
+
+
     async def register_dataset(
         self,
         actor_id: UUID,
         payload: DatasetImport,
         *,
         commit: bool = True,
+        preverified_storage_refs: set[tuple[str, str]] | None = None,
     ) -> dict[str, Any]:
         await self._admin(actor_id)
         samples = [item.model_dump() for item in payload.samples]
@@ -972,6 +1049,9 @@ class VireadOcrTrainingService:
         semaphore = asyncio.Semaphore(8)
 
         async def verify_object(item: dict[str, Any]) -> None:
+            ref_pair = (item["image_storage_path"], str(item["image_sha256"]).lower())
+            if preverified_storage_refs and ref_pair in preverified_storage_refs:
+                return
             async with semaphore:
                 data = await self._read_artifact_bytes(
                     item["image_storage_path"],
@@ -1156,67 +1236,14 @@ class VireadOcrTrainingService:
                     "eligible_group_count": int(existing["group_count"]),
                     "minimum_samples": MIN_LOCKED_PAIRS, "minimum_groups": MIN_LOCKED_GROUPS}
 
-        eligible = await self.repo.one("""
+        eligible = await self.repo.one(f"""
             WITH verified_holdout AS (
-                SELECT sample.id::text AS sample_id, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
-                       sample.image_sha256, sample.label
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout'
-                  AND sample.source_flow='FLOW1_VERIFIED'
-                  AND sample.dataset_version_id IS NULL
-                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                  AND sample.source_page_id IS NOT NULL
-                  AND sample.source_revision_id IS NOT NULL
-                  AND sample.provenance->>'verified_by_admin'='true'
-                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
-                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
-                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
-                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
-                  AND EXISTS (
-                      SELECT 1 FROM public.viread_ocr_outbox outbox
-                      WHERE outbox.page_id=sample.source_page_id
-                        AND outbox.revision_id=sample.source_revision_id
-                        AND outbox.status='DONE'
-                  )
-                UNION ALL
-                SELECT sample.id::text, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id),
-                       sample.image_sha256, sample.label
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout'
-                  AND sample.source_flow='FLOW2_EXTERNAL'
-                  AND sample.dataset_version_id IS NOT NULL
-                  AND sample.provenance->>'verified'='true'
-                  AND sample.provenance->>'annotation_id' IS NOT NULL
+{self._VERIFIED_HOLDOUT_SOURCE_SQL}
             ), safe_holdout AS (
                 SELECT DISTINCT ON (holdout.image_sha256)
                        holdout.image_sha256, holdout.group_id
                 FROM verified_holdout holdout
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM public.viread_ocr_samples used
-                    WHERE used.split IN ('train','validation')
-                      AND used.image_sha256 = holdout.image_sha256
-                )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM public.viread_ocr_samples used
-                    LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
-                    WHERE used.split IN ('train','validation')
-                      AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
-                )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM public.viread_ocr_samples locked
-                    WHERE locked.source_flow = 'LOCKED_TEST'
-                      AND locked.image_sha256 = holdout.image_sha256
-                )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM public.viread_ocr_samples locked
-                    LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
-                    WHERE locked.source_flow = 'LOCKED_TEST'
-                      AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
-                )
+{self._SAFE_HOLDOUT_EXCLUSIONS_SQL}
                 ORDER BY holdout.image_sha256, holdout.group_id
             )
             SELECT count(*)::integer AS sample_count,
@@ -1291,64 +1318,12 @@ class VireadOcrTrainingService:
             return {"status": "READY", **existing, "evaluation_type": "PILOT",
                     "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
 
-        rows = await self.repo.all("""
+        rows = await self.repo.all(f"""
             WITH verified_holdout AS (
-                SELECT sample.id::text AS sample_id, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
-                       sample.image_storage_path, sample.image_sha256, sample.label,
-                       sample.source_page_id, sample.source_revision_id, sample.provenance
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout' AND sample.source_flow='FLOW1_VERIFIED'
-                  AND sample.dataset_version_id IS NULL
-                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                  AND sample.source_page_id IS NOT NULL
-                  AND sample.source_revision_id IS NOT NULL
-                  AND sample.provenance->>'verified_by_admin'='true'
-                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
-                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
-                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
-                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
-                  AND EXISTS (
-                      SELECT 1 FROM public.viread_ocr_outbox outbox
-                      WHERE outbox.page_id=sample.source_page_id
-                        AND outbox.revision_id=sample.source_revision_id AND outbox.status='DONE'
-                  )
-                UNION ALL
-                SELECT sample.id::text, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id),
-                       sample.image_storage_path, sample.image_sha256, sample.label,
-                       sample.source_page_id, sample.source_revision_id, sample.provenance
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout' AND sample.source_flow='FLOW2_EXTERNAL'
-                  AND sample.dataset_version_id IS NOT NULL
-                  AND sample.provenance->>'verified'='true'
-                  AND sample.provenance->>'annotation_id' IS NOT NULL
+{self._VERIFIED_HOLDOUT_SOURCE_SQL}
             )
             SELECT holdout.* FROM verified_holdout holdout
-            WHERE NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples used
-                WHERE used.split IN ('train','validation')
-                  AND used.image_sha256 = holdout.image_sha256
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples used
-                LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
-                WHERE used.split IN ('train','validation')
-                  AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples locked
-                WHERE locked.source_flow = 'LOCKED_TEST'
-                  AND locked.image_sha256 = holdout.image_sha256
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples locked
-                LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
-                WHERE locked.source_flow = 'LOCKED_TEST'
-                  AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
-            )
+{self._SAFE_HOLDOUT_EXCLUSIONS_SQL}
             ORDER BY holdout.group_id, holdout.image_sha256, holdout.sample_id
         """)
         by_hash: dict[str, dict[str, Any]] = {}
@@ -1470,12 +1445,103 @@ class VireadOcrTrainingService:
                 "group_count": group_count, "evaluation_type": "PILOT",
                 "minimum_samples": MIN_PILOT_PAIRS, "minimum_groups": MIN_PILOT_GROUPS}
 
+    async def _prepare_locked_test_row(
+        self,
+        row: dict[str, Any],
+        *,
+        router: TrainingArtifactStoreRouter | None,
+        use_drive: bool,
+        semaphore: asyncio.Semaphore,
+        supabase_quota_lock: asyncio.Lock,
+    ) -> tuple[DatasetSampleInput, tuple[str, str]]:
+        from io import BytesIO
+
+        digest = str(row["image_sha256"]).lower()
+        async with semaphore:
+            image_bytes = await self._read_artifact_bytes(
+                row["image_storage_path"], expected_sha256=digest, router=router
+            )
+            if hashlib.sha256(image_bytes).hexdigest() != digest:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Verified holdout image hash changed; Locked Test was not created",
+                )
+            try:
+                with Image.open(BytesIO(image_bytes)) as image:
+                    image.verify()
+                    image_format = (image.format or "PNG").upper()
+                rgb_crop = open_image_exif_safe(image_bytes)
+            except (UnidentifiedImageError, OSError) as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Verified holdout contains an invalid image; Locked Test was not created",
+                ) from exc
+            crop_ok, _crop_metrics, crop_reason = validate_flow2_line_crop(rgb_crop, label=row["label"])
+            if not crop_ok:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Verified holdout image failed quality check; Locked Test was not created ({crop_reason})",
+                )
+            extension, content_type = {
+                "JPEG": ("jpg", "image/jpeg"),
+                "PNG": ("png", "image/png"),
+                "WEBP": ("webp", "image/webp"),
+            }.get(image_format, (None, None))
+            if not extension:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Verified holdout image format is unsupported for Locked Test",
+                )
+            if use_drive:
+                try:
+                    stored = await asyncio.to_thread(
+                        router.put,
+                        f"locked-tests/production/{digest[:2]}/{digest}.{extension}",
+                        image_bytes,
+                        content_type=content_type,
+                        expected_sha256=digest,
+                        metadata={"evaluation_type": "PRODUCTION", "sample_id": str(row["sample_id"])},
+                    )
+                except TrainingStorageError as exc:
+                    raise _storage_http_error(exc) from exc
+                object_path = stored.reference
+            else:
+                object_path = f"ocr-training/locked-test/auto-admin-verified/{digest[:2]}/{digest}.{extension}"
+                async with supabase_quota_lock:
+                    await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
+                await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
+        sample_input = DatasetSampleInput(
+            source_flow="LOCKED_TEST",
+            sample_id=str(row["sample_id"]),
+            group_id=str(row["group_id"]),
+            split="locked_test",
+            image_storage_path=object_path,
+            image_sha256=digest,
+            label=unicodedata.normalize("NFC", str(row["label"])),
+            verified=True,
+            annotation_id=str(row["sample_id"]),
+            source_page_id=row.get("source_page_id"),
+            source_revision_id=row.get("source_revision_id"),
+            provenance={
+                "auto_locked_test": "admin_verified_holdout_v1",
+                "source_flow": row["source_flow"],
+                "source_sample_id": str(row["sample_id"]),
+                "source_page_id": str(row["source_page_id"]) if row.get("source_page_id") else None,
+                "source_revision_id": str(row["source_revision_id"]) if row.get("source_revision_id") else None,
+                "storage_provider": (
+                    StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value
+                ),
+                "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED",
+            },
+        )
+        return sample_input, (object_path, digest)
+
     async def ensure_locked_test(self, actor_id: UUID) -> dict[str, Any]:
         """Create the first immutable Locked Test from clean verified holdout data once thresholds are met."""
         await self._admin(actor_id)
-        await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_locked_test_autocreate'))")
         readiness = await self._locked_test_readiness()
         if readiness["status"] == "READY":
+            await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_locked_test_autocreate'))")
             await self._record_evaluation_cohort(
                 UUID(readiness["version_id"]), readiness["manifest_sha256"],
                 "PRODUCTION", "viread-locked-test-admin-verified-v1",
@@ -1487,69 +1553,13 @@ class VireadOcrTrainingService:
             await self.repo.commit()
             return readiness
 
-        rows = await self.repo.all("""
+        rows = await self.repo.all(f"""
             WITH verified_holdout AS (
-                SELECT sample.id::text AS sample_id, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
-                       sample.image_storage_path,
-                       sample.image_sha256, sample.label, sample.source_page_id,
-                       sample.source_revision_id, sample.provenance
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout'
-                  AND sample.source_flow='FLOW1_VERIFIED'
-                  AND sample.dataset_version_id IS NULL
-                  AND COALESCE(to_jsonb(sample)->>'training_eligibility', 'ELIGIBLE') = 'ELIGIBLE'
-                  AND sample.source_page_id IS NOT NULL
-                  AND sample.source_revision_id IS NOT NULL
-                  AND sample.provenance->>'verified_by_admin'='true'
-                  AND COALESCE(sample.provenance->>'ai_review_required', 'false') <> 'true'
-                  AND COALESCE(sample.provenance->>'verification_source', 'admin') = 'admin'
-                  AND COALESCE(sample.provenance->>'source_origin', '') <> 'PARENT_PRIVATE_CONTRIBUTION'
-                  AND COALESCE(sample.provenance->>'eligible_for_locked_test', 'true') <> 'false'
-                  AND EXISTS (
-                      SELECT 1 FROM public.viread_ocr_outbox outbox
-                      WHERE outbox.page_id=sample.source_page_id
-                        AND outbox.revision_id=sample.source_revision_id
-                        AND outbox.status='DONE'
-                  )
-                UNION ALL
-                SELECT sample.id::text, sample.source_flow,
-                       COALESCE(page.bookid::text, sample.source_group_id), sample.image_storage_path,
-                       sample.image_sha256, sample.label, sample.source_page_id,
-                       sample.source_revision_id, sample.provenance
-                FROM public.viread_ocr_samples sample
-                LEFT JOIN public.bookpages page ON page.id=sample.source_page_id
-                WHERE sample.split='holdout'
-                  AND sample.source_flow='FLOW2_EXTERNAL'
-                  AND sample.dataset_version_id IS NOT NULL
-                  AND sample.provenance->>'verified'='true'
-                  AND sample.provenance->>'annotation_id' IS NOT NULL
+{self._VERIFIED_HOLDOUT_SOURCE_SQL}
             )
             SELECT holdout.*
             FROM verified_holdout holdout
-            WHERE NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples used
-                WHERE used.split IN ('train','validation')
-                  AND used.image_sha256 = holdout.image_sha256
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples used
-                LEFT JOIN public.bookpages used_page ON used_page.id = used.source_page_id
-                WHERE used.split IN ('train','validation')
-                  AND COALESCE(used_page.bookid::text, used.source_group_id) = holdout.group_id
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples locked
-                WHERE locked.source_flow = 'LOCKED_TEST'
-                  AND locked.image_sha256 = holdout.image_sha256
-            )
-              AND NOT EXISTS (
-                SELECT 1 FROM public.viread_ocr_samples locked
-                LEFT JOIN public.bookpages locked_page ON locked_page.id = locked.source_page_id
-                WHERE locked.source_flow = 'LOCKED_TEST'
-                  AND COALESCE(locked_page.bookid::text, locked.source_group_id) = holdout.group_id
-            )
+{self._SAFE_HOLDOUT_EXCLUSIONS_SQL}
             ORDER BY holdout.source_flow, holdout.group_id, holdout.image_sha256, holdout.sample_id
         """)
         by_hash: dict[str, dict[str, Any]] = {}
@@ -1573,75 +1583,43 @@ class VireadOcrTrainingService:
             return {**readiness, "status": "NEEDS_DATA",
                     "eligible_sample_count": len(selected), "eligible_group_count": group_count}
 
-        from io import BytesIO
-
         router = await self._artifact_router()
         use_drive = router.write_provider == StorageProvider.GOOGLE_DRIVE
-        locked_samples = []
-        for row in selected:
-            digest = str(row["image_sha256"]).lower()
-            image_bytes = await self._read_artifact_bytes(
-                row["image_storage_path"], expected_sha256=digest, router=router
-            )
-            if hashlib.sha256(image_bytes).hexdigest() != digest:
-                await self.repo.rollback()
-                raise HTTPException(status_code=409, detail="Verified holdout image hash changed; Locked Test was not created")
-            try:
-                with Image.open(BytesIO(image_bytes)) as image:
-                    image.verify()
-                    image_format = (image.format or "PNG").upper()
-                rgb_crop = open_image_exif_safe(image_bytes)
-            except (UnidentifiedImageError, OSError) as exc:
-                await self.repo.rollback()
-                raise HTTPException(status_code=422, detail="Verified holdout contains an invalid image; Locked Test was not created") from exc
-            crop_ok, _crop_metrics, crop_reason = validate_flow2_line_crop(rgb_crop, label=row["label"])
-            if not crop_ok:
-                await self.repo.rollback()
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"Verified holdout image failed quality check; Locked Test was not created ({crop_reason})",
-                )
-            extension, content_type = {
-                "JPEG": ("jpg", "image/jpeg"), "PNG": ("png", "image/png"),
-                "WEBP": ("webp", "image/webp"),
-            }.get(image_format, (None, None))
-            if not extension:
-                await self.repo.rollback()
-                raise HTTPException(status_code=422, detail="Verified holdout image format is unsupported for Locked Test")
-            if use_drive:
-                try:
-                    stored = await asyncio.to_thread(
-                        router.put,
-                        f"locked-tests/production/{digest[:2]}/{digest}.{extension}",
-                        image_bytes,
-                        content_type=content_type,
-                        expected_sha256=digest,
-                        metadata={"evaluation_type": "PRODUCTION", "sample_id": str(row["sample_id"])},
+        # Release the read transaction before remote storage I/O so slow Drive calls
+        # never hold advisory locks or DB connections open across the batch.
+        await self._release_read_txn()
+        semaphore = asyncio.Semaphore(4 if use_drive else 8)
+        supabase_quota_lock = asyncio.Lock()
+        try:
+            prepared = await asyncio.gather(
+                *(
+                    self._prepare_locked_test_row(
+                        row,
+                        router=router,
+                        use_drive=use_drive,
+                        semaphore=semaphore,
+                        supabase_quota_lock=supabase_quota_lock,
                     )
-                except TrainingStorageError as exc:
-                    await self.repo.rollback()
-                    raise _storage_http_error(exc) from exc
-                object_path = stored.reference
-            else:
-                object_path = f"ocr-training/locked-test/auto-admin-verified/{digest[:2]}/{digest}.{extension}"
-                await ensure_storage_capacity(self.db, len(image_bytes), existing_object_path=object_path)
-                await asyncio.to_thread(upload_object, object_path, image_bytes, content_type, upsert=True)
-            locked_samples.append(DatasetSampleInput(
-                source_flow="LOCKED_TEST", sample_id=str(row["sample_id"]),
-                group_id=str(row["group_id"]), split="locked_test",
-                image_storage_path=object_path, image_sha256=digest,
-                label=unicodedata.normalize("NFC", str(row["label"])),
-                verified=True, annotation_id=str(row["sample_id"]),
-                source_page_id=row.get("source_page_id"),
-                source_revision_id=row.get("source_revision_id"),
-                provenance={"auto_locked_test": "admin_verified_holdout_v1",
-                            "source_flow": row["source_flow"],
-                            "source_sample_id": str(row["sample_id"]),
-                            "source_page_id": str(row["source_page_id"]) if row.get("source_page_id") else None,
-                            "source_revision_id": str(row["source_revision_id"]) if row.get("source_revision_id") else None,
-                            "storage_provider": StorageProvider.GOOGLE_DRIVE.value if use_drive else StorageProvider.SUPABASE_LEGACY.value,
-                            "verified_by_admin": row["source_flow"] == "FLOW1_VERIFIED"},
-            ))
+                    for row in selected
+                )
+            )
+        except Exception:
+            await self.repo.rollback()
+            raise
+        locked_samples = [pair[0] for pair in prepared]
+        preverified_refs = {pair[1] for pair in prepared}
+
+        await self.repo.execute("SELECT pg_advisory_xact_lock(hashtext('viread_ocr_locked_test_autocreate'))")
+        latest_readiness = await self._locked_test_readiness()
+        if latest_readiness["status"] == "READY":
+            await self._record_evaluation_cohort(
+                UUID(latest_readiness["version_id"]), latest_readiness["manifest_sha256"],
+                "PRODUCTION", "viread-locked-test-admin-verified-v1",
+                latest_readiness["sample_count"], latest_readiness["group_count"], actor_id,
+            )
+            await self.repo.commit()
+            return latest_readiness
+
         imported = await self.register_dataset(
             actor_id,
             DatasetImport(
@@ -1655,6 +1633,7 @@ class VireadOcrTrainingService:
                             "eligible_source_flows": ["FLOW1_VERIFIED", "FLOW2_EXTERNAL"]},
             ),
             commit=False,
+            preverified_storage_refs=preverified_refs,
         )
         await self._record_evaluation_cohort(
             UUID(str(imported["id"])), imported["version_sha256"], "PRODUCTION",

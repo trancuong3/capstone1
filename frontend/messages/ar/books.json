@@ -321,7 +321,7 @@
     "overviewAria": "نظرة عامة سريعة على حالة الصفحات",
     "overviewChipTitle": "صفحة المصدر {page}: {status}",
     "workerFailuresSummary": "واجهت {count} صفحة أخطاء في التعرف الضوئي على الحروف (OCR) / الذكاء الاصطناعي (قد تكون الخدمة مشغولة أو متوقفة مؤقتاً). الصفحات الجاهزة أو التي تنتظر مراجعة المسؤول (ADMIN) لا تتأثر - انقر على «إعادة محاولة التحقق» في صفحات الأخطاء المحددة.",
-    "windowsOcrQueueWaiting": "في انتظار تشغيل خادم التعرف الضوئي على الحروف (OCR) على نظام Windows (قائمة انتظار آمنة - تم حفظ {count} صفحة بأمان وسيتم معالجتها تلقائياً بمجرد نشاط خادم OCR).",
+    "windowsOcrQueueWaiting": "تم الحفظ في قائمة انتظار OCR ({count} صفحة) — بانتظار عودة خادم OCR للعمل. سيبدأ التعرف تلقائيًا فور اتصاله.",
     "ocrRunningStatus": "جاري التعرف الضوئي على الحروف (OCR) لـ {running} صفحة",
     "ocrQueuedSuffix": " ({count} صفحات في قائمة الانتظار التالية)",
     "ocrOtherPagesStillVisible": ". تبقى الصفحات المكتملة مرئية بالكامل لتتمكن من اتخاذ الإجراءات عليها فوراً.",
@@ -457,7 +457,11 @@
     "cancelledSubmissionNotice": "تم إلغاء الرفع المعلق.",
     "cancelSubmissionErrorFallback": "تعذر إلغاء هذه الصفحة.",
     "pageNumberHeading": "الصفحة {page}",
-    "pageItemLabel": "صفحات"
+    "pageItemLabel": "صفحات",
+    "workerOfflineUploadNotice": "خادم OCR متوقف مؤقتًا — لا يزال بإمكانكم رفع الصور أو ملفات PDF/DOCX لحفظها في قائمة الانتظار، وسيبدأ التعرف تلقائيًا عند عودة الخادم.",
+    "queuedWaitingWorkerBadge": "محفوظ في قائمة انتظار OCR — بانتظار الخادم",
+    "queuedWaitingWorkerShort": "محفوظ في قائمة انتظار OCR — تعرف تلقائي عند عودة الخادم",
+    "reasonQueuedOffline": "تم حفظ الصفحة بأمان في قائمة انتظار OCR وسيتم التعرف عليها تلقائيًا فور عودة خادم OCR للعمل."
   },
   "ocrContribution": {
     "cardAria": "ساهم بعينات لتحسين OCR ViRead لـ {title}",

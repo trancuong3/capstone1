@@ -260,7 +260,17 @@
     "referencePageAlt": "第 {page} 页参考图",
     "scrollToCurrentWord": "关于当前单词",
     "currentWordPrefix": "当前单词： ",
-    "overlayAria": "通过边界框高亮当前单词"
+    "overlayAria": "通过边界框高亮当前单词",
+    "readingModeSwitcherAria": "书页阅读模式",
+    "readingModeIllustrated": "图文阅读",
+    "readingModeIllustratedTitle": "同时查看无文字插画与清晰阅读正文",
+    "readingModeText": "纯文字阅读",
+    "readingModeTextTitle": "专注查看清晰排版的阅读文字",
+    "readingModeOriginal": "原页对照",
+    "readingModeOriginalTitle": "查看扫描的原始书页图像进行对照",
+    "illustrationAlt": "第 {page} 页插画",
+    "originalReferenceHeading": "原始书页图像（对照）",
+    "originalReferenceAlt": "第 {page} 页原始图像"
   },
   "pageContent": {
     "incorrectWordAria": "不准确：\"{word}\"。请重读这个词。",

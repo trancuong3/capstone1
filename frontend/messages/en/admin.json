@@ -15,7 +15,13 @@
     "auditLogsTitle": "Audit Logs",
     "healthTitle": "Operational Status",
     "protectedLoadingAria": "Loading admin area",
-    "protectedLoadingStatus": "Loading admin data..."
+    "protectedLoadingStatus": "Loading admin data...",
+    "bookDetailTitle": "Book Details",
+    "karaokeEditTitle": "Edit Song",
+    "karaokeNewTitle": "Create New Song",
+    "karaokeTitle": "Song Management",
+    "ocrReviewTitle": "OCR Page Review",
+    "vireadTrainingTitle": "OCR Training"
   },
   "layout": {
     "skipToContent": "Skip navigation, go to admin content",
@@ -35,7 +41,12 @@
     },
     "signOut": "Sign out",
     "signingOut": "Signing out…",
-    "signOutError": "Cannot log out at this time. Please try again."
+    "signOutError": "Cannot log out at this time. Please try again.",
+    "groups": {
+      "content": "Content",
+      "systemAi": "System & AI",
+      "users": "Users"
+    }
   },
   "login": {
     "areaLabel": "Admin Area",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "Invalid login session",
     "yes": "Yes",
     "no": "No",
-    "notYet": "Not yet"
+    "notYet": "Not yet",
+    "breadcrumbAria": "Breadcrumb navigation",
+    "clearSearch": "Clear search"
   },
   "auditLogs": {
     "title": "Audit Logs",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "View metadata details ({count} characters)",
     "loadMoreError": "Cannot load more logs. Previous records remain unchanged.",
     "retryLoadMore": "Retry loading",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "clearFilters": "Clear filters",
+    "columns": {
+      "action": "Action",
+      "metadata": "Metadata",
+      "resource": "Resource",
+      "timestamp": "Timestamp"
+    },
+    "drawerTitleFallback": "Event details",
+    "eventIdLabel": "Event ID",
+    "filterActionPlaceholder": "e.g. book.read, parent.update…",
+    "filterAria": "Audit log filters",
+    "filterResourcePlaceholder": "e.g. book, parent, song…",
+    "inspectBtn": "Details",
+    "inspectEventAria": "Inspect event {action}",
+    "tableAria": "Audit logs table"
   },
   "health": {
     "title": "Operational Status",
@@ -126,7 +154,7 @@
     "eyebrow": "Operational check",
     "description": "Lightweight check of FastAPI, Database, OCR, Tesseract, worker, TTS, and STT; does not load OCR models on page load.",
     "recheck": "Check again",
-    "loadError": "Unable to retrieve security status. Please try again.",
+    "loadError": "Unable to load operational health status. Please try again.",
     "servicesHeading": "Service status check",
     "checkedAt": "Checked at {time}",
     "technicalStatus": "Technical status: {status}",
@@ -137,7 +165,14 @@
       "healthy": "Verified",
       "failed": "Error encountered",
       "unknown": "Unverified",
-      "disabled": "Not running"
+      "disabled": "Not running",
+      "cached": "Precomputed cache",
+      "client_side": "Client-side",
+      "cloud_ready": "Cloud ready",
+      "local_only": "Local only",
+      "remote_delegated": "Remote delegated",
+      "scheduled": "Scheduled",
+      "standby": "Standby"
     },
     "queueDepthLabel": "Queue",
     "queueDepthValue": "{count, plural, =0 {0 tasks} one {# task} other {# tasks}}",
@@ -186,8 +221,87 @@
       "Queued": "Queued",
       "Quota exhausted": "Limit exceeded",
       "Unsupported": "Not supported",
-      "Unknown": "Unknown"
-    }
+      "Unknown": "Unknown",
+      "Local only": "Local only",
+      "Scheduled": "Scheduled",
+      "Standby": "Standby"
+    },
+    "actionHintLabel": "Suggested action",
+    "audioCacheErrorDetail": "Diagnostic code: {code}",
+    "audioCacheErrorTitle": "Unable to load precomputed TTS cache metrics",
+    "audioCachePercentUsed": "{percent} used",
+    "audioCacheUnlimited": "No limit",
+    "audioCacheUsageAria": "{label} utilization: {percent}%",
+    "autoRefresh30s": "30s",
+    "autoRefresh60s": "60s",
+    "autoRefreshActive": "Auto-refresh every {seconds}s",
+    "autoRefreshLabel": "Auto-refresh",
+    "autoRefreshOff": "Off",
+    "autoRefreshPaused": "Auto-refresh paused while tab is hidden",
+    "clearTtsCache": "Clear TTS cache",
+    "clearTtsCacheError": "Unable to clear browser TTS cache right now.",
+    "clearTtsCacheSuccess": "Cleared browser TTS cache.",
+    "clearWasmCache": "Clear STT model cache",
+    "clearWasmCacheError": "Unable to clear STT model cache right now.",
+    "clearWasmCacheSuccess": "Cleared browser STT model cache.",
+    "clearingCache": "Clearing…",
+    "deviceProbeError": "Unable to fully inspect current device capabilities.",
+    "dismissErrorAria": "Dismiss error notice",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "Request ID: {requestId}",
+    "filterAria": "Filter services by status",
+    "filteredEmpty": "No services match this status filter.",
+    "filters": {
+      "all": "All",
+      "attention": "Needs attention",
+      "healthy": "Healthy",
+      "local_only": "Local only",
+      "standby": "Standby"
+    },
+    "groups": {
+      "core": "Core Infrastructure",
+      "coreDesc": "API, database, and object storage essential to the platform.",
+      "localOnlyWorkers": "Local-only / Remote-delegated / Disabled by config",
+      "localOnlyWorkersToggleHint": "{count} items",
+      "ocr": "OCR Pipeline & AI Engines",
+      "ocrDesc": "Remote OCR worker, 4 OCR engines, and AI proofreading.",
+      "voice": "Voice & Audio Cache",
+      "voiceDesc": "Text-to-Speech, Speech-to-Text, and precomputed audio cache.",
+      "workers": "Background Workers & Cron",
+      "workersDesc": "Scheduled jobs, moderation queues, and reading event workers."
+    },
+    "kpiAria": "Service status metrics",
+    "kpiTotalDetail": "/ {total} services",
+    "ocrEnginesSubheading": "OCR recognition engines",
+    "probeDevice": "Check device",
+    "probingDevice": "Checking device…",
+    "refreshTimeoutError": "Health check request timed out after 15 seconds.",
+    "refreshWarningBody": "Showing the most recent snapshot. Please try again.",
+    "refreshWarningTitle": "Unable to refresh latest status",
+    "refreshing": "Refreshing…",
+    "resetFilter": "Show all services",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "PWA App",
+    "sttInsecureContextWarning": "Not a secure HTTPS context; microphone and some browser APIs may be restricted.",
+    "sttMicNeedsHttps": "HTTPS required for microphone",
+    "sttMicNoMediaDevices": "getUserMedia unavailable",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "IndexedDB read error ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB is unavailable; local STT models and TTS cache cannot be stored.",
+    "summaryAllHealthy": "All {healthy} services are operating normally.",
+    "summaryAria": "System operational summary",
+    "summaryAttentionSegment": "{count} need attention",
+    "summaryHealthySegment": "{count} healthy",
+    "summaryLocalOnlySegment": "{count} local only",
+    "summaryStandbySegment": "{count} on standby",
+    "ttsCacheBrowserEmpty": "Empty (0 items)",
+    "ttsCacheBrowserError": "Cache error ({code})",
+    "ttsCacheBrowserHitsMisses": "Hits: {hits} · Misses: {misses}",
+    "wakeOcrError": "Unable to wake OCR worker. Please try again.",
+    "wakeOcrRechecking": "Rechecking automatically in a few seconds…",
+    "wakeOcrWorker": "Wake OCR worker",
+    "wakingOcrWorker": "Waking up…"
   },
   "parents": {
     "title": "Parent management",
@@ -264,7 +378,8 @@
       "childGrade": "Grade {grade}",
       "authNotConfigured": "Cannot load email and phone number because the backend is not configured with Supabase Auth access permissions.",
       "authNotFound": "No Supabase Auth account found linked to this profile. Profile and child information are still displayed.",
-      "authUnavailable": "Unable to load contact information from Supabase Auth at this time. Check the configuration or try reloading."
+      "authUnavailable": "Unable to load contact information from Supabase Auth at this time. Check the configuration or try reloading.",
+      "parentIdLabel": "Parent ID"
     },
     "modal": {
       "createTitle": "Add Parent",
@@ -301,6 +416,16 @@
         "genericUpdate": "Unable to update account at this time. Please try again.",
         "fallback": "Unable to update account at this time. Entered data has been kept."
       }
+    },
+    "copiedId": "Copied",
+    "copyId": "Copy ID",
+    "copyIdAria": "Copy ID {id}",
+    "directoryAria": "Parent accounts list",
+    "overviewAria": "Parents overview",
+    "searchToolbarAria": "Search parents",
+    "tableHeaders": {
+      "actions": "Actions",
+      "parent": "Parent"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "Maximum grade must be an integer from 1 to 5.",
         "maxRange": "Maximum grade must be between 1 and 5.",
         "gradeOrder": "Minimum grade cannot be greater than the maximum grade."
-      }
+      },
+      "authorPlaceholder": "e.g., Charles Perrault",
+      "livePreviewDesc": "When no custom cover image is uploaded, ViRead automatically generates a crisp typographic cover from the title, author, and grade range.",
+      "livePreviewHeading": "Book cover preview",
+      "livePreviewTitleFallback": "New book title",
+      "namePlaceholder": "e.g., Puss in Boots (internal catalog name)",
+      "titlePlaceholder": "e.g., Puss in Boots"
     },
     "detail": {
       "eyebrow": "Book Details",
@@ -454,7 +585,26 @@
       "notFoundTitle": "Book not found",
       "loadErrorTitle": "Cannot load book",
       "notFoundDesc": "Book ID does not belong to current administrative data.",
-      "genericErrorDesc": "Please try again later."
+      "genericErrorDesc": "Please try again later.",
+      "ocrQueueOfflineBanner": "Saved {count} pages in the OCR queue — Will process automatically when the OCR server comes back online",
+      "ocrQueueOnlineBanner": "Processing OCR for {count} pages…",
+      "ocrQueueOfflineHint": "Jobs are durably queued and will automatically update this page list once the OCR server reconnects, even after a reload.",
+      "ocrQueueOnlineHint": "Automatically refreshing page-by-page OCR progress.",
+      "ocrQueueCheckNow": "Check now",
+      "queuedNewPageBadge": "New page #{index} · Saved in OCR queue",
+      "pageQueuedOfflineBadge": "Saved in OCR queue — Waiting for server",
+      "pageQueuedOnlineBadge": "Re-running OCR…",
+      "copiedId": "Copied",
+      "copyIdAria": "Copy book ID",
+      "openOcrShort": "Open OCR review",
+      "publishRuleToggle": "Child library publishing rules",
+      "statNeedsReview": "Needs review",
+      "statProcessing": "Processing",
+      "statTotalPages": "Total pages",
+      "statVerified": "Verified",
+      "summaryStripAria": "Book summary",
+      "toggleAiBatchBtn": "Run batch AI review",
+      "toggleUploadBtn": "Upload pages"
     },
     "editor": {
       "loading": "Loading book metadata…",
@@ -490,7 +640,14 @@
       "cannotRetireTitle": "Unable to deactivate book",
       "safetyBlocked": "Child Safety does not yet allow this book in the library. Complete OCR VERIFIED and confirm Safety matches Candidate for all pages; HIGH or NOT_RECOMMENDED findings remain blocked.",
       "invalidMetadata": "Current metadata is invalid. Please fix the title and grade range in the form and save before activating.",
-      "genericToggleError": "Request not confirmed. Please check Admin permissions or backend connection and try again."
+      "genericToggleError": "Request not confirmed. Please check Admin permissions or backend connection and try again.",
+      "closeCoverStudio": "Close Cover Studio",
+      "coverDesc": "Update the book cover (upload, 3:4 crop, rotate, or AI cover generation) without altering reading pages or verified revisions.",
+      "coverHeading": "Book cover",
+      "dangerZoneActiveDesc": "Retiring hides the book from the parent library while preserving all pages, revisions, and reading history.",
+      "dangerZoneHeading": "Book lifecycle",
+      "dangerZoneRetiredDesc": "This book is currently retired. You can reactivate it once metadata and OCR pages meet the requirements.",
+      "openCoverStudio": "Open Cover Studio"
     },
     "uploader": {
       "heading": "Upload page images or documents and run OCR",
@@ -517,7 +674,14 @@
         "imageUnreadable": "Cannot read image dimensions in browser.",
         "noValidFiles": "No valid files to upload. Check format, size, and image dimensions.",
         "someInvalidFiles": "Some files are invalid and were not uploaded. Valid files are still being processed."
-      }
+      },
+      "workerOfflineTitle": "OCR processing service is currently offline",
+      "workerOfflineBody": "You can still upload images or PDF/DOCX files right now: pages are durably saved in the queue and will be processed automatically once the OCR server comes back online.",
+      "workerUnreachableTitle": "Unable to verify OCR service status",
+      "workerUnreachableBody": "The backend is starting up or the connection is slow. You can recheck or upload to save pages into the OCR queue.",
+      "recheckWorkerBtn": "Recheck OCR connection",
+      "workerOfflineDesc": "You can still upload images or PDF/DOCX files now: the system queues them safely and automatically runs OCR once the OCR worker service is online.",
+      "workerUnreachableDesc": "The backend may be starting up or experiencing network delay. You can recheck the connection or upload files to queue OCR."
     },
     "imagePreview": {
       "hideButton": "Hide page {pageNumber} image",
@@ -574,8 +738,25 @@
         "savedNoChanges": "AI proposed no modifications & performed a safety scan. Awaiting Admin review of images, usage rights, and manual verification.",
         "savedPrefix": "AI draft saved and awaiting manual Admin verification: {detail}",
         "failedKeepReview": "AI processing failed; page remains in NEEDS_REVIEW status (not automatically VERIFIED). {detail}"
+      },
+      "statusBadges": {
+        "failed": "Needs review",
+        "saved": "Draft saved",
+        "verified": "Verified"
       }
-    }
+    },
+    "emptyFilteredDesc": "Try changing the keyword or resetting filters to view the entire book library.",
+    "filterToolbarAria": "Book library filters",
+    "kpi": {
+      "activeBooks": "Active books",
+      "childLibraryEligible": "Child library eligible",
+      "needsReview": "Needs OCR review",
+      "needsReviewDetail": "{count} pages awaiting review",
+      "total": "Total books"
+    },
+    "listAria": "Admin book list",
+    "resetFilters": "Reset",
+    "searchPlaceholder": "Search by book name, title, or author…"
   },
   "metadataQuality": {
     "title": "Book data quality",
@@ -607,7 +788,8 @@
       "invalidGradeRange": "Invalid grade range",
       "invalidGradeRangeDetail": "Outside grade 1–5 or min grade exceeds max grade",
       "duplicateGroups": "Potential duplicates",
-      "duplicateGroupsDetail": "{count} books in candidate groups"
+      "duplicateGroupsDetail": "{count} books in candidate groups",
+      "missingMetadataSummary": "Missing author: {missingAuthor} · Invalid grades: {invalidGrade}"
     },
     "issuesHeading": "Books needing review",
     "duplicateNote": "Duplicates are identified based on title and author after trimming whitespace and ignoring case.",
@@ -649,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "Active",
       "RETIRED": "Stopped"
-    }
+    },
+    "searchPlaceholder": "Search by title or author…"
   },
   "contentQuality": {
     "eyebrow": "Book quality administration",
@@ -667,7 +850,9 @@
       "RESOLVED": "Resolved",
       "REJECTED": "Rejected",
       "REPORTED_BOOKS": "Reported books",
-      "REPORTED_PAGES": "Reported pages"
+      "REPORTED_PAGES": "Reported pages",
+      "reportedScope": "Reported books",
+      "reportedScopeDetail": "Reported pages: {pages} · Rejected: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "Incorrect book info",
@@ -846,7 +1031,14 @@
       "scanning": "Scanning…",
       "scanWholeBook": "Scan full book",
       "paginationAria": "Quality check book pagination",
-      "itemLabel": "book"
+      "itemLabel": "book",
+      "kpiApprovedDetail": "Ready: {ready} · Admin approved: {approved} · Auto-published: {published}",
+      "kpiApprovedGroup": "Eligible / Approved",
+      "kpiAria": "Book approval and safety overview",
+      "kpiCopyrightDetail": "Both Safety & Copyright: {both}",
+      "kpiProcessingDetail": "Scanning: {processing} · Stale: {stale} · Scan failed: {failed}",
+      "kpiProcessingGroup": "Processing / Needs Rescan",
+      "statusBreakdownToggle": "View detailed status breakdown ({count} groups)"
     },
     "bookDetail": {
       "subheading": "Book quality, AI history, findings, and Admin review",
@@ -974,7 +1166,12 @@
       "checkAndFixPage": "Check and edit page",
       "rescanPage": "Rescan this page",
       "noFindingThisScan": "No findings in this check.",
-      "noScanResultYet": "Page has no check results; see status and reason above."
+      "noScanResultYet": "Page has no check results; see status and reason above.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} flagged pages",
+      "compactMetricsToggle": "View detailed AI metrics, workflows & assessment hash",
+      "compactOcrDetail": "Valid hash: {valid}/{total} · Unscanned: {unscanned}",
+      "compactPipelineDetail": "Stale: {stale} · Processing: {processing}",
+      "compactSafetyDetail": "Proofreading: {proofreading}"
     }
   },
   "userBooks": {
@@ -1072,7 +1269,8 @@
       "suspendedBook": "Private book suspended.",
       "rejected": "This page version rejected.",
       "suspendedWithTitle": "Private book \"{title}\" suspended. Owning family cannot read it immediately."
-    }
+    },
+    "kpiAria": "User books moderation overview"
   },
   "flow2": {
     "filters": {
@@ -1425,7 +1623,9 @@
       "providerUnavailable": "unavailable",
       "providerChecking": "checking",
       "noProviderEvents": "No provider event.",
-      "safetyDisclaimer": "AI results do not guarantee absolute content safety. With AI workflows, you can only save as VERIFIED after an Admin confirms Safety for the correct current Candidate."
+      "safetyDisclaimer": "AI results do not guarantee absolute content safety. With AI workflows, you can only save as VERIFIED after an Admin confirms Safety for the correct current Candidate.",
+      "emptyDesc": "Run CONFIRM & RUN AI in the action bar below to proofread text and run child safety scanning.",
+      "emptyTitle": "No AI Safety results for this revision yet"
     },
     "tabs": {
       "words": "Check words and positions",
@@ -1553,12 +1753,91 @@
       "noWords": "No words in this revision yet.",
       "addWord": "Add word",
       "deleteWord": "Delete word",
-      "finishReview": "Finish review"
+      "finishReview": "Finish review",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "OCR processing history",
       "subtitle": "{title} · Page {pageNumber} · Revision R{revisionNo}",
       "mobileCardAria": "Select revision {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "Accept clear blocks",
+      "blockCardAria": "{typeLabel} block",
+      "circuitBreakerDesc": "The projected exclusion ratio exceeded 35% of the page, so the system kept these blocks and moved them to Needs Verification for manual review.",
+      "circuitBreakerTitle": "Content-loss protection triggered",
+      "cropReviewTitle": "Original image frame preserved to avoid clipping text",
+      "decisions": {
+        "EXCLUDE": "Excluded",
+        "KEEP": "Keep",
+        "REVIEW": "Needs verification"
+      },
+      "editBtn": "Edit text",
+      "editLabel": "Edit block text",
+      "emptyClean": "No clean content blocks have been kept yet.",
+      "emptyExcluded": "No noise or page numbers were excluded on this page.",
+      "emptyReview": "No remaining blocks need verification on this page.",
+      "excludeBtn": "Exclude",
+      "geometryMeta": "Estimated skew: {angle}° · Page area: {area}% · {gutterReason}",
+      "heading": "Smart OCR content extraction review",
+      "headingWithPage": "Smart OCR content extraction review — Page {pageNumber}",
+      "keepBtn": "Keep",
+      "loaderDesc": "Automatically separates main reading content from page numbers, running headers, and extraneous text (never auto-deletes main content).",
+      "loaderError": "Unable to classify smart text blocks for this page.",
+      "loaderOpenBtn": "Open smart text block classification",
+      "loaderReextractBtn": "Re-analyze text blocks",
+      "manualOverrideBadge": "Manually edited",
+      "noImageFallback": "No source image attached — all {count} analyzed text blocks are still displayed.",
+      "notices": {
+        "acceptClearAll": "Confirmed all {confirmed} clear blocks.",
+        "acceptClearRemoteRemaining": "Accepted clear blocks. {remaining} blocks still require manual verification.",
+        "acceptClearWithRemaining": "Confirmed {confirmed} clear blocks. {remaining} blocks still need your manual verification.",
+        "editSaved": "Updated block text and kept it in the reading content.",
+        "emptyEditError": "Block text cannot be empty when saving edits.",
+        "excluded": "Excluded text block from the reading content.",
+        "humanEditReason": "User edited this block's text.",
+        "humanExcludeReason": "User chose to exclude this block.",
+        "humanKeepReason": "User chose to keep this block.",
+        "humanRestoreReason": "Restored block to the reading content.",
+        "kept": "Kept text block in the reading content.",
+        "nothingToUndo": "There are no actions to undo.",
+        "restored": "Restored text block to the reading content.",
+        "saved": "Saved content block changes.",
+        "undone": "Undid the most recent action.",
+        "updateFailed": "Could not update the decision for this block. Please try again.",
+        "updated": "Updated content block status."
+      },
+      "originalImageAlt": "Original book page image",
+      "originalImageAltWithPage": "Original image for page {pageNumber}",
+      "overlayAria": "Extracted text region overlay",
+      "previewEmpty": "No reading text available after filtering.",
+      "previewHeading": "Child reading content",
+      "previewReviewNotice": "Preview currently includes {count} blocks needing verification to ensure no reading content is missed.",
+      "readingOrderMeta": "Reading order #{order} · Confidence {confidence}%",
+      "reasonPrefix": "Reason:",
+      "restoreBtn": "Restore",
+      "reviewBanner": "The blocks below are temporarily retained in the preview to avoid losing text. Choose Keep or Exclude for each block.",
+      "saveEditBtn": "Save edit",
+      "shadowModeDesc": "Noise-filtering decisions are being recorded for comparison and do not modify the canonical reading text yet.",
+      "shadowModeTitle": "Running in comparison mode (Shadow)",
+      "summaryLine": "Page type: {pageKind} · Retained {retention}% chars ({keep} kept, {excluded} excluded, {review} to verify)",
+      "tabs": {
+        "clean": "Clean content",
+        "excluded": "Excluded",
+        "original": "Original image",
+        "preview": "Reading preview",
+        "review": "Needs verification"
+      },
+      "tabsAria": "OCR extraction view modes",
+      "undoBtn": "Undo"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "OCR review workspace",
+      "draft": "Text & Review",
+      "history": "Revision History",
+      "safety": "AI Safety",
+      "smartBlocks": "Smart Blocks V2",
+      "words": "Words & BBox"
     }
   },
   "training": {
@@ -1707,7 +1986,15 @@
       "closeDriftSuccess": "Configuration-error job closed. Run and checkpoint preserved, candidate not yet benchmarked/approved; the system may create a new job based on the correctly locked configuration.",
       "closeDriftFailed": "Cannot close this candidate; status or lineage may have changed.",
       "closeUnbenchmarkedSuccess": "Unbenchmarked candidate closed; run and checkpoint preserved. The system will auto-generate a Locked Test and replacement job once sufficient independent VERIFIED holdout is available.",
-      "closeUnbenchmarkedFailed": "Cannot close candidate. The worker may still be running, the candidate already has a benchmark, or the lineage has changed."
+      "closeUnbenchmarkedFailed": "Cannot close candidate. The worker may still be running, the candidate already has a benchmark, or the lineage has changed.",
+      "flow2AlreadyTrained": "The current Flow 2 dataset and config already have a prior training result. Add new VERIFIED samples or evaluate the existing candidate.",
+      "flow2NoEligibleSamples": "No clean Flow 2 samples are eligible to create a snapshot yet.",
+      "flow2Paused": "Flow 2 is paused (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "Cannot queue Flow 2 ({reason}).",
+      "flow2Scheduled": "Created Flow 2 snapshot ({train} train / {validation} validation) and queued job {jobId} ({status}).",
+      "flow2TrainValRequired": "Snapshot currently has {train} train and {validation} validation; both splits are required to queue Colab.",
+      "flow2TriggerFailed": "Failed to create snapshot or queue Flow 2 training.",
+      "flow2UnresolvedJob": "An unresolved training job is already queued; no new job was created."
     },
     "flow1": {
       "badgeEyebrow": "Stream 1 New · Direct Model Replacement",
@@ -1875,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "The Apps Script Web App is blocking anonymous access. In script.google.com, redeploy with 'Who has access: Anyone' (still protected by HMAC-SHA256 signature).",
         "BRIDGE_SECRET_MISMATCH": "Apps Script Bridge signature mismatch or VIREAD_BRIDGE_SECRET is missing from the script.google.com Script Properties.",
         "DRIVE_SCOPE_MISMATCH": "OAuth scope is incorrect; minimum drive.file permission required. Please reconnect and grant the app-specific folder permission.",
-        "genericCode": "Error code: {code}. Check your Google Drive connection or click Check Connection & Storage."
+        "genericCode": "Error code: {code}. Check your Google Drive connection or click Check Connection & Storage.",
+        "DESKTOP_REQUIRES_WINDOWS": "Linux servers do not support local Google Drive for Desktop mounts. Please connect via Apps Script Bridge.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "Cloud servers (Render) cannot access Google Drive for Desktop (G:\\) on a personal computer. Please switch to Apps Script Bridge.",
+        "ENCRYPTION_KEY_MISSING": "Missing VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 characters) on the server."
       },
       "notices": {
         "redirectingOauth": "Redirecting to Google OAuth 2.0 authentication (requesting minimum drive.file permission only)…",
@@ -1896,8 +2186,37 @@
         "disconnectConfirm": "Disconnect Google Drive from Pipeline 2? Original book data and files saved on Drive will not be deleted; new outbox items will safely wait (not synced to Supabase).",
         "disconnected": "Google Drive safely disconnected and refresh token removed from backend.",
         "disconnectFailed": "Unable to disconnect Google Drive at this time."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(only readable on local Windows G:\\ drive). For Cloud backend (Render) and Google Colab to read/write Drive, switch to",
+      "desktopCloudWarningPrefix": "Current connection uses",
+      "disconnectModalConfirm": "Disconnect",
+      "disconnectModalTitle": "Disconnect Google Drive?"
+    },
+    "colabGuideAnd": "and",
+    "colabGuideMid1": ", select Runtime",
+    "colabGuideMid2": ", enable 2 Colab Secrets",
+    "colabGuidePrefix": "Open notebook",
+    "colabGuideSuffix": ", then click",
+    "colabGuideTitle": "Guide to running Colab Free T4 GPU (0 VND)",
+    "driveUnavailableDesc": "Backend did not return Google Drive connection status for Flow 2.",
+    "driveUnavailableTitle": "Google Drive not configured",
+    "errors": {
+      "loadFailed": "Unable to load training status. Check Admin permissions and VietOCR V2 migrations.",
+      "serviceUnavailable": "VietOCR training administration service is unavailable."
+    },
+    "kpiGridAria": "OCR training metrics",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Flow 1 Model Replacement",
+      "flow2": "Flow 2 Training & Evaluation",
+      "overview": "Overview & Runtime"
+    },
+    "tabsAria": "OCR training sections",
+    "triggerFlow2Btn": "Create Snapshot & Queue Flow 2 Training",
+    "workerExecutionModeLabel": "Execution mode:",
+    "workerWebHeavyDisabled": "Disabled (use the trigger button below)",
+    "workerWebHeavyEnabled": "Enabled",
+    "workerWebHeavyLabel": "Web background worker:"
   },
   "karaoke": {
     "library": {
@@ -1937,7 +2256,11 @@
         "DRAFT": "Draft",
         "PUBLISHED": "Visible",
         "HIDDEN": "Hidden"
-      }
+      },
+      "emptyTitle": "No songs yet",
+      "filterAria": "Song library filters",
+      "hasCoverBadge": "Has cover",
+      "searchPlaceholder": "Enter song title or author…"
     },
     "workspace": {
       "retryLoad": "Try reloading",
@@ -2344,25 +2667,82 @@
       "listenDraftFirst": "Listen to and confirm the current draft first.",
       "draftMissingReviewContent": "No content to confirm for approval.",
       "noResultToPreview": "No result to listen to yet."
+    },
+    "confirm": {
+      "continueAction": "Continue",
+      "editLyricsTitle": "Edit timed lyrics?",
+      "expandRepeatsAction": "Confirm expansion",
+      "expandRepeatsTitle": "Expand repeat notation?",
+      "leaveAction": "Leave page",
+      "leaveTitle": "Leave this page?",
+      "publishAction": "Confirm publish",
+      "publishTitle": "Publish song?",
+      "reloadAction": "Reload saved version",
+      "reloadTitle": "Reload from server?",
+      "replaceAudioAction": "Replace audio",
+      "replaceAudioTitle": "Replace MP3 audio file?",
+      "replaceLyricsAction": "Replace lyrics",
+      "replaceLyricsTitle": "Replace all current lyrics?",
+      "resplitAction": "Confirm re-split",
+      "resplitTitle": "Re-split syllables for this line?"
     }
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR task not finished. Check the Windows OCR server and try again.",
-    "ocrTaskQueuedWindows": "Page image queued for Windows OCR server processing. Refresh after the server completes.",
+    "ocrTaskQueuedWindows": "Page saved in the OCR queue — Will process automatically when the OCR server comes back online",
     "skippedEmptyNote": "skip {count} blank pages",
     "failedPagesNote": "error {count} pages",
     "createdPagesSummary": "Created {count} pages · Pending approval{suffix}",
-    "queuedDocPagesForWorker": "Queued {count} pages waiting for Windows OCR server activation",
+    "queuedDocPagesForWorker": "Saved {count} pages in the OCR queue — Will process automatically when the OCR server comes back online",
     "docPagesPartialProgress": "Completed {completed}/{total} pages ({pending} pages still queued for OCR)",
     "docPagesComplete": "OCR completed {completed}/{total} pages · Pending approval",
     "singlePageQueued": "Queued waiting for Windows OCR server processing",
     "singlePageRecognizing": "Recognizing OCR page…",
     "singlePageFailed": "OCR page task not finished. Please try again.",
     "singlePageSucceeded": "OCR recognized · Pending approval",
-    "singlePageWaitingWorker": "Queued safely waiting for Windows OCR server completion",
+    "singlePageWaitingWorker": "Saved 1 page in the OCR queue — Will process automatically when the OCR server comes back online",
     "uploadFailedCheckBackend": "Upload failed. Check Backend and try again.",
     "reloadAfterUploadFailed": "Cannot reload page list after upload. Data may have been saved; reload to verify.",
     "reprocessIncomplete": "OCR reprocessing task not finished. Please try again.",
-    "reprocessQueuedWindows": "Page queued for Windows OCR server reprocessing. Refresh after completion."
+    "reprocessQueuedWindows": "Re-OCR request saved in the queue — Will process automatically when the OCR server comes back online"
+  },
+  "qualityHub": {
+    "description": "Review catalog metadata, resolve parent reports, approve book safety, and moderate parent private books in one unified hub.",
+    "eyebrow": "Quality Operations",
+    "tabs": {
+      "approval": "Book Approval & Safety",
+      "metadata": "Book Metadata",
+      "reports": "User Reports",
+      "userBooks": "User Books & Flow 2"
+    },
+    "tabsAria": "Book quality management sections"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Processing in background…",
+    "closeAria": "Close AI Task Center",
+    "defaultBookLabel": "Book",
+    "elapsedHours": "{hours}h",
+    "elapsedHoursMinutes": "{hours}h {minutes}m",
+    "elapsedMinutes": "{minutes}m",
+    "elapsedMinutesSeconds": "{minutes}m {seconds}s",
+    "elapsedRunning": "Running for {elapsed}",
+    "elapsedSeconds": "{seconds}s",
+    "emptyDescription": "When you upload book pages, extract OCR, or generate covers, live progress will appear here.",
+    "emptyTitle": "No AI tasks yet",
+    "openAria": "Open AI Task Center",
+    "pageSeparator": " • Page {pageNumber}",
+    "pillFailed": "Failed tasks ({count})",
+    "pillIdle": "AI Tasks",
+    "pillRunning": "AI running ({count})",
+    "pillWaitingReview": "Needs review ({count})",
+    "processingAria": "Processing {title}",
+    "progressAria": "Progress for {title}",
+    "refreshAria": "Refresh task list",
+    "stagePrefix": "Stage: {stage}",
+    "subtitle": "Background tasks keep running safely even when you navigate away.",
+    "title": "AI Task Center",
+    "viewResultAction": "View result",
+    "workerOfflineBanner": "Waiting for AI worker to reconnect. Tasks are safely persisted and will resume automatically.",
+    "pillWaitingForWorker": "OCR queue ({count})"
   }
 }

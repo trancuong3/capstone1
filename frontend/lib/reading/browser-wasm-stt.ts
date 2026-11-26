@@ -41,6 +41,7 @@ const MODEL_FILE_SPECS = [
 ] as const;
 const IDB_NAME = "viread-wasm-models-v1";
 const IDB_STORE = "files";
+const WASM_IDB_TIMEOUT_MS = 4_000;
 
 export interface WasmSttProgressEvent {
   readonly stage: string;
@@ -62,6 +63,7 @@ export interface BrowserWasmCapabilities {
   readonly simd: boolean;
   readonly indexedDb: boolean;
   readonly subtleCrypto: boolean;
+  readonly isSecureContext: boolean;
   readonly reason: string | null;
 }
 
@@ -71,6 +73,8 @@ export interface WasmModelCacheStatus {
   readonly expectedFiles: number;
   readonly cachedBytes: number;
   readonly totalBytes: number;
+  readonly supported?: boolean;
+  readonly error?: string | null;
 }
 
 export interface BrowserWasmDecodeResult {
@@ -92,6 +96,12 @@ export function detectBrowserWasmSttSupport(): BrowserWasmCapabilities {
   }
   const indexedDb = typeof indexedDB !== "undefined";
   const subtleCrypto = Boolean(globalThis.crypto?.subtle?.digest);
+  const isSecureContext =
+    typeof globalThis.isSecureContext === "boolean"
+      ? globalThis.isSecureContext
+      : hasWindow && typeof window.isSecureContext === "boolean"
+        ? window.isSecureContext
+        : subtleCrypto;
 
   if (!hasWindow || !worker || !wasm || !subtleCrypto) {
     return {
@@ -101,11 +111,14 @@ export function detectBrowserWasmSttSupport(): BrowserWasmCapabilities {
       simd,
       indexedDb,
       subtleCrypto,
-      reason: !worker
-        ? tSpeechWasm("speech.wasm.workerUnavailable")
-        : !wasm
-          ? tSpeechWasm("speech.wasm.wasmUnavailable")
-          : tSpeechWasm("speech.wasm.cryptoUnavailable"),
+      isSecureContext,
+      reason: !hasWindow
+        ? tSpeechWasm("speech.wasm.deviceUnsupported")
+        : !worker
+          ? tSpeechWasm("speech.wasm.workerUnavailable")
+          : !wasm
+            ? tSpeechWasm("speech.wasm.wasmUnavailable")
+            : tSpeechWasm("speech.wasm.cryptoUnavailable"),
     };
   }
   return {
@@ -115,21 +128,54 @@ export function detectBrowserWasmSttSupport(): BrowserWasmCapabilities {
     simd,
     indexedDb,
     subtleCrypto,
+    isSecureContext,
     reason: null,
   };
 }
 
+function emptyWasmCacheStatus(
+  supported = true,
+  error: string | null = null,
+): WasmModelCacheStatus {
+  return {
+    ready: false,
+    cachedFiles: 0,
+    expectedFiles: MODEL_FILE_SPECS.length,
+    cachedBytes: 0,
+    totalBytes: SHERPA_WASM_MODEL_BYTES,
+    supported,
+    error,
+  };
+}
+
+function safeCloseWasmDb(db: IDBDatabase | null): void {
+  if (!db) return;
+  try {
+    db.close();
+  } catch {
+    // Ignore close error
+  }
+}
+
 export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
   if (typeof indexedDB === "undefined") {
-    return {
-      ready: false,
-      cachedFiles: 0,
-      expectedFiles: MODEL_FILE_SPECS.length,
-      cachedBytes: 0,
-      totalBytes: SHERPA_WASM_MODEL_BYTES,
-    };
+    return emptyWasmCacheStatus(false, "INDEXEDDB_UNAVAILABLE");
   }
   return new Promise((resolve) => {
+    let settled = false;
+    let openedDb: IDBDatabase | null = null;
+    const finish = (status: WasmModelCacheStatus) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      safeCloseWasmDb(openedDb);
+      openedDb = null;
+      resolve(status);
+    };
+    const timer = setTimeout(
+      () => finish(emptyWasmCacheStatus(false, "INDEXEDDB_TIMEOUT")),
+      WASM_IDB_TIMEOUT_MS,
+    );
     try {
       const req = indexedDB.open(IDB_NAME, 1);
       req.onupgradeneeded = () => {
@@ -138,30 +184,29 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
           db.createObjectStore(IDB_STORE, { keyPath: "key" });
         }
       };
+      req.onblocked = () =>
+        finish(emptyWasmCacheStatus(false, "INDEXEDDB_BLOCKED"));
+      req.onerror = () =>
+        finish(emptyWasmCacheStatus(false, "INDEXEDDB_OPEN_ERROR"));
       req.onsuccess = () => {
         const db = req.result;
-        let settled = false;
-        const finish = (status: WasmModelCacheStatus) => {
-          if (settled) return;
-          settled = true;
-          try {
-            db.close();
-          } catch {
-            // Ignore close error
-          }
-          resolve(status);
-        };
-        const emptyStatus: WasmModelCacheStatus = {
-          ready: false,
-          cachedFiles: 0,
-          expectedFiles: MODEL_FILE_SPECS.length,
-          cachedBytes: 0,
-          totalBytes: SHERPA_WASM_MODEL_BYTES,
-        };
+        if (settled) {
+          safeCloseWasmDb(db);
+          return;
+        }
+        openedDb = db;
         try {
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            finish(emptyWasmCacheStatus(true, null));
+            return;
+          }
           const tx = db.transaction(IDB_STORE, "readonly");
-          tx.onabort = () => finish(emptyStatus);
-          tx.onerror = () => finish(emptyStatus);
+          tx.onabort = () =>
+            finish(
+              emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ABORTED"),
+            );
+          tx.onerror = () =>
+            finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ERROR"));
           const store = tx.objectStore(IDB_STORE);
           const checkLegacyEntries = () => {
             let cachedFiles = 0;
@@ -172,7 +217,13 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
               getReq.onsuccess = () => {
                 const rec = getReq.result as
                   { byteLength?: number; buffer?: ArrayBuffer } | undefined;
-                const len = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
+                const rawLen = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
+                const len =
+                  typeof rawLen === "number" &&
+                  Number.isFinite(rawLen) &&
+                  rawLen > 0
+                    ? rawLen
+                    : 0;
                 if (len === spec.expectedBytes) {
                   cachedFiles += 1;
                   cachedBytes += len;
@@ -185,6 +236,8 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
                     expectedFiles: MODEL_FILE_SPECS.length,
                     cachedBytes,
                     totalBytes: SHERPA_WASM_MODEL_BYTES,
+                    supported: true,
+                    error: null,
                   });
                 }
               };
@@ -197,6 +250,8 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
                     expectedFiles: MODEL_FILE_SPECS.length,
                     cachedBytes,
                     totalBytes: SHERPA_WASM_MODEL_BYTES,
+                    supported: true,
+                    error: null,
                   });
                 }
               };
@@ -222,6 +277,8 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
                 const entry = manifest.files[spec.name];
                 if (
                   entry?.verified &&
+                  typeof entry.byteLength === "number" &&
+                  Number.isFinite(entry.byteLength) &&
                   entry.byteLength === spec.expectedBytes
                 ) {
                   cachedFiles += 1;
@@ -234,6 +291,8 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
                 expectedFiles: MODEL_FILE_SPECS.length,
                 cachedBytes,
                 totalBytes: SHERPA_WASM_MODEL_BYTES,
+                supported: true,
+                error: null,
               });
               return;
             }
@@ -243,25 +302,69 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
             checkLegacyEntries();
           };
         } catch {
-          finish(emptyStatus);
+          finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ERROR"));
         }
       };
-      req.onerror = () =>
-        resolve({
-          ready: false,
-          cachedFiles: 0,
-          expectedFiles: MODEL_FILE_SPECS.length,
-          cachedBytes: 0,
-          totalBytes: SHERPA_WASM_MODEL_BYTES,
-        });
     } catch {
-      resolve({
-        ready: false,
-        cachedFiles: 0,
-        expectedFiles: MODEL_FILE_SPECS.length,
-        cachedBytes: 0,
-        totalBytes: SHERPA_WASM_MODEL_BYTES,
-      });
+      finish(emptyWasmCacheStatus(false, "INDEXEDDB_OPEN_ERROR"));
+    }
+  });
+}
+
+export async function clearWasmModelCache(): Promise<boolean> {
+  if (sharedClient) {
+    sharedClient.dispose();
+    sharedClient = null;
+  }
+  if (typeof indexedDB === "undefined") {
+    return false;
+  }
+  return new Promise((resolve) => {
+    let settled = false;
+    let openedDb: IDBDatabase | null = null;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      safeCloseWasmDb(openedDb);
+      openedDb = null;
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), WASM_IDB_TIMEOUT_MS);
+    try {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE, { keyPath: "key" });
+        }
+      };
+      req.onblocked = () => finish(false);
+      req.onerror = () => finish(false);
+      req.onsuccess = () => {
+        const db = req.result;
+        if (settled) {
+          safeCloseWasmDb(db);
+          return;
+        }
+        openedDb = db;
+        try {
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            finish(true);
+            return;
+          }
+          const tx = db.transaction(IDB_STORE, "readwrite");
+          tx.oncomplete = () => finish(true);
+          tx.onerror = () => finish(false);
+          tx.onabort = () => finish(false);
+          const clearReq = tx.objectStore(IDB_STORE).clear();
+          clearReq.onerror = () => finish(false);
+        } catch {
+          finish(false);
+        }
+      };
+    } catch {
+      finish(false);
     }
   });
 }

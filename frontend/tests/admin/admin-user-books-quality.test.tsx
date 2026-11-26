@@ -194,7 +194,9 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     });
 
     const user = userEvent.setup();
-    render(withAdminFixture(<AdminBookContentQualityScreen />, services));
+    const { container } = render(
+      withAdminFixture(<AdminBookContentQualityScreen />, services),
+    );
 
     // Switch to Sách người dùng tab
     const userBooksTab = await screen.findByRole("tab", {
@@ -202,6 +204,15 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
     });
     await user.click(userBooksTab);
     expect(userBooksTab).toHaveAttribute("aria-selected", "true");
+
+    // Regression guard: NO duplicate #quality-panel-user-books or any duplicate IDs
+    expect(
+      container.querySelectorAll("#quality-panel-user-books"),
+    ).toHaveLength(1);
+    const ids = Array.from(container.querySelectorAll("[id]")).map(
+      (el) => el.id,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
 
     // All 6 status filters visible
     for (const label of [
@@ -264,6 +275,15 @@ describe("Admin Chất lượng sách -> Sách người dùng tab", () => {
         expected_lock_version: 2,
       });
     });
+    // Drawer auto-closes on success while keeping confirmation notice visible above queue
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("admin-drawer-panel"),
+      ).not.toBeInTheDocument();
+    });
+    expect(
+      await screen.findByText(/Đã phê duyệt đúng phiên bản v1/),
+    ).toBeInTheDocument();
   });
 
   it("disables Approve on policy-blocked content and handles concurrent 409 conflict cleanly", async () => {

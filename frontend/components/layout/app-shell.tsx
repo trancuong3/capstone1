@@ -482,7 +482,9 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const autoSyncStudioTasks =
-    pathname.startsWith("/my-books") || pathname.startsWith("/book-scanner");
+    pathname.startsWith("/my-books") ||
+    pathname.startsWith("/book-scanner") ||
+    pathname.startsWith("/studio/tasks");
 
   return (
     <AiTaskCenterProvider

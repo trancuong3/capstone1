@@ -5,6 +5,7 @@ from app.api.routes import (
     book,
     book_content_quality,
     comprehension,
+    parent_notifications,
     parent_private_book,
     profile,
     reading,
@@ -49,6 +50,11 @@ api_router.include_router(
     tags=["Reading Presence"],
 )
 api_router.include_router(
+    parent_notifications.router,
+    prefix="/parent-notifications",
+    tags=["Parent Notifications"],
+)
+api_router.include_router(
     sentence_shooter.router,
     prefix="/games/sentence-shooter",
     tags=["Sentence Shooter"],
@@ -73,5 +79,6 @@ api_router.include_router(tutor_question.router, prefix="/tutor", tags=["AI Tuto
 api_router.include_router(voice_studio.router, prefix="/voice", tags=["Voice"])
 api_router.include_router(child_progress.router, prefix="/tutor", tags=["AI Tutor"])
 api_router.include_router(ocr_extraction.router, prefix="/studio/ocr", tags=["Smart Book Studio OCR"])
+api_router.include_router(ocr_extraction.studio_router, prefix="/studio", tags=["Smart Book Studio OCR"])
 api_router.include_router(book_assets.router, prefix="/studio", tags=["Smart Book Studio Assets"])
 api_router.include_router(global_tasks.router, prefix="/studio", tags=["Smart Book Studio Tasks"])
