@@ -216,7 +216,6 @@ class LocalSynthesizedAudio:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +240,6 @@ class LocalTimedSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,7 +265,6 @@ class LocalPhonicsSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 def fix_wav_header_sizes(content: bytes) -> bytes:
@@ -302,27 +299,6 @@ class LocalTranscription:
     fallback_used: bool = False
     fallback_reason: str | None = None
     superseded: bool = False
-
-
-def fix_wav_header_sizes(content: bytes) -> bytes:
-    """Rewrite streaming/placeholder RIFF & data chunk sizes to exact byte counts."""
-    if (
-        len(content) < 44
-        or content[:4] != b"RIFF"
-        or content[8:12] != b"WAVE"
-        or content[36:40] != b"data"
-    ):
-        return content
-    actual_riff = len(content) - 8
-    actual_data = len(content) - 44
-    cur_riff = struct.unpack_from("<I", content, 4)[0]
-    cur_data = struct.unpack_from("<I", content, 40)[0]
-    if cur_riff == actual_riff and cur_data == actual_data:
-        return content
-    patched = bytearray(content)
-    struct.pack_into("<I", patched, 4, actual_riff)
-    struct.pack_into("<I", patched, 40, actual_data)
-    return bytes(patched)
 
 
 class LocalVoiceTechnicalError(VoiceProviderError):
@@ -441,6 +417,7 @@ class LocalVoiceProvider:
         self._remote_unavailable_until: float = 0.0
         self._remote_unavailable_error_code: str = "LOCAL_VOICE_UNAVAILABLE"
         self._remote_unavailable_client_id: int | None = None
+        self._remote_unavailable_override: Any = None
         self._inflight_client_counts: dict[int, int] = {}
         self._deferred_close_clients: dict[int, Any] = {}
 
@@ -451,12 +428,17 @@ class LocalVoiceProvider:
         self._remote_unavailable_error_code = error_code
         # In production `_get_client` is unbound on the instance; if a unit test patches
         # `provider._get_client` to swap fake clients mid-test, scope the breaker to that mock.
+        self._remote_unavailable_override = self.__dict__.get("_get_client")
         self._remote_unavailable_client_id = (
             id(client) if "_get_client" in self.__dict__ else None
         )
 
     def _is_remote_circuit_open(self, client: Any | None = None) -> bool:
         if self.is_loopback or time.monotonic() >= self._remote_unavailable_until:
+            return False
+        override = self.__dict__.get("_get_client")
+        recorded_override = getattr(self, "_remote_unavailable_override", None)
+        if recorded_override is not None and override is not recorded_override:
             return False
         if (
             self._remote_unavailable_client_id is not None
@@ -739,6 +721,7 @@ class LocalVoiceProvider:
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
                 self._remote_unavailable_client_id = None
+                self._remote_unavailable_override = None
 
             if resp.status_code == 503 and retries_used < retry_limit:
                 worker_code = _extract_worker_error_code(resp)
@@ -789,6 +772,8 @@ class LocalVoiceProvider:
                 "error_code": err,
                 "stt_error_code": err if err == "LOCAL_VOICE_TIMEOUT" else "LOCAL_STT_UNAVAILABLE",
                 "tts_error_code": err if err == "LOCAL_VOICE_TIMEOUT" else "LOCAL_TTS_UNAVAILABLE",
+                "stt_model_version": LOCAL_STT_MODEL_VERSION,
+                "tts_model_version": LOCAL_TTS_MODEL_VERSION,
                 "latency_ms": 0,
             }
         started = time.perf_counter()
@@ -806,6 +791,7 @@ class LocalVoiceProvider:
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
                 self._remote_unavailable_client_id = None
+                self._remote_unavailable_override = None
             if resp.status_code == 503:
                 return {
                     "configured": True,
@@ -818,6 +804,8 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             if resp.status_code != 200:
+                if not self.is_loopback and resp.status_code >= 500:
+                    self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
                 if resp.status_code in (401, 403) and not self._get_token():
                     self._schedule_background_recovery()
                 return {
@@ -933,6 +921,7 @@ class LocalVoiceProvider:
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
                 self._remote_unavailable_client_id = None
+                self._remote_unavailable_override = None
                 payload = resp.json()
                 if not isinstance(payload, dict):
                     raise ValueError("expected JSON object")

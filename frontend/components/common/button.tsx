@@ -12,8 +12,14 @@ import {
 
 import { cn } from "@/lib/utils/cn";
 
-export type ButtonVariant = "primary" | "secondary" | "quiet" | "destructive";
-export type ButtonSize = "default" | "compact";
+export type ButtonVariant =
+  | "primary"
+  | "secondary"
+  | "quiet"
+  | "destructive"
+  | "outline"
+  | "destructive-outline";
+export type ButtonSize = "default" | "compact" | "admin";
 
 export const ButtonSizeContext = createContext<ButtonSize>("default");
 
@@ -32,7 +38,7 @@ export function ButtonSizeProvider({
 }
 
 const baseClassName =
-  "inline-flex items-center justify-center gap-2 rounded-control px-4 py-2 text-center text-button font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
+  "inline-flex items-center justify-center gap-2 rounded-control text-center font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-55";
 
 const explicitWidthClassPattern =
   /(?:^|\s)(?:w-(?:auto|fit|min|max|\d+|\[.+?\])|(?:sm|md|lg|xl):w-auto|size-\S+)/;
@@ -40,11 +46,16 @@ const explicitWidthClassPattern =
 function resolveWidthClassName(
   fullWidth: boolean | undefined,
   className: string | undefined,
+  resolvedSize: ButtonSize,
+  inheritedSize: ButtonSize,
 ): string | undefined {
   if (fullWidth === false) return "w-auto";
   if (fullWidth === true) return "w-full";
   if (className && explicitWidthClassPattern.test(className)) {
     return undefined;
+  }
+  if (resolvedSize === "admin" || inheritedSize === "admin") {
+    return "w-auto";
   }
   return "w-full";
 }
@@ -54,11 +65,15 @@ const variantClassNames: Record<ButtonVariant, string> = {
   secondary: "bg-sky text-primary-hover hover:bg-border",
   quiet: "bg-white text-ink hover:bg-sky",
   destructive: "bg-danger text-white hover:opacity-90",
+  outline: "border border-border bg-white text-ink hover:bg-canvas",
+  "destructive-outline":
+    "border border-danger/30 bg-white text-danger hover:bg-danger-surface",
 };
 
 const sizeClassNames: Record<ButtonSize, string> = {
-  default: "min-h-14",
+  default: "min-h-14 px-4 py-2 text-button",
   compact: "min-h-12 px-4 py-2.5 text-label leading-5",
+  admin: "min-h-10 px-3 py-1.5 text-sm leading-5",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -81,15 +96,16 @@ export function Button({
   ...props
 }: ButtonProps) {
   const inheritedSize = useContext(ButtonSizeContext);
+  const resolvedSize = size ?? inheritedSize;
 
   return (
     <button
       aria-busy={isLoading || undefined}
       className={cn(
         baseClassName,
-        resolveWidthClassName(fullWidth, className),
+        resolveWidthClassName(fullWidth, className, resolvedSize, inheritedSize),
         variantClassNames[variant],
-        sizeClassNames[size ?? inheritedSize],
+        sizeClassNames[resolvedSize],
         className,
       )}
       disabled={disabled || isLoading}
@@ -97,7 +113,13 @@ export function Button({
       {...props}
     >
       {isLoading ? (
-        <LoaderCircle aria-hidden="true" className="size-5 animate-spin" />
+        <LoaderCircle
+          aria-hidden="true"
+          className={cn(
+            "animate-spin",
+            resolvedSize === "admin" ? "size-4" : "size-5",
+          )}
+        />
       ) : null}
       {children}
     </button>
@@ -122,14 +144,15 @@ export function ButtonLink({
   ...props
 }: ButtonLinkProps) {
   const inheritedSize = useContext(ButtonSizeContext);
+  const resolvedSize = size ?? inheritedSize;
 
   return (
     <Link
       className={cn(
         baseClassName,
-        resolveWidthClassName(fullWidth, className),
+        resolveWidthClassName(fullWidth, className, resolvedSize, inheritedSize),
         variantClassNames[variant],
-        sizeClassNames[size ?? inheritedSize],
+        sizeClassNames[resolvedSize],
         className,
       )}
       href={href}
