@@ -85,7 +85,7 @@ export function AdminBookEditorScreen({
       const current = await books.get(bookId);
       if (requestId !== requestIdRef.current) return;
       setBook(current);
-      // Hydrate active cover asset immediately on mount without waiting for Cover Studio modal.
+      // Hydrate active cover asset immediately on mount without waiting for Cover Studio panel.
       void resolvedAssetsService
         .getBookAssets(bookId)
         .then((summary) => {
@@ -219,6 +219,14 @@ export function AdminBookEditorScreen({
   }
 
   const resolvedTitle = book.title.trim() || t("books.missingTitle");
+  const resolvedCoverUrl = coverExplicitlyCleared
+    ? null
+    : (activeCoverAsset?.media_url ?? book.cover_url ?? null);
+  const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
+    ? "METADATA_RENDER"
+    : (activeCoverAsset?.source_type ??
+      (book.cover_source_type as AssetSourceType | null | undefined) ??
+      null);
 
   const initial: AdminBookCreateDTO = {
     name: book.name ?? "",
@@ -231,15 +239,6 @@ export function AdminBookEditorScreen({
     returnTo === "metadata-quality"
       ? "/admin/metadata-quality"
       : `/admin/books/${encodeURIComponent(bookId)}`;
-
-  const resolvedCoverUrl = coverExplicitlyCleared
-    ? null
-    : (activeCoverAsset?.media_url ?? book.cover_url ?? null);
-  const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
-    ? "METADATA_RENDER"
-    : (activeCoverAsset?.source_type ??
-      (book.cover_source_type as AssetSourceType | null | undefined) ??
-      null);
 
   return (
     <section className="space-y-4">
@@ -274,6 +273,7 @@ export function AdminBookEditorScreen({
           {notice.message}
         </StatusMessage>
       ) : null}
+
       <AdminBookForm
         bookId={bookId}
         cancelHref={cancelHref}
@@ -399,6 +399,7 @@ export function AdminBookEditorScreen({
         }
         submitLabel={t("books.editor.submitLabel")}
       />
+
       <Modal
         closeOnBackdropClick={!statusBusy}
         closeOnEscape={!statusBusy}

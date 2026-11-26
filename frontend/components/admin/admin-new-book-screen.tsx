@@ -92,7 +92,7 @@ export function AdminNewBookScreen({
     [],
   );
 
-  async function handleCreateBook(value: AdminBookCreateDTO) {
+  async function handleCreate(value: AdminBookCreateDTO) {
     setCoverNotice(null);
     const created = await books.create({
       name: value.name.trim(),
@@ -142,10 +142,9 @@ export function AdminNewBookScreen({
             type="file"
           />
           <Button
-            className="min-h-11 w-auto px-3.5 text-xs"
             fullWidth={false}
             onClick={() => fileInputRef.current?.click()}
-            size="compact"
+            size="admin"
             type="button"
             variant="secondary"
           >
@@ -154,10 +153,9 @@ export function AdminNewBookScreen({
           </Button>
           {stagedCoverFile ? (
             <Button
-              className="min-h-11 w-auto px-3 text-xs"
               fullWidth={false}
               onClick={clearStagedCover}
-              size="compact"
+              size="admin"
               type="button"
               variant="quiet"
             >
@@ -184,6 +182,7 @@ export function AdminNewBookScreen({
         eyebrow={t("books.eyebrow")}
         title={t("books.new.title")}
       />
+
       <AdminBookForm
         bookId="new-book-preview"
         cancelHref="/admin/books"
@@ -198,7 +197,7 @@ export function AdminNewBookScreen({
         }
         formHeading={t("books.new.infoHeading")}
         initial={{ min_grade: 1, max_grade: 5 }}
-        onSubmit={handleCreateBook}
+        onSubmit={handleCreate}
         showLiveCoverPreview
         submitLabel={t("books.new.submit")}
       />

@@ -849,7 +849,6 @@ export function SmartOcrBlockReview({
         <div className="flex flex-wrap items-center gap-2">
           {showApplyToDraftAction ? (
             <Button
-              className="min-h-11"
               data-testid="apply-ocr-to-draft-btn"
               disabled={
                 busy ||
@@ -860,7 +859,7 @@ export function SmartOcrBlockReview({
               fullWidth={false}
               isLoading={applyingToDraft}
               onClick={() => void handleApplyCleanTextToDraft()}
-              size="compact"
+              size="admin"
               title={
                 isRevisionVerified
                   ? "Revision đã VERIFIED nên không thể chỉnh sửa bản nháp"
@@ -869,14 +868,12 @@ export function SmartOcrBlockReview({
               type="button"
               variant="primary"
             >
-              <FileText aria-hidden="true" className="size-4" />
+              <FileText aria-hidden="true" className="size-3.5 shrink-0" />
               Áp dụng văn bản sạch vào bản nháp
             </Button>
           ) : null}
           <Button
-            className="min-h-11"
             disabled={busy || applyingToDraft || clearBlockCount === 0}
-            fullWidth={false}
             onClick={() =>
               void commitPatch({
                 accept_clear_blocks: true,
@@ -893,9 +890,7 @@ export function SmartOcrBlockReview({
             )}
           </Button>
           <Button
-            className="min-h-11"
             disabled={busy || applyingToDraft || !canUndo}
-            fullWidth={false}
             onClick={() => void commitPatch({ undo: true })}
             size="admin"
             variant="outline"
@@ -1305,10 +1300,10 @@ export function SmartOcrBlockReviewLoader({
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
       {extraction ? (
         <SmartOcrBlockReview
-          key={`${pageId}:${extraction.extraction_id ?? "transient"}:${extraction.blocks.length}`}
           canApplyToDraft={canApplyToDraft}
           extraction={extraction}
           isRevisionVerified={isRevisionVerified}
+          key={`${pageId}:${extraction.extraction_id ?? "transient"}:${extraction.blocks.length}`}
           onApplyToDraft={onApplyToDraft}
           onExtractionChange={setExtraction}
           onPatchBlocks={(payload) => patchPageOcrBlocks(pageId, payload)}

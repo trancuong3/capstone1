@@ -15,7 +15,6 @@ import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
-import { STUDIO_TASKS_CHANGED_EVENT } from "@/lib/api/global-tasks-service";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
@@ -25,6 +24,7 @@ import {
   runAdminBookUpload,
   subscribeAdminBookUploadSession,
 } from "@/lib/admin/admin-book-upload-session";
+import { STUDIO_TASKS_CHANGED_EVENT } from "@/lib/api/global-tasks-service";
 import type { TranslateFn } from "@/lib/i18n/types";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
@@ -224,7 +224,10 @@ export function AdminPageUploader({
   }, [bookId, onUploaded]);
 
   const shouldRender =
-    !collapsed || session.busy || session.progress.length > 0;
+    !collapsed ||
+    session.busy ||
+    session.progress.length > 0 ||
+    session.serverTasks.length > 0;
 
   useEffect(() => {
     if (!shouldRender) return;
@@ -517,9 +520,10 @@ export function AdminPageUploader({
           </Button>
         </div>
       </form>
+
       {session.serverTasks.length > 0 ? (
         <div
-          className="mt-4 space-y-2 rounded-control border border-primary/25 bg-white p-3.5"
+          className="space-y-2 rounded-xl border border-primary/25 bg-white p-3.5"
           data-testid="rehydrated-server-tasks"
         >
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -545,7 +549,7 @@ export function AdminPageUploader({
                 task.progress_pct !== null;
               return (
                 <div
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-canvas/50 px-3 py-2 text-xs"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2 text-xs"
                   key={`${task.source}-${task.id}`}
                 >
                   <div className="min-w-0 flex-1">
@@ -557,9 +561,7 @@ export function AdminPageUploader({
                       {task.page_number ? ` · Trang ${task.page_number}` : ""}
                     </p>
                   </div>
-                  <span className="rounded-full border border-primary/25 bg-sky px-2.5 py-0.5 font-semibold text-primary-hover">
-                    {task.status_label_vi}
-                  </span>
+                  <AdminBadge tone="info">{task.status_label_vi}</AdminBadge>
                   {hasMeasured ? (
                     <span className="font-semibold tabular-nums text-ink">
                       {task.progress_completed}/{task.progress_total} (
@@ -572,6 +574,7 @@ export function AdminPageUploader({
           </div>
         </div>
       ) : null}
+
       {session.progress.length ? (
         <div className="space-y-2" aria-live="polite">
           {session.progress.map((item) => (

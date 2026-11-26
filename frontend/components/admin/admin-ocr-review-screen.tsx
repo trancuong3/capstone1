@@ -45,13 +45,13 @@ import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
-import { cn } from "@/lib/utils/cn";
 import {
   getAdminOcrJob,
   isActiveAdminOcrJobStatus,
   isAdminOcrJobQueuedSignal,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import { cn } from "@/lib/utils/cn";
 import { isServiceError } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
@@ -3319,12 +3319,12 @@ export function AdminOcrReviewScreen({
       ) : null}
       {queuedOcrJob ? (
         <div
-          className="mb-6 flex items-start gap-3 rounded-card border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
+          className="mb-4 flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
           data-testid="admin-review-ocr-queued-banner"
           role="status"
         >
           <Clock3
-            aria-hidden
+            aria-hidden="true"
             className="mt-0.5 size-5 shrink-0 text-amber-700"
           />
           <div className="min-w-0 flex-1">
@@ -4654,11 +4654,39 @@ export function AdminOcrReviewScreen({
           >
             <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
               <SmartOcrBlockReviewLoader
+                isRevisionVerified={detail.verification_status === "VERIFIED"}
+                onApplyToDraft={async (result) => {
+                  handleDraftTextChange(result.canonical_text);
+                  await load();
+                }}
                 pageId={pageId}
                 pageImageUrl={image.preview_url}
                 pageNumber={image.page_number}
+                pageRevisionId={detail.page_revision_id}
               />
             </section>
+            <details
+              className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5"
+              onToggle={(event) =>
+                setIllustrationStudioOpen(event.currentTarget.open)
+              }
+            >
+              <summary className="min-h-11 cursor-pointer py-2 font-bold text-ink">
+                Studio tranh minh họa sạch chữ (V2)
+              </summary>
+              <div className="mt-4">
+                <PageIllustrationStudio
+                  actorRole="admin"
+                  autoLoad={illustrationStudioOpen}
+                  bookId={bookId}
+                  canonicalText={draftText}
+                  compact
+                  pageId={pageId}
+                  pageNumber={image.page_number}
+                  wordBboxes={words.map((word) => [...word.bbox])}
+                />
+              </div>
+            </details>
           </div>
 
           {/* Tab 5: Lịch sử Revision + Diagnostics + Original OCR */}
@@ -4976,46 +5004,6 @@ export function AdminOcrReviewScreen({
               )}
             </div>
           </div>
-          <details className="rounded-card border border-border bg-white p-4">
-            <summary className="min-h-11 cursor-pointer py-2 font-bold text-ink">
-              Phân loại khối chữ thông minh (V2)
-            </summary>
-            <div className="mt-4">
-              <SmartOcrBlockReviewLoader
-                isRevisionVerified={detail.verification_status === "VERIFIED"}
-                onApplyToDraft={async (result) => {
-                  handleDraftTextChange(result.canonical_text);
-                  await load();
-                }}
-                pageId={pageId}
-                pageImageUrl={image.preview_url}
-                pageNumber={image.page_number}
-                pageRevisionId={detail.page_revision_id}
-              />
-            </div>
-          </details>
-          <details
-            className="rounded-card border border-border bg-white p-4"
-            onToggle={(event) =>
-              setIllustrationStudioOpen(event.currentTarget.open)
-            }
-          >
-            <summary className="min-h-11 cursor-pointer py-2 font-bold text-ink">
-              Studio tranh minh họa sạch chữ (V2)
-            </summary>
-            <div className="mt-4">
-              <PageIllustrationStudio
-                actorRole="admin"
-                autoLoad={illustrationStudioOpen}
-                bookId={bookId}
-                canonicalText={draftText}
-                compact
-                pageId={pageId}
-                pageNumber={image.page_number}
-                wordBboxes={words.map((word) => [...word.bbox])}
-              />
-            </div>
-          </details>
         </div>
       </div>
     </div>
@@ -5148,7 +5136,7 @@ function AdminOcrWordReviewPanel({
               <thead className="sticky top-0 z-10 bg-sky text-primary-hover">
                 <tr>
                   <th className="px-3 py-3 font-bold">
-                    {t("ocrReview.bboxView.hashColumnLabel")}
+                    {t("ocrReview.bboxView.hashColumnLabel", undefined, "#")}
                   </th>
                   <th className="px-3 py-3 font-bold">
                     {t("ocrReview.bboxView.wordColumn")}
