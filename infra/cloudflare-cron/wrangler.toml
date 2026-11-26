@@ -10,4 +10,4 @@ crons = ["*/30 * * * *"]
 # Override in Cloudflare dashboard / wrangler secret put:
 # VIREAD_BACKEND_URL = "https://your-api.example.com"
 # Secret (never commit): wrangler secret put VIREAD_CRON_DISPATCH_TOKEN
-VIREAD_BACKEND_URL = "https://api.example.invalid"
+VIREAD_BACKEND_URL = "https://capstone1-ssd8.onrender.com"
