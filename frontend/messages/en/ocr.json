@@ -70,7 +70,8 @@
     "checkQueueNow": "Check now",
     "scanAnotherPageQueued": "Scan another page",
     "cancelQueuedTask": "Cancel task",
-    "queuedListHeading": "Other pages saved in the OCR queue ({count} pages)"
+    "queuedListHeading": "Other pages saved in the OCR queue ({count} pages)",
+    "jobSubtitleQueuedOffline": "Queued waiting for the Windows OCR server to come back online — your page image is safely saved even if you reload."
   },
   "camera": {
     "missingBookInfo": "ViRead recognized the page but missing book info. Please align and scan again.",

@@ -60,7 +60,7 @@
     "errorUnsupportedFormat": "Định dạng ảnh chưa hỗ trợ. Hãy chọn ảnh JPG, PNG hoặc WebP.",
     "errorEmptyFile": "Tệp ảnh bị rỗng. Ba mẹ hãy chọn ảnh khác nhé.",
     "errorFileTooLarge": "Ảnh vượt quá giới hạn dung lượng 32 MB. Hãy chọn ảnh nhỏ hơn nhé.",
-    "workerOfflineBannerTitle": "Máy chủ OCR đang tạm tắt",
+    "workerOfflineBannerTitle": "Máy chủ OCR đang tạm tắt (ngoại tuyến)",
     "workerOfflineBannerBody": "Máy chủ OCR đang tạm tắt — Ba mẹ vẫn có thể chụp/tải ảnh để lưu sẵn vào hàng chờ; hệ thống sẽ tự động nhận diện ngay khi máy chủ bật lại.",
     "workerUnreachableBannerTitle": "Máy chủ OCR đang khởi động hoặc tạm chưa phản hồi",
     "workerUnreachableBannerBody": "Chưa kiểm tra được trạng thái máy chủ OCR do máy chủ đang khởi động hoặc mạng chậm. Ba mẹ vẫn có thể tải ảnh để lưu vào hàng chờ hoặc bấm kiểm tra lại sau vài giây.",
@@ -69,8 +69,9 @@
     "savedAtLabel": "Đã lưu lúc {time}",
     "checkQueueNow": "Kiểm tra lại ngay",
     "scanAnotherPageQueued": "Quét thêm trang khác",
-    "cancelQueuedTask": "Hủy tác vụ",
-    "queuedListHeading": "Các trang khác đang lưu trong hàng chờ OCR ({count} trang)"
+    "cancelQueuedTask": "Hủy quét tác vụ",
+    "queuedListHeading": "Các trang khác đang lưu trong hàng chờ OCR ({count} trang)",
+    "jobSubtitleQueuedOffline": "Đang xếp hàng chờ máy chủ OCR Windows bật — ảnh đã được lưu an toàn, không bị mất khi rời hoặc tải lại trang."
   },
   "camera": {
     "missingBookInfo": "ViRead nhận diện được trang nhưng thiếu thông tin cuốn sách. Ba mẹ hãy căn chỉnh và quét lại nhé.",

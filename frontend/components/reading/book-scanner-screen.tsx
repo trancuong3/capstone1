@@ -337,16 +337,25 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const ocrAbortRef = useRef<AbortController | null>(null);
   const pollWakeRef = useRef<(() => void) | null>(null);
   const activeJobIdRef = useRef<string | null>(null);
+  const activeJobWorkerOnlineRef = useRef<boolean>(false);
   const ocrGenerationRef = useRef(0);
 
   useEffect(() => {
     return () => {
-      // Stop local polling cleanly on unmount without cancelling durable queued OCR jobs.
+      // Stop local polling cleanly on unmount. Keep offline-queued jobs durably
+      // saved across reloads/navigation; only cancel an abandoned live interactive
+      // scan when the OCR worker is online.
       ocrGenerationRef.current += 1;
       ocrAbortRef.current?.abort();
       ocrAbortRef.current = null;
       pollWakeRef.current = null;
+      const jobIdToCancel = activeJobIdRef.current;
+      const wasWorkerOnline = activeJobWorkerOnlineRef.current;
       activeJobIdRef.current = null;
+      activeJobWorkerOnlineRef.current = false;
+      if (jobIdToCancel && wasWorkerOnline) {
+        void cancelScanPageOcrJob(jobIdToCancel).catch(() => undefined);
+      }
     };
   }, []);
 
@@ -376,6 +385,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       const { generation, controller, file, wasOptimized, idempotencyKey } =
         options;
       activeJobIdRef.current = initialJob.job_id;
+      activeJobWorkerOnlineRef.current = initialJob.worker_online;
       writeStoredScanJobId(initialJob.job_id);
       let currentJob = initialJob;
       let onlineAttempts = 0;
@@ -391,11 +401,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
         const resolvedFileName =
           currentJob.file_name || options.fileName || "book-page.jpg";
+        activeJobWorkerOnlineRef.current = currentJob.worker_online;
         setOcrWorkerStatus(currentJob.worker_online ? "ready" : "offline");
         upsertQueuedJob(currentJob);
 
         if (currentJob.status === "SUCCEEDED" && currentJob.result) {
           activeJobIdRef.current = null;
+          activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(null);
           setOcrState({
             status: "succeeded",
@@ -411,6 +423,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           currentJob.status === "CANCELLED"
         ) {
           activeJobIdRef.current = null;
+          activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(null);
           setOcrState({
             status: "error",
@@ -444,6 +457,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           offlineAttempts = 0;
           if (onlineAttempts > MAX_ONLINE_POLL_ATTEMPTS) {
             activeJobIdRef.current = null;
+            activeJobWorkerOnlineRef.current = false;
             setOcrState({
               status: "error",
               fileName: resolvedFileName,
@@ -807,6 +821,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       ocrAbortRef.current = null;
       pollWakeRef.current = null;
       activeJobIdRef.current = null;
+      activeJobWorkerOnlineRef.current = false;
       writeStoredScanJobId(null);
       setOcrState({ status: "idle" });
     }
@@ -819,6 +834,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     pollWakeRef.current = null;
     const jobIdToCancel = activeJobIdRef.current;
     activeJobIdRef.current = null;
+    activeJobWorkerOnlineRef.current = false;
     writeStoredScanJobId(null);
     if (jobIdToCancel) {
       setQueuedJobs((current) =>
@@ -1087,6 +1103,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
                         ? t("scanner.jobHeadlineQueuedOnline")
                         : t("scanner.jobHeadlineQueuedOffline")}
                 </p>
+                {!ocrState.workerOnline &&
+                (ocrState.jobStatus === "QUEUED" ||
+                  ocrState.jobStatus === "FAILED_RETRYABLE") ? (
+                  <p className="mt-1 text-sm text-amber-900/90">
+                    {t("scanner.jobSubtitleQueuedOffline")}
+                  </p>
+                ) : null}
                 <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-medium text-muted">
                   {ocrState.queuePosition ? (
                     <span data-testid="ocr-queue-position">

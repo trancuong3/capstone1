@@ -70,7 +70,8 @@
     "checkQueueNow": "지금 다시 확인",
     "scanAnotherPageQueued": "다른 페이지 스캔",
     "cancelQueuedTask": "작업 취소",
-    "queuedListHeading": "OCR 대기열에 저장된 다른 페이지 ({count}페이지)"
+    "queuedListHeading": "OCR 대기열에 저장된 다른 페이지 ({count}페이지)",
+    "jobSubtitleQueuedOffline": "Windows OCR 서버가 다시 켜지기를 대기열에서 기다리는 중입니다 — 페이지를 새로고침해도 이미지는 안전하게 보관됩니다."
   },
   "camera": {
     "missingBookInfo": "ViRead가 페이지를 인식했으나 책 정보가 누락되었습니다. 정렬 후 다시 스캔해 주세요.",

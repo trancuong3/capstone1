@@ -70,7 +70,8 @@
     "checkQueueNow": "今すぐ確認",
     "scanAnotherPageQueued": "別のページをスキャン",
     "cancelQueuedTask": "タスクをキャンセル",
-    "queuedListHeading": "OCR待機キューに保存中の他のページ（{count}ページ）"
+    "queuedListHeading": "OCR待機キューに保存中の他のページ（{count}ページ）",
+    "jobSubtitleQueuedOffline": "Windows OCRサーバーの起動待ちキューに保存されました — ページを再読み込みしても画像は安全に保持されます。"
   },
   "camera": {
     "missingBookInfo": "ページは認識されましたが、書籍情報が不足しています。位置を合わせて再度スキャンしてください。",
