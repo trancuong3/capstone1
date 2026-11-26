@@ -713,6 +713,25 @@ class ParentPrivateBookService:
         readable = await self.repo.is_private_book_readable(book_id, actor_id)
         contrib_map = await self._load_contribution_states([book])
 
+        pending_ocr_sub = next(
+            (
+                s
+                for s in submissions
+                if s.WorkflowStatus == "CHECKING" and s.OcrStatus == "PENDING"
+            ),
+            None,
+        )
+        if pending_ocr_sub is not None:
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=pending_ocr_sub.Id,
+                created_at=pending_ocr_sub.UpdatedAt or pending_ocr_sub.CreatedAt,
+                reason="parent_book_poll_nudge",
+            )
+
         pages_dto = [
             ParentPrivatePageRead(
                 page_id=page.Id,
@@ -1735,6 +1754,16 @@ class ParentPrivateBookService:
         sub = await self.repo.get_owned_submission(book_id, submission_id, actor_id)
         if sub is None:
             raise HTTPException(status_code=404, detail="Resource not found")
+        if sub.WorkflowStatus == "CHECKING" and sub.OcrStatus == "PENDING":
+            from app.services.remote_ocr_wakeup import (
+                maybe_nudge_ocr_wakeup_for_stale_queued_job,
+            )
+
+            maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                job_id=sub.Id,
+                created_at=sub.UpdatedAt or sub.CreatedAt,
+                reason="parent_submission_poll_nudge",
+            )
         return self._serialize_submission(book, sub, base_url=base_url)
 
     async def accept_spelling(

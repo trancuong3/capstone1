@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { SpeechService } from "@/lib/api/speech-service";
@@ -187,6 +189,146 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       const status = await getWasmModelCacheStatus();
       expect(status.ready).toBe(false);
       expect(status.cachedFiles).toBe(3);
+    });
+
+    it("sherpa-stt-worker caps excess leading pre-roll silence on short words without double-padding", async () => {
+      const workerPath = resolve(
+        process.cwd(),
+        "public/workers/sherpa-stt-worker.js",
+      );
+      const source = readFileSync(workerPath, "utf8");
+      const acceptedLengths: number[] = [];
+
+      const workerGlobal: Record<string, unknown> = {
+        performance: { now: () => 10 },
+        crypto: { subtle: { digest: vi.fn() } },
+        postMessage: vi.fn(),
+        importScripts: () => {},
+        OfflineRecognizer: class FakeOfflineRecognizer {
+          handle = 1;
+          createStream() {
+            return {
+              acceptWaveform: (_sr: number, wf: Float32Array) => {
+                acceptedLengths.push(wf.length);
+              },
+              free: () => {},
+            };
+          }
+          decode() {}
+          getResult() {
+            return { text: "cả" };
+          }
+          free() {}
+        },
+      };
+      workerGlobal.self = workerGlobal;
+
+      // Stub fetch to return exact-sized dummy buffers & bypass SHA mismatch via crypto mock
+      const specSizes: Record<string, { bytes: number; sha: string }> = {
+        "encoder.int8.onnx": {
+          bytes: 27699063,
+          sha: "8ef5286dd427eb108055c2ddc1982aa31e544706072d5ea228729292dacade68",
+        },
+        "decoder.onnx": {
+          bytes: 5165084,
+          sha: "cf2aa385b82c9d5d40cd29c3188af52d0249b3b78f0d4b7eb84ad502d50c7e7f",
+        },
+        "joiner.int8.onnx": {
+          bytes: 1033417,
+          sha: "7311d2e17b810ecea515d79c71cc4668af8759256a06fa01d27047772320c821",
+        },
+        "tokens.txt": {
+          bytes: 23238,
+          sha: "ca8171f8bbd516c050b627582f2125c8f5f1f6ed967ab41b0fa9aae2cf61b492",
+        },
+      };
+      const shaHexToBytes = (hex: string) => {
+        const bytes = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < bytes.length; i += 1) {
+          bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        }
+        return bytes.buffer;
+      };
+      let lastFile = "";
+      workerGlobal.fetch = async (url: string) => {
+        const name = String(url).split("/").pop() || "";
+        lastFile = name;
+        const size = specSizes[name]?.bytes ?? 0;
+        return {
+          ok: true,
+          status: 200,
+          arrayBuffer: async () => new ArrayBuffer(size),
+        };
+      };
+      workerGlobal.crypto = {
+        subtle: {
+          digest: async () => shaHexToBytes(specSizes[lastFile].sha),
+        },
+      };
+      workerGlobal.importScripts = () => {
+        const mod = workerGlobal.Module as {
+          onRuntimeInitialized?: () => void;
+          FS_unlink?: (p: string) => void;
+          FS_createDataFile?: () => void;
+        };
+        mod.FS_unlink = () => {};
+        mod.FS_createDataFile = () => {};
+        mod.onRuntimeInitialized?.();
+      };
+
+      const runWorker = new Function(
+        "self",
+        "fetch",
+        "importScripts",
+        "OfflineRecognizer",
+        source,
+      );
+      runWorker(
+        workerGlobal,
+        workerGlobal.fetch,
+        workerGlobal.importScripts,
+        workerGlobal.OfflineRecognizer,
+      );
+
+      // 0.50s pre-roll silence + 0.40s voiced tone (16kHz) => 14,400 samples total
+      const sr = 16000;
+      const samples = new Float32Array(Math.round(0.9 * sr));
+      for (let i = Math.round(0.5 * sr); i < samples.length; i += 1) {
+        samples[i] = 0.15 * Math.sin((2 * Math.PI * 240 * i) / sr);
+      }
+      const onmessage = workerGlobal.onmessage as (ev: {
+        data: unknown;
+      }) => Promise<void>;
+      await onmessage({
+        data: {
+          type: "transcribe",
+          id: "cap-lead-1",
+          samples,
+          sampleRate: sr,
+        },
+      });
+
+      expect(acceptedLengths).toHaveLength(1);
+      // Trimmed to ~0.18s lead + 0.40s speech = ~9,280 samples (< 11,200), NOT 14,400 + 2,880 = 17,280!
+      expect(acceptedLengths[0]).toBeLessThan(Math.round(0.7 * sr));
+      expect(acceptedLengths[0]).toBeGreaterThan(Math.round(0.5 * sr));
+
+      // 0.18s lead + 0.40s speech + 0.50s excess trailing silence => tail trimmed to <= 0.20s (~0.78s total)
+      const tailSamples = new Float32Array(Math.round(1.08 * sr));
+      for (let i = Math.round(0.18 * sr); i < Math.round(0.58 * sr); i += 1) {
+        tailSamples[i] = 0.15 * Math.sin((2 * Math.PI * 240 * i) / sr);
+      }
+      await onmessage({
+        data: {
+          type: "transcribe",
+          id: "cap-tail-1",
+          samples: tailSamples,
+          sampleRate: sr,
+        },
+      });
+      expect(acceptedLengths).toHaveLength(2);
+      expect(acceptedLengths[1]).toBeLessThan(Math.round(0.85 * sr));
+      expect(acceptedLengths[1]).toBeGreaterThan(Math.round(0.65 * sr));
     });
 
     it("falls back from failing Tier-1 WASM to Tier-3 Web Speech when allowed, and falls back in evaluateRecordedShortWord on 503", async () => {

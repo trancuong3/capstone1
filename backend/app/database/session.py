@@ -25,6 +25,8 @@ from .config import (
     DATABASE_CONCURRENCY_LIMIT,
     DATABASE_CONCURRENCY_WAIT_TIMEOUT,
     DATABASE_CONNECT_TIMEOUT,
+    DATABASE_POOL_PRE_PING,
+    DATABASE_POOL_RECYCLE_SECONDS,
     DATABASE_POOLER_MODE,
     DATABASE_SSL_REQUIRED,
     DATABASE_SSL_ROOT_CERT,
@@ -243,14 +245,17 @@ if _use_null_pool:
 elif DATABASE_POOLER_MODE == "transaction":
     # Tiny bounded pool avoids per-request TLS/SCRAM handshakes across Supavisor
     # transaction pooler (port 6543) while prepared statements remain disabled.
+    # pool_pre_ping defaults False here (DATABASE_POOL_PRE_PING=true overrides)
+    # so warm checkouts avoid a synchronous extra Oregon<->APAC SELECT 1 RTT;
+    # pool_recycle=180 + asyncpg connection lifecycle guard staleness.
     engine = create_async_engine(
         sqlalchemy_database_url,
         echo=False,
         pool_size=2,
         max_overflow=2,
         pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
-        pool_recycle=300,
-        pool_pre_ping=True,
+        pool_recycle=DATABASE_POOL_RECYCLE_SECONDS,
+        pool_pre_ping=DATABASE_POOL_PRE_PING,
         pool_use_lifo=True,
         connect_args=asyncpg_connect_args,
     )
@@ -263,8 +268,8 @@ else:
         pool_size=_base_pool_size,
         max_overflow=_max_overflow,
         pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
-        pool_recycle=300,
-        pool_pre_ping=True,
+        pool_recycle=DATABASE_POOL_RECYCLE_SECONDS,
+        pool_pre_ping=DATABASE_POOL_PRE_PING,
         pool_use_lifo=True,
         connect_args=asyncpg_connect_args,
     )
@@ -284,7 +289,7 @@ async def get_db():
         yield session
 
 
-_DNS_CACHE_TTL_SECONDS = 60.0
+_DNS_CACHE_TTL_SECONDS = 300.0
 _dns_cache_lock = threading.Lock()
 _dns_cache: dict[tuple[str, int], float] = {}
 
@@ -324,6 +329,12 @@ async def probe_database_connection(*, timeout: float | None = None) -> dict[str
 
         async def _select_one() -> bool:
             async with AsyncSessionLocal() as session:
+                if isinstance(session, AsyncSession):
+                    # AUTOCOMMIT avoids BEGIN + ROLLBACK around read-only SELECT 1
+                    # (cuts 3 cross-region round-trips down to 1 single RTT).
+                    await session.connection(
+                        execution_options={"isolation_level": "AUTOCOMMIT"}
+                    )
                 return (await session.scalar(text("SELECT 1"))) == 1
 
         ok = await asyncio.wait_for(_select_one(), timeout=effective_timeout)

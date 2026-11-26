@@ -465,6 +465,98 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
             self.assertLess(summary["total_bytes"], 1_048_576)
             self.assertGreaterEqual(summary["file_count"], 18)
 
+    def test_get_active_model_retries_transient_502_503_and_push_hf_space_contracts(self):
+        token = "m" * 40
+        active_model_calls = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal active_model_calls
+            if request.url.path == "/internal/ocr-jobs/active-model":
+                active_model_calls += 1
+                if active_model_calls < 3:
+                    return httpx.Response(502 if active_model_calls == 1 else 503, text="waking")
+                return httpx.Response(
+                    200,
+                    json={
+                        "profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+                        "shards": [],
+                    },
+                )
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+            completion_retry_attempts=3,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            manifest = client.get_active_model()
+            self.assertEqual(manifest["profile"], "FLOW1_EXTERNAL_TRDG")
+            self.assertEqual(active_model_calls, 3)
+        finally:
+            client.close()
+
+        from scripts.push_hf_space import (
+            _redact_secrets,
+            ensure_private_docker_space,
+            main as push_hf_main,
+        )
+
+        # Dry-run succeeds with exit code 0 without requiring HF_TOKEN
+        self.assertEqual(
+            push_hf_main(["--space-id", "demo-user/viread-ocr-worker", "--dry-run"]),
+            0,
+        )
+        self.assertNotIn(
+            "hf_secret_123456",
+            _redact_secrets("Authorization: Bearer hf_secret_123456 failed", "hf_secret_123456"),
+        )
+
+        seen_payloads: list[dict[str, object]] = []
+
+        def fake_hf_api(method: str, url: str, *, hf_token: str, payload=None):
+            if method == "GET" and url.endswith("/api/spaces/demo-user/viread-ocr-worker"):
+                return 404, {"error": "Not found"}
+            if method == "GET" and url.endswith("/api/whoami-v2"):
+                return 200, {"name": "demo-user"}
+            if method == "POST" and url.endswith("/api/repos/create"):
+                assert isinstance(payload, dict)
+                seen_payloads.append(payload)
+                return 201, {"url": "https://huggingface.co/spaces/demo-user/viread-ocr-worker"}
+            return 500, {"error": "unexpected"}
+
+        with patch("scripts.push_hf_space._hf_api_request", side_effect=fake_hf_api):
+            ensure_private_docker_space(
+                space_id="demo-user/viread-ocr-worker",
+                hf_token="hf_test_token_abcdef",
+                public=False,
+            )
+        self.assertEqual(len(seen_payloads), 1)
+        self.assertEqual(seen_payloads[0].get("visibility"), "private")
+        self.assertEqual(seen_payloads[0].get("sdk"), "docker")
+        self.assertEqual(seen_payloads[0].get("hardware"), "cpu-basic")
+        self.assertNotIn("organization", seen_payloads[0])
+
+        def fake_hf_402(method: str, url: str, *, hf_token: str, payload=None):
+            if method == "GET" and "/api/spaces/" in url:
+                return 404, {}
+            if method == "GET" and url.endswith("/api/whoami-v2"):
+                return 200, {"name": "demo-user"}
+            return 402, {"error": "Payment Required for hf_test_token_abcdef"}
+
+        with patch("scripts.push_hf_space._hf_api_request", side_effect=fake_hf_402):
+            with self.assertRaises(RuntimeError) as ctx:
+                ensure_private_docker_space(
+                    space_id="demo-user/viread-ocr-worker",
+                    hf_token="hf_test_token_abcdef",
+                    public=False,
+                )
+            self.assertIn("Google Cloud Run Always Free", str(ctx.exception))
+            self.assertNotIn("hf_test_token_abcdef", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -54,6 +54,22 @@ python scripts/push_hf_space.py --space-id "<ten-user-hf>/viread-ocr-worker" --s
    - `VIREAD_OCR_WORKER_TOKEN` = `<CHUOI_BI_MAT_TOI_THIEU_32_KY_TU>`
 4. Tải toàn bộ tệp trong `.runtime/hf-ocr-space-bundle` lên Space. Sau ~4–6 phút build xong, trạng thái Space chuyển sang **Running** trên cổng `7860` (`UID 1000`).
 
+> **Lưu ý cập nhật chính sách Hugging Face (2026) & Phương án dự phòng 0 VNĐ**:
+> Trên một số tài khoản cá nhân mới của Hugging Face, việc tạo mới Docker Space có thể yêu cầu gói PRO/Team (HTTP `402`) hoặc trên Space `Private` cần gửi `VIREAD_HF_SPACE_TOKEN` (hoặc đặt visibility `Protected` nếu có PRO). Nếu tài khoản Hugging Face của bạn bị giới hạn tạo mới Docker Space, bạn có thể đẩy **chính xác cùng thư mục `.runtime/hf-ocr-space-bundle`** lên **Google Cloud Run Always Free** (`x86_64`, 2 vCPU, 4 GiB RAM, miễn phí 360,000 GiB-giây/tháng = **0 VNĐ**, tự scale-to-zero khi rỗi và tự thức dậy qua cơ chế `POST /wakeup` + tự phục hồi `queued_poll_nudge` đã tích hợp sẵn):
+> ```bash
+> python scripts/build_hf_space_bundle.py
+> gcloud run deploy viread-ocr-worker \
+>   --source .runtime/hf-ocr-space-bundle \
+>   --region asia-southeast1 \
+>   --memory 4Gi --cpu 2 --port 7860 \
+>   --min-instances 0 --max-instances 1 \
+>   --no-cpu-throttling \
+>   --allow-unauthenticated \
+>   --set-env-vars "VIREAD_OCR_BACKEND_URL=https://capstone1-ssd8.onrender.com,VIREAD_OCR_QUIET_STANDBY=true,VIREAD_OCR_WAKE_BURST_SECONDS=90" \
+>   --set-secrets "VIREAD_OCR_WORKER_TOKEN=viread-ocr-worker-token:latest"
+> ```
+> *(Endpoint `/wakeup` tự bảo vệ bằng `X-ViRead-Ocr-Worker-Token` so sánh hằng thời gian `hmac.compare_digest`, và `/health` không lộ bất kỳ bí mật nào.)*
+
 ---
 
 ## 3. Bước 2 — Cấu hình Biến Môi Trường trên Render (`capstone1-ssd8`)

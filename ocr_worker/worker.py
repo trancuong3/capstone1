@@ -126,9 +126,28 @@ class BackendOcrClient:
         return dict(resp.json())
 
     def get_active_model(self) -> dict[str, Any]:
-        resp = self._client.get("/internal/ocr-jobs/active-model")
-        resp.raise_for_status()
-        return dict(resp.json())
+        retryable_statuses = {429, 500, 502, 503, 504}
+        max_attempts = max(1, min(3, self._completion_retry_attempts))
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._client.get("/internal/ocr-jobs/active-model")
+                if resp.status_code in retryable_statuses and attempt < max_attempts:
+                    delay = min(6.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return dict(resp.json())
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(6.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def download_direct_url(self, url: str) -> bytes | None:
         """Download shard/config directly from a signed Storage URL without worker auth headers."""
@@ -597,17 +616,27 @@ def run_worker_forever(
     except ValueError:
         model_sync_seconds = 120.0
 
+    warmup_recovery_attempts = 0
     try:
         while not stop_event.is_set():
             now = time.monotonic()
 
             if use_quiet_standby and now >= runtime.burst_until_monotonic():
+                if client is not None and not runtime.is_ready() and warmup_recovery_attempts < 5:
+                    backoff = min(60.0, 15.0 * (2**warmup_recovery_attempts))
+                    warmup_recovery_attempts += 1
+                    _wait_for_wake_or_stop(stop_event, runtime.wake_event, backoff)
+                    if stop_event.is_set():
+                        break
+                    runtime.extend_burst_window(20.0)
+                    continue
                 runtime.set_standby_mode("quiet_standby")
                 # Quiet Standby: 0 outbound HTTP requests to Render until /wakeup arrives.
                 woken = _wait_for_wake_or_stop(stop_event, runtime.wake_event, None)
                 if stop_event.is_set():
                     break
                 if woken:
+                    warmup_recovery_attempts = 0
                     last_activity_at = time.monotonic()
                 continue
 

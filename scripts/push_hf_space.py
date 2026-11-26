@@ -52,10 +52,20 @@ def _hf_api_request(
         return exc.code, parsed_err
 
 
+def _redact_secrets(text: str, *secrets: str) -> str:
+    cleaned = text or ""
+    for secret in secrets:
+        if secret and len(secret) >= 6:
+            cleaned = cleaned.replace(secret, "***REDACTED***")
+    return cleaned.strip()
+
+
 def ensure_private_docker_space(*, space_id: str, hf_token: str, public: bool = False) -> None:
     if "/" not in space_id or len(space_id.split("/")) != 2:
         raise ValueError("--space-id must be formatted as '<owner>/<space-name>'.")
     owner, name = space_id.split("/", 1)
+    if not owner or not name:
+        raise ValueError("--space-id must be formatted as '<owner>/<space-name>'.")
     status_code, _ = _hf_api_request(
         "GET",
         f"https://huggingface.co/api/spaces/{owner}/{name}",
@@ -63,76 +73,113 @@ def ensure_private_docker_space(*, space_id: str, hf_token: str, public: bool = 
     )
     if status_code == 200:
         return
-    create_status, create_body = _hf_api_request(
-        "POST",
-        "https://huggingface.co/api/repos/create",
+
+    visibility = "public" if public else "private"
+    whoami_status, whoami_body = _hf_api_request(
+        "GET",
+        "https://huggingface.co/api/whoami-v2",
         hf_token=hf_token,
-        payload={
-            "type": "space",
-            "organization": owner,
-            "name": name,
-            "private": not public,
-            "sdk": "docker",
-            "hardware": "cpu-basic",
-        },
     )
-    if create_status not in (200, 201, 409):
-        # Retry without `organization` when `owner` is the personal user account.
+    is_personal_owner = (
+        whoami_status == 200
+        and isinstance(whoami_body.get("name"), str)
+        and str(whoami_body["name"]).lower() == owner.lower()
+    )
+
+    candidate_payloads: list[dict[str, object]] = []
+    user_payload: dict[str, object] = {
+        "type": "space",
+        "name": name,
+        "visibility": visibility,
+        "private": not public,
+        "sdk": "docker",
+        "hardware": "cpu-basic",
+    }
+    org_payload: dict[str, object] = {
+        **user_payload,
+        "organization": owner,
+    }
+    if is_personal_owner:
+        candidate_payloads.extend([user_payload, org_payload])
+    else:
+        candidate_payloads.extend([org_payload, user_payload])
+
+    create_status = 0
+    create_body: dict[str, object] = {}
+    for payload in candidate_payloads:
         create_status, create_body = _hf_api_request(
             "POST",
             "https://huggingface.co/api/repos/create",
             hf_token=hf_token,
-            payload={
-                "type": "space",
-                "name": name,
-                "private": not public,
-                "sdk": "docker",
-                "hardware": "cpu-basic",
-            },
+            payload=payload,
         )
-    if create_status not in (200, 201, 409):
+        if create_status in (200, 201, 409):
+            return
+        if create_status == 402:
+            break
+
+    err_msg = _redact_secrets(str(create_body.get("error", "unknown")), hf_token)
+    if create_status in (402, 403):
         raise RuntimeError(
-            f"Failed creating Hugging Face Space (HTTP {create_status}): {create_body.get('error', 'unknown')}"
+            f"Failed creating Hugging Face Space (HTTP {create_status}: {err_msg}). "
+            "Note: Hugging Face Hub may require an existing Space or PRO/Team plan to create new Docker Spaces; "
+            "see docs/HF_SPACES_ZERO_COST_OCR_DEPLOYMENT.md for 0 VND Google Cloud Run Always Free / Modal deployment."
         )
+    raise RuntimeError(
+        f"Failed creating Hugging Face Space (HTTP {create_status}): {err_msg}"
+    )
 
 
 def upsert_space_secret(*, space_id: str, hf_token: str, key: str, value: str) -> None:
-    status_code, _ = _hf_api_request(
+    status_code, err_body = _hf_api_request(
         "POST",
         f"https://huggingface.co/api/spaces/{space_id}/secrets",
         hf_token=hf_token,
         payload={"key": key, "value": value},
     )
     if status_code not in (200, 201):
-        raise RuntimeError(f"Failed setting Space secret {key} (HTTP {status_code}).")
+        detail = _redact_secrets(str(err_body.get("error", "unknown")), hf_token, value)
+        raise RuntimeError(f"Failed setting Space secret {key} (HTTP {status_code}: {detail}).")
 
 
 def push_bundle_over_git(*, bundle_dir: Path, space_id: str, hf_token: str) -> None:
     """Push bundle to HF Space using HTTP extraheader so HF_TOKEN never enters remote URLs."""
     basic = base64.b64encode(f"user:{hf_token}".encode("utf-8")).decode("ascii")
+    git_env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GCM_INTERACTIVE": "never",
+    }
     with tempfile.TemporaryDirectory(prefix="viread-hf-git-") as tmp_git_str:
         work_dir = Path(tmp_git_str) / "space"
         from shutil import copytree
 
         copytree(bundle_dir, work_dir)
 
-        def _git(*args: str) -> None:
+        def _git(step_name: str, *args: str) -> None:
             proc = subprocess.run(
                 ["git", *args],
                 cwd=str(work_dir),
+                env=git_env,
                 capture_output=True,
                 text=True,
                 check=False,
             )
             if proc.returncode != 0:
-                raise RuntimeError(f"git {args[0]} failed (exit {proc.returncode}).")
+                safe_err = _redact_secrets(proc.stderr or proc.stdout or "", hf_token, basic)[:300]
+                raise RuntimeError(
+                    f"git {step_name} failed (exit {proc.returncode}): {safe_err}"
+                )
 
-        _git("init", "-b", "main")
-        _git("config", "user.name", "ViRead Release Bot")
-        _git("config", "user.email", "noreply@viread.local")
-        _git("add", "-A")
-        _git("commit", "-m", "chore(ocr-worker): sync ViRead 0-cost HF Space bundle")
+        _git("init", "init", "-b", "main")
+        _git("config-name", "config", "user.name", "ViRead Release Bot")
+        _git("config-email", "config", "user.email", "noreply@viread.local")
+        _git("add", "add", "-A")
+        _git("commit", "commit", "-m", "chore(ocr-worker): sync ViRead 0-cost HF Space bundle")
         _git(
+            "push",
+            "-c",
+            "credential.helper=",
             "-c",
             f"http.https://huggingface.co/.extraheader=AUTHORIZATION: Basic {basic}",
             "push",
@@ -162,7 +209,30 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also upload VIREAD_OCR_BACKEND_URL and VIREAD_OCR_WORKER_TOKEN from env if set.",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Build and verify the <1 MiB HF Space bundle and validate --space-id without network calls.",
+    )
     args = parser.parse_args(argv)
+
+    if "/" not in args.space_id or len(args.space_id.split("/")) != 2 or not all(args.space_id.split("/")):
+        print("ERROR: --space-id must be formatted as '<owner>/<space-name>'.", file=sys.stderr)
+        return 2
+
+    owner, name = args.space_id.split("/", 1)
+    subdomain = f"{owner}-{name}".lower().replace("_", "-").replace(".", "-")
+
+    if args.dry_run:
+        with tempfile.TemporaryDirectory(prefix="viread-hf-bundle-") as tmp_dir:
+            bundle_path = Path(tmp_dir) / "bundle"
+            summary = build_hf_space_bundle(bundle_path)
+            print(
+                f"[DRY-RUN] Verified HF Space bundle ({summary['file_count']} files, {summary['total_bytes']:,} bytes < 1 MiB)."
+            )
+            print(f"[DRY-RUN] Target Space: https://huggingface.co/spaces/{args.space_id}")
+            print(f"[DRY-RUN] Direct Space URL: https://{subdomain}.hf.space")
+        return 0
 
     hf_token = (os.getenv("HF_TOKEN") or "").strip()
     if not hf_token:
@@ -206,8 +276,6 @@ def main(argv: list[str] | None = None) -> int:
             hf_token=hf_token,
         )
 
-    owner, name = args.space_id.split("/", 1)
-    subdomain = f"{owner}-{name}".lower().replace("_", "-").replace(".", "-")
     print(f"Successfully pushed Space: https://huggingface.co/spaces/{args.space_id}")
     print(f"Direct Space runtime URL:  https://{subdomain}.hf.space")
     return 0

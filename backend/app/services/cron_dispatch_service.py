@@ -28,7 +28,10 @@ from app.services.ocr_inference_job_service import (
     OcrInferenceJobService,
     reconcile_orphaned_parent_submissions,
 )
-from app.services.remote_ocr_wakeup import maybe_keep_warm_hf_space_from_cron
+from app.services.remote_ocr_wakeup import (
+    maybe_keep_warm_hf_space_from_cron,
+    maybe_nudge_ocr_wakeup_for_stale_queued_job,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +88,37 @@ async def _sweep_ocr_leases_and_heartbeats(*, max_age_hours: int) -> tuple[int, 
                 raw_pruned = await prune_fn()
             heartbeats_pruned = max(0, int(raw_pruned or 0))
 
+        stale_queued_pair: tuple[object, object] | None = None
+        if hasattr(db, "execute"):
+            try:
+                from sqlalchemy import select
+                from app.models import OcrInferenceJob
+
+                first_queued = (
+                    await db.execute(
+                        select(OcrInferenceJob.Id, OcrInferenceJob.CreatedAt)
+                        .where(OcrInferenceJob.Status == "QUEUED")
+                        .order_by(OcrInferenceJob.CreatedAt.asc())
+                        .limit(1)
+                    )
+                ).first()
+                if first_queued is not None:
+                    stale_queued_pair = (first_queued[0], first_queued[1])
+            except Exception:
+                stale_queued_pair = None
+
         try:
             await db.commit()
         except Exception:
             await db.rollback()
             raise
+
+    if stale_queued_pair is not None:
+        maybe_nudge_ocr_wakeup_for_stale_queued_job(
+            job_id=stale_queued_pair[0],  # type: ignore[arg-type]
+            created_at=stale_queued_pair[1],  # type: ignore[arg-type]
+            reason="cron_stale_queued_nudge",
+        )
 
     return requeued, dead_lettered, heartbeats_pruned
 

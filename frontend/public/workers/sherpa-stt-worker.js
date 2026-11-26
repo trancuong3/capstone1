@@ -18,6 +18,7 @@ const HF_BASE_URL =
 const SAMPLE_RATE = 16000;
 const MIN_PAD_DURATION_SECONDS = 1.2;
 const LEAD_PAD_SECONDS = 0.18;
+const SHORT_TRAIL_CAP_SECONDS = 0.2;
 const TRAILING_PAD_SECONDS = 0.35;
 const IDB_NAME = "viread-wasm-models-v1";
 const IDB_STORE = "files";
@@ -259,7 +260,7 @@ async function ensureRecognizer() {
         {
           ...baseConfig,
           decodingMethod: "modified_beam_search",
-          blankPenalty: -0.05,
+          blankPenalty: 0,
         },
         M,
       );
@@ -296,7 +297,7 @@ async function ensureRecognizer() {
 /**
  * Mirror server voice_worker.py child-voice acoustic preprocessing:
  * 1) DC offset removal
- * 2) 80Hz 1st-order high-pass filter (removes table rumble & breath thumps)
+ * 2) 60Hz 1st-order high-pass filter (removes table rumble & breath thumps while preserving low huyền/nặng tones)
  * 3) Active-frame AGC up to 15x gain (lifts quiet child voices RMS 0.003-0.01)
  */
 function preprocessChildVoice(input, sampleRate) {
@@ -311,9 +312,9 @@ function preprocessChildVoice(input, sampleRate) {
   }
   mean /= n;
 
-  // 2. 80Hz 1st-order high-pass filter
+  // 2. 60Hz 1st-order high-pass filter
   const sr = sampleRate > 0 ? sampleRate : SAMPLE_RATE;
-  const rc = 1 / (2 * Math.PI * 80);
+  const rc = 1 / (2 * Math.PI * 60);
   const dt = 1 / sr;
   const alpha = rc / (rc + dt);
   let prevX = input[0] - mean;
@@ -384,16 +385,29 @@ function preprocessChildVoice(input, sampleRate) {
 }
 
 /**
- * Estimate voiced speech span in seconds using 20ms frame energy when caller
- * does not pass explicit `voicedDurationMs` from client VAD.
+ * Estimate voiced speech span, leading silence, and trailing silence in seconds
+ * using 20ms frame energy so we never double-pad pre-roll silence or leave
+ * excessive trailing silence on short isolated words.
  */
-function estimateVoicedDurationSeconds(samples, sampleRate) {
+function analyzeSpeechWindowSeconds(samples, sampleRate) {
   const n = samples.length;
-  if (!n) return 0;
+  if (!n) {
+    return {
+      voicedSeconds: 0,
+      leadingSilenceSeconds: 0,
+      trailingSilenceSeconds: 0,
+    };
+  }
   const sr = sampleRate > 0 ? sampleRate : SAMPLE_RATE;
   const frameLen = Math.max(1, Math.round(sr * 0.02));
   const numFrames = Math.floor(n / frameLen);
-  if (numFrames <= 0) return n / sr;
+  if (numFrames <= 0) {
+    return {
+      voicedSeconds: n / sr,
+      leadingSilenceSeconds: 0,
+      trailingSilenceSeconds: 0,
+    };
+  }
 
   const frameRms = new Float32Array(numFrames);
   let maxFrameRms = 0;
@@ -411,7 +425,11 @@ function estimateVoicedDurationSeconds(samples, sampleRate) {
 
   const thresh = Math.max(0.004, maxFrameRms * 0.14);
   if (maxFrameRms < thresh) {
-    return 0;
+    return {
+      voicedSeconds: 0,
+      leadingSilenceSeconds: n / sr,
+      trailingSilenceSeconds: n / sr,
+    };
   }
 
   let firstActive = -1;
@@ -422,8 +440,19 @@ function estimateVoicedDurationSeconds(samples, sampleRate) {
       lastActive = f;
     }
   }
-  if (firstActive === -1) return 0;
-  return ((lastActive - firstActive + 1) * frameLen) / sr;
+  if (firstActive === -1) {
+    return {
+      voicedSeconds: 0,
+      leadingSilenceSeconds: n / sr,
+      trailingSilenceSeconds: n / sr,
+    };
+  }
+  const trailingFrames = Math.max(0, numFrames - 1 - lastActive);
+  return {
+    voicedSeconds: ((lastActive - firstActive + 1) * frameLen) / sr,
+    leadingSilenceSeconds: (firstActive * frameLen) / sr,
+    trailingSilenceSeconds: (trailingFrames * frameLen) / sr,
+  };
 }
 
 self.onmessage = async (event) => {
@@ -485,8 +514,7 @@ self.onmessage = async (event) => {
       }
 
       // Early pre-decode silence guard: never feed digital silence or near-zero
-      // noise into Sherpa modified_beam_search (with blankPenalty=-0.05, all-zero
-      // audio can hallucinate filler syllables such as "vâng").
+      // noise into Sherpa modified_beam_search so silence always returns "".
       let rawPeak = 0;
       let rawSumSq = 0;
       for (let i = 0; i < input.length; i += 1) {
@@ -501,18 +529,19 @@ self.onmessage = async (event) => {
         return;
       }
 
-      // Prepend 0.18s lead pad (matches server voice_worker) and append 0.35s
-      // trailing silence ONLY when *voiced* speech duration >= 1.2s (never total
-      // buffer length inflated by 0.45s pre-roll), avoiding short-word hallucinations.
+      // Maintain ~0.18s clean lead silence (never double-stacking existing pre-roll),
+      // cap excess trailing silence on isolated short words to <= 0.20s, and append
+      // 0.35s trailing silence ONLY when *voiced* speech duration >= 1.2s.
       const sr =
         typeof msg.sampleRate === "number" && msg.sampleRate > 0
           ? msg.sampleRate
           : SAMPLE_RATE;
       const preprocessed = preprocessChildVoice(input, sr);
-      const estimatedVoicedSeconds = estimateVoicedDurationSeconds(
-        preprocessed,
-        sr,
-      );
+      const {
+        voicedSeconds: estimatedVoicedSeconds,
+        leadingSilenceSeconds: existingLeadSeconds,
+        trailingSilenceSeconds: existingTailSeconds,
+      } = analyzeSpeechWindowSeconds(preprocessed, sr);
       if (
         estimatedVoicedSeconds <= 0 &&
         (msg.voicedDurationMs === undefined ||
@@ -528,15 +557,43 @@ self.onmessage = async (event) => {
         msg.voicedDurationMs >= 0
           ? msg.voicedDurationMs / 1000
           : estimatedVoicedSeconds;
-      const leadPadSamples = Math.round(LEAD_PAD_SECONDS * sr);
-      const trailPadSamples =
-        voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS
-          ? Math.round(TRAILING_PAD_SECONDS * sr)
-          : 0;
+      let audioForDecode = preprocessed;
+      let leadPadSamples = 0;
+      if (
+        voicedDurationSeconds < MIN_PAD_DURATION_SECONDS &&
+        existingLeadSeconds > LEAD_PAD_SECONDS
+      ) {
+        const trimSamples = Math.round(
+          (existingLeadSeconds - LEAD_PAD_SECONDS) * sr,
+        );
+        if (trimSamples > 0 && trimSamples < preprocessed.length) {
+          audioForDecode = preprocessed.subarray(trimSamples);
+        }
+      } else {
+        const missingLeadSeconds = Math.max(
+          0,
+          LEAD_PAD_SECONDS - existingLeadSeconds,
+        );
+        leadPadSamples = Math.round(missingLeadSeconds * sr);
+      }
+      let trailPadSamples = 0;
+      if (voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS) {
+        trailPadSamples = Math.round(TRAILING_PAD_SECONDS * sr);
+      } else if (existingTailSeconds > SHORT_TRAIL_CAP_SECONDS) {
+        const trimTailSamples = Math.round(
+          (existingTailSeconds - SHORT_TRAIL_CAP_SECONDS) * sr,
+        );
+        if (trimTailSamples > 0 && trimTailSamples < audioForDecode.length) {
+          audioForDecode = audioForDecode.subarray(
+            0,
+            audioForDecode.length - trimTailSamples,
+          );
+        }
+      }
       const waveform = new Float32Array(
-        leadPadSamples + preprocessed.length + trailPadSamples,
+        leadPadSamples + audioForDecode.length + trailPadSamples,
       );
-      waveform.set(preprocessed, leadPadSamples);
+      waveform.set(audioForDecode, leadPadSamples);
 
       const t0 = self.performance ? self.performance.now() : Date.now();
       const stream = recognizer.createStream();

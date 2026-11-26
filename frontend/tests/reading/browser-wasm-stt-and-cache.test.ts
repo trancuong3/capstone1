@@ -322,7 +322,7 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     expect(freedStreams).toHaveLength(2);
     expect(recognizerConfigs[0]).toMatchObject({
       decodingMethod: "modified_beam_search",
-      blankPenalty: -0.05,
+      blankPenalty: 0,
     });
     expect(posted.find((p) => (p as { id?: string }).id === "long-1")).toEqual(
       expect.objectContaining({ type: "result", text: "con mèo ngủ" }),

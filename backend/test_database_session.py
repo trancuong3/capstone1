@@ -203,6 +203,38 @@ class DatabaseConnectionProbeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["dns_resolved"])
         self.assertEqual(result["error_type"], "gaierror")
 
+    async def test_probe_database_connection_uses_autocommit_for_real_async_session(self):
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        captured_options: list[dict[str, object]] = []
+
+        class FakeRealAsyncSession(AsyncSession):
+            def __init__(self) -> None:
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def connection(self, *, execution_options=None, **_kwargs):
+                captured_options.append(dict(execution_options or {}))
+                return object()
+
+            async def scalar(self, statement, *_args, **_kwargs):
+                assert str(statement) == "SELECT 1"
+                return 1
+
+        with patch(
+            "app.database.session.AsyncSessionLocal",
+            return_value=FakeRealAsyncSession(),
+        ):
+            result = await probe_database_connection(timeout=1.0)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured_options, [{"isolation_level": "AUTOCOMMIT"}])
+
 
 if __name__ == "__main__":
     unittest.main()
