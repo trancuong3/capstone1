@@ -119,6 +119,8 @@ class ColabWorker:
     ARTIFACT_FETCH_MAX_ATTEMPTS = 5
     ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
     ARTIFACT_DOWNLOAD_WORKERS = 4
+    API_CALL_MAX_ATTEMPTS = 6
+    API_CALL_RETRY_BASE_SECONDS = 2.0
     RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 
     def __init__(
@@ -146,6 +148,8 @@ class ColabWorker:
         self.artifact_fetch_max_attempts = self.ARTIFACT_FETCH_MAX_ATTEMPTS
         self.artifact_fetch_retry_base_seconds = self.ARTIFACT_FETCH_RETRY_BASE_SECONDS
         self.artifact_download_workers = self.ARTIFACT_DOWNLOAD_WORKERS
+        self.api_call_max_attempts = self.API_CALL_MAX_ATTEMPTS
+        self.api_call_retry_base_seconds = self.API_CALL_RETRY_BASE_SECONDS
         has_resume_root = resume_root is not None and str(resume_root).strip() != ""
         if state_store_factory is None:
             if has_resume_root or self.drive_root is not None:
@@ -162,10 +166,55 @@ class ColabWorker:
         self.session.mount("http://", adapter)
         self.session.headers.update({"X-ViRead-Training-Worker": token})
 
+    @staticmethod
+    def _rewind_request_files(files_arg: Any) -> None:
+        items = files_arg.values() if isinstance(files_arg, dict) else (item[1] for item in files_arg)
+        for entry in items:
+            handle = entry[1] if isinstance(entry, tuple) and len(entry) >= 2 else entry
+            if handle is not None and hasattr(handle, "seek"):
+                try:
+                    if not hasattr(handle, "seekable") or handle.seekable():
+                        handle.seek(0)
+                except (OSError, ValueError):
+                    pass
+
     def call(self, method: str, path: str, **kwargs):
-        response = self.session.request(method, self.api_base + path, timeout=300, **kwargs)
-        response.raise_for_status()
-        return response.json() if response.content else {}
+        attempts = max(1, int(getattr(self, "api_call_max_attempts", self.API_CALL_MAX_ATTEMPTS)))
+        base_delay = max(
+            0.0,
+            float(getattr(self, "api_call_retry_base_seconds", self.API_CALL_RETRY_BASE_SECONDS)),
+        )
+        timeout = kwargs.pop("timeout", 300)
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            if "files" in kwargs and kwargs["files"] is not None:
+                self._rewind_request_files(kwargs["files"])
+            try:
+                response = self.session.request(method, self.api_base + path, timeout=timeout, **kwargs)
+                response.raise_for_status()
+                return response.json() if response.content else {}
+            except requests.HTTPError as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code is not None and status_code not in self.RETRYABLE_HTTP_STATUSES:
+                    raise
+                last_error = exc
+                reason = f"http_{status_code or 'unknown'}"
+            except requests.RequestException as exc:
+                last_error = exc
+                reason = type(exc).__name__
+            assert last_error is not None
+            if attempt >= attempts:
+                raise last_error
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "API %s attempt %d/%d failed (%s); retrying in %.1fs",
+                method,
+                attempt,
+                attempts,
+                reason,
+                delay,
+            )
+            time.sleep(delay)
 
     def claim(self, training_job_id: str | None = None) -> dict[str, Any] | None:
         payload = {"worker_id": self.worker_id, "runtime": self.runtime_data}
@@ -617,11 +666,13 @@ class ColabWorker:
                 raise ValueError("CACHED_CANDIDATE_SHARDS_MISMATCH")
         else:
             shard_manifest = shard_file(stable_candidate, chunks_root, chunk_bytes=8 * 1024 * 1024)
+        total_shards = len(shard_manifest["chunks"])
         for chunk in shard_manifest["chunks"]:
             with (chunks_root / chunk["name"]).open("rb") as stream:
                 self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/chunks",
                           data={"worker_id": self.worker_id, "chunk_index": str(chunk["index"])},
                           files={"file": (chunk["name"], stream, "application/octet-stream")})
+            print(f"Uploaded candidate shard {int(chunk['index']) + 1}/{total_shards}", flush=True)
         self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/complete",
                   params={"worker_id": self.worker_id}, json={
                       "profile": candidate["profile"],
@@ -819,17 +870,33 @@ class ColabWorker:
             else:
                 from .train import run_training
 
+                is_remote_store = isinstance(state_store, RemoteBackendJobStateStore)
+                sync_interval = (
+                    max(500, int(os.getenv("VIREAD_REMOTE_RESUME_SYNC_INTERVAL_STEPS", "2500")))
+                    if is_remote_store
+                    else 500
+                )
                 last_synced_step = [0]
 
                 def persist_training_progress(completed: int, total: int) -> None:
                     progress.update({"stage": "training", "completed_steps": completed, "total_steps": total})
-                    if state_store is not None and (
-                        completed <= 0
-                        or completed >= total
-                        or completed - last_synced_step[0] >= 500
-                    ):
+                    if completed > 0 and (completed % 100 == 0 or completed >= total):
+                        print(f"Training progress: {completed}/{total} steps", flush=True)
+                    if state_store is None:
+                        return
+                    if completed <= 0 or completed >= total:
+                        return
+                    if completed - last_synced_step[0] < sync_interval:
+                        return
+                    try:
                         state_store.sync()
                         last_synced_step[0] = completed
+                    except Exception as sync_exc:
+                        logger.warning(
+                            "Mid-training resume sync at step %d failed (%s); continuing training on local disk checkpoint",
+                            completed,
+                            type(sync_exc).__name__,
+                        )
 
                 candidate = run_training(
                     profile=job["profile"], manifest_path=str(manifest), output_dir=str(run_dir),
@@ -858,7 +925,16 @@ class ColabWorker:
                 raise ValueError("CANDIDATE_CONFIG_FINGERPRINT_MISMATCH")
             if state_store is not None:
                 # Commit the finished candidate before registering its run in the database.
-                state_store.sync()
+                if isinstance(state_store, RemoteBackendJobStateStore):
+                    try:
+                        state_store.sync()
+                    except Exception as sync_exc:
+                        logger.warning(
+                            "Post-training remote resume sync skipped (%s); proceeding directly to candidate upload",
+                            type(sync_exc).__name__,
+                        )
+                else:
+                    state_store.sync()
             progress["stage"] = "uploading_candidate"
             run_id, run_status, stable_candidate = self.upload_candidate(job, candidate, run_dir)
             if run_status == "BENCHMARKED":
