@@ -35,7 +35,10 @@ function defaultOnsetGraceMs(): number {
   if (isAndroidNativeSpeechAvailable()) {
     return 400;
   }
-  if (typeof navigator !== "undefined" && /android/i.test(navigator.userAgent ?? "")) {
+  if (
+    typeof navigator !== "undefined" &&
+    /android/i.test(navigator.userAgent ?? "")
+  ) {
     return 400;
   }
   return 250;

@@ -540,7 +540,9 @@ export function ComprehensionQuestion({
             seenFinalTurnIds.add(turnKey);
           }
           clearVoiceSettleTimer();
-          const transcript = (item[0]?.transcript ?? "").normalize("NFC").trim();
+          const transcript = (item[0]?.transcript ?? "")
+            .normalize("NFC")
+            .trim();
           if (!transcript) continue;
           armReminder();
           const confidence = item[0]?.confidence;

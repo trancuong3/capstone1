@@ -790,13 +790,10 @@ function ReadingSessionScreen({
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
-          } else if (wasmSupported) {
-            recordSttEngineUsage({
-              provider: "wasm",
-              fallbackUsed: true,
-              fallbackReason: "LOCAL_STT_UNAVAILABLE",
-            });
           }
+          // Under `local_only` when STT has not started yet, keep the idle mount
+          // badge honestly at `"idle"`; Tier-1 `browser_wasm` activates lazily
+          // when the child actually begins reading.
         } else {
           recordSttEngineUsage({
             provider: "local",
@@ -2970,9 +2967,7 @@ function ReadingSessionScreen({
               `[REALTIME STT ERROR] error=${String(event.error ?? "unknown")} recorderStarted=${String(recorderStarted)} browserRecognitionStarted=${String(browserRecognitionStarted)} isListeningActive=${String(isListeningActiveRef.current)}`,
             );
 
-            if (
-              event.error === "stt-unavailable"
-            ) {
+            if (event.error === "stt-unavailable") {
               isListeningActiveRef.current = false;
               isUsingRecorderRef.current = false;
               recognitionRef.current = null;
@@ -4220,7 +4215,11 @@ function ReadingSessionScreen({
           }
           const tutorText = action?.tts_text ?? word;
           const tutorPlaybackId = `tutor-read-${(assistantPlaybackSeqRef.current += 1)}`;
-          echoGuard.playbackStarted(tutorPlaybackId, tutorText, performance.now());
+          echoGuard.playbackStarted(
+            tutorPlaybackId,
+            tutorText,
+            performance.now(),
+          );
           try {
             await speechPlayer.play(tutorText, {
               wordSample: !action || action.tts_text === word,

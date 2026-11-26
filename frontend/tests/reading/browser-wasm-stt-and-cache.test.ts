@@ -328,6 +328,38 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
       expect.objectContaining({ type: "result", text: "con mèo ngủ" }),
     );
 
+    // 3. Pure 0.5s all-zero silence (and low-level silent hum with voicedDurationMs=0)
+    //    MUST short-circuit to "" before invoking Sherpa decode() (never hallucinate "vâng")!
+    await onmessage({
+      data: {
+        type: "transcribe",
+        id: "silence-zeros",
+        samples: new Float32Array(8000),
+        sampleRate: 16000,
+        voicedDurationMs: 0,
+      },
+    });
+    await onmessage({
+      data: {
+        type: "transcribe",
+        id: "silence-dc",
+        samples: new Float32Array(8000).fill(0.02),
+        sampleRate: 16000,
+      },
+    });
+    expect(acceptedLengths).toHaveLength(2);
+    expect(freedStreams).toHaveLength(2);
+    expect(
+      posted.find((p) => (p as { id?: string }).id === "silence-zeros"),
+    ).toEqual(
+      expect.objectContaining({ type: "result", text: "", decodeMs: 0 }),
+    );
+    expect(
+      posted.find((p) => (p as { id?: string }).id === "silence-dc"),
+    ).toEqual(
+      expect.objectContaining({ type: "result", text: "", decodeMs: 0 }),
+    );
+
     // Worker source must never inject expected book text into OfflineRecognizer
     expect(workerSrc).not.toContain("hotwords");
     expect(workerSrc).not.toContain("keyterms");

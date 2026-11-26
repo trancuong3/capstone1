@@ -484,6 +484,23 @@ self.onmessage = async (event) => {
         return;
       }
 
+      // Early pre-decode silence guard: never feed digital silence or near-zero
+      // noise into Sherpa modified_beam_search (with blankPenalty=-0.05, all-zero
+      // audio can hallucinate filler syllables such as "vâng").
+      let rawPeak = 0;
+      let rawSumSq = 0;
+      for (let i = 0; i < input.length; i += 1) {
+        const v = input[i];
+        const a = v < 0 ? -v : v;
+        if (a > rawPeak) rawPeak = a;
+        rawSumSq += v * v;
+      }
+      const rawRms = Math.sqrt(rawSumSq / input.length);
+      if (rawPeak <= 0.0015 || (msg.voicedDurationMs === 0 && rawRms < 0.003)) {
+        self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
+        return;
+      }
+
       // Prepend 0.18s lead pad (matches server voice_worker) and append 0.35s
       // trailing silence ONLY when *voiced* speech duration >= 1.2s (never total
       // buffer length inflated by 0.45s pre-roll), avoiding short-word hallucinations.
@@ -492,12 +509,25 @@ self.onmessage = async (event) => {
           ? msg.sampleRate
           : SAMPLE_RATE;
       const preprocessed = preprocessChildVoice(input, sr);
+      const estimatedVoicedSeconds = estimateVoicedDurationSeconds(
+        preprocessed,
+        sr,
+      );
+      if (
+        estimatedVoicedSeconds <= 0 &&
+        (msg.voicedDurationMs === undefined ||
+          msg.voicedDurationMs === null ||
+          msg.voicedDurationMs <= 0)
+      ) {
+        self.postMessage({ type: "result", id, text: "", decodeMs: 0 });
+        return;
+      }
       const voicedDurationSeconds =
         typeof msg.voicedDurationMs === "number" &&
         Number.isFinite(msg.voicedDurationMs) &&
         msg.voicedDurationMs >= 0
           ? msg.voicedDurationMs / 1000
-          : estimateVoicedDurationSeconds(preprocessed, sr);
+          : estimatedVoicedSeconds;
       const leadPadSamples = Math.round(LEAD_PAD_SECONDS * sr);
       const trailPadSamples =
         voicedDurationSeconds >= MIN_PAD_DURATION_SECONDS

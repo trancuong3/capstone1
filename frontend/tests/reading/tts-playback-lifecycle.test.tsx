@@ -12,6 +12,7 @@ import {
   countUnintendedVoiceSwitches,
   getSessionVoiceAudit,
   lockSessionVoice,
+  releaseSessionVoiceLock,
   resetVoiceLockAndPolicyForTests,
   setVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
@@ -987,11 +988,15 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await firstPlay;
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
 
-      // Case 2: Under local_only, Android native TTS fallback is blocked to enforce policy/voice lock;
-      // when parent opts into local_with_google_fallback (unlocked), it falls through to Android native TTS.
+      // Case 2: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
+      // (One-Session-One-Voice); once unlocked, on-device Android native TTS works under local_only.
       const planMiss = buildPhonicsLesson("bàn");
       expect(planMiss.supported).toBe(true);
       if (!planMiss.supported) return;
+      lockSessionVoice("android-lock-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -1010,11 +1015,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
         }),
       ).rejects.toThrow();
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
+      releaseSessionVoiceLock("android-lock-test");
 
-      setVoicePolicyPreferences({
-        providerMode: "local_with_google_fallback",
-        allowGoogleTtsFallback: true,
-      });
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,

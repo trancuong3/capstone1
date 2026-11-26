@@ -635,9 +635,13 @@ describe("DifficultWordPracticePanel phonics, voice commands & 4 mastery outcome
       expect(speechRecorderMock.start).toHaveBeenCalledTimes(2),
     );
     expect(evaluatePracticeWordMock).not.toHaveBeenCalled();
-    expect(speechPlayerMock.play).toHaveBeenCalledWith("mốt", {
-      wordSample: true,
-    });
+    expect(speechPlayerMock.play).toHaveBeenCalledWith(
+      "mốt",
+      expect.objectContaining({
+        wordSample: true,
+        cacheScope: expect.stringMatching(/^(CATALOG|PRIVATE)$/),
+      }),
+    );
 
     // 2. Child says "Đánh vần giúp con" -> runs step-by-step phonics including context "hai mươi mốt." and re-opens mic
     act(() => lastRecognition().say("Đánh vần giúp con"));

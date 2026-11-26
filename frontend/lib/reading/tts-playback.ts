@@ -221,20 +221,23 @@ function canUseBrowserSpeechSynthesis(): boolean {
 }
 
 function canUseAllowedDeviceFallbackTts(operation?: Operation): boolean {
-  // Enforce SessionVoiceLock ("Một buổi, một giọng") & strict local_only policy:
-  // never silently jump to OS/Android/browser voice mid-session or under local_only.
+  // Enforce SessionVoiceLock ("Một buổi, một giọng"):
+  // never silently jump to OS/Android/browser voice mid-session.
   const isSessionLocked = Boolean(
     operation?.voice.sessionId ?? getActiveSessionVoiceLock(),
   );
   if (isSessionLocked) {
     return false;
   }
+  // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
+  // cloud), so it remains allowed under `local_only` when no session voice lock
+  // is active (Tier 3 Android APK fallback).
+  if (isAndroidNativeSpeechAvailable()) {
+    return true;
+  }
   const policy = getVoicePolicyPreferences();
   if (policy.providerMode === "local_only") {
     return false;
-  }
-  if (isAndroidNativeSpeechAvailable()) {
-    return true;
   }
   return canUseGoogleTtsFallback() && canUseBrowserSpeechSynthesis();
 }
@@ -1561,7 +1564,8 @@ export class TtsPlayback {
           const servedMeta = getSynthesizedAudioMeta(fetched.audio);
           recordActualUtterance({
             provider: servedMeta?.provider ?? operation.voice.provider,
-            voiceId: servedMeta?.resolvedVoiceId ?? operation.voice.cacheVoiceId,
+            voiceId:
+              servedMeta?.resolvedVoiceId ?? operation.voice.cacheVoiceId,
             region: servedMeta?.region ?? operation.voice.region,
             modelVersion:
               servedMeta?.modelVersion ?? operation.voice.modelVersion,
@@ -1683,7 +1687,12 @@ export class TtsPlayback {
         }) => {
           if (phonicsAudited) return;
           phonicsAudited = true;
-          this.auditUtterance(operation, "phonics_lesson", phonicsPreview, served);
+          this.auditUtterance(
+            operation,
+            "phonics_lesson",
+            phonicsPreview,
+            served,
+          );
         };
 
         const playPhonicsViaBrowser = async () => {
@@ -2237,7 +2246,8 @@ export class TtsPlayback {
       const canMap = hasMatchingSpeechWords(text, words);
       if (!canMap) options.onWordChange?.(-1);
       const requireWordTimings =
-        Boolean(options.onWordChange) && !options.precomputedWordTimings?.length;
+        Boolean(options.onWordChange) &&
+        !options.precomputedWordTimings?.length;
 
       // Tier 1: Precomputed verified-catalog MP3 URL — strictly gated on
       // exact DEFAULT_LOCAL_VOICE_ID, public catalog book, and !requireWordTimings.
@@ -2508,10 +2518,7 @@ export class TtsPlayback {
           }
           const invalid = this.cache.get(key);
           if (invalid) {
-            this.cacheBytes = Math.max(
-              0,
-              this.cacheBytes - invalid.audio.size,
-            );
+            this.cacheBytes = Math.max(0, this.cacheBytes - invalid.audio.size);
             this.cache.delete(key);
           }
           // Prefer the same locked voice via the short endpoint before
@@ -2559,7 +2566,10 @@ export class TtsPlayback {
     if (entry.audio.size > 4 * 1024 * 1024) return;
     const prev = this.shortCache.get(key);
     if (prev) {
-      this.shortCacheBytes = Math.max(0, this.shortCacheBytes - prev.audio.size);
+      this.shortCacheBytes = Math.max(
+        0,
+        this.shortCacheBytes - prev.audio.size,
+      );
       this.shortCache.delete(key);
     }
     this.shortCache.set(key, entry);
@@ -2618,7 +2628,8 @@ export class TtsPlayback {
       if (first === undefined) break;
       this.phonicsCacheBytes = Math.max(
         0,
-        this.phonicsCacheBytes - (this.phonicsCache.get(first)?.audio.size ?? 0),
+        this.phonicsCacheBytes -
+          (this.phonicsCache.get(first)?.audio.size ?? 0),
       );
       this.phonicsCache.delete(first);
     }
@@ -2724,7 +2735,8 @@ export class TtsPlayback {
         if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
         if (timeline && absolute && timeline.length > 0) {
           const maxEnd = timeline.reduce(
-            (max, word) => (Number.isFinite(word.end) ? Math.max(max, word.end) : max),
+            (max, word) =>
+              Number.isFinite(word.end) ? Math.max(max, word.end) : max,
             0,
           );
           if (maxEnd <= 0) {

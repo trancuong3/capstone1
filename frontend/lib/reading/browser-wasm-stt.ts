@@ -123,8 +123,7 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
             const getReq = store.get(`${SHERPA_WASM_MODEL_ID}/${spec.name}`);
             getReq.onsuccess = () => {
               const rec = getReq.result as
-                | { byteLength?: number; buffer?: ArrayBuffer }
-                | undefined;
+                { byteLength?: number; buffer?: ArrayBuffer } | undefined;
               const len = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
               if (len === spec.expectedBytes) {
                 cachedFiles += 1;
@@ -341,10 +340,17 @@ export async function decodeAudioBlobTo16kFloat32(
 
 function raceWithSignalAndTimeout<T>(
   promise: Promise<T>,
-  options: { signal?: AbortSignal; timeoutMs?: number; timeoutMessage?: string },
+  options: {
+    signal?: AbortSignal;
+    timeoutMs?: number;
+    timeoutMessage?: string;
+  },
 ): Promise<T> {
-  const { signal, timeoutMs, timeoutMessage = "WASM STT request timed out" } =
-    options;
+  const {
+    signal,
+    timeoutMs,
+    timeoutMessage = "WASM STT request timed out",
+  } = options;
   if (signal?.aborted) {
     return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
