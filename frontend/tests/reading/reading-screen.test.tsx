@@ -3465,9 +3465,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
     expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
     expect(
-      screen.queryByText(
-        "Đang phát âm toàn bộ trang sách theo giọng mẫu...",
-      ),
+      screen.queryByText("Đang phát âm toàn bộ trang sách theo giọng mẫu..."),
     ).not.toBeInTheDocument();
 
     await act(async () => {
@@ -3476,9 +3474,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     });
 
     // Switch reading mode to ORIGINAL ("Trang gốc đối chiếu") on page 4
-    await user.click(
-      screen.getByRole("tab", { name: "Trang gốc đối chiếu" }),
-    );
+    await user.click(screen.getByRole("tab", { name: "Trang gốc đối chiếu" }));
     expect(screen.getByRole("article")).toHaveAttribute(
       "data-reading-mode",
       "ORIGINAL",

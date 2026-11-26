@@ -229,7 +229,8 @@ export function AdminBookEditorScreen({
   const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
     ? "METADATA_RENDER"
     : (activeCoverAsset?.source_type ??
-      ((book.cover_source_type as AssetSourceType | null | undefined) ?? null));
+      (book.cover_source_type as AssetSourceType | null | undefined) ??
+      null);
 
   return (
     <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
