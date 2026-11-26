@@ -284,6 +284,28 @@ class TestAsyncScanPageOcrJobsAndMatchPageCache(unittest.TestCase):
             async def list_worker_heartbeats(self, *, limit=20):
                 return []
 
+            async def get_queue_positions(self, job_ids):
+                if not job_ids:
+                    return {}
+                target_set = set(job_ids)
+                claimable = [
+                    j
+                    for j in jobs_store.values()
+                    if j.Status in ("QUEUED", "FAILED_RETRYABLE")
+                ]
+                claimable.sort(
+                    key=lambda j: (
+                        int(j.Priority or 0),
+                        j.CreatedAt or now,
+                        str(j.Id),
+                    )
+                )
+                return {
+                    j.Id: idx
+                    for idx, j in enumerate(claimable, start=1)
+                    if j.Id in target_set
+                }
+
         class _FakeScanRepo:
             def __init__(self, db):
                 self.db = db

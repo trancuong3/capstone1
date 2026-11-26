@@ -936,8 +936,15 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       path === `/books/admin/catalog/${state.createdBook.id}/pages`
     )
       return respond(route, []);
+    if (
+      state.createdBook &&
+      path === `/books/admin/catalog/${state.createdBook.id}/ocr-jobs`
+    )
+      return respond(route, []);
     if (path === `/books/admin/catalog/${ids.book}`)
       return respond(route, book);
+    if (path === `/books/admin/catalog/${ids.book}/ocr-jobs`)
+      return respond(route, []);
     if (path === `/books/admin/catalog/${ids.book}/pages`)
       return respond(
         route,
