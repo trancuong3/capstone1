@@ -562,6 +562,7 @@ class GlobalTasksService:
         job.CompletedAt = None
         job.UpdatedAt = now
         await self.db.commit()
+        notify_smart_studio_worker()
 
         book_titles = await self.repo.get_book_titles({job.BookId} if job.BookId else set())
         page_numbers = await self.repo.get_page_numbers({job.BookPageId} if job.BookPageId else set())
@@ -1525,6 +1526,9 @@ async def process_one_smart_studio_job(
 
 
 _SMART_STUDIO_WAKE_EVENTS: dict[int, asyncio.Event] = {}
+_SMART_STUDIO_LOOP_ACTIVE: set[int] = set()
+_EVENT_SMART_STUDIO_TASKS: set[asyncio.Task[Any]] = set()
+_EVENT_SMART_STUDIO_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
 
 
 def _get_smart_studio_wake_event() -> asyncio.Event:
@@ -1536,12 +1540,152 @@ def _get_smart_studio_wake_event() -> asyncio.Event:
     return ev
 
 
-def notify_smart_studio_worker() -> None:
-    """Wake `run_smart_studio_worker_loop` immediately when a Smart Studio job is queued."""
+def _event_smart_studio_semaphore() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    sem = _EVENT_SMART_STUDIO_SEMAPHORES.get(loop_id)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _EVENT_SMART_STUDIO_SEMAPHORES[loop_id] = sem
+    return sem
+
+
+def _is_smart_studio_continuous_worker_configured() -> bool:
+    import os
+
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    raw = os.getenv("VIREAD_ENABLE_SMART_STUDIO_WORKER")
+    if raw is not None and raw.strip():
+        norm = raw.strip().lower()
+        if norm in {"1", "true", "yes", "on"}:
+            return True
+        if norm in {"0", "false", "no", "off"}:
+            return False
+    raw_legacy = os.getenv("VIREAD_SMART_STUDIO_WORKER_ENABLED")
+    legacy_disabled = raw_legacy is not None and raw_legacy.strip().lower() in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    return (not is_heavy_workers_disabled()) and (not legacy_disabled)
+
+
+async def _drain_scheduled_smart_studio_jobs(
+    *,
+    max_jobs: int = 8,
+    worker_id: str = "smart-studio-event-drain",
+) -> int:
+    from app.database.session import AsyncSessionLocal
+    from app.services.worker_telemetry import (
+        persist_worker_heartbeat_with_factory,
+        record_worker_error,
+        record_worker_success,
+    )
+
+    await asyncio.sleep(0)
+    sem = _event_smart_studio_semaphore()
+    processed_count = 0
+    async with sem:
+        try:
+            for _ in range(max(1, max_jobs)):
+                async with AsyncSessionLocal() as db:
+                    did_work = await process_one_smart_studio_job(
+                        db, worker_id=worker_id
+                    )
+                if not did_work:
+                    break
+                processed_count += 1
+            record_worker_success("smart_studio")
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "smart_studio",
+                execution_mode="on_demand",
+                ok=True,
+                items_processed=processed_count,
+                source="event",
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            record_worker_error("smart_studio", exc)
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "smart_studio",
+                execution_mode="on_demand",
+                ok=False,
+                items_processed=processed_count,
+                source="event",
+                error_code=type(exc).__name__,
+            )
+            logger.warning(
+                "smart_studio_event_drain_failed err=%s", type(exc).__name__
+            )
+    return processed_count
+
+
+def schedule_smart_studio_drain(
+    *,
+    force: bool = False,
+    max_jobs: int = 8,
+) -> asyncio.Task[Any] | None:
+    """Single-flight bounded event-driven drain when continuous Smart Studio loop is disabled."""
+    import os
+
+    from app.database.config import APP_ENVIRONMENT
+
     try:
-        _get_smart_studio_wake_event().set()
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if app_env == "test":
+            return None
+        if (
+            id(loop) in _SMART_STUDIO_LOOP_ACTIVE
+            or _is_smart_studio_continuous_worker_configured()
+        ):
+            return None
+
+    active_tasks = [t for t in list(_EVENT_SMART_STUDIO_TASKS) if not t.done()]
+    if active_tasks:
+        return active_tasks[0]
+
+    task = loop.create_task(
+        _drain_scheduled_smart_studio_jobs(max_jobs=max_jobs),
+        name="smart_studio_event_drain",
+    )
+    _EVENT_SMART_STUDIO_TASKS.add(task)
+    task.add_done_callback(_EVENT_SMART_STUDIO_TASKS.discard)
+    return task
+
+
+async def shutdown_scheduled_smart_studio_tasks(
+    *, timeout_seconds: float = 5.0
+) -> None:
+    if not _EVENT_SMART_STUDIO_TASKS:
+        return
+    pending = [task for task in list(_EVENT_SMART_STUDIO_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)
+
+
+def notify_smart_studio_worker() -> None:
+    """Wake `run_smart_studio_worker_loop` or schedule event-driven drain when disabled."""
+    try:
+        loop = asyncio.get_running_loop()
     except RuntimeError:
         return
+    _get_smart_studio_wake_event().set()
+    if (
+        id(loop) not in _SMART_STUDIO_LOOP_ACTIVE
+        and not _is_smart_studio_continuous_worker_configured()
+    ):
+        schedule_smart_studio_drain()
 
 
 async def run_smart_studio_worker_loop(
@@ -1556,6 +1700,7 @@ async def run_smart_studio_worker_loop(
 
     from app.database.session import AsyncSessionLocal
     from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+    from app.services.worker_telemetry import record_worker_success
 
     light_web_tier = is_heavy_workers_disabled()
     if poll_interval_seconds is None:
@@ -1588,48 +1733,54 @@ async def run_smart_studio_worker_loop(
     else:
         effective_reconcile = max(1.0, float(reconcile_interval_seconds))
 
+    loop_id = id(asyncio.get_running_loop())
+    _SMART_STUDIO_LOOP_ACTIVE.add(loop_id)
     wake_event = _get_smart_studio_wake_event()
     last_reconcile_at = 0.0
-    while not stop_event.is_set():
-        wake_event.clear()
-        now_mono = time.monotonic()
-        if (now_mono - last_reconcile_at) >= effective_reconcile or last_reconcile_at == 0.0:
+    try:
+        while not stop_event.is_set():
+            wake_event.clear()
+            now_mono = time.monotonic()
+            if (now_mono - last_reconcile_at) >= effective_reconcile or last_reconcile_at == 0.0:
+                try:
+                    async with AsyncSessionLocal() as db:
+                        await GlobalTasksService(db).reconcile_stale_jobs()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.warning("smart_studio_periodic_reconcile_skipped", exc_info=True)
+                last_reconcile_at = time.monotonic()
+
+            processed = False
             try:
                 async with AsyncSessionLocal() as db:
-                    await GlobalTasksService(db).reconcile_stale_jobs()
+                    processed = await process_one_smart_studio_job(db, worker_id=worker_id)
+                record_worker_success("smart_studio")
             except asyncio.CancelledError:
                 raise
+            except SQLAlchemyError as exc:
+                if _is_missing_table_error(exc):
+                    logger.debug("smart_studio_worker_table_missing_sleeping")
+                else:
+                    logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
             except Exception:
-                logger.warning("smart_studio_periodic_reconcile_skipped", exc_info=True)
-            last_reconcile_at = time.monotonic()
-
-        processed = False
-        try:
-            async with AsyncSessionLocal() as db:
-                processed = await process_one_smart_studio_job(db, worker_id=worker_id)
-        except asyncio.CancelledError:
-            raise
-        except SQLAlchemyError as exc:
-            if _is_missing_table_error(exc):
-                logger.debug("smart_studio_worker_table_missing_sleeping")
-            else:
                 logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
-        except Exception:
-            logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
 
-        if processed:
-            continue
+            if processed:
+                continue
 
-        stop_wait = asyncio.create_task(stop_event.wait())
-        wake_wait = asyncio.create_task(wake_event.wait())
-        try:
-            await asyncio.wait(
-                {stop_wait, wake_wait},
-                timeout=effective_poll,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-        finally:
-            for waiter in (stop_wait, wake_wait):
-                if not waiter.done():
-                    waiter.cancel()
-            await asyncio.gather(stop_wait, wake_wait, return_exceptions=True)
+            stop_wait = asyncio.create_task(stop_event.wait())
+            wake_wait = asyncio.create_task(wake_event.wait())
+            try:
+                await asyncio.wait(
+                    {stop_wait, wake_wait},
+                    timeout=effective_poll,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                for waiter in (stop_wait, wake_wait):
+                    if not waiter.done():
+                        waiter.cancel()
+                await asyncio.gather(stop_wait, wake_wait, return_exceptions=True)
+    finally:
+        _SMART_STUDIO_LOOP_ACTIVE.discard(loop_id)

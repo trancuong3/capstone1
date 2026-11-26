@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  Check,
   ChevronRight,
+  Copy,
   Pencil,
   Plus,
   RefreshCw,
@@ -18,7 +20,15 @@ import {
 } from "react";
 import Link from "next/link";
 
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
+import {
+  AdminBadge,
+  AdminKpiCard,
+  AdminKpiGrid,
+  AdminLoading,
+  AdminPageHeader,
+  AdminSearchInput,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
 import {
   AdminParentFormModal,
   type AdminParentFormValues,
@@ -26,12 +36,10 @@ import {
   getAdminParentMutationErrorMessage,
 } from "@/components/admin/admin-parent-form-modal";
 import { Button, ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
-import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
@@ -57,6 +65,7 @@ export function AdminParentsScreen() {
   const [error, setError] = useState<LoadError | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<"create" | "edit" | null>(null);
   const [formParentId, setFormParentId] = useState<string | null>(null);
   const [form, setForm] = useState<ParentForm>(emptyForm);
@@ -64,11 +73,22 @@ export function AdminParentsScreen() {
   const [formContactInfoEditable, setFormContactInfoEditable] = useState(false);
   const editRequestIdRef = useRef(0);
   const editLoadingRef = useRef(false);
+  const copyTimerRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
+    null,
+  );
   const [pendingDelete, setPendingDelete] =
     useState<AdminParentProfileItemDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current !== null) {
+        globalThis.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
   const load = useCallback(async () => {
     const requestId = ++requestIdRef.current;
@@ -110,6 +130,27 @@ export function AdminParentsScreen() {
     event.preventDefault();
     setOffset(0);
     setSearch(searchInput.trim());
+  }
+
+  function clearSearch() {
+    setSearchInput("");
+    setSearch("");
+    setOffset(0);
+  }
+
+  async function copyParentId(id: string) {
+    try {
+      await navigator.clipboard?.writeText(id);
+      setCopiedId(id);
+      if (copyTimerRef.current !== null) {
+        globalThis.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = globalThis.setTimeout(() => {
+        setCopiedId((current) => (current === id ? null : current));
+      }, 2000);
+    } catch {
+      // Clipboard API may be unavailable in restricted contexts.
+    }
   }
 
   function closeParentForm() {
@@ -211,16 +252,17 @@ export function AdminParentsScreen() {
         description={t("parents.description")}
         actions={
           <>
-            <Button className="sm:w-auto" onClick={openCreate}>
-              <Plus aria-hidden className="size-5" />
+            <Button fullWidth={false} onClick={openCreate} size="admin">
+              <Plus aria-hidden className="size-4" />
               {t("parents.addParent")}
             </Button>
             <Button
-              className="sm:w-auto"
+              fullWidth={false}
               onClick={() => void load()}
-              variant="secondary"
+              size="admin"
+              variant="outline"
             >
-              <RefreshCw aria-hidden className="size-5" />
+              <RefreshCw aria-hidden className="size-4" />
               {t("parents.reload")}
             </Button>
           </>
@@ -229,7 +271,7 @@ export function AdminParentsScreen() {
 
       {notice ? (
         <div
-          className="mb-4 rounded-control border border-border bg-white p-4 text-sm font-semibold"
+          className="mb-4 rounded-xl border border-primary/25 bg-sky/40 px-4 py-3 text-sm font-semibold text-primary-hover"
           role="status"
         >
           {notice}
@@ -239,10 +281,11 @@ export function AdminParentsScreen() {
         <div className="mb-4">
           <StatusMessage tone="error" title={actionError}>
             <Button
-              className="sm:w-auto"
+              fullWidth={false}
               onClick={() => void load()}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("parents.reloadData")}
             </Button>
@@ -250,66 +293,68 @@ export function AdminParentsScreen() {
         </div>
       ) : null}
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-2">
-        <Card className="bg-white">
-          <p className="text-sm font-semibold text-muted">
-            {t("parents.totalParents")}
-          </p>
-          <div className="flex items-center gap-3">
-            <UsersRound aria-hidden className="size-8 text-primary" />
-            <p className="text-3xl font-semibold">{formatNumber(total)}</p>
-          </div>
-        </Card>
-        <Card className="bg-white">
-          <p className="text-sm font-semibold text-muted">
-            {t("parents.listRange")}
-          </p>
-          <p className="text-lg font-semibold">
-            {total === 0
+      <AdminKpiGrid
+        ariaLabel={t("parents.overviewAria", undefined, "Tổng quan phụ huynh")}
+        className="mb-5"
+        columns={2}
+      >
+        <AdminKpiCard
+          icon={<UsersRound aria-hidden className="size-4 text-primary" />}
+          label={t("parents.totalParents")}
+          tone="info"
+          value={formatNumber(total)}
+        />
+        <AdminKpiCard
+          detail={t("parents.sortedNewest")}
+          label={t("parents.listRange")}
+          value={
+            total === 0
               ? t("parents.noDataRange")
               : t("parents.rangeDisplay", {
                   start: formatNumber(offset + 1),
                   end: formatNumber(Math.min(offset + PAGE_SIZE, total)),
                   total: formatNumber(total),
-                })}
-          </p>
-          <p className="text-sm text-muted">{t("parents.sortedNewest")}</p>
-        </Card>
-      </div>
+                })
+          }
+        />
+      </AdminKpiGrid>
 
-      <Card className="mb-6 bg-white">
-        <form
-          className="flex flex-col gap-3 sm:flex-row sm:items-end"
-          onSubmit={submitSearch}
+      <form className="mb-5" onSubmit={submitSearch}>
+        <AdminToolbar
+          actions={
+            <>
+              <Button fullWidth={false} size="admin" type="submit">
+                <Search aria-hidden className="size-4" />
+                {t("parents.searchButton")}
+              </Button>
+              {search ? (
+                <Button
+                  fullWidth={false}
+                  onClick={clearSearch}
+                  size="admin"
+                  type="button"
+                  variant="outline"
+                >
+                  {t("parents.clearFilter")}
+                </Button>
+              ) : null}
+            </>
+          }
+          ariaLabel={t(
+            "parents.searchToolbarAria",
+            undefined,
+            "Tìm kiếm phụ huynh",
+          )}
         >
-          <div className="min-w-0 flex-1">
-            <TextField
-              label={t("parents.searchLabel")}
-              onChange={(event) => setSearchInput(event.target.value)}
-              placeholder={t("parents.searchPlaceholder")}
-              value={searchInput}
-            />
-          </div>
-          <Button className="sm:w-auto" type="submit">
-            <Search aria-hidden className="size-5" />
-            {t("parents.searchButton")}
-          </Button>
-          {search ? (
-            <Button
-              className="sm:w-auto"
-              onClick={() => {
-                setSearchInput("");
-                setSearch("");
-                setOffset(0);
-              }}
-              type="button"
-              variant="secondary"
-            >
-              {t("parents.clearFilter")}
-            </Button>
-          ) : null}
-        </form>
-      </Card>
+          <AdminSearchInput
+            label={t("parents.searchLabel")}
+            onChange={setSearchInput}
+            onClear={clearSearch}
+            placeholder={t("parents.searchPlaceholder")}
+            value={searchInput}
+          />
+        </AdminToolbar>
+      </form>
 
       {items === null ? (
         <AdminLoading label={t("parents.loadingList")} />
@@ -332,10 +377,11 @@ export function AdminParentsScreen() {
             t("parents.forbiddenDesc")
           ) : (
             <Button
-              className="sm:w-auto"
+              fullWidth={false}
               onClick={() => void load()}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("common.retry")}
             </Button>
@@ -343,7 +389,7 @@ export function AdminParentsScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          icon={<UsersRound aria-hidden className="size-10 text-primary" />}
+          icon={<UsersRound aria-hidden className="size-8 text-primary" />}
           title={
             search ? t("parents.emptySearchTitle") : t("parents.emptyListTitle")
           }
@@ -353,13 +399,10 @@ export function AdminParentsScreen() {
           action={
             search ? (
               <Button
-                className="sm:w-auto"
-                onClick={() => {
-                  setSearchInput("");
-                  setSearch("");
-                  setOffset(0);
-                }}
-                variant="secondary"
+                fullWidth={false}
+                onClick={clearSearch}
+                size="admin"
+                variant="outline"
               >
                 {t("parents.clearFilters")}
               </Button>
@@ -368,60 +411,118 @@ export function AdminParentsScreen() {
         />
       ) : (
         <>
-          <div className="grid gap-6 lg:grid-cols-2">
-            {items.map((parent) => (
-              <Card className="bg-white" key={parent.id}>
-                <div className="flex min-w-0 flex-col gap-4">
-                  <div className="min-w-0 flex-1">
-                    <h2 className="break-words text-xl font-semibold text-ink">
+          <section
+            aria-label={t(
+              "parents.directoryAria",
+              undefined,
+              "Danh sách tài khoản phụ huynh",
+            )}
+            className="overflow-hidden rounded-xl border border-border bg-white shadow-2xs"
+          >
+            <div
+              aria-hidden="true"
+              className="hidden border-b border-border bg-surface-subtle/75 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-muted md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_auto] md:items-center md:gap-4"
+            >
+              <span>{t("parents.tableHeaders.parent", undefined, "Phụ huynh")}</span>
+              <span>{t("parents.childProfiles")}</span>
+              <span>{t("parents.createdAt")}</span>
+              <span className="text-end">
+                {t("parents.tableHeaders.actions", undefined, "Thao tác")}
+              </span>
+            </div>
+
+            <ul className="divide-y divide-border">
+              {items.map((parent) => (
+                <li
+                  className="flex flex-col gap-3 p-4 transition-colors hover:bg-surface-subtle/40 md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_auto] md:items-center md:gap-4 md:px-4 md:py-3"
+                  key={parent.id}
+                >
+                  <div className="min-w-0">
+                    <h2 className="truncate text-base font-bold text-ink">
                       {parent.display_name?.trim() || t("parents.nameFallback")}
                     </h2>
-                    <p className="mt-1 break-all text-xs text-muted">
-                      ID: {parent.id}
-                    </p>
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <p
+                        className="max-w-44 truncate font-mono text-xs text-muted sm:max-w-56"
+                        title={parent.id}
+                      >
+                        ID: {parent.id}
+                      </p>
+                      <button
+                        aria-label={t(
+                          "parents.copyIdAria",
+                          { id: parent.id },
+                          "Sao chép ID {id}",
+                        )}
+                        className="inline-flex size-6 shrink-0 items-center justify-center rounded text-muted transition-colors hover:bg-surface-subtle hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                        onClick={() => void copyParentId(parent.id)}
+                        title={
+                          copiedId === parent.id
+                            ? t("parents.copiedId", undefined, "Đã sao chép")
+                            : t("parents.copyId", undefined, "Sao chép ID")
+                        }
+                        type="button"
+                      >
+                        {copiedId === parent.id ? (
+                          <Check
+                            aria-hidden
+                            className="size-3.5 text-success-ink"
+                          />
+                        ) : (
+                          <Copy aria-hidden className="size-3.5" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <dl className="grid grid-cols-2 gap-3">
-                    <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-semibold text-muted">
-                        {t("parents.createdAt")}
-                      </dt>
-                      <dd className="mt-1 font-semibold">
+
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 md:contents">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-muted md:hidden">
+                        {t("parents.childProfiles")}:
+                      </span>
+                      <AdminBadge
+                        tone={parent.children_count > 0 ? "info" : "neutral"}
+                      >
+                        {formatNumber(parent.children_count)}
+                      </AdminBadge>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-muted md:hidden">
+                        {t("parents.createdAt")}:
+                      </span>
+                      <span className="text-sm font-medium text-ink tabular-nums">
                         {formatDate(parent.created_at, {
                           year: "numeric",
                           month: "2-digit",
                           day: "2-digit",
                           fallback: t("common.unknown"),
                         })}
-                      </dd>
+                      </span>
                     </div>
-                    <div className="rounded-control bg-canvas px-4 py-3">
-                      <dt className="text-xs font-semibold text-muted">
-                        {t("parents.childProfiles")}
-                      </dt>
-                      <dd className="mt-1 font-semibold">
-                        {formatNumber(parent.children_count)}
-                      </dd>
-                    </div>
-                  </dl>
-                  <div className="flex flex-wrap gap-2">
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 md:justify-end">
                     <ButtonLink
                       fullWidth={false}
                       href={`/admin/parents/${encodeURIComponent(parent.id)}`}
+                      size="admin"
                       variant="secondary"
                     >
                       {t("parents.viewDetail")}
                       <ChevronRight
                         aria-hidden
-                        className="size-5 rtl:rotate-180"
+                        className="size-4 viread-rtl-flip"
                       />
                     </ButtonLink>
                     <Button
                       disabled={formLoading || formMode !== null}
                       fullWidth={false}
                       onClick={() => void openEdit(parent.id)}
-                      variant="secondary"
+                      size="admin"
+                      variant="outline"
                     >
-                      <Pencil aria-hidden className="size-5" />{" "}
+                      <Pencil aria-hidden className="size-4" />
                       {t("parents.edit")}
                     </Button>
                     <Button
@@ -430,19 +531,22 @@ export function AdminParentsScreen() {
                         setPendingDelete(parent);
                         setDeleteError(null);
                       }}
-                      variant="secondary"
+                      size="admin"
+                      variant="destructive-outline"
                     >
-                      <UserX aria-hidden className="size-5" />{" "}
+                      <UserX aria-hidden className="size-4" />
                       {t("parents.deactivate")}
                     </Button>
                   </div>
-                </div>
-              </Card>
-            ))}
-          </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+
           <PaginationBar
             ariaLabel={t("parents.paginationAria")}
-            className="mt-6"
+            className="mt-5"
+            compact
             itemLabel={t("parents.itemLabel")}
             nextLabel={t("parents.nextLabel")}
             onPageChange={(nextPage) => setOffset((nextPage - 1) * PAGE_SIZE)}
@@ -474,6 +578,35 @@ export function AdminParentsScreen() {
       ) : null}
 
       <Modal
+        closeOnBackdropClick={!deleting}
+        closeOnEscape={!deleting}
+        footer={
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Button
+              disabled={deleting}
+              fullWidth={false}
+              onClick={() => {
+                setPendingDelete(null);
+                setDeleteError(null);
+              }}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              {t("common.cancel")}
+            </Button>
+            <Button
+              fullWidth={false}
+              isLoading={deleting}
+              onClick={() => void confirmDeleteParent()}
+              size="admin"
+              type="button"
+              variant="destructive"
+            >
+              {t("parents.deactivateTitle")}
+            </Button>
+          </div>
+        }
         isOpen={pendingDelete !== null}
         onClose={() => {
           if (!deleting) {
@@ -481,11 +614,14 @@ export function AdminParentsScreen() {
             setDeleteError(null);
           }
         }}
+        role="alertdialog"
+        showCloseButton={!deleting}
         title={t("parents.deactivateTitle")}
+        tone="paper"
       >
         {pendingDelete ? (
-          <div className="grid gap-4">
-            <p>
+          <div className="grid gap-3">
+            <p className="text-sm leading-relaxed text-ink">
               {t("parents.deactivateConfirm", {
                 name: pendingDelete.display_name?.trim() || pendingDelete.id,
               })}
@@ -498,29 +634,6 @@ export function AdminParentsScreen() {
                 {t("parents.deactivateErrorFallback")}
               </StatusMessage>
             ) : null}
-            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-              <Button
-                className="sm:w-auto"
-                disabled={deleting}
-                onClick={() => {
-                  setPendingDelete(null);
-                  setDeleteError(null);
-                }}
-                type="button"
-                variant="secondary"
-              >
-                {t("common.cancel")}
-              </Button>
-              <Button
-                className="sm:w-auto"
-                isLoading={deleting}
-                onClick={() => void confirmDeleteParent()}
-                type="button"
-                variant="destructive"
-              >
-                {t("parents.deactivateTitle")}
-              </Button>
-            </div>
           </div>
         ) : null}
       </Modal>

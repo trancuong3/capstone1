@@ -165,6 +165,40 @@ describe("real Admin adapters", () => {
     fetchMock.mockResolvedValue(Response.json(adminBookDetail));
     expect(await createAdminBookService().get(bookId)).toEqual(adminBookDetail);
   });
+  it("preserves optional cover_url and cover_source_type in admin book list and detail", async () => {
+    const coveredBook = {
+      ...book,
+      cover_url: "https://example.test/covers/book-1.webp",
+      cover_source_type: "AI_GENERATED",
+    };
+    const row = {
+      book: coveredBook,
+      page_count: 4,
+      processing_count: 0,
+      needs_review_count: 0,
+      verified_count: 4,
+      parent_catalog_eligible: true,
+    };
+    fetchMock
+      .mockResolvedValueOnce(Response.json([row]))
+      .mockResolvedValueOnce(
+        Response.json({
+          ...coveredBook,
+          cover_url: null,
+          cover_source_type: null,
+          next_page_number: 5,
+        }),
+      );
+    const service = createAdminBookService();
+    const listed = await service.list();
+    expect(listed[0].book.cover_url).toBe(
+      "https://example.test/covers/book-1.webp",
+    );
+    expect(listed[0].book.cover_source_type).toBe("AI_GENERATED");
+    const detailBook = await service.get(bookId);
+    expect(detailBook.cover_url).toBeNull();
+    expect(detailBook.cover_source_type).toBeNull();
+  });
   it("rejects a book belonging to a different requested ID", async () => {
     fetchMock.mockResolvedValue(Response.json({ ...book, id: pageId }));
     await expect(createAdminBookService().get(bookId)).rejects.toMatchObject({
@@ -469,6 +503,137 @@ describe("real Admin adapters", () => {
       }),
     );
     await expect(createHealthService().get()).rejects.toThrow();
+  });
+  it("validates canonical lockstep health fields, supports AbortSignal, and wakes OCR worker", async () => {
+    const richSnapshot = {
+      overall_status: "HEALTHY",
+      checked_at: timestamp,
+      audio_cache: null,
+      audio_cache_error: "AUDIO_CACHE_TIMEOUT",
+      services: [
+        {
+          id: "ocr_worker",
+          label: "OCR worker",
+          status: "HEALTHY",
+          operational_state: "Standby",
+          checked_at: timestamp,
+          safe_message: "Đang ở chế độ chờ.",
+          detail_status: "standby",
+          service_group: "ocr",
+          execution_mode: "remote_worker",
+          criticality: "important",
+          action_hint: "Bấm đánh thức để chuẩn bị quét.",
+          can_wake: true,
+        },
+        {
+          id: "reading_reminder",
+          label: "Reading reminder",
+          status: "HEALTHY",
+          operational_state: "Scheduled",
+          checked_at: timestamp,
+          safe_message: "Chạy theo lịch.",
+          detail_status: "scheduled",
+          service_group: "workers",
+          execution_mode: "cron_scheduled",
+          criticality: "important",
+          can_wake: false,
+        },
+        {
+          id: "local_trainer_process",
+          label: "Local trainer",
+          status: "HEALTHY",
+          operational_state: "Local only",
+          checked_at: timestamp,
+          safe_message: "Chỉ chạy cục bộ.",
+          detail_status: "local_only",
+          service_group: "workers",
+          execution_mode: "local_only",
+          criticality: "optional",
+        },
+        {
+          id: "tts",
+          label: "TTS",
+          status: "HEALTHY",
+          operational_state: "Healthy",
+          checked_at: timestamp,
+          safe_message: "Cache sẵn sàng.",
+          detail_status: "cached",
+          service_group: "voice",
+          execution_mode: "precomputed_cache",
+          criticality: "important",
+        },
+        {
+          id: "stt",
+          label: "STT",
+          status: "HEALTHY",
+          operational_state: "Healthy",
+          checked_at: timestamp,
+          safe_message: "Chạy trên trình duyệt.",
+          detail_status: "client_side",
+          service_group: "voice",
+          execution_mode: "browser_wasm",
+          criticality: "important",
+        },
+        {
+          id: "local_ocr",
+          label: "AI OCR",
+          status: "HEALTHY",
+          operational_state: "Healthy",
+          checked_at: timestamp,
+          safe_message: "Cloud AI sẵn sàng.",
+          detail_status: "cloud_ready",
+          service_group: "ocr",
+          execution_mode: "cloud_ai",
+          criticality: "important",
+        },
+        {
+          id: "active_model_registry",
+          label: "Model registry",
+          status: "HEALTHY",
+          operational_state: "Standby",
+          checked_at: timestamp,
+          safe_message: "Ủy quyền cho remote worker.",
+          detail_status: "remote_delegated",
+          service_group: "workers",
+          execution_mode: "remote_delegated",
+          criticality: "optional",
+        },
+      ],
+    };
+
+    const service = createHealthService();
+    const controller = new AbortController();
+    fetchMock.mockResolvedValueOnce(Response.json(richSnapshot));
+    expect(await service.get(controller.signal)).toEqual(richSnapshot);
+    expect(fetchMock.mock.calls[0][0]).toContain("/system/admin/health");
+
+    const abortedController = new AbortController();
+    abortedController.abort();
+    await expect(service.get(abortedController.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+
+    const wakeupResponse = {
+      status: "ok",
+      woken: true,
+      detail: "Wakeup signal sent to remote OCR worker.",
+    };
+    fetchMock.mockResolvedValueOnce(Response.json(wakeupResponse));
+    expect(await service.wakeOcrWorker(controller.signal)).toEqual(
+      wakeupResponse,
+    );
+    const [wakeUrl, wakeInit] = fetchMock.mock.calls[1] as [
+      string,
+      RequestInit,
+    ];
+    expect(wakeUrl).toContain("/system/admin/health/ocr-worker/wakeup");
+    expect(wakeInit.method).toBe("POST");
+    expect(wakeInit.signal).toBe(controller.signal);
+
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ status: "ok", woken: "yes", detail: 123 }),
+    );
+    await expect(service.wakeOcrWorker()).rejects.toThrow();
   });
   it.each([401, 403, 404, 501, 503])(
     "preserves HTTP %s with a safe generic message",

@@ -439,6 +439,7 @@ class LocalVoiceProvider:
         self._client: httpx.AsyncClient | None = None
         self._recovery_task: asyncio.Task[bool] | None = None
         self._remote_unavailable_until: float = 0.0
+        self._remote_unavailable_override: Any = None
         self._inflight_client_counts: dict[int, int] = {}
         self._deferred_close_clients: dict[int, Any] = {}
 
@@ -741,6 +742,22 @@ class LocalVoiceProvider:
                 "tts_model_version": LOCAL_TTS_MODEL_VERSION,
                 "latency_ms": 0,
             }
+        if not self.is_loopback and time.monotonic() < self._remote_unavailable_until:
+            override = self.__dict__.get("_get_client")
+            recorded_override = getattr(self, "_remote_unavailable_override", None)
+            if recorded_override is None or override is recorded_override:
+                return {
+                    "configured": True,
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNAVAILABLE",
+                    "stt_error_code": "LOCAL_STT_UNAVAILABLE",
+                    "tts_error_code": "LOCAL_TTS_UNAVAILABLE",
+                    "stt_model_version": LOCAL_STT_MODEL_VERSION,
+                    "tts_model_version": LOCAL_TTS_MODEL_VERSION,
+                    "latency_ms": 0,
+                }
         started = time.perf_counter()
         client = self._acquire_client()
         try:
@@ -755,6 +772,7 @@ class LocalVoiceProvider:
             latency_ms = int((time.perf_counter() - started) * 1000)
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
+                self._remote_unavailable_override = None
             if resp.status_code == 503:
                 return {
                     "configured": True,
@@ -767,6 +785,9 @@ class LocalVoiceProvider:
                     "latency_ms": latency_ms,
                 }
             if resp.status_code != 200:
+                if not self.is_loopback and resp.status_code >= 500:
+                    self._remote_unavailable_until = time.monotonic() + 15.0
+                    self._remote_unavailable_override = self.__dict__.get("_get_client")
                 if resp.status_code in (401, 403) and not self._get_token():
                     self._schedule_background_recovery()
                 return {
@@ -826,6 +847,7 @@ class LocalVoiceProvider:
         except (httpx.TimeoutException, asyncio.TimeoutError):
             if not self.is_loopback:
                 self._remote_unavailable_until = time.monotonic() + 15.0
+                self._remote_unavailable_override = self.__dict__.get("_get_client")
             return {
                 "configured": True,
                 "available": False,
@@ -839,6 +861,7 @@ class LocalVoiceProvider:
         except httpx.ConnectError:
             if not self.is_loopback:
                 self._remote_unavailable_until = time.monotonic() + 15.0
+                self._remote_unavailable_override = self.__dict__.get("_get_client")
             self._schedule_background_recovery()
             return {
                 "configured": True,
@@ -853,6 +876,7 @@ class LocalVoiceProvider:
         except Exception:
             if not self.is_loopback:
                 self._remote_unavailable_until = time.monotonic() + 15.0
+                self._remote_unavailable_override = self.__dict__.get("_get_client")
             return {
                 "configured": True,
                 "available": False,
@@ -883,6 +907,7 @@ class LocalVoiceProvider:
             )
             if resp.status_code == 200:
                 self._remote_unavailable_until = 0.0
+                self._remote_unavailable_override = None
                 payload = resp.json()
                 if not isinstance(payload, dict):
                     raise ValueError("expected JSON object")
@@ -923,6 +948,7 @@ class LocalVoiceProvider:
         except Exception:
             if not self.is_loopback:
                 self._remote_unavailable_until = time.monotonic() + 15.0
+                self._remote_unavailable_override = self.__dict__.get("_get_client")
         finally:
             await self._release_client(client)
         return [dict(v) for v in STATIC_LOCAL_VOICES], False

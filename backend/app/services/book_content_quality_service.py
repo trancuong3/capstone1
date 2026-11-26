@@ -1038,6 +1038,10 @@ class BookContentQualityService:
             )
 
             await self.repository.commit()
+            if is_new_scan_run:
+                from app.jobs.book_quality_worker import schedule_book_quality_scan
+
+                schedule_book_quality_scan()
             return response
         except IntegrityError as exc:
             # Flush can fail before commit. Always reset the failed transaction.
@@ -1277,6 +1281,10 @@ class BookContentQualityService:
         )
         if existing is not None:
             response = self._scan_read(existing)
+            if existing.Status == "QUEUED":
+                from app.jobs.book_quality_worker import schedule_book_quality_scan
+
+                schedule_book_quality_scan()
             await self._ensure_page_ai_workflows(actor_id, book_id)
             return response
         if scope == "BOOK":
@@ -1321,6 +1329,9 @@ class BookContentQualityService:
             await self.repository.db.rollback()
             raise
         response = self._scan_read(run)
+        from app.jobs.book_quality_worker import schedule_book_quality_scan
+
+        schedule_book_quality_scan()
         await self._ensure_page_ai_workflows(actor_id, book_id)
         return response
 

@@ -312,21 +312,68 @@ class AdminCatalogService:
             raise HTTPException(status_code=404, detail="Resource not found")
         return page
 
+    async def _cover_map_for_books(self, book_ids: list[UUID]) -> dict[UUID, tuple[str, str]]:
+        """Best-effort batched cover lookup (USER_UPLOAD > AI_GENERATED > METADATA_RENDER)."""
+        if not book_ids:
+            return {}
+        db_session = getattr(self.repository, "db", None)
+        if db_session is None or not callable(getattr(db_session, "scalars", None)):
+            return {}
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import BookPresentationAsset
+
+            priority = {"USER_UPLOAD": 3, "AI_GENERATED": 2, "METADATA_RENDER": 1}
+            query = (
+                select(BookPresentationAsset)
+                .where(
+                    BookPresentationAsset.BookId.in_(book_ids),
+                    BookPresentationAsset.AssetRole == "COVER",
+                    BookPresentationAsset.IsActive.is_(True),
+                    BookPresentationAsset.ModerationStatus == "APPROVED",
+                )
+                .order_by(
+                    desc(BookPresentationAsset.AssetVersion),
+                    desc(BookPresentationAsset.UpdatedAt),
+                )
+            )
+            begin_nested = getattr(db_session, "begin_nested", None)
+            if callable(begin_nested):
+                async with begin_nested():
+                    rows = (await db_session.scalars(query)).all()
+            else:
+                rows = (await db_session.scalars(query)).all()
+            chosen: dict[UUID, tuple[int, str, str]] = {}
+            for asset in rows:
+                rank = priority.get(str(asset.SourceType), 0)
+                prev = chosen.get(asset.BookId)
+                if prev is None or rank > prev[0]:
+                    chosen[asset.BookId] = (
+                        rank,
+                        f"/studio/assets/{asset.Id}/media",
+                        str(asset.SourceType),
+                    )
+            return {bid: (url, src) for bid, (_r, url, src) in chosen.items()}
+        except Exception:
+            return {}
+
     async def list(self, search: str | None, lifecycle_status: str | None, verification_status: str | None):
         if isinstance(self.repository, AdminCatalogRepository):
             output = []
             rows = await self.repository.catalog_rows(
                 search, lifecycle_status, verification_status
             )
-            for (
-                book,
-                page_count,
-                processing_count,
-                needs_review_count,
-                verified_count,
-                unknown_status_count,
-                parent_catalog_eligible,
-            ) in rows:
+            filtered_rows = []
+            for row in rows:
+                (
+                    book,
+                    page_count,
+                    processing_count,
+                    needs_review_count,
+                    verified_count,
+                    unknown_status_count,
+                    parent_catalog_eligible,
+                ) = row
                 if unknown_status_count:
                     raise HTTPException(status_code=501, detail="Page status contract is not available yet")
                 if verification_status is not None and not {
@@ -335,10 +382,28 @@ class AdminCatalogService:
                     "VERIFIED": verified_count,
                 }.get(verification_status, 0):
                     continue
+                filtered_rows.append(row)
+
+            covers = await self._cover_map_for_books([row[0].Id for row in filtered_rows])
+            for (
+                book,
+                page_count,
+                processing_count,
+                needs_review_count,
+                verified_count,
+                _unknown_status_count,
+                parent_catalog_eligible,
+            ) in filtered_rows:
                 try:
+                    book_dto = AdminBookMetadataResponse.model_validate(book)
+                    cover_info = covers.get(book.Id)
+                    if cover_info is not None:
+                        book_dto = book_dto.model_copy(
+                            update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                        )
                     output.append(
                         AdminCatalogBookResponse(
-                            book=AdminBookMetadataResponse.model_validate(book),
+                            book=book_dto,
                             page_count=page_count,
                             processing_count=processing_count,
                             needs_review_count=needs_review_count,
@@ -351,6 +416,7 @@ class AdminCatalogService:
             return output
 
         output = []
+        matched: list[tuple[object, list[object], list[str]]] = []
         for book in await self.repository.books(search, lifecycle_status):
             pages = await self.repository.pages(book.Id)
             statuses = []
@@ -362,11 +428,21 @@ class AdminCatalogService:
                     statuses.append(revisions[0].VerificationStatus)
             if verification_status is not None and verification_status not in statuses:
                 continue
+            matched.append((book, pages, statuses))
+
+        covers = await self._cover_map_for_books([book.Id for book, _p, _s in matched])
+        for book, pages, statuses in matched:
             try:
+                book_dto = AdminBookMetadataResponse.model_validate(book)
+                cover_info = covers.get(book.Id)
+                if cover_info is not None:
+                    book_dto = book_dto.model_copy(
+                        update={"cover_url": cover_info[0], "cover_source_type": cover_info[1]}
+                    )
                 output.append(AdminCatalogBookResponse(
-                book=AdminBookMetadataResponse.model_validate(book), page_count=len(pages),
-                processing_count=statuses.count("PROCESSING"), needs_review_count=statuses.count("NEEDS_REVIEW"),
-                verified_count=statuses.count("VERIFIED"), parent_catalog_eligible=await self.repository.is_eligible(book.Id),
+                    book=book_dto, page_count=len(pages),
+                    processing_count=statuses.count("PROCESSING"), needs_review_count=statuses.count("NEEDS_REVIEW"),
+                    verified_count=statuses.count("VERIFIED"), parent_catalog_eligible=await self.repository.is_eligible(book.Id),
                 ))
             except ValidationError:
                 raise HTTPException(status_code=501, detail="Catalog contract is not available yet") from None
