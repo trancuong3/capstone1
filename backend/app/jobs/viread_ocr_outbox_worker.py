@@ -46,7 +46,11 @@ from app.services.viread_training_storage_quota import (
     ensure_database_capacity,
     ensure_storage_capacity,
 )
-from app.services.worker_telemetry import record_worker_error, record_worker_success
+from app.services.worker_telemetry import (
+    persist_worker_heartbeat_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 logger = logging.getLogger(__name__)
 MAX_ATTEMPTS = 8
@@ -1312,17 +1316,80 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = POLL_SECONDS) -
                            outbox_id=str(event["id"]), attempt=attempts, terminal=terminal)
 
 
-async def run_once() -> bool:
+_EVENT_OUTBOX_TASKS: set[asyncio.Task[Any]] = set()
+_EVENT_OUTBOX_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+
+
+def _configured_enabled() -> bool:
+    return os.getenv("VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _event_outbox_semaphore() -> asyncio.Semaphore:
+    loop_id = id(asyncio.get_running_loop())
+    sem = _EVENT_OUTBOX_SEMAPHORES.get(loop_id)
+    if sem is None:
+        sem = asyncio.Semaphore(1)
+        _EVENT_OUTBOX_SEMAPHORES[loop_id] = sem
+    return sem
+
+
+async def run_once(
+    *,
+    source: str = "cron",
+    execution_mode: str = "cron_scheduled",
+    persist_heartbeat: bool = True,
+) -> bool:
     """Claim and process a single outbox event. Returns True if an event was claimed."""
     if is_flow2_ingestion_paused():
         return False
-    event = await _claim_one()
+    try:
+        event = await _claim_one()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        record_worker_error("viread_ocr_outbox", exc)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+            )
+        raise
     if event is None:
+        record_worker_success("viread_ocr_outbox")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=0,
+                source=source,
+            )
         return False
     attempts = int(event["attempts"])
     try:
         await _process_with_lease(event)
         await _finish(event["id"], status="DONE", expected_attempts=attempts)
+        record_worker_success("viread_ocr_outbox")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=1,
+                source=source,
+            )
     except OutboxEventSkipped as exc:
         await _finish(
             event["id"],
@@ -1330,6 +1397,16 @@ async def run_once() -> bool:
             expected_attempts=attempts,
             error_code=exc.code[:64],
         )
+        record_worker_success("viread_ocr_outbox")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=1,
+                source=source,
+            )
     except OutboxEventBlocked as exc:
         await _finish(
             event["id"],
@@ -1337,6 +1414,16 @@ async def run_once() -> bool:
             expected_attempts=attempts,
             error_code=exc.code[:64],
         )
+        record_worker_success("viread_ocr_outbox")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=1,
+                source=source,
+            )
     except asyncio.CancelledError:
         try:
             await asyncio.shield(
@@ -1368,4 +1455,95 @@ async def run_once() -> bool:
             error_code=error_code,
             delay_seconds=delay,
         )
+        record_worker_error("viread_ocr_outbox", error_code)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_outbox",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=error_code,
+            )
     return True
+
+
+async def _drain_scheduled_viread_ocr_outbox(*, max_events: int = 8) -> int:
+    await asyncio.sleep(0)
+    sem = _event_outbox_semaphore()
+    processed = 0
+    had_error: str | None = None
+    async with sem:
+        for _ in range(max(1, max_events)):
+            try:
+                did_work = await run_once(
+                    source="event",
+                    execution_mode="on_demand",
+                    persist_heartbeat=False,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                had_error = type(exc).__name__
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="viread_ocr_outbox_event_drain_failed",
+                    stage="event_trigger",
+                    exception=exc,
+                )
+                break
+            if not did_work:
+                break
+            processed += 1
+        await persist_worker_heartbeat_with_factory(
+            AsyncSessionLocal,
+            "viread_ocr_outbox",
+            execution_mode="on_demand",
+            ok=had_error is None,
+            items_processed=processed,
+            source="event",
+            error_code=had_error,
+        )
+    return processed
+
+
+def schedule_viread_ocr_outbox(*, force: bool = False) -> asyncio.Task[Any] | None:
+    """Trigger bounded event-driven Flow 2 outbox drain when heavy workers are disabled."""
+    from app.database.config import APP_ENVIRONMENT
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if (
+            app_env == "test"
+            or not is_heavy_workers_disabled()
+            or not _configured_enabled()
+            or is_flow2_ingestion_paused()
+        ):
+            return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    active_tasks = [t for t in list(_EVENT_OUTBOX_TASKS) if not t.done()]
+    if len(active_tasks) >= 2:
+        return active_tasks[-1]
+    task = loop.create_task(
+        _drain_scheduled_viread_ocr_outbox(),
+        name="viread_ocr_outbox_event_drain",
+    )
+    _EVENT_OUTBOX_TASKS.add(task)
+    task.add_done_callback(_EVENT_OUTBOX_TASKS.discard)
+    return task
+
+
+async def shutdown_scheduled_outbox_tasks(*, timeout_seconds: float = 5.0) -> None:
+    if not _EVENT_OUTBOX_TASKS:
+        return
+    pending = [task for task in list(_EVENT_OUTBOX_TASKS) if not task.done()]
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.wait(pending, timeout=timeout_seconds)

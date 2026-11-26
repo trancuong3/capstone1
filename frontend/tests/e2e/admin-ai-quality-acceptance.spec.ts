@@ -1244,7 +1244,7 @@ test.describe("Admin AI Quality, Rights, Safety & Parent Reports E2E", () => {
       });
     });
 
-    await page.goto("/admin/metadata-quality");
+    await page.goto("/admin/metadata-quality?tab=approval");
     await expect(
       page.getByRole("heading", { name: "Truyện Chú Mèo Nhỏ (Synthetic QA)" }),
     ).toBeVisible();
@@ -1675,7 +1675,7 @@ test.describe("Admin AI Quality, Rights, Safety & Parent Reports E2E", () => {
     // Phase B: Admin opens inbox, inspects and resolves report with resolution note
     await page.setExtraHTTPHeaders(authFixtureHeaders("admin"));
     await seedBrowserSession(context, "admin", ADMIN_ID);
-    await page.goto("/admin/metadata-quality");
+    await page.goto("/admin/metadata-quality?tab=reports");
     await expect(page.getByText(/Đoạn văn có chi tiết đáng sợ/)).toBeVisible();
     await page.getByRole("button", { name: "Xem chi tiết" }).first().click();
     await page

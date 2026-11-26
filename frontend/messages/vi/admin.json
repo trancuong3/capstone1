@@ -15,7 +15,13 @@
     "auditLogsTitle": "Nhật ký kiểm toán",
     "healthTitle": "Tình trạng vận hành",
     "protectedLoadingAria": "Đang tải khu vực quản trị",
-    "protectedLoadingStatus": "Đang tải dữ liệu quản trị…"
+    "protectedLoadingStatus": "Đang tải dữ liệu quản trị…",
+    "bookDetailTitle": "Chi tiết sách",
+    "karaokeEditTitle": "Biên tập bài hát",
+    "karaokeNewTitle": "Tạo bài hát mới",
+    "karaokeTitle": "Quản lý bài hát",
+    "ocrReviewTitle": "Kiểm tra OCR trang sách",
+    "vireadTrainingTitle": "Huấn luyện OCR"
   },
   "layout": {
     "skipToContent": "Bỏ qua điều hướng, đến nội dung quản trị",
@@ -35,7 +41,12 @@
     },
     "signOut": "Đăng xuất",
     "signingOut": "Đang đăng xuất…",
-    "signOutError": "Chưa thể đăng xuất lúc này. Vui lòng thử lại."
+    "signOutError": "Chưa thể đăng xuất lúc này. Vui lòng thử lại.",
+    "groups": {
+      "content": "Nội dung",
+      "systemAi": "Hệ thống & AI",
+      "users": "Người dùng"
+    }
   },
   "login": {
     "areaLabel": "Khu vực quản trị",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "Phiên đăng nhập không hợp lệ",
     "yes": "Có",
     "no": "Không",
-    "notYet": "Chưa"
+    "notYet": "Chưa",
+    "breadcrumbAria": "Đường dẫn điều hướng",
+    "clearSearch": "Xóa từ khóa tìm kiếm"
   },
   "auditLogs": {
     "title": "Nhật ký kiểm toán",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "Xem chi tiết metadata ({count} ký tự)",
     "loadMoreError": "Không thể tải thêm nhật ký. Các bản ghi trước đó vẫn được giữ nguyên.",
     "retryLoadMore": "Thử tải thêm lại",
-    "loadMore": "Tải thêm"
+    "loadMore": "Tải thêm",
+    "clearFilters": "Xóa bộ lọc",
+    "columns": {
+      "action": "Hành động",
+      "metadata": "Metadata",
+      "resource": "Tài nguyên",
+      "timestamp": "Thời điểm"
+    },
+    "drawerTitleFallback": "Chi tiết sự kiện",
+    "eventIdLabel": "Mã sự kiện",
+    "filterActionPlaceholder": "vd: book.read, parent.update…",
+    "filterAria": "Bộ lọc nhật ký kiểm toán",
+    "filterResourcePlaceholder": "vd: book, parent, song…",
+    "inspectBtn": "Chi tiết",
+    "inspectEventAria": "Xem chi tiết sự kiện {action}",
+    "tableAria": "Bảng nhật ký kiểm toán"
   },
   "health": {
     "title": "Tình trạng vận hành",
@@ -137,7 +165,14 @@
       "healthy": "Đã xác minh",
       "failed": "Gặp lỗi",
       "unknown": "Chưa xác minh",
-      "disabled": "Chưa chạy"
+      "disabled": "Chưa chạy",
+      "cached": "Dùng bộ nhớ đệm",
+      "client_side": "Chạy trên trình duyệt",
+      "cloud_ready": "Đám mây sẵn sàng",
+      "local_only": "Chỉ chạy cục bộ",
+      "remote_delegated": "Ủy quyền từ xa",
+      "scheduled": "Theo lịch định kỳ",
+      "standby": "Chế độ chờ"
     },
     "queueDepthLabel": "Hàng đợi",
     "queueDepthValue": "{count, plural, =0 {0 tác vụ} other {# tác vụ}}",
@@ -159,7 +194,7 @@
     "ttsCacheHitRate": "Tỉ lệ cache hit",
     "ttsQuotaExhausted": "Vượt hạn mức lưu trữ",
     "noData": "Chưa có dữ liệu",
-    "clientDeviceHeading": "Client Device Capabilities",
+    "clientDeviceHeading": "Năng lực thiết bị hiện tại",
     "sttHeading": "Khả năng STT & Cache thiết bị",
     "sttSubtitle": "Kiểm tra năng lực chạy STT trên trình duyệt/WebView và bộ nhớ đệm thiết bị hiện tại.",
     "sttWasmLabel": "WebAssembly SIMD",
@@ -183,11 +218,90 @@
       "Healthy": "Ổn định",
       "Degraded": "Suy giảm",
       "Offline": "Ngoại tuyến",
-      "Queued": "Queued",
+      "Queued": "Đang xếp hàng",
       "Quota exhausted": "Vượt hạn mức",
       "Unsupported": "Không hỗ trợ",
-      "Unknown": "Không rõ"
-    }
+      "Unknown": "Không rõ",
+      "Local only": "Chỉ cục bộ",
+      "Scheduled": "Theo lịch",
+      "Standby": "Chờ kích hoạt"
+    },
+    "actionHintLabel": "Gợi ý xử lý",
+    "audioCacheErrorDetail": "Mã chẩn đoán: {code}",
+    "audioCacheErrorTitle": "Không thể tải thống kê kho âm thanh đọc mẫu",
+    "audioCachePercentUsed": "{percent} đã dùng",
+    "audioCacheUnlimited": "Không giới hạn",
+    "audioCacheUsageAria": "Mức sử dụng {label}: {percent}%",
+    "autoRefresh30s": "30s",
+    "autoRefresh60s": "60s",
+    "autoRefreshActive": "Tự làm mới mỗi {seconds}s",
+    "autoRefreshLabel": "Tự làm mới",
+    "autoRefreshOff": "Tắt",
+    "autoRefreshPaused": "Tự làm mới tạm dừng khi ẩn tab",
+    "clearTtsCache": "Xóa cache TTS",
+    "clearTtsCacheError": "Không thể xóa cache TTS lúc này.",
+    "clearTtsCacheSuccess": "Đã xóa cache TTS trên trình duyệt.",
+    "clearWasmCache": "Xóa cache model STT",
+    "clearWasmCacheError": "Không thể xóa cache model STT lúc này.",
+    "clearWasmCacheSuccess": "Đã xóa cache model STT trên trình duyệt.",
+    "clearingCache": "Đang xóa…",
+    "deviceProbeError": "Không thể kiểm tra đầy đủ năng lực thiết bị hiện tại.",
+    "dismissErrorAria": "Đóng thông báo lỗi",
+    "errorHttpStatus": "Mã HTTP {status}",
+    "errorRequestId": "Mã yêu cầu: {requestId}",
+    "filterAria": "Lọc dịch vụ theo trạng thái",
+    "filteredEmpty": "Không có dịch vụ nào thuộc nhóm trạng thái này.",
+    "filters": {
+      "all": "Tất cả",
+      "attention": "Cần chú ý",
+      "healthy": "Hoạt động",
+      "local_only": "Chỉ cục bộ",
+      "standby": "Chờ kích hoạt"
+    },
+    "groups": {
+      "core": "Hạ tầng lõi",
+      "coreDesc": "API, cơ sở dữ liệu và lưu trữ đối tượng thiết yếu cho toàn hệ thống.",
+      "localOnlyWorkers": "Chỉ cục bộ / Ủy quyền từ xa / Tắt theo cấu hình",
+      "localOnlyWorkersToggleHint": "{count} mục",
+      "ocr": "Pipeline OCR & AI Engines",
+      "ocrDesc": "OCR worker từ xa, 4 engine nhận diện chữ và AI hậu kiểm chính tả.",
+      "voice": "Giọng đọc & Bộ nhớ đệm",
+      "voiceDesc": "Text-to-Speech, Speech-to-Text và kho âm thanh đọc mẫu dựng sẵn.",
+      "workers": "Tiến trình nền & Cron",
+      "workersDesc": "Các tác vụ định kỳ, hàng đợi kiểm duyệt và sự kiện đọc sách."
+    },
+    "kpiAria": "Thống kê nhanh dịch vụ",
+    "kpiTotalDetail": "/ {total} dịch vụ",
+    "ocrEnginesSubheading": "Các engine nhận diện OCR",
+    "probeDevice": "Kiểm tra thiết bị",
+    "probingDevice": "Đang kiểm tra thiết bị…",
+    "refreshTimeoutError": "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
+    "refreshWarningBody": "Đang giữ dữ liệu kiểm tra gần nhất. Hãy thử kiểm tra lại.",
+    "refreshWarningTitle": "Không thể làm mới trạng thái mới nhất",
+    "refreshing": "Đang cập nhật…",
+    "resetFilter": "Xem tất cả dịch vụ",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "Ứng dụng PWA",
+    "sttInsecureContextWarning": "Kết nối chưa phải HTTPS (Secure Context); micro và một số API trình duyệt có thể bị chặn.",
+    "sttMicNeedsHttps": "Cần HTTPS để ghi âm",
+    "sttMicNoMediaDevices": "Không hỗ trợ getUserMedia",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "Lỗi đọc IndexedDB ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB không khả dụng; không thể lưu model STT hoặc cache TTS cục bộ.",
+    "summaryAllHealthy": "Tất cả {healthy} dịch vụ đang hoạt động ổn định.",
+    "summaryAria": "Tổng quan tình trạng hệ thống",
+    "summaryAttentionSegment": "{count} cần chú ý",
+    "summaryHealthySegment": "{count} hoạt động",
+    "summaryLocalOnlySegment": "{count} chỉ cục bộ",
+    "summaryStandbySegment": "{count} chờ kích hoạt",
+    "ttsCacheBrowserEmpty": "Trống (0 mục)",
+    "ttsCacheBrowserError": "Lỗi bộ nhớ đệm ({code})",
+    "ttsCacheBrowserHitsMisses": "Trúng: {hits} · Trượt: {misses}",
+    "wakeOcrError": "Không thể gửi lệnh đánh thức OCR worker. Vui lòng thử lại.",
+    "wakeOcrRechecking": "Tự động kiểm tra lại sau vài giây…",
+    "wakeOcrWorker": "Đánh thức OCR worker",
+    "wakingOcrWorker": "Đang đánh thức…"
   },
   "parents": {
     "title": "Quản lý phụ huynh",
@@ -264,7 +378,8 @@
       "childGrade": "Lớp {grade}",
       "authNotConfigured": "Chưa thể tải email và số điện thoại vì backend chưa được cấu hình quyền truy xuất Supabase Auth.",
       "authNotFound": "Không tìm thấy tài khoản Supabase Auth liên kết với hồ sơ này. Thông tin hồ sơ và trẻ em vẫn được hiển thị.",
-      "authUnavailable": "Không thể tải thông tin liên hệ từ Supabase Auth lúc này. Hãy kiểm tra cấu hình hoặc thử tải lại."
+      "authUnavailable": "Không thể tải thông tin liên hệ từ Supabase Auth lúc này. Hãy kiểm tra cấu hình hoặc thử tải lại.",
+      "parentIdLabel": "Mã phụ huynh"
     },
     "modal": {
       "createTitle": "Thêm Parent",
@@ -301,6 +416,16 @@
         "genericUpdate": "Không thể cập nhật tài khoản lúc này. Vui lòng thử lại.",
         "fallback": "Không thể cập nhật tài khoản lúc này. Dữ liệu đã nhập vẫn được giữ."
       }
+    },
+    "copiedId": "Đã sao chép",
+    "copyId": "Sao chép ID",
+    "copyIdAria": "Sao chép ID {id}",
+    "directoryAria": "Danh sách tài khoản phụ huynh",
+    "overviewAria": "Tổng quan phụ huynh",
+    "searchToolbarAria": "Tìm kiếm phụ huynh",
+    "tableHeaders": {
+      "actions": "Thao tác",
+      "parent": "Phụ huynh"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "Khối lớp lớn nhất phải là số nguyên từ 1 đến 5.",
         "maxRange": "Khối lớp lớn nhất phải từ 1 đến 5.",
         "gradeOrder": "Khối lớp nhỏ nhất không được lớn hơn khối lớp lớn nhất."
-      }
+      },
+      "authorPlaceholder": "Ví dụ: Charles Perrault",
+      "livePreviewDesc": "Khi chưa tải ảnh bìa riêng, ViRead tự tạo bìa chữ tiếng Việt sắc nét theo tiêu đề, tác giả và khối lớp.",
+      "livePreviewHeading": "Xem trước bìa sách",
+      "livePreviewTitleFallback": "Tiêu đề sách mới",
+      "namePlaceholder": "Ví dụ: Chú mèo đi hia (tên quản lý nội bộ)",
+      "titlePlaceholder": "Ví dụ: Chú mèo đi hia"
     },
     "detail": {
       "eyebrow": "Chi tiết sách",
@@ -462,7 +593,18 @@
       "ocrQueueCheckNow": "Kiểm tra lại ngay",
       "queuedNewPageBadge": "Trang mới #{index} · Đã lưu trong hàng chờ OCR",
       "pageQueuedOfflineBadge": "Đã lưu trong hàng chờ OCR — Chờ máy chủ bật lại",
-      "pageQueuedOnlineBadge": "Đang xử lý OCR lại…"
+      "pageQueuedOnlineBadge": "Đang xử lý OCR lại…",
+      "copiedId": "Đã sao chép",
+      "copyIdAria": "Sao chép ID sách",
+      "openOcrShort": "Mở duyệt OCR",
+      "publishRuleToggle": "Quy tắc mở cho thư viện trẻ em",
+      "statNeedsReview": "Cần duyệt",
+      "statProcessing": "Đang xử lý",
+      "statTotalPages": "Tổng trang",
+      "statVerified": "Đã duyệt",
+      "summaryStripAria": "Tóm tắt sách",
+      "toggleAiBatchBtn": "Chạy AI duyệt hàng loạt",
+      "toggleUploadBtn": "Tải trang lên"
     },
     "editor": {
       "loading": "Đang tải metadata sách…",
@@ -498,7 +640,14 @@
       "cannotRetireTitle": "Không thể ngừng hoạt động sách",
       "safetyBlocked": "Child Safety chưa cho phép đưa sách vào thư viện. Hoàn tất OCR VERIFIED và xác nhận Safety khớp Candidate cho tất cả trang; finding HIGH hoặc NOT_RECOMMENDED tiếp tục bị chặn.",
       "invalidMetadata": "Metadata hiện tại chưa hợp lệ. Hãy sửa tiêu đề và khoảng lớp ở biểu mẫu rồi lưu trước khi kích hoạt.",
-      "genericToggleError": "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại."
+      "genericToggleError": "Yêu cầu không được xác nhận. Hãy kiểm tra quyền Admin hoặc kết nối Backend rồi thử lại.",
+      "closeCoverStudio": "Đóng Cover Studio",
+      "coverDesc": "Cập nhật ảnh bìa (tải lên, cắt 3:4, xoay hoặc tạo bìa AI) mà không làm thay đổi các trang đọc hay revision đã xác minh.",
+      "coverHeading": "Ảnh bìa sách",
+      "dangerZoneActiveDesc": "Ngừng hoạt động sẽ ẩn sách khỏi thư viện phụ huynh nhưng vẫn giữ nguyên toàn bộ trang, revision và lịch sử đọc.",
+      "dangerZoneHeading": "Vòng đời sách",
+      "dangerZoneRetiredDesc": "Sách đang ngừng hoạt động. Bạn có thể kích hoạt lại khi metadata và các trang OCR đã đáp ứng yêu cầu.",
+      "openCoverStudio": "Mở Cover Studio"
     },
     "uploader": {
       "heading": "Tải ảnh trang sách hoặc tài liệu và chạy OCR",
@@ -526,11 +675,13 @@
         "noValidFiles": "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
         "someInvalidFiles": "Một số tệp không hợp lệ nên chưa được upload. Các tệp hợp lệ vẫn đang được xử lý."
       },
-      "workerOfflineTitle": "Máy chủ OCR Windows hiện đang tắt",
+      "workerOfflineTitle": "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
       "workerOfflineBody": "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ lưu bền vững vào hàng chờ và tự động xử lý OCR ngay khi máy chủ OCR bật lại.",
-      "workerUnreachableTitle": "Chưa kiểm tra được trạng thái máy chủ OCR",
+      "workerUnreachableTitle": "Chưa kiểm tra được trạng thái dịch vụ OCR",
       "workerUnreachableBody": "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để lưu vào hàng chờ OCR.",
-      "recheckWorkerBtn": "Kiểm tra lại kết nối OCR"
+      "recheckWorkerBtn": "Kiểm tra lại kết nối OCR",
+      "workerOfflineDesc": "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
+      "workerUnreachableDesc": "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng OCR."
     },
     "imagePreview": {
       "hideButton": "Ẩn ảnh trang {pageNumber}",
@@ -587,8 +738,25 @@
         "savedNoChanges": "AI không đề xuất sửa đổi & đã quét an toàn văn bản. Chờ Admin kiểm tra ảnh, quyền sử dụng và xác minh thủ công.",
         "savedPrefix": "Bản nháp AI đã được lưu và chờ Admin xác minh thủ công: {detail}",
         "failedKeepReview": "AI không xử lý được; trang giữ nguyên trạng thái NEEDS_REVIEW (không tự động VERIFIED). {detail}"
+      },
+      "statusBadges": {
+        "failed": "Cần kiểm tra",
+        "saved": "Đã lưu nháp",
+        "verified": "Đã xác minh"
       }
-    }
+    },
+    "emptyFilteredDesc": "Thử thay đổi từ khóa hoặc đặt lại bộ lọc để xem toàn bộ kho sách.",
+    "filterToolbarAria": "Bộ lọc kho sách",
+    "kpi": {
+      "activeBooks": "Sách đang hoạt động",
+      "childLibraryEligible": "Đủ điều kiện thư viện trẻ em",
+      "needsReview": "Cần duyệt OCR",
+      "needsReviewDetail": "{count} trang chờ duyệt",
+      "total": "Tổng sách"
+    },
+    "listAria": "Danh sách sách quản trị",
+    "resetFilters": "Đặt lại",
+    "searchPlaceholder": "Nhập tên sách, tiêu đề hoặc tác giả…"
   },
   "metadataQuality": {
     "title": "Chất lượng dữ liệu sách",
@@ -620,7 +788,8 @@
       "invalidGradeRange": "Khoảng lớp không hợp lệ",
       "invalidGradeRangeDetail": "Ngoài lớp 1–5 hoặc lớp tối thiểu lớn hơn lớp tối đa",
       "duplicateGroups": "Nhóm có thể trùng",
-      "duplicateGroupsDetail": "{count} sách nằm trong các nhóm ứng viên"
+      "duplicateGroupsDetail": "{count} sách nằm trong các nhóm ứng viên",
+      "missingMetadataSummary": "Thiếu tác giả: {missingAuthor} · Sai khối lớp: {invalidGrade}"
     },
     "issuesHeading": "Sách cần kiểm tra",
     "duplicateNote": "Các trường hợp trùng chỉ dựa trên tiêu đề và tác giả sau khi bỏ khoảng trắng ngoài và không phân biệt chữ hoa/chữ thường.",
@@ -662,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "Đang hoạt động",
       "RETIRED": "Đã ngừng"
-    }
+    },
+    "searchPlaceholder": "Nhập tiêu đề hoặc tác giả…"
   },
   "contentQuality": {
     "eyebrow": "Quản trị chất lượng sách",
@@ -680,7 +850,9 @@
       "RESOLVED": "Đã giải quyết",
       "REJECTED": "Đã từ chối",
       "REPORTED_BOOKS": "Sách được báo cáo",
-      "REPORTED_PAGES": "Trang được báo cáo"
+      "REPORTED_PAGES": "Trang được báo cáo",
+      "reportedScope": "Sách được báo cáo",
+      "reportedScopeDetail": "Trang báo cáo: {pages} · Từ chối: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "Sai thông tin sách",
@@ -859,7 +1031,14 @@
       "scanning": "Đang quét…",
       "scanWholeBook": "Quét toàn bộ sách",
       "paginationAria": "Phân trang sách kiểm tra chất lượng",
-      "itemLabel": "sách"
+      "itemLabel": "sách",
+      "kpiApprovedDetail": "Sẵn sàng: {ready} · Admin duyệt: {approved} · Tự xuất bản: {published}",
+      "kpiApprovedGroup": "Đủ điều kiện / Đã duyệt",
+      "kpiAria": "Tổng quan duyệt và an toàn sách",
+      "kpiCopyrightDetail": "Cả Safety & Copyright: {both}",
+      "kpiProcessingDetail": "Đang quét: {processing} · Stale: {stale} · Lỗi scan: {failed}",
+      "kpiProcessingGroup": "Đang xử lý / Cần quét lại",
+      "statusBreakdownToggle": "Xem phân bổ chi tiết theo trạng thái ({count} nhóm)"
     },
     "bookDetail": {
       "subheading": "Chất lượng sách, lịch sử AI, findings và review Admin",
@@ -987,7 +1166,12 @@
       "checkAndFixPage": "Kiểm tra và sửa trang",
       "rescanPage": "Quét lại trang này",
       "noFindingThisScan": "Không có finding trong lần kiểm tra này.",
-      "noScanResultYet": "Trang chưa có kết quả kiểm tra; xem trạng thái và lý do ở trên."
+      "noScanResultYet": "Trang chưa có kết quả kiểm tra; xem trạng thái và lý do ở trên.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} trang cảnh báo",
+      "compactMetricsToggle": "Xem chi tiết chỉ số AI, workflow & assessment hash",
+      "compactOcrDetail": "Hash hợp lệ: {valid}/{total} · Chưa quét: {unscanned}",
+      "compactPipelineDetail": "Stale: {stale} · Đang xử lý: {processing}",
+      "compactSafetyDetail": "Proofreading: {proofreading}"
     }
   },
   "userBooks": {
@@ -1085,7 +1269,8 @@
       "suspendedBook": "Đã đình chỉ sách riêng.",
       "rejected": "Đã từ chối phiên bản trang này.",
       "suspendedWithTitle": "Đã đình chỉ sách riêng \"{title}\". Gia đình sở hữu không thể mở đọc ngay lập tức."
-    }
+    },
+    "kpiAria": "Tổng quan hàng đợi sách người dùng"
   },
   "flow2": {
     "filters": {
@@ -1438,7 +1623,9 @@
       "providerUnavailable": "không khả dụng",
       "providerChecking": "đang kiểm tra",
       "noProviderEvents": "Chưa có provider event.",
-      "safetyDisclaimer": "Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận Safety cho đúng Candidate hiện tại."
+      "safetyDisclaimer": "Kết quả AI không bảo đảm nội dung an toàn tuyệt đối. Với workflow AI, chỉ có thể lưu VERIFIED sau khi Admin xác nhận Safety cho đúng Candidate hiện tại.",
+      "emptyDesc": "Chạy XÁC NHẬN & CHẠY AI ở thanh thao tác bên dưới để tự động rà soát chính tả và quét an toàn trẻ em.",
+      "emptyTitle": "Chưa có kết quả AI Safety cho revision này"
     },
     "tabs": {
       "words": "Kiểm tra từ và vị trí",
@@ -1566,12 +1753,91 @@
       "noWords": "Chưa có từ nào trong revision này.",
       "addWord": "Thêm từ",
       "deleteWord": "Xóa từ",
-      "finishReview": "Hoàn tất kiểm tra"
+      "finishReview": "Hoàn tất kiểm tra",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "Lịch sử xử lý OCR",
       "subtitle": "{title} · Trang {pageNumber} · Revision R{revisionNo}",
       "mobileCardAria": "Chọn revision {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "Chấp nhận các khối rõ ràng",
+      "blockCardAria": "Khối {typeLabel}",
+      "circuitBreakerDesc": "Tỉ lệ văn bản dự kiến loại bỏ vượt quá 35% trang nên hệ thống đã tự động giữ lại và chuyển sang mục Phần cần xác minh để bạn kiểm tra thủ công.",
+      "circuitBreakerTitle": "Đã bật cơ chế bảo vệ chống mất nội dung",
+      "cropReviewTitle": "Giữ nguyên khung ảnh gốc để tránh cắt mất chữ",
+      "decisions": {
+        "EXCLUDE": "Đã loại",
+        "KEEP": "Giữ lại",
+        "REVIEW": "Cần xác minh"
+      },
+      "editBtn": "Sửa chữ",
+      "editLabel": "Chỉnh sửa chữ của khối",
+      "emptyClean": "Chưa có khối nội dung sạch nào được giữ lại.",
+      "emptyExcluded": "Không có phần nhiễu hay số trang nào bị loại bỏ trên trang này.",
+      "emptyReview": "Không còn khối nào cần xác minh thêm trên trang này.",
+      "excludeBtn": "Loại bỏ",
+      "geometryMeta": "Góc nghiêng ước lượng: {angle}° · Diện tích vùng trang: {area}% · {gutterReason}",
+      "heading": "Rà soát nội dung trích xuất thông minh",
+      "headingWithPage": "Rà soát nội dung trích xuất thông minh — Trang {pageNumber}",
+      "keepBtn": "Giữ lại",
+      "loaderDesc": "Tách tự động nội dung bài đọc khỏi số trang, tiêu đề lặp và chữ thừa (không bao giờ tự xóa nội dung chính).",
+      "loaderError": "Chưa thể phân loại khối chữ thông minh cho trang này.",
+      "loaderOpenBtn": "Mở phân loại khối chữ thông minh",
+      "loaderReextractBtn": "Phân tích lại khối chữ",
+      "manualOverrideBadge": "Đã chỉnh thủ công",
+      "noImageFallback": "Chưa có ảnh gốc đính kèm — hệ thống vẫn hiển thị đầy đủ {count} khối chữ đã phân tích.",
+      "notices": {
+        "acceptClearAll": "Đã xác nhận tất cả {confirmed} khối rõ ràng.",
+        "acceptClearRemoteRemaining": "Đã chấp nhận các khối rõ ràng. Còn {remaining} khối cần xác minh thủ công.",
+        "acceptClearWithRemaining": "Đã xác nhận {confirmed} khối rõ ràng. Vẫn còn {remaining} khối cần bạn xác minh thủ công.",
+        "editSaved": "Đã cập nhật nội dung chữ của khối và giữ trong bài đọc.",
+        "emptyEditError": "Nội dung khối chữ không được để trống khi lưu sửa.",
+        "excluded": "Đã loại bỏ khối chữ khỏi bài đọc.",
+        "humanEditReason": "Người dùng đã chỉnh sửa nội dung khối này.",
+        "humanExcludeReason": "Người dùng chọn loại bỏ khối này.",
+        "humanKeepReason": "Người dùng chọn giữ lại khối này.",
+        "humanRestoreReason": "Đã khôi phục khối vào bài đọc.",
+        "kept": "Đã giữ lại khối chữ vào bài đọc.",
+        "nothingToUndo": "Chưa có thao tác nào để hoàn tác.",
+        "restored": "Đã khôi phục khối chữ vào bài đọc.",
+        "saved": "Đã lưu thay đổi khối nội dung.",
+        "undone": "Đã hoàn tác thao tác gần nhất.",
+        "updateFailed": "Không thể cập nhật quyết định cho khối này. Vui lòng thử lại.",
+        "updated": "Đã cập nhật trạng thái khối nội dung."
+      },
+      "originalImageAlt": "Ảnh gốc trang sách",
+      "originalImageAltWithPage": "Ảnh gốc trang {pageNumber}",
+      "overlayAria": "Lớp phủ vùng chữ trích xuất",
+      "previewEmpty": "Chưa có chữ nào trong bài đọc sau khi lọc.",
+      "previewHeading": "Nội dung bài đọc cho bé",
+      "previewReviewNotice": "Bản xem trước hiện bao gồm {count} khối cần xác minh để bảo đảm không bỏ sót nội dung bài đọc.",
+      "readingOrderMeta": "Thứ tự đọc #{order} · Độ tin cậy {confidence}%",
+      "reasonPrefix": "Lý do:",
+      "restoreBtn": "Khôi phục",
+      "reviewBanner": "Các khối dưới đây đang được tạm giữ trong bản xem trước để tránh mất chữ. Hãy chọn Giữ lại hoặc Loại bỏ cho từng khối.",
+      "saveEditBtn": "Lưu sửa",
+      "shadowModeDesc": "Các quyết định lọc nhiễu đang được ghi nhận để đối chiếu và chưa thay đổi văn bản đọc chính thức.",
+      "shadowModeTitle": "Đang chạy chế độ đối chiếu (Shadow)",
+      "summaryLine": "Loại trang: {pageKind} · Giữ lại {retention}% ký tự ({keep} khối giữ, {excluded} khối loại, {review} khối cần xác minh)",
+      "tabs": {
+        "clean": "Nội dung sạch",
+        "excluded": "Phần bị loại",
+        "original": "Ảnh gốc",
+        "preview": "Xem trước bài đọc",
+        "review": "Phần cần xác minh"
+      },
+      "tabsAria": "Chế độ xem trích xuất OCR",
+      "undoBtn": "Hoàn tác"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "Khu vực làm việc duyệt OCR",
+      "draft": "Văn bản & Duyệt",
+      "history": "Lịch sử Revision",
+      "safety": "AI Safety",
+      "smartBlocks": "Khối thông minh V2",
+      "words": "Từ & BBox"
     }
   },
   "training": {
@@ -1720,7 +1986,15 @@
       "closeDriftSuccess": "Đã đóng job lỗi cấu hình. Run và checkpoint được giữ nguyên, candidate chưa được benchmark/duyệt; hệ thống có thể tạo job mới theo cấu hình đã khóa đúng.",
       "closeDriftFailed": "Không thể đóng candidate này; trạng thái hoặc lineage có thể đã thay đổi.",
       "closeUnbenchmarkedSuccess": "Đã đóng candidate chưa benchmark; run và checkpoint được giữ nguyên. Hệ thống sẽ tự tạo Locked Test và job thay thế khi đủ holdout VERIFIED độc lập.",
-      "closeUnbenchmarkedFailed": "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi."
+      "closeUnbenchmarkedFailed": "Không thể đóng candidate. Có thể worker vẫn đang chạy, candidate đã có benchmark hoặc lineage đã thay đổi.",
+      "flow2AlreadyTrained": "Dataset và cấu hình Luồng 2 hiện tại đã có kết quả train trước đó. Thêm mẫu VERIFIED mới hoặc đánh giá candidate hiện có.",
+      "flow2NoEligibleSamples": "Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot.",
+      "flow2Paused": "Luồng 2 đang tạm dừng (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "Không thể xếp hàng Luồng 2 ({reason}).",
+      "flow2Scheduled": "Đã tạo snapshot Luồng 2 ({train} train / {validation} validation) và xếp hàng job {jobId} ({status}).",
+      "flow2TrainValRequired": "Snapshot hiện có {train} train và {validation} validation; cần cả 2 tập mới có thể xếp hàng Colab.",
+      "flow2TriggerFailed": "Không thể tạo snapshot hoặc xếp hàng train Luồng 2.",
+      "flow2UnresolvedJob": "Đang có job huấn luyện chưa kết thúc trong hàng đợi; chưa tạo thêm job mới."
     },
     "flow1": {
       "badgeEyebrow": "Luồng 1 Mới · Direct Model Replacement",
@@ -1888,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "Apps Script Web App đang chặn truy cập ẩn danh. Trong script.google.com hãy Deploy lại với tùy chọn 'Ai có quyền truy cập: Bất kỳ ai (Anyone)' (vẫn bảo vệ bằng chữ ký HMAC-SHA256).",
         "BRIDGE_SECRET_MISMATCH": "Chữ ký Apps Script Bridge không khớp hoặc chưa cài VIREAD_BRIDGE_SECRET trong Script Properties của script.google.com.",
         "DRIVE_SCOPE_MISMATCH": "Quyền OAuth không đúng phạm vi tối thiểu drive.file. Hãy kết nối lại và chấp thuận đúng quyền thư mục riêng của ứng dụng.",
-        "genericCode": "Mã lỗi: {code}. Kiểm tra lại kết nối Google Drive hoặc bấm Kiểm tra kết nối & dung lượng."
+        "genericCode": "Mã lỗi: {code}. Kiểm tra lại kết nối Google Drive hoặc bấm Kiểm tra kết nối & dung lượng.",
+        "DESKTOP_REQUIRES_WINDOWS": "Máy chủ Linux không hỗ trợ Google Drive for Desktop local mount. Hãy kết nối qua Apps Script Bridge.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "Cloud server (Render) không thể truy cập Google Drive Desktop (G:\\) trên máy cá nhân. Hãy chuyển sang Apps Script Bridge.",
+        "ENCRYPTION_KEY_MISSING": "Thiếu biến VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự) trên server."
       },
       "notices": {
         "redirectingOauth": "Đang chuyển hướng tới trang xác thực OAuth 2.0 của Google (chỉ xin quyền tối thiểu drive.file)…",
@@ -1909,8 +2186,37 @@
         "disconnectConfirm": "Ngắt kết nối Google Drive khỏi Luồng 2? Dữ liệu sách gốc và tệp đã lưu trên Drive không bị xóa; outbox mới sẽ tạm chờ an toàn (không chuyển về Supabase).",
         "disconnected": "Đã ngắt kết nối Google Drive an toàn và xóa refresh token khỏi backend.",
         "disconnectFailed": "Không thể ngắt kết nối Google Drive lúc này."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(chỉ đọc được ổ G:\\ trên máy Windows local). Để backend Cloud (Render) và Google Colab đọc/ghi Drive, hãy chuyển sang",
+      "desktopCloudWarningPrefix": "Kết nối hiện tại đang dùng",
+      "disconnectModalConfirm": "Ngắt kết nối",
+      "disconnectModalTitle": "Ngắt kết nối Google Drive?"
+    },
+    "colabGuideAnd": "và",
+    "colabGuideMid1": ", chọn Runtime",
+    "colabGuideMid2": ", bật 2 Colab Secrets",
+    "colabGuidePrefix": "Mở notebook",
+    "colabGuideSuffix": ", rồi bấm",
+    "colabGuideTitle": "Hướng dẫn chạy Colab Free GPU T4 (0 VNĐ)",
+    "driveUnavailableDesc": "Backend hiện chưa trả về thông tin trạng thái kết nối Google Drive cho Luồng 2.",
+    "driveUnavailableTitle": "Chưa có cấu hình Google Drive",
+    "errors": {
+      "loadFailed": "Chưa thể tải trạng thái huấn luyện. Kiểm tra quyền Admin và migration VietOCR V2.",
+      "serviceUnavailable": "Dịch vụ quản trị huấn luyện VietOCR chưa sẵn sàng."
+    },
+    "kpiGridAria": "Chỉ số huấn luyện OCR",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Thay model Flow 1",
+      "flow2": "Huấn luyện & Đánh giá Flow 2",
+      "overview": "Tổng quan & Runtime"
+    },
+    "tabsAria": "Phân khu huấn luyện OCR",
+    "triggerFlow2Btn": "Tạo snapshot & Xếp hàng train Luồng 2",
+    "workerExecutionModeLabel": "Chế độ chạy:",
+    "workerWebHeavyDisabled": "Đang tắt (dùng nút kích hoạt bên dưới)",
+    "workerWebHeavyEnabled": "Đang bật",
+    "workerWebHeavyLabel": "Worker nền Web:"
   },
   "karaoke": {
     "library": {
@@ -1950,7 +2256,11 @@
         "DRAFT": "Bản nháp",
         "PUBLISHED": "Đang hiển thị",
         "HIDDEN": "Đã ẩn"
-      }
+      },
+      "emptyTitle": "Chưa có bài hát nào",
+      "filterAria": "Bộ lọc thư viện bài hát",
+      "hasCoverBadge": "Có bìa",
+      "searchPlaceholder": "Nhập tên bài hát hoặc tác giả…"
     },
     "workspace": {
       "retryLoad": "Thử tải lại",
@@ -2357,6 +2667,24 @@
       "listenDraftFirst": "Hãy nghe và xác nhận bản nháp hiện tại trước.",
       "draftMissingReviewContent": "Bản nháp chưa có nội dung để xác nhận duyệt.",
       "noResultToPreview": "Chưa có kết quả để nghe."
+    },
+    "confirm": {
+      "continueAction": "Tiếp tục",
+      "editLyricsTitle": "Chỉnh sửa lời đã căn thời gian?",
+      "expandRepeatsAction": "Xác nhận mở rộng",
+      "expandRepeatsTitle": "Mở rộng ký hiệu câu lặp?",
+      "leaveAction": "Rời trang",
+      "leaveTitle": "Rời khỏi trang hiện tại?",
+      "publishAction": "Xác nhận xuất bản",
+      "publishTitle": "Xuất bản bài hát?",
+      "reloadAction": "Tải lại bản lưu",
+      "reloadTitle": "Tải lại bản từ máy chủ?",
+      "replaceAudioAction": "Thay nhạc",
+      "replaceAudioTitle": "Thay file nhạc MP3?",
+      "replaceLyricsAction": "Thay thế lời",
+      "replaceLyricsTitle": "Thay thế toàn bộ lời hiện tại?",
+      "resplitAction": "Xác nhận tách lại",
+      "resplitTitle": "Tách lại tiếng cho câu này?"
     }
   },
   "pageUploadRuntime": {
@@ -2377,5 +2705,44 @@
     "reloadAfterUploadFailed": "Không thể tải lại danh sách trang sau upload. Dữ liệu có thể đã được lưu; hãy tải lại để xác minh.",
     "reprocessIncomplete": "Tác vụ OCR lại trang chưa hoàn tất. Vui lòng thử lại.",
     "reprocessQueuedWindows": "Đã lưu yêu cầu chạy lại OCR trong hàng chờ — Tự động xử lý ngay khi máy chủ OCR bật lại"
+  },
+  "qualityHub": {
+    "description": "Kiểm tra metadata, xử lý báo cáo phụ huynh, duyệt an toàn sách và kiểm duyệt sách người dùng trong một màn hình thống nhất.",
+    "eyebrow": "Quản trị chất lượng",
+    "tabs": {
+      "approval": "Duyệt & An toàn sách",
+      "metadata": "Metadata sách",
+      "reports": "Báo cáo người dùng",
+      "userBooks": "Sách người dùng & Flow 2"
+    },
+    "tabsAria": "Phân khu quản lý chất lượng sách"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Đang xử lý nền…",
+    "closeAria": "Đóng trung tâm tác vụ AI",
+    "defaultBookLabel": "Sách",
+    "elapsedHours": "{hours} giờ",
+    "elapsedHoursMinutes": "{hours} giờ {minutes} phút",
+    "elapsedMinutes": "{minutes} phút",
+    "elapsedMinutesSeconds": "{minutes} phút {seconds} giây",
+    "elapsedRunning": "Đã chạy {elapsed}",
+    "elapsedSeconds": "{seconds} giây",
+    "emptyDescription": "Khi bạn tải trang sách, tách nội dung OCR hoặc tạo bìa, tiến trình thực sẽ hiển thị tại đây.",
+    "emptyTitle": "Chưa có tác vụ AI nào",
+    "openAria": "Mở trung tâm tác vụ AI",
+    "pageSeparator": " • Trang {pageNumber}",
+    "pillFailed": "Tác vụ lỗi ({count})",
+    "pillIdle": "Tác vụ AI",
+    "pillRunning": "AI đang chạy ({count})",
+    "pillWaitingReview": "Cần xác minh ({count})",
+    "processingAria": "Đang xử lý {title}",
+    "progressAria": "Tiến độ {title}",
+    "refreshAria": "Làm mới danh sách tác vụ",
+    "stagePrefix": "Bước: {stage}",
+    "subtitle": "Tác vụ nền tiếp tục chạy an toàn kể cả khi bạn chuyển trang.",
+    "title": "Trung tâm tác vụ AI",
+    "viewResultAction": "Xem kết quả",
+    "workerOfflineBanner": "Chờ máy xử lý AI kết nối lại. Tác vụ đã lưu bền vững và sẽ tự tiếp tục.",
+    "pillWaitingForWorker": "Hàng chờ OCR ({count})"
   }
 }

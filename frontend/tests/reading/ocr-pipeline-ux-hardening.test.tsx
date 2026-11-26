@@ -364,7 +364,7 @@ describe("OCR pipeline UX & polling hardening", () => {
 
     expect(
       await screen.findByTestId("admin-ocr-worker-offline-banner"),
-    ).toHaveTextContent(/Máy chủ OCR Windows hiện đang tắt/i);
+    ).toHaveTextContent(/Dịch vụ xử lý OCR hiện đang ngoại tuyến/i);
   });
 
   it("OcrReviewService runCombinedWorkflow fails cleanly instead of spinning forever when stuck QUEUED", async () => {

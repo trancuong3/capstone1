@@ -1,12 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  BookCheck,
+  CheckCircle2,
+  Clock,
+  Flag,
+  RefreshCw,
+  ShieldAlert,
+} from "lucide-react";
 import Link from "next/link";
-import { RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { AdminLoading } from "@/components/admin/admin-ui";
+import {
+  AdminBadge,
+  AdminDrawer,
+  AdminKpiCard,
+  AdminKpiGrid,
+  AdminLoading,
+  AdminPageHeader,
+  AdminSearchInput,
+  AdminSelect,
+  AdminToolbar,
+  type AdminBadgeTone,
+} from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
@@ -14,19 +33,28 @@ import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
+import { cn } from "@/lib/utils/cn";
 import type {
+  BookApprovalStatus,
   BookContentIssueType,
   BookContentReportDetailDTO,
   BookContentReportStatus,
   BookQualityBookDetailDTO,
   BookQualityBookPageDTO,
-  BookApprovalStatus,
   BookQualityFindingDTO,
   BookQualityFindingStatus,
   BookQualityReportAdminPageDTO,
   BookQualityScanDetailDTO,
   BookRightsStatus,
 } from "@/types/book-content-quality";
+
+export type ContentQualitySection = "all" | "reports" | "approval";
+
+export interface AdminBookContentQualityScreenProps {
+  readonly embedded?: boolean;
+  readonly refreshSignal?: number;
+  readonly section?: ContentQualitySection;
+}
 
 const REPORT_STATUS_KEYS: readonly BookContentReportStatus[] = [
   "OPEN",
@@ -59,15 +87,38 @@ const APPROVAL_STATUS_KEYS: readonly BookApprovalStatus[] = [
   "STALE",
 ];
 
-const approvalStatusStyles: Record<BookApprovalStatus, string> = {
-  PROCESSING: "bg-sky text-primary-hover",
-  SCAN_FAILED: "bg-rose-100 text-rose-800",
-  PENDING_ADMIN_REVIEW: "bg-amber-100 text-amber-900",
-  READY_FOR_CHILDREN: "bg-emerald-100 text-emerald-900",
-  PUBLISHED: "bg-emerald-100 text-emerald-900",
-  APPROVED_BY_ADMIN: "bg-emerald-100 text-emerald-900",
-  REJECTED_FOR_CHILDREN: "bg-rose-100 text-rose-800",
-  STALE: "bg-orange-100 text-orange-900",
+const approvalStatusTones: Record<BookApprovalStatus, AdminBadgeTone> = {
+  PROCESSING: "info",
+  SCAN_FAILED: "danger",
+  PENDING_ADMIN_REVIEW: "warning",
+  READY_FOR_CHILDREN: "success",
+  PUBLISHED: "success",
+  APPROVED_BY_ADMIN: "success",
+  REJECTED_FOR_CHILDREN: "danger",
+  STALE: "warning",
+};
+
+const reportStatusTones: Record<BookContentReportStatus, AdminBadgeTone> = {
+  OPEN: "warning",
+  UNDER_REVIEW: "info",
+  RESOLVED: "success",
+  REJECTED: "neutral",
+};
+
+const findingStatusTones: Record<BookQualityFindingStatus, AdminBadgeTone> = {
+  NEEDS_REVIEW: "warning",
+  CONFIRMED: "danger",
+  DISMISSED: "neutral",
+  RESOLVED: "success",
+  STALE: "neutral",
+};
+
+const rightsStatusTones: Record<string, AdminBadgeTone> = {
+  UNASSESSED: "neutral",
+  INSUFFICIENT_EVIDENCE: "warning",
+  CONCERN_FLAGGED: "danger",
+  RIGHTS_REVIEWED: "success",
+  STALE_RIGHTS_REVIEW: "warning",
 };
 
 function errorMessage(error: unknown, t: TranslateFn): string {
@@ -95,7 +146,7 @@ function OcrLink({
   const t = useTranslations("admin");
   if (!bookId || !finding.page_id) {
     return (
-      <span className="text-sm text-muted">
+      <span className="text-xs text-muted">
         {t("contentQuality.findingCard.pageUnavailable")}
       </span>
     );
@@ -104,12 +155,13 @@ function OcrLink({
     ? `?revisionId=${encodeURIComponent(finding.page_revision_id)}`
     : "";
   return (
-    <Link
-      className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
+    <ButtonLink
       href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(finding.page_id)}${query}`}
+      size="admin"
+      variant="outline"
     >
       {children}
-    </Link>
+    </ButtonLink>
   );
 }
 
@@ -130,24 +182,24 @@ function FindingCard({
   const t = useTranslations("admin");
   const { formatPercent } = useI18n();
   return (
-    <article className="rounded-control border border-border bg-white p-4">
+    <article className="rounded-xl border border-border bg-white p-3.5 shadow-2xs">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="font-semibold text-ink">
+        <div className="text-sm font-bold text-ink">
           {t("contentQuality.findingCard.pageIssue", {
             pageNumber: finding.page_number,
             issueType: finding.issue_type,
           })}
         </div>
-        <div className="flex flex-wrap gap-2 text-xs font-semibold">
-          <span className="rounded-full bg-canvas px-3 py-1">
+        <div className="flex flex-wrap gap-1.5">
+          <AdminBadge tone={finding.severity === "HIGH" ? "danger" : "warning"}>
             {finding.severity}
-          </span>
-          <span className="rounded-full bg-sky px-3 py-1 text-primary-hover">
+          </AdminBadge>
+          <AdminBadge tone={findingStatusTones[finding.status] ?? "neutral"}>
             {t(`contentQuality.findingStatuses.${finding.status}`)}
-          </span>
+          </AdminBadge>
         </div>
       </div>
-      <blockquote className="mt-3 whitespace-pre-wrap rounded-control bg-canvas p-3 text-sm leading-6 text-ink">
+      <blockquote className="mt-2.5 whitespace-pre-wrap rounded-control border border-border bg-surface-subtle p-2.5 text-sm leading-6 text-ink">
         {finding.original_excerpt ? (
           <span className="viread-learning-content" dir="ltr" lang="vi">
             {finding.original_excerpt}
@@ -156,9 +208,11 @@ function FindingCard({
           t("contentQuality.findingCard.emptyExcerpt")
         )}
       </blockquote>
-      <p className="mt-2 text-sm leading-6 text-muted">{finding.explanation}</p>
+      <p className="mt-2 text-xs leading-relaxed text-muted">
+        {finding.explanation}
+      </p>
       {finding.suggested_correction ? (
-        <p className="mt-2 text-sm text-ink">
+        <p className="mt-1.5 text-xs text-ink">
           {t("contentQuality.findingCard.suggestionPrefix")}{" "}
           <span
             className="viread-learning-content font-semibold"
@@ -169,7 +223,7 @@ function FindingCard({
           </span>
         </p>
       ) : null}
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted">
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
         <span>
           {t("contentQuality.findingCard.sourcePrefix")}{" "}
           {finding.detection_source === "RULE"
@@ -178,7 +232,7 @@ function FindingCard({
         </span>
         {finding.model_name ? <span>Model: {finding.model_name}</span> : null}
         {finding.confidence !== null ? (
-          <span>
+          <span className="tabular-nums">
             Confidence:{" "}
             {formatPercent(finding.confidence, { maximumFractionDigits: 0 })}
           </span>
@@ -189,34 +243,34 @@ function FindingCard({
           </span>
         ) : null}
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3">
         <OcrLink bookId={bookId} finding={finding}>
           {t("contentQuality.findingCard.openInOcr")}
         </OcrLink>
         {finding.status === "NEEDS_REVIEW" ? (
           <>
             <Button
-              className="h-10 w-auto px-3 text-sm"
               disabled={busy}
               onClick={() => onUpdate(finding, "CONFIRMED")}
+              size="admin"
               variant="secondary"
             >
               {t("contentQuality.findingCard.confirmWarning")}
             </Button>
             <Button
-              className="h-10 w-auto px-3 text-sm"
               disabled={busy}
               onClick={() => onUpdate(finding, "DISMISSED")}
-              variant="secondary"
+              size="admin"
+              variant="outline"
             >
               {t("contentQuality.findingCard.dismiss")}
             </Button>
           </>
         ) : finding.status === "CONFIRMED" ? (
           <Button
-            className="h-10 w-auto px-3 text-sm"
             disabled={busy}
             onClick={() => onUpdate(finding, "RESOLVED")}
+            size="admin"
             variant="secondary"
           >
             {t("contentQuality.findingCard.markResolved")}
@@ -227,17 +281,25 @@ function FindingCard({
   );
 }
 
-export function AdminBookContentQualityScreen() {
+export function AdminBookContentQualityScreen({
+  embedded = false,
+  refreshSignal = 0,
+  section = "all",
+}: AdminBookContentQualityScreenProps = {}) {
   const { bookContentQuality } = useAdminServices();
   const t = useTranslations("admin");
   const { formatDateTime, formatNumber } = useI18n();
   const formatDate = formatDateTime;
+
+  const showReports = section === "all" || section === "reports";
+  const showBooks = section === "all" || section === "approval";
+
   const [reports, setReports] = useState<BookQualityReportAdminPageDTO | null>(
     null,
   );
   const [books, setBooks] = useState<BookQualityBookPageDTO | null>(null);
-  const [loadingReports, setLoadingReports] = useState(true);
-  const [loadingBooks, setLoadingBooks] = useState(true);
+  const [loadingReports, setLoadingReports] = useState(showReports);
+  const [loadingBooks, setLoadingBooks] = useState(showBooks);
   const [reportError, setReportError] = useState<string | null>(null);
   const [bookError, setBookError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -289,6 +351,8 @@ export function AdminBookContentQualityScreen() {
   const reportLimit = 10;
   const bookLimit = 10;
 
+  const isCatalogVisible = section !== "all" || activeTab === "catalog";
+
   const loadReports = useCallback(async () => {
     const requestId = ++reportRequestId.current;
     setLoadingReports(true);
@@ -329,38 +393,46 @@ export function AdminBookContentQualityScreen() {
     t,
   ]);
 
-  const loadBooks = useCallback(async () => {
-    const requestId = ++bookRequestId.current;
-    setLoadingBooks(true);
-    setBookError(null);
-    try {
-      const next = await bookContentQuality.listBooks({
-        search: bookSearch.trim() || undefined,
-        approval_status: bookApprovalFilter || undefined,
-        alert_filter: bookAlertFilter || undefined,
-        limit: bookLimit,
-        offset: bookOffset,
-      });
-      if (requestId === bookRequestId.current) setBooks(next);
-    } catch (error) {
-      if (requestId === bookRequestId.current) {
-        setBooks(null);
-        setBookError(errorMessage(error, t));
+  const loadBooks = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const requestId = ++bookRequestId.current;
+      if (!options?.silent) {
+        setLoadingBooks(true);
+        setBookError(null);
       }
-    } finally {
-      if (requestId === bookRequestId.current) setLoadingBooks(false);
-    }
-  }, [
-    bookContentQuality,
-    bookApprovalFilter,
-    bookAlertFilter,
-    bookOffset,
-    bookSearch,
-    t,
-  ]);
+      try {
+        const next = await bookContentQuality.listBooks({
+          search: bookSearch.trim() || undefined,
+          approval_status: bookApprovalFilter || undefined,
+          alert_filter: bookAlertFilter || undefined,
+          limit: bookLimit,
+          offset: bookOffset,
+        });
+        if (requestId === bookRequestId.current) setBooks(next);
+      } catch (error) {
+        if (requestId === bookRequestId.current && !options?.silent) {
+          setBooks(null);
+          setBookError(errorMessage(error, t));
+        }
+      } finally {
+        if (requestId === bookRequestId.current && !options?.silent) {
+          setLoadingBooks(false);
+        }
+      }
+    },
+    [
+      bookContentQuality,
+      bookApprovalFilter,
+      bookAlertFilter,
+      bookOffset,
+      bookSearch,
+      t,
+    ],
+  );
 
   useEffect(() => {
-    if (activeTab !== "catalog") return;
+    void refreshSignal;
+    if (!showReports || !isCatalogVisible) return;
     const requestId = reportRequestId;
     if (!search.trim()) {
       let cancelled = false;
@@ -377,27 +449,40 @@ export function AdminBookContentQualityScreen() {
       globalThis.clearTimeout(timeout);
       requestId.current += 1;
     };
-  }, [activeTab, loadReports, search]);
+  }, [isCatalogVisible, loadReports, refreshSignal, search, showReports]);
 
   useEffect(() => {
-    if (activeTab !== "catalog") return;
+    void refreshSignal;
+    if (!isCatalogVisible) return;
+    if (!showBooks && !showReports) return;
     const requestId = bookRequestId;
+    const silent = !showBooks;
     if (!bookSearch.trim()) {
       let cancelled = false;
       void Promise.resolve().then(() => {
-        if (!cancelled) void loadBooks();
+        if (!cancelled) void loadBooks({ silent });
       });
       return () => {
         cancelled = true;
         requestId.current += 1;
       };
     }
-    const timeout = globalThis.setTimeout(() => void loadBooks(), 180);
+    const timeout = globalThis.setTimeout(
+      () => void loadBooks({ silent }),
+      180,
+    );
     return () => {
       globalThis.clearTimeout(timeout);
       requestId.current += 1;
     };
-  }, [activeTab, bookSearch, loadBooks]);
+  }, [
+    bookSearch,
+    isCatalogVisible,
+    loadBooks,
+    refreshSignal,
+    showBooks,
+    showReports,
+  ]);
 
   const refreshSelectedBook = useCallback(
     async (bookId: string) => {
@@ -426,6 +511,14 @@ export function AdminBookContentQualityScreen() {
     }, 3000);
     return () => globalThis.clearTimeout(timeout);
   }, [refreshSelectedBook, selectedBook, t]);
+
+  const closeReportDrawer = useCallback(() => {
+    setSelectedReport(null);
+  }, []);
+
+  const closeBookDrawer = useCallback(() => {
+    setSelectedBook(null);
+  }, []);
 
   async function openReport(reportId: string) {
     setBusyKey(`report:${reportId}`);
@@ -640,479 +733,1038 @@ export function AdminBookContentQualityScreen() {
         workflow.safety_status === "STALE",
     ).length ?? 0;
 
-  return (
-    <section className="mt-10 border-t border-border pt-8">
-      <header className="mb-6 flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 max-w-3xl">
-          <p className="text-sm font-semibold text-muted">
-            {t("contentQuality.eyebrow")}
-          </p>
-          <h2 className="book-title mt-1 text-3xl text-ink sm:text-[36px]">
-            {t("contentQuality.heading")}
-          </h2>
-          <p className="mt-2 max-w-2xl text-body leading-6 text-muted">
-            {t("contentQuality.description")}
-          </p>
-        </div>
-        <div className="flex w-full shrink-0 flex-wrap gap-3 sm:w-auto">
-          <Button
-            className="h-12"
-            disabled={loadingReports || loadingBooks}
-            fullWidth={false}
-            onClick={() => void Promise.all([loadReports(), loadBooks()])}
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden className="size-4" />
-            {t("common.reload")}
-          </Button>
-        </div>
-      </header>
+  const hasReportFilters = Boolean(
+    search.trim() ||
+    createdAfter ||
+    createdBefore ||
+    statusFilter ||
+    issueFilter ||
+    bookFilter,
+  );
+  const hasBookFilters = Boolean(
+    bookSearch.trim() || bookApprovalFilter || bookAlertFilter,
+  );
 
-      {actionError ? (
-        <StatusMessage
-          tone="error"
-          title={t("contentQuality.errors.actionNotDoneTitle")}
-        >
-          {actionError}
-        </StatusMessage>
-      ) : null}
+  function clearReportFilters() {
+    setSearch("");
+    setCreatedAfter("");
+    setCreatedBefore("");
+    setStatusFilter("");
+    setIssueFilter("");
+    setBookFilter("");
+    setReportOffset(0);
+  }
 
-      <div
-        aria-label={t("contentQuality.sectionNavAria")}
-        className="mb-6 flex flex-wrap gap-2"
-        onKeyDown={(event) => {
-          if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
-            event.preventDefault();
-            const nextTab = activeTab === "catalog" ? "user-books" : "catalog";
-            setActiveTab(nextTab);
-            const nextId =
-              nextTab === "catalog"
-                ? "quality-tab-catalog"
-                : "quality-tab-user-books";
-            document.getElementById(nextId)?.focus();
-          }
-        }}
-        role="tablist"
+  function clearBookFilters() {
+    setBookSearch("");
+    setBookApprovalFilter("");
+    setBookAlertFilter("");
+    setBookOffset(0);
+  }
+
+  const bookSummary = books?.summary ?? {};
+  const bookAlerts = books?.alert_summary ?? {};
+  const approvedGroupTotal =
+    (bookSummary.READY_FOR_CHILDREN ?? 0) +
+    (bookSummary.APPROVED_BY_ADMIN ?? 0) +
+    (bookSummary.PUBLISHED ?? 0);
+  const processingGroupTotal =
+    (bookSummary.PROCESSING ?? 0) +
+    (bookSummary.STALE ?? 0) +
+    (bookSummary.SCAN_FAILED ?? 0);
+
+  const reportsSectionNode = showReports ? (
+    <div className="space-y-4">
+      <AdminKpiGrid
+        ariaLabel={t("contentQuality.reportSummaryAria")}
+        columns={4}
       >
-        <button
-          aria-controls="quality-panel-catalog"
-          aria-selected={activeTab === "catalog"}
-          className={
-            "inline-flex min-h-11 items-center gap-2 rounded-control border px-4 text-sm font-bold transition " +
-            (activeTab === "catalog"
-              ? "border-primary bg-primary text-white"
-              : "border-border bg-white text-ink hover:bg-canvas")
+        <AdminKpiCard
+          active={statusFilter === "OPEN"}
+          icon={<Flag className="size-4" />}
+          label={t("contentQuality.summaryCards.OPEN")}
+          onClick={() => {
+            setReportOffset(0);
+            setStatusFilter((prev) => (prev === "OPEN" ? "" : "OPEN"));
+          }}
+          tone={(reportSummary?.OPEN ?? 0) > 0 ? "warning" : "neutral"}
+          value={
+            reportSummary?.OPEN !== undefined
+              ? formatNumber(reportSummary.OPEN)
+              : t("common.emptyDash")
           }
-          id="quality-tab-catalog"
-          onClick={() => setActiveTab("catalog")}
-          role="tab"
-          tabIndex={activeTab === "catalog" ? 0 : -1}
-          type="button"
-        >
-          {t("contentQuality.tabs.catalog")}
-        </button>
-        <button
-          aria-controls="quality-panel-user-books"
-          aria-selected={activeTab === "user-books"}
-          className={
-            "inline-flex min-h-11 items-center gap-2 rounded-control border px-4 text-sm font-bold transition " +
-            (activeTab === "user-books"
-              ? "border-primary bg-primary text-white"
-              : "border-border bg-white text-ink hover:bg-canvas")
+        />
+        <AdminKpiCard
+          active={statusFilter === "UNDER_REVIEW"}
+          icon={<Clock className="size-4" />}
+          label={t("contentQuality.summaryCards.UNDER_REVIEW")}
+          onClick={() => {
+            setReportOffset(0);
+            setStatusFilter((prev) =>
+              prev === "UNDER_REVIEW" ? "" : "UNDER_REVIEW",
+            );
+          }}
+          tone={(reportSummary?.UNDER_REVIEW ?? 0) > 0 ? "info" : "neutral"}
+          value={
+            reportSummary?.UNDER_REVIEW !== undefined
+              ? formatNumber(reportSummary.UNDER_REVIEW)
+              : t("common.emptyDash")
           }
-          id="quality-tab-user-books"
-          onClick={() => setActiveTab("user-books")}
-          role="tab"
-          tabIndex={activeTab === "user-books" ? 0 : -1}
-          type="button"
-        >
-          {t("contentQuality.tabs.userBooks")}
-        </button>
-      </div>
+        />
+        <AdminKpiCard
+          active={statusFilter === "RESOLVED"}
+          icon={<CheckCircle2 className="size-4" />}
+          label={t("contentQuality.summaryCards.RESOLVED")}
+          onClick={() => {
+            setReportOffset(0);
+            setStatusFilter((prev) => (prev === "RESOLVED" ? "" : "RESOLVED"));
+          }}
+          tone="success"
+          value={
+            reportSummary?.RESOLVED !== undefined
+              ? formatNumber(reportSummary.RESOLVED)
+              : t("common.emptyDash")
+          }
+        />
+        <AdminKpiCard
+          detail={t(
+            "contentQuality.summaryCards.reportedScopeDetail",
+            {
+              pages:
+                reportSummary?.REPORTED_PAGES !== undefined
+                  ? formatNumber(reportSummary.REPORTED_PAGES)
+                  : t("common.emptyDash"),
+              rejected:
+                reportSummary?.REJECTED !== undefined
+                  ? formatNumber(reportSummary.REJECTED)
+                  : t("common.emptyDash"),
+            },
+            "Trang báo cáo: {pages} · Từ chối: {rejected}",
+          )}
+          label={t(
+            "contentQuality.summaryCards.reportedScope",
+            undefined,
+            "Sách được báo cáo",
+          )}
+          tone="neutral"
+          value={
+            reportSummary?.REPORTED_BOOKS !== undefined
+              ? formatNumber(reportSummary.REPORTED_BOOKS)
+              : t("common.emptyDash")
+          }
+        />
+      </AdminKpiGrid>
 
-      {activeTab === "user-books" ? (
-        <div
-          aria-labelledby="quality-tab-user-books"
-          id="quality-panel-user-books"
-          role="tabpanel"
+      <AdminToolbar
+        actions={
+          hasReportFilters ? (
+            <Button
+              onClick={clearReportFilters}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              {t("metadataQuality.clearFilters")}
+            </Button>
+          ) : undefined
+        }
+        ariaLabel={t("contentQuality.reports.heading")}
+      >
+        <AdminSearchInput
+          label={t("contentQuality.reports.searchLabel")}
+          onChange={(value) => {
+            setReportOffset(0);
+            setSearch(value);
+          }}
+          placeholder={t("contentQuality.reports.searchPlaceholder")}
+          value={search}
+        />
+        <AdminSelect
+          containerClassName="w-full sm:w-44"
+          label={t("contentQuality.reports.statusLabel")}
+          onChange={(value) => {
+            setReportOffset(0);
+            setStatusFilter(value as BookContentReportStatus | "");
+          }}
+          value={statusFilter}
         >
-          <AdminUserBooksQualitySection />
+          <option value="">{t("common.all")}</option>
+          {REPORT_STATUS_KEYS.map((value) => (
+            <option key={value} value={value}>
+              {t(`contentQuality.reportStatuses.${value}`)}
+            </option>
+          ))}
+        </AdminSelect>
+        <AdminSelect
+          containerClassName="w-full sm:w-52"
+          label={t("contentQuality.reports.issueTypeLabel")}
+          onChange={(value) => {
+            setReportOffset(0);
+            setIssueFilter(value as BookContentIssueType | "");
+          }}
+          value={issueFilter}
+        >
+          <option value="">{t("common.all")}</option>
+          {ISSUE_TYPE_KEYS.map((value) => (
+            <option key={value} value={value}>
+              {t(`contentQuality.reportIssueTypes.${value}`)}
+            </option>
+          ))}
+        </AdminSelect>
+        <AdminSelect
+          containerClassName="w-full sm:w-48"
+          label={t("contentQuality.reports.bookLabel")}
+          onChange={(value) => {
+            setReportOffset(0);
+            setBookFilter(value);
+          }}
+          value={bookFilter}
+        >
+          <option value="">{t("contentQuality.reports.allBooksOption")}</option>
+          {(books?.items ?? []).map((book) => (
+            <option key={book.book_id} value={book.book_id}>
+              {book.book_title}
+            </option>
+          ))}
+        </AdminSelect>
+        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-36">
+          {t("contentQuality.reports.fromDateLabel")}
+          <input
+            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2.5 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            onChange={(event) => {
+              setReportOffset(0);
+              setCreatedAfter(event.target.value);
+            }}
+            type="date"
+            value={createdAfter}
+          />
+        </label>
+        <label className="flex w-full flex-col gap-1 text-xs font-semibold text-muted sm:w-36">
+          {t("contentQuality.reports.toDateLabel")}
+          <input
+            className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-2.5 text-sm font-medium text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            onChange={(event) => {
+              setReportOffset(0);
+              setCreatedBefore(event.target.value);
+            }}
+            type="date"
+            value={createdBefore}
+          />
+        </label>
+      </AdminToolbar>
+
+      <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-lg font-extrabold tracking-tight text-ink">
+              {t("contentQuality.reports.heading")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              {t("contentQuality.reports.subtitle")}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-bold tabular-nums text-muted">
+            {t("contentQuality.reports.countBadge", {
+              count: reports?.total ?? 0,
+            })}
+          </span>
         </div>
-      ) : null}
 
-      {activeTab === "catalog" ? (
-        <div
-          aria-labelledby="quality-tab-catalog"
-          id="quality-panel-catalog"
-          role="tabpanel"
-        >
-          <section
-            aria-label={t("contentQuality.reportSummaryAria")}
-            className="mb-6"
+        {loadingReports ? (
+          <AdminLoading
+            label={t("contentQuality.reports.loading")}
+            variant="skeleton"
+          />
+        ) : reportError ? (
+          <StatusMessage
+            title={t("contentQuality.reports.loadErrorTitle")}
+            tone="error"
           >
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-              {(
-                [
-                  "OPEN",
-                  "UNDER_REVIEW",
-                  "RESOLVED",
-                  "REJECTED",
-                  "REPORTED_BOOKS",
-                  "REPORTED_PAGES",
-                ] as const
-              ).map((key) => (
-                <div
-                  className="rounded-card border border-border bg-white p-4"
-                  key={key}
+            {reportError}
+          </StatusMessage>
+        ) : !reports || reports.items.length === 0 ? (
+          <EmptyState
+            description={t("contentQuality.reports.emptyDesc")}
+            title={t("contentQuality.reports.emptyTitle")}
+          />
+        ) : (
+          <div className="grid gap-3">
+            {reports.items.map((report) => {
+              const isSelected = selectedReport?.id === report.id;
+              return (
+                <article
+                  className={cn(
+                    "rounded-xl border p-4 transition-colors",
+                    isSelected
+                      ? "border-primary bg-sky/20 ring-1 ring-primary/25"
+                      : "border-border bg-white hover:border-primary/40 hover:bg-surface-subtle/50",
+                  )}
+                  key={report.id}
                 >
-                  <p className="text-sm text-muted">
-                    {t(`contentQuality.summaryCards.${key}`)}
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold tabular-nums text-ink">
-                    {reportSummary?.[key] !== undefined
-                      ? formatNumber(reportSummary[key])
-                      : t("common.emptyDash")}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-card border border-border bg-white p-4 sm:p-6">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-ink">
-                  {t("contentQuality.reports.heading")}
-                </h2>
-                <p className="mt-1 text-sm text-muted">
-                  {t("contentQuality.reports.subtitle")}
-                </p>
-              </div>
-              <span className="text-sm font-semibold text-muted">
-                {t("contentQuality.reports.countBadge", {
-                  count: reports?.total ?? 0,
-                })}
-              </span>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.searchLabel")}
-                <span className="relative mt-1 block">
-                  <Search
-                    aria-hidden
-                    className="absolute start-3 top-3 size-4 text-muted"
-                  />
-                  <input
-                    className="min-h-11 w-full rounded-control border border-border pe-3 ps-9"
-                    onChange={(event) => {
-                      setReportOffset(0);
-                      setSearch(event.target.value);
-                    }}
-                    placeholder={t("contentQuality.reports.searchPlaceholder")}
-                    value={search}
-                  />
-                </span>
-              </label>
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.fromDateLabel")}
-                <input
-                  className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                  onChange={(event) => {
-                    setReportOffset(0);
-                    setCreatedAfter(event.target.value);
-                  }}
-                  type="date"
-                  value={createdAfter}
-                />
-              </label>
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.toDateLabel")}
-                <input
-                  className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                  onChange={(event) => {
-                    setReportOffset(0);
-                    setCreatedBefore(event.target.value);
-                  }}
-                  type="date"
-                  value={createdBefore}
-                />
-              </label>
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.statusLabel")}
-                <select
-                  className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                  onChange={(event) => {
-                    setReportOffset(0);
-                    setStatusFilter(
-                      event.target.value as BookContentReportStatus | "",
-                    );
-                  }}
-                  value={statusFilter}
-                >
-                  <option value="">{t("common.all")}</option>
-                  {REPORT_STATUS_KEYS.map((value) => (
-                    <option key={value} value={value}>
-                      {t(`contentQuality.reportStatuses.${value}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.issueTypeLabel")}
-                <select
-                  className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                  onChange={(event) => {
-                    setReportOffset(0);
-                    setIssueFilter(
-                      event.target.value as BookContentIssueType | "",
-                    );
-                  }}
-                  value={issueFilter}
-                >
-                  <option value="">{t("common.all")}</option>
-                  {ISSUE_TYPE_KEYS.map((value) => (
-                    <option key={value} value={value}>
-                      {t(`contentQuality.reportIssueTypes.${value}`)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-semibold text-ink">
-                {t("contentQuality.reports.bookLabel")}
-                <select
-                  className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                  onChange={(event) => {
-                    setReportOffset(0);
-                    setBookFilter(event.target.value);
-                  }}
-                  value={bookFilter}
-                >
-                  <option value="">
-                    {t("contentQuality.reports.allBooksOption")}
-                  </option>
-                  {(books?.items ?? []).map((book) => (
-                    <option key={book.book_id} value={book.book_id}>
-                      {book.book_title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            {loadingReports ? (
-              <AdminLoading label={t("contentQuality.reports.loading")} />
-            ) : reportError ? (
-              <StatusMessage
-                tone="error"
-                title={t("contentQuality.reports.loadErrorTitle")}
-              >
-                {reportError}
-              </StatusMessage>
-            ) : !reports || reports.items.length === 0 ? (
-              <EmptyState
-                title={t("contentQuality.reports.emptyTitle")}
-                description={t("contentQuality.reports.emptyDesc")}
-              />
-            ) : (
-              <div className="mt-4 grid gap-3">
-                {reports.items.map((report) => (
-                  <article
-                    className="rounded-control border border-border p-4"
-                    key={report.id}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="font-semibold text-ink">
-                          {report.book_title}
-                        </h3>
-                        <p className="mt-1 text-sm text-muted">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <AdminBadge
+                          dot
+                          tone={reportStatusTones[report.status] ?? "neutral"}
+                        >
+                          {t(`contentQuality.reportStatuses.${report.status}`)}
+                        </AdminBadge>
+                        <AdminBadge tone="neutral">
                           {t(
                             `contentQuality.reportIssueTypes.${report.issue_type}`,
                           )}
+                        </AdminBadge>
+                      </div>
+                      <h3 className="mt-2 text-base font-extrabold text-ink">
+                        {report.book_title}
+                        <span className="font-semibold text-muted">
                           {report.page_number !== null
                             ? t("contentQuality.reports.pageScope", {
                                 pageNumber: report.page_number,
                               })
                             : t("contentQuality.reports.wholeBookScope")}
-                        </p>
-                        <p className="mt-1 text-xs text-muted">
-                          {t("contentQuality.reports.reporterPrefix")}{" "}
-                          {report.reporter_name ||
-                            t("contentQuality.reports.reporterFallback")}
-                          {" · "}
+                        </span>
+                      </h3>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {t("contentQuality.reports.reporterPrefix")}{" "}
+                        {report.reporter_name ||
+                          t("contentQuality.reports.reporterFallback")}
+                        {" · "}
+                        <span className="tabular-nums">
                           {formatDate(report.created_at)}
-                        </p>
-                      </div>
-                      <span className="rounded-full bg-sky px-3 py-1 text-xs font-semibold text-primary-hover">
-                        {t(`contentQuality.reportStatuses.${report.status}`)}
-                      </span>
-                    </div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink">
-                      {report.description}
-                    </p>
-                    {report.reported_text ? (
-                      <p className="mt-2 text-sm text-muted">
-                        {t("contentQuality.reports.suspectedExcerptPrefix")}{" "}
-                        <span
-                          className="viread-learning-content font-semibold text-ink"
-                          dir="ltr"
-                          lang="vi"
-                        >
-                          {report.reported_text}
                         </span>
                       </p>
-                    ) : null}
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-                      <span className="break-all font-mono text-xs text-muted">
-                        {report.id}
-                      </span>
-                      <Button
-                        className="h-10 w-auto px-3 text-sm"
-                        disabled={busyKey === `report:${report.id}`}
-                        onClick={() => void openReport(report.id)}
-                        variant="secondary"
+                    </div>
+                    <Button
+                      disabled={busyKey === `report:${report.id}`}
+                      onClick={() => void openReport(report.id)}
+                      size="admin"
+                      variant={isSelected ? "primary" : "outline"}
+                    >
+                      {t("contentQuality.reports.viewDetails")}
+                    </Button>
+                  </div>
+                  <p className="mt-2.5 whitespace-pre-wrap text-sm leading-6 text-ink">
+                    {report.description}
+                  </p>
+                  {report.reported_text ? (
+                    <p className="mt-2 rounded-control bg-surface-subtle px-3 py-2 text-xs text-muted">
+                      {t("contentQuality.reports.suspectedExcerptPrefix")}{" "}
+                      <span
+                        className="viread-learning-content font-semibold text-ink"
+                        dir="ltr"
+                        lang="vi"
                       >
-                        {t("contentQuality.reports.viewDetails")}
+                        {report.reported_text}
+                      </span>
+                    </p>
+                  ) : null}
+                  <p className="mt-2 break-all font-mono text-[11px] text-muted">
+                    {report.id}
+                  </p>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        {reports ? (
+          <PaginationBar
+            ariaLabel={t("contentQuality.reports.paginationAria")}
+            className="mt-4"
+            compact
+            disabled={loadingReports}
+            itemLabel={t("contentQuality.reports.itemLabel")}
+            onPageChange={(nextPage) =>
+              setReportOffset((nextPage - 1) * reportLimit)
+            }
+            page={Math.floor(reportOffset / reportLimit) + 1}
+            pageSize={reportLimit}
+            total={reports.total}
+          />
+        ) : null}
+      </section>
+    </div>
+  ) : null;
+
+  const booksSectionNode = showBooks ? (
+    <div className="space-y-4">
+      {books ? (
+        <>
+          <AdminKpiGrid
+            ariaLabel={t(
+              "contentQuality.booksScan.kpiAria",
+              undefined,
+              "Tổng quan duyệt và an toàn sách",
+            )}
+            columns={5}
+          >
+            <AdminKpiCard
+              active={bookApprovalFilter === "PENDING_ADMIN_REVIEW"}
+              icon={<Clock className="size-4" />}
+              label={t(
+                "contentQuality.assessmentStatuses.PENDING_ADMIN_REVIEW",
+              )}
+              onClick={() => {
+                setBookOffset(0);
+                setBookApprovalFilter((prev) =>
+                  prev === "PENDING_ADMIN_REVIEW" ? "" : "PENDING_ADMIN_REVIEW",
+                );
+              }}
+              tone={
+                (bookSummary.PENDING_ADMIN_REVIEW ?? 0) > 0
+                  ? "warning"
+                  : "neutral"
+              }
+              value={formatNumber(bookSummary.PENDING_ADMIN_REVIEW ?? 0)}
+            />
+            <AdminKpiCard
+              active={bookApprovalFilter === "APPROVED_BY_ADMIN"}
+              detail={t(
+                "contentQuality.booksScan.kpiApprovedDetail",
+                {
+                  ready: formatNumber(bookSummary.READY_FOR_CHILDREN ?? 0),
+                  approved: formatNumber(bookSummary.APPROVED_BY_ADMIN ?? 0),
+                  published: formatNumber(bookSummary.PUBLISHED ?? 0),
+                },
+                "Sẵn sàng: {ready} · Admin duyệt: {approved} · Tự xuất bản: {published}",
+              )}
+              icon={<BookCheck className="size-4" />}
+              label={t(
+                "contentQuality.booksScan.kpiApprovedGroup",
+                undefined,
+                "Đủ điều kiện / Đã duyệt",
+              )}
+              onClick={() => {
+                setBookOffset(0);
+                setBookApprovalFilter((prev) =>
+                  prev === "APPROVED_BY_ADMIN" ? "" : "APPROVED_BY_ADMIN",
+                );
+              }}
+              tone="success"
+              value={formatNumber(approvedGroupTotal)}
+            />
+            <AdminKpiCard
+              active={bookApprovalFilter === "PROCESSING"}
+              detail={t(
+                "contentQuality.booksScan.kpiProcessingDetail",
+                {
+                  processing: formatNumber(bookSummary.PROCESSING ?? 0),
+                  stale: formatNumber(bookSummary.STALE ?? 0),
+                  failed: formatNumber(bookSummary.SCAN_FAILED ?? 0),
+                },
+                "Đang quét: {processing} · Stale: {stale} · Lỗi scan: {failed}",
+              )}
+              icon={<RefreshCw className="size-4" />}
+              label={t(
+                "contentQuality.booksScan.kpiProcessingGroup",
+                undefined,
+                "Đang xử lý / Cần quét lại",
+              )}
+              onClick={() => {
+                setBookOffset(0);
+                setBookApprovalFilter((prev) =>
+                  prev === "PROCESSING" ? "" : "PROCESSING",
+                );
+              }}
+              tone={processingGroupTotal > 0 ? "info" : "neutral"}
+              value={formatNumber(processingGroupTotal)}
+            />
+            <AdminKpiCard
+              active={bookAlertFilter === "CHILD_SAFETY"}
+              icon={<ShieldAlert className="size-4" />}
+              label={t("contentQuality.booksScan.alertCards.CHILD_SAFETY")}
+              onClick={() => {
+                setBookOffset(0);
+                setBookAlertFilter((prev) =>
+                  prev === "CHILD_SAFETY" ? "" : "CHILD_SAFETY",
+                );
+              }}
+              tone={(bookAlerts.CHILD_SAFETY ?? 0) > 0 ? "danger" : "neutral"}
+              value={formatNumber(bookAlerts.CHILD_SAFETY ?? 0)}
+            />
+            <AdminKpiCard
+              active={bookAlertFilter === "COPYRIGHT"}
+              detail={t(
+                "contentQuality.booksScan.kpiCopyrightDetail",
+                { both: formatNumber(bookAlerts.BOTH ?? 0) },
+                "Cả Safety & Copyright: {both}",
+              )}
+              icon={<AlertTriangle className="size-4" />}
+              label={t("contentQuality.booksScan.alertCards.COPYRIGHT")}
+              onClick={() => {
+                setBookOffset(0);
+                setBookAlertFilter((prev) =>
+                  prev === "COPYRIGHT" ? "" : "COPYRIGHT",
+                );
+              }}
+              tone={(bookAlerts.COPYRIGHT ?? 0) > 0 ? "warning" : "neutral"}
+              value={formatNumber(bookAlerts.COPYRIGHT ?? 0)}
+            />
+          </AdminKpiGrid>
+
+          <details className="rounded-xl border border-border bg-white px-4 py-2.5 text-xs shadow-2xs">
+            <summary className="cursor-pointer font-bold text-ink">
+              {t(
+                "contentQuality.booksScan.statusBreakdownToggle",
+                { count: APPROVAL_STATUS_KEYS.length },
+                "Xem phân bổ chi tiết theo trạng thái ({count} nhóm)",
+              )}
+            </summary>
+            <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3">
+              {APPROVAL_STATUS_KEYS.map((status) => (
+                <button
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-bold transition-colors",
+                    bookApprovalFilter === status
+                      ? "border-primary bg-primary text-white"
+                      : "border-border bg-surface-subtle text-ink hover:border-primary/40",
+                  )}
+                  key={status}
+                  onClick={() => {
+                    setBookOffset(0);
+                    setBookApprovalFilter((prev) =>
+                      prev === status ? "" : status,
+                    );
+                  }}
+                  type="button"
+                >
+                  <span>
+                    {t(`contentQuality.assessmentStatuses.${status}`)}
+                  </span>
+                  <span className="tabular-nums opacity-80">
+                    {formatNumber(bookSummary[status] ?? 0)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-xs text-muted">
+              {t("contentQuality.booksScan.statsNote")}
+            </p>
+          </details>
+        </>
+      ) : null}
+
+      <AdminToolbar
+        actions={
+          hasBookFilters ? (
+            <Button
+              onClick={clearBookFilters}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              {t("metadataQuality.clearFilters")}
+            </Button>
+          ) : undefined
+        }
+        ariaLabel={t("contentQuality.booksScan.heading")}
+      >
+        <AdminSearchInput
+          label={t("contentQuality.booksScan.searchLabel")}
+          onChange={(value) => {
+            setBookOffset(0);
+            setBookSearch(value);
+          }}
+          placeholder={t("contentQuality.booksScan.searchPlaceholder")}
+          value={bookSearch}
+        />
+        <AdminSelect
+          containerClassName="w-full sm:w-56"
+          label={t("contentQuality.booksScan.assessmentFilterLabel")}
+          onChange={(value) => {
+            setBookOffset(0);
+            setBookApprovalFilter(value as BookApprovalStatus | "");
+          }}
+          value={bookApprovalFilter}
+        >
+          <option value="">
+            {t("contentQuality.booksScan.allStatusesOption")}
+          </option>
+          {APPROVAL_STATUS_KEYS.map((status) => (
+            <option key={status} value={status}>
+              {t(`contentQuality.assessmentStatuses.${status}`)}
+            </option>
+          ))}
+        </AdminSelect>
+        <AdminSelect
+          containerClassName="w-full sm:w-52"
+          label={t("contentQuality.booksScan.alertFilterLabel")}
+          onChange={(value) => {
+            setBookOffset(0);
+            setBookAlertFilter(
+              value as "" | "CHILD_SAFETY" | "COPYRIGHT" | "BOTH",
+            );
+          }}
+          value={bookAlertFilter}
+        >
+          <option value="">
+            {t("contentQuality.booksScan.allAlertsOption")}
+          </option>
+          <option value="CHILD_SAFETY">
+            {t("contentQuality.booksScan.alertChildSafetyOption")}
+          </option>
+          <option value="COPYRIGHT">
+            {t("contentQuality.booksScan.alertCopyrightOption")}
+          </option>
+          <option value="BOTH">
+            {t("contentQuality.booksScan.alertBothOption")}
+          </option>
+        </AdminSelect>
+      </AdminToolbar>
+
+      <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="text-lg font-extrabold tracking-tight text-ink">
+              {t("contentQuality.booksScan.heading")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted">
+              {t("contentQuality.booksScan.subtitle")}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs font-bold tabular-nums text-muted">
+            {t("contentQuality.booksScan.countBadge", {
+              count: books?.total ?? 0,
+            })}
+          </span>
+        </div>
+
+        {loadingBooks ? (
+          <AdminLoading
+            label={t("contentQuality.booksScan.loading")}
+            variant="skeleton"
+          />
+        ) : bookError ? (
+          <StatusMessage
+            title={t("contentQuality.booksScan.loadErrorTitle")}
+            tone="error"
+          >
+            {bookError}
+          </StatusMessage>
+        ) : !books || books.items.length === 0 ? (
+          <EmptyState
+            description={t("contentQuality.booksScan.emptyDesc")}
+            title={t("contentQuality.booksScan.emptyTitle")}
+          />
+        ) : (
+          <div className="grid gap-3">
+            {books.items.map((book) => {
+              const isSelected = selectedBook?.book_id === book.book_id;
+              const isScanning =
+                book.latest_scan?.status === "QUEUED" ||
+                book.latest_scan?.status === "RUNNING";
+              return (
+                <article
+                  className={cn(
+                    "rounded-xl border p-4 transition-colors",
+                    isSelected
+                      ? "border-primary bg-sky/20 ring-1 ring-primary/25"
+                      : "border-border bg-white hover:border-primary/40 hover:bg-surface-subtle/50",
+                  )}
+                  key={book.book_id}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <AdminBadge
+                          dot
+                          tone={
+                            approvalStatusTones[book.assessment.status] ??
+                            "neutral"
+                          }
+                        >
+                          {t(
+                            `contentQuality.assessmentStatuses.${book.assessment.status}`,
+                            undefined,
+                            book.assessment.status,
+                          )}
+                        </AdminBadge>
+                        {book.assessment.finding_count > 0 ? (
+                          <AdminBadge tone="danger">
+                            {t(
+                              "contentQuality.booksScan.childSafetyAlertBadge",
+                            )}
+                          </AdminBadge>
+                        ) : null}
+                        {book.assessment.copyright_finding_count !== null &&
+                        book.assessment.copyright_finding_count > 0 ? (
+                          <AdminBadge tone="warning">
+                            {t("contentQuality.booksScan.copyrightAlertBadge")}
+                          </AdminBadge>
+                        ) : null}
+                      </div>
+
+                      <h3
+                        className="mt-2 text-base font-extrabold text-ink"
+                        dir="auto"
+                      >
+                        {book.book_title}
+                      </h3>
+
+                      <p className="mt-1 text-xs text-muted">
+                        {t("contentQuality.booksScan.assessmentSummaryLine", {
+                          proofreading: book.assessment.proofreading_status,
+                          safety: book.assessment.child_safety_status,
+                        })}{" "}
+                        {t(
+                          `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
+                          undefined,
+                          book.assessment.copyright_status,
+                        )}
+                      </p>
+
+                      <p className="mt-1 text-xs font-semibold tabular-nums text-warning">
+                        {t(
+                          "contentQuality.booksScan.childSafetyFindingsCount",
+                          {
+                            count: formatNumber(book.assessment.finding_count),
+                          },
+                        )}
+                        {` · HIGH ${formatNumber(book.assessment.high_finding_count)}`}
+                        {` · MEDIUM ${formatNumber(book.assessment.medium_finding_count)}`}
+                        {` · ${t(
+                          `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
+                          undefined,
+                          book.assessment.copyright_status,
+                        )}`}
+                      </p>
+
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted tabular-nums">
+                        <span>
+                          {t("contentQuality.booksScan.bookMetricsLine", {
+                            reports: formatNumber(book.report_count),
+                            findings: formatNumber(book.finding_count),
+                            needsReview: formatNumber(
+                              book.needs_review_finding_count,
+                            ),
+                          })}
+                        </span>
+                        <span>
+                          {book.latest_scan ? (
+                            <>
+                              {t("contentQuality.booksScan.latestScanLine")}{" "}
+                              {t(
+                                `contentQuality.scanStatuses.${book.latest_scan.status}`,
+                                undefined,
+                                book.latest_scan.status,
+                              )}
+                              {" · "}
+                              {t("contentQuality.booksScan.pagesCheckedRatio", {
+                                completed: formatNumber(
+                                  book.latest_scan.completed_pages,
+                                ),
+                                total: formatNumber(
+                                  book.latest_scan.total_pages,
+                                ),
+                              })}
+                              {" · "}
+                              {formatDate(book.latest_scan.created_at)}
+                            </>
+                          ) : (
+                            t("contentQuality.booksScan.noScanHistory")
+                          )}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        disabled={busyKey === `book:${book.book_id}`}
+                        onClick={() => void openBook(book.book_id)}
+                        size="admin"
+                        variant={isSelected ? "primary" : "secondary"}
+                      >
+                        {t("contentQuality.booksScan.viewResults")}
+                      </Button>
+                      <Button
+                        disabled={
+                          busyKey === `scan:${book.book_id}` || isScanning
+                        }
+                        onClick={() => void enqueueBookScan(book.book_id)}
+                        size="admin"
+                        variant="outline"
+                      >
+                        {isScanning
+                          ? t("contentQuality.booksScan.scanning")
+                          : t("contentQuality.booksScan.scanWholeBook")}
                       </Button>
                     </div>
-                  </article>
-                ))}
-              </div>
-            )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
 
-            {reports ? (
-              <PaginationBar
-                ariaLabel={t("contentQuality.reports.paginationAria")}
-                className="mt-4"
-                compact
-                disabled={loadingReports}
-                itemLabel={t("contentQuality.reports.itemLabel")}
-                onPageChange={(nextPage) =>
-                  setReportOffset((nextPage - 1) * reportLimit)
-                }
-                page={Math.floor(reportOffset / reportLimit) + 1}
-                pageSize={reportLimit}
-                total={reports.total}
-              />
-            ) : null}
-          </section>
+        {books ? (
+          <PaginationBar
+            ariaLabel={t("contentQuality.booksScan.paginationAria")}
+            className="mt-4"
+            compact
+            disabled={loadingBooks}
+            itemLabel={t("contentQuality.booksScan.itemLabel")}
+            onPageChange={(nextPage) =>
+              setBookOffset((nextPage - 1) * bookLimit)
+            }
+            page={Math.floor(bookOffset / bookLimit) + 1}
+            pageSize={bookLimit}
+            total={books.total}
+          />
+        ) : null}
+      </section>
+    </div>
+  ) : null;
 
-          {selectedReport ? (
-            <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold text-ink">
-                    {t("contentQuality.reports.detailHeading")}
-                  </h2>
-                  <p className="mt-1 break-all font-mono text-xs text-muted">
-                    {selectedReport.id}
-                  </p>
-                </div>
-                <Button
-                  className="h-10 w-auto px-3 text-sm"
-                  onClick={() => setSelectedReport(null)}
-                  variant="secondary"
-                >
-                  {t("contentQuality.reports.closeDetail")}
-                </Button>
-              </div>
-              <div className="mt-4 grid gap-4 lg:grid-cols-2">
-                <div>
-                  <h3 className="font-semibold text-ink">
-                    {t("contentQuality.reports.snapshotHeading")}
-                  </h3>
-                  <p className="mt-2 text-sm text-muted">
-                    {selectedReport.book_title}
+  return (
+    <section
+      className={cn(
+        "space-y-4",
+        !embedded && "mt-8 border-t border-border pt-6",
+      )}
+    >
+      {!embedded ? (
+        <AdminPageHeader
+          actions={
+            <Button
+              disabled={loadingReports || loadingBooks}
+              onClick={() => void Promise.all([loadReports(), loadBooks()])}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw aria-hidden="true" className="size-4" />
+              {t("common.reload")}
+            </Button>
+          }
+          description={t("contentQuality.description")}
+          eyebrow={t("contentQuality.eyebrow")}
+          title={t("contentQuality.heading")}
+        />
+      ) : null}
+
+      {actionError ? (
+        <StatusMessage
+          title={t("contentQuality.errors.actionNotDoneTitle")}
+          tone="error"
+        >
+          {actionError}
+        </StatusMessage>
+      ) : null}
+
+      {section === "all" ? (
+        <>
+          <div
+            aria-label={t("contentQuality.sectionNavAria")}
+            className="inline-flex flex-wrap gap-1.5 rounded-xl border border-border bg-surface-subtle p-1.5"
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+                event.preventDefault();
+                const nextTab =
+                  activeTab === "catalog" ? "user-books" : "catalog";
+                setActiveTab(nextTab);
+                const nextId =
+                  nextTab === "catalog"
+                    ? "quality-tab-catalog"
+                    : "quality-tab-user-books";
+                document.getElementById(nextId)?.focus();
+              }
+            }}
+            role="tablist"
+          >
+            <button
+              aria-controls="quality-panel-catalog"
+              aria-selected={activeTab === "catalog"}
+              className={cn(
+                "inline-flex min-h-10 items-center gap-2 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                activeTab === "catalog"
+                  ? "bg-white text-primary shadow-2xs ring-1 ring-border"
+                  : "text-muted hover:bg-white/75 hover:text-ink",
+              )}
+              id="quality-tab-catalog"
+              onClick={() => setActiveTab("catalog")}
+              role="tab"
+              tabIndex={activeTab === "catalog" ? 0 : -1}
+              type="button"
+            >
+              {t("contentQuality.tabs.catalog")}
+            </button>
+            <button
+              aria-controls="quality-panel-user-books"
+              aria-selected={activeTab === "user-books"}
+              className={cn(
+                "inline-flex min-h-10 items-center gap-2 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                activeTab === "user-books"
+                  ? "bg-white text-primary shadow-2xs ring-1 ring-border"
+                  : "text-muted hover:bg-white/75 hover:text-ink",
+              )}
+              id="quality-tab-user-books"
+              onClick={() => setActiveTab("user-books")}
+              role="tab"
+              tabIndex={activeTab === "user-books" ? 0 : -1}
+              type="button"
+            >
+              {t("contentQuality.tabs.userBooks")}
+            </button>
+          </div>
+
+          {activeTab === "user-books" ? (
+            <div
+              aria-labelledby="quality-tab-user-books"
+              id="quality-panel-user-books"
+              role="tabpanel"
+            >
+              <AdminUserBooksQualitySection embedded />
+            </div>
+          ) : (
+            <div
+              aria-labelledby="quality-tab-catalog"
+              className="space-y-6"
+              id="quality-panel-catalog"
+              role="tabpanel"
+            >
+              {reportsSectionNode}
+              {booksSectionNode}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="space-y-6">
+          {reportsSectionNode}
+          {booksSectionNode}
+        </div>
+      )}
+
+      {/* Report Detail Drawer */}
+      <AdminDrawer
+        closeLabel={t("contentQuality.reports.closeDetail")}
+        description={selectedReport?.id}
+        footer={
+          <Button onClick={closeReportDrawer} size="admin" variant="outline">
+            {t("contentQuality.reports.closeDetail")}
+          </Button>
+        }
+        isOpen={Boolean(selectedReport)}
+        onClose={closeReportDrawer}
+        size="xl"
+        title={t("contentQuality.reports.detailHeading")}
+      >
+        {selectedReport ? (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <AdminBadge
+                dot
+                tone={reportStatusTones[selectedReport.status] ?? "neutral"}
+              >
+                {t(`contentQuality.reportStatuses.${selectedReport.status}`)}
+              </AdminBadge>
+              <AdminBadge tone="neutral">
+                {t(
+                  `contentQuality.reportIssueTypes.${selectedReport.issue_type}`,
+                )}
+              </AdminBadge>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="space-y-3 rounded-xl border border-border bg-surface-subtle/50 p-4">
+                <h3 className="text-sm font-extrabold text-ink">
+                  {t("contentQuality.reports.snapshotHeading")}
+                </h3>
+                <p className="text-sm font-semibold text-ink">
+                  {selectedReport.book_title}
+                  <span className="font-normal text-muted">
                     {selectedReport.page_number !== null
                       ? t("contentQuality.reports.pageScope", {
                           pageNumber: selectedReport.page_number,
                         })
                       : t("contentQuality.reports.wholeBookScope")}
+                  </span>
+                </p>
+                <p className="whitespace-pre-wrap text-sm leading-6 text-ink">
+                  {selectedReport.description}
+                </p>
+                {selectedReport.verified_text_snapshot ? (
+                  <pre
+                    className="viread-learning-content max-h-56 overflow-auto whitespace-pre-wrap rounded-control border border-border bg-white p-3 text-xs leading-5 text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {selectedReport.verified_text_snapshot}
+                  </pre>
+                ) : (
+                  <p className="text-xs text-muted">
+                    {t("contentQuality.reports.noSnapshot")}
                   </p>
-                  <p className="mt-2 text-sm font-semibold text-ink">
-                    {t(
-                      `contentQuality.reportIssueTypes.${selectedReport.issue_type}`,
-                    )}
+                )}
+                {selectedReport.page_id && selectedReport.book_id ? (
+                  <ButtonLink
+                    href={`/admin/books/${encodeURIComponent(selectedReport.book_id)}/pages/${encodeURIComponent(selectedReport.page_id)}${selectedReport.page_revision_id ? `?revisionId=${encodeURIComponent(selectedReport.page_revision_id)}` : ""}`}
+                    size="admin"
+                    variant="outline"
+                  >
+                    {t("contentQuality.reports.openOriginalInOcr")}
+                  </ButtonLink>
+                ) : null}
+                {selectedReport.content_hash_snapshot ? (
+                  <p className="break-all font-mono text-[11px] text-muted">
+                    Content hash: {selectedReport.content_hash_snapshot}
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-ink">
-                    {selectedReport.description}
-                  </p>
-                  {selectedReport.verified_text_snapshot ? (
-                    <pre
-                      className="viread-learning-content mt-3 max-h-60 overflow-auto whitespace-pre-wrap rounded-control bg-canvas p-3 text-xs leading-5 text-ink"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {selectedReport.verified_text_snapshot}
-                    </pre>
-                  ) : (
-                    <p className="mt-3 text-sm text-muted">
-                      {t("contentQuality.reports.noSnapshot")}
-                    </p>
-                  )}
-                  {selectedReport.page_id && selectedReport.book_id ? (
-                    <Link
-                      className="mt-3 inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
-                      href={`/admin/books/${encodeURIComponent(selectedReport.book_id)}/pages/${encodeURIComponent(selectedReport.page_id)}${selectedReport.page_revision_id ? `?revisionId=${encodeURIComponent(selectedReport.page_revision_id)}` : ""}`}
-                    >
-                      {t("contentQuality.reports.openOriginalInOcr")}
-                    </Link>
-                  ) : null}
-                  {selectedReport.content_hash_snapshot ? (
-                    <p className="mt-2 break-all font-mono text-xs text-muted">
-                      Content hash: {selectedReport.content_hash_snapshot}
-                    </p>
-                  ) : null}
-                </div>
-                <div>
-                  <h3 className="font-semibold text-ink">
+                ) : null}
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border border-border bg-white p-4">
+                  <h3 className="text-sm font-extrabold text-ink">
                     {t("contentQuality.reports.historyHeading")}
                   </h3>
-                  <ol className="mt-2 space-y-3 border-s-2 border-border ps-4">
+                  <ol className="mt-2.5 space-y-3 border-s-2 border-border ps-3.5">
                     {selectedReport.history.map((item, index) => (
                       <li key={`${item.created_at}-${index}`}>
-                        <p className="text-sm font-semibold text-ink">
+                        <p className="text-xs font-bold text-ink">
                           {item.from_status
                             ? `${t(`contentQuality.reportStatuses.${item.from_status}`)} → `
                             : ""}
                           {t(`contentQuality.reportStatuses.${item.to_status}`)}
                         </p>
-                        <p className="text-xs text-muted">
+                        <p className="text-[11px] text-muted tabular-nums">
                           {item.actor_name ||
                             t("contentQuality.reports.systemActor")}{" "}
                           · {formatDate(item.created_at)}
                         </p>
                         {item.note ? (
-                          <p className="mt-1 text-sm text-muted">{item.note}</p>
+                          <p className="mt-1 text-xs text-muted">{item.note}</p>
                         ) : null}
                       </li>
                     ))}
                   </ol>
-                  <h3 className="mt-5 font-semibold text-ink">
+                </div>
+
+                <div className="rounded-xl border border-border bg-white p-4">
+                  <h3 className="text-sm font-extrabold text-ink">
                     {t("contentQuality.reports.linkedFindingsHeading")}
                   </h3>
                   {selectedReport.related_findings.length ? (
-                    <div className="mt-2 grid gap-2">
+                    <div className="mt-2.5 grid gap-2">
                       {selectedReport.related_findings.map((finding) => (
                         <div
-                          className="rounded-control bg-canvas p-3"
+                          className="rounded-control border border-border bg-surface-subtle/60 p-3"
                           key={finding.id}
                         >
-                          <p className="text-sm font-semibold text-ink">
+                          <p className="text-xs font-bold text-ink">
                             {t("contentQuality.findingCard.pageIssue", {
                               pageNumber: finding.page_number,
                               issueType: finding.issue_type,
                             })}
                           </p>
-                          <p className="mt-1 text-xs text-muted">
+                          <p className="mt-0.5 text-[11px] text-muted">
                             {t(
                               `contentQuality.findingStatuses.${finding.status}`,
                             )}{" "}
                             · {finding.detection_source}
                           </p>
                           <p
-                            className="viread-learning-content mt-2 whitespace-pre-wrap text-sm text-ink"
+                            className="viread-learning-content mt-1.5 whitespace-pre-wrap text-xs text-ink"
                             dir="ltr"
                             lang="vi"
                           >
@@ -1122,531 +1774,352 @@ export function AdminBookContentQualityScreen() {
                       ))}
                     </div>
                   ) : (
-                    <p className="mt-2 text-sm text-muted">
+                    <p className="mt-2 text-xs text-muted">
                       {t("contentQuality.reports.noLinkedFindings")}
                     </p>
                   )}
                 </div>
               </div>
-              <div className="mt-5 border-t border-border pt-4">
-                <label
-                  className="block text-sm font-semibold text-ink"
-                  htmlFor="report-resolution-note"
-                >
-                  {t("contentQuality.reports.adminNoteLabel")}
-                  <textarea
-                    className="mt-2 min-h-20 w-full rounded-control border border-border p-3 font-normal"
-                    id="report-resolution-note"
-                    maxLength={2000}
-                    onChange={(event) => setResolutionNote(event.target.value)}
-                    placeholder={t(
-                      "contentQuality.reports.adminNotePlaceholder",
-                    )}
-                    value={resolutionNote}
-                  />
-                </label>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedReport.status === "OPEN" ? (
+            </div>
+
+            <div className="rounded-xl border border-border bg-surface-subtle/50 p-4">
+              <label
+                className="block text-xs font-bold text-ink"
+                htmlFor="report-resolution-note"
+              >
+                {t("contentQuality.reports.adminNoteLabel")}
+                <textarea
+                  className="mt-1.5 min-h-20 w-full rounded-control border border-border bg-white p-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  id="report-resolution-note"
+                  maxLength={2000}
+                  onChange={(event) => setResolutionNote(event.target.value)}
+                  placeholder={t("contentQuality.reports.adminNotePlaceholder")}
+                  value={resolutionNote}
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedReport.status === "OPEN" ? (
+                  <Button
+                    disabled={busyKey === `report-status:${selectedReport.id}`}
+                    onClick={() =>
+                      void changeReportStatus(selectedReport.id, "UNDER_REVIEW")
+                    }
+                    size="admin"
+                    variant="secondary"
+                  >
+                    {t("contentQuality.reports.actions.takeReview")}
+                  </Button>
+                ) : null}
+                {selectedReport.status === "UNDER_REVIEW" ? (
+                  <Button
+                    disabled={busyKey === `report-status:${selectedReport.id}`}
+                    onClick={() =>
+                      void changeReportStatus(selectedReport.id, "OPEN")
+                    }
+                    size="admin"
+                    variant="outline"
+                  >
+                    {t("contentQuality.reports.actions.returnOpen")}
+                  </Button>
+                ) : null}
+                {["OPEN", "UNDER_REVIEW"].includes(selectedReport.status) ? (
+                  <>
                     <Button
-                      className="h-11 w-auto px-4 text-sm"
-                      disabled={
-                        busyKey === `report-status:${selectedReport.id}`
-                      }
-                      onClick={() =>
-                        void changeReportStatus(
-                          selectedReport.id,
-                          "UNDER_REVIEW",
-                        )
-                      }
-                      variant="secondary"
-                    >
-                      {t("contentQuality.reports.actions.takeReview")}
-                    </Button>
-                  ) : null}
-                  {selectedReport.status === "UNDER_REVIEW" ? (
-                    <Button
-                      className="h-11 w-auto px-4 text-sm"
-                      disabled={
-                        busyKey === `report-status:${selectedReport.id}`
-                      }
-                      onClick={() =>
-                        void changeReportStatus(selectedReport.id, "OPEN")
-                      }
-                      variant="secondary"
-                    >
-                      {t("contentQuality.reports.actions.returnOpen")}
-                    </Button>
-                  ) : null}
-                  {["OPEN", "UNDER_REVIEW"].includes(selectedReport.status) ? (
-                    <>
-                      <Button
-                        className="h-11 w-auto px-4 text-sm"
-                        disabled={
-                          !resolutionNote.trim() ||
-                          busyKey === `report-status:${selectedReport.id}`
-                        }
-                        onClick={() =>
-                          void changeReportStatus(selectedReport.id, "RESOLVED")
-                        }
-                        variant="secondary"
-                      >
-                        {t("contentQuality.reports.actions.resolve")}
-                      </Button>
-                      <Button
-                        className="h-11 w-auto px-4 text-sm"
-                        disabled={
-                          !resolutionNote.trim() ||
-                          busyKey === `report-status:${selectedReport.id}`
-                        }
-                        onClick={() =>
-                          void changeReportStatus(selectedReport.id, "REJECTED")
-                        }
-                        variant="secondary"
-                      >
-                        {t("contentQuality.reports.actions.rejectWithReason")}
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      className="h-11 w-auto px-4 text-sm"
                       disabled={
                         !resolutionNote.trim() ||
                         busyKey === `report-status:${selectedReport.id}`
                       }
                       onClick={() =>
-                        void changeReportStatus(
-                          selectedReport.id,
-                          "UNDER_REVIEW",
-                        )
+                        void changeReportStatus(selectedReport.id, "RESOLVED")
                       }
-                      variant="secondary"
+                      size="admin"
+                      variant="primary"
                     >
-                      {t("contentQuality.reports.actions.reopen")}
+                      {t("contentQuality.reports.actions.resolve")}
                     </Button>
-                  )}
-                </div>
-              </div>
-            </section>
-          ) : null}
-
-          <section className="mt-8 rounded-card border border-border bg-white p-4 sm:p-6">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-xl font-semibold text-ink">
-                  {t("contentQuality.booksScan.heading")}
-                </h2>
-                <p className="mt-1 text-sm text-muted">
-                  {t("contentQuality.booksScan.subtitle")}
-                </p>
-              </div>
-              <span className="text-sm font-semibold text-muted">
-                {t("contentQuality.booksScan.countBadge", {
-                  count: books?.total ?? 0,
-                })}
-              </span>
-            </div>
-            <label className="mb-4 block max-w-lg text-sm font-semibold text-ink">
-              {t("contentQuality.booksScan.searchLabel")}
-              <input
-                className="mt-1 min-h-11 w-full rounded-control border border-border px-3"
-                onChange={(event) => {
-                  setBookOffset(0);
-                  setBookSearch(event.target.value);
-                }}
-                placeholder={t("contentQuality.booksScan.searchPlaceholder")}
-                value={bookSearch}
-              />
-            </label>
-            {books ? (
-              <div className="mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                {APPROVAL_STATUS_KEYS.map((status) => (
-                  <div className="rounded-control bg-canvas p-3" key={status}>
-                    <p className="text-xs text-muted">
-                      {t(`contentQuality.assessmentStatuses.${status}`)}
-                    </p>
-                    <p className="mt-1 text-lg font-extrabold text-ink">
-                      {formatNumber(books.summary[status] ?? 0)}
-                    </p>
-                  </div>
-                ))}
-                {(["CHILD_SAFETY", "COPYRIGHT", "BOTH"] as const).map((key) => (
-                  <div
-                    className="rounded-control border border-amber-200 bg-amber-50 p-3"
-                    key={key}
-                  >
-                    <p className="text-xs text-muted">
-                      {t(`contentQuality.booksScan.alertCards.${key}`)}
-                    </p>
-                    <p className="mt-1 text-lg font-extrabold text-ink">
-                      {formatNumber(books.alert_summary[key] ?? 0)}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-            <label className="mb-4 block max-w-lg text-sm font-semibold text-ink">
-              {t("contentQuality.booksScan.assessmentFilterLabel")}
-              <select
-                className="mt-1 min-h-11 w-full rounded-control border border-border bg-white px-3"
-                onChange={(event) => {
-                  setBookOffset(0);
-                  setBookApprovalFilter(
-                    event.target.value as BookApprovalStatus | "",
-                  );
-                }}
-                value={bookApprovalFilter}
-              >
-                <option value="">
-                  {t("contentQuality.booksScan.allStatusesOption")}
-                </option>
-                {APPROVAL_STATUS_KEYS.map((status) => (
-                  <option key={status} value={status}>
-                    {t(`contentQuality.assessmentStatuses.${status}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="mb-4 block max-w-lg text-sm font-semibold text-ink">
-              {t("contentQuality.booksScan.alertFilterLabel")}
-              <select
-                className="mt-1 min-h-11 w-full rounded-control border border-border bg-white px-3"
-                onChange={(event) => {
-                  setBookOffset(0);
-                  setBookAlertFilter(
-                    event.target.value as
-                      "" | "CHILD_SAFETY" | "COPYRIGHT" | "BOTH",
-                  );
-                }}
-                value={bookAlertFilter}
-              >
-                <option value="">
-                  {t("contentQuality.booksScan.allAlertsOption")}
-                </option>
-                <option value="CHILD_SAFETY">
-                  {t("contentQuality.booksScan.alertChildSafetyOption")}
-                </option>
-                <option value="COPYRIGHT">
-                  {t("contentQuality.booksScan.alertCopyrightOption")}
-                </option>
-                <option value="BOTH">
-                  {t("contentQuality.booksScan.alertBothOption")}
-                </option>
-              </select>
-            </label>
-            <p className="mb-4 text-xs text-muted">
-              {t("contentQuality.booksScan.statsNote")}
-            </p>
-            {loadingBooks ? (
-              <AdminLoading label={t("contentQuality.booksScan.loading")} />
-            ) : bookError ? (
-              <StatusMessage
-                tone="error"
-                title={t("contentQuality.booksScan.loadErrorTitle")}
-              >
-                {bookError}
-              </StatusMessage>
-            ) : !books || books.items.length === 0 ? (
-              <EmptyState
-                title={t("contentQuality.booksScan.emptyTitle")}
-                description={t("contentQuality.booksScan.emptyDesc")}
-              />
-            ) : (
-              <div className="grid gap-3">
-                {books.items.map((book) => (
-                  <article
-                    className="rounded-control border border-border p-4"
-                    key={book.book_id}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <h3 className="font-bold text-ink" dir="auto">
-                          {book.book_title}
-                        </h3>
-                        <span
-                          className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${approvalStatusStyles[book.assessment.status]}`}
-                        >
-                          {t(
-                            `contentQuality.assessmentStatuses.${book.assessment.status}`,
-                            undefined,
-                            book.assessment.status,
-                          )}
-                        </span>
-                        {book.assessment.finding_count > 0 ? (
-                          <span className="ms-2 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900">
-                            {t(
-                              "contentQuality.booksScan.childSafetyAlertBadge",
-                            )}
-                          </span>
-                        ) : null}
-                        {book.assessment.copyright_finding_count !== null &&
-                        book.assessment.copyright_finding_count > 0 ? (
-                          <span className="ms-2 inline-flex rounded-full bg-orange-100 px-3 py-1 text-xs font-extrabold text-orange-900">
-                            {t("contentQuality.booksScan.copyrightAlertBadge")}
-                          </span>
-                        ) : null}
-                        <p className="mt-2 text-sm text-muted">
-                          {t("contentQuality.booksScan.assessmentSummaryLine", {
-                            proofreading: book.assessment.proofreading_status,
-                            safety: book.assessment.child_safety_status,
-                          })}{" "}
-                          {t(
-                            `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
-                            undefined,
-                            book.assessment.copyright_status,
-                          )}
-                        </p>
-                        <p className="mt-1 text-xs font-semibold text-amber-900">
-                          {t(
-                            "contentQuality.booksScan.childSafetyFindingsCount",
-                            {
-                              count: formatNumber(
-                                book.assessment.finding_count,
-                              ),
-                            },
-                          )}
-                          {` · HIGH ${formatNumber(book.assessment.high_finding_count)}`}
-                          {` · MEDIUM ${formatNumber(book.assessment.medium_finding_count)}`}
-                          {` · ${t(
-                            `contentQuality.rightsStatuses.${book.assessment.copyright_status}`,
-                            undefined,
-                            book.assessment.copyright_status,
-                          )}`}
-                        </p>
-                        <p className="mt-1 text-sm text-muted">
-                          {t("contentQuality.booksScan.bookMetricsLine", {
-                            reports: formatNumber(book.report_count),
-                            findings: formatNumber(book.finding_count),
-                            needsReview: formatNumber(
-                              book.needs_review_finding_count,
-                            ),
-                          })}
-                        </p>
-                        {book.latest_scan ? (
-                          <p className="mt-1 text-xs text-muted">
-                            {t("contentQuality.booksScan.latestScanLine")}{" "}
-                            {t(
-                              `contentQuality.scanStatuses.${book.latest_scan.status}`,
-                              undefined,
-                              book.latest_scan.status,
-                            )}
-                            {" · "}
-                            {t("contentQuality.booksScan.pagesCheckedRatio", {
-                              completed: formatNumber(
-                                book.latest_scan.completed_pages,
-                              ),
-                              total: formatNumber(book.latest_scan.total_pages),
-                            })}
-                            {" · "}
-                            {formatDate(book.latest_scan.created_at)}
-                          </p>
-                        ) : (
-                          <p className="mt-1 text-xs text-muted">
-                            {t("contentQuality.booksScan.noScanHistory")}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          className="h-10 w-auto px-3 text-sm"
-                          disabled={busyKey === `book:${book.book_id}`}
-                          onClick={() => void openBook(book.book_id)}
-                          variant="secondary"
-                        >
-                          {t("contentQuality.booksScan.viewResults")}
-                        </Button>
-                        <Button
-                          className="h-10 w-auto px-3 text-sm"
-                          disabled={
-                            busyKey === `scan:${book.book_id}` ||
-                            book.latest_scan?.status === "QUEUED" ||
-                            book.latest_scan?.status === "RUNNING"
-                          }
-                          onClick={() => void enqueueBookScan(book.book_id)}
-                          variant="secondary"
-                        >
-                          {book.latest_scan?.status === "QUEUED" ||
-                          book.latest_scan?.status === "RUNNING"
-                            ? t("contentQuality.booksScan.scanning")
-                            : t("contentQuality.booksScan.scanWholeBook")}
-                        </Button>
-                      </div>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            )}
-            {books ? (
-              <PaginationBar
-                ariaLabel={t("contentQuality.booksScan.paginationAria")}
-                className="mt-4"
-                compact
-                disabled={loadingBooks}
-                itemLabel={t("contentQuality.booksScan.itemLabel")}
-                onPageChange={(nextPage) =>
-                  setBookOffset((nextPage - 1) * bookLimit)
-                }
-                page={Math.floor(bookOffset / bookLimit) + 1}
-                pageSize={bookLimit}
-                total={books.total}
-              />
-            ) : null}
-          </section>
-
-          {selectedBook ? (
-            <section className="mt-6 rounded-card border border-border bg-white p-4 sm:p-6">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-xl font-semibold text-ink" dir="auto">
-                    {selectedBook.book_title}
-                  </h2>
-                  <p className="mt-1 text-sm text-muted">
-                    {t("contentQuality.bookDetail.subheading")}
-                  </p>
-                </div>
-                <div className="flex gap-2">
+                    <Button
+                      disabled={
+                        !resolutionNote.trim() ||
+                        busyKey === `report-status:${selectedReport.id}`
+                      }
+                      onClick={() =>
+                        void changeReportStatus(selectedReport.id, "REJECTED")
+                      }
+                      size="admin"
+                      variant="destructive-outline"
+                    >
+                      {t("contentQuality.reports.actions.rejectWithReason")}
+                    </Button>
+                  </>
+                ) : (
                   <Button
-                    className="h-10 w-auto px-3 text-sm"
                     disabled={
-                      busyKey === `scan:${selectedBook.book_id}` ||
-                      selectedBook.scans.some(
-                        (run) =>
-                          run.status === "QUEUED" || run.status === "RUNNING",
-                      )
+                      !resolutionNote.trim() ||
+                      busyKey === `report-status:${selectedReport.id}`
                     }
-                    onClick={() => void enqueueBookScan(selectedBook.book_id)}
-                    variant="secondary"
+                    onClick={() =>
+                      void changeReportStatus(selectedReport.id, "UNDER_REVIEW")
+                    }
+                    size="admin"
+                    variant="outline"
                   >
-                    {t("contentQuality.bookDetail.rescanBook")}
+                    {t("contentQuality.reports.actions.reopen")}
                   </Button>
-                  <Button
-                    className="h-10 w-auto px-3 text-sm"
-                    onClick={() => setSelectedBook(null)}
-                    variant="secondary"
-                  >
-                    {t("common.close")}
-                  </Button>
-                </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </AdminDrawer>
+
+      {/* Book Assessment Detail Drawer */}
+      <AdminDrawer
+        description={t("contentQuality.bookDetail.subheading")}
+        footer={
+          selectedBook ? (
+            <>
+              <Button
+                disabled={
+                  busyKey === `scan:${selectedBook.book_id}` ||
+                  selectedBook.scans.some(
+                    (run) =>
+                      run.status === "QUEUED" || run.status === "RUNNING",
+                  )
+                }
+                onClick={() => void enqueueBookScan(selectedBook.book_id)}
+                size="admin"
+                variant="outline"
+              >
+                <RefreshCw aria-hidden="true" className="size-4" />
+                {t("contentQuality.bookDetail.rescanBook")}
+              </Button>
+              <Button
+                onClick={closeBookDrawer}
+                size="admin"
+                variant="secondary"
+              >
+                {t("common.close")}
+              </Button>
+            </>
+          ) : undefined
+        }
+        isOpen={Boolean(selectedBook)}
+        onClose={closeBookDrawer}
+        size="xl"
+        title={selectedBook?.book_title ?? ""}
+      >
+        {selectedBook ? (
+          <div className="space-y-5">
+            <section
+              aria-label={t("contentQuality.bookDetail.assessmentAria")}
+              className="space-y-4 rounded-xl border border-border bg-surface-subtle/50 p-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-base font-extrabold text-ink">
+                  {t("contentQuality.bookDetail.assessmentHeading")}
+                </h3>
+                <AdminBadge
+                  dot
+                  tone={
+                    approvalStatusTones[selectedBook.assessment.status] ??
+                    "neutral"
+                  }
+                >
+                  {t(
+                    `contentQuality.assessmentStatuses.${selectedBook.assessment.status}`,
+                    undefined,
+                    selectedBook.assessment.status,
+                  )}
+                </AdminBadge>
               </div>
 
-              <section
-                aria-label={t("contentQuality.bookDetail.assessmentAria")}
-                className="mt-5 rounded-control border border-border bg-canvas p-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h3 className="text-lg font-extrabold text-ink">
-                    {t("contentQuality.bookDetail.assessmentHeading")}
-                  </h3>
-                  <span
-                    className={`rounded-full px-3 py-1 text-sm font-extrabold ${approvalStatusStyles[selectedBook.assessment.status]}`}
-                  >
-                    {t(
-                      `contentQuality.assessmentStatuses.${selectedBook.assessment.status}`,
-                      undefined,
-                      selectedBook.assessment.status,
-                    )}
-                  </span>
-                </div>
-                <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  {[
-                    [
-                      t("contentQuality.bookDetail.metrics.activePages"),
-                      `${formatNumber(selectedBook.assessment.ocr_completed_pages)}/${formatNumber(selectedBook.assessment.page_count)} OCR`,
-                    ],
-                    [
-                      t(
-                        "contentQuality.bookDetail.metrics.verifiedCandidateHash",
+              <AdminKpiGrid columns={4}>
+                <AdminKpiCard
+                  detail={t(
+                    "contentQuality.bookDetail.compactOcrDetail",
+                    {
+                      valid: formatNumber(
+                        selectedBook.assessment.ocr_approval_valid_pages,
                       ),
-                      `${formatNumber(selectedBook.assessment.ocr_approval_valid_pages)}/${formatNumber(selectedBook.assessment.page_count)}`,
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.proofreadingDone"),
-                      `${formatNumber(selectedBook.assessment.proofreading_completed_pages)}/${formatNumber(selectedBook.assessment.page_count)} · ${selectedBook.assessment.proofreading_status}`,
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.childSafetyLabel"),
-                      `${formatNumber(selectedBook.assessment.child_safety_completed_pages)}/${formatNumber(selectedBook.assessment.page_count)} · ${selectedBook.assessment.child_safety_status}`,
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.inProgress"),
-                      t("contentQuality.bookDetail.metrics.pagesCountValue", {
-                        count: formatNumber(
-                          selectedBook.assessment.processing_pages,
-                        ),
-                      }),
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.rightsStatus"),
-                      t(
+                      total: formatNumber(selectedBook.assessment.page_count),
+                      unscanned: formatNumber(
+                        selectedBook.assessment.failed_or_unscanned_page_count,
+                      ),
+                    },
+                    "Hash hợp lệ: {valid}/{total} · Chưa quét: {unscanned}",
+                  )}
+                  label={t("contentQuality.bookDetail.metrics.activePages")}
+                  tone="neutral"
+                  value={`${formatNumber(selectedBook.assessment.ocr_completed_pages)}/${formatNumber(selectedBook.assessment.page_count)}`}
+                />
+                <AdminKpiCard
+                  detail={t(
+                    "contentQuality.bookDetail.compactSafetyDetail",
+                    {
+                      proofreading: selectedBook.assessment.proofreading_status,
+                    },
+                    "Proofreading: {proofreading}",
+                  )}
+                  label={t(
+                    "contentQuality.bookDetail.metrics.childSafetyLabel",
+                  )}
+                  tone={
+                    selectedBook.assessment.child_safety_status === "COMPLETED"
+                      ? "success"
+                      : "warning"
+                  }
+                  value={`${formatNumber(selectedBook.assessment.child_safety_completed_pages)}/${formatNumber(selectedBook.assessment.page_count)}`}
+                />
+                <AdminKpiCard
+                  detail={t(
+                    "contentQuality.bookDetail.compactFindingsDetail",
+                    {
+                      high: formatNumber(
+                        selectedBook.assessment.high_finding_count,
+                      ),
+                      medium: formatNumber(
+                        selectedBook.assessment.medium_finding_count,
+                      ),
+                      pages: formatNumber(
+                        selectedBook.assessment.warning_page_count,
+                      ),
+                    },
+                    "HIGH {high} · MEDIUM {medium} · {pages} trang cảnh báo",
+                  )}
+                  label={t("contentQuality.bookDetail.metrics.findingsLabel")}
+                  tone={
+                    selectedBook.assessment.high_finding_count > 0
+                      ? "danger"
+                      : selectedBook.assessment.finding_count > 0
+                        ? "warning"
+                        : "success"
+                  }
+                  value={formatNumber(selectedBook.assessment.finding_count)}
+                />
+                <AdminKpiCard
+                  detail={t(
+                    "contentQuality.bookDetail.compactPipelineDetail",
+                    {
+                      stale: formatNumber(selectedBook.assessment.stale_pages),
+                      processing: formatNumber(
+                        selectedBook.assessment.processing_pages,
+                      ),
+                    },
+                    "Stale: {stale} · Đang xử lý: {processing}",
+                  )}
+                  label={t(
+                    "contentQuality.bookDetail.metrics.failedOrUnscanned",
+                  )}
+                  tone={
+                    selectedBook.assessment.failed_or_unscanned_page_count > 0
+                      ? "danger"
+                      : "neutral"
+                  }
+                  value={formatNumber(
+                    selectedBook.assessment.failed_or_unscanned_page_count,
+                  )}
+                />
+              </AdminKpiGrid>
+
+              <details className="rounded-control border border-border bg-white px-3.5 py-2.5 text-xs">
+                <summary className="cursor-pointer font-bold text-ink">
+                  {t(
+                    "contentQuality.bookDetail.compactMetricsToggle",
+                    undefined,
+                    "Xem chi tiết chỉ số AI, workflow & assessment hash",
+                  )}
+                </summary>
+                <div
+                  aria-label={t("contentQuality.bookDetail.aiSummaryAria")}
+                  className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 sm:grid-cols-3"
+                >
+                  <div className="rounded-control bg-surface-subtle p-2">
+                    <p className="text-[11px] text-muted">
+                      {t("contentQuality.bookDetail.metrics.rightsStatus")}
+                    </p>
+                    <p className="mt-0.5 font-bold text-ink">
+                      {t(
                         `contentQuality.rightsStatuses.${selectedBook.assessment.copyright_status}`,
                         undefined,
                         selectedBook.assessment.copyright_status,
-                      ),
-                    ],
+                      )}
+                    </p>
+                  </div>
+                  <div className="rounded-control bg-surface-subtle p-2">
+                    <p className="text-[11px] text-muted">
+                      {t("contentQuality.bookDetail.metrics.assessmentHash")}
+                    </p>
+                    <p className="mt-0.5 break-all font-mono font-bold text-ink">
+                      {selectedBook.assessment.assessment_hash.slice(0, 16)}
+                    </p>
+                  </div>
+                  {(
                     [
-                      t("contentQuality.bookDetail.metrics.findingsLabel"),
-                      `${formatNumber(selectedBook.assessment.finding_count)} · HIGH ${formatNumber(selectedBook.assessment.high_finding_count)} · MEDIUM ${formatNumber(selectedBook.assessment.medium_finding_count)}`,
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.alertPages"),
-                      formatNumber(selectedBook.assessment.warning_page_count),
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.failedOrUnscanned"),
-                      `${formatNumber(selectedBook.assessment.failed_or_unscanned_page_count)} · ${t(
-                        "contentQuality.bookDetail.metrics.failedSuffix",
-                        {
-                          count: formatNumber(
-                            selectedBook.assessment.failed_pages,
-                          ),
-                        },
-                      )}`,
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.staleResults"),
-                      t("contentQuality.bookDetail.metrics.pagesCountValue", {
-                        count: formatNumber(
-                          selectedBook.assessment.stale_pages,
-                        ),
-                      }),
-                    ],
-                    [
-                      t("contentQuality.bookDetail.metrics.assessmentHash"),
-                      selectedBook.assessment.assessment_hash.slice(0, 16),
-                    ],
-                  ].map(([label, value]) => (
-                    <div className="rounded-control bg-white p-3" key={label}>
-                      <p className="text-xs text-muted">{label}</p>
-                      <p className="mt-1 break-all text-sm font-bold text-ink">
-                        {value}
+                      ["pagesTotal", "pages_total"],
+                      ["workflowsTotal", "workflows_total"],
+                      ["pagesWithWorkflow", "pages_with_workflow"],
+                      ["pagesWithoutWorkflow", "pages_without_workflow"],
+                      ["proofreadingCompleted", "proofreading_completed"],
+                      ["safetyCompleted", "safety_completed"],
+                      ["safetyStale", "safety_stale"],
+                      ["safetyUnscanned", "safety_unscanned"],
+                      ["active", "active"],
+                      ["readyForReview", "ready_for_review"],
+                      ["failed", "failed"],
+                      ["needsAdminReview", "needs_admin_review"],
+                    ] as const
+                  ).map(([labelKey, key]) => (
+                    <div
+                      className="rounded-control bg-surface-subtle p-2"
+                      key={key}
+                    >
+                      <p className="text-[11px] text-muted">
+                        {t(`contentQuality.bookDetail.aiMetrics.${labelKey}`)}
+                      </p>
+                      <p className="mt-0.5 font-bold tabular-nums text-ink">
+                        {formatNumber(
+                          selectedBook.ai_workflow_summary[key] ?? 0,
+                        )}
+                        {key === "needs_admin_review"
+                          ? ` · ${formatNumber(selectedBook.ai_workflow_summary.finding_count ?? 0)}`
+                          : ""}
                       </p>
                     </div>
                   ))}
                 </div>
-                <div className="mt-4 rounded-control border border-border bg-white p-3 text-sm text-muted">
-                  {t("contentQuality.bookDetail.publishRulePrefix")}
-                  <strong>
-                    {t("contentQuality.bookDetail.publishRuleStrong")}
-                  </strong>
-                  .
-                </div>
+              </details>
 
-                <section
-                  aria-label={t("contentQuality.bookDetail.rightsSectionAria")}
-                  className="mt-4 rounded-control border border-border bg-white p-4"
-                  data-testid="book-rights-panel"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <h4 className="font-extrabold text-ink">
-                        {t("contentQuality.bookDetail.rightsHeading")}
-                      </h4>
-                      <p className="mt-1 text-xs text-muted">
-                        {t("contentQuality.bookDetail.rightsDesc")}
-                      </p>
-                    </div>
-                    <span
-                      className="rounded-full bg-canvas px-3 py-1 text-xs font-extrabold text-ink"
-                      data-testid="book-rights-status"
+              <div className="rounded-control border border-border bg-white p-3 text-xs leading-relaxed text-muted">
+                {t("contentQuality.bookDetail.publishRulePrefix")}
+                <strong className="text-ink">
+                  {t("contentQuality.bookDetail.publishRuleStrong")}
+                </strong>
+                .
+              </div>
+
+              {/* Rights Evidence Panel */}
+              <section
+                aria-label={t("contentQuality.bookDetail.rightsSectionAria")}
+                className="rounded-xl border border-border bg-white p-4"
+                data-testid="book-rights-panel"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-sm font-extrabold text-ink">
+                      {t("contentQuality.bookDetail.rightsHeading")}
+                    </h4>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {t("contentQuality.bookDetail.rightsDesc")}
+                    </p>
+                  </div>
+                  <span data-testid="book-rights-status">
+                    <AdminBadge
+                      tone={
+                        rightsStatusTones[
+                          selectedBook.rights_evidence?.effective_status ??
+                            selectedBook.assessment.copyright_status
+                        ] ?? "neutral"
+                      }
                     >
                       {t(
                         `contentQuality.rightsStatuses.${
@@ -1660,761 +2133,741 @@ export function AdminBookContentQualityScreen() {
                       {selectedBook.rights_evidence?.version
                         ? ` · v${selectedBook.rights_evidence.version}`
                         : ""}
-                    </span>
-                  </div>
-                  {selectedBook.rights_evidence?.is_stale ? (
-                    <p className="mt-2 rounded-control border border-amber-400 bg-amber-50 p-2.5 text-xs font-semibold text-amber-950">
-                      {t("contentQuality.bookDetail.rightsStaleWarning")}
-                    </p>
-                  ) : null}
-                  {rightsSavedNotice ? (
-                    <p
-                      className="mt-2 rounded-control border border-emerald-300 bg-emerald-50 p-2.5 text-xs font-semibold text-emerald-900"
-                      role="status"
-                    >
-                      {rightsSavedNotice}
-                    </p>
-                  ) : null}
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.rightsStatusField")}
-                      <select
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                        onChange={(event) =>
-                          setRightsStatus(
-                            event.target.value as BookRightsStatus,
-                          )
-                        }
-                        value={rightsStatus}
-                      >
-                        <option value="UNASSESSED">
-                          {t(
-                            "contentQuality.bookDetail.rightsOptions.UNASSESSED",
-                          )}
-                        </option>
-                        <option value="INSUFFICIENT_EVIDENCE">
-                          {t(
-                            "contentQuality.bookDetail.rightsOptions.INSUFFICIENT_EVIDENCE",
-                          )}
-                        </option>
-                        <option value="CONCERN_FLAGGED">
-                          {t(
-                            "contentQuality.bookDetail.rightsOptions.CONCERN_FLAGGED",
-                          )}
-                        </option>
-                        <option value="RIGHTS_REVIEWED">
-                          {t(
-                            "contentQuality.bookDetail.rightsOptions.RIGHTS_REVIEWED",
-                          )}
-                        </option>
-                      </select>
-                    </label>
-                    <label className="text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.usageBasisLabel")}
-                      <input
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                        maxLength={120}
-                        onChange={(event) =>
-                          setRightsUsageBasis(event.target.value)
-                        }
-                        placeholder={t(
-                          "contentQuality.bookDetail.usageBasisPlaceholder",
-                        )}
-                        type="text"
-                        value={rightsUsageBasis}
-                      />
-                    </label>
-                    <label className="text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.sourceLabel")}
-                      <input
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                        maxLength={500}
-                        onChange={(event) =>
-                          setRightsSource(event.target.value)
-                        }
-                        placeholder={t(
-                          "contentQuality.bookDetail.sourcePlaceholder",
-                        )}
-                        type="text"
-                        value={rightsSource}
-                      />
-                    </label>
-                    <label className="text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.authorOrHolderLabel")}
-                      <input
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                        maxLength={300}
-                        onChange={(event) =>
-                          setRightsAuthor(event.target.value)
-                        }
-                        placeholder={t(
-                          "contentQuality.bookDetail.authorOrHolderPlaceholder",
-                        )}
-                        type="text"
-                        value={rightsAuthor}
-                      />
-                    </label>
-                    <label className="sm:col-span-2 text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.evidenceRefLabel")}
-                      <input
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal"
-                        maxLength={1000}
-                        onChange={(event) =>
-                          setRightsEvidenceRef(event.target.value)
-                        }
-                        placeholder={t(
-                          "contentQuality.bookDetail.evidenceRefPlaceholder",
-                        )}
-                        type="text"
-                        value={rightsEvidenceRef}
-                      />
-                    </label>
-                    <label className="sm:col-span-2 text-xs font-bold text-ink">
-                      {t("contentQuality.bookDetail.rightsNotesLabel")}
-                      <textarea
-                        className="mt-1 min-h-16 w-full rounded-control border border-border bg-white p-2.5 text-sm font-normal"
-                        maxLength={2000}
-                        onChange={(event) => setRightsNotes(event.target.value)}
-                        placeholder={t(
-                          "contentQuality.bookDetail.rightsNotesPlaceholder",
-                        )}
-                        value={rightsNotes}
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                    <Button
-                      className="h-10 w-auto px-4 text-sm"
-                      disabled={
-                        busyKey === `book-rights:${selectedBook.book_id}` ||
-                        (rightsStatus === "RIGHTS_REVIEWED" &&
-                          (!rightsSource.trim() ||
-                            !rightsUsageBasis.trim() ||
-                            !rightsEvidenceRef.trim())) ||
-                        (rightsStatus === "CONCERN_FLAGGED" &&
-                          !rightsNotes.trim())
-                      }
-                      onClick={() => void saveBookRights()}
-                      type="button"
-                    >
-                      {t("contentQuality.bookDetail.saveRightsBtn")}
-                    </Button>
-                    {selectedBook.rights_evidence?.reviewed_at ? (
-                      <span className="text-xs text-muted">
-                        {t("contentQuality.bookDetail.lastUpdatedPrefix")}{" "}
-                        {formatDate(selectedBook.rights_evidence.reviewed_at)}
-                        {selectedBook.rights_evidence.reviewed_by_name
-                          ? ` · ${selectedBook.rights_evidence.reviewed_by_name}`
-                          : ""}
-                      </span>
-                    ) : null}
-                  </div>
-                  {selectedBook.rights_evidence?.history?.length ? (
-                    <details className="mt-3 rounded-control border border-border bg-canvas/50 p-2.5">
-                      <summary className="cursor-pointer text-xs font-bold text-ink">
-                        {t("contentQuality.bookDetail.rightsHistoryHeading", {
-                          count: formatNumber(
-                            selectedBook.rights_evidence.history.length,
-                          ),
-                        })}
-                      </summary>
-                      <ul className="mt-2 grid gap-2 text-xs">
-                        {selectedBook.rights_evidence.history.map((entry) => (
-                          <li
-                            className="rounded-control bg-white p-2"
-                            key={entry.id}
-                          >
-                            <span className="font-bold">
-                              v{entry.version} ·{" "}
-                              {t(
-                                `contentQuality.rightsStatuses.${entry.to_status}`,
-                                undefined,
-                                entry.to_status,
-                              )}
-                            </span>{" "}
-                            · {formatDate(entry.created_at)}
-                            {entry.actor_name ? ` · ${entry.actor_name}` : ""}
-                            {entry.notes ? (
-                              <p className="mt-1 text-muted">{entry.notes}</p>
-                            ) : null}
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
-                  ) : null}
-                </section>
-
-                {selectedBook.page_diagnostics?.length ? (
-                  <section
-                    aria-label={t("contentQuality.bookDetail.diagnosticsAria")}
-                    className="mt-4 rounded-control border border-border bg-white p-4"
-                    data-testid="book-page-diagnostics"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div>
-                        <h4 className="font-extrabold text-ink">
-                          {t("contentQuality.bookDetail.diagnosticsHeading", {
-                            count: formatNumber(
-                              selectedBook.page_diagnostics.length,
-                            ),
-                          })}
-                        </h4>
-                        <p className="mt-1 text-xs text-muted">
-                          {selectedBook.completeness_disclaimer ??
-                            t(
-                              "contentQuality.bookDetail.diagnosticsMissingPrintNote",
-                            )}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(
-                          ["ALL", "ISSUES", "UNVERIFIED", "MEDIA_OCR"] as const
-                        ).map((value) => (
-                          <button
-                            className={
-                              "min-h-8 rounded-full border px-3 text-xs font-bold " +
-                              (pageDiagnosticFilter === value
-                                ? "border-primary bg-primary text-white"
-                                : "border-border bg-canvas text-ink")
-                            }
-                            key={value}
-                            onClick={() => setPageDiagnosticFilter(value)}
-                            type="button"
-                          >
-                            {t(
-                              `contentQuality.bookDetail.diagnosticsTabs.${value}`,
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <ul className="mt-3 grid max-h-72 gap-2 overflow-y-auto">
-                      {selectedBook.page_diagnostics
-                        .filter((item) => {
-                          if (pageDiagnosticFilter === "ALL") return true;
-                          if (pageDiagnosticFilter === "ISSUES") {
-                            return item.codes.some((code) => code !== "OK");
-                          }
-                          if (pageDiagnosticFilter === "UNVERIFIED") {
-                            return item.codes.includes("UNVERIFIED_PAGE");
-                          }
-                          return item.codes.some((code) =>
-                            [
-                              "MISSING_IMAGE",
-                              "EMPTY_OCR",
-                              "OCR_ERROR",
-                              "IMAGE_ONLY_PAGE",
-                            ].includes(code),
-                          );
-                        })
-                        .map((item, idx) => (
-                          <li
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-canvas/50 p-2.5 text-xs"
-                            key={`${item.page_number}:${item.page_id ?? idx}`}
-                          >
-                            <div className="min-w-0">
-                              <span className="font-extrabold text-ink">
-                                {t(
-                                  "contentQuality.bookDetail.pageNumberHeading",
-                                  {
-                                    pageNumber: formatNumber(item.page_number),
-                                  },
-                                )}
-                              </span>
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {item.codes.map((code) => (
-                                  <span
-                                    className={
-                                      "rounded-full px-2 py-0.5 font-bold " +
-                                      (code === "OK"
-                                        ? "bg-emerald-100 text-emerald-900"
-                                        : "bg-amber-100 text-amber-950")
-                                    }
-                                    key={code}
-                                  >
-                                    {t(
-                                      `contentQuality.diagnosticStatuses.${code}`,
-                                      undefined,
-                                      code,
-                                    )}
-                                  </span>
-                                ))}
-                              </div>
-                              <p className="mt-1 text-muted">{item.summary}</p>
-                            </div>
-                            {item.page_id ? (
-                              <Link
-                                className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary hover:bg-canvas"
-                                href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
-                              >
-                                {t("contentQuality.bookDetail.openOcrPage")}
-                              </Link>
-                            ) : null}
-                          </li>
-                        ))}
-                    </ul>
-                  </section>
-                ) : null}
-                {selectedBook.assessment.finding_groups.length ? (
-                  <div className="mt-4 grid gap-3">
-                    <h4 className="font-bold text-ink">
-                      {t("contentQuality.bookDetail.childSafetySummaryHeading")}
-                    </h4>
-                    {selectedBook.assessment.finding_groups.map((group) => (
-                      <article
-                        className="rounded-control border border-border bg-white p-3"
-                        key={`${group.category}:${group.severity}`}
-                      >
-                        <p className="font-bold text-ink">
-                          {t("contentQuality.bookDetail.groupSummaryLine", {
-                            category: group.category,
-                            severity: group.severity,
-                            findingCount: formatNumber(group.finding_count),
-                            pageCount: formatNumber(group.page_count),
-                          })}
-                        </p>
-                        <p className="mt-1 text-xs text-muted">
-                          {t("contentQuality.bookDetail.pagesListPrefix", {
-                            pages: group.page_numbers.join(", "),
-                          })}
-                        </p>
-                        {group.examples.map((example, index) => (
-                          <div
-                            className="mt-2 border-t border-border pt-2"
-                            key={`${example.page_number}:${index}`}
-                          >
-                            <p className="text-xs font-bold text-muted">
-                              {t("contentQuality.bookDetail.evidencePage", {
-                                pageNumber: example.page_number,
-                              })}
-                            </p>
-                            <blockquote
-                              className="viread-learning-content mt-1 whitespace-pre-wrap text-sm text-ink"
-                              dir="ltr"
-                              lang="vi"
-                            >
-                              {example.evidence_text}
-                            </blockquote>
-                            <p className="mt-1 text-sm text-muted">
-                              {example.explanation}
-                            </p>
-                            <p className="mt-1 text-sm text-ink">
-                              {example.recommendation}
-                            </p>
-                          </div>
-                        ))}
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
-                {selectedBook.assessment.blockers.length ? (
-                  <p className="mt-3 text-xs text-muted">
-                    {t("contentQuality.bookDetail.remainingBlockers")}{" "}
-                    {selectedBook.assessment.blockers.join(" · ")}
-                  </p>
-                ) : null}
-                {selectedBook.assessment.admin_approved_at ? (
-                  <p className="mt-2 text-sm text-emerald-900">
-                    {selectedBook.assessment.publication_source ===
-                    "AUTO_APPROVAL"
-                      ? t("contentQuality.bookDetail.autoPublishedLabel")
-                      : t("contentQuality.bookDetail.adminApprovedLabel")}{" "}
-                    {formatDate(selectedBook.assessment.admin_approved_at)}
-                    {selectedBook.assessment.admin_approved_by_name
-                      ? ` · ${selectedBook.assessment.admin_approved_by_name}`
-                      : ""}
-                    {selectedBook.assessment.admin_reason
-                      ? ` · ${selectedBook.assessment.admin_reason}`
-                      : ""}
-                  </p>
-                ) : null}
-
-                <div className="mt-4 grid gap-3 border-t border-border pt-4">
-                  <label className="text-sm font-semibold text-ink">
-                    {t("contentQuality.bookDetail.decisionReasonLabel")}
-                    <textarea
-                      className="mt-1 min-h-24 w-full rounded-control border border-border bg-white p-3"
-                      maxLength={2000}
-                      onChange={(event) =>
-                        setBookDecisionReason(event.target.value)
-                      }
-                      value={bookDecisionReason}
-                    />
-                  </label>
-                  {selectedBook.assessment.finding_count > 0 ||
-                  selectedBook.ai_workflows.some(
-                    (workflow) => workflow.suitability === "REVIEW_REQUIRED",
-                  ) ||
-                  selectedBook.ai_workflows.some(
-                    (workflow) => workflow.suitability === "NOT_RECOMMENDED",
-                  ) ? (
-                    <p className="rounded-control bg-rose-50 p-3 text-sm font-semibold text-rose-900">
-                      {t("contentQuality.bookDetail.approveGuardHint")}
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      className="h-10 w-auto px-3 text-sm"
-                      disabled={
-                        !bookDecisionReason.trim() ||
-                        selectedBook.assessment.ocr_completed_pages !==
-                          selectedBook.assessment.page_count ||
-                        selectedBook.assessment.ocr_approval_valid_pages !==
-                          selectedBook.assessment.page_count ||
-                        !["COMPLETED", "COMPLETED_WITH_SUGGESTIONS"].includes(
-                          selectedBook.assessment.proofreading_status,
-                        ) ||
-                        selectedBook.assessment.child_safety_status !==
-                          "COMPLETED" ||
-                        selectedBook.assessment.failed_or_unscanned_page_count >
-                          0 ||
-                        selectedBook.assessment.finding_count > 0 ||
-                        selectedBook.ai_workflows.some(
-                          (workflow) =>
-                            workflow.suitability === "REVIEW_REQUIRED",
-                        ) ||
-                        selectedBook.ai_workflows.some(
-                          (workflow) =>
-                            workflow.suitability === "NOT_RECOMMENDED",
-                        ) ||
-                        selectedBook.ai_workflows.some(
-                          (workflow) =>
-                            workflow.image_safety_status ===
-                            "ADMIN_FLAGGED_UNSAFE",
-                        ) ||
-                        busyKey === `book-decision:${selectedBook.book_id}`
-                      }
-                      onClick={() => void decideBook("APPROVE")}
-                    >
-                      {t("contentQuality.bookDetail.approveBookBtn")}
-                    </Button>
-                    <Button
-                      className="h-10 w-auto px-3 text-sm"
-                      disabled={
-                        !bookDecisionReason.trim() ||
-                        busyKey === `book-decision:${selectedBook.book_id}`
-                      }
-                      onClick={() => void decideBook("REJECT")}
-                      variant="secondary"
-                    >
-                      {t("contentQuality.bookDetail.rejectBookBtn")}
-                    </Button>
-                    <Button
-                      className="h-10 w-auto px-3 text-sm"
-                      disabled={
-                        !bookDecisionReason.trim() ||
-                        busyKey === `book-decision:${selectedBook.book_id}`
-                      }
-                      onClick={() => void decideBook("REQUEST_RESCAN")}
-                      variant="secondary"
-                    >
-                      {t("contentQuality.bookDetail.requestRescanBtn")}
-                    </Button>
-                  </div>
-                  <div className="flex flex-wrap items-end gap-2">
-                    <label className="min-w-48 text-sm font-semibold text-ink">
-                      {t(
-                        "contentQuality.bookDetail.falsePositiveCategoryLabel",
-                      )}
-                      <input
-                        className="mt-1 min-h-10 w-full rounded-control border border-border bg-white px-3"
-                        onChange={(event) =>
-                          setFalsePositiveCategory(event.target.value)
-                        }
-                        value={falsePositiveCategory}
-                      />
-                    </label>
-                    <Button
-                      className="h-10 w-auto px-3 text-sm"
-                      disabled={
-                        !bookDecisionReason.trim() ||
-                        !falsePositiveCategory.trim() ||
-                        busyKey === `book-decision:${selectedBook.book_id}`
-                      }
-                      onClick={() => void decideBook("FALSE_POSITIVE")}
-                      variant="secondary"
-                    >
-                      {t("contentQuality.bookDetail.falsePositiveBtn")}
-                    </Button>
-                  </div>
-                  {selectedBook.decision_history.length ? (
-                    <details className="rounded-control border border-border bg-white p-3">
-                      <summary className="cursor-pointer text-sm font-bold">
-                        {t("contentQuality.bookDetail.decisionHistoryHeading", {
-                          count: formatNumber(
-                            selectedBook.decision_history.length,
-                          ),
-                        })}
-                      </summary>
-                      <ul className="mt-2 grid gap-2">
-                        {selectedBook.decision_history.map(
-                          (decision, index) => (
-                            <li
-                              className="rounded-control bg-canvas p-3 text-sm"
-                              key={`${decision.action}:${decision.created_at}:${index}`}
-                            >
-                              <p className="font-bold">
-                                {decision.action} ·{" "}
-                                {decision.created_at
-                                  ? formatDate(decision.created_at)
-                                  : ""}
-                                {decision.actor_name
-                                  ? ` · ${decision.actor_name}`
-                                  : ""}
-                              </p>
-                              <p className="mt-1 text-muted">
-                                {decision.reason ??
-                                  t(
-                                    "contentQuality.bookDetail.noReasonFallback",
-                                  )}
-                              </p>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    </details>
-                  ) : null}
+                    </AdminBadge>
+                  </span>
                 </div>
-              </section>
 
-              <div
-                className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"
-                aria-label={t("contentQuality.bookDetail.aiSummaryAria")}
-              >
-                {(
-                  [
-                    ["pagesTotal", "pages_total"],
-                    ["workflowsTotal", "workflows_total"],
-                    ["pagesWithWorkflow", "pages_with_workflow"],
-                    ["pagesWithoutWorkflow", "pages_without_workflow"],
-                    ["proofreadingCompleted", "proofreading_completed"],
-                    ["safetyCompleted", "safety_completed"],
-                    ["safetyStale", "safety_stale"],
-                    ["safetyUnscanned", "safety_unscanned"],
-                    ["active", "active"],
-                    ["readyForReview", "ready_for_review"],
-                    ["failed", "failed"],
-                    ["needsAdminReview", "needs_admin_review"],
-                  ] as const
-                ).map(([labelKey, key]) => (
-                  <div className="rounded-control bg-canvas p-3" key={key}>
-                    <p className="text-xs text-muted">
-                      {t(`contentQuality.bookDetail.aiMetrics.${labelKey}`)}
-                    </p>
-                    <p className="mt-1 text-lg font-extrabold text-ink">
-                      {formatNumber(selectedBook.ai_workflow_summary[key] ?? 0)}
-                      {key === "needs_admin_review"
-                        ? ` · ${formatNumber(selectedBook.ai_workflow_summary.finding_count ?? 0)}`
-                        : ""}
-                    </p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="mt-4">
-                <h3 className="font-semibold text-ink">
-                  {t("contentQuality.bookDetail.scanHistoryHeading")}
-                </h3>
-                {selectedBook.scans.length ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {selectedBook.scans.map((scan) => (
-                      <Button
-                        className="h-10 w-auto px-3 text-xs"
-                        key={scan.id}
-                        onClick={() => void openScan(scan.id)}
-                        variant={
-                          selectedScan?.id === scan.id ? "primary" : "secondary"
-                        }
-                      >
-                        {t(
-                          `contentQuality.scanStatuses.${scan.status}`,
-                          undefined,
-                          scan.status,
-                        )}{" "}
-                        · {formatDate(scan.created_at)}
-                      </Button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-muted">
-                    {t("contentQuality.bookDetail.noScanYet")}
+                {selectedBook.rights_evidence?.is_stale ? (
+                  <p className="mt-2.5 rounded-control border border-amber-300 bg-warning-surface p-2.5 text-xs font-semibold text-warning">
+                    {t("contentQuality.bookDetail.rightsStaleWarning")}
                   </p>
-                )}
-              </div>
+                ) : null}
 
-              <div className="mt-5 border-t border-border pt-4">
-                <h3 className="font-bold text-ink">
-                  {t("contentQuality.bookDetail.aiHistoryHeading")}
-                </h3>
-                {aiAttentionCount > 0 ? (
-                  <div
-                    aria-live="polite"
-                    className="mt-3 rounded-control border border-amber-500 bg-amber-50 p-4 text-sm text-amber-950"
+                {rightsSavedNotice ? (
+                  <p
+                    className="mt-2.5 rounded-control border border-emerald-200 bg-success-surface p-2.5 text-xs font-semibold text-success-ink"
                     role="status"
                   >
-                    {t("contentQuality.bookDetail.aiAttentionNotice", {
-                      count: formatNumber(aiAttentionCount),
-                    })}
-                  </div>
+                    {rightsSavedNotice}
+                  </p>
                 ) : null}
-                {selectedBook.ai_workflows.length ? (
-                  <div className="mt-3 grid gap-3">
-                    {selectedBook.ai_workflows.map((workflow) => (
-                      <article
-                        className="rounded-control border border-border p-4"
-                        key={workflow.workflow_id}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h4 className="font-bold text-ink">
-                              {workflow.status} · {workflow.safety_status}
-                            </h4>
-                            <p className="mt-1 text-xs text-muted">
-                              {workflow.suitability ??
-                                t(
-                                  "contentQuality.bookDetail.noSuitabilityFallback",
-                                )}{" "}
-                              · Candidate v{workflow.candidate_version}
-                              {workflow.hash_match
-                                ? t("contentQuality.bookDetail.safetyHashMatch")
-                                : t(
-                                    "contentQuality.bookDetail.safetyHashStale",
-                                  )}
-                            </p>
-                            <p className="mt-1 break-all font-mono text-xs text-muted">
-                              {t("contentQuality.bookDetail.workflowIdLine", {
-                                workflowId: workflow.workflow_id,
-                                revisionId: workflow.page_revision_id,
-                              })}
-                            </p>
-                          </div>
-                          <Link
-                            className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-bold text-primary hover:bg-canvas"
-                            href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(workflow.page_id)}?revisionId=${encodeURIComponent(workflow.page_revision_id)}`}
-                          >
-                            {t("contentQuality.bookDetail.openOcrReview")}
-                          </Link>
-                        </div>
 
-                        {workflow.error_code ? (
-                          <p className="mt-3 text-sm text-danger">
-                            {t("contentQuality.bookDetail.workflowError", {
-                              code: workflow.error_code,
-                            })}
-                          </p>
-                        ) : null}
-
-                        {workflow.findings.length ? (
-                          <div className="mt-3 grid gap-2">
-                            {workflow.findings.map((finding, index) => (
-                              <div
-                                className="rounded-control bg-canvas p-3"
-                                key={String(finding.finding_id ?? index)}
-                              >
-                                <p className="font-bold">
-                                  {String(
-                                    finding.category ?? "OTHER_SENSITIVE",
-                                  )}{" "}
-                                  · {String(finding.content_type ?? "MENTION")}{" "}
-                                  · {String(finding.severity ?? "REVIEW")}
-                                </p>
-                                <p className="mt-1 text-xs text-muted">
-                                  {String(
-                                    finding.review_status ?? "PROVISIONAL",
-                                  )}{" "}
-                                  · {String(finding.evidence_start ?? "?")}–
-                                  {String(finding.evidence_end ?? "?")}
-                                </p>
-                                <blockquote
-                                  className="viread-learning-content mt-2 whitespace-pre-wrap text-sm"
-                                  dir="ltr"
-                                  lang="vi"
-                                >
-                                  {String(finding.evidence_text ?? "")}
-                                </blockquote>
-                                <p className="mt-1 text-sm text-muted">
-                                  {String(finding.explanation ?? "")}
-                                </p>
-                                <p className="mt-1 text-sm text-ink">
-                                  {String(finding.recommendation ?? "")}
-                                </p>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="mt-3 text-sm text-muted">
-                            {workflow.safety_status === "PROVISIONAL" ||
-                            workflow.safety_status === "CONFIRMED" ||
-                            workflow.safety_status === "AUTO_CONFIRMED"
-                              ? t("contentQuality.bookDetail.noSafetyFindings")
-                              : t(
-                                  "contentQuality.bookDetail.noValidSafetyResult",
-                                )}
-                          </p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="text-xs font-bold text-ink">
+                    {t("contentQuality.bookDetail.rightsStatusField")}
+                    <select
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      onChange={(event) =>
+                        setRightsStatus(event.target.value as BookRightsStatus)
+                      }
+                      value={rightsStatus}
+                    >
+                      <option value="UNASSESSED">
+                        {t(
+                          "contentQuality.bookDetail.rightsOptions.UNASSESSED",
                         )}
+                      </option>
+                      <option value="INSUFFICIENT_EVIDENCE">
+                        {t(
+                          "contentQuality.bookDetail.rightsOptions.INSUFFICIENT_EVIDENCE",
+                        )}
+                      </option>
+                      <option value="CONCERN_FLAGGED">
+                        {t(
+                          "contentQuality.bookDetail.rightsOptions.CONCERN_FLAGGED",
+                        )}
+                      </option>
+                      <option value="RIGHTS_REVIEWED">
+                        {t(
+                          "contentQuality.bookDetail.rightsOptions.RIGHTS_REVIEWED",
+                        )}
+                      </option>
+                    </select>
+                  </label>
+                  <label className="text-xs font-bold text-ink">
+                    {t("contentQuality.bookDetail.usageBasisLabel")}
+                    <input
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      maxLength={120}
+                      onChange={(event) =>
+                        setRightsUsageBasis(event.target.value)
+                      }
+                      placeholder={t(
+                        "contentQuality.bookDetail.usageBasisPlaceholder",
+                      )}
+                      type="text"
+                      value={rightsUsageBasis}
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-ink">
+                    {t("contentQuality.bookDetail.sourceLabel")}
+                    <input
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      maxLength={500}
+                      onChange={(event) => setRightsSource(event.target.value)}
+                      placeholder={t(
+                        "contentQuality.bookDetail.sourcePlaceholder",
+                      )}
+                      type="text"
+                      value={rightsSource}
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-ink">
+                    {t("contentQuality.bookDetail.authorOrHolderLabel")}
+                    <input
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      maxLength={300}
+                      onChange={(event) => setRightsAuthor(event.target.value)}
+                      placeholder={t(
+                        "contentQuality.bookDetail.authorOrHolderPlaceholder",
+                      )}
+                      type="text"
+                      value={rightsAuthor}
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-ink sm:col-span-2">
+                    {t("contentQuality.bookDetail.evidenceRefLabel")}
+                    <input
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      maxLength={1000}
+                      onChange={(event) =>
+                        setRightsEvidenceRef(event.target.value)
+                      }
+                      placeholder={t(
+                        "contentQuality.bookDetail.evidenceRefPlaceholder",
+                      )}
+                      type="text"
+                      value={rightsEvidenceRef}
+                    />
+                  </label>
+                  <label className="text-xs font-bold text-ink sm:col-span-2">
+                    {t("contentQuality.bookDetail.rightsNotesLabel")}
+                    <textarea
+                      className="mt-1 min-h-16 w-full rounded-control border border-border bg-white p-2.5 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      maxLength={2000}
+                      onChange={(event) => setRightsNotes(event.target.value)}
+                      placeholder={t(
+                        "contentQuality.bookDetail.rightsNotesPlaceholder",
+                      )}
+                      value={rightsNotes}
+                    />
+                  </label>
+                </div>
 
-                        {workflow.safety_history.length ? (
-                          <details className="mt-3 rounded-control border border-border p-3">
-                            <summary className="cursor-pointer text-sm font-bold">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <Button
+                    disabled={
+                      busyKey === `book-rights:${selectedBook.book_id}` ||
+                      (rightsStatus === "RIGHTS_REVIEWED" &&
+                        (!rightsSource.trim() ||
+                          !rightsUsageBasis.trim() ||
+                          !rightsEvidenceRef.trim())) ||
+                      (rightsStatus === "CONCERN_FLAGGED" &&
+                        !rightsNotes.trim())
+                    }
+                    onClick={() => void saveBookRights()}
+                    size="admin"
+                    type="button"
+                  >
+                    {t("contentQuality.bookDetail.saveRightsBtn")}
+                  </Button>
+                  {selectedBook.rights_evidence?.reviewed_at ? (
+                    <span className="text-xs text-muted tabular-nums">
+                      {t("contentQuality.bookDetail.lastUpdatedPrefix")}{" "}
+                      {formatDate(selectedBook.rights_evidence.reviewed_at)}
+                      {selectedBook.rights_evidence.reviewed_by_name
+                        ? ` · ${selectedBook.rights_evidence.reviewed_by_name}`
+                        : ""}
+                    </span>
+                  ) : null}
+                </div>
+
+                {selectedBook.rights_evidence?.history?.length ? (
+                  <details className="mt-3 rounded-control border border-border bg-surface-subtle/60 p-2.5">
+                    <summary className="cursor-pointer text-xs font-bold text-ink">
+                      {t("contentQuality.bookDetail.rightsHistoryHeading", {
+                        count: formatNumber(
+                          selectedBook.rights_evidence.history.length,
+                        ),
+                      })}
+                    </summary>
+                    <ul className="mt-2 grid gap-2 text-xs">
+                      {selectedBook.rights_evidence.history.map((entry) => (
+                        <li
+                          className="rounded-control border border-border bg-white p-2"
+                          key={entry.id}
+                        >
+                          <span className="font-bold text-ink">
+                            v{entry.version} ·{" "}
+                            {t(
+                              `contentQuality.rightsStatuses.${entry.to_status}`,
+                              undefined,
+                              entry.to_status,
+                            )}
+                          </span>{" "}
+                          ·{" "}
+                          <span className="tabular-nums text-muted">
+                            {formatDate(entry.created_at)}
+                          </span>
+                          {entry.actor_name ? ` · ${entry.actor_name}` : ""}
+                          {entry.notes ? (
+                            <p className="mt-1 text-muted">{entry.notes}</p>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </section>
+
+              {/* Page Diagnostics Panel */}
+              {selectedBook.page_diagnostics?.length ? (
+                <section
+                  aria-label={t("contentQuality.bookDetail.diagnosticsAria")}
+                  className="rounded-xl border border-border bg-white p-4"
+                  data-testid="book-page-diagnostics"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <h4 className="text-sm font-extrabold text-ink">
+                        {t("contentQuality.bookDetail.diagnosticsHeading", {
+                          count: formatNumber(
+                            selectedBook.page_diagnostics.length,
+                          ),
+                        })}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {selectedBook.completeness_disclaimer ??
+                          t(
+                            "contentQuality.bookDetail.diagnosticsMissingPrintNote",
+                          )}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(
+                        ["ALL", "ISSUES", "UNVERIFIED", "MEDIA_OCR"] as const
+                      ).map((value) => (
+                        <button
+                          className={cn(
+                            "min-h-8 rounded-full border px-3 text-xs font-bold transition-colors",
+                            pageDiagnosticFilter === value
+                              ? "border-primary bg-primary text-white"
+                              : "border-border bg-surface-subtle text-ink hover:border-primary/40",
+                          )}
+                          key={value}
+                          onClick={() => setPageDiagnosticFilter(value)}
+                          type="button"
+                        >
+                          {t(
+                            `contentQuality.bookDetail.diagnosticsTabs.${value}`,
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto">
+                    {selectedBook.page_diagnostics
+                      .filter((item) => {
+                        if (pageDiagnosticFilter === "ALL") return true;
+                        if (pageDiagnosticFilter === "ISSUES") {
+                          return item.codes.some((code) => code !== "OK");
+                        }
+                        if (pageDiagnosticFilter === "UNVERIFIED") {
+                          return item.codes.includes("UNVERIFIED_PAGE");
+                        }
+                        return item.codes.some((code) =>
+                          [
+                            "MISSING_IMAGE",
+                            "EMPTY_OCR",
+                            "OCR_ERROR",
+                            "IMAGE_ONLY_PAGE",
+                          ].includes(code),
+                        );
+                      })
+                      .map((item, idx) => (
+                        <li
+                          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
+                          key={`${item.page_number}:${item.page_id ?? idx}`}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <span className="font-extrabold text-ink">
                               {t(
-                                "contentQuality.bookDetail.previousSafetyScans",
+                                "contentQuality.bookDetail.pageNumberHeading",
                                 {
-                                  count: formatNumber(
-                                    workflow.safety_history.length,
-                                  ),
+                                  pageNumber: formatNumber(item.page_number),
                                 },
                               )}
-                            </summary>
-                            <ul className="mt-2 grid gap-2">
-                              {workflow.safety_history.map((scan, index) => (
-                                <li
-                                  className="break-all rounded-control bg-canvas p-3 text-xs"
-                                  key={`${String(scan.scan_id)}-${index}`}
+                            </span>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {item.codes.map((code) => (
+                                <AdminBadge
+                                  key={code}
+                                  tone={code === "OK" ? "success" : "warning"}
                                 >
-                                  <p className="font-bold">
-                                    {String(scan.status)} ·{" "}
-                                    {String(
-                                      scan.suitability ??
-                                        t(
-                                          "contentQuality.bookDetail.noSuitabilityFallback",
-                                        ),
-                                    )}{" "}
-                                    ·{" "}
-                                    {t(
-                                      "contentQuality.bookDetail.findingsCountLabel",
-                                      {
-                                        count: formatNumber(
-                                          Array.isArray(scan.findings)
-                                            ? scan.findings.length
-                                            : 0,
-                                        ),
-                                      },
-                                    )}
-                                  </p>
-                                  <p className="mt-1 font-mono text-muted">
-                                    {t("contentQuality.bookDetail.hashPrefix", {
-                                      hash: String(scan.content_hash ?? "?"),
-                                    })}{" "}
-                                    ·{" "}
-                                    {t(
-                                      "contentQuality.bookDetail.archivedPrefix",
-                                    )}{" "}
-                                    {String(scan.archived_at ?? "")}
-                                  </p>
-                                </li>
+                                  {t(
+                                    `contentQuality.diagnosticStatuses.${code}`,
+                                    undefined,
+                                    code,
+                                  )}
+                                </AdminBadge>
                               ))}
-                            </ul>
-                          </details>
-                        ) : null}
+                            </div>
+                            <p className="mt-1 text-muted">{item.summary}</p>
+                          </div>
+                          {item.page_id ? (
+                            <Link
+                              className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary transition-colors hover:bg-surface-subtle"
+                              href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
+                            >
+                              {t("contentQuality.bookDetail.openOcrPage")}
+                            </Link>
+                          ) : null}
+                        </li>
+                      ))}
+                  </ul>
+                </section>
+              ) : null}
 
-                        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+              {/* Child Safety Finding Groups */}
+              {selectedBook.assessment.finding_groups.length ? (
+                <div className="grid gap-3">
+                  <h4 className="text-sm font-extrabold text-ink">
+                    {t("contentQuality.bookDetail.childSafetySummaryHeading")}
+                  </h4>
+                  {selectedBook.assessment.finding_groups.map((group) => (
+                    <article
+                      className="rounded-xl border border-border bg-white p-3.5"
+                      key={`${group.category}:${group.severity}`}
+                    >
+                      <p className="text-sm font-bold text-ink">
+                        {t("contentQuality.bookDetail.groupSummaryLine", {
+                          category: group.category,
+                          severity: group.severity,
+                          findingCount: formatNumber(group.finding_count),
+                          pageCount: formatNumber(group.page_count),
+                        })}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted">
+                        {t("contentQuality.bookDetail.pagesListPrefix", {
+                          pages: group.page_numbers.join(", "),
+                        })}
+                      </p>
+                      {group.examples.map((example, index) => (
+                        <div
+                          className="mt-2.5 border-t border-border/70 pt-2.5"
+                          key={`${example.page_number}:${index}`}
+                        >
+                          <p className="text-xs font-bold text-muted">
+                            {t("contentQuality.bookDetail.evidencePage", {
+                              pageNumber: example.page_number,
+                            })}
+                          </p>
+                          <blockquote
+                            className="viread-learning-content mt-1 whitespace-pre-wrap rounded-control bg-surface-subtle p-2 text-xs text-ink"
+                            dir="ltr"
+                            lang="vi"
+                          >
+                            {example.evidence_text}
+                          </blockquote>
+                          <p className="mt-1 text-xs text-muted">
+                            {example.explanation}
+                          </p>
+                          <p className="mt-1 text-xs text-ink">
+                            {example.recommendation}
+                          </p>
+                        </div>
+                      ))}
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+
+              {selectedBook.assessment.blockers.length ? (
+                <p className="text-xs text-muted">
+                  {t("contentQuality.bookDetail.remainingBlockers")}{" "}
+                  {selectedBook.assessment.blockers.join(" · ")}
+                </p>
+              ) : null}
+
+              {selectedBook.assessment.admin_approved_at ? (
+                <p className="rounded-control border border-emerald-200 bg-success-surface p-2.5 text-xs font-semibold text-success-ink">
+                  {selectedBook.assessment.publication_source ===
+                  "AUTO_APPROVAL"
+                    ? t("contentQuality.bookDetail.autoPublishedLabel")
+                    : t("contentQuality.bookDetail.adminApprovedLabel")}{" "}
+                  {formatDate(selectedBook.assessment.admin_approved_at)}
+                  {selectedBook.assessment.admin_approved_by_name
+                    ? ` · ${selectedBook.assessment.admin_approved_by_name}`
+                    : ""}
+                  {selectedBook.assessment.admin_reason
+                    ? ` · ${selectedBook.assessment.admin_reason}`
+                    : ""}
+                </p>
+              ) : null}
+
+              {/* Decision Controls */}
+              <div className="grid gap-3 border-t border-border pt-4">
+                <label className="text-xs font-bold text-ink">
+                  {t("contentQuality.bookDetail.decisionReasonLabel")}
+                  <textarea
+                    className="mt-1.5 min-h-20 w-full rounded-control border border-border bg-white p-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    maxLength={2000}
+                    onChange={(event) =>
+                      setBookDecisionReason(event.target.value)
+                    }
+                    value={bookDecisionReason}
+                  />
+                </label>
+
+                {selectedBook.assessment.finding_count > 0 ||
+                selectedBook.ai_workflows.some(
+                  (workflow) => workflow.suitability === "REVIEW_REQUIRED",
+                ) ||
+                selectedBook.ai_workflows.some(
+                  (workflow) => workflow.suitability === "NOT_RECOMMENDED",
+                ) ? (
+                  <p className="rounded-control border border-danger/25 bg-danger-surface p-3 text-xs font-semibold text-danger">
+                    {t("contentQuality.bookDetail.approveGuardHint")}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={
+                      !bookDecisionReason.trim() ||
+                      selectedBook.assessment.ocr_completed_pages !==
+                        selectedBook.assessment.page_count ||
+                      selectedBook.assessment.ocr_approval_valid_pages !==
+                        selectedBook.assessment.page_count ||
+                      !["COMPLETED", "COMPLETED_WITH_SUGGESTIONS"].includes(
+                        selectedBook.assessment.proofreading_status,
+                      ) ||
+                      selectedBook.assessment.child_safety_status !==
+                        "COMPLETED" ||
+                      selectedBook.assessment.failed_or_unscanned_page_count >
+                        0 ||
+                      selectedBook.assessment.finding_count > 0 ||
+                      selectedBook.ai_workflows.some(
+                        (workflow) =>
+                          workflow.suitability === "REVIEW_REQUIRED",
+                      ) ||
+                      selectedBook.ai_workflows.some(
+                        (workflow) =>
+                          workflow.suitability === "NOT_RECOMMENDED",
+                      ) ||
+                      selectedBook.ai_workflows.some(
+                        (workflow) =>
+                          workflow.image_safety_status ===
+                          "ADMIN_FLAGGED_UNSAFE",
+                      ) ||
+                      busyKey === `book-decision:${selectedBook.book_id}`
+                    }
+                    onClick={() => void decideBook("APPROVE")}
+                    size="admin"
+                    variant="primary"
+                  >
+                    {t("contentQuality.bookDetail.approveBookBtn")}
+                  </Button>
+                  <Button
+                    disabled={
+                      !bookDecisionReason.trim() ||
+                      busyKey === `book-decision:${selectedBook.book_id}`
+                    }
+                    onClick={() => void decideBook("REJECT")}
+                    size="admin"
+                    variant="destructive-outline"
+                  >
+                    {t("contentQuality.bookDetail.rejectBookBtn")}
+                  </Button>
+                  <Button
+                    disabled={
+                      !bookDecisionReason.trim() ||
+                      busyKey === `book-decision:${selectedBook.book_id}`
+                    }
+                    onClick={() => void decideBook("REQUEST_RESCAN")}
+                    size="admin"
+                    variant="outline"
+                  >
+                    {t("contentQuality.bookDetail.requestRescanBtn")}
+                  </Button>
+                </div>
+
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="min-w-48 flex-1 text-xs font-bold text-ink">
+                    {t("contentQuality.bookDetail.falsePositiveCategoryLabel")}
+                    <input
+                      className="mt-1 h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-normal text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      onChange={(event) =>
+                        setFalsePositiveCategory(event.target.value)
+                      }
+                      value={falsePositiveCategory}
+                    />
+                  </label>
+                  <Button
+                    disabled={
+                      !bookDecisionReason.trim() ||
+                      !falsePositiveCategory.trim() ||
+                      busyKey === `book-decision:${selectedBook.book_id}`
+                    }
+                    onClick={() => void decideBook("FALSE_POSITIVE")}
+                    size="admin"
+                    variant="outline"
+                  >
+                    {t("contentQuality.bookDetail.falsePositiveBtn")}
+                  </Button>
+                </div>
+
+                {selectedBook.decision_history.length ? (
+                  <details className="rounded-control border border-border bg-white p-3">
+                    <summary className="cursor-pointer text-xs font-bold text-ink">
+                      {t("contentQuality.bookDetail.decisionHistoryHeading", {
+                        count: formatNumber(
+                          selectedBook.decision_history.length,
+                        ),
+                      })}
+                    </summary>
+                    <ul className="mt-2 grid gap-2">
+                      {selectedBook.decision_history.map((decision, index) => (
+                        <li
+                          className="rounded-control bg-surface-subtle p-2.5 text-xs"
+                          key={`${decision.action}:${decision.created_at}:${index}`}
+                        >
+                          <p className="font-bold text-ink">
+                            {decision.action} ·{" "}
+                            <span className="tabular-nums">
+                              {decision.created_at
+                                ? formatDate(decision.created_at)
+                                : ""}
+                            </span>
+                            {decision.actor_name
+                              ? ` · ${decision.actor_name}`
+                              : ""}
+                          </p>
+                          <p className="mt-1 text-muted">
+                            {decision.reason ??
+                              t("contentQuality.bookDetail.noReasonFallback")}
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
+              </div>
+            </section>
+
+            {/* Scan History */}
+            <section className="rounded-xl border border-border bg-white p-4">
+              <h3 className="text-sm font-extrabold text-ink">
+                {t("contentQuality.bookDetail.scanHistoryHeading")}
+              </h3>
+              {selectedBook.scans.length ? (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  {selectedBook.scans.map((scan) => (
+                    <Button
+                      key={scan.id}
+                      onClick={() => void openScan(scan.id)}
+                      size="admin"
+                      variant={
+                        selectedScan?.id === scan.id ? "primary" : "outline"
+                      }
+                    >
+                      {t(
+                        `contentQuality.scanStatuses.${scan.status}`,
+                        undefined,
+                        scan.status,
+                      )}{" "}
+                      · {formatDate(scan.created_at)}
+                    </Button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted">
+                  {t("contentQuality.bookDetail.noScanYet")}
+                </p>
+              )}
+            </section>
+
+            {/* Combined AI Workflow History */}
+            <section className="rounded-xl border border-border bg-white p-4">
+              <h3 className="text-sm font-extrabold text-ink">
+                {t("contentQuality.bookDetail.aiHistoryHeading")}
+              </h3>
+              {aiAttentionCount > 0 ? (
+                <div
+                  aria-live="polite"
+                  className="mt-3 rounded-control border border-amber-300 bg-warning-surface p-3 text-xs font-semibold text-warning"
+                  role="status"
+                >
+                  {t("contentQuality.bookDetail.aiAttentionNotice", {
+                    count: formatNumber(aiAttentionCount),
+                  })}
+                </div>
+              ) : null}
+              {selectedBook.ai_workflows.length ? (
+                <div className="mt-3 grid gap-3">
+                  {selectedBook.ai_workflows.map((workflow) => (
+                    <article
+                      className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
+                      key={workflow.workflow_id}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-sm font-bold text-ink">
+                            {workflow.status} · {workflow.safety_status}
+                          </h4>
+                          <p className="mt-0.5 text-xs text-muted">
+                            {workflow.suitability ??
+                              t(
+                                "contentQuality.bookDetail.noSuitabilityFallback",
+                              )}{" "}
+                            · Candidate v{workflow.candidate_version}
+                            {workflow.hash_match
+                              ? t("contentQuality.bookDetail.safetyHashMatch")
+                              : t("contentQuality.bookDetail.safetyHashStale")}
+                          </p>
+                          <p className="mt-0.5 break-all font-mono text-[11px] text-muted">
+                            {t("contentQuality.bookDetail.workflowIdLine", {
+                              workflowId: workflow.workflow_id,
+                              revisionId: workflow.page_revision_id,
+                            })}
+                          </p>
+                        </div>
+                        <ButtonLink
+                          href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(workflow.page_id)}?revisionId=${encodeURIComponent(workflow.page_revision_id)}`}
+                          size="admin"
+                          variant="outline"
+                        >
+                          {t("contentQuality.bookDetail.openOcrReview")}
+                        </ButtonLink>
+                      </div>
+
+                      {workflow.error_code ? (
+                        <p className="mt-2 text-xs font-semibold text-danger">
+                          {t("contentQuality.bookDetail.workflowError", {
+                            code: workflow.error_code,
+                          })}
+                        </p>
+                      ) : null}
+
+                      {workflow.findings.length ? (
+                        <div className="mt-2.5 grid gap-2">
+                          {workflow.findings.map((finding, index) => (
+                            <div
+                              className="rounded-control border border-border bg-white p-2.5"
+                              key={String(finding.finding_id ?? index)}
+                            >
+                              <p className="text-xs font-bold text-ink">
+                                {String(finding.category ?? "OTHER_SENSITIVE")}{" "}
+                                · {String(finding.content_type ?? "MENTION")} ·{" "}
+                                {String(finding.severity ?? "REVIEW")}
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-muted">
+                                {String(finding.review_status ?? "PROVISIONAL")}{" "}
+                                · {String(finding.evidence_start ?? "?")}–
+                                {String(finding.evidence_end ?? "?")}
+                              </p>
+                              <blockquote
+                                className="viread-learning-content mt-1.5 whitespace-pre-wrap text-xs text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {String(finding.evidence_text ?? "")}
+                              </blockquote>
+                              <p className="mt-1 text-xs text-muted">
+                                {String(finding.explanation ?? "")}
+                              </p>
+                              <p className="mt-1 text-xs text-ink">
+                                {String(finding.recommendation ?? "")}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted">
+                          {workflow.safety_status === "PROVISIONAL" ||
+                          workflow.safety_status === "CONFIRMED" ||
+                          workflow.safety_status === "AUTO_CONFIRMED"
+                            ? t("contentQuality.bookDetail.noSafetyFindings")
+                            : t(
+                                "contentQuality.bookDetail.noValidSafetyResult",
+                              )}
+                        </p>
+                      )}
+
+                      {workflow.safety_history.length ? (
+                        <details className="mt-2.5 rounded-control border border-border bg-white p-2.5">
+                          <summary className="cursor-pointer text-xs font-bold text-ink">
+                            {t(
+                              "contentQuality.bookDetail.previousSafetyScans",
+                              {
+                                count: formatNumber(
+                                  workflow.safety_history.length,
+                                ),
+                              },
+                            )}
+                          </summary>
+                          <ul className="mt-2 grid gap-2">
+                            {workflow.safety_history.map((scan, index) => (
+                              <li
+                                className="break-all rounded-control bg-surface-subtle p-2.5 text-xs"
+                                key={`${String(scan.scan_id)}-${index}`}
+                              >
+                                <p className="font-bold text-ink">
+                                  {String(scan.status)} ·{" "}
+                                  {String(
+                                    scan.suitability ??
+                                      t(
+                                        "contentQuality.bookDetail.noSuitabilityFallback",
+                                      ),
+                                  )}{" "}
+                                  ·{" "}
+                                  {t(
+                                    "contentQuality.bookDetail.findingsCountLabel",
+                                    {
+                                      count: formatNumber(
+                                        Array.isArray(scan.findings)
+                                          ? scan.findings.length
+                                          : 0,
+                                      ),
+                                    },
+                                  )}
+                                </p>
+                                <p className="mt-1 font-mono text-[11px] text-muted">
+                                  {t("contentQuality.bookDetail.hashPrefix", {
+                                    hash: String(scan.content_hash ?? "?"),
+                                  })}{" "}
+                                  ·{" "}
+                                  {t(
+                                    "contentQuality.bookDetail.archivedPrefix",
+                                  )}{" "}
+                                  {String(scan.archived_at ?? "")}
+                                </p>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+
+                      <details className="mt-2.5 rounded-control border border-border bg-white p-2.5">
+                        <summary className="cursor-pointer text-xs font-bold text-ink">
+                          {t(
+                            "contentQuality.bookDetail.candidateVersionsHeading",
+                          )}{" "}
+                          ·{" "}
+                          {t("contentQuality.bookDetail.reviewHistoryHeading")}{" "}
+                          ·{" "}
+                          {t(
+                            "contentQuality.bookDetail.providerProvenanceHeading",
+                          )}
+                        </summary>
+                        <div className="mt-2.5 grid gap-3 border-t border-border/70 pt-2.5 lg:grid-cols-3">
                           <div>
-                            <h5 className="text-sm font-bold">
+                            <h5 className="text-xs font-bold text-ink">
                               {t(
                                 "contentQuality.bookDetail.candidateVersionsHeading",
                               )}
                             </h5>
-                            <ul className="mt-1 space-y-1 text-xs text-muted">
+                            <ul className="mt-1 space-y-1 text-[11px] text-muted">
                               {workflow.candidate_history.map(
                                 (version, index) => (
                                   <li
@@ -2432,12 +2885,12 @@ export function AdminBookContentQualityScreen() {
                             </ul>
                           </div>
                           <div>
-                            <h5 className="text-sm font-bold">
+                            <h5 className="text-xs font-bold text-ink">
                               {t(
                                 "contentQuality.bookDetail.reviewHistoryHeading",
                               )}
                             </h5>
-                            <ul className="mt-1 space-y-1 text-xs text-muted">
+                            <ul className="mt-1 space-y-1 text-[11px] text-muted">
                               {workflow.review_history.map((event, index) => (
                                 <li
                                   key={`${String(event.created_at)}-${index}`}
@@ -2455,12 +2908,12 @@ export function AdminBookContentQualityScreen() {
                             </ul>
                           </div>
                           <div>
-                            <h5 className="text-sm font-bold">
+                            <h5 className="text-xs font-bold text-ink">
                               {t(
                                 "contentQuality.bookDetail.providerProvenanceHeading",
                               )}
                             </h5>
-                            <ul className="mt-1 space-y-1 text-xs text-muted">
+                            <ul className="mt-1 space-y-1 text-[11px] text-muted">
                               {workflow.provider_events.map((event, index) => (
                                 <li
                                   key={`${String(event.provider)}-${String(event.chunk_id)}-${index}`}
@@ -2485,34 +2938,37 @@ export function AdminBookContentQualityScreen() {
                             </ul>
                           </div>
                         </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-sm text-muted">
-                    {t("contentQuality.bookDetail.noCombinedAiHistory")}
-                  </p>
-                )}
-              </div>
+                      </details>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted">
+                  {t("contentQuality.bookDetail.noCombinedAiHistory")}
+                </p>
+              )}
+            </section>
 
-              {selectedScan ? (
-                <div className="mt-5 border-t border-border pt-4">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <h3 className="font-semibold text-ink">
-                      {t("contentQuality.bookDetail.selectedScanHeading", {
-                        status: t(
-                          `contentQuality.scanStatuses.${selectedScan.status}`,
-                          undefined,
-                          selectedScan.status,
-                        ),
-                      })}
-                    </h3>
-                    <span className="font-mono text-xs text-muted">
-                      {selectedScan.id}
-                    </span>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-5">
-                    {[
+            {/* Selected Scan Details */}
+            {selectedScan ? (
+              <section className="rounded-xl border border-border bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-extrabold text-ink">
+                    {t("contentQuality.bookDetail.selectedScanHeading", {
+                      status: t(
+                        `contentQuality.scanStatuses.${selectedScan.status}`,
+                        undefined,
+                        selectedScan.status,
+                      ),
+                    })}
+                  </h3>
+                  <span className="font-mono text-[11px] text-muted">
+                    {selectedScan.id}
+                  </span>
+                </div>
+                <div className="mt-2.5 flex flex-wrap gap-2 text-xs tabular-nums">
+                  {(
+                    [
                       [
                         t("contentQuality.bookDetail.scanStats.totalPages"),
                         selectedScan.total_pages,
@@ -2535,128 +2991,120 @@ export function AdminBookContentQualityScreen() {
                         ),
                         selectedScan.ai_unavailable_pages,
                       ],
-                    ].map(([label, value]) => (
-                      <div
-                        className="rounded-control bg-canvas p-3"
-                        key={String(label)}
-                      >
-                        <p className="text-xs text-muted">{label}</p>
-                        <p className="mt-1 text-lg font-semibold tabular-nums text-ink">
-                          {formatNumber(Number(value))}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                  <p className="mt-3 text-xs text-muted">
-                    {t("contentQuality.bookDetail.aiCompletedNote", {
-                      count: formatNumber(selectedScan.ai_completed_pages),
-                    })}
-                  </p>
-                  {selectedScan.error_summary ? (
-                    <p className="mt-2 text-sm text-danger">
-                      {selectedScan.error_summary}
-                    </p>
-                  ) : null}
-
-                  <div className="mt-4 grid gap-4">
-                    {selectedScan.pages.map((page) => (
-                      <article
-                        className="rounded-control border border-border p-4"
-                        key={page.id}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <h4 className="font-semibold text-ink">
-                              {t(
-                                "contentQuality.bookDetail.pageNumberHeading",
-                                {
-                                  pageNumber: formatNumber(page.page_number),
-                                },
-                              )}
-                            </h4>
-                            <p className="mt-1 text-xs text-muted">
-                              {t(
-                                `contentQuality.pageScanStatuses.${page.status}`,
-                                undefined,
-                                page.status,
-                              )}
-                              {` · ${t("contentQuality.bookDetail.rulePrefix")} `}
-                              {page.rule_check_status}
-                              {` · ${t("contentQuality.bookDetail.aiPrefix")} `}
-                              {t(
-                                `contentQuality.aiCheckStatuses.${page.ai_analysis_status}`,
-                                undefined,
-                                page.ai_analysis_status,
-                              )}
-                            </p>
-                            {page.page_revision_id ? (
-                              <p className="mt-1 break-all font-mono text-xs text-muted">
-                                {t(
-                                  "contentQuality.bookDetail.sourceRevisionPrefix",
-                                )}{" "}
-                                {page.page_revision_id}
-                              </p>
-                            ) : null}
-                            {page.error_summary ? (
-                              <p className="mt-2 text-sm text-danger">
-                                {page.error_summary}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {page.page_id ? (
-                              <Link
-                                className="inline-flex min-h-10 items-center rounded-control border border-border px-3 text-sm font-semibold text-primary hover:bg-canvas"
-                                href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(page.page_id)}${page.page_revision_id ? `?revisionId=${encodeURIComponent(page.page_revision_id)}` : ""}`}
-                              >
-                                {t("contentQuality.bookDetail.checkAndFixPage")}
-                              </Link>
-                            ) : null}
-                            {page.status === "FAILED" ||
-                            page.status === "STALE" ||
-                            page.ai_analysis_status === "UNAVAILABLE" ||
-                            page.ai_analysis_status === "FAILED" ? (
-                              <Button
-                                className="h-10 w-auto px-3 text-sm"
-                                disabled={busyKey === `retry:${page.id}`}
-                                onClick={() =>
-                                  void retryPage(selectedScan.id, page.id)
-                                }
-                                variant="secondary"
-                              >
-                                {t("contentQuality.bookDetail.rescanPage")}
-                              </Button>
-                            ) : null}
-                          </div>
-                        </div>
-                        {page.findings.length ? (
-                          <div className="mt-4 grid gap-3">
-                            {page.findings.map((finding) => (
-                              <FindingCard
-                                bookId={selectedBook.book_id}
-                                busy={busyKey === `finding:${finding.id}`}
-                                finding={finding}
-                                key={finding.id}
-                                onUpdate={updateFinding}
-                              />
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="mt-3 text-sm text-muted">
-                            {page.status === "COMPLETED"
-                              ? t("contentQuality.bookDetail.noFindingThisScan")
-                              : t("contentQuality.bookDetail.noScanResultYet")}
-                          </p>
-                        )}
-                      </article>
-                    ))}
-                  </div>
+                    ] as const
+                  ).map(([label, value]) => (
+                    <AdminBadge key={String(label)} tone="neutral">
+                      {label}: {formatNumber(Number(value))}
+                    </AdminBadge>
+                  ))}
                 </div>
-              ) : null}
-            </section>
-          ) : null}
-        </div>
-      ) : null}
+                <p className="mt-2.5 text-xs text-muted">
+                  {t("contentQuality.bookDetail.aiCompletedNote", {
+                    count: formatNumber(selectedScan.ai_completed_pages),
+                  })}
+                </p>
+                {selectedScan.error_summary ? (
+                  <p className="mt-2 text-xs font-semibold text-danger">
+                    {selectedScan.error_summary}
+                  </p>
+                ) : null}
+
+                <div className="mt-3.5 grid gap-3">
+                  {selectedScan.pages.map((page) => (
+                    <article
+                      className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
+                      key={page.id}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="text-sm font-bold text-ink">
+                            {t("contentQuality.bookDetail.pageNumberHeading", {
+                              pageNumber: formatNumber(page.page_number),
+                            })}
+                          </h4>
+                          <p className="mt-0.5 text-xs text-muted">
+                            {t(
+                              `contentQuality.pageScanStatuses.${page.status}`,
+                              undefined,
+                              page.status,
+                            )}
+                            {` · ${t("contentQuality.bookDetail.rulePrefix")} `}
+                            {page.rule_check_status}
+                            {` · ${t("contentQuality.bookDetail.aiPrefix")} `}
+                            {t(
+                              `contentQuality.aiCheckStatuses.${page.ai_analysis_status}`,
+                              undefined,
+                              page.ai_analysis_status,
+                            )}
+                          </p>
+                          {page.page_revision_id ? (
+                            <p className="mt-0.5 break-all font-mono text-[11px] text-muted">
+                              {t(
+                                "contentQuality.bookDetail.sourceRevisionPrefix",
+                              )}{" "}
+                              {page.page_revision_id}
+                            </p>
+                          ) : null}
+                          {page.error_summary ? (
+                            <p className="mt-1.5 text-xs font-semibold text-danger">
+                              {page.error_summary}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {page.page_id ? (
+                            <ButtonLink
+                              href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(page.page_id)}${page.page_revision_id ? `?revisionId=${encodeURIComponent(page.page_revision_id)}` : ""}`}
+                              size="admin"
+                              variant="outline"
+                            >
+                              {t("contentQuality.bookDetail.checkAndFixPage")}
+                            </ButtonLink>
+                          ) : null}
+                          {page.status === "FAILED" ||
+                          page.status === "STALE" ||
+                          page.ai_analysis_status === "UNAVAILABLE" ||
+                          page.ai_analysis_status === "FAILED" ? (
+                            <Button
+                              disabled={busyKey === `retry:${page.id}`}
+                              onClick={() =>
+                                void retryPage(selectedScan.id, page.id)
+                              }
+                              size="admin"
+                              variant="secondary"
+                            >
+                              {t("contentQuality.bookDetail.rescanPage")}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+                      {page.findings.length ? (
+                        <div className="mt-3 grid gap-2.5">
+                          {page.findings.map((finding) => (
+                            <FindingCard
+                              bookId={selectedBook.book_id}
+                              busy={busyKey === `finding:${finding.id}`}
+                              finding={finding}
+                              key={finding.id}
+                              onUpdate={updateFinding}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-muted">
+                          {page.status === "COMPLETED"
+                            ? t("contentQuality.bookDetail.noFindingThisScan")
+                            : t("contentQuality.bookDetail.noScanResultYet")}
+                        </p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+      </AdminDrawer>
     </section>
   );
 }

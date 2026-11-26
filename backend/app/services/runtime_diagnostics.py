@@ -6,6 +6,8 @@ No secret, model path or command line appears in the returned evidence.
 """
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import importlib.util
 import httpx
 from urllib.parse import quote
@@ -14,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+import weakref
 from functools import lru_cache
 from typing import Any
 
@@ -23,8 +26,46 @@ from app.database.config import (
     SUPABASE_URL,
     supabase_admin_headers,
 )
+from app.services import worker_telemetry
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig
 from app.services.worker_telemetry import get_worker_telemetry
+
+_REAL_HTTPX_ASYNC_CLIENT = httpx.AsyncClient
+_STORAGE_HTTP_CLIENTS: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, httpx.AsyncClient
+] = weakref.WeakKeyDictionary()
+_STORAGE_HEALTH_CACHE_TTL_SECONDS = 15.0
+_STORAGE_HEALTH_CACHE: tuple[float, tuple[str, str, str], dict[str, str]] | None = None
+
+
+def clear_storage_health_cache() -> None:
+    """Clear the 15s RAM TTL cache for Storage health probes (for tests or manual refresh)."""
+    global _STORAGE_HEALTH_CACHE
+    _STORAGE_HEALTH_CACHE = None
+
+
+def _get_pooled_storage_http_client() -> httpx.AsyncClient | None:
+    """Return a loop-bound pooled httpx.AsyncClient unless httpx.AsyncClient is monkeypatched."""
+    if httpx.AsyncClient is not _REAL_HTTPX_ASYNC_CLIENT:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    client = _STORAGE_HTTP_CLIENTS.get(loop)
+    if client is None or getattr(client, "is_closed", False):
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(2.5, connect=1.5),
+            follow_redirects=False,
+            trust_env=False,
+            limits=httpx.Limits(
+                max_connections=8,
+                max_keepalive_connections=4,
+                keepalive_expiry=30.0,
+            ),
+        )
+        _STORAGE_HTTP_CLIENTS[loop] = client
+    return client
 
 
 def _package_installed(name: str) -> bool:
@@ -51,15 +92,29 @@ def derive_operational_state(
     last_error: str | None = None,
     quota_exhausted: bool = False,
 ) -> str:
-    """Map legacy health triad + detail/queue/quota telemetry to a 7-value operational_state."""
+    """Map health triad + detail/queue/quota telemetry to the canonical 10-value operational_state."""
     if quota_exhausted or (last_error and "QUOTA" in str(last_error).upper()):
         return "Quota exhausted"
     if detail_status == "disabled":
         return "Offline"
+    if detail_status == "local_only":
+        return "Local only"
+    if detail_status == "remote_delegated":
+        return "Standby"
+    if detail_status == "standby":
+        if status == "UNAVAILABLE":
+            return "Offline"
+        if queue_depth is not None and queue_depth > 0 and not last_error:
+            return "Queued"
+        return "Standby"
     if status == "UNAVAILABLE":
         return "Offline"
     if status in {"HEALTHY", "DEGRADED"} and queue_depth is not None and queue_depth > 0 and not last_error:
         return "Queued"
+    if detail_status == "scheduled" and status == "HEALTHY":
+        return "Scheduled"
+    if detail_status in {"cached", "client_side", "cloud_ready"} and status == "HEALTHY":
+        return "Healthy"
     if detail_status == "unknown" and status == "DEGRADED":
         return "Unknown"
     if status == "DEGRADED":
@@ -154,48 +209,93 @@ def collect_ocr_health() -> list[dict[str, str]]:
     return [paddle, viet, tesseract, vietnamese]
 
 
-async def probe_storage_health() -> dict[str, str]:
-    """A read-only HEAD of the configured bucket; no object listing or downloads."""
+async def probe_storage_health(*, bypass_cache: bool = False) -> dict[str, str]:
+    """A read-only HEAD of the configured bucket with loop-pooled HTTP client and 15s RAM TTL cache."""
+    global _STORAGE_HEALTH_CACHE
+    core_meta = {
+        "service_group": "core",
+        "execution_mode": "always_on",
+        "criticality": "core",
+    }
     if not (SUPABASE_URL and SUPABASE_STORAGE_BUCKET and SUPABASE_ADMIN_KEY):
-        return _health_item(
-            "storage", "Supabase Storage", "UNAVAILABLE", "failed",
-            "Thiếu cấu hình kết nối Supabase Storage.",
-        )
+        return {
+            **_health_item(
+                "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+                "Thiếu cấu hình kết nối Supabase Storage.",
+            ),
+            **core_meta,
+        }
+
+    key_digest = hashlib.sha256(str(SUPABASE_ADMIN_KEY).encode("utf-8")).hexdigest()[:16]
+    cache_key = (str(SUPABASE_URL).rstrip("/"), str(SUPABASE_STORAGE_BUCKET), key_digest)
+    now_mono = time.monotonic()
+    if not bypass_cache and _STORAGE_HEALTH_CACHE is not None:
+        expires_at, cached_key, cached_item = _STORAGE_HEALTH_CACHE
+        if cached_key == cache_key and now_mono < expires_at:
+            return dict(cached_item)
+
     try:
         url = (
             f"{SUPABASE_URL.rstrip('/')}/storage/v1/bucket/"
             f"{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
         )
         headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(2.5, connect=1.5),
-            follow_redirects=False, trust_env=False,
-        ) as client:
-            response = await client.head(url, headers=headers)
+        pooled = _get_pooled_storage_http_client()
+        if pooled is not None:
+            response = await pooled.head(url, headers=headers)
+        else:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(2.5, connect=1.5),
+                follow_redirects=False, trust_env=False,
+            ) as client:
+                response = await client.head(url, headers=headers)
         if response.status_code == 200:
-            return _health_item(
-                "storage", "Supabase Storage", "HEALTHY", "healthy",
-                "Storage phản hồi kiểm tra bucket (không đọc file).",
-            )
-        if response.status_code in {401, 403}:
-            return _health_item(
-                "storage", "Supabase Storage", "UNAVAILABLE", "failed",
-                "Storage từ chối quyền kiểm tra bucket.",
-            )
-        if response.status_code == 404:
-            return _health_item(
-                "storage", "Supabase Storage", "UNAVAILABLE", "failed",
-                "Không tìm thấy bucket Storage đã cấu hình.",
-            )
-        return _health_item(
-            "storage", "Supabase Storage", "DEGRADED", "unknown",
-            "Storage chưa phản hồi trạng thái bucket hợp lệ.",
-        )
+            item = {
+                **_health_item(
+                    "storage", "Supabase Storage", "HEALTHY", "healthy",
+                    "Storage phản hồi kiểm tra bucket (không đọc file).",
+                ),
+                **core_meta,
+            }
+        elif response.status_code in {401, 403}:
+            item = {
+                **_health_item(
+                    "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+                    "Storage từ chối quyền kiểm tra bucket.",
+                ),
+                **core_meta,
+            }
+        elif response.status_code == 404:
+            item = {
+                **_health_item(
+                    "storage", "Supabase Storage", "UNAVAILABLE", "failed",
+                    "Không tìm thấy bucket Storage đã cấu hình.",
+                ),
+                **core_meta,
+            }
+        else:
+            item = {
+                **_health_item(
+                    "storage", "Supabase Storage", "DEGRADED", "unknown",
+                    "Storage chưa phản hồi trạng thái bucket hợp lệ.",
+                ),
+                **core_meta,
+            }
     except (httpx.HTTPError, TimeoutError, ValueError, OSError):
-        return _health_item(
-            "storage", "Supabase Storage", "DEGRADED", "unknown",
-            "Chưa xác minh được kết nối Storage; vui lòng thử lại.",
-        )
+        item = {
+            **_health_item(
+                "storage", "Supabase Storage", "DEGRADED", "unknown",
+                "Chưa xác minh được kết nối Storage; vui lòng thử lại.",
+            ),
+            **core_meta,
+        }
+
+    _STORAGE_HEALTH_CACHE = (
+        time.monotonic() + _STORAGE_HEALTH_CACHE_TTL_SECONDS,
+        cache_key,
+        dict(item),
+    )
+    return item
 
 
 _WORKER_LABELS = {
@@ -264,114 +364,315 @@ def collect_worker_health(workers: dict[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
-def _age_seconds(ts_val: Any, now: Any) -> float | None:
-    from datetime import timezone
+def _normalize_utc_timestamp(ts_val: Any) -> Any:
+    from datetime import datetime, timezone
 
     if ts_val is None:
         return None
-    if getattr(ts_val, "tzinfo", None) is None:
-        ts_val = ts_val.replace(tzinfo=timezone.utc)
-    return round(max(0.0, (now - ts_val).total_seconds()), 1)
+    if isinstance(ts_val, str):
+        cleaned = ts_val.strip()
+        if not cleaned:
+            return None
+        if cleaned.endswith("Z"):
+            cleaned = cleaned[:-1] + "+00:00"
+        try:
+            ts_val = datetime.fromisoformat(cleaned)
+        except ValueError:
+            return None
+    if isinstance(ts_val, datetime) and ts_val.tzinfo is None:
+        return ts_val.replace(tzinfo=timezone.utc)
+    return ts_val
 
 
-async def collect_worker_queue_metrics(db: Any, *, now: Any | None = None) -> dict[str, dict[str, Any]]:
-    """Read-only aggregate queue depth, oldest pending age, and last DB activity per worker."""
-    from datetime import datetime, timezone
-    from sqlalchemy import text
+def _age_seconds(ts_val: Any, now: Any) -> float | None:
+    normalized = _normalize_utc_timestamp(ts_val)
+    if normalized is None:
+        return None
+    return round(max(0.0, (now - normalized).total_seconds()), 1)
 
-    ts = now or datetime.now(timezone.utc)
-    metrics: dict[str, dict[str, Any]] = {}
 
-    queries: dict[str, str] = {
-        "ocr_worker": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING'))::int AS queue_depth,
-                MIN(created_at) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')) AS oldest_pending,
-                MAX(completed_at) FILTER (WHERE status = 'SUCCEEDED') AS last_success
-            FROM public.ocr_inference_jobs
+_NON_OCR_WORKER_QUEUE_BRANCHES: tuple[tuple[str, str], ...] = (
+    (
+        "parent_book_submission",
+        """
+        SELECT
+            'parent_book_submission'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE workflow_status = 'CHECKING'), 0)::int AS queue_depth,
+            MIN(created_at) FILTER (WHERE workflow_status = 'CHECKING')::timestamptz AS oldest_pending,
+            MAX(updated_at) FILTER (WHERE workflow_status IN ('PASSED_READY_TO_ADD','NEEDS_ADMIN_REVIEW','PENDING_ADMIN','ADDED_TO_BOOK'))::timestamptz AS last_success
+        FROM public.parent_book_page_submissions
         """,
-        "parent_book_submission": """
-            SELECT
-                COUNT(*) FILTER (WHERE workflow_status = 'CHECKING')::int AS queue_depth,
-                MIN(created_at) FILTER (WHERE workflow_status = 'CHECKING') AS oldest_pending,
-                MAX(updated_at) FILTER (WHERE workflow_status IN ('PASSED_READY_TO_ADD','NEEDS_ADMIN_REVIEW','PENDING_ADMIN','ADDED_TO_BOOK')) AS last_success
-            FROM public.parent_book_page_submissions
+    ),
+    (
+        "book_quality",
+        """
+        SELECT
+            'book_quality'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING')), 0)::int AS queue_depth,
+            MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING'))::timestamptz AS oldest_pending,
+            MAX(completedat) FILTER (WHERE status IN ('COMPLETED','PARTIAL'))::timestamptz AS last_success
+        FROM public.bookqualityscanruns
         """,
-        "book_quality": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING'))::int AS queue_depth,
-                MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING')) AS oldest_pending,
-                MAX(completedat) FILTER (WHERE status IN ('COMPLETED','PARTIAL')) AS last_success
-            FROM public.bookqualityscanruns
+    ),
+    (
+        "admin_ai_workflow",
+        """
+        SELECT
+            'admin_ai_workflow'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY')), 0)::int AS queue_depth,
+            MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY'))::timestamptz AS oldest_pending,
+            MAX(updatedat) FILTER (WHERE status IN ('READY_FOR_ADMIN_REVIEW','VERIFIED'))::timestamptz AS last_success
+        FROM public.adminaiworkflows
         """,
-        "admin_ai_workflow": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY'))::int AS queue_depth,
-                MIN(createdat) FILTER (WHERE status IN ('QUEUED','RUNNING','RETRY')) AS oldest_pending,
-                MAX(updatedat) FILTER (WHERE status IN ('READY_FOR_ADMIN_REVIEW','VERIFIED')) AS last_success
-            FROM public.adminaiworkflows
+    ),
+    (
+        "viread_ocr_outbox",
+        """
+        SELECT
+            'viread_ocr_outbox'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING')), 0)::int AS queue_depth,
+            MIN(created_at) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING'))::timestamptz AS oldest_pending,
+            MAX(updated_at) FILTER (WHERE status = 'DONE')::timestamptz AS last_success
+        FROM public.viread_ocr_outbox
         """,
-        "viread_ocr_outbox": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING'))::int AS queue_depth,
-                MIN(created_at) FILTER (WHERE status IN ('PENDING','RETRY','PROCESSING')) AS oldest_pending,
-                MAX(updated_at) FILTER (WHERE status = 'DONE') AS last_success
-            FROM public.viread_ocr_outbox
+    ),
+    (
+        "viread_ocr_training",
+        """
+        SELECT
+            'viread_ocr_training'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')), 0)::int AS queue_depth,
+            MIN(created_at) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB'))::timestamptz AS oldest_pending,
+            MAX(updated_at) FILTER (WHERE status = 'COMPLETED')::timestamptz AS last_success
+        FROM public.viread_ocr_training_jobs
         """,
-        "viread_ocr_training": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB'))::int AS queue_depth,
-                MIN(created_at) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')) AS oldest_pending,
-                MAX(updated_at) FILTER (WHERE status = 'COMPLETED') AS last_success
-            FROM public.viread_ocr_training_jobs
+    ),
+    (
+        "reading_reminder",
+        """
+        SELECT
+            'reading_reminder'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING')), 0)::int AS queue_depth,
+            MIN(scheduledfor) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING'))::timestamptz AS oldest_pending,
+            MAX(emailsentat) FILTER (WHERE emailstatus = 'SENT')::timestamptz AS last_success
+        FROM public.readingreminderoccurrences
         """,
-        "reading_reminder": """
-            SELECT
-                COUNT(*) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING'))::int AS queue_depth,
-                MIN(scheduledfor) FILTER (WHERE emailstatus IN ('PENDING','RETRY','SENDING')) AS oldest_pending,
-                MAX(emailsentat) FILTER (WHERE emailstatus = 'SENT') AS last_success
-            FROM public.readingreminderoccurrences
+    ),
+    (
+        "reading_presence",
+        """
+        SELECT
+            'reading_presence'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('PENDING','SENDING')), 0)::int AS queue_depth,
+            MIN(dueat) FILTER (WHERE status IN ('PENDING','SENDING'))::timestamptz AS oldest_pending,
+            MAX(sentat) FILTER (WHERE status = 'SENT')::timestamptz AS last_success
+        FROM public.readingpresencealerts
         """,
-        "reading_presence": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('PENDING','SENDING'))::int AS queue_depth,
-                MIN(dueat) FILTER (WHERE status IN ('PENDING','SENDING')) AS oldest_pending,
-                MAX(sentat) FILTER (WHERE status = 'SENT') AS last_success
-            FROM public.readingpresencealerts
+    ),
+    (
+        "karaoke_processing",
+        """
+        SELECT
+            'karaoke_processing'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING')), 0)::int AS queue_depth,
+            MIN(created_at) FILTER (WHERE status IN ('QUEUED','RUNNING'))::timestamptz AS oldest_pending,
+            MAX(finished_at) FILTER (WHERE status IN ('READY','NEEDS_REVIEW','APPLIED'))::timestamptz AS last_success
+        FROM public.karaoke_processing_jobs
         """,
-        "karaoke_processing": """
-            SELECT
-                COUNT(*) FILTER (WHERE status IN ('QUEUED','RUNNING'))::int AS queue_depth,
-                MIN(created_at) FILTER (WHERE status IN ('QUEUED','RUNNING')) AS oldest_pending,
-                MAX(finished_at) FILTER (WHERE status IN ('READY','NEEDS_REVIEW','APPLIED')) AS last_success
-            FROM public.karaoke_processing_jobs
+    ),
+    (
+        "active_model_registry",
+        """
+        SELECT
+            'active_model_registry'::text AS worker_key,
+            0::int AS queue_depth,
+            NULL::timestamptz AS oldest_pending,
+            MAX(updated_at)::timestamptz AS last_success
+        FROM public.viread_ocr_active_model
         """,
-        "active_model_registry": """
-            SELECT
-                0::int AS queue_depth,
-                NULL::timestamptz AS oldest_pending,
-                MAX(updated_at) AS last_success
-            FROM public.viread_ocr_active_model
-        """,
+    ),
+)
+
+_OCR_WORKER_QUEUE_BRANCH: tuple[str, str] = (
+    "ocr_worker",
+    """
+    SELECT
+        'ocr_worker'::text AS worker_key,
+        COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')), 0)::int AS queue_depth,
+        MIN(created_at) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING'))::timestamptz AS oldest_pending,
+        MAX(completed_at) FILTER (WHERE status = 'SUCCEEDED')::timestamptz AS last_success
+    FROM public.ocr_inference_jobs
+    """,
+)
+
+
+def _sqlite_portable_sql(sql: str) -> str:
+    return (
+        sql.replace("public.", "")
+        .replace("::text", "")
+        .replace("::int", "")
+        .replace("::timestamptz", "")
+    )
+
+
+def _row_to_metric(row: Any, ts: Any) -> dict[str, Any]:
+    return {
+        "queue_depth": int(row.get("queue_depth") or 0),
+        "oldest_pending_job_age_seconds": _age_seconds(row.get("oldest_pending"), ts),
+        "last_success_at": _normalize_utc_timestamp(row.get("last_success")),
+        "last_error": None,
     }
 
-    for worker_key, sql in queries.items():
+
+async def _execute_worker_queue_metrics_on_session(
+    session: Any,
+    *,
+    ts: Any,
+    include_ocr_worker: bool,
+    timeout: float,
+) -> dict[str, dict[str, Any]]:
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    branches = (
+        (_OCR_WORKER_QUEUE_BRANCH, *_NON_OCR_WORKER_QUEUE_BRANCHES)
+        if include_ocr_worker
+        else _NON_OCR_WORKER_QUEUE_BRANCHES
+    )
+    is_real_session = isinstance(session, AsyncSession)
+    is_sqlite = False
+    if is_real_session:
+        bind = getattr(session, "bind", None)
+        dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+        is_sqlite = str(dialect_name).lower() == "sqlite"
+        if not session.in_transaction() and not is_sqlite:
+            await session.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+
+    union_sql = "\nUNION ALL\n".join(
+        _sqlite_portable_sql(sql) if is_sqlite else sql for _k, sql in branches
+    )
+
+    metrics: dict[str, dict[str, Any]] = {}
+    try:
+        rows = (
+            await asyncio.wait_for(session.execute(text(union_sql)), timeout=timeout)
+        ).mappings().all()
+        for row in rows:
+            wkey = str(row.get("worker_key") or "").strip()
+            if wkey:
+                metrics[wkey] = _row_to_metric(row, ts)
+        return metrics
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # Fallback for minimal SQLite test DBs that omit one or more tables.
+        if is_real_session and session.in_transaction():
+            try:
+                await session.rollback()
+            except Exception:
+                pass
+
+    for worker_key, sql in branches:
+        candidate_sql = _sqlite_portable_sql(sql) if is_sqlite else sql
         try:
-            async with db.begin_nested():
-                row = (await db.execute(text(sql))).mappings().first()
+            if is_real_session and session.in_transaction():
+                async with session.begin_nested():
+                    row = (
+                        await asyncio.wait_for(
+                            session.execute(text(candidate_sql)), timeout=min(2.0, timeout)
+                        )
+                    ).mappings().first()
+            else:
+                row = (
+                    await asyncio.wait_for(
+                        session.execute(text(candidate_sql)), timeout=min(2.0, timeout)
+                    )
+                ).mappings().first()
             if row is not None:
-                last_succ = row.get("last_success")
-                if last_succ is not None and getattr(last_succ, "tzinfo", None) is None:
-                    last_succ = last_succ.replace(tzinfo=timezone.utc)
-                metrics[worker_key] = {
-                    "queue_depth": int(row.get("queue_depth") or 0),
-                    "oldest_pending_job_age_seconds": _age_seconds(row.get("oldest_pending"), ts),
-                    "last_success_at": last_succ,
-                    "last_error": None,
-                }
+                metrics[worker_key] = _row_to_metric(row, ts)
+        except asyncio.CancelledError:
+            raise
         except Exception:
+            if not is_sqlite:
+                # Retry portable SQL once in case a fake/mock SQLite session wasn't detected via bind.dialect.
+                try:
+                    row = (
+                        await asyncio.wait_for(
+                            session.execute(text(_sqlite_portable_sql(sql))),
+                            timeout=min(2.0, timeout),
+                        )
+                    ).mappings().first()
+                    if row is not None:
+                        metrics[worker_key] = _row_to_metric(row, ts)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    continue
             continue
     return metrics
+
+
+async def collect_worker_queue_metrics(
+    db: Any = None,
+    *,
+    now: Any | None = None,
+    include_ocr_worker: bool = False,
+    timeout: float = 5.0,
+) -> dict[str, dict[str, Any]]:
+    """Read-only aggregate queue depth, oldest pending age, and last DB activity via 1-RTT UNION ALL."""
+    from datetime import datetime, timezone
+
+    ts = now or datetime.now(timezone.utc)
+    if db is None:
+        from app.database.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as session:
+            return await _execute_worker_queue_metrics_on_session(
+                session,
+                ts=ts,
+                include_ocr_worker=include_ocr_worker,
+                timeout=timeout,
+            )
+    return await _execute_worker_queue_metrics_on_session(
+        db,
+        ts=ts,
+        include_ocr_worker=include_ocr_worker,
+        timeout=timeout,
+    )
+
+
+async def collect_persisted_worker_heartbeats(
+    db: Any = None,
+    *,
+    timeout: float = 3.0,
+) -> dict[str, dict[str, Any]]:
+    """Safely read persisted worker heartbeats on an AUTOCOMMIT session (fail-safe {})."""
+    reader = getattr(worker_telemetry, "read_persisted_worker_heartbeats", None)
+    if not callable(reader):
+        return {}
+    try:
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        if db is None:
+            from app.database.session import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as session:
+                if isinstance(session, AsyncSession) and not session.in_transaction():
+                    await session.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+                result = await asyncio.wait_for(reader(session), timeout=timeout)
+                return dict(result) if isinstance(result, dict) else {}
+
+        if isinstance(db, AsyncSession) and not db.in_transaction():
+            bind = getattr(db, "bind", None)
+            dialect_name = str(getattr(getattr(bind, "dialect", None), "name", "")).lower()
+            if dialect_name != "sqlite":
+                await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+        result = await asyncio.wait_for(reader(db), timeout=timeout)
+        return dict(result) if isinstance(result, dict) else {}
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return {}
 
 
 def runtime_configuration_diagnostics(*, include_ocr: bool = True) -> dict[str, bool | None]:
@@ -497,7 +798,8 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
     )
 
     remote_probe_degraded = False
-    if is_remote_worker_wakeup_configured():
+    wakeup_configured = is_remote_worker_wakeup_configured()
+    if wakeup_configured:
         passive_probe = await probe_configured_remote_ocr_worker_health()
         if isinstance(passive_probe, dict) and passive_probe.get("online"):
             is_synthetic_scale_to_zero = passive_probe.get("standby_mode") == "scale_to_zero"
@@ -530,6 +832,7 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
     out: dict[str, Any] = {
         "mode": "remote_worker",
         "ready": any_online_ready,
+        "wakeup_configured": wakeup_configured,
         "heartbeat_ttl_seconds": ttl_seconds,
         "engines": latest_online_engines,
         "workers": serialized_workers,
