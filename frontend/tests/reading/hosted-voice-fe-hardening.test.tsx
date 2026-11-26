@@ -249,10 +249,8 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
         }
         return bytes.buffer;
       };
-      let lastFile = "";
       workerGlobal.fetch = async (url: string) => {
         const name = String(url).split("/").pop() || "";
-        lastFile = name;
         const size = specSizes[name]?.bytes ?? 0;
         return {
           ok: true,
@@ -262,7 +260,12 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
       };
       workerGlobal.crypto = {
         subtle: {
-          digest: async () => shaHexToBytes(specSizes[lastFile].sha),
+          digest: async (_alg: string, buf: ArrayBuffer) => {
+            const matched = Object.values(specSizes).find(
+              (entry) => entry.bytes === buf.byteLength,
+            );
+            return shaHexToBytes(matched?.sha ?? specSizes["tokens.txt"].sha);
+          },
         },
       };
       workerGlobal.importScripts = () => {

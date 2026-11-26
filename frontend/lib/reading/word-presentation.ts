@@ -33,25 +33,33 @@ export const wordPresentationLabels: Record<WordPresentationState, string> = {
   uncertain: "Chưa nghe rõ",
 };
 
+// Zero-Layout-Shift Invariant:
+// Every presentation state MUST preserve exact token box geometry (x, y, width, height).
+// Token base class fixes `font-bold` (from parent <p>) and `border-b-4`; states may ONLY
+// change colors, border-bottom color/style, ring/shadow, or text-decoration — NEVER
+// font-weight, font-size, padding, margin, or border-width.
 export const wordPresentationClasses: Record<WordPresentationState, string> = {
-  unread: "",
-  current:
-    "bg-yellow-200/60 ring-2 ring-yellow-500 border-b-4 border-amber-600 font-semibold",
+  unread: "border-b-transparent",
+  current: "bg-yellow-200/60 ring-2 ring-yellow-500 border-b-amber-600",
   "preview-correct":
-    "bg-emerald-50 text-emerald-950 border-b-2 border-dashed border-emerald-500",
+    "bg-emerald-50 text-emerald-950 border-dashed border-b-emerald-500",
   correct:
-    "bg-success-surface text-success-ink border-b-2 border-solid border-emerald-700/60",
-  incorrect: "bg-red-200 text-red-900 ring-1 ring-red-500",
-  omission: "bg-red-200 text-red-900 ring-1 ring-red-500",
-  repeated: "bg-purple-200 text-purple-900 ring-1 ring-purple-500",
-  hesitation: "bg-purple-200 text-purple-900 ring-1 ring-purple-500",
+    "bg-success-surface text-success-ink border-solid border-b-emerald-700/60",
+  incorrect: "bg-red-200 text-red-900 ring-1 ring-red-500 border-b-red-500",
+  omission: "bg-red-200 text-red-900 ring-1 ring-red-500 border-b-transparent",
+  repeated:
+    "bg-purple-200 text-purple-900 ring-1 ring-purple-500 border-b-transparent",
+  hesitation:
+    "bg-purple-200 text-purple-900 ring-1 ring-purple-500 border-b-transparent",
   "self-corrected":
-    "bg-green-200 text-green-900 ring-2 ring-green-600 ring-offset-2",
-  unresolved: "bg-red-200 text-red-900 ring-2 ring-red-600",
+    "bg-green-200 text-green-900 ring-2 ring-green-600 ring-offset-2 border-b-transparent",
+  unresolved:
+    "bg-red-200 text-red-900 ring-2 ring-red-600 border-b-transparent",
   // Not colour alone: dotted underline marks "the app read this one for you".
   assisted:
-    "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4",
-  uncertain: "bg-slate-100 text-slate-700 ring-1 ring-slate-400",
+    "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4 border-b-transparent",
+  uncertain:
+    "bg-slate-100 text-slate-700 ring-1 ring-slate-400 border-b-transparent",
 };
 
 export function getWordPresentationLabel(state: WordPresentationState): string {

@@ -79,7 +79,9 @@
       "american": "מבטא אמריקאי",
       "british": "מבטא בריטי"
     },
-    "googleProviderLabel": "גיבוי של Google"
+    "googleProviderLabel": "גיבוי של Google",
+    "sessionLockedBadge": "נעול למפגש קריאה זה",
+    "offlineBrowserBadge": "הדפדפן במצב לא מקוון"
   },
   "engineBadge": {
     "ariaLabel": "מקור דיבור: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "מטמון רגיל",
       "android_native": "Android (vi-VN)",
       "google_cloud": "מקוון (Google API)",
-      "browser_default": "מקוון (Google / דפדפן)"
-    }
+      "browser_default": "מקוון (Google / דפדפן)",
+      "idle": "בודק…"
+    },
+    "idleDetail": "{base} (בודק את מצב מנוע הקול)"
   },
   "playback": {
     "unavailable": "הקול במכשיר אינו זמין כרגע. ההורים והילד יכולים לעקוב אחר הטקסט שעל המסך וללחוץ על 'נסה שוב'.",

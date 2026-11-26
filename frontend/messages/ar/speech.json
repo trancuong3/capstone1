@@ -79,7 +79,9 @@
       "american": "لهجة أمريكية",
       "british": "لهجة بريطانية"
     },
-    "googleProviderLabel": "احتياطي Google"
+    "googleProviderLabel": "احتياطي Google",
+    "sessionLockedBadge": "مقفل لجلسة القراءة هذه",
+    "offlineBrowserBadge": "المتصفح غير متصل بالإنترنت"
   },
   "engineBadge": {
     "ariaLabel": "مصدر الصوت: STT {stt}، TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "ذاكرة التخزين المؤقت القياسية",
       "android_native": "Android (vi-VN)",
       "google_cloud": "عبر الإنترنت (Google API)",
-      "browser_default": "عبر الإنترنت (Google / المتصفح)"
-    }
+      "browser_default": "عبر الإنترنت (Google / المتصفح)",
+      "idle": "جارٍ الفحص…"
+    },
+    "idleDetail": "{base} (جارٍ فحص حالة محرك الصوت)"
   },
   "playback": {
     "unavailable": "الصوت على الجهاز غير جاهز بعد. يمكن لولي الأمر والطفل متابعة النص على الشاشة والنقر على إعادة المحاولة.",

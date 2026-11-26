@@ -35,6 +35,13 @@ class ReadingPageWordDTO(BaseModel):
     # Default keeps responses compatible with legacy rows and test fixtures.
     line_index: int = Field(default=0, ge=0)
 
+
+class ReadingPageWordTimingDTO(BaseModel):
+    index: int = Field(ge=0)
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(ge=0, allow_inf_nan=False)
+
+
 class ReadingPageDTO(BaseModel):
     page_id: UUID
     page_revision_id: UUID
@@ -46,6 +53,10 @@ class ReadingPageDTO(BaseModel):
     image_url: Optional[str] = None
     # Deterministic public precomputed TTS MP3 URL strictly for verified public catalog pages.
     tts_audio_url: Optional[str] = None
+    # Optional precomputed word timings & voice metadata for instant Tier-1 synced playback.
+    tts_word_timings: Optional[list[ReadingPageWordTimingDTO]] = None
+    tts_voice_id: Optional[str] = None
+    tts_cached_speed: Optional[float] = None
     # Legacy or edited geometry has no measured, content-bound proof.
     image_overlay_safe: bool = False
     illustration_url: Optional[str] = None

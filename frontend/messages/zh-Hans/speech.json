@@ -79,7 +79,9 @@
       "american": "美式口音",
       "british": "英式口音"
     },
-    "googleProviderLabel": "Google 备用"
+    "googleProviderLabel": "Google 备用",
+    "sessionLockedBadge": "已锁定用于本次阅读",
+    "offlineBrowserBadge": "浏览器当前离线"
   },
   "engineBadge": {
     "ariaLabel": "语音源：STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "标准缓存",
       "android_native": "Android (vi-VN)",
       "google_cloud": "在线 (Google API)",
-      "browser_default": "在线 (Google/浏览器)"
-    }
+      "browser_default": "在线 (Google/浏览器)",
+      "idle": "检测中…"
+    },
+    "idleDetail": "{base} (正在检测语音引擎状态)"
   },
   "playback": {
     "unavailable": "设备语音尚未就绪。请家长和孩子查看屏幕文字并点击重试。",
