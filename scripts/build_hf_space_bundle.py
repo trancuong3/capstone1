@@ -22,6 +22,7 @@ FORBIDDEN_SUFFIXES = frozenset({".wasm", ".pth", ".pt", ".onnx", ".pdparams", ".
 
 REQUIRED_RELATIVE_FILES: tuple[str, ...] = (
     "ocr_worker/__init__.py",
+    "ocr_worker/prebake.py",
     "ocr_worker/requirements.txt",
     "ocr_worker/service.py",
     "ocr_worker/worker.py",
@@ -65,6 +66,14 @@ Standalone Vietnamese 3-engine OCR worker (**PaddleOCR 2.7.3** + **VietOCR 0.3.1
 
 HF_SPACE_DOCKERFILE = """FROM python:3.12-slim
 
+LABEL org.opencontainers.image.source="https://github.com/trancuong3/capstone1"
+LABEL org.opencontainers.image.description="ViRead 0-cost 3-engine Vietnamese OCR worker (PaddleOCR + VietOCR FLOW1_EXTERNAL_TRDG + Tesseract vie)"
+
+ARG PREBAKE_CHECKPOINT_URL=""
+ARG PREBAKE_CHECKPOINT_SHA256="200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6"
+ARG PREBAKE_CONFIG_URL=""
+ARG PREBAKE_CONFIG_SHA256="140f4b4a0b1036b074cf7d661e18d8e26303f8a3f5457a700187a9ec101cfb3c"
+
 ENV PYTHONDONTWRITEBYTECODE=1 \\
     PYTHONUNBUFFERED=1 \\
     OMP_NUM_THREADS=2 \\
@@ -77,6 +86,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \\
     VIREAD_OCR_BACKEND_TIMEOUT_SECONDS=75 \\
     HOME=/home/user \\
     PADDLEOCR_HOME=/home/user/.paddleocr \\
+    XDG_CACHE_HOME=/tmp/.cache \\
+    MPLCONFIGDIR=/tmp/matplotlib \\
+    TORCH_HOME=/tmp/torch \\
+    VIREAD_OCR_PREBAKED_MODEL_DIR=/home/user/viread-models \\
     VIREAD_OCR_MODEL_CACHE_DIR=/tmp/viread-models \\
     PORT=7860 \\
     PYTHONPATH=/app:/app/backend
@@ -90,10 +103,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \\
     fonts-dejavu-core \\
     && rm -rf /var/lib/apt/lists/*
 
-# Create Hugging Face Spaces mandatory UID 1000 user with writable $HOME and cache dirs.
+# Create UID 1000 user with writable $HOME, prebaked model dir, and /tmp cache dirs.
 RUN useradd -m -u 1000 user \\
-    && mkdir -p /app /home/user/.paddleocr /home/user/.cache /tmp/viread-models \\
-    && chown -R 1000:1000 /app /home/user /tmp/viread-models
+    && mkdir -p /app /home/user/.paddleocr /home/user/.cache /home/user/viread-models /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models \\
+    && chown -R 1000:1000 /app /home/user /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models
 
 WORKDIR /app
 
@@ -126,6 +139,9 @@ USER 1000
 
 # Pre-warm PaddleOCR ~16.34 MB det/rec/cls weights into /home/user/.paddleocr under UID 1000.
 RUN python -c "import torch, paddle; from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=False, lang='vi', det_algorithm='DB', show_log=False)"
+
+# Optionally pre-bake SHA-256 verified FLOW1_EXTERNAL_TRDG checkpoint for zero-egress cold starts.
+RUN python -m ocr_worker.prebake
 
 EXPOSE 7860
 

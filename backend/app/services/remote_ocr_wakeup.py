@@ -37,6 +37,12 @@ DEFAULT_STALE_QUEUED_NUDGE_COOLDOWN_SECONDS = 15.0
 DEFAULT_ACTIVE_BURST_SUPPRESS_SECONDS = 45.0
 DEFAULT_CRON_KEEPWARM_INTERVAL_SECONDS = 12 * 3600.0
 DEFAULT_DNS_VALIDATION_TTL_SECONDS = 60.0
+DEFAULT_SCALE_TO_ZERO_CONNECT_TIMEOUT_SECONDS = 45.0
+DEFAULT_SCALE_TO_ZERO_DRAIN_TIMEOUT_SECONDS = 240.0
+EXPECTED_FLOW1_TRDG_SHA256 = (
+    "200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6"
+)
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
 
 _HEALTH_CACHE: tuple[float, str, dict[str, Any] | None, bool] | None = None
 _HEALTH_LOCKS: dict[int, asyncio.Lock] = {}
@@ -44,6 +50,8 @@ _LAST_WAKE_SENT: tuple[str, float] | None = None
 _LAST_WAKE_ATTEMPT_AT: tuple[str, float] | None = None
 _LAST_CRON_KEEPWARM_AT: float = 0.0
 _DNS_SAFE_CACHE: dict[str, tuple[float, bool]] = {}
+_IN_FLIGHT_WAKE_URLS: set[str] = set()
+_PENDING_REWAKE_URLS: set[str] = set()
 _WAKEUP_TASKS: set[asyncio.Task[Any]] = set()
 _CUSTOM_TRANSPORT: httpx.AsyncBaseTransport | None = None
 
@@ -65,6 +73,8 @@ def clear_remote_ocr_wakeup_cache_for_tests() -> None:
     _LAST_CRON_KEEPWARM_AT = 0.0
     _DNS_SAFE_CACHE.clear()
     _HEALTH_LOCKS.clear()
+    _IN_FLIGHT_WAKE_URLS.clear()
+    _PENDING_REWAKE_URLS.clear()
 
 
 def _loop_health_lock() -> asyncio.Lock:
@@ -184,6 +194,65 @@ def is_remote_worker_wakeup_configured() -> bool:
     return get_configured_remote_ocr_worker_url() is not None
 
 
+def is_remote_ocr_scale_to_zero_enabled() -> bool:
+    """Return True when remote OCR worker runs on a scale-to-zero platform (ACA / Cloud Run).
+
+    Requires both a valid remote worker URL and >=32-char worker token so passive health
+    never reports synthetic readiness when `/wakeup?drain=true` cannot authenticate.
+    """
+    raw = (os.getenv("VIREAD_OCR_REMOTE_SCALE_TO_ZERO") or "").strip().lower()
+    if raw not in _TRUTHY_VALUES:
+        return False
+    if get_configured_remote_ocr_worker_url() is None:
+        return False
+    worker_token = (os.getenv("VIREAD_OCR_WORKER_TOKEN") or "").strip()
+    return len(worker_token) >= 32
+
+
+def is_remote_ocr_wakeup_in_flight(base_url: str | None = None) -> bool:
+    resolved = base_url or get_configured_remote_ocr_worker_url()
+    if not resolved:
+        return False
+    return resolved in _IN_FLIGHT_WAKE_URLS
+
+
+def build_scale_to_zero_standby_health_snapshot(
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Build synthetic `<1ms` standby health without waking a cold 4 GiB container."""
+    resolved = base_url or get_configured_remote_ocr_worker_url() or ""
+    host = (urlsplit(resolved).hostname or "scale-to-zero")[:120]
+    in_flight = bool(resolved and resolved in _IN_FLIGHT_WAKE_URLS)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    standby_engines = {
+        eng_id: {
+            "status": "HEALTHY",
+            "detail_status": "loaded",
+            "installed": True,
+            "loaded": True,
+            "inference_verified": True,
+        }
+        for eng_id in ("paddleocr", "vietocr", "tesseract_vie")
+    }
+    return {
+        "worker_id": "remote-ocr-scale-to-zero",
+        "hostname": host,
+        "status": "BUSY" if in_flight else "IDLE",
+        "standby_mode": "scale_to_zero",
+        "online": True,
+        "ready": True,
+        "last_heartbeat_at": now_iso,
+        "age_seconds": 0.0,
+        "active_job_count": 1 if in_flight else 0,
+        "concurrency_limit": 1,
+        "model_profile": "FLOW1_EXTERNAL_TRDG",
+        "model_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+        "app_version": None,
+        "git_sha": None,
+        "engines": standby_engines,
+    }
+
+
 def _hf_space_bearer_headers() -> dict[str, str]:
     token = (
         os.getenv("VIREAD_HF_SPACE_TOKEN")
@@ -258,7 +327,11 @@ def _normalize_remote_health_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def peek_cached_remote_ocr_worker_health() -> tuple[bool, dict[str, Any] | None]:
     """Return `(cache_valid, cached_value)` without performing any network I/O."""
     base_url = get_configured_remote_ocr_worker_url()
-    if not base_url or _HEALTH_CACHE is None:
+    if not base_url:
+        return False, None
+    if is_remote_ocr_scale_to_zero_enabled():
+        return True, build_scale_to_zero_standby_health_snapshot(base_url)
+    if _HEALTH_CACHE is None:
         return False, None
     expires_at, cached_url, cached_val, _degraded = _HEALTH_CACHE
     if cached_url == base_url and time.monotonic() < expires_at:
@@ -268,6 +341,8 @@ def peek_cached_remote_ocr_worker_health() -> tuple[bool, dict[str, Any] | None]
 
 def peek_remote_ocr_probe_degraded() -> bool:
     """Return True when the most recent `/health` probe saw a waking/warming Space (5xx/timeout/ready=False)."""
+    if is_remote_ocr_scale_to_zero_enabled():
+        return False
     base_url = get_configured_remote_ocr_worker_url()
     if not base_url or _HEALTH_CACHE is None:
         return False
@@ -285,6 +360,9 @@ async def probe_configured_remote_ocr_worker_health(
     base_url = get_configured_remote_ocr_worker_url()
     if not base_url:
         return None
+    if is_remote_ocr_scale_to_zero_enabled():
+        # Never wake a cold 4 GiB Azure Container App / Cloud Run instance on passive health checks.
+        return build_scale_to_zero_standby_health_snapshot(base_url)
 
     if not force_refresh:
         valid, cached = peek_cached_remote_ocr_worker_health()
@@ -357,10 +435,10 @@ async def send_remote_ocr_wakeup(
     *,
     reason: str = "job_enqueued",
     job_id: str | None = None,
-    timeout_seconds: float = 8.0,
+    timeout_seconds: float | None = None,
     bypass_coalesce: bool = False,
 ) -> bool:
-    """Send authenticated `POST <worker>/wakeup` to wake Quiet Standby worker immediately."""
+    """Send authenticated `POST <worker>/wakeup` (or `/wakeup?drain=true` on scale-to-zero)."""
     global _LAST_WAKE_SENT, _LAST_WAKE_ATTEMPT_AT
     base_url = get_configured_remote_ocr_worker_url()
     if not base_url:
@@ -370,54 +448,112 @@ async def send_remote_ocr_wakeup(
         logger.debug("Skipping remote OCR /wakeup: VIREAD_OCR_WORKER_TOKEN not configured.")
         return False
 
+    scale_to_zero = is_remote_ocr_scale_to_zero_enabled()
+    is_poll_nudge = str(reason or "").endswith("_nudge")
+
+    # Track single-flight BEFORE any `await` so concurrent enqueues / poll nudges never fire
+    # duplicate `/wakeup?drain=true` HTTP requests while one is already in-flight.
+    if base_url in _IN_FLIGHT_WAKE_URLS:
+        if not is_poll_nudge:
+            _PENDING_REWAKE_URLS.add(base_url)
+        return True
+
     now_mono = time.monotonic()
     if (
-        not bypass_coalesce
+        not scale_to_zero
+        and not bypass_coalesce
         and _LAST_WAKE_SENT is not None
         and _LAST_WAKE_SENT[0] == base_url
         and (now_mono - _LAST_WAKE_SENT[1]) < DEFAULT_WAKE_COALESCE_SECONDS
     ):
         return True
 
-    if not await _validate_production_target_dns(base_url):
-        return False
+    _IN_FLIGHT_WAKE_URLS.add(base_url)
+    try:
+        current_reason = str(reason)[:64]
+        current_job_id = str(job_id)[:64] if job_id else None
+        any_succeeded = False
+        max_followups = 3
+        followup_count = 0
 
-    _LAST_WAKE_ATTEMPT_AT = (base_url, now_mono)
-    headers = {
-        "Accept": "application/json",
-        "X-ViRead-Ocr-Worker-Token": worker_token,
-        **_hf_space_bearer_headers(),
-    }
-    body: dict[str, Any] = {"reason": str(reason)[:64]}
-    if job_id:
-        body["job_id"] = str(job_id)[:64]
+        while True:
+            if not await _validate_production_target_dns(base_url):
+                _PENDING_REWAKE_URLS.discard(base_url)
+                return False
 
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(timeout_seconds, connect=min(4.0, timeout_seconds)),
-                follow_redirects=False,
-                trust_env=False,
-                transport=_CUSTOM_TRANSPORT,
-            ) as client:
-                resp = await client.post(f"{base_url}/wakeup", headers=headers, json=body)
-            if resp.status_code == 200:
-                _LAST_WAKE_SENT = (base_url, time.monotonic())
-                return True
-            if 300 <= resp.status_code < 400:
-                logger.warning(
-                    "Refusing HTTP %s redirect from VIREAD_OCR_REMOTE_WORKER_URL /wakeup.",
-                    resp.status_code,
+            _LAST_WAKE_ATTEMPT_AT = (base_url, time.monotonic())
+            headers = {
+                "Accept": "application/json",
+                "X-ViRead-Ocr-Worker-Token": worker_token,
+                **_hf_space_bearer_headers(),
+            }
+            body: dict[str, Any] = {"reason": current_reason}
+            if current_job_id:
+                body["job_id"] = current_job_id
+
+            target_url = f"{base_url}/wakeup?drain=true" if scale_to_zero else f"{base_url}/wakeup"
+            if timeout_seconds is not None:
+                resolved_timeout = httpx.Timeout(
+                    float(timeout_seconds),
+                    connect=min(
+                        DEFAULT_SCALE_TO_ZERO_CONNECT_TIMEOUT_SECONDS if scale_to_zero else 4.0,
+                        float(timeout_seconds),
+                    ),
                 )
-                return False
-            if resp.status_code in (401, 403, 404):
-                logger.warning("Remote OCR /wakeup rejected with HTTP %s.", resp.status_code)
-                return False
-        except Exception as exc:
-            logger.debug("Remote OCR /wakeup attempt %s error: %s", attempt + 1, type(exc).__name__)
-        if attempt == 0:
-            await asyncio.sleep(1.0)
-    return False
+            elif scale_to_zero:
+                resolved_timeout = httpx.Timeout(
+                    DEFAULT_SCALE_TO_ZERO_DRAIN_TIMEOUT_SECONDS,
+                    connect=DEFAULT_SCALE_TO_ZERO_CONNECT_TIMEOUT_SECONDS,
+                    read=DEFAULT_SCALE_TO_ZERO_DRAIN_TIMEOUT_SECONDS,
+                    write=15.0,
+                    pool=15.0,
+                )
+            else:
+                resolved_timeout = httpx.Timeout(8.0, connect=4.0)
+
+            cycle_ok = False
+            for attempt in range(2):
+                try:
+                    async with httpx.AsyncClient(
+                        timeout=resolved_timeout,
+                        follow_redirects=False,
+                        trust_env=False,
+                        transport=_CUSTOM_TRANSPORT,
+                    ) as client:
+                        resp = await client.post(target_url, headers=headers, json=body)
+                    if resp.status_code == 200:
+                        _LAST_WAKE_SENT = (base_url, time.monotonic())
+                        cycle_ok = True
+                        break
+                    if 300 <= resp.status_code < 400:
+                        logger.warning(
+                            "Refusing HTTP %s redirect from VIREAD_OCR_REMOTE_WORKER_URL /wakeup.",
+                            resp.status_code,
+                        )
+                        _PENDING_REWAKE_URLS.discard(base_url)
+                        return False
+                    if resp.status_code in (401, 403, 404):
+                        logger.warning("Remote OCR /wakeup rejected with HTTP %s.", resp.status_code)
+                        _PENDING_REWAKE_URLS.discard(base_url)
+                        return False
+                except Exception as exc:
+                    logger.debug(
+                        "Remote OCR /wakeup attempt %s error: %s", attempt + 1, type(exc).__name__
+                    )
+                if attempt == 0:
+                    await asyncio.sleep(1.0)
+
+            any_succeeded = any_succeeded or cycle_ok
+            if base_url in _PENDING_REWAKE_URLS and followup_count < max_followups:
+                _PENDING_REWAKE_URLS.discard(base_url)
+                followup_count += 1
+                current_reason = "pending_rewake"
+                current_job_id = None
+                continue
+            _PENDING_REWAKE_URLS.discard(base_url)
+            return any_succeeded
+    finally:
+        _IN_FLIGHT_WAKE_URLS.discard(base_url)
 
 
 async def _has_online_idle_cuda_worker() -> bool:
@@ -616,6 +752,8 @@ def maybe_nudge_ocr_wakeup_for_stale_queued_job(
     worker_token = (os.getenv("VIREAD_OCR_WORKER_TOKEN") or "").strip()
     if len(worker_token) < 32:
         return None
+    if base_url in _IN_FLIGHT_WAKE_URLS:
+        return None
 
     if created_at is not None:
         created_utc = (
@@ -627,9 +765,11 @@ def maybe_nudge_ocr_wakeup_for_stale_queued_job(
         if age < max(0.0, float(min_age_seconds)):
             return None
 
+    scale_to_zero = is_remote_ocr_scale_to_zero_enabled()
     now_mono = time.monotonic()
     if (
-        _LAST_WAKE_SENT is not None
+        not scale_to_zero
+        and _LAST_WAKE_SENT is not None
         and _LAST_WAKE_SENT[0] == base_url
         and (now_mono - _LAST_WAKE_SENT[1]) < max(5.0, float(active_burst_suppress_seconds))
     ):
@@ -666,7 +806,7 @@ async def maybe_keep_warm_hf_space_from_cron(
 ) -> bool:
     """Send at most one passive `/health` ping per 12h during `/internal/cron/dispatch`."""
     global _LAST_CRON_KEEPWARM_AT
-    if not is_remote_worker_wakeup_configured():
+    if not is_remote_worker_wakeup_configured() or is_remote_ocr_scale_to_zero_enabled():
         return False
     now_mono = time.monotonic()
     if (

@@ -2,6 +2,12 @@
 
 Tài liệu này hướng dẫn cấu hình hoàn chỉnh để **ViRead Web (`Vercel`)** và **ViRead Android** quét OCR trang sách (`/book-scanner`, `/admin/books`, `/my-books`) **24/7 khi tắt laptop hoàn toàn** với **0 VNĐ/tháng**, không cần thẻ tín dụng, giữ nguyên 100% chất lượng bộ 3 engine (**PaddleOCR 2.7.3 + VietOCR 0.3.12 `FLOW1_EXTERNAL_TRDG` + Tesseract 5 `vie`**), và **không gây nghẽn Render Free (512 MB / 750 giờ / NullPool) hay ảnh hưởng STT/TTS offline**.
 
+> [!IMPORTANT]
+> **Cập nhật chính sách Hugging Face (HTTP `402` — Yêu cầu PRO cho Docker Space mới)**:
+> Hiện tại Hugging Face trả về lỗi `HTTP 402` (*"hosting Gradio and Docker Spaces on free cpu-basic requires a PRO subscription"*) đối với các tài khoản miễn phí khi tạo mới Docker Space.
+> - **Khuyên dùng số 1 (0 thẻ tín dụng, khóa cứng 0 VNĐ)**: Xem hướng dẫn triển khai tự động bằng 1 lệnh PowerShell tại **[`docs/AZURE_STUDENTS_ZERO_COST_OCR_DEPLOYMENT.md`](AZURE_STUDENTS_ZERO_COST_OCR_DEPLOYMENT.md)** (dùng email sinh viên `.edu.vn`, ~1,500–3,500+ trang/tháng).
+> - Tài liệu bên dưới vẫn giữ nguyên cho các tài khoản đã có sẵn Space cũ hoặc có gói HF PRO/Team, kèm theo cấu hình chuẩn 0 VNĐ trên **Google Cloud Run Always Free (`us-west1`) / Modal / Leapcell**.
+
 ---
 
 ## 1. Kiến trúc Chống Nghẽn & 0 VNĐ
@@ -54,21 +60,22 @@ python scripts/push_hf_space.py --space-id "<ten-user-hf>/viread-ocr-worker" --s
    - `VIREAD_OCR_WORKER_TOKEN` = `<CHUOI_BI_MAT_TOI_THIEU_32_KY_TU>`
 4. Tải toàn bộ tệp trong `.runtime/hf-ocr-space-bundle` lên Space. Sau ~4–6 phút build xong, trạng thái Space chuyển sang **Running** trên cổng `7860` (`UID 1000`).
 
-> **Lưu ý cập nhật chính sách Hugging Face (2026) & Phương án dự phòng 0 VNĐ**:
-> Trên một số tài khoản cá nhân mới của Hugging Face, việc tạo mới Docker Space có thể yêu cầu gói PRO/Team (HTTP `402`) hoặc trên Space `Private` cần gửi `VIREAD_HF_SPACE_TOKEN` (hoặc đặt visibility `Protected` nếu có PRO). Nếu tài khoản Hugging Face của bạn bị giới hạn tạo mới Docker Space, bạn có thể đẩy **chính xác cùng thư mục `.runtime/hf-ocr-space-bundle`** lên **Google Cloud Run Always Free** (`x86_64`, 2 vCPU, 4 GiB RAM, miễn phí 360,000 GiB-giây/tháng = **0 VNĐ**, tự scale-to-zero khi rỗi và tự thức dậy qua cơ chế `POST /wakeup` + tự phục hồi `queued_poll_nudge` đã tích hợp sẵn):
+> **Lưu ý cập nhật chính sách Hugging Face (`HTTP 402`) & Các phương án Scale-to-Zero 0 VNĐ**:
+> Nếu tài khoản Hugging Face của bạn trả về `HTTP 402` khi tạo Docker Space mới:
+> 1. **Phương án khuyên dùng (0 thẻ tín dụng, khóa cứng 0đ)**: Triển khai lên **Azure for Students (`Azure Container Apps`)** theo hướng dẫn chi tiết tại [`docs/AZURE_STUDENTS_ZERO_COST_OCR_DEPLOYMENT.md`](AZURE_STUDENTS_ZERO_COST_OCR_DEPLOYMENT.md) (`.\scripts\azure\Deploy-ViReadAzureOcrWorker.ps1`).
+> 2. **Phương án Google Cloud Run Always Free (`us-west1` / `us-central1` / `us-east1` — 360,000 GiB-giây + 180,000 vCPU-giây miễn phí/tháng)** hoặc **Modal ($30/tháng free compute) / Leapcell**:
 > ```bash
-> python scripts/build_hf_space_bundle.py
 > gcloud run deploy viread-ocr-worker \
->   --source .runtime/hf-ocr-space-bundle \
->   --region asia-southeast1 \
->   --memory 4Gi --cpu 2 --port 7860 \
+>   --image ghcr.io/trancuong3/viread-ocr-worker:latest \
+>   --region us-west1 \
+>   --memory 4Gi --cpu 2 --port 7860 --timeout 300 \
 >   --min-instances 0 --max-instances 1 \
->   --no-cpu-throttling \
+>   --concurrency 2 \
 >   --allow-unauthenticated \
->   --set-env-vars "VIREAD_OCR_BACKEND_URL=https://capstone1-ssd8.onrender.com,VIREAD_OCR_QUIET_STANDBY=true,VIREAD_OCR_WAKE_BURST_SECONDS=90" \
+>   --set-env-vars "VIREAD_OCR_BACKEND_URL=https://capstone1-ssd8.onrender.com,VIREAD_OCR_QUIET_STANDBY=true,VIREAD_OCR_SCALE_TO_ZERO=true,VIREAD_OCR_SKIP_STARTUP_SMOKE=true,VIREAD_OCR_WORKER_MODEL_PROFILE=FLOW1_EXTERNAL_TRDG,VIREAD_OCR_WORKER_MODEL_SHA256=200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6" \
 >   --set-secrets "VIREAD_OCR_WORKER_TOKEN=viread-ocr-worker-token:latest"
 > ```
-> *(Endpoint `/wakeup` tự bảo vệ bằng `X-ViRead-Ocr-Worker-Token` so sánh hằng thời gian `hmac.compare_digest`, và `/health` không lộ bất kỳ bí mật nào.)*
+> *(Khi dùng nền tảng scale-to-zero như Azure Container Apps / Cloud Run / Leapcell, nhớ đặt thêm `VIREAD_OCR_REMOTE_SCALE_TO_ZERO=true` trên Render để `/health` không đánh thức container khi rỗi và tự động rút cạn hàng đợi đồng bộ qua `POST /wakeup?drain=true`!)*
 
 ---
 
