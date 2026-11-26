@@ -617,11 +617,11 @@ class OcrRuntimeManager:
     git_sha: str = field(default_factory=resolve_git_sha)
 
     def __post_init__(self) -> None:
-        self._drain_lock = threading.Lock()
         self._cycle_lock = threading.Lock()
         self._inference_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._wake_event = threading.Event()
+        self._draining: bool = False
         self._pending_redrain: bool = False
         self._burst_until_monotonic: float = 0.0
         self._standby_mode: str = "active_polling"
@@ -651,14 +651,46 @@ class OcrRuntimeManager:
     def cycle_lock(self) -> threading.Lock:
         return self._cycle_lock
 
-    def try_acquire_drain(self) -> bool:
-        return self._drain_lock.acquire(blocking=False)
-
-    def release_drain(self) -> None:
-        self._drain_lock.release()
-
     def is_draining(self) -> bool:
-        return self._drain_lock.locked()
+        with self._state_lock:
+            return self._draining
+
+    def try_begin_drain_or_mark_pending(self, *, reason: str) -> tuple[bool, int, str]:
+        """Atomically acquire single-flight drain ownership or mark a pending redrain."""
+        with self._state_lock:
+            self._wakeup_count += 1
+            self._last_wakeup_reason = str(reason)[:64]
+            wake_count = self._wakeup_count
+            if self._draining:
+                self._pending_redrain = True
+                mode = self._standby_mode
+                acquired = False
+            else:
+                self._draining = True
+                self._pending_redrain = False
+                self._standby_mode = "draining"
+                mode = self._standby_mode
+                acquired = True
+        if not acquired:
+            self._wake_event.set()
+        return acquired, wake_count, mode
+
+    def finish_drain_or_continue(self, *, idle_mode: str) -> tuple[bool, str]:
+        """Atomically either consume a pending redrain or release drain ownership."""
+        with self._state_lock:
+            if self._pending_redrain:
+                self._pending_redrain = False
+                self._standby_mode = "draining"
+                return True, self._standby_mode
+            self._draining = False
+            self._standby_mode = idle_mode
+            return False, self._standby_mode
+
+    def abort_drain(self, *, idle_mode: str) -> None:
+        with self._state_lock:
+            self._draining = False
+            self._pending_redrain = False
+            self._standby_mode = idle_mode
 
     def mark_pending_redrain(self) -> None:
         with self._state_lock:
@@ -1403,13 +1435,10 @@ def build_worker_http_app(
                 reason=reason_val,
             )
 
-        if not runtime.try_acquire_drain():
-            runtime.mark_pending_redrain()
-            with runtime._state_lock:
-                runtime._wakeup_count += 1
-                runtime._last_wakeup_reason = str(reason_val)[:64]
-                wake_count = runtime._wakeup_count
-                mode = runtime._standby_mode
+        acquired, wake_count, mode = runtime.try_begin_drain_or_mark_pending(
+            reason=reason_val
+        )
+        if not acquired:
             return {
                 "ok": True,
                 "woken": True,
@@ -1421,51 +1450,46 @@ def build_worker_http_app(
                 "wakeup_count": wake_count,
             }
 
-        try:
-            with runtime._state_lock:
-                runtime._wakeup_count += 1
-                runtime._last_wakeup_reason = str(reason_val)[:64]
-                runtime._standby_mode = "draining"
-                wake_count = runtime._wakeup_count
-
-            if drain_runner is None:
-                idle_mode = "scale_to_zero" if is_scale_to_zero_enabled() else "quiet_standby"
-                runtime.set_standby_mode(idle_mode)
-                return {
-                    "ok": True,
-                    "woken": True,
-                    "drained": True,
-                    "already_draining": False,
-                    "drained_jobs": 0,
-                    "worker_id": runtime.worker_id,
-                    "standby_mode": idle_mode,
-                    "wakeup_count": wake_count,
-                }
-
-            try:
-                drained_count = await asyncio.to_thread(drain_runner, reason_val)
-            except Exception as exc:
-                idle_mode = "scale_to_zero" if is_scale_to_zero_enabled() else "quiet_standby"
-                runtime.set_standby_mode(idle_mode)
-                logger.warning("Synchronous /wakeup drain error: %s", type(exc).__name__)
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="OCR worker synchronous drain cycle failed.",
-                ) from None
-
-            with runtime._state_lock:
-                mode = runtime._standby_mode
+        idle_mode = "scale_to_zero" if is_scale_to_zero_enabled() else "quiet_standby"
+        if drain_runner is None:
+            runtime.abort_drain(idle_mode=idle_mode)
             return {
                 "ok": True,
                 "woken": True,
                 "drained": True,
                 "already_draining": False,
-                "drained_jobs": int(drained_count),
+                "drained_jobs": 0,
                 "worker_id": runtime.worker_id,
-                "standby_mode": mode,
+                "standby_mode": idle_mode,
                 "wakeup_count": wake_count,
             }
-        finally:
-            runtime.release_drain()
+
+        drained_total = 0
+        try:
+            while True:
+                drained_total += int(await asyncio.to_thread(drain_runner, reason_val))
+                should_continue, mode = runtime.finish_drain_or_continue(idle_mode=idle_mode)
+                if not should_continue:
+                    break
+        except BaseException as exc:
+            runtime.abort_drain(idle_mode=idle_mode)
+            if isinstance(exc, Exception):
+                logger.warning("Synchronous /wakeup drain error: %s", type(exc).__name__)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="OCR worker synchronous drain cycle failed.",
+                ) from None
+            raise
+
+        return {
+            "ok": True,
+            "woken": True,
+            "drained": True,
+            "already_draining": False,
+            "drained_jobs": drained_total,
+            "worker_id": runtime.worker_id,
+            "standby_mode": mode,
+            "wakeup_count": wake_count,
+        }
 
     return app

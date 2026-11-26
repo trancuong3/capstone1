@@ -8,9 +8,10 @@ interface CachedEntry {
 }
 
 interface InflightRead {
-  readonly promise: Promise<unknown>;
+  promise: Promise<unknown>;
   readonly controller: AbortController;
   waiters: number;
+  invalidated: boolean;
 }
 
 const readCache = new Map<string, CachedEntry>();
@@ -18,6 +19,7 @@ const inflightReads = new Map<string, InflightRead>();
 const resetListeners = new Set<() => void>();
 let activeActorScope = "anon";
 let crossRequestCacheEnabled = false;
+let cacheEpoch = 0;
 
 const NON_CACHEABLE_PATH_PATTERNS = [
   // Catalog availability, draft revisions and signed playback can change externally.
@@ -46,7 +48,7 @@ export function registerCacheResetListener(listener: () => void): void {
 
 export function resetAllApiCachesForTests(): void {
   crossRequestCacheEnabled = false;
-  clearApiReadCache();
+  resetApiReadCacheForActorSwitch();
   setApiReadCacheActorScope(null);
   for (const listener of resetListeners) {
     listener();
@@ -105,16 +107,40 @@ export function setApiReadCacheActorScope(
   const nextScope = userId ? `usr:${userId}` : "anon";
   if (nextScope !== activeActorScope) {
     activeActorScope = nextScope;
-    clearApiReadCache();
+    resetApiReadCacheForActorSwitch();
   }
 }
 
-export function clearApiReadCache(): void {
+/**
+ * Invalidates cached GET responses after a mutation or refresh without aborting
+ * unrelated in-flight reads. In-flight reads started before this epoch will not
+ * repopulate the cache when they settle.
+ */
+export function invalidateApiReadCache(): void {
+  cacheEpoch += 1;
   readCache.clear();
   for (const entry of inflightReads.values()) {
+    entry.invalidated = true;
+  }
+  inflightReads.clear();
+}
+
+/**
+ * Clears cached reads AND aborts all in-flight reads. Call ONLY on logout,
+ * actor switch, or test teardown.
+ */
+export function resetApiReadCacheForActorSwitch(): void {
+  cacheEpoch += 1;
+  readCache.clear();
+  for (const entry of inflightReads.values()) {
+    entry.invalidated = true;
     entry.controller.abort();
   }
   inflightReads.clear();
+}
+
+export function clearApiReadCache(): void {
+  invalidateApiReadCache();
 }
 
 export function invalidateApiReadCacheByPrefix(prefix: string): void {
@@ -123,6 +149,14 @@ export function invalidateApiReadCacheByPrefix(prefix: string): void {
     const path = separator >= 0 ? key.slice(separator + 1) : key;
     if (path.startsWith(prefix)) {
       readCache.delete(key);
+    }
+  }
+  for (const [key, entry] of inflightReads.entries()) {
+    const separator = key.indexOf("|", key.indexOf("|") + 1);
+    const path = separator >= 0 ? key.slice(separator + 1) : key;
+    if (path.startsWith(prefix)) {
+      entry.invalidated = true;
+      inflightReads.delete(key);
     }
   }
 }
@@ -214,13 +248,26 @@ export async function runCoalescedApiGet<T>(
     }
   }
 
+  const capturedScope = activeActorScope;
+  const capturedEpoch = cacheEpoch;
   const key = buildCacheKey(path, accessToken);
   let entry = inflightReads.get(key);
   if (!entry) {
     const controller = new AbortController();
+    const inflightEntry: InflightRead = {
+      promise: Promise.resolve(),
+      controller,
+      waiters: 0,
+      invalidated: false,
+    };
     const promise = loader(controller.signal)
       .then((result) => {
-        if (!options.bypassCache) {
+        if (
+          !options.bypassCache &&
+          !inflightEntry.invalidated &&
+          capturedEpoch === cacheEpoch &&
+          capturedScope === activeActorScope
+        ) {
           setCachedApiRead(
             path,
             accessToken,
@@ -231,16 +278,13 @@ export async function runCoalescedApiGet<T>(
         return result;
       })
       .finally(() => {
-        if (inflightReads.get(key) === entry) {
+        if (inflightReads.get(key) === inflightEntry) {
           inflightReads.delete(key);
         }
       });
 
-    entry = {
-      promise,
-      controller,
-      waiters: 0,
-    };
+    inflightEntry.promise = promise;
+    entry = inflightEntry;
     inflightReads.set(key, entry);
   }
 
@@ -254,7 +298,9 @@ export async function runCoalescedApiGet<T>(
       if (entry) {
         entry.waiters = Math.max(0, entry.waiters - 1);
         if (entry.waiters === 0) {
-          inflightReads.delete(key);
+          if (inflightReads.get(key) === entry) {
+            inflightReads.delete(key);
+          }
           entry.controller.abort();
         }
       }

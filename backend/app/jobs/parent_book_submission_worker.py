@@ -5,11 +5,11 @@ import asyncio
 import logging
 import os
 import socket
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
-from uuid import uuid4
+from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.models import ParentBookPageSubmission
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
@@ -29,6 +29,101 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 _WORKER_KEY = "parent_book_submission"
+LEASE_SECONDS = 900
+HEARTBEAT_SECONDS = 60.0
+
+
+async def _renew_submission_lease(
+    submission_id: UUID,
+    worker_id: str,
+    *,
+    lease_seconds: int = LEASE_SECONDS,
+) -> bool:
+    now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(ParentBookPageSubmission)
+            .where(
+                ParentBookPageSubmission.Id == submission_id,
+                ParentBookPageSubmission.WorkflowStatus == "CHECKING",
+                ParentBookPageSubmission.WorkerId == worker_id,
+                ParentBookPageSubmission.LeaseExpiresAt.is_not(None),
+                ParentBookPageSubmission.LeaseExpiresAt > now,
+            )
+            .values(
+                LeaseExpiresAt=now + timedelta(seconds=lease_seconds),
+                UpdatedAt=now,
+            )
+        )
+        await db.commit()
+        return bool(result.rowcount)
+
+
+async def _release_submission_lease(submission_id: UUID, worker_id: str) -> None:
+    now = datetime.now(timezone.utc)
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                update(ParentBookPageSubmission)
+                .where(
+                    ParentBookPageSubmission.Id == submission_id,
+                    ParentBookPageSubmission.WorkflowStatus == "CHECKING",
+                    ParentBookPageSubmission.WorkerId == worker_id,
+                )
+                .values(
+                    WorkerId=None,
+                    LeaseExpiresAt=None,
+                    UpdatedAt=now,
+                )
+            )
+            await db.commit()
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="parent_book_submission_lease_release_failed",
+            stage="worker",
+            submission_id=str(submission_id),
+            exception=exc,
+        )
+
+
+async def _heartbeat_submission_lease(
+    submission_id: UUID,
+    worker_id: str,
+    stop: asyncio.Event,
+    lease_lost: asyncio.Event,
+    *,
+    heartbeat_seconds: float | None = None,
+    lease_seconds: int = LEASE_SECONDS,
+) -> None:
+    interval = HEARTBEAT_SECONDS if heartbeat_seconds is None else heartbeat_seconds
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            pass
+        try:
+            alive = await _renew_submission_lease(
+                submission_id, worker_id, lease_seconds=lease_seconds
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="parent_book_submission_lease_heartbeat_error",
+                stage="worker",
+                submission_id=str(submission_id),
+                exception=exc,
+            )
+            continue
+        if not alive:
+            lease_lost.set()
+            stop.set()
+            return
 
 
 def _poll_seconds() -> float:
@@ -109,6 +204,7 @@ async def run_once(
         repo = ParentPrivateBookRepository(db)
         claimed = await repo.claim_next_checking_submission(
             worker_name,
+            lease_seconds=LEASE_SECONDS,
             only_post_ocr=post_ocr_only,
         )
         if claimed is None:
@@ -116,15 +212,34 @@ async def run_once(
             return False
         submission_id = claimed.Id
 
-    if post_ocr_only:
-        await run_parent_submission_post_ocr(submission_id)
-    else:
-        from app.services.parent_private_book_pipeline import process_submission_stages
+    stop_heartbeat = asyncio.Event()
+    lease_lost = asyncio.Event()
+    heartbeat_task = asyncio.create_task(
+        _heartbeat_submission_lease(
+            submission_id,
+            worker_name,
+            stop_heartbeat,
+            lease_lost,
+        )
+    )
+    try:
+        if post_ocr_only:
+            await run_parent_submission_post_ocr(submission_id)
+        else:
+            from app.services.parent_private_book_pipeline import process_submission_stages
 
-        async with AsyncSessionLocal() as db:
-            await process_submission_stages(
-                db, submission_id, hooks=hooks, worker_id=worker_name
-            )
+            async with AsyncSessionLocal() as db:
+                await process_submission_stages(
+                    db, submission_id, hooks=hooks, worker_id=worker_name
+                )
+    except asyncio.CancelledError:
+        await _release_submission_lease(submission_id, worker_name)
+        raise
+    finally:
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+
     record_worker_success(_WORKER_KEY)
     return True
 

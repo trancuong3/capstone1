@@ -97,6 +97,7 @@ export function useReadingAutoScroll({
   const programmaticStartRef = useRef(0);
   const programmaticUntilRef = useRef(0);
   const userInteractionAtRef = useRef(0);
+  const lastObservedScrollTopRef = useRef(0);
 
   useEffect(() => {
     getActiveElementRef.current = getActiveElement;
@@ -198,6 +199,10 @@ export function useReadingAutoScroll({
 
     const handleScroll = () => {
       if (!isScrollableContainer(container)) return;
+      const prevScrollTop = lastObservedScrollTopRef.current;
+      const currentScrollTop = container.scrollTop;
+      lastObservedScrollTopRef.current = currentScrollTop;
+      const scrollMoved = Math.abs(currentScrollTop - prevScrollTop) > 2;
       const now = nowMs();
       const hasRecentUserGesture =
         userInteractionAtRef.current > 0 &&
@@ -228,7 +233,10 @@ export function useReadingAutoScroll({
         if (backInCenterBand) {
           setDetachedState(false);
         }
-      } else if (hasRecentUserGesture) {
+      } else if (
+        hasRecentUserGesture ||
+        (outsideProgrammaticWindow && scrollMoved)
+      ) {
         const leftComfortBand =
           relTop < viewHeight * DETACH_TOP_RATIO ||
           relBottom > viewHeight * DETACH_BOTTOM_RATIO;
@@ -238,7 +246,9 @@ export function useReadingAutoScroll({
       }
     };
 
+    lastObservedScrollTopRef.current = container.scrollTop;
     container.addEventListener("wheel", markUserIntent, { passive: true });
+    container.addEventListener("touchstart", markUserIntent, { passive: true });
     container.addEventListener("touchmove", markUserIntent, { passive: true });
     container.addEventListener("pointerdown", handlePointerDown, {
       passive: true,
@@ -248,6 +258,7 @@ export function useReadingAutoScroll({
 
     return () => {
       container.removeEventListener("wheel", markUserIntent);
+      container.removeEventListener("touchstart", markUserIntent);
       container.removeEventListener("touchmove", markUserIntent);
       container.removeEventListener("pointerdown", handlePointerDown);
       container.removeEventListener("keydown", handleKeyDown);

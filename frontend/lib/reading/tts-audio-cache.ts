@@ -15,7 +15,9 @@ export type TtsCacheScope = "CATALOG" | "PRIVATE" | "COACHING";
 
 export const MAX_BROWSER_TTS_CACHE_BYTES = 50 * 1024 * 1024;
 const IDB_NAME = "viread-tts-audio-v1";
+const IDB_VERSION = 2;
 const IDB_STORE = "entries";
+const IDB_META_STORE = "meta";
 
 interface StoredTtsEntry {
   readonly key: string;
@@ -25,6 +27,14 @@ interface StoredTtsEntry {
   readonly buffer: ArrayBuffer;
   readonly createdAt: number;
   readonly cachedSpeed?: number | null;
+  lastAccessedAt: number;
+}
+
+interface StoredTtsMeta {
+  readonly key: string;
+  readonly scope: "CATALOG" | "COACHING";
+  readonly byteSize: number;
+  readonly createdAt: number;
   lastAccessedAt: number;
 }
 
@@ -73,11 +83,43 @@ function openTtsDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
   return new Promise((resolve) => {
     try {
-      const req = indexedDB.open(IDB_NAME, 1);
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(IDB_STORE)) {
           db.createObjectStore(IDB_STORE, { keyPath: "key" });
+        }
+        if (!db.objectStoreNames.contains(IDB_META_STORE)) {
+          const metaStore = db.createObjectStore(IDB_META_STORE, {
+            keyPath: "key",
+          });
+          // Backfill lightweight metadata store when upgrading from v1.
+          try {
+            const upgradeTx = req.transaction;
+            if (upgradeTx && db.objectStoreNames.contains(IDB_STORE)) {
+              const entriesStore = upgradeTx.objectStore(IDB_STORE);
+              const cursorReq = entriesStore.openCursor?.();
+              if (cursorReq) {
+                cursorReq.onsuccess = () => {
+                  const cursor = cursorReq.result;
+                  if (!cursor) return;
+                  const rec = cursor.value as StoredTtsEntry | undefined;
+                  if (rec && typeof rec.key === "string") {
+                    metaStore.put({
+                      key: rec.key,
+                      scope: rec.scope === "COACHING" ? "COACHING" : "CATALOG",
+                      byteSize: rec.byteSize ?? rec.buffer?.byteLength ?? 0,
+                      createdAt: rec.createdAt ?? Date.now(),
+                      lastAccessedAt: rec.lastAccessedAt ?? Date.now(),
+                    } satisfies StoredTtsMeta);
+                  }
+                  cursor.continue();
+                };
+              }
+            }
+          } catch {
+            // Best-effort backfill; fresh writes will populate metadata.
+          }
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -88,6 +130,14 @@ function openTtsDb(): Promise<IDBDatabase | null> {
   });
 }
 
+function safeCloseDb(db: IDBDatabase): void {
+  try {
+    db.close();
+  } catch {
+    // Ignore close errors
+  }
+}
+
 export async function getCachedTtsAudio(key: string): Promise<Blob | null> {
   const db = await openTtsDb();
   if (!db) {
@@ -95,9 +145,20 @@ export async function getCachedTtsAudio(key: string): Promise<Blob | null> {
     return null;
   }
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: Blob | null) => {
+      if (settled) return;
+      settled = true;
+      safeCloseDb(db);
+      resolve(result);
+    };
     try {
-      const tx = db.transaction(IDB_STORE, "readwrite");
+      const hasMetaStore = db.objectStoreNames.contains(IDB_META_STORE);
+      const stores = hasMetaStore ? [IDB_STORE, IDB_META_STORE] : [IDB_STORE];
+      const tx = db.transaction(stores, "readwrite");
       const store = tx.objectStore(IDB_STORE);
+      const metaStore = hasMetaStore ? tx.objectStore(IDB_META_STORE) : null;
+      let hitBlob: Blob | null = null;
       const req = store.get(key);
       req.onsuccess = () => {
         const rec = req.result as StoredTtsEntry | undefined;
@@ -107,12 +168,22 @@ export async function getCachedTtsAudio(key: string): Promise<Blob | null> {
           (rec.scope !== "CATALOG" && rec.scope !== "COACHING")
         ) {
           cacheMisses += 1;
-          db.close();
-          resolve(null);
+          finish(null);
           return;
         }
-        rec.lastAccessedAt = Date.now();
-        store.put(rec);
+        const now = Date.now();
+        if (metaStore) {
+          metaStore.put({
+            key: rec.key,
+            scope: rec.scope,
+            byteSize: rec.byteSize ?? rec.buffer.byteLength,
+            createdAt: rec.createdAt ?? now,
+            lastAccessedAt: now,
+          } satisfies StoredTtsMeta);
+        } else {
+          rec.lastAccessedAt = now;
+          store.put(rec);
+        }
         cacheHits += 1;
         const blob = new Blob([rec.buffer], {
           type: rec.contentType || "audio/mpeg",
@@ -128,24 +199,24 @@ export async function getCachedTtsAudio(key: string): Promise<Blob | null> {
             cachedSpeed: rec.cachedSpeed,
           });
         }
-        tx.oncomplete = () => {
-          db.close();
-          resolve(blob);
-        };
-        tx.onerror = () => {
-          db.close();
-          resolve(blob);
-        };
+        hitBlob = blob;
       };
       req.onerror = () => {
         cacheMisses += 1;
-        db.close();
-        resolve(null);
+        finish(null);
+      };
+      tx.oncomplete = () => {
+        finish(hitBlob);
+      };
+      tx.onerror = () => {
+        finish(hitBlob);
+      };
+      tx.onabort = () => {
+        finish(hitBlob);
       };
     } catch {
       cacheMisses += 1;
-      db.close();
-      resolve(null);
+      finish(null);
     }
   });
 }
@@ -177,15 +248,26 @@ export async function putCachedTtsAudio(input: {
     input.scope === "COACHING" ? "COACHING" : "CATALOG";
 
   return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      safeCloseDb(db);
+      resolve(ok);
+    };
     try {
-      const tx = db.transaction(IDB_STORE, "readwrite");
+      const hasMetaStore = db.objectStoreNames.contains(IDB_META_STORE);
+      const stores = hasMetaStore ? [IDB_STORE, IDB_META_STORE] : [IDB_STORE];
+      const tx = db.transaction(stores, "readwrite");
       const store = tx.objectStore(IDB_STORE);
-      const getAllReq = store.getAll();
-      getAllReq.onsuccess = () => {
-        const existing = (getAllReq.result as StoredTtsEntry[]) ?? [];
+      const metaStore = hasMetaStore ? tx.objectStore(IDB_META_STORE) : null;
+      // Read ONLY lightweight metadata (no ArrayBuffer blobs) for LRU accounting.
+      const metaReq = (metaStore ?? store).getAll();
+      metaReq.onsuccess = () => {
+        const existing = (metaReq.result as StoredTtsMeta[]) ?? [];
         const now = Date.now();
         let totalBytes = 0;
-        const retained: StoredTtsEntry[] = [];
+        const retained: StoredTtsMeta[] = [];
         for (const item of existing) {
           if (item.key === input.key) continue;
           totalBytes += item.byteSize;
@@ -198,8 +280,9 @@ export async function putCachedTtsAudio(input: {
         ) {
           const evicted = retained.shift();
           if (evicted) {
-            totalBytes -= evicted.byteSize;
+            totalBytes = Math.max(0, totalBytes - evicted.byteSize);
             store.delete(evicted.key);
+            metaStore?.delete(evicted.key);
           }
         }
         const entry: StoredTtsEntry = {
@@ -217,18 +300,28 @@ export async function putCachedTtsAudio(input: {
           lastAccessedAt: now,
         };
         store.put(entry);
+        metaStore?.put({
+          key: input.key,
+          scope: safeScope,
+          byteSize: buffer.byteLength,
+          createdAt: now,
+          lastAccessedAt: now,
+        } satisfies StoredTtsMeta);
+      };
+      metaReq.onerror = () => {
+        finish(false);
       };
       tx.oncomplete = () => {
-        db.close();
-        resolve(true);
+        finish(true);
       };
       tx.onerror = () => {
-        db.close();
-        resolve(false);
+        finish(false);
+      };
+      tx.onabort = () => {
+        finish(false);
       };
     } catch {
-      db.close();
-      resolve(false);
+      finish(false);
     }
   });
 }
@@ -256,14 +349,31 @@ export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
     };
   }
   return new Promise((resolve) => {
+    let settled = false;
+    const emptyStats = (): BrowserTtsCacheStats => ({
+      supported: true,
+      entryCount: 0,
+      usedBytes: 0,
+      quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
+      hits: cacheHits,
+      misses: cacheMisses,
+    });
+    const finish = (stats: BrowserTtsCacheStats) => {
+      if (settled) return;
+      settled = true;
+      safeCloseDb(db);
+      resolve(stats);
+    };
     try {
-      const tx = db.transaction(IDB_STORE, "readonly");
-      const req = tx.objectStore(IDB_STORE).getAll();
+      const targetStore = db.objectStoreNames.contains(IDB_META_STORE)
+        ? IDB_META_STORE
+        : IDB_STORE;
+      const tx = db.transaction(targetStore, "readonly");
+      const req = tx.objectStore(targetStore).getAll();
       req.onsuccess = () => {
-        const items = (req.result as StoredTtsEntry[]) ?? [];
+        const items = (req.result as StoredTtsMeta[]) ?? [];
         const usedBytes = items.reduce((sum, item) => sum + item.byteSize, 0);
-        db.close();
-        resolve({
+        finish({
           supported: true,
           entryCount: items.length,
           usedBytes,
@@ -272,27 +382,11 @@ export async function getBrowserTtsCacheStats(): Promise<BrowserTtsCacheStats> {
           misses: cacheMisses,
         });
       };
-      req.onerror = () => {
-        db.close();
-        resolve({
-          supported: true,
-          entryCount: 0,
-          usedBytes: 0,
-          quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
-          hits: cacheHits,
-          misses: cacheMisses,
-        });
-      };
+      req.onerror = () => finish(emptyStats());
+      tx.onerror = () => finish(emptyStats());
+      tx.onabort = () => finish(emptyStats());
     } catch {
-      db.close();
-      resolve({
-        supported: true,
-        entryCount: 0,
-        usedBytes: 0,
-        quotaBytes: MAX_BROWSER_TTS_CACHE_BYTES,
-        hits: cacheHits,
-        misses: cacheMisses,
-      });
+      finish(emptyStats());
     }
   });
 }
@@ -303,20 +397,26 @@ export async function clearBrowserTtsCacheForTests(): Promise<void> {
   const db = await openTtsDb();
   if (!db) return;
   await new Promise<void>((resolve) => {
-    try {
-      const tx = db.transaction(IDB_STORE, "readwrite");
-      tx.objectStore(IDB_STORE).clear();
-      tx.oncomplete = () => {
-        db.close();
-        resolve();
-      };
-      tx.onerror = () => {
-        db.close();
-        resolve();
-      };
-    } catch {
-      db.close();
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      safeCloseDb(db);
       resolve();
+    };
+    try {
+      const hasMetaStore = db.objectStoreNames.contains(IDB_META_STORE);
+      const stores = hasMetaStore ? [IDB_STORE, IDB_META_STORE] : [IDB_STORE];
+      const tx = db.transaction(stores, "readwrite");
+      tx.objectStore(IDB_STORE).clear();
+      if (hasMetaStore) {
+        tx.objectStore(IDB_META_STORE).clear();
+      }
+      tx.oncomplete = finish;
+      tx.onerror = finish;
+      tx.onabort = finish;
+    } catch {
+      finish();
     }
   });
 }

@@ -692,4 +692,133 @@ describe("automatic reading flow on the reading screen", () => {
     expect(screen.queryByText(/Đọc lại cả câu:/)).not.toBeInTheDocument();
     expect(word("Tôi")).not.toHaveClass(SUCCESS);
   });
+
+  it("triggers auto-coaching on Page 2 and Page 3 without stale-closure page bug (Mũi B P0)", async () => {
+    const pageFive: ReadingPageDTO = {
+      ...pageFour,
+      page_id: "30000000-0000-4000-8000-000000000005",
+      page_revision_id: "40000000-0000-4000-8000-000000000005",
+      page_number: 5,
+      text: "Chú chó trắng chạy",
+      words: ["Chú", "chó", "trắng", "chạy"].map((text, index) => ({
+        word_id: `50000000-0000-4000-8000-00000000005${index}`,
+        word_index: index,
+        text,
+        bbox: [0.05 + index * 0.18, 0.2, 0.14, 0.05] as const,
+      })),
+    };
+    const pageSix: ReadingPageDTO = {
+      ...pageFour,
+      page_id: "30000000-0000-4000-8000-000000000006",
+      page_revision_id: "40000000-0000-4000-8000-000000000006",
+      page_number: 6,
+      text: "Bông hoa hồng nở",
+      words: ["Bông", "hoa", "hồng", "nở"].map((text, index) => ({
+        word_id: `50000000-0000-4000-8000-00000000006${index}`,
+        word_index: index,
+        text,
+        bbox: [0.05 + index * 0.18, 0.2, 0.14, 0.05] as const,
+      })),
+    };
+    const allPages = [pageFour, pageFive, pageSix];
+    let currentPageIdx = 0;
+    const makeThreeProgress = (idx: number, completedCount: number) => ({
+      session_id: TEST_SESSION_ID,
+      persisted: true,
+      start_page_id: pageFour.page_id,
+      end_page_id: pageSix.page_id,
+      current_page_id: allPages[idx].page_id,
+      start_page_number: pageFour.page_number,
+      end_page_number: pageSix.page_number,
+      current_page_number: allPages[idx].page_number,
+      current_index: idx,
+      total_pages: 3,
+      completed_pages: completedCount,
+      pages: allPages.map((p, order) => ({
+        page_id: p.page_id,
+        page_revision_id: p.page_revision_id,
+        page_number: p.page_number,
+        page_order: order,
+        status:
+          order < completedCount
+            ? ("COMPLETED" as const)
+            : order === idx
+              ? ("IN_PROGRESS" as const)
+              : ("PENDING" as const),
+        started_at: null,
+        completed_at: null,
+      })),
+    });
+    (
+      services.readingService.getPageProgress as ReturnType<typeof vi.fn>
+    ).mockImplementation(async () =>
+      makeThreeProgress(currentPageIdx, currentPageIdx),
+    );
+    (
+      services.readingService.getCurrentPage as ReturnType<typeof vi.fn>
+    ).mockImplementation(async () => allPages[currentPageIdx]);
+    (
+      services.readingService.completeCurrentPage as ReturnType<typeof vi.fn>
+    ).mockImplementation(async () =>
+      makeThreeProgress(currentPageIdx, currentPageIdx + 1),
+    );
+    (
+      services.readingService.navigateToPage as ReturnType<typeof vi.fn>
+    ).mockImplementation(async (_sid: string, targetPageId: string) => {
+      const idx = allPages.findIndex((p) => p.page_id === targetPageId);
+      if (idx >= 0) currentPageIdx = idx;
+      return makeThreeProgress(currentPageIdx, currentPageIdx);
+    });
+    (
+      services.pageMatchService.selectPage as ReturnType<typeof vi.fn>
+    ).mockImplementation(async (_sid: string, targetPageId: string) => {
+      const idx = allPages.findIndex((p) => p.page_id === targetPageId);
+      if (idx >= 0) currentPageIdx = idx;
+      return allPages[currentPageIdx];
+    });
+
+    const rec1 = await startWithFakeClock();
+    // Finish Page 1 fluently -> auto-advances to Page 2 (pageFive)
+    act(() => rec1.say("Bé mèo nhỏ đang"));
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(word("Chú")).toBeInTheDocument();
+
+    // On Page 2: child reads "Chú chó" then hesitates on "trắng" -> auto-coaching MUST speak "trắng" (Page 2 word, NOT stale Page 1!)
+    speechPlayerMock.play.mockClear();
+    act(() => lastRecognition().say("Chú chó"));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(speechPlayerMock.play).toHaveBeenCalledWith("trắng", {
+      wordSample: true,
+    });
+
+    // Finish Page 2 -> auto-advances to Page 3 (pageSix)
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    act(() => lastRecognition().say("trắng chạy"));
+    await act(async () => vi.advanceTimersByTimeAsync(1_000));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    await act(async () => vi.advanceTimersByTimeAsync(2_000));
+    expect(word("Bông")).toBeInTheDocument();
+
+    // On Page 3: child reads "Bông hoa" then hesitates on "hồng" -> auto-coaching MUST speak "hồng" (Page 3 word!)
+    speechPlayerMock.play.mockClear();
+    act(() => lastRecognition().say("Bông hoa"));
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(speechPlayerMock.play).toHaveBeenCalledWith("hồng", {
+      wordSample: true,
+    });
+  });
+
+  it("handles REPLAY voice command ('đọc lại') by speaking current word without marking SUBSTITUTE (Mũi B P1)", async () => {
+    const recognition = await startWithFakeClock();
+    speechPlayerMock.play.mockClear();
+    act(() => recognition.say("đọc lại"));
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
+      wordSample: true,
+    });
+    expect(word("Bé")).not.toHaveClass("bg-red-200");
+    expect(word("Bé")).not.toHaveClass(SUCCESS);
+  });
 });

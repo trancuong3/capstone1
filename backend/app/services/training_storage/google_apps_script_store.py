@@ -154,7 +154,8 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 http_status=400,
             )
         self._bridge_secret = clean_secret
-        self._session = session or requests.Session()
+        self._provided_session = session
+        self._session_local = threading.local()
         self._min_free_buffer_bytes = (
             min_free_buffer_bytes
             if min_free_buffer_bytes is not None
@@ -176,6 +177,23 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         self._lock = threading.Lock()
         self._root_folder_id: str | None = root_folder_id
         self._subfolder_ids: dict[str, str] = {str(k): str(v) for k, v in (subfolder_ids or {}).items() if v}
+
+    def _get_session(self) -> requests.Session:
+        if self._provided_session is not None:
+            return self._provided_session
+        sess = getattr(self._session_local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            self._session_local.session = sess
+        return sess
+
+    @property
+    def _session(self) -> requests.Session:
+        return self._get_session()
+
+    @_session.setter
+    def _session(self, value: requests.Session | None) -> None:
+        self._provided_session = value
 
     @property
     def root_folder_id(self) -> str | None:

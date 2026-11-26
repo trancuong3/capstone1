@@ -6,10 +6,12 @@ import hmac
 import inspect
 import json
 import os
+import re
 from datetime import datetime, timezone
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -34,6 +36,7 @@ from app.schemas.viread_ocr_training import (
 from app.services.training_storage import (
     TrainingStorageError,
     is_gdrive_ref,
+    resolve_flow2_sync_root,
     sign_worker_artifact_token,
     verify_worker_artifact_token,
 )
@@ -45,6 +48,32 @@ from app.services.viread_ocr_training_service import (
 from app.services.storage_service import create_signed_image_url
 
 router = APIRouter()
+
+_WORKER_ID_PATTERN = r"^[A-Za-z0-9_.:-]+$"
+_WORKER_ID_RE = re.compile(_WORKER_ID_PATTERN)
+
+
+def _validate_worker_id(worker_id: str) -> str:
+    if (
+        not isinstance(worker_id, str)
+        or not (1 <= len(worker_id) <= 120)
+        or not _WORKER_ID_RE.fullmatch(worker_id)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid worker_id format")
+    return worker_id
+
+
+async def _close_upload_file(file: UploadFile | None) -> None:
+    if file is None:
+        return
+    close_fn = getattr(file, "close", None)
+    if callable(close_fn):
+        try:
+            res = close_fn()
+            if inspect.isawaitable(res):
+                await res
+        except Exception:
+            pass
 
 
 def _require_training_worker_token(token: str | None = Header(default=None, alias="X-ViRead-Training-Worker")) -> None:
@@ -84,6 +113,7 @@ def _colab_worker_failure_state(job: dict, payload_run_id: UUID | None) -> tuple
 
 
 async def _leased_colab_job(service: VireadOcrTrainingService, job_id: UUID, worker_id: str):
+    worker_id = _validate_worker_id(worker_id)
     job = await service.repo.one("""
         SELECT id, profile, status, target, worker_id, dataset_version_id, manifest_sha256,
                config_sha256, parent_checkpoint_sha256, run_id, created_by, attempts,
@@ -180,9 +210,18 @@ async def connect_viread_training_drive_desktop(
     db: AsyncSession = Depends(get_db),
 ):
     await VireadOcrTrainingService(db)._admin(actor_id)
+    sync_root_path = payload.sync_root_path if payload else None
+    if sync_root_path is not None and sync_root_path.strip():
+        try:
+            resolve_flow2_sync_root(sync_root_path)
+        except TrainingStorageError as exc:
+            raise HTTPException(
+                status_code=exc.http_status or 400,
+                detail=f"{exc.code}: {exc}",
+            ) from exc
     return await VireadDriveConnectionService(db).connect_drive_desktop(
         actor_id=actor_id,
-        sync_root_path=payload.sync_root_path if payload else None,
+        sync_root_path=sync_root_path,
         account_email=payload.account_email if payload else None,
     )
 
@@ -688,9 +727,14 @@ async def upload_viread_training_dataset_object(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await file.read(MAX_SHARD_BYTES + 1)
+    try:
+        data = await file.read(MAX_SHARD_BYTES + 1)
+        filename = file.filename or "image"
+        content_type = file.content_type or "application/octet-stream"
+    finally:
+        await _close_upload_file(file)
     return await VireadOcrTrainingService(db).upload_dataset_object(
-        actor_id, source_flow, file.filename or "image", data, file.content_type or "application/octet-stream"
+        actor_id, source_flow, filename, data, content_type
     )
 
 
@@ -720,7 +764,10 @@ async def upload_viread_flow1_model_chunk(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await file.read(MAX_SHARD_BYTES + 1)
+    try:
+        data = await file.read(MAX_SHARD_BYTES + 1)
+    finally:
+        await _close_upload_file(file)
     if len(data) > MAX_SHARD_BYTES:
         raise HTTPException(status_code=413, detail="Checkpoint shard exceeds 40 MiB")
     return await VireadOcrTrainingService(db).upload_flow1_model_chunk(
@@ -740,16 +787,20 @@ async def activate_viread_flow1_model(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    comparison_bytes = await comparison_file.read(2 * 1024 * 1024 + 1)
-    if len(comparison_bytes) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Comparison file exceeds 2 MiB")
-    config_bytes = None
-    config_filename = None
-    if config_file is not None and config_file.filename:
-        config_bytes = await config_file.read(1024 * 1024 + 1)
-        if len(config_bytes) > 1024 * 1024:
-            raise HTTPException(status_code=413, detail="Configuration file exceeds 1 MiB")
-        config_filename = config_file.filename
+    try:
+        comparison_bytes = await comparison_file.read(2 * 1024 * 1024 + 1)
+        if len(comparison_bytes) > 2 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Comparison file exceeds 2 MiB")
+        config_bytes = None
+        config_filename = None
+        if config_file is not None and config_file.filename:
+            config_bytes = await config_file.read(1024 * 1024 + 1)
+            if len(config_bytes) > 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Configuration file exceeds 1 MiB")
+            config_filename = config_file.filename
+    finally:
+        await _close_upload_file(comparison_file)
+        await _close_upload_file(config_file)
 
     return await VireadOcrTrainingService(db).activate_flow1_model(
         actor_id=actor_id,
@@ -772,7 +823,10 @@ async def upload_viread_checkpoint_chunk(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    data = await file.read(MAX_SHARD_BYTES + 1)
+    try:
+        data = await file.read(MAX_SHARD_BYTES + 1)
+    finally:
+        await _close_upload_file(file)
     if len(data) > MAX_SHARD_BYTES:
         raise HTTPException(status_code=413, detail="Checkpoint shard exceeds 40 MiB")
     return await VireadOcrTrainingService(db).upload_checkpoint_chunk(actor_id, run_id, chunk_index, data)
@@ -824,6 +878,7 @@ async def claim_viread_colab_training_job(
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
+    _validate_worker_id(payload.worker_id)
     runtime = _safe_runtime(payload.runtime)
     result = await db.execute(text("""
         WITH next_job AS (
@@ -892,7 +947,7 @@ async def claim_viread_colab_training_job(
         )
         manifest_url = (
             f"/books/admin/viread-training/worker/jobs/{job['id']}/artifact-stream"
-            f"?worker_id={payload.worker_id}&token={manifest_token}"
+            f"?worker_id={quote(payload.worker_id, safe='')}&token={quote(manifest_token, safe='')}"
         )
     else:
         manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
@@ -948,7 +1003,7 @@ async def report_viread_colab_worker_status(
 @router.get("/admin/viread-training/worker/jobs/{job_id}/dataset")
 async def get_viread_colab_job_dataset(
     job_id: UUID,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     limit: int = 200,
     offset: int = 0,
     _worker: None = Depends(_require_training_worker_token),
@@ -984,7 +1039,7 @@ async def get_viread_colab_job_dataset(
 @router.get("/admin/viread-training/worker/jobs/{job_id}/locked-test")
 async def get_viread_colab_job_locked_test(
     job_id: UUID,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     limit: int = 200,
     offset: int = 0,
     _worker: None = Depends(_require_training_worker_token),
@@ -1031,8 +1086,8 @@ async def get_viread_colab_job_locked_test(
 @router.get("/admin/viread-training/worker/jobs/{job_id}/artifact-stream")
 async def stream_viread_colab_job_artifact(
     job_id: UUID,
-    worker_id: str,
-    token: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
+    token: str = Query(..., min_length=1),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1045,6 +1100,7 @@ async def stream_viread_colab_job_artifact(
     4. Server-side DB authorization proving claims.reference belongs to this job's
        dataset, pinned Locked Test, active parent model, or attached candidate run.
     """
+    worker_id = _validate_worker_id(worker_id)
     try:
         claims = verify_worker_artifact_token(
             token,
@@ -1129,8 +1185,8 @@ async def stream_viread_colab_job_artifact(
         )
 
     router_store = await VireadDriveConnectionService(db).build_artifact_router()
-    # Release DB transaction before streaming potentially large files over HTTP.
-    await db.commit()
+    # Release DB read transaction before streaming potentially large files over HTTP.
+    await db.rollback()
     try:
         if hasattr(router_store, "open_stream_with_metadata"):
             meta, chunk_iterator = await asyncio.to_thread(
@@ -1171,8 +1227,8 @@ async def stream_viread_colab_job_artifact(
 @router.post("/admin/viread-training/worker/jobs/{job_id}/runs")
 async def create_viread_colab_job_run(
     job_id: UUID,
-    worker_id: str,
-    payload: TrainingRunCreate,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
+    payload: TrainingRunCreate = Body(...),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1212,7 +1268,7 @@ async def create_viread_colab_job_run(
 async def get_viread_colab_job_run_result(
     job_id: UUID,
     run_id: UUID,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1248,7 +1304,7 @@ async def get_viread_colab_job_run_result(
 async def get_viread_colab_candidate_artifact(
     job_id: UUID,
     run_id: UUID,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1257,16 +1313,18 @@ async def get_viread_colab_candidate_artifact(
     if str(job["run_id"]) != str(run_id):
         await db.rollback()
         raise HTTPException(status_code=409, detail="Candidate run is not attached to this evaluation job")
+    actor_id = UUID(str(job["created_by"]))
+    await db.rollback()
     if "job_id" in inspect.signature(service.candidate_artifact).parameters:
         artifact = await service.candidate_artifact(
-            UUID(str(job["created_by"])),
+            actor_id,
             run_id,
             job_id=job_id,
             worker_id=worker_id,
         )
     else:
-        artifact = await service.candidate_artifact(UUID(str(job["created_by"])), run_id)
-    await db.commit()
+        artifact = await service.candidate_artifact(actor_id, run_id)
+    await db.rollback()
     return artifact
 
 
@@ -1274,20 +1332,23 @@ async def get_viread_colab_candidate_artifact(
 async def upload_viread_colab_job_chunk(
     job_id: UUID,
     run_id: UUID,
-    worker_id: str = Form(...),
+    worker_id: str = Form(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     chunk_index: int = Form(ge=0),
     file: UploadFile = File(...),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
-    service = VireadOcrTrainingService(db)
-    job = await _leased_colab_job(service, job_id, worker_id)
-    if str(job["run_id"]) != str(run_id):
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="Checkpoint upload run is not attached to this job")
-    actor_id = UUID(str(job["created_by"]))
-    await service._admin(actor_id)
-    data = await file.read(MAX_SHARD_BYTES + 1)
+    try:
+        service = VireadOcrTrainingService(db)
+        job = await _leased_colab_job(service, job_id, worker_id)
+        if str(job["run_id"]) != str(run_id):
+            await db.rollback()
+            raise HTTPException(status_code=409, detail="Checkpoint upload run is not attached to this job")
+        actor_id = UUID(str(job["created_by"]))
+        await service._admin(actor_id)
+        data = await file.read(MAX_SHARD_BYTES + 1)
+    finally:
+        await _close_upload_file(file)
     if len(data) > MAX_SHARD_BYTES:
         raise HTTPException(status_code=413, detail="Checkpoint shard exceeds 40 MiB")
     result = await service.upload_checkpoint_chunk(actor_id, run_id, chunk_index, data)
@@ -1298,8 +1359,8 @@ async def upload_viread_colab_job_chunk(
 async def complete_viread_colab_job_run(
     job_id: UUID,
     run_id: UUID,
-    worker_id: str,
-    payload: TrainingRunComplete,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
+    payload: TrainingRunComplete = Body(...),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1320,8 +1381,8 @@ async def complete_viread_colab_job_run(
 @router.post("/admin/viread-training/worker/jobs/{job_id}/benchmarks")
 async def benchmark_viread_colab_job(
     job_id: UUID,
-    worker_id: str,
-    payload: BenchmarkCreate,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
+    payload: BenchmarkCreate = Body(...),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1381,26 +1442,35 @@ async def finish_viread_colab_training_job(
 ):
     service = VireadOcrTrainingService(db)
     job = await _leased_colab_job(service, job_id, payload.worker_id)
+    verified_run_id = job.get("run_id")
+    if payload.run_id is not None and (
+        verified_run_id is None or str(payload.run_id) != str(verified_run_id)
+    ):
+        await db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail="Worker result does not match the registered training job",
+        )
     if payload.status in {"CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED"}:
         run = await service.repo.one("""
             SELECT id, status, profile, dataset_version_id, manifest_sha256,
                    parent_checkpoint_sha256, created_by
             FROM public.viread_ocr_training_runs WHERE id=:id
-        """, {"id": payload.run_id}) if payload.run_id else None
+        """, {"id": verified_run_id}) if (payload.run_id is not None and verified_run_id is not None) else None
         expected_status = "CANDIDATE" if payload.status == "CANDIDATE" else "BENCHMARKED"
         if (not run or run["status"] != expected_status or run["profile"] != job["profile"]
                 or run["dataset_version_id"] != job["dataset_version_id"]
                 or run["manifest_sha256"] != job["manifest_sha256"]
                 or run["parent_checkpoint_sha256"] != job["parent_checkpoint_sha256"]
                 or str(run["created_by"]) != str(job["created_by"])
-                or str(payload.run_id) != str(job["run_id"])):
+                or str(payload.run_id) != str(verified_run_id)):
             await db.rollback()
             raise HTTPException(status_code=422, detail="Worker result does not match the registered training job")
         if payload.status in {"BENCHMARKED", "QUALITY_GATE_REJECTED"}:
             benchmark = await service.repo.one("""
                 SELECT gate_status FROM public.viread_ocr_benchmarks
                 WHERE run_id=:run_id ORDER BY created_at DESC LIMIT 1
-            """, {"run_id": payload.run_id})
+            """, {"run_id": verified_run_id})
             expected_gate = "V2_WIN" if payload.status == "BENCHMARKED" else None
             if not benchmark or (expected_gate and benchmark["gate_status"] != expected_gate) or (
                 payload.status == "QUALITY_GATE_REJECTED" and benchmark["gate_status"] == "V2_WIN"
@@ -1414,7 +1484,7 @@ async def finish_viread_colab_training_job(
     if payload.status == "FAILED":
         # Enterprise execution is polled through Google; manual/free Colab has no
         # execution identity and must not remain in COLAB_EXECUTING forever.
-        new_status, default_error_code = _colab_worker_failure_state(job, payload.run_id)
+        new_status, default_error_code = _colab_worker_failure_state(job, verified_run_id)
         if new_status == "BLOCKED" and default_error_code == "COLAB_FAILURE_REQUIRES_RUN_RECOVERY":
             worker_reported_error = payload.error_code
             error_code = default_error_code
@@ -1431,36 +1501,36 @@ async def finish_viread_colab_training_job(
             progress=CAST(:progress AS jsonb),
             metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
         WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
-    """, {"id": job_id, "worker_id": payload.worker_id, "status": new_status, "run_id": payload.run_id or job["run_id"],
+    """, {"id": job_id, "worker_id": payload.worker_id, "status": new_status, "run_id": verified_run_id,
           "error_code": error_code, "retry_delay": retry_delay,
           "progress": json.dumps({"stage": new_status.lower()}),
           "metadata": json.dumps({"runtime": runtime,
                                   **({"worker_error_code": worker_reported_error} if worker_reported_error else {}),
                                   **({"evaluation_status": "FAILED"} if payload.status == "FAILED"
                                      and (job.get("metadata") or {}).get("operation") == "BENCHMARK_ONLY" else {})})})
-    if payload.run_id and runtime:
+    if verified_run_id is not None and runtime:
         await service.repo.execute("""
             UPDATE public.viread_ocr_training_runs SET metadata=metadata || CAST(:metadata AS jsonb)
             WHERE id=:run_id
-        """, {"run_id": payload.run_id, "metadata": json.dumps({
+        """, {"run_id": verified_run_id, "metadata": json.dumps({
             "execution_target": "COLAB", "training_job_id": str(job_id),
             "worker_id": payload.worker_id, "runtime": runtime,
         })})
     await service.repo.commit()
-    return {"job_id": job_id, "status": new_status, "run_id": payload.run_id or job["run_id"]}
+    return {"job_id": job_id, "status": new_status, "run_id": verified_run_id}
 
 
 @router.get("/admin/viread-training/worker/jobs/{job_id}/resume-state")
 async def list_viread_colab_resume_state(
     job_id: UUID,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
     """List job-scoped resume objects stored in the server's connected owner Google Drive."""
     service = VireadOcrTrainingService(db)
     await _leased_colab_job(service, job_id, worker_id)
-    await db.commit()
+    await db.rollback()
     return await VireadDriveConnectionService(db).list_job_resume_files(job_id)
 
 
@@ -1468,14 +1538,14 @@ async def list_viread_colab_resume_state(
 async def download_viread_colab_resume_object(
     job_id: UUID,
     object_path: str,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Stream a resume file from the owner's Google Drive to any authorized Colab worker account."""
     service = VireadOcrTrainingService(db)
     await _leased_colab_job(service, job_id, worker_id)
-    await db.commit()
+    await db.rollback()
     meta, stream = await VireadDriveConnectionService(db).open_job_resume_stream(job_id, object_path)
     headers = {
         "Cache-Control": "private, no-store",
@@ -1496,17 +1566,20 @@ async def download_viread_colab_resume_object(
 async def upload_viread_colab_resume_object(
     job_id: UUID,
     object_path: str,
-    worker_id: str = Form(...),
+    worker_id: str = Form(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     expected_sha256: str | None = Form(default=None),
     file: UploadFile = File(...),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a resume snapshot object strictly into the owner's Google Drive (no Colab Drive mount)."""
-    service = VireadOcrTrainingService(db)
-    await _leased_colab_job(service, job_id, worker_id)
-    await db.commit()
-    data = await file.read(MAX_SHARD_BYTES + 1)
+    try:
+        service = VireadOcrTrainingService(db)
+        await _leased_colab_job(service, job_id, worker_id)
+        await db.rollback()
+        data = await file.read(MAX_SHARD_BYTES + 1)
+    finally:
+        await _close_upload_file(file)
     if len(data) > MAX_SHARD_BYTES:
         raise HTTPException(status_code=413, detail="Resume state object exceeds 40 MiB chunk limit")
     return await VireadDriveConnectionService(db).put_job_resume_file(
@@ -1521,12 +1594,12 @@ async def upload_viread_colab_resume_object(
 async def delete_viread_colab_resume_object(
     job_id: UUID,
     object_path: str,
-    worker_id: str,
+    worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Prune an obsolete resume object from the owner's Google Drive after manifest commit."""
     service = VireadOcrTrainingService(db)
     await _leased_colab_job(service, job_id, worker_id)
-    await db.commit()
+    await db.rollback()
     return await VireadDriveConnectionService(db).delete_job_resume_file(job_id, object_path)

@@ -91,7 +91,13 @@ class ViReadPageMatcher:
             return None
         db_arr = np.frombuffer(image_bytes, np.uint8)
         db_gray = cv2.imdecode(db_arr, cv2.IMREAD_GRAYSCALE)
-        if db_gray is None:
+        if (
+            db_gray is None
+            or db_gray.size == 0
+            or db_gray.ndim < 2
+            or db_gray.shape[0] <= 0
+            or db_gray.shape[1] <= 0
+        ):
             return None
 
         db_h, db_w = db_gray.shape
@@ -117,17 +123,28 @@ class ViReadPageMatcher:
         """
         Kiểm tra sách đã đặt đúng vào khung trung tâm chưa, đủ sáng và không bị mờ (rung tay).
         """
+        invalid_response = {
+            "framing_valid": False,
+            "status_code": "INVALID_IMAGE",
+            "message": "Không đọc được hình ảnh từ camera. Bé thử lại nhé!",
+        }
+        if not image_bytes:
+            return invalid_response
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if img is None:
-            return {
-                "framing_valid": False,
-                "status_code": "INVALID_IMAGE",
-                "message": "Không đọc được hình ảnh từ camera. Bé thử lại nhé!",
-            }
+        if (
+            img is None
+            or img.size == 0
+            or img.ndim < 2
+            or img.shape[0] <= 0
+            or img.shape[1] <= 0
+        ):
+            return invalid_response
 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+        h, w = gray.shape[:2]
+        if h < 2 or w < 2:
+            return invalid_response
 
         # 1. Kiểm tra ánh sáng
         brightness = float(np.mean(gray))
@@ -151,6 +168,8 @@ class ViReadPageMatcher:
         roi_y1, roi_y2 = int(h * 0.15), int(h * 0.85)
         roi_x1, roi_x2 = int(w * 0.15), int(w * 0.85)
         roi = gray[roi_y1:roi_y2, roi_x1:roi_x2]
+        if roi.size == 0:
+            return invalid_response
 
         edges = cv2.Canny(roi, 50, 150)
         edge_density = float(np.count_nonzero(edges)) / float(roi.size)
@@ -175,9 +194,17 @@ class ViReadPageMatcher:
         Đối chiếu ảnh từ camera với tất cả các trang của cuốn sách đã chọn bằng ORB + Homography.
         Hỗ trợ sẵn `features` đã cache (tránh giải mã/tải lại ảnh) và giữ tương thích với `image_bytes`.
         """
+        if not camera_bytes:
+            return {"matched": False, "confidence": 0.0}
         nparr = np.frombuffer(camera_bytes, np.uint8)
         cam_gray = cv2.imdecode(nparr, cv2.IMREAD_GRAYSCALE)
-        if cam_gray is None:
+        if (
+            cam_gray is None
+            or cam_gray.size == 0
+            or cam_gray.ndim < 2
+            or cam_gray.shape[0] <= 0
+            or cam_gray.shape[1] <= 0
+        ):
             return {"matched": False, "confidence": 0.0}
 
         cam_h, cam_w = cam_gray.shape

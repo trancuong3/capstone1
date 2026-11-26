@@ -26,6 +26,7 @@ const { servicesHook, speechPlayerMock } = vi.hoisted(() => ({
     isPaused: false,
     fallbackNotice: null,
     play: vi.fn(),
+    prefetch: vi.fn(),
     playWithWordTimings: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
@@ -128,6 +129,7 @@ beforeEach(() => {
     value: QuizRecognition,
   });
   speechPlayerMock.play.mockReset().mockResolvedValue(undefined);
+  speechPlayerMock.prefetch.mockReset().mockResolvedValue(undefined);
   speechPlayerMock.stop.mockReset();
 });
 
@@ -503,10 +505,18 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
 
     await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
     const q1Rec = lastRec();
-    // Male voice selected -> zero "Cô" in prompts
-    expect(
-      speechPlayerMock.play.mock.calls.map(([t]) => t).join(" "),
-    ).not.toMatch(/(^|[^\p{L}])Cô(?=$|[^\p{L}])/u);
+    // Male voice selected: story choices ("Đáp án C: Cô giáo") MUST stay verbatim
+    // (P1-10: never rewrite story characters into "Thầy"), while teacher prompts have zero "Cô".
+    const playedUtterances = speechPlayerMock.play.mock.calls.map(([t]) =>
+      String(t),
+    );
+    expect(playedUtterances).toContain("Đáp án C: Cô giáo");
+    const teacherPrompts = playedUtterances.filter(
+      (t) => t !== q1.question.prompt && !t.startsWith("Đáp án "),
+    );
+    expect(teacherPrompts.join(" ")).not.toMatch(
+      /(^|[^\p{L}])Cô(?=$|[^\p{L}])/u,
+    );
 
     // Wrong voice choice records exact choice first, speaks story_hint, and re-opens mic
     now += 2_000;
@@ -620,5 +630,145 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     // Clicking again after correct answer is solved must not re-submit
     fireEvent.click(btnC);
     expect(submitAnswer).toHaveBeenCalledTimes(1);
+  });
+
+  it("speaks story_hint aloud on manual wrong tap and supports barge-in when tapping another choice (Mũi D P1)", async () => {
+    const q1 = makeQuizQuestion(1, 1, "Mi cầm gì che mưa?", [
+      "Chiếc ô",
+      "Quả táo",
+      "Quyển sách",
+    ]);
+    let resolveHintPlay: () => void = () => undefined;
+    const submitAnswer = vi
+      .fn()
+      .mockResolvedValueOnce({
+        answer_id: "ans-wrong-tap",
+        question_id: q1.question.id,
+        submitted_answer: "Quả táo",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Trong bài có câu: Mi cầm … che mưa cho bạn.",
+      })
+      .mockResolvedValueOnce({
+        answer_id: "ans-right-tap",
+        question_id: q1.question.id,
+        submitted_answer: "Chiếc ô",
+        is_correct: true,
+        score: 1,
+        feedback_code: "CORRECT",
+      });
+
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+    speechPlayerMock.play.mockClear();
+    speechPlayerMock.stop.mockClear();
+    speechPlayerMock.play.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveHintPlay = resolve;
+        }),
+    );
+
+    // Manual tap on wrong choice "Quả táo" -> must read story_hint aloud
+    fireEvent.click(screen.getByRole("button", { name: /Quả táo/ }));
+    await waitFor(() =>
+      expect(speechPlayerMock.play).toHaveBeenCalledWith(
+        expect.stringContaining("Mi cầm … che mưa cho bạn"),
+        { coaching: true },
+      ),
+    );
+
+    // Barge-in: child taps correct choice "Chiếc ô" while hint audio is still playing
+    fireEvent.click(screen.getByRole("button", { name: /Chiếc ô/ }));
+    expect(speechPlayerMock.stop).toHaveBeenCalled();
+    act(() => resolveHintPlay());
+
+    await waitFor(() =>
+      expect(submitAnswer).toHaveBeenCalledWith(
+        TEST_SESSION_ID,
+        q1.question.id,
+        "Chiếc ô",
+      ),
+    );
+  });
+
+  it("dispatches question prompt before prefetching choices B/C and aborts in-flight prefetch on barge-in", async () => {
+    const callOrder: string[] = [];
+    let capturedSignal: AbortSignal | undefined;
+    let resolveQuestionPlay: () => void = () => undefined;
+
+    speechPlayerMock.play.mockImplementationOnce(
+      (text: string) =>
+        new Promise<void>((resolve) => {
+          callOrder.push(`play:${text}`);
+          resolveQuestionPlay = resolve;
+        }),
+    );
+    speechPlayerMock.prefetch.mockImplementation(
+      (text: string, options?: { signal?: AbortSignal }) => {
+        callOrder.push(`prefetch:${text}`);
+        capturedSignal = options?.signal;
+        return new Promise<void>(() => {
+          // keep pending until aborted
+        });
+      },
+    );
+
+    const q1 = makeQuizQuestion(1, 1, "Mi cầm gì che mưa?", [
+      "Chiếc ô",
+      "Quả táo",
+      "Quyển sách",
+    ]);
+    const submitAnswer = vi.fn().mockResolvedValue({
+      answer_id: "ans-barge",
+      question_id: q1.question.id,
+      submitted_answer: "Chiếc ô",
+      is_correct: true,
+      score: 1,
+      feedback_code: "CORRECT",
+    });
+
+    servicesHook.mockReturnValue({
+      comprehensionService: {
+        getQuestion: vi.fn().mockResolvedValueOnce(q1),
+        submitAnswer,
+      },
+    } as unknown as ReadingServices);
+
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={vi.fn()}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    await waitFor(() => expect(callOrder.length).toBeGreaterThanOrEqual(2));
+    // Question prompt MUST be dispatched before Choice B prefetch
+    expect(callOrder[0]).toBe("play:Mi cầm gì che mưa?");
+    expect(callOrder[1]).toBe("prefetch:Đáp án B: Quả táo");
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    // Barge-in tap aborts the in-flight prefetch signal immediately
+    fireEvent.click(screen.getByRole("button", { name: /Chiếc ô/ }));
+    expect(capturedSignal?.aborted).toBe(true);
+    act(() => resolveQuestionPlay());
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
   });
 });

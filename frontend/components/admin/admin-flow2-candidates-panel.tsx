@@ -20,12 +20,20 @@ import {
   type Flow2RejectionCode,
 } from "@/types/parent-private-book";
 
-const STATUS_FILTER_KEYS: readonly Flow2CandidateStatus[] = [
-  "PENDING_VERIFICATION",
-  "SYNC_QUEUED",
-  "SYNCED",
-  "REJECTED",
-  "REVOKED",
+const STATUS_FILTERS: readonly {
+  readonly key: "" | Flow2CandidateStatus;
+  readonly labelKey: string;
+}[] = [
+  { key: "", labelKey: "common.all" },
+  {
+    key: "PENDING_VERIFICATION",
+    labelKey: "flow2.filters.PENDING_VERIFICATION",
+  },
+  { key: "VERIFIED", labelKey: "statusBadges.VERIFIED" },
+  { key: "SYNC_QUEUED", labelKey: "flow2.filters.SYNC_QUEUED" },
+  { key: "SYNCED", labelKey: "flow2.filters.SYNCED" },
+  { key: "REJECTED", labelKey: "flow2.filters.REJECTED" },
+  { key: "REVOKED", labelKey: "flow2.filters.REVOKED" },
 ];
 
 const REJECTION_CODES = Object.keys(
@@ -172,12 +180,21 @@ export function AdminFlow2CandidatesPanel() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-4">
         <div className="flex flex-wrap gap-2">
-          {STATUS_FILTER_KEYS.map((key) => {
-            const count = page?.summary[key] ?? 0;
-            const active = statusFilter === key;
+          {STATUS_FILTERS.map((f) => {
+            const summaryTotal = page
+              ? Object.values(page.summary).reduce(
+                  (sum, value) => sum + value,
+                  0,
+                )
+              : 0;
+            const count =
+              f.key === ""
+                ? summaryTotal || (statusFilter === "" ? (page?.total ?? 0) : 0)
+                : (page?.summary[f.key] ?? 0);
+            const active = statusFilter === f.key;
             return (
               <button
-                key={key}
+                key={f.key || "ALL"}
                 className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
                   active
                     ? "border-primary bg-primary text-white"
@@ -188,11 +205,11 @@ export function AdminFlow2CandidatesPanel() {
                   setLoading(Boolean(bookContentQuality.listFlow2Candidates));
                   setError(null);
                   setOffset(0);
-                  setStatusFilter(key);
+                  setStatusFilter(f.key);
                 }}
                 type="button"
               >
-                {t(`flow2.filters.${key}`)} ({formatNumber(count)})
+                {t(f.labelKey)} ({formatNumber(count)})
               </button>
             );
           })}

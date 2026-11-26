@@ -25,7 +25,7 @@ async def ensure_storage_capacity(
 ) -> dict[str, int]:
     """Keep artifacts below the configured project storage budget and per-object cap."""
     global _storage_cache
-    if incoming_bytes < 0 or incoming_bytes > MAX_STORAGE_OBJECT_BYTES:
+    if isinstance(incoming_bytes, bool) or incoming_bytes < 0 or incoming_bytes > MAX_STORAGE_OBJECT_BYTES:
         raise HTTPException(status_code=413, detail="Training Storage object must be at most 40 MiB")
     configured = os.getenv("VIREAD_OCR_STORAGE_LIMIT_BYTES", str(DEFAULT_STORAGE_LIMIT_BYTES)).strip()
     try:
@@ -38,12 +38,14 @@ async def ensure_storage_capacity(
     now = time.monotonic()
     use_cache = APP_ENVIRONMENT != "test" and existing_object_path is None
     used: int | None = None
+    from_cache = False
     if use_cache:
         with _quota_lock:
             expires_at, cached_used = _storage_cache
             if expires_at > now and (cached_used + incoming_bytes) < int(limit * 0.95):
                 used = cached_used
                 _storage_cache = (expires_at, cached_used + incoming_bytes)
+                from_cache = True
 
     if used is None:
         exclude_path = " WHERE name <> :existing_path" if existing_object_path else ""
@@ -57,12 +59,14 @@ async def ensure_storage_capacity(
         """), {"existing_path": existing_object_path} if existing_object_path else {})
         row = result.mappings().first()
         used = int(row["used_bytes"] if row else 0)
-        if use_cache:
-            with _quota_lock:
-                _storage_cache = (now + _QUOTA_CACHE_TTL, used + incoming_bytes)
 
     if used + incoming_bytes > limit:
         raise HTTPException(status_code=413, detail="Supabase Storage budget would be exceeded; no artifacts were removed")
+
+    if use_cache and not from_cache:
+        with _quota_lock:
+            _storage_cache = (now + _QUOTA_CACHE_TTL, used + incoming_bytes)
+
     return {"used_bytes": used, "incoming_bytes": incoming_bytes, "limit_bytes": limit,
             "remaining_bytes": max(0, limit - used)}
 
@@ -74,28 +78,32 @@ async def ensure_database_capacity(db: AsyncSession, estimated_incoming_bytes: i
         limit = int(configured)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail="VIREAD_OCR_DATABASE_LIMIT_BYTES must be an integer") from exc
-    if limit <= 0 or estimated_incoming_bytes < 0:
+    if limit <= 0 or isinstance(estimated_incoming_bytes, bool) or estimated_incoming_bytes < 0:
         raise HTTPException(status_code=503, detail="VIREAD_OCR_DATABASE_LIMIT_BYTES or estimated size is invalid")
 
     now = time.monotonic()
     use_cache = APP_ENVIRONMENT != "test"
     used: int | None = None
+    from_cache = False
     if use_cache:
         with _quota_lock:
             expires_at, cached_used = _db_size_cache
             if expires_at > now and (cached_used + estimated_incoming_bytes) < int(limit * 0.95):
                 used = cached_used
                 _db_size_cache = (expires_at, cached_used + estimated_incoming_bytes)
+                from_cache = True
 
     if used is None:
         result = await db.execute(text("SELECT pg_database_size(current_database())::bigint AS used_bytes"))
         row = result.mappings().first()
         used = int(row["used_bytes"] if row else 0)
-        if use_cache:
-            with _quota_lock:
-                _db_size_cache = (now + _QUOTA_CACHE_TTL, used + estimated_incoming_bytes)
 
     if used + estimated_incoming_bytes > limit:
         raise HTTPException(status_code=413, detail="Supabase database budget would be exceeded; no data was deleted")
+
+    if use_cache and not from_cache:
+        with _quota_lock:
+            _db_size_cache = (now + _QUOTA_CACHE_TTL, used + estimated_incoming_bytes)
+
     return {"used_bytes": used, "incoming_bytes": estimated_incoming_bytes, "limit_bytes": limit,
             "remaining_bytes": max(0, limit - used)}

@@ -239,7 +239,7 @@ class VoiceStreamProxyTests(unittest.TestCase):
         self.assertNotIn("token", forwarded_start)
         self.assertEqual(forwarded_start["session_id"], "sess_auth")
 
-    def test_ws_stream_subprotocol_bearer_auth_negotiates_viread_subprotocol(self) -> None:
+    def test_ws_stream_rejects_bearer_subprotocol_and_requires_first_frame_auth(self) -> None:
         fake_worker = FakeWorkerWs()
 
         @asynccontextmanager
@@ -261,15 +261,65 @@ class VoiceStreamProxyTests(unittest.TestCase):
             ),
         ):
             with self._build_client(override_auth=False) as client:
+                # Sending bearer.* in Sec-WebSocket-Protocol must NOT authenticate the socket;
+                # only `viread-stt-v1` is negotiated and first-frame JSON token auth is still required.
                 with client.websocket_connect(
                     "/voice/stt-stream",
                     subprotocols=["viread-stt-v1", "bearer.proto-jwt"],
                 ) as ws:
                     self.assertEqual(ws.accepted_subprotocol, "viread-stt-v1")
                     ws.send_text(json.dumps({"type": "start", "session_id": "s_proto"}))
-                    ready = ws.receive_json()
-                    self.assertEqual(ready["type"], "ready")
-                    ws.send_text(json.dumps({"type": "stop"}))
+                    err = ws.receive_json()
+                    self.assertEqual(err["type"], "error")
+                    self.assertEqual(err["code"], "UNAUTHORIZED")
+                    with self.assertRaises(WebSocketDisconnect) as ctx:
+                        ws.receive_text()
+                    self.assertEqual(ctx.exception.code, 4401)
+
+    def test_ws_stream_stop_drains_delayed_final_frame_before_closing(self) -> None:
+        class DelayedFinalWorkerWs(FakeWorkerWs):
+            async def send(self, data: str | bytes) -> None:
+                self.sent_messages.append(data)
+                if isinstance(data, str):
+                    payload = json.loads(data)
+                    if payload.get("type") == "start":
+                        await super().send(data)
+                    elif payload.get("type") == "stop":
+                        async def _emit_delayed_final() -> None:
+                            await asyncio.sleep(0.05)
+                            await self._incoming.put(
+                                json.dumps(
+                                    {
+                                        "type": "final",
+                                        "text": "câu cuối",
+                                        "words": [{"text": "câu", "start": 0.0, "end": 0.2, "type": "word"}],
+                                        "segment_id": "sess_stop:seg_1",
+                                        "turn_id": "turn_stop",
+                                        "provider": "local",
+                                        "model_version": LOCAL_STT_MODEL_VERSION,
+                                    }
+                                )
+                            )
+                            await self._incoming.put(None)
+
+                        asyncio.create_task(_emit_delayed_final())
+
+        fake_worker = DelayedFinalWorkerWs()
+
+        @asynccontextmanager
+        async def _fake_open_ws(_url: str, _headers: dict[str, str]):
+            yield fake_worker
+
+        voice_routes.open_local_stt_ws = _fake_open_ws  # type: ignore[assignment]
+
+        with self._build_client(override_auth=True) as client:
+            with client.websocket_connect("/voice/stt-stream") as ws:
+                ws.send_text(json.dumps({"type": "start", "session_id": "sess_stop"}))
+                self.assertEqual(ws.receive_json()["type"], "ready")
+                ws.send_text(json.dumps({"type": "stop"}))
+                final = ws.receive_json()
+                self.assertEqual(final["type"], "final")
+                self.assertEqual(final["text"], "câu cuối")
 
     def test_ws_stream_reports_4503_when_worker_down_or_http_rollback_enabled(self) -> None:
         @asynccontextmanager

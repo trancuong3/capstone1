@@ -292,9 +292,9 @@
     "restartFromScratch": "最初からやり直す（新しい試行）",
     "micUnavailable": "このデバイスではマイクにアクセスできません。下のボックスに説明を入力してください。",
     "micListening": "絵の説明を聞いています…",
-    "transcribingSpeech": "ElevenLabsで音声を変換しています…",
+    "transcribingSpeech": "音声を文字に変換しています…",
     "unclearVoice": "よく聞こえませんでした。マイクをタップしてもう一度話すか、文字を入力してください！",
-    "transcribedElevenLabs": "ElevenLabsで変換しました！聞き直すか、採点のために送信する前に編集できます。",
+    "transcribedElevenLabs": "音声を文字に変換しました！聞き直すか、採点のために送信する前に編集できます。",
     "transcribedBrowser": "お話を記録しました！聞き直すか、採点のために送信する前に編集できます。",
     "emptySubmissionError": "絵の説明を少なくとも1文、話すか書いてください。",
     "sources": {

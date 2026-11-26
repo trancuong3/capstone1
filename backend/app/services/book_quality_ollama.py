@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import unicodedata
 from dataclasses import dataclass
 from typing import Literal
 
@@ -26,7 +27,7 @@ class OllamaTextFinding(BaseModel):
     severity: Literal["LOW", "MEDIUM", "HIGH"]
     explanation: str = Field(min_length=1, max_length=1000)
     suggested_correction: str | None = Field(default=None, max_length=500)
-    confidence: float | None = Field(default=None, ge=0, le=1)
+    confidence: float | None = Field(default=None, ge=0, le=1, allow_inf_nan=False)
 
 
 class OllamaTextResponse(BaseModel):
@@ -196,14 +197,47 @@ def _prompt(chunk: str, page_number: int, *, include_json_contract: bool = False
     )
 
 
-def _unique_excerpt_position(source: str, excerpt: str) -> int | None:
-    """Return an offset only when the exact excerpt has one source occurrence."""
+def _nfc_with_spans(value: str) -> tuple[str, list[tuple[int, int]]]:
+    """Normalize text to NFC while mapping each normalized codepoint back to its raw span."""
+    normalized: list[str] = []
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(value):
+        start = index
+        index += 1
+        while index < len(value) and unicodedata.combining(value[index]) != 0:
+            index += 1
+        cluster = unicodedata.normalize("NFC", value[start:index])
+        normalized.extend(cluster)
+        spans.extend([(start, index)] * len(cluster))
+    return "".join(normalized), spans
+
+
+def _unique_excerpt_span(source: str, excerpt: str) -> tuple[int, int] | None:
+    """Return an exact raw (start, end) span only when the NFC excerpt occurs uniquely."""
     if not excerpt:
         return None
-    first = source.find(excerpt)
-    if first < 0 or source.find(excerpt, first + 1) >= 0:
+    nfc_source, source_spans = _nfc_with_spans(source)
+    nfc_excerpt = unicodedata.normalize("NFC", excerpt)
+    if not nfc_excerpt:
         return None
-    return first
+    first = nfc_source.find(nfc_excerpt)
+    if first < 0 or nfc_source.find(nfc_excerpt, first + 1) >= 0:
+        return None
+    end = first + len(nfc_excerpt)
+    if not source_spans or end <= first:
+        return None
+    return source_spans[first][0], source_spans[end - 1][1]
+
+
+def _unique_excerpt_position(source: str, excerpt: str) -> int | None:
+    """Return an offset only when the exact (NFC-normalized) excerpt has one source occurrence."""
+    span = _unique_excerpt_span(source, excerpt)
+    return span[0] if span is not None else None
+
+
+def _reject_json_constant(constant: str) -> None:
+    raise ValueError(f"Non-finite JSON constant rejected: {constant}")
 
 
 def _decode_model_response(payload: object) -> OllamaTextResponse:
@@ -214,8 +248,9 @@ def _decode_model_response(payload: object) -> OllamaTextResponse:
     if not isinstance(content, str) or not content.strip():
         raise LocalCorrectionError(502, "Ollama trả về phản hồi rỗng hoặc không hợp lệ.")
     try:
-        return OllamaTextResponse.model_validate(json.loads(content))
-    except (json.JSONDecodeError, ValidationError) as error:
+        parsed_json = json.loads(content, parse_constant=_reject_json_constant)
+        return OllamaTextResponse.model_validate(parsed_json)
+    except (json.JSONDecodeError, ValidationError, ValueError) as error:
         raise LocalCorrectionError(502, "Ollama trả về JSON không đúng schema.") from error
 
 
@@ -315,25 +350,30 @@ async def analyse_with_ollama(
                         ) from error
                     parsed = _decode_model_response(payload)
                     for item in parsed.findings:
-                        position = _unique_excerpt_position(chunk, item.excerpt)
-                        if position is None:
+                        span = _unique_excerpt_span(chunk, item.excerpt)
+                        if span is None:
                             # Without an unambiguous source occurrence, do not
                             # guess which repeated phrase the model intended.
                             rejected += 1
                             continue
-                        absolute_start = start + position
-                        absolute_end = absolute_start + len(item.excerpt)
+                        raw_start, raw_end = span
+                        absolute_start = start + raw_start
+                        absolute_end = start + raw_end
                         key = (absolute_start, absolute_end, item.issue_type)
                         if key in findings:
                             continue
                         findings[key] = OllamaFindingEvidence(
                             issue_type=item.issue_type,
                             severity=item.severity,
-                            excerpt=item.excerpt,
+                            excerpt=chunk[raw_start:raw_end],
                             excerpt_start=absolute_start,
                             excerpt_end=absolute_end,
-                            explanation=item.explanation,
-                            suggested_correction=item.suggested_correction,
+                            explanation=unicodedata.normalize("NFC", item.explanation),
+                            suggested_correction=(
+                                unicodedata.normalize("NFC", item.suggested_correction)
+                                if item.suggested_correction is not None
+                                else None
+                            ),
                             confidence=item.confidence,
                             model_name=config.model,
                         )

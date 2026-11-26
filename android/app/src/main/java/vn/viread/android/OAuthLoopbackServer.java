@@ -217,7 +217,17 @@ public final class OAuthLoopbackServer {
             if (pair.isEmpty()) continue;
             int eq = pair.indexOf('=');
             String rawName = eq >= 0 ? pair.substring(0, eq) : pair;
-            if (NONCE_PARAM.equals(urlDecode(rawName))) {
+            String rawVal = eq >= 0 ? pair.substring(eq + 1) : "";
+            String key = urlDecode(rawName);
+            String safePair = null;
+            if ("code".equals(key) && rawVal.matches("[A-Za-z0-9._~%-]{1,512}")) {
+                safePair = "code=" + rawVal;
+            } else if ("error".equals(key) && rawVal.matches("[A-Za-z0-9._~%-]{1,128}")) {
+                safePair = "error=" + rawVal;
+            } else if ("next".equals(key) && isSafeRelativeNextParam(rawVal)) {
+                safePair = "next=" + rawVal;
+            }
+            if (safePair == null) {
                 continue;
             }
             if (out.length() == 0) {
@@ -225,9 +235,24 @@ public final class OAuthLoopbackServer {
             } else {
                 out.append('&');
             }
-            out.append(pair);
+            out.append(safePair);
         }
         return out.toString();
+    }
+
+    private static boolean isSafeRelativeNextParam(String rawVal) {
+        if (rawVal == null || rawVal.isEmpty() || rawVal.length() > 256) {
+            return false;
+        }
+        if (!rawVal.matches("[A-Za-z0-9._~/%-]{1,256}")) {
+            return false;
+        }
+        String decoded = urlDecode(rawVal);
+        return decoded.startsWith("/")
+                && !decoded.startsWith("//")
+                && !decoded.contains("\\")
+                && !decoded.contains("\r")
+                && !decoded.contains("\n");
     }
 
     private static String urlDecode(String value) {

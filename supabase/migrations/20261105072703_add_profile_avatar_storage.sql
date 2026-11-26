@@ -32,6 +32,8 @@ SET
     file_size_limit = EXCLUDED.file_size_limit,
     allowed_mime_types = EXCLUDED.allowed_mime_types;
 
+DROP POLICY IF EXISTS viread_avatars_service_role_only ON storage.objects;
+
 CREATE POLICY viread_avatars_service_role_only
     ON storage.objects
     FOR ALL

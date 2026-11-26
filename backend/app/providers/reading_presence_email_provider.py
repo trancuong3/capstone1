@@ -95,7 +95,7 @@ def send_presence_email(
             )
         else:
             client = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_SEND_TIMEOUT_SECONDS)
-    except (smtplib.SMTPConnectError, ConnectionError, socket.gaierror, TimeoutError) as error:
+    except (smtplib.SMTPConnectError, ConnectionError, socket.gaierror, TimeoutError, ssl.SSLError, OSError) as error:
         raise PresenceEmailRetryable() from error
     with client:
         try:
@@ -104,7 +104,7 @@ def send_presence_email(
                 client.starttls(context=context)
                 client.ehlo()
             client.login(SMTP_USERNAME, SMTP_APP_PASSWORD)
-        except (smtplib.SMTPException, ConnectionError, TimeoutError) as error:
+        except (smtplib.SMTPException, ConnectionError, TimeoutError, ssl.SSLError, OSError) as error:
             # Nothing was sent yet: login/negotiation happens before DATA.
             raise PresenceEmailRetryable() from error
         client.send_message(message)

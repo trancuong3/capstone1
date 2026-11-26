@@ -1246,9 +1246,10 @@
       "reuploadCreated": "Se ejecutó el OCR en una nueva imagen para esta página. La nueva versión está pendiente de revisión; la imagen y el contenido utilizados para la lectura solo cambiarán a la nueva versión tras la verificación.",
       "reuploadError": "No se pudo cargar la nueva imagen o ejecutar el OCR. Se conservan los datos actuales; verifique Storage, Tesseract 5.x, vie.traineddata e inténtelo de nuevo.",
       "aiRejectedAll": "Sugerencia de IA descartada. Se conserva el borrador actual.",
-      "wordDeleteSyncError": "No se pudo sincronizar el texto después de eliminar la palabra. Verifique el contenido y la lista de palabras antes de guardar."
+      "wordDeleteSyncError": "No se pudo sincronizar el texto después de eliminar la palabra. Verifique el contenido y la lista de palabras antes de guardar.",
+      "wordAddSyncError": "No se pudo sincronizar el texto después de agregar una palabra. Revisa el contenido y la lista de palabras antes de guardar."
     },
-    "newWordPlaceholder": "Nueva palabra",
+    "newWordPlaceholder": "Palabra",
     "loading": "Cargando imagen y revisión...",
     "errors": {
       "notFoundTitle": "Página no encontrada",

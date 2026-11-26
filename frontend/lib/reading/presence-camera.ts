@@ -88,6 +88,9 @@ export function createCameraPresenceSource(
       if (!options.allowPrompt && !(await isCameraAlreadyGranted())) {
         return "denied";
       }
+      if (mine !== generation) {
+        return "unavailable";
+      }
       let acquired: MediaStream;
       try {
         acquired = await navigator.mediaDevices.getUserMedia({
@@ -107,17 +110,24 @@ export function createCameraPresenceSource(
         return "unavailable";
       }
       stream = acquired;
-      video = document.createElement("video");
-      video.muted = true;
-      video.playsInline = true;
-      video.srcObject = acquired;
+      const currentVideo = document.createElement("video");
+      currentVideo.muted = true;
+      currentVideo.playsInline = true;
+      currentVideo.srcObject = acquired;
+      video = currentVideo;
       canvas = document.createElement("canvas");
       canvas.width = 80;
       canvas.height = 60;
       try {
-        await video.play();
+        await currentVideo.play();
       } catch {
         // Autoplay can be refused; frames may still arrive on some browsers.
+      }
+      if (mine !== generation) {
+        acquired.getTracks().forEach((track) => track.stop());
+        currentVideo.pause();
+        currentVideo.srcObject = null;
+        return "unavailable";
       }
       const Detector = (
         globalThis as { FaceDetector?: FaceDetectorConstructor }

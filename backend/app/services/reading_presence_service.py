@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 from app.database.config import (
@@ -136,6 +138,15 @@ class ReadingPresenceService:
     async def cancel_for_session(self, session_id: UUID, reason: str = "SESSION_ENDED") -> int:
         return await self.repo.cancel_pending_for_session(session_id, reason)
 
+    async def _release_db(self) -> None:
+        """End any open read transaction so no DB permit is held during HTTP/SMTP I/O."""
+        db = getattr(self.repo, "db", None)
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            res = rollback()
+            if inspect.isawaitable(res):
+                await res
+
     # -- delivery (worker) --------------------------------------------
     async def deliver_due(
         self,
@@ -153,9 +164,27 @@ class ReadingPresenceService:
             heartbeat=timedelta(seconds=self.limits.heartbeat_seconds),
             limit=batch,
         )
+        # Snapshot scalar fields up front so rollback()/commit() on one alert
+        # never expires subsequent ORM instances in the same session.
+        snapshots = [
+            SimpleNamespace(
+                Id=alert.Id,
+                SessionId=alert.SessionId,
+                ChildId=alert.ChildId,
+                ParentId=alert.ParentId,
+                ExpiresAt=alert.ExpiresAt,
+                Attempts=alert.Attempts or 0,
+            )
+            for alert in claimed
+        ]
+        if not snapshots:
+            await self._release_db()
+            return 0
         delivered = 0
-        for alert in claimed:
+        for alert in snapshots:
             ctx = await self.repo.delivery_context(alert)
+            # Release the read transaction before external HTTP/SMTP calls.
+            await self._release_db()
             # Re-check every precondition at the last moment.
             if now >= alert.ExpiresAt:
                 await self.repo.finish_alert(alert.Id, status="EXPIRED", now=now)

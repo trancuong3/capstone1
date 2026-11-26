@@ -21,6 +21,7 @@ const refreshResponseHeaders = ["cache-control", "expires", "pragma"] as const;
 export interface SupabaseProxyAuthResult {
   readonly response: NextResponse;
   readonly userId: string | null;
+  readonly role: ParentRole | null;
 }
 
 function isHttpsRequest(request: NextRequest): boolean {
@@ -72,8 +73,10 @@ function rebuildNextResponseWithHeaders(
 export async function refreshSupabaseAuth(
   request: NextRequest,
 ): Promise<SupabaseProxyAuthResult> {
+  const currentPathWithQuery = `${request.nextUrl.pathname}${request.nextUrl.search}`;
   // Never trust any client-supplied internal auth header.
   const forwardedHeaders = stripUntrustedSsrAuthHeaders(request.headers);
+  forwardedHeaders.set("x-viread-next", currentPathWithQuery);
   let response = NextResponse.next({ request: { headers: forwardedHeaders } });
   const { publishableKey, url } = getSupabasePublicConfig();
   const supabase = createServerClient(url, publishableKey, {
@@ -119,7 +122,7 @@ export async function refreshSupabaseAuth(
     if (hasIncomingRoleCache) {
       clearRoleCacheCookie(response, request);
     }
-    return { response, userId: null };
+    return { response, userId: null, role: null };
   }
 
   const cookieHash = computeSupabaseAuthCookieFingerprint(
@@ -132,12 +135,13 @@ export async function refreshSupabaseAuth(
   );
 
   let resolvedRole: ParentRole | undefined = cachedRole ?? undefined;
-  const isProtectedNavigation =
-    getProtectedRouteArea(request.nextUrl.pathname) !== null;
+  const pathname = request.nextUrl.pathname;
+  const shouldResolveRole =
+    getProtectedRouteArea(pathname) !== null || pathname === "/";
 
   if (
     !resolvedRole &&
-    isProtectedNavigation &&
+    shouldResolveRole &&
     typeof supabase.from === "function"
   ) {
     try {
@@ -181,6 +185,7 @@ export async function refreshSupabaseAuth(
   return {
     response,
     userId,
+    role: resolvedRole ?? null,
   };
 }
 

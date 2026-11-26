@@ -9,6 +9,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.repositories.child_progress_repository import ChildProgressRepository
 from app.schemas.child_progress import AssessmentRequest, ChildProgressAssessmentRead
 from app.services.child_progress_service import ChildProgressService
+from app.services.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -25,6 +26,9 @@ async def get_progress_assessment(
     child_id: UUID,
     days: int = Query(default=30, ge=7, le=90),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("child_progress_read", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Scores and metrics now; comments are the cached AI text or offline comments."""
@@ -39,6 +43,9 @@ async def create_progress_assessment(
     child_id: UUID,
     payload: AssessmentRequest,
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("child_progress_ai", default_max=20, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Ask the AI to write the assessment (cached while the data is unchanged)."""

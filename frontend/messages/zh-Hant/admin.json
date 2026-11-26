@@ -1246,9 +1246,10 @@
       "reuploadCreated": "已對此頁的新圖片執行 OCR。新版本待審核；閱讀使用的圖片和內容僅在驗證後才會切換至新版本。",
       "reuploadError": "無法載入新圖片或執行 OCR。目前資料已保留；請檢查 Storage、Tesseract 5.x、vie.traineddata 並重試。",
       "aiRejectedAll": "已忽略 AI 建議。目前草稿保持不變。",
-      "wordDeleteSyncError": "刪除單字後無法同步文字。請在儲存前檢查內容和單字清單。"
+      "wordDeleteSyncError": "刪除單字後無法同步文字。請在儲存前檢查內容和單字清單。",
+      "wordAddSyncError": "新增詞語後無法同步文字。請在儲存前檢查內容與詞語列表。"
     },
-    "newWordPlaceholder": "新詞",
+    "newWordPlaceholder": "詞",
     "loading": "正在載入圖片與修訂版本…",
     "errors": {
       "notFoundTitle": "找不到頁面",

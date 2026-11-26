@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    Table,
     Text,
     text,
 )
@@ -21,7 +22,7 @@ class ParentBookPageSubmission(Base):
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     BatchId = Column("batch_id", UUID(as_uuid=True), nullable=False)
     BatchTotalPages = Column("batch_total_pages", Integer, nullable=False, default=1, server_default=text("1"))
     SourcePageNumber = Column("source_page_number", Integer, nullable=False, default=1, server_default=text("1"))
@@ -104,7 +105,7 @@ class ParentBookModerationRequest(Base):
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
     SubmissionId = Column("submission_id", UUID(as_uuid=True), ForeignKey("parent_book_page_submissions.id", ondelete="CASCADE"), nullable=False)
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     SubmissionVersion = Column("submission_version", Integer, nullable=False)
     SnapshotHash = Column("snapshot_hash", String(64), nullable=False)
     SourceSha256 = Column("source_sha256", String(64), nullable=False)
@@ -132,7 +133,7 @@ class ParentBookOcrContributionConsent(Base):
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False, unique=True)
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     Purpose = Column("purpose", Text, nullable=False, default="FLOW2_ADMIN_VERIFIED_OCR", server_default=text("'FLOW2_ADMIN_VERIFIED_OCR'"))
     Status = Column("status", Text, nullable=False, default="OPTED_OUT", server_default=text("'OPTED_OUT'"))
     ConsentVersion = Column("consent_version", Integer, nullable=False, default=1, server_default=text("1"))
@@ -150,8 +151,8 @@ class ParentBookOcrContributionConsentEvent(Base):
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
-    ActorId = Column("actor_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
+    ActorId = Column("actor_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)
     Action = Column("action", Text, nullable=False)
     ConsentVersion = Column("consent_version", Integer, nullable=False)
     Purpose = Column("purpose", Text, nullable=False, default="FLOW2_ADMIN_VERIFIED_OCR", server_default=text("'FLOW2_ADMIN_VERIFIED_OCR'"))
@@ -161,12 +162,21 @@ class ParentBookOcrContributionConsentEvent(Base):
     CreatedAt = Column("created_at", DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+Table(
+    "viread_ocr_outbox",
+    Base.metadata,
+    Column("id", UUID(as_uuid=True), primary_key=True),
+    extend_existing=True,
+    info={"skip_autogenerate": True},
+)
+
+
 class ParentBookFlow2Candidate(Base):
     __tablename__ = "parent_book_flow2_candidates"
 
     Id = Column("id", UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     BookId = Column("book_id", UUID(as_uuid=True), ForeignKey("books.id", ondelete="CASCADE"), nullable=False)
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=False)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=False)
     PageId = Column("page_id", UUID(as_uuid=True), ForeignKey("bookpages.id", ondelete="CASCADE"), nullable=False)
     RevisionId = Column("revision_id", UUID(as_uuid=True), ForeignKey("pagerevisions.id", ondelete="CASCADE"), nullable=False)
     SubmissionId = Column("submission_id", UUID(as_uuid=True), ForeignKey("parent_book_page_submissions.id", ondelete="SET NULL"), nullable=True)
@@ -189,7 +199,7 @@ class ParentBookFlow2Candidate(Base):
     VerifiedAt = Column("verified_at", DateTime(timezone=True), nullable=True)
     RejectionCode = Column("rejection_code", String(64), nullable=True)
     RejectionReason = Column("rejection_reason", Text, nullable=True)
-    OutboxEventId = Column("outbox_event_id", UUID(as_uuid=True), nullable=True)
+    OutboxEventId = Column("outbox_event_id", UUID(as_uuid=True), ForeignKey("viread_ocr_outbox.id", ondelete="SET NULL"), nullable=True)
     SampleId = Column("sample_id", UUID(as_uuid=True), nullable=True)
     RevokedAt = Column("revoked_at", DateTime(timezone=True), nullable=True)
     RevokeReason = Column("revoke_reason", Text, nullable=True)

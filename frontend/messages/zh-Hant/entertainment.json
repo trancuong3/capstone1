@@ -292,9 +292,9 @@
     "restartFromScratch": "從頭再來（新的嘗試）",
     "micUnavailable": "無法在此裝置上存取麥克風。寶貝可以在下方文字框輸入描述喔。",
     "micListening": "正在聆聽寶貝描述圖片...",
-    "transcribingSpeech": "正在透過 ElevenLabs 轉換寶貝的語音...",
+    "transcribingSpeech": "正在將寶貝的語音轉換為文字...",
     "unclearVoice": "聽不太清楚寶貝的聲音。請點擊麥克風重新說一次，或是直接打字喔！",
-    "transcribedElevenLabs": "已透過 ElevenLabs 轉換語音！寶貝可以點擊「重新聆聽」或在送出評分前進行修改。",
+    "transcribedElevenLabs": "已將語音轉換為文字！寶貝可以點擊「重新聆聽」或在送出評分前進行修改。",
     "transcribedBrowser": "已記錄寶貝的敘述！寶貝可以重新聆聽或在送出評分前進行修改。",
     "emptySubmissionError": "請至少說出或寫出一句描述圖片的句子。",
     "sources": {

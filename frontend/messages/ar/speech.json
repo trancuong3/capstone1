@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "أولوية للمحلي، مع التحويل التلقائي إلى الإنترنت كاحتياطي",
     "googleSttFallback": "احتياطي Google للتعرف على الصوت (STT)",
     "googleTtsFallback": "احتياطي Google للنطق (TTS)",
-    "missingGoogleKeyHint": "إذا لم يتم تكوين مفتاح Google Cloud API في backend/.env، فسيستخدم ViRead تلقائيًا Google/المتصفح عبر الإنترنت كاحتياطي.",
+    "missingGoogleKeyHint": "إذا لم يتم تكوين مفتاح Google Cloud API على الخادم، فسيستخدم ViRead تلقائيًا Google/المتصفح عبر الإنترنت كاحتياطي.",
     "useDefaultVoice": "استخدام الصوت الافتراضي",
     "preview": "معاينة",
     "stopPreview": "إيقاف المعاينة",

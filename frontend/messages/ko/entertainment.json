@@ -292,9 +292,9 @@
     "restartFromScratch": "처음부터 다시 말하기 (새 시도)",
     "micUnavailable": "이 기기에서 마이크를 사용할 수 없습니다. 아래 칸에 설명을 직접 입력해 주세요.",
     "micListening": "그림에 대한 설명을 듣고 있어요...",
-    "transcribingSpeech": "ElevenLabs를 통해 아이의 음성을 변환 중입니다...",
+    "transcribingSpeech": "아이의 음성을 텍스트로 변환 중입니다...",
     "unclearVoice": "아이의 목소리가 잘 들리지 않아요. 마이크를 눌러 다시 말하거나 글자로 입력해 주세요!",
-    "transcribedElevenLabs": "ElevenLabs 음성 변환 완료! 다시 듣거나 채점 제출 전 수정할 수 있습니다.",
+    "transcribedElevenLabs": "음성 텍스트 변환 완료! 다시 듣거나 채점 제출 전 수정할 수 있습니다.",
     "transcribedBrowser": "이야기가 녹음되었습니다! 다시 듣거나 채점 제출 전 수정할 수 있습니다.",
     "emptySubmissionError": "그림에 대한 설명을 최소 1문장 이상 말하거나 적어주세요.",
     "sources": {

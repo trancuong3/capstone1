@@ -736,6 +736,111 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertEqual(len(created_clients), 2)
         google.transcribe.assert_not_called()
 
+    def test_p2_4_timed_phonics_repair_wav_headers_and_mark_phonics_fallback(self) -> None:
+        import asyncio
+        import struct
+        from app.providers.local_voice_provider import (
+            LocalPhonicsSpeech,
+            LocalPhonicsStepTiming,
+        )
+
+        pcm_payload = b"\x00\x00" * 2400
+        bad_header = struct.pack(
+            "<4sI4s4sIHHIIHH4sI",
+            b"RIFF",
+            36 + 0x7FFFF000,
+            b"WAVE",
+            b"fmt ",
+            16,
+            1,
+            1,
+            24000,
+            48000,
+            2,
+            16,
+            b"data",
+            0x7FFFF000,
+        )
+        bad_wav = bad_header + pcm_payload
+        bad_b64 = base64.b64encode(bad_wav).decode("ascii")
+
+        class FakeWorkerClient:
+            is_closed = False
+
+            async def post(self, url, **_kwargs):
+                if url.endswith("/tts"):
+                    return httpx.Response(
+                        200,
+                        content=bad_wav,
+                        headers={"content-type": "audio/wav"},
+                    )
+                if url.endswith("/tts/timed"):
+                    return httpx.Response(
+                        200,
+                        json={
+                            "audio_base64": bad_b64,
+                            "media_type": "audio/wav",
+                            "duration_seconds": 0.1,
+                            "words": [{"word": "mèo", "start": 0.0, "end": 0.1}],
+                            "voice_id": "local_north_truc_ly",
+                            "region": "north",
+                        },
+                    )
+                return httpx.Response(
+                    200,
+                    json={
+                        "audio_base64": bad_b64,
+                        "media_type": "audio/wav",
+                        "duration_seconds": 0.1,
+                        "step_timings": [{"id": "s1", "start": 0.0, "end": 0.1}],
+                        "voice_id": "local_north_truc_ly",
+                        "region": "north",
+                    },
+                )
+
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        local._client = FakeWorkerClient()  # type: ignore[assignment]
+        single = asyncio.run(local.synthesize(text="mèo"))
+        timed = asyncio.run(local.synthesize_timed(words=["mèo"]))
+        phonics = asyncio.run(
+            local.synthesize_phonics(
+                steps=[{"id": "s1", "spoken_text": "mờ", "pause_after_ms": 200}]
+            )
+        )
+        self.assertEqual(struct.unpack_from("<I", single.content, 40)[0], len(pcm_payload))
+        self.assertEqual(struct.unpack_from("<I", timed.audio, 40)[0], len(pcm_payload))
+        self.assertEqual(struct.unpack_from("<I", phonics.audio, 40)[0], len(pcm_payload))
+
+        # VoiceOrchestrator.synthesize_phonics sets used_fallback_voice=True on Google fallback
+        down_local = LocalVoiceProvider()
+        down_local.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        google = GoogleCloudVoiceProvider(tts_api_key="test-key")
+        google.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalPhonicsSpeech(
+                audio=_make_pcm_wav(),
+                content_type="audio/wav",
+                duration_seconds=0.4,
+                step_timings=[LocalPhonicsStepTiming(id="s1", index=0, start=0.0, end=0.4)],
+                resolved_voice_id="google_vi_vn_neural2_a",
+                region="north",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+            )
+        )
+        orch = VoiceOrchestrator(local_provider=down_local, google_provider=google)
+        fb = asyncio.run(
+            orch.synthesize_phonics(
+                steps=[{"id": "s1", "spoken_text": "mờ", "pause_after_ms": 200}],
+                policy=VoicePolicyContext(
+                    provider_mode="local_with_google_fallback",
+                    allow_google_tts=True,
+                ),
+            )
+        )
+        self.assertTrue(fb.used_fallback_voice)
+
 
 if __name__ == "__main__":
     unittest.main()

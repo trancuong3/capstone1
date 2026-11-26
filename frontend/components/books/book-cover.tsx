@@ -110,7 +110,9 @@ function formatBookGrade(
 function isSafeImageSrc(url: string | null | undefined): string | null {
   if (!url) return null;
   const trimmed = url.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/\\")) {
+    return null;
+  }
   if (
     trimmed.startsWith("/") ||
     trimmed.startsWith("blob:") ||

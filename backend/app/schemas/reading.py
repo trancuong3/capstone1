@@ -145,6 +145,8 @@ class FluencyAssessmentBase(BaseModel):
 
 class FluencyAssessmentCreate(FluencyAssessmentBase):
     SessionId: UUID
+    Score: Optional[float] = Field(None, allow_inf_nan=False)
+    Uncertainty: Optional[float] = Field(None, ge=0, le=1, allow_inf_nan=False)
 
 class FluencyAssessmentResponse(FluencyAssessmentBase):
     Id: UUID
@@ -325,10 +327,14 @@ class SessionDetailRead(HistorySessionSummaryRead):
     report_id: UUID | None
 
 
+MAX_COMPARE_TRANSCRIPT_CHARS = 10_000
+MAX_COMPARE_WORDS = 2_000
+
+
 class WordTimestamp(BaseModel):
-    text: str
-    start: float = Field(..., ge=0)
-    end: float = Field(..., ge=0)
+    text: str = Field(..., max_length=120)
+    start: float = Field(..., ge=0, allow_inf_nan=False)
+    end: float = Field(..., ge=0, allow_inf_nan=False)
 
 
 class InitialWordAssessment(BaseModel):
@@ -366,8 +372,8 @@ class ReadingPracticeStateRead(BaseModel):
 
 
 class CompareReadingRequest(BaseModel):
-    transcript: str = Field(..., min_length=1)
-    words: list[WordTimestamp] | None = None
+    transcript: str = Field(..., min_length=1, max_length=MAX_COMPARE_TRANSCRIPT_CHARS)
+    words: list[WordTimestamp] | None = Field(default=None, max_length=MAX_COMPARE_WORDS)
     # New clients bind each transcript to the immutable page snapshot they read.
     # Both fields remain optional for backward compatibility with legacy callers.
     page_id: UUID | None = None

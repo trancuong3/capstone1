@@ -131,7 +131,10 @@ public final class ErrorAndOfflineRecoveryTest {
                 "net::ERR_TIMED_OUT");
         assertEquals(View.INVISIBLE, webView.getVisibility());
         assertEquals(View.VISIBLE, activity.getErrorOverlayForTest().getVisibility());
-        assertTrue(activity.getErrorMessageViewForTest().getText().toString().contains("chậm"));
+        assertEquals(
+                activity.getString(R.string.timeout_message),
+                activity.getErrorMessageViewForTest().getText().toString());
+        assertTrue(activity.getErrorMessageViewForTest().getText().toString().contains("ch\u1eadm"));
 
         // HTTP 500/502/503 cold-start / maintenance
         for (int status : new int[]{500, 502, 503}) {

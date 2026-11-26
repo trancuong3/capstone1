@@ -12,6 +12,7 @@ from app.schemas.parent_private_book import (
     AdminFlow2CandidateDecisionResponse,
     AdminFlow2CandidatePageRead,
     AdminSuspendPrivateBookRequest,
+    AdminSuspendPrivateBookResponse,
     AdminUserBookDecisionRequest,
     AdminUserBookDecisionResponse,
     AdminUserBookQueueFilter,
@@ -21,6 +22,7 @@ from app.schemas.parent_private_book import (
     ParentAcceptSpellingRequest,
     ParentAddPageRequest,
     ParentAddPageResponse,
+    ParentCancelSubmissionResponse,
     ParentDeletePrivateBookResponse,
     ParentDeletePrivatePageResponse,
     ParentOcrContributionStateRead,
@@ -39,6 +41,7 @@ from app.schemas.parent_private_book import (
 )
 from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.parent_private_book_service import ParentPrivateBookService
+from app.services.rate_limiter import rate_limit
 
 router = APIRouter()
 
@@ -170,20 +173,26 @@ async def replace_my_private_book_page_file(
     response: Response,
     file: UploadFile = File(...),
     source_type: str | None = Form(default=None),
-    source_note: str | None = Form(default=None),
+    source_note: str | None = Form(default=None, max_length=1000),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("private_book_upload", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
-    return await ParentPrivateBookService(db).replace_committed_page_file(
-        actor_id,
-        book_id,
-        page_id,
-        file,
-        source_type=source_type,
-        source_note=source_note,
-        base_url=str(request.base_url),
-    )
+    try:
+        return await ParentPrivateBookService(db).replace_committed_page_file(
+            actor_id,
+            book_id,
+            page_id,
+            file,
+            source_type=source_type,
+            source_note=source_note,
+            base_url=str(request.base_url),
+        )
+    finally:
+        await file.close()
 
 
 @router.delete(
@@ -215,22 +224,28 @@ async def submit_my_private_book_pages(
     file: UploadFile = File(...),
     idempotency_key: str = Form(..., min_length=1, max_length=128),
     source_type: str = Form(default="OWNED_PHYSICAL_BOOK"),
-    source_note: str | None = Form(default=None),
-    target_page_number: int | None = Form(default=None),
+    source_note: str | None = Form(default=None, max_length=1000),
+    target_page_number: int | None = Form(default=None, ge=1, le=32767),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("private_book_upload", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
-    return await ParentPrivateBookService(db).submit_pages(
-        actor_id,
-        book_id,
-        file,
-        idempotency_key=idempotency_key,
-        source_type=source_type,
-        source_note=source_note,
-        target_page_number=target_page_number,
-        base_url=str(request.base_url),
-    )
+    try:
+        return await ParentPrivateBookService(db).submit_pages(
+            actor_id,
+            book_id,
+            file,
+            idempotency_key=idempotency_key,
+            source_type=source_type,
+            source_note=source_note,
+            target_page_number=target_page_number,
+            base_url=str(request.base_url),
+        )
+    finally:
+        await file.close()
 
 
 @router.get(
@@ -300,20 +315,26 @@ async def replace_my_submission_file(
     response: Response,
     file: UploadFile = File(...),
     source_type: str | None = Form(default=None),
-    source_note: str | None = Form(default=None),
+    source_note: str | None = Form(default=None, max_length=1000),
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("private_book_upload", default_max=60, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
-    return await ParentPrivateBookService(db).replace_submission_file(
-        actor_id,
-        book_id,
-        submission_id,
-        file,
-        source_type=source_type,
-        source_note=source_note,
-        base_url=str(request.base_url),
-    )
+    try:
+        return await ParentPrivateBookService(db).replace_submission_file(
+            actor_id,
+            book_id,
+            submission_id,
+            file,
+            source_type=source_type,
+            source_note=source_note,
+            base_url=str(request.base_url),
+        )
+    finally:
+        await file.close()
 
 
 @router.post(
@@ -335,7 +356,10 @@ async def retry_my_submission(
     )
 
 
-@router.delete("/my-books/{book_id}/submissions/{submission_id}")
+@router.delete(
+    "/my-books/{book_id}/submissions/{submission_id}",
+    response_model=ParentCancelSubmissionResponse,
+)
 async def cancel_my_submission(
     book_id: UUID,
     submission_id: UUID,
@@ -522,7 +546,10 @@ async def decide_admin_user_book_submission(
     )
 
 
-@router.post("/admin/quality/user-books/{book_id}/suspend")
+@router.post(
+    "/admin/quality/user-books/{book_id}/suspend",
+    response_model=AdminSuspendPrivateBookResponse,
+)
 async def suspend_admin_user_book(
     book_id: UUID,
     payload: AdminSuspendPrivateBookRequest,
@@ -579,7 +606,7 @@ async def update_my_private_book_ocr_contribution(
 async def list_admin_flow2_candidates(
     request: Request,
     response: Response,
-    candidate_status: Flow2CandidateStatus | None = Query(default="PENDING_VERIFICATION", alias="status"),
+    candidate_status: Flow2CandidateStatus | None = Query(default=None, alias="status"),
     book_id: UUID | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),

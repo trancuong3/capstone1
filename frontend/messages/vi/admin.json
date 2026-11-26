@@ -1246,9 +1246,10 @@
       "reuploadCreated": "Đã OCR ảnh mới cho đúng trang này. Bản mới đang chờ duyệt; ảnh và nội dung dùng cho lượt đọc chỉ chuyển sang bản mới sau khi xác minh.",
       "reuploadError": "Không thể tải ảnh mới hoặc chạy OCR. Dữ liệu hiện tại được giữ lại; hãy kiểm tra Storage, Tesseract 5.x, vie.traineddata và thử lại.",
       "aiRejectedAll": "Đã bỏ đề xuất AI. Bản nháp hiện tại được giữ nguyên.",
-      "wordDeleteSyncError": "Không thể đồng bộ văn bản sau khi xóa từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu."
+      "wordDeleteSyncError": "Không thể đồng bộ văn bản sau khi xóa từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu.",
+      "wordAddSyncError": "Không thể đồng bộ văn bản sau khi thêm từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu."
     },
-    "newWordPlaceholder": "Từ mới",
+    "newWordPlaceholder": "Từ",
     "loading": "Đang tải ảnh và revision…",
     "errors": {
       "notFoundTitle": "Không tìm thấy trang",

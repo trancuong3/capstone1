@@ -98,28 +98,32 @@ class KaraokeProcessingRepository:
         return await self.songs.actor(actor_id) == ("admin", 1)
 
     async def claim(self, config):
-        now = utcnow()
+        # Use PostgreSQL func.now() consistently with fence() and heartbeat()
+        # so worker host clock skew can never expire a freshly claimed lease.
+        db_now = func.now()
         # During a rolling deployment, another worker may own the algorithm
         # version of an older/newer job. Leave it queued for that worker rather
         # than claiming it and failing it in process()'s version guard.
         query = select(Job).where(Job.status == "QUEUED",
             Job.pipeline_version == config.pipeline_version, or_(
-            Job.next_attempt_at.is_(None), Job.next_attempt_at <= now,
+            Job.next_attempt_at.is_(None), Job.next_attempt_at <= db_now,
         )).order_by(Job.created_at, Job.id).with_for_update(skip_locked=True).limit(1)
         job = await self.db.scalar(query)
         if job is None:
             return None
         if not await self.actor_active(job.created_by):
             job.status, job.safe_error_code, job.retry_policy = "FAILED", "ACTOR_UNAVAILABLE", "NONE"
-            job.updated_at = job.finished_at = now
+            job.updated_at = job.finished_at = db_now
+            await self.db.flush()
             return None
         job.status = "RUNNING"
         job.stage = "VALIDATING_INPUT"
         job.attempt_count += 1
         job.lease_token = uuid4()
-        job.heartbeat_at = job.updated_at = now
-        job.lease_expires_at = now + timedelta(seconds=config.lease_seconds)
+        job.heartbeat_at = job.updated_at = db_now
+        job.lease_expires_at = db_now + timedelta(seconds=config.lease_seconds)
         await self.db.flush()
+        await self.db.refresh(job)
         return freeze(job)
 
     @staticmethod

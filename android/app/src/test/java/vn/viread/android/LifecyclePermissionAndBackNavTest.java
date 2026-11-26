@@ -140,9 +140,14 @@ public final class LifecyclePermissionAndBackNavTest {
         assertTrue(dialog.isShowing());
         dialog.dismiss();
 
-        // Real backgrounding (no permission/file picker active) pauses WebView cleanly
+        // Real backgrounding (no permission/file picker active) unregisters noisy receiver and defers WebView pause
+        assertTrue(activity.isNoisyReceiverRegisteredForTest());
         controller.pause().stop();
+        assertFalse(activity.isNoisyReceiverRegisteredForTest());
         assertFalse(activity.isAwaitingSystemPermissionForTest());
+        Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(
+                java.time.Duration.ofMillis(300));
+        assertTrue(activity.isWebViewPausedForStopForTest());
     }
 
     @Test

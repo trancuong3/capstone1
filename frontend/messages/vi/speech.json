@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Ưu tiên local, bật tự động chuyển Online dự phòng",
     "googleSttFallback": "Dự phòng Google cho Nhận diện giọng nói (STT)",
     "googleTtsFallback": "Dự phòng Google cho Đọc mẫu (TTS)",
-    "missingGoogleKeyHint": "Khi máy chưa cấu hình khóa Google Cloud API trong backend/.env, ViRead sẽ tự động dùng Google/Trình duyệt Online làm dự phòng.",
+    "missingGoogleKeyHint": "Khi máy chủ chưa cấu hình khóa Google Cloud API, ViRead sẽ tự động dùng Google/Trình duyệt Online làm dự phòng.",
     "useDefaultVoice": "Dùng giọng mặc định",
     "preview": "Nghe thử",
     "stopPreview": "Dừng nghe thử",

@@ -300,6 +300,7 @@ class SentenceShooterRepository:
                     GameRound,
                     attempt_subquery.label("duplicate_snapshot"),
                 )
+                .join(Book, Book.Id == GameSession.BookId)
                 .join(ChildProfile, ChildProfile.Id == GameSession.ChildProfileId)
                 .join(Profile, Profile.Id == ChildProfile.ParentId)
                 .join(GameRound, GameRound.GameSessionId == GameSession.Id)
@@ -309,6 +310,7 @@ class SentenceShooterRepository:
                     Profile.Active == 1,
                     GameSession.Id == session_id,
                     GameRound.Id == round_id,
+                    CatalogRepository.eligible_book(),
                 )
                 .with_for_update(of=(GameSession, GameRound))
             )

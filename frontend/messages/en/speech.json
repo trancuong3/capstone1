@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Prioritizes local, auto-falls back to Online",
     "googleSttFallback": "Google fallback for Voice recognition (STT)",
     "googleTtsFallback": "Google fallback for Pronunciation (TTS)",
-    "missingGoogleKeyHint": "If the Google Cloud API key is not configured in backend/.env, ViRead will automatically use Google/Browser Online as a fallback.",
+    "missingGoogleKeyHint": "If the server does not have a Google Cloud API key configured, ViRead will automatically use Google/Browser Online as a fallback.",
     "useDefaultVoice": "Use default voice",
     "preview": "Preview",
     "stopPreview": "Stop preview",

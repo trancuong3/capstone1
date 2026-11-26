@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Callable
@@ -22,6 +23,7 @@ from app.services.admin_ocr_chunking import (
     chunk_ocr_text,
     reconstruct_ocr_text,
 )
+from app.services.ocr_text_utils import normalize_word
 
 
 DEFAULT_MODEL = "qwen3-vl:4b-instruct-q4_K_M"
@@ -281,16 +283,19 @@ def _decode_chunk_response(payload: object, chunk: OcrTextChunk) -> tuple[str, .
             raise ValueError("provider returned invalid uncertain indices")
         corrected: list[str] = []
         for index, item in enumerate(result["corrected_words"]):
+            if not isinstance(item, str):
+                raise ValueError("provider returned a malformed word")
+            normalized_item = unicodedata.normalize("NFC", item)
             if (
-                not isinstance(item, str)
-                or not item
-                or len(item) > 500
-                or any(character.isspace() for character in item)
+                not normalized_item
+                or len(normalized_item) > 500
+                or any(character.isspace() for character in normalized_item)
             ):
                 raise ValueError("provider returned a malformed word")
-            if index in uncertain and item != chunk.tokens[index].text:
+            expected_source = unicodedata.normalize("NFC", chunk.tokens[index].text)
+            if index in uncertain and normalized_item != expected_source:
                 raise ValueError("provider changed an uncertain word")
-            corrected.append(item)
+            corrected.append(normalized_item)
         return tuple(corrected)
     except (KeyError, TypeError, ValueError) as exc:
         raise LocalCorrectionError(
@@ -313,10 +318,16 @@ class LocalOcrCorrector:
         image_bytes: bytes,
         word_boxes: list[tuple[float, float, float, float]],
         *,
+        word_normalizer: Callable[[str], str] | None = normalize_word,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> str:
+        normalized_text = unicodedata.normalize("NFC", text)
         try:
-            plan = chunk_ocr_text(text, self.config.chunking)
+            plan = chunk_ocr_text(
+                normalized_text,
+                self.config.chunking,
+                word_normalizer=word_normalizer,
+            )
         except ChunkingError as exc:
             raise LocalCorrectionError(422, str(exc)) from exc
         if len(word_boxes) != len(plan.tokens):

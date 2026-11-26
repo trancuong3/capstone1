@@ -388,6 +388,11 @@ class ParentDeletePrivatePageResponse(BaseModel):
     readable_for_children: bool = False
 
 
+class ParentCancelSubmissionResponse(BaseModel):
+    status: Literal["cancelled"] = "cancelled"
+    submission_id: UUID
+
+
 # ---------------------------------------------------------------------------
 # Admin "Sách người dùng" Moderation Schemas
 # ---------------------------------------------------------------------------
@@ -526,6 +531,14 @@ class AdminSuspendPrivateBookRequest(BaseModel):
         if len(cleaned) < 5:
             raise ValueError("Vui lòng nhập lý do đình chỉ (tối thiểu 5 ký tự).")
         return cleaned
+
+
+class AdminSuspendPrivateBookResponse(BaseModel):
+    book_id: UUID
+    moderation_status: Literal["SUSPENDED"] = "SUSPENDED"
+    suspended_at: datetime
+    reason: str
+    audit_log_id: UUID
 
 
 class AdminUserBookDecisionResponse(BaseModel):

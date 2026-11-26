@@ -51,15 +51,23 @@ export function createSupabaseAdminAuthService(
   let initialization: Promise<void> | null = null;
 
   const ensureInitialized = () => {
-    initialization ??= (async () => {
-      try {
-        const { error } = await supabase.auth.initialize();
-        if (error) throw new AdminAuthError("safe-error");
-      } catch (error) {
-        if (error instanceof AdminAuthError) throw error;
-        throw new AdminAuthError("safe-error");
-      }
-    })();
+    if (!initialization) {
+      const attempt = (async () => {
+        try {
+          const { error } = await supabase.auth.initialize();
+          if (error) throw new AdminAuthError("safe-error");
+        } catch (error) {
+          if (error instanceof AdminAuthError) throw error;
+          throw new AdminAuthError("safe-error");
+        }
+      })().catch((error) => {
+        if (initialization === attempt) {
+          initialization = null;
+        }
+        throw error;
+      });
+      initialization = attempt;
+    }
 
     return initialization;
   };

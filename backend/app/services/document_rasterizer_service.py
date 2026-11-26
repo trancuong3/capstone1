@@ -3,11 +3,14 @@ from __future__ import annotations
 import gc
 import hashlib
 import logging
+import math
 import os
+import re
 import shutil
 import subprocess
 import tempfile
 import unicodedata
+import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -25,6 +28,7 @@ MAX_SINGLE_IMAGE_BYTES = 12 * 1024 * 1024
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 MAX_DOCUMENT_PAGES = 30
 MAX_PAGE_IMAGE_DIMENSION = 6000
+MAX_PAGE_IMAGE_PIXELS = MAX_PAGE_IMAGE_DIMENSION * MAX_PAGE_IMAGE_DIMENSION
 MAX_PAGE_IMAGE_BYTES = 12 * 1024 * 1024
 
 MAX_DOCX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024
@@ -211,6 +215,117 @@ def _detect_format_by_magic(data: bytes) -> SourceDocumentFormat | None:
     return None
 
 
+_XML_UNSAFE_DECL_RE = re.compile(r"<!\s*(?:doctype|entity)\b", re.IGNORECASE)
+_XML_EXTERNAL_TARGET_MODE_RE = re.compile(r"""targetmode\s*=\s*["']\s*external\s*["']""", re.IGNORECASE)
+_UNSAFE_EXTERNAL_TARGET_RE = re.compile(r"(?:https?://|file://|ftp://|smb://|\\\\)", re.IGNORECASE)
+_EXTERNAL_REF_ATTR_NAMES = frozenset({"target", "href", "src", "link", "url"})
+
+
+def _decode_xml_text_for_inspection(raw: bytes) -> str:
+    """Decode XML bytes with UTF-8/UTF-16/UTF-32 BOM and Appendix-F auto-detection."""
+    if not raw:
+        return ""
+    if raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
+        return raw.decode("utf-32", errors="replace")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    if raw.startswith(b"\xef\xbb\xbf"):
+        return raw.decode("utf-8-sig", errors="replace")
+    if raw.startswith(b"\x00\x00\x00<"):
+        return raw.decode("utf-32-be", errors="replace")
+    if raw.startswith(b"<\x00\x00\x00"):
+        return raw.decode("utf-32-le", errors="replace")
+    if raw.startswith(b"\x00<"):
+        return raw.decode("utf-16-be", errors="replace")
+    if raw.startswith(b"<\x00"):
+        return raw.decode("utf-16-le", errors="replace")
+    sample = raw[:64]
+    if b"\x00" in sample:
+        even_nulls = sum(1 for i in range(0, len(sample), 2) if sample[i] == 0)
+        odd_nulls = sum(1 for i in range(1, len(sample), 2) if sample[i] == 0)
+        if even_nulls > odd_nulls and even_nulls >= max(2, len(sample) // 8):
+            return raw.decode("utf-16-be", errors="replace")
+        if odd_nulls > even_nulls and odd_nulls >= max(2, len(sample) // 8):
+            return raw.decode("utf-16-le", errors="replace")
+    return raw.decode("utf-8", errors="replace")
+
+
+def _xml_local_name(tag_or_attr: str) -> str:
+    if "}" in tag_or_attr:
+        return tag_or_attr.rsplit("}", 1)[1].lower()
+    if ":" in tag_or_attr:
+        return tag_or_attr.rsplit(":", 1)[1].lower()
+    return tag_or_attr.lower()
+
+
+def _is_unsafe_external_target(value: str) -> bool:
+    stripped = (value or "").strip()
+    if not stripped:
+        return False
+    lowered = stripped.lower()
+    if lowered.startswith(("http://", "https://", "file://", "ftp://", "smb://", "\\\\", "//")):
+        return True
+    if _UNSAFE_EXTERNAL_TARGET_RE.search(stripped):
+        return True
+    return False
+
+
+def _validate_docx_xml_entry(lower_name: str, raw_bytes: bytes) -> None:
+    decoded = _decode_xml_text_for_inspection(raw_bytes)
+    normalized_probe = decoded.replace("\x00", "")
+    if _XML_UNSAFE_DECL_RE.search(decoded) or _XML_UNSAFE_DECL_RE.search(normalized_probe):
+        raise HTTPException(
+            status_code=422,
+            detail="Document XML contains unsafe declarations",
+        )
+    if _XML_EXTERNAL_TARGET_MODE_RE.search(decoded) or _XML_EXTERNAL_TARGET_MODE_RE.search(normalized_probe):
+        raise HTTPException(
+            status_code=422,
+            detail="Document XML contains unsafe external references",
+        )
+    try:
+        root = ET.fromstring(decoded)
+    except ET.ParseError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="The uploaded document is empty or corrupted",
+        ) from exc
+
+    is_rels = lower_name.endswith(".rels")
+    for elem in root.iter():
+        elem_local = _xml_local_name(elem.tag)
+        for attr_key, attr_val in elem.attrib.items():
+            attr_local = _xml_local_name(attr_key)
+            val_str = str(attr_val or "").strip()
+            if attr_local == "targetmode" and val_str.lower() == "external":
+                raise HTTPException(
+                    status_code=422,
+                    detail="Document XML contains unsafe external references",
+                )
+            if is_rels and attr_local == "target" and _is_unsafe_external_target(val_str):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Document XML contains unsafe external references",
+                )
+            if attr_local in _EXTERNAL_REF_ATTR_NAMES and _is_unsafe_external_target(val_str):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Document XML contains unsafe external references",
+                )
+            if elem_local == "fldsimple" and attr_local == "instr" and _is_unsafe_external_target(val_str):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Document XML contains unsafe external references",
+                )
+        if elem_local == "instrtext":
+            field_text = "".join(elem.itertext())
+            if _is_unsafe_external_target(field_text):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Document XML contains unsafe external references",
+                )
+
+
 def _validate_docx_archive(source: bytes | BinaryIO) -> None:
     stream: BinaryIO
     if isinstance(source, (bytes, bytearray)):
@@ -229,7 +344,6 @@ def _validate_docx_archive(source: bytes | BinaryIO) -> None:
 
             total_declared_uncompressed = 0
             names_lower: set[str] = set()
-            xml_entries: list[zipfile.ZipInfo] = []
 
             for info in infos:
                 if info.flag_bits & 0x1:
@@ -237,7 +351,13 @@ def _validate_docx_archive(source: bytes | BinaryIO) -> None:
                         status_code=422,
                         detail="Password-protected documents are not supported",
                     )
-                lower_name = info.filename.lower()
+                entry_name = info.filename
+                if entry_name.startswith(("/", "\\")) or "\\" in entry_name or ".." in entry_name.split("/"):
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Archive structure exceeds safe extraction limits",
+                    )
+                lower_name = entry_name.lower()
                 names_lower.add(lower_name)
                 if lower_name.endswith("vbaproject.bin") or lower_name.startswith("word/vba"):
                     raise HTTPException(
@@ -259,36 +379,42 @@ def _validate_docx_archive(source: bytes | BinaryIO) -> None:
                             detail="Archive structure exceeds safe extraction limits",
                         )
 
-                if lower_name.endswith(".xml") or lower_name.endswith(".rels"):
-                    xml_entries.append(info)
-
             if "[content_types].xml" not in names_lower or "word/document.xml" not in names_lower:
                 raise HTTPException(
                     status_code=415,
                     detail="File content does not match the declared file type or extension",
                 )
 
+            # Stream-verify actual decompressed bytes for ALL entries (never trust info.file_size header).
             total_read_bytes = 0
-            for info in xml_entries:
+            for info in infos:
+                lower_name = info.filename.lower()
+                is_xml_or_rels = lower_name.endswith(".xml") or lower_name.endswith(".rels")
                 chunks: list[bytes] = []
+                entry_read_bytes = 0
                 with zf.open(info, "r") as entry_stream:
                     while True:
                         chunk = entry_stream.read(65536)
                         if not chunk:
                             break
+                        entry_read_bytes += len(chunk)
                         total_read_bytes += len(chunk)
                         if total_read_bytes > MAX_DOCX_UNCOMPRESSED_BYTES:
                             raise HTTPException(
                                 status_code=422,
                                 detail="Archive structure exceeds safe extraction limits",
                             )
-                        chunks.append(chunk)
-                xml_bytes = b"".join(chunks).lower()
-                if b"<!doctype" in xml_bytes or b"<!entity" in xml_bytes:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Document XML contains unsafe declarations",
-                    )
+                        if entry_read_bytes > MAX_DOCX_RATIO_CHECK_MIN_BYTES:
+                            actual_ratio = entry_read_bytes / max(info.compress_size, 1)
+                            if actual_ratio > MAX_DOCX_COMPRESSION_RATIO:
+                                raise HTTPException(
+                                    status_code=422,
+                                    detail="Archive structure exceeds safe extraction limits",
+                                )
+                        if is_xml_or_rels:
+                            chunks.append(chunk)
+                if is_xml_or_rels:
+                    _validate_docx_xml_entry(lower_name, b"".join(chunks))
     except HTTPException:
         raise
     except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
@@ -296,6 +422,21 @@ def _validate_docx_archive(source: bytes | BinaryIO) -> None:
             status_code=422,
             detail="The uploaded document is empty or corrupted",
         ) from exc
+
+
+def _assert_pil_image_within_pixel_budget(image: Image.Image) -> None:
+    """Enforce pixel budget on lazy header dimensions before load()/exif_transpose() without mutating Image.MAX_IMAGE_PIXELS."""
+    width, height = image.size
+    if width <= 0 or height <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="The uploaded document is empty or corrupted",
+        )
+    if width * height > MAX_PAGE_IMAGE_PIXELS:
+        raise HTTPException(
+            status_code=413,
+            detail="Image dimensions must not exceed 6000 by 6000 pixels",
+        )
 
 
 def _flatten_to_rgb(image: Image.Image) -> Image.Image:
@@ -332,6 +473,7 @@ def _normalize_pil_frame(
     *,
     output_format: Literal["jpeg", "png"] | None = None,
 ) -> tuple[bytes, str, str, int, int]:
+    _assert_pil_image_within_pixel_budget(frame)
     canvas = _flatten_to_rgb(frame)
     owns_canvas = canvas is not frame
     try:
@@ -399,6 +541,7 @@ def _iter_image_pages(
                             status_code=422,
                             detail="Document exceeds the 30-page limit per upload",
                         )
+                    _assert_pil_image_within_pixel_budget(frame)
                     frame_copy = frame.copy()
                     try:
                         out_bytes, ctype, ext, w, h = _normalize_pil_frame(frame_copy)
@@ -416,6 +559,7 @@ def _iter_image_pages(
                     del out_bytes
                     gc.collect()
             else:
+                _assert_pil_image_within_pixel_budget(img)
                 img.load()
                 out_bytes, ctype, ext, w, h = _normalize_pil_frame(img)
                 yielded += 1
@@ -445,6 +589,53 @@ def _iter_image_pages(
             status_code=422,
             detail="The uploaded document is empty or corrupted",
         )
+
+
+def _compute_safe_pdf_render_scale(
+    page_w_pt: float,
+    page_h_pt: float,
+    *,
+    render_dpi: float | None = None,
+    max_edge: int | None = None,
+) -> float:
+    """Compute a PDF render scale strictly capped by MAX_PAGE_IMAGE_DIMENSION and MAX_PAGE_IMAGE_PIXELS."""
+    if (
+        not math.isfinite(page_w_pt)
+        or not math.isfinite(page_h_pt)
+        or page_w_pt <= 0.0
+        or page_h_pt <= 0.0
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="PDF page dimensions are invalid",
+        )
+    dpi = _PDF_RENDER_DPI if render_dpi is None else float(render_dpi)
+    edge_cap = (
+        MAX_PAGE_IMAGE_DIMENSION
+        if max_edge is None
+        else min(MAX_PAGE_IMAGE_DIMENSION, int(max_edge))
+    )
+    max_pt = max(page_w_pt, page_h_pt)
+    scale = min(dpi / 72.0, edge_cap / max_pt)
+    if not math.isfinite(scale) or scale <= 0.0:
+        raise HTTPException(
+            status_code=422,
+            detail="PDF page dimensions exceed safe rendering limits",
+        )
+    est_w = int(round(page_w_pt * scale))
+    est_h = int(round(page_h_pt * scale))
+    if (
+        est_w < 1
+        or est_h < 1
+        or est_w > edge_cap
+        or est_h > edge_cap
+        or (est_w * est_h) > MAX_PAGE_IMAGE_PIXELS
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="PDF page dimensions exceed safe rendering limits",
+        )
+    return scale
 
 
 def _rasterize_image_bytes(
@@ -493,11 +684,15 @@ def _iter_pdf_with_pypdfium2(source: bytes | Path) -> Iterator[RasterizedDocumen
             pil_image = None
             try:
                 page_w_pt, page_h_pt = page.get_size()
-                max_pt = max(float(page_w_pt), float(page_h_pt), 1.0)
-                scale = min(render_dpi / 72.0, max_edge / max_pt)
-                scale = max(scale, 0.25)
+                scale = _compute_safe_pdf_render_scale(
+                    float(page_w_pt),
+                    float(page_h_pt),
+                    render_dpi=render_dpi,
+                    max_edge=max_edge,
+                )
                 bitmap = page.render(scale=scale)
                 pil_image = bitmap.to_pil()
+                _assert_pil_image_within_pixel_budget(pil_image)
                 out_bytes, ctype, ext, w, h = _normalize_pil_frame(pil_image)
             finally:
                 if pil_image is not None:
@@ -563,10 +758,24 @@ def _iter_pdf_with_pymupdf(source: bytes | Path) -> Iterator[RasterizedDocumentP
         for idx in range(page_count):
             page = doc[idx]
             rect = page.rect
-            max_pt = max(float(rect.width), float(rect.height), 1.0)
-            scale = min(render_dpi / 72.0, max_edge / max_pt)
-            scale = max(scale, 0.25)
+            scale = _compute_safe_pdf_render_scale(
+                float(rect.width),
+                float(rect.height),
+                render_dpi=render_dpi,
+                max_edge=max_edge,
+            )
             pix = page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False)
+            if (
+                pix.width <= 0
+                or pix.height <= 0
+                or pix.width > MAX_PAGE_IMAGE_DIMENSION
+                or pix.height > MAX_PAGE_IMAGE_DIMENSION
+                or (pix.width * pix.height) > MAX_PAGE_IMAGE_PIXELS
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="PDF page dimensions exceed safe rendering limits",
+                )
             pil_image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
             del pix
             try:
@@ -712,9 +921,13 @@ def _try_libreoffice_docx_to_pdf(data: bytes) -> bytes | None:
     try:
         input_path = work_dir / "source.docx"
         input_path.write_bytes(data)
+        lo_profile_dir = work_dir / "lo_profile"
+        lo_profile_dir.mkdir(parents=True, exist_ok=True)
+        lo_profile_uri = lo_profile_dir.resolve().as_uri()
         proc = subprocess.run(
             [
                 soffice,
+                f"-env:UserInstallation={lo_profile_uri}",
                 "--headless",
                 "--nologo",
                 "--nofirststartwizard",
@@ -899,6 +1112,7 @@ def _iter_docx_pages(source: bytes | BinaryIO) -> Iterator[RasterizedDocumentPag
                 for blob in extract_embedded_images(child):
                     try:
                         with Image.open(BytesIO(blob)) as raw_embedded:
+                            _assert_pil_image_within_pixel_budget(raw_embedded)
                             embedded_rgb = _flatten_to_rgb(raw_embedded)
                     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
                         continue

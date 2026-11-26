@@ -20,12 +20,23 @@ vi.mock("next/link", async () => {
 vi.mock("next/image", async () => {
   const { createElement } = await import("react");
   return {
-    default: ({ src, alt, ...props }: Record<string, unknown>) =>
-      createElement("img", {
+    default: ({
+      src,
+      alt,
+      fill: _fill,
+      priority: _priority,
+      unoptimized: _unoptimized,
+      ...props
+    }: Record<string, unknown>) => {
+      void _fill;
+      void _priority;
+      void _unoptimized;
+      return createElement("img", {
         ...props,
         src: String(src ?? ""),
         alt: String(alt ?? ""),
-      }),
+      });
+    },
   };
 });
 

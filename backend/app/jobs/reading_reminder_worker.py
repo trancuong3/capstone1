@@ -5,6 +5,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import inspect
 import logging
+import signal
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
@@ -99,6 +100,16 @@ async def get_verified_parent_email(parent_id: UUID) -> str:
     return email.strip()
 
 
+async def _release_repository_db(repository: object) -> None:
+    """Release any open DB read transaction before external HTTP/SMTP calls."""
+    db = getattr(repository, "db", None)
+    rollback = getattr(db, "rollback", None)
+    if callable(rollback):
+        res = rollback()
+        if inspect.isawaitable(res):
+            await res
+
+
 def _sender_accepts_locale(email_sender) -> bool:
     try:
         sig = inspect.signature(email_sender)
@@ -115,6 +126,18 @@ def _sender_accepts_locale(email_sender) -> bool:
     return False
 
 
+def _extract_explicit_locale(reminder: ReadingReminder, child: ChildProfile) -> str:
+    explicit = getattr(reminder, "Locale", None) or getattr(child, "Locale", None)
+    if explicit:
+        return resolve_supported_locale(explicit)
+    settings = getattr(child, "Settings", None)
+    if isinstance(settings, dict):
+        pref = settings.get("preferred_locale") or settings.get("locale")
+        if pref:
+            return resolve_supported_locale(pref)
+    return DEFAULT_LOCALE
+
+
 async def _resolve_claim_locale(
     reminder: ReadingReminder,
     child: ChildProfile,
@@ -126,15 +149,7 @@ async def _resolve_claim_locale(
             raw = await raw
         if raw:
             return resolve_supported_locale(raw)
-    explicit = getattr(reminder, "Locale", None) or getattr(child, "Locale", None)
-    if explicit:
-        return resolve_supported_locale(explicit)
-    settings = getattr(child, "Settings", None)
-    if isinstance(settings, dict):
-        pref = settings.get("preferred_locale") or settings.get("locale")
-        if pref:
-            return resolve_supported_locale(pref)
-    return DEFAULT_LOCALE
+    return _extract_explicit_locale(reminder, child)
 
 
 async def deliver_claimed_occurrences(
@@ -147,44 +162,73 @@ async def deliver_claimed_occurrences(
     locale_resolver=None,
     max_attempts: int = READING_REMINDER_MAX_ATTEMPTS,
 ) -> int:
+    # Snapshot scalar claim attributes up front so rollback()/commit() never expires
+    # subsequent ORM objects in the same AsyncSession.
+    claim_snapshots = [
+        (
+            occurrence.Id,
+            occurrence.EmailAttempts,
+            occurrence.ScheduledLocalDate.isoformat(),
+            reminder.RemindAt.strftime("%H:%M"),
+            reminder.Timezone,
+            child.ParentId,
+            child.Alias,
+            _extract_explicit_locale(reminder, child),
+        )
+        for occurrence, reminder, child in claims
+    ]
     delivered = 0
     supports_locale = _sender_accepts_locale(email_sender)
-    for occurrence, reminder, child in claims:
+    for (
+        occurrence_id,
+        attempts,
+        local_date,
+        local_time,
+        timezone_name,
+        parent_id,
+        child_alias,
+        explicit_locale,
+    ) in claim_snapshots:
+        await _release_repository_db(repository)
         try:
-            recipient = await recipient_resolver(child.ParentId)
+            recipient = await recipient_resolver(parent_id)
             send_kwargs: dict[str, object] = {
                 "recipient": recipient,
-                "child_alias": child.Alias,
-                "local_date": occurrence.ScheduledLocalDate.isoformat(),
-                "local_time": reminder.RemindAt.strftime("%H:%M"),
-                "timezone_name": reminder.Timezone,
-                "occurrence_id": occurrence.Id,
+                "child_alias": child_alias,
+                "local_date": local_date,
+                "local_time": local_time,
+                "timezone_name": timezone_name,
+                "occurrence_id": occurrence_id,
             }
             if supports_locale:
-                send_kwargs["locale"] = await _resolve_claim_locale(
-                    reminder, child, locale_resolver=locale_resolver
-                )
+                claim_locale = explicit_locale
+                if locale_resolver is not None:
+                    raw_locale = locale_resolver(parent_id)
+                    if inspect.isawaitable(raw_locale):
+                        raw_locale = await raw_locale
+                    if raw_locale:
+                        claim_locale = resolve_supported_locale(raw_locale)
+                send_kwargs["locale"] = claim_locale
             await asyncio.to_thread(email_sender, **send_kwargs)
         except ParentEmailUnavailable as error:
             await repository.update_email_delivery(
-                occurrence.Id,
+                occurrence_id,
                 status="FAILED",
                 now=now,
                 error_code=error.code,
             )
         except EmailDeliveryNotConfigured:
             await repository.update_email_delivery(
-                occurrence.Id,
+                occurrence_id,
                 status="FAILED",
                 now=now,
                 error_code="EMAIL_NOT_CONFIGURED",
             )
         except ParentEmailLookupFailed as error:
-            attempts = occurrence.EmailAttempts
             terminal = attempts >= max_attempts
             delay_minutes = min(60, 2 ** max(0, attempts - 1))
             await repository.update_email_delivery(
-                occurrence.Id,
+                occurrence_id,
                 status="FAILED" if terminal else "RETRY",
                 now=now,
                 error_code="PARENT_EMAIL_LOOKUP_FAILED",
@@ -200,11 +244,10 @@ async def deliver_claimed_occurrences(
                 terminal=terminal,
             )
         except Exception as error:
-            attempts = occurrence.EmailAttempts
             terminal = attempts >= max_attempts
             delay_minutes = min(60, 2 ** max(0, attempts - 1))
             await repository.update_email_delivery(
-                occurrence.Id,
+                occurrence_id,
                 status="FAILED" if terminal else "RETRY",
                 now=now,
                 error_code="SMTP_UNAVAILABLE",
@@ -221,7 +264,7 @@ async def deliver_claimed_occurrences(
             )
         else:
             await repository.update_email_delivery(
-                occurrence.Id,
+                occurrence_id,
                 status="SENT",
                 now=now,
             )
@@ -255,14 +298,28 @@ def validate_worker_configuration() -> None:
         raise RuntimeError("Set a server-only Supabase Admin API key for verified parent email lookup.")
 
 
-async def run_worker(*, once: bool = False) -> int:
+async def run_worker(
+    *, once: bool = False, stop_event: asyncio.Event | None = None
+) -> int:
     validate_worker_configuration()
+    effective_stop = stop_event if stop_event is not None else asyncio.Event()
+    if stop_event is None:
+        try:
+            loop = asyncio.get_running_loop()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, effective_stop.set)
+        except (NotImplementedError, RuntimeError, ValueError):
+            pass
     try:
         if once:
+            if effective_stop.is_set():
+                return 0
             return await process_due_reminders_once()
-        while True:
+        while not effective_stop.is_set():
             try:
                 await process_due_reminders_once()
+            except asyncio.CancelledError:
+                raise
             except Exception as error:
                 record_worker_error(_WORKER_KEY, error)
                 log_diagnostic(
@@ -272,7 +329,17 @@ async def run_worker(*, once: bool = False) -> int:
                     stage="scheduler",
                     exception=error,
                 )
-            await asyncio.sleep(READING_REMINDER_POLL_SECONDS)
+            if effective_stop.is_set():
+                break
+            try:
+                await asyncio.wait_for(
+                    effective_stop.wait(),
+                    timeout=READING_REMINDER_POLL_SECONDS,
+                )
+                break
+            except TimeoutError:
+                pass
+        return 0
     finally:
         await engine.dispose()
 

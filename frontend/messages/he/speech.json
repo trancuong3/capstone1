@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "עדיפות למקומי, מעבר אוטומטי לגיבוי מקוון",
     "googleSttFallback": "גיבוי של Google לזיהוי דיבור (STT)",
     "googleTtsFallback": "גיבוי של Google להגייה (TTS)",
-    "missingGoogleKeyHint": "אם מפתח ה-Google Cloud API אינו מוגדר בקובץ backend/.env, ViRead תשתמש אוטומטית ב-Google / בדפדפן המקוון כגיבוי.",
+    "missingGoogleKeyHint": "אם מפתח ה-Google Cloud API אינו מוגדר בשרת, ViRead תשתמש אוטומטית ב-Google / בדפדפן המקוון כגיבוי.",
     "useDefaultVoice": "השתמש בקול ברירת מחדל",
     "preview": "תצוגה מקדימה",
     "stopPreview": "עצור תצוגה מקדימה",

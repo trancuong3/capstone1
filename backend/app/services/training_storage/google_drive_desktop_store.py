@@ -11,6 +11,7 @@ import re
 import shutil
 import sqlite3
 import string
+import threading
 import time
 from typing import Any, BinaryIO
 from uuid import uuid4
@@ -181,7 +182,7 @@ def _read_drivefs_account_profiles() -> list[dict[str, Any]]:
         return []
 
     profiles: list[dict[str, Any]] = []
-    for child in drivefs_dir.iterdir():
+    for child in sorted(drivefs_dir.iterdir(), key=lambda p: p.name):
         if not child.is_dir() or not child.name.isdigit():
             continue
         meta_db = child / "metadata_sqlite_db"
@@ -282,30 +283,36 @@ def detect_google_drive_desktop_mounts() -> list[dict[str, Any]]:
     # 1. Explicit env override if configured
     env_root = (os.getenv("VIREAD_GDRIVE_DESKTOP_ROOT") or "").strip()
     if env_root:
-        p = Path(env_root)
-        if p.exists():
-            resolved_flow2 = resolve_flow2_sync_root(p)
-            key = str(resolved_flow2).lower()
-            seen_paths.add(key)
-            mounts.append(
-                {
-                    "drive_root": str(p),
-                    "flow2_root": str(resolved_flow2),
-                    "account_email": primary_email,
-                    "source": "env",
-                }
-            )
+        try:
+            p = _validate_raw_desktop_path(env_root)
+            if p.exists():
+                resolved_flow2 = resolve_flow2_sync_root(p)
+                key = str(resolved_flow2).lower()
+                seen_paths.add(key)
+                mounts.append(
+                    {
+                        "drive_root": str(p),
+                        "flow2_root": str(resolved_flow2),
+                        "account_email": primary_email,
+                        "source": "env",
+                    }
+                )
+        except (TrainingStorageError, OSError):
+            logger.warning("Ignoring unsafe VIREAD_GDRIVE_DESKTOP_ROOT value")
 
     # 2. DriveFS recorded mount paths
     for acc in drivefs_accounts:
         mp = (acc.get("mount_path") or "").strip()
         if not mp:
             continue
-        base = Path(mp)
-        if not base.exists():
+        try:
+            base = _validate_raw_desktop_path(mp)
+            if not base.exists():
+                continue
+            candidate = _find_my_drive_child(base) or base
+            flow2 = resolve_flow2_sync_root(candidate)
+        except (TrainingStorageError, OSError):
             continue
-        candidate = _find_my_drive_child(base) or base
-        flow2 = resolve_flow2_sync_root(candidate)
         key = str(flow2).lower()
         if key not in seen_paths:
             seen_paths.add(key)
@@ -341,9 +348,163 @@ def detect_google_drive_desktop_mounts() -> list[dict[str, Any]]:
                             "source": "windows_mount",
                         }
                     )
-            except OSError:
+            except (TrainingStorageError, OSError):
                 continue
     return mounts
+
+
+def _is_reparse_or_symlink(path: Path) -> bool:
+    try:
+        if path.is_symlink():
+            return True
+    except OSError:
+        pass
+    isjunction = getattr(os.path, "isjunction", None)
+    if callable(isjunction):
+        try:
+            if isjunction(path):
+                return True
+        except OSError:
+            pass
+    return False
+
+
+def _assert_no_symlink_components(path: Path) -> None:
+    anchor = Path(path.anchor) if path.anchor else None
+    cur = path
+    while True:
+        if anchor is not None and cur == anchor:
+            break
+        if _is_reparse_or_symlink(cur):
+            raise TrainingStorageError(
+                "Symbolic links and junctions are not permitted for Google Drive Desktop sync",
+                code="DRIVE_DESKTOP_SYMLINK_FORBIDDEN",
+                http_status=400,
+            )
+        parent = cur.parent
+        if parent == cur:
+            break
+        cur = parent
+
+
+def _validate_raw_desktop_path(raw_path: str | Path) -> Path:
+    """Validate desktop sync path syntax before touching the filesystem (prevents UNC/SMB & traversal)."""
+    raw_str = str(raw_path or "").strip().strip('"').strip("'")
+    if not raw_str:
+        raise TrainingStorageError(
+            "Google Drive for Desktop folder path is required",
+            code="DRIVE_DESKTOP_PATH_MISSING",
+            http_status=400,
+        )
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in raw_str):
+        raise TrainingStorageError(
+            "Google Drive for Desktop folder path contains invalid characters",
+            code="DRIVE_DESKTOP_PATH_INVALID",
+            http_status=400,
+        )
+    if raw_str.startswith(("\\\\", "//")) or raw_str.startswith(("\\?", "\\.", "/?", "/.")):
+        raise TrainingStorageError(
+            "Network and UNC paths are not allowed for Google Drive Desktop sync",
+            code="DRIVE_DESKTOP_UNC_FORBIDDEN",
+            http_status=400,
+        )
+    if "://" in raw_str:
+        raise TrainingStorageError(
+            "URL paths are not allowed for Google Drive Desktop sync",
+            code="DRIVE_DESKTOP_PATH_INVALID",
+            http_status=400,
+        )
+    if len(raw_str) == 2 and raw_str[1] == ":" and raw_str[0] in string.ascii_letters:
+        raw_str = f"{raw_str}\\"
+    if raw_str.startswith("\\"):
+        raise TrainingStorageError(
+            "Relative paths are not allowed for Google Drive Desktop sync",
+            code="DRIVE_DESKTOP_PATH_INVALID",
+            http_status=400,
+        )
+    if len(raw_str) >= 2 and raw_str[1] == ":" and raw_str[0] in string.ascii_letters:
+        if len(raw_str) < 3 or raw_str[2] not in ("\\", "/"):
+            raise TrainingStorageError(
+                "Relative paths are not allowed for Google Drive Desktop sync",
+                code="DRIVE_DESKTOP_PATH_INVALID",
+                http_status=400,
+            )
+    p = Path(raw_str)
+    if not p.is_absolute():
+        raise TrainingStorageError(
+            "Relative paths are not allowed for Google Drive Desktop sync",
+            code="DRIVE_DESKTOP_PATH_INVALID",
+            http_status=400,
+        )
+    if ".." in p.parts:
+        raise TrainingStorageError(
+            "Path traversal segments are not allowed for Google Drive Desktop sync",
+            code="DRIVE_DESKTOP_PATH_INVALID",
+            http_status=400,
+        )
+    _assert_no_symlink_components(p)
+    return p
+
+
+def get_allowed_drive_desktop_roots() -> list[Path]:
+    """Parse pathsep-separated VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS into safe resolved Paths."""
+    raw = (os.getenv("VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS") or "").strip()
+    if not raw:
+        return []
+    roots: list[Path] = []
+    for entry in raw.split(os.pathsep):
+        cleaned = entry.strip().strip('"').strip("'")
+        if not cleaned:
+            continue
+        try:
+            p = _validate_raw_desktop_path(cleaned)
+            roots.append(p.resolve())
+        except (TrainingStorageError, OSError):
+            logger.warning("Ignoring invalid VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS entry")
+            continue
+    return roots
+
+
+def _path_is_within_root(candidate: Path, root: Path) -> bool:
+    try:
+        candidate_norm = Path(os.path.normcase(str(candidate.resolve())))
+        root_norm = Path(os.path.normcase(str(root.resolve())))
+        return candidate_norm.is_relative_to(root_norm)
+    except (OSError, ValueError):
+        return False
+
+
+def validate_flow2_sync_root_allowed(
+    flow2_root: Path,
+    *,
+    detected_mounts: list[dict[str, Any]] | None = None,
+) -> Path:
+    """Require resolved flow2_root to stay inside a detected DriveFS mount or explicit env allowlist."""
+    _assert_no_symlink_components(flow2_root)
+    resolved = flow2_root.resolve()
+    mounts = detected_mounts if detected_mounts is not None else detect_google_drive_desktop_mounts()
+    allowed_roots: list[Path] = []
+    for mount in mounts:
+        for key in ("drive_root", "flow2_root"):
+            raw_mount = str(mount.get(key) or "").strip()
+            if not raw_mount:
+                continue
+            try:
+                allowed_roots.append(_validate_raw_desktop_path(raw_mount).resolve())
+            except (TrainingStorageError, OSError):
+                continue
+    allowed_roots.extend(get_allowed_drive_desktop_roots())
+    if not any(_path_is_within_root(resolved, root) for root in allowed_roots):
+        logger.warning(
+            "Rejected Google Drive Desktop sync root outside detected mounts and allowlist: %s",
+            resolved,
+        )
+        raise DrivePermissionError(
+            "Google Drive for Desktop path must be inside a detected Google Drive mount or configured VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS",
+            code="DRIVE_DESKTOP_PATH_NOT_ALLOWED",
+            http_status=403,
+        )
+    return resolved
 
 
 def _find_my_drive_child(base: Path) -> Path | None:
@@ -361,25 +522,17 @@ def _find_my_drive_child(base: Path) -> Path | None:
 
 def resolve_flow2_sync_root(raw_path: str | Path) -> Path:
     """Resolve user-supplied drive letter or My Drive path into .../ViRead/OCR-Training/Flow2-Admin-Verified."""
-    raw_str = str(raw_path or "").strip().strip('"').strip("'")
-    if not raw_str:
-        raise TrainingStorageError(
-            "Google Drive for Desktop folder path is required",
-            code="DRIVE_DESKTOP_PATH_MISSING",
-            http_status=400,
-        )
-    if len(raw_str) == 2 and raw_str[1] == ":" and raw_str[0] in string.ascii_letters:
-        raw_str = f"{raw_str}\\"
-    p = Path(raw_str)
+    p = _validate_raw_desktop_path(raw_path)
     # If pointing to drive root (e.g. G:\), automatically step into "My Drive" / "Drive của tôi"
     my_drive = _find_my_drive_child(p)
     if my_drive is not None and my_drive != p:
+        _assert_no_symlink_components(my_drive)
         p = my_drive
     # If already ending with Flow2-Admin-Verified, keep as-is; otherwise append standard Flow 2 segments
-    if p.name == DRIVE_ROOT_SEGMENTS[-1]:
-        return p
-    for seg in DRIVE_ROOT_SEGMENTS:
-        p = p / seg
+    if p.name != DRIVE_ROOT_SEGMENTS[-1]:
+        for seg in DRIVE_ROOT_SEGMENTS:
+            p = p / seg
+    _assert_no_symlink_components(p)
     return p
 
 
@@ -387,11 +540,20 @@ def drive_desktop_config_readiness() -> dict[str, Any]:
     enc_key = (os.getenv("VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY") or "").strip()
     required_email = (os.getenv("VIREAD_GDRIVE_REQUIRED_ACCOUNT_EMAIL") or "").strip().lower() or None
     detected = detect_google_drive_desktop_mounts()
+    sanitized_mounts = [
+        {
+            "drive_root": "Google Drive Desktop",
+            "flow2_root": DRIVE_ROOT_DISPLAY_PATH,
+            "account_email": m.get("account_email"),
+            "source": m.get("source"),
+        }
+        for m in detected
+    ]
     return {
         "desktop_ready": len(enc_key) >= 32,
         "encryption_key_configured": len(enc_key) >= 32,
-        "detected_mounts": detected,
-        "default_mount_path": detected[0]["drive_root"] if detected else None,
+        "detected_mounts": sanitized_mounts,
+        "default_mount_path": None,
         "required_account_email": required_email,
     }
 
@@ -414,7 +576,8 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         max_training_budget_bytes: int | None = None,
     ) -> None:
         self._raw_root_input = str(root_dir)
-        self._root_dir = Path(root_dir).resolve()
+        validated_root = _validate_raw_desktop_path(root_dir)
+        self._root_dir = validated_root.resolve()
         self._account_email = (account_email or "").strip().lower() or None
         self._min_free_buffer_bytes = (
             min_free_buffer_bytes
@@ -429,6 +592,7 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         )
         self._root_folder_id = f"gdesk_root_{hashlib.sha256(str(self._root_dir).lower().encode('utf-8')).hexdigest()[:16]}"
         self._subfolder_ids: dict[str, str] = {}
+        self._index_lock = threading.Lock()
 
     @property
     def root_dir(self) -> Path:
@@ -449,6 +613,12 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         clean_id = validate_drive_file_id(file_id)
         return self._index_dir() / f"{clean_id}.json"
 
+    def _immutable_key_index_path(self, logical_path: str, sha256_hex: str) -> Path:
+        key_sha = hashlib.sha256(
+            f"{logical_path}\0{sha256_hex.strip().lower()}".encode("utf-8")
+        ).hexdigest()
+        return self._index_dir() / "by_key" / key_sha[:2] / f"{key_sha}.json"
+
     def _assert_root_available(self) -> None:
         app_env = (os.getenv("APP_ENVIRONMENT") or "").strip().lower()
         is_render = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -463,8 +633,9 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         # Check the top-level mount anchor (e.g. G:\ or parent drive) exists before touching anything
         anchor = Path(self._root_dir.anchor) if self._root_dir.anchor else self._root_dir.parent
         if not anchor.exists():
+            logger.warning("Google Drive Desktop mount anchor unavailable: %s", anchor)
             raise DriveNotConnectedError(
-                f"Google Drive for Desktop mount ({anchor}) is offline; start Google Drive on Windows"
+                "Google Drive for Desktop mount is offline; start Google Drive on the host"
             )
 
     def _delete_index_entries_for_logical_path(
@@ -615,8 +786,13 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
             self._subfolder_ids = subfolders
             return self._root_folder_id, dict(subfolders)
         except OSError as exc:
+            logger.warning(
+                "Cannot create or write ViRead Flow 2 folders in Google Drive Desktop mount (%s): %s",
+                self._root_dir,
+                exc,
+            )
             raise DrivePermissionError(
-                f"Cannot create or write ViRead Flow 2 folders in Google Drive Desktop mount ({self._root_dir}): {exc}",
+                "Cannot create or write ViRead Flow 2 folders in Google Drive Desktop mount",
                 code="DRIVE_DESKTOP_WRITE_ERROR",
                 http_status=503,
             ) from exc
@@ -629,7 +805,8 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         try:
             local_usage = shutil.disk_usage(probe_path)
         except OSError as exc:
-            raise DriveNotConnectedError(f"Unable to read Google Drive Desktop quota at {probe_path}: {exc}") from exc
+            logger.warning("Unable to read Google Drive Desktop quota at %s: %s", probe_path, exc)
+            raise DriveNotConnectedError("Unable to read Google Drive Desktop storage quota") from exc
 
         local_free_bytes = max(0, int(local_usage.free))
         prof = self._matching_drivefs_profile()
@@ -724,9 +901,15 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
                 root_folder_id=root_id,
                 root_folder_path=DRIVE_ROOT_DISPLAY_PATH,
                 quota=quota,
-                detail=f"Google Drive for Desktop synced folder verified ({self._root_dir})",
+                detail="Google Drive for Desktop synced folder verified",
             )
         except TrainingStorageError as exc:
+            logger.warning(
+                "Google Drive Desktop health check failed (%s) at %s: %s",
+                exc.code,
+                self._root_dir,
+                exc,
+            )
             return StorageHealthStatus(
                 provider=StorageProvider.GOOGLE_DRIVE,
                 healthy=False,
@@ -738,6 +921,11 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
                 detail=str(exc),
             )
         except OSError as exc:
+            logger.warning(
+                "Google Drive Desktop health check I/O error at %s: %s",
+                self._root_dir,
+                exc,
+            )
             return StorageHealthStatus(
                 provider=StorageProvider.GOOGLE_DRIVE,
                 healthy=False,
@@ -746,26 +934,47 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
                 root_folder_id=self._root_folder_id,
                 root_folder_path=DRIVE_ROOT_DISPLAY_PATH,
                 error_code="DRIVE_DESKTOP_IO_ERROR",
-                detail=str(exc)[:240],
+                detail="Google Drive for Desktop synced folder is not accessible or writable",
             )
 
     def _find_existing_immutable_index(self, logical_path: str, sha256_hex: str) -> dict[str, Any] | None:
         idx_dir = self._index_dir()
         if not idx_dir.is_dir():
             return None
-        for entry_file in idx_dir.glob("gdesk_*.json"):
-            try:
-                rec = json.loads(entry_file.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if (
-                isinstance(rec, dict)
-                and rec.get("logical_path") == logical_path
-                and str(rec.get("sha256") or "").lower() == sha256_hex
-            ):
-                target = self._resolve_target_path(logical_path)
-                if target.is_file():
+        norm_sha = sha256_hex.strip().lower()
+        target = self._resolve_target_path(logical_path)
+        key_path = self._immutable_key_index_path(logical_path, norm_sha)
+        with self._index_lock:
+            if key_path.is_file():
+                try:
+                    rec = json.loads(key_path.read_text(encoding="utf-8"))
+                except Exception:
+                    rec = None
+                if (
+                    isinstance(rec, dict)
+                    and rec.get("logical_path") == logical_path
+                    and str(rec.get("sha256") or "").lower() == norm_sha
+                    and rec.get("file_id")
+                    and target.is_file()
+                ):
                     return rec
+            for entry_file in sorted(idx_dir.glob("gdesk_*.json"), key=lambda p: p.name):
+                try:
+                    rec = json.loads(entry_file.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                if (
+                    isinstance(rec, dict)
+                    and rec.get("logical_path") == logical_path
+                    and str(rec.get("sha256") or "").lower() == norm_sha
+                    and rec.get("file_id")
+                ):
+                    if target.is_file():
+                        try:
+                            self._write_json_atomic(key_path, rec)
+                        except OSError:
+                            pass
+                        return rec
         return None
 
     def put(
@@ -828,18 +1037,22 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
                 raise
 
             file_id = _make_desktop_file_id()
-            self._write_json_atomic(
-                self._index_path(file_id),
-                {
-                    "file_id": file_id,
-                    "logical_path": clean_path,
-                    "name": target.name,
-                    "sha256": actual_sha,
-                    "size_bytes": actual_size,
-                    "content_type": content_type,
-                    "metadata": dict(metadata or {}),
-                },
-            )
+            record = {
+                "file_id": file_id,
+                "logical_path": clean_path,
+                "name": target.name,
+                "sha256": actual_sha,
+                "size_bytes": actual_size,
+                "content_type": content_type,
+                "metadata": dict(metadata or {}),
+            }
+            with self._index_lock:
+                self._write_json_atomic(self._index_path(file_id), record)
+                if category in _IMMUTABLE_CATEGORIES:
+                    self._write_json_atomic(
+                        self._immutable_key_index_path(clean_path, actual_sha),
+                        record,
+                    )
             return StoredArtifact(
                 provider=StorageProvider.GOOGLE_DRIVE,
                 reference=format_gdrive_ref(file_id),
@@ -957,14 +1170,24 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
         idx_path = self._index_path(parsed.drive_file_id)
         if not idx_path.is_file():
             return False
+        logical_path = ""
+        sha_hex = ""
         try:
             rec = json.loads(idx_path.read_text(encoding="utf-8"))
-            logical_path = str(rec.get("logical_path") or "")
+            if isinstance(rec, dict):
+                logical_path = str(rec.get("logical_path") or "")
+                sha_hex = str(rec.get("sha256") or "").strip().lower()
             if logical_path:
                 target = self._resolve_target_path(logical_path)
                 target.unlink(missing_ok=True)
         finally:
-            idx_path.unlink(missing_ok=True)
+            with self._index_lock:
+                idx_path.unlink(missing_ok=True)
+                if logical_path and sha_hex:
+                    try:
+                        self._immutable_key_index_path(logical_path, sha_hex).unlink(missing_ok=True)
+                    except OSError:
+                        pass
         return True
 
     def self_test(self) -> DriveSelfTestResult:
@@ -993,7 +1216,7 @@ class GoogleDriveDesktopStore(TrainingArtifactStore):
             deleted_after_test=deleted,
             is_private=not meta.is_public,
             quota=quota,
-            detail=f"Upload, SHA-256 verification, private read-back, and cleanup succeeded in {self._root_dir}"
+            detail="Upload, SHA-256 verification, private read-back, and cleanup succeeded"
             if ok
             else "Self-test completed with one or more failed assertions",
         )

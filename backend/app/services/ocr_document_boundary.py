@@ -87,16 +87,16 @@ def _decode_image_to_bgr(image_input: bytes | np.ndarray | Image.Image) -> np.nd
             raise ValueError("Image payload exceeds 12 MiB limit")
         if not _has_supported_image_magic(raw):
             raise ValueError("Unsupported image format: only JPEG, PNG, and WEBP are allowed")
-        prev_max_pixels = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
         try:
             with Image.open(io.BytesIO(raw)) as pil_img:
-                if int(pil_img.width) * int(pil_img.height) > _MAX_IMAGE_PIXELS:
+                width, height = pil_img.size
+                if width <= 0 or height <= 0 or int(width) * int(height) > _MAX_IMAGE_PIXELS:
                     raise ValueError("Image exceeds 25MP decompression limit")
+                pil_img.load()
                 transposed = ImageOps.exif_transpose(pil_img).convert("RGB")
                 rgb = np.asarray(transposed, dtype=np.uint8)
-        finally:
-            Image.MAX_IMAGE_PIXELS = prev_max_pixels
+        except Image.DecompressionBombError as exc:
+            raise ValueError("Image exceeds 25MP decompression limit") from exc
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     raise TypeError(f"Unsupported image input type: {type(image_input).__name__}")

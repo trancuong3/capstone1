@@ -1180,13 +1180,28 @@ export function AdminOcrReviewScreen({
           ) {
             return;
           }
+          setCandidateEditPending(false);
           try {
             const latest = await ocr.getLatestWorkflow(
               pageId,
               requestedRevision,
             );
+            if (
+              !mountedRef.current ||
+              candidateSyncRequestRef.current !== requestId ||
+              detail?.page_revision_id !== requestedRevision
+            ) {
+              return;
+            }
             if (latest) setAiWorkflow(latest);
           } catch {
+            if (
+              !mountedRef.current ||
+              candidateSyncRequestRef.current !== requestId ||
+              detail?.page_revision_id !== requestedRevision
+            ) {
+              return;
+            }
             setNotice(
               isServiceError(cause)
                 ? t("ocrReview.notices.candidateSaveErrorWithMsg", {
@@ -1318,7 +1333,11 @@ export function AdminOcrReviewScreen({
           paddleLineScore,
         )
       ) {
-        setWordFilter("review");
+        setWordFilter(
+          matchesWordFilter(selectedStatus, "review", selected, paddleLineScore)
+            ? "review"
+            : "all",
+        );
       }
 
       const element =
@@ -2034,7 +2053,8 @@ export function AdminOcrReviewScreen({
   }
 
   async function reprocess() {
-    if (!detail) return;
+    if (!detail || detail.lifecycle_status !== "ACTIVE" || busy !== null)
+      return;
     const generation = ++revisionChoiceRequestIdRef.current;
     setBusy("reprocess");
     setNotice(null);
@@ -2056,9 +2076,14 @@ export function AdminOcrReviewScreen({
       setHistory(nextHistory);
       setNotice(t("ocrReview.notices.reprocessCreated"));
     } catch {
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
       setNotice(t("ocrReview.notices.reprocessError"), "error");
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
@@ -2110,9 +2135,14 @@ export function AdminOcrReviewScreen({
       if (input) input.value = "";
       setNotice(t("ocrReview.notices.reuploadCreated"));
     } catch {
+      if (
+        !mountedRef.current ||
+        generation !== revisionChoiceRequestIdRef.current
+      )
+        return;
       setNotice(t("ocrReview.notices.reuploadError"), "error");
     } finally {
-      setBusy(null);
+      if (mountedRef.current) setBusy(null);
     }
   }
 
@@ -2320,7 +2350,9 @@ export function AdminOcrReviewScreen({
         busy={busy !== null}
         onAddWord={() => {
           if (detail.verification_status !== "NEEDS_REVIEW") return;
-          const newWordText = t("ocrReview.newWordPlaceholder");
+          const rawPlaceholder = t("ocrReview.newWordPlaceholder");
+          const newWordText =
+            tokenizePageText(rawPlaceholder)[0] ?? rawPlaceholder;
           const nextIndex =
             words.reduce(
               (maximum, word) => Math.max(maximum, word.word_index),
@@ -2335,10 +2367,21 @@ export function AdminOcrReviewScreen({
             ocr_confidence: null,
             ocr_review_status: "needs_review",
           };
-          setWords((current) => [...current, nextWord]);
-          setDraftText((current) => `${current.trim()} ${newWordText}`.trim());
+          const nextWords = [...words, nextWord];
+          const nextText = `${draftText.trim()} ${newWordText}`
+            .trim()
+            .normalize("NFC");
+          const synced = syncPageTextToWords(nextText, nextWords);
+          if (synced.status === "synchronized") {
+            setWords([...synced.words]);
+            setWordSyncError(null);
+          } else {
+            setWords(nextWords);
+            setWordSyncError(t("ocrReview.notices.wordAddSyncError"));
+          }
+          setDraftText(nextText);
+          setCandidateEditPending(true);
           setSelectedWord(nextIndex);
-          setWordSyncError(null);
           draftEditVersionRef.current += 1;
         }}
         onComplete={() => router.push(viewHref("review"))}
@@ -2366,6 +2409,7 @@ export function AdminOcrReviewScreen({
           }
           setWords([...synced.words]);
           setDraftText(nextText.normalize("NFC"));
+          setCandidateEditPending(true);
           setSelectedWord(nextWords[0]?.word_index ?? null);
           setWordSyncError(null);
           draftEditVersionRef.current += 1;

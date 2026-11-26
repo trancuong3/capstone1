@@ -237,13 +237,22 @@ describe("comprehension-voice-matcher", () => {
   });
 
   it("blocks Vietnamese homophone nouns as bare letters and resolves content without false conflicts", () => {
-    // Bare homophones must never hijack Choice C/D when spoken without an explicit marker
+    // Bare homophones must never hijack Choice C/D when spoken without an explicit marker;
+    // when they match a visible choice's distinctive noun, resolve content cleanly instead.
     const deRes = analyzeComprehensionVoiceInput("dê", ANIMAL_CHOICES);
-    expect(["NONE", "AMBIGUOUS"]).toContain(deRes.type);
+    expect(deRes).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "A", label: "Con dê" },
+      matchedBy: "content",
+    });
     expect(deRes).not.toMatchObject({ type: "CHOICE", choice: { id: "D" } });
 
     const xeRes = analyzeComprehensionVoiceInput("xe", ANIMAL_CHOICES);
-    expect(["NONE", "AMBIGUOUS"]).toContain(xeRes.type);
+    expect(xeRes).toMatchObject({
+      type: "CHOICE",
+      choice: { id: "B", label: "Xe đạp" },
+      matchedBy: "content",
+    });
     expect(xeRes).not.toMatchObject({ type: "CHOICE", choice: { id: "C" } });
 
     // "đề" in "đề bài nói xe đạp" must not trigger a CONFLICT with Choice D

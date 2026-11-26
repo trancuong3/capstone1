@@ -292,9 +292,9 @@
     "restartFromScratch": "Von vorne beginnen (neuer Versuch)",
     "micUnavailable": "Das Mikrofon kann auf diesem Gerät nicht geöffnet werden. Du kannst deine Beschreibung in das Feld unten eingeben.",
     "micListening": "Ich höre mir deine Bildbeschreibung an...",
-    "transcribingSpeech": "Deine Stimme wird über ElevenLabs konvertiert...",
+    "transcribingSpeech": "Deine Stimme wird in Text umgewandelt...",
     "unclearVoice": "Ich konnte dich nicht klar verstehen. Bitte tippe auf das Mikrofon, um es erneut zu versuchen, oder gib deinen Text ein!",
-    "transcribedElevenLabs": "Stimme über ElevenLabs konvertiert! Du kannst sie dir erneut anhören oder bearbeiten, bevor du sie zur Bewertung abschickst.",
+    "transcribedElevenLabs": "Stimme in Text umgewandelt! Du kannst sie dir erneut anhören oder bearbeiten, bevor du sie zur Bewertung abschickst.",
     "transcribedBrowser": "Deine Erzählung wurde aufgezeichnet! Du kannst sie dir erneut anhören oder bearbeiten, bevor du sie zur Bewertung abschickst.",
     "emptySubmissionError": "Bitte sprich oder schreibe mindestens einen Satz, um das Bild zu beschreiben.",
     "sources": {

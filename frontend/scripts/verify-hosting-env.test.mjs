@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   checkPublishableKey,
+  checkSsrSigningKey,
   publicHttpsOrigin,
   verifyHostingEnvironment,
 } from "./verify-hosting-env.mjs";
@@ -12,6 +13,8 @@ const allowed = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
     "sb_publishable_abcdefghijklmnopqrstuvwxyz123456789",
   NEXT_PUBLIC_API_URL: "https://capstone1-ssd8.onrender.com",
+  VIREAD_SSR_AUTH_SIGNING_KEY:
+    "viread_ssr_hmac_key_9f8e7d6c5b4a3210fedcba9876543210",
 };
 
 function legacyJwt(role) {
@@ -121,6 +124,45 @@ test("rejects public secrets and production auth fixtures", () => {
         PLAYWRIGHT_AUTH_FIXTURES: "true",
       }),
     /PLAYWRIGHT_AUTH_FIXTURES/,
+  );
+});
+
+test("validates VIREAD_SSR_AUTH_SIGNING_KEY without leaking key material", () => {
+  assert.doesNotThrow(() =>
+    checkSsrSigningKey(allowed.VIREAD_SSR_AUTH_SIGNING_KEY),
+  );
+
+  const shortSecret = "too-short-secret-DO-NOT-LOG";
+  assert.throws(
+    () =>
+      verifyHostingEnvironment({
+        ...allowed,
+        VIREAD_SSR_AUTH_SIGNING_KEY: shortSecret,
+      }),
+    (error) =>
+      /VIREAD_SSR_AUTH_SIGNING_KEY/.test(error.message) &&
+      !error.message.includes(shortSecret),
+  );
+
+  for (const weak of [
+    "your-placeholder-signing-key-value-123456",
+    "a".repeat(48),
+    "<REDACTED_32+_BYTE_SECRET_PLACEHOLDER>",
+  ]) {
+    assert.throws(
+      () => checkSsrSigningKey(weak),
+      /VIREAD_SSR_AUTH_SIGNING_KEY/,
+    );
+  }
+
+  assert.throws(
+    () =>
+      verifyHostingEnvironment({
+        ...allowed,
+        NEXT_PUBLIC_VIREAD_SSR_AUTH_SIGNING_KEY:
+          allowed.VIREAD_SSR_AUTH_SIGNING_KEY,
+      }),
+    /forbidden browser-public secret/,
   );
 });
 

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import logging
+import math
 import os
 import sys
 import threading
@@ -46,6 +48,7 @@ from app.services.ocr_inference_job_service import (
     is_remote_ocr_mode,
     normalize_text_tokens,
     normalize_word,
+    remote_sync_wait_timeout_seconds,
 )
 
 
@@ -116,22 +119,113 @@ def _prune_cache(now: float) -> None:
         _idempotency_cache.pop(oldest_key, None)
 
 
+def _safe_finite_float(value: object, default: float) -> float:
+    if value is None or isinstance(value, bool):
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    return parsed if math.isfinite(parsed) else default
+
+
+def _safe_nonneg_int(value: object, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            return default
+        return max(0, int(value))
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return default
+
+
+def _resolve_scan_timeout_seconds() -> float:
+    raw = os.getenv("LOCAL_OCR_SCAN_TIMEOUT_SECONDS", str(DEFAULT_SCAN_TIMEOUT_SECONDS))
+    parsed = _safe_finite_float(raw, DEFAULT_SCAN_TIMEOUT_SECONDS)
+    return max(1.0, min(600.0, parsed))
+
+
+def _clamp_bbox_coords(
+    raw_x: float, raw_y: float, raw_w: float, raw_h: float
+) -> tuple[float, float, float, float]:
+    x = max(0.0, min(0.9999, raw_x))
+    y = max(0.0, min(0.9999, raw_y))
+    w = max(0.0001, min(1.0 - x, raw_w))
+    h = max(0.0001, min(1.0 - y, raw_h))
+    if x + w > 1.0:
+        w = max(0.0001, math.floor((1.0 - x) * 1_000_000) / 1_000_000)
+    if y + h > 1.0:
+        h = max(0.0001, math.floor((1.0 - y) * 1_000_000) / 1_000_000)
+    return (x, y, w, h)
+
+
 def _normalize_bbox(raw_bbox: object) -> tuple[float, float, float, float]:
     if isinstance(raw_bbox, (list, tuple)) and len(raw_bbox) == 4:
-        return (
-            max(0.0, min(1.0, float(raw_bbox[0]))),
-            max(0.0, min(1.0, float(raw_bbox[1]))),
-            max(0.0001, min(1.0, float(raw_bbox[2]))),
-            max(0.0001, min(1.0, float(raw_bbox[3]))),
+        return _clamp_bbox_coords(
+            _safe_finite_float(raw_bbox[0], 0.0),
+            _safe_finite_float(raw_bbox[1], 0.0),
+            _safe_finite_float(raw_bbox[2], 0.1),
+            _safe_finite_float(raw_bbox[3], 0.05),
         )
     if isinstance(raw_bbox, dict):
-        return (
-            max(0.0, min(1.0, float(raw_bbox.get("x", 0.0)))),
-            max(0.0, min(1.0, float(raw_bbox.get("y", 0.0)))),
-            max(0.0001, min(1.0, float(raw_bbox.get("w", raw_bbox.get("width", 0.1))))),
-            max(0.0001, min(1.0, float(raw_bbox.get("h", raw_bbox.get("height", 0.05))))),
+        return _clamp_bbox_coords(
+            _safe_finite_float(raw_bbox.get("x"), 0.0),
+            _safe_finite_float(raw_bbox.get("y"), 0.0),
+            _safe_finite_float(raw_bbox.get("w", raw_bbox.get("width")), 0.1),
+            _safe_finite_float(raw_bbox.get("h", raw_bbox.get("height")), 0.05),
         )
     return (0.0, 0.0, 0.1, 0.05)
+
+
+def _decode_and_normalize_image_bytes(raw: bytes) -> tuple[bytes, str]:
+    try:
+        with Image.open(BytesIO(raw)) as probe:
+            fmt = (probe.format or "").upper()
+            if fmt not in ALLOWED_SCAN_FORMATS:
+                raise HTTPException(
+                    status_code=415,
+                    detail="Unsupported upload format; use JPEG, PNG, or WebP",
+                )
+            width, height = probe.size
+            if width <= 0 or height <= 0:
+                raise HTTPException(status_code=422, detail="Image dimensions are invalid")
+            if width > MAX_SCAN_IMAGE_DIMENSION or height > MAX_SCAN_IMAGE_DIMENSION:
+                raise HTTPException(
+                    status_code=422,
+                    detail="Image dimensions must not exceed 6000 by 6000 pixels",
+                )
+            # Apply EXIF orientation so rotated mobile camera photos are upright,
+            # and store compact JPEG q85 (avoiding multi-MB uncompressed PNGs).
+            oriented = ImageOps.exif_transpose(probe)
+            rgb = oriented.convert("RGB")
+            buf = BytesIO()
+            rgb.save(buf, format="JPEG", quality=85, optimize=True)
+            clean_bytes = buf.getvalue()
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=422, detail="Image decoding failed") from exc
+
+    # Hash the exact encoded bytes stored/transmitted so remote OCR workers verify cleanly.
+    image_sha256 = hashlib.sha256(clean_bytes).hexdigest()
+    return clean_bytes, image_sha256
+
+
+def _probe_image_dimensions_and_format(clean_bytes: bytes) -> tuple[int, int, str]:
+    try:
+        with Image.open(BytesIO(clean_bytes)) as img:
+            width, height = img.size
+            fmt = (img.format or "PNG").upper()
+            if width <= 0 or height <= 0:
+                raise HTTPException(status_code=422, detail="Image dimensions are invalid")
+            return int(width), int(height), fmt
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
+        raise HTTPException(status_code=422, detail="Image decoding failed") from exc
 
 
 def _detect_runtime_device(metadata: dict[str, Any]) -> str:
@@ -190,6 +284,24 @@ class LocalOcrScanService:
     def __init__(self, repository: LocalOcrScanRepository):
         self.repository = repository
 
+    async def _release_db_read_txn(self) -> None:
+        """Release read-only auth/lookup transactions before slow I/O without discarding pending ORM changes."""
+        db = getattr(self.repository, "db", None)
+        if db is None or (
+            getattr(db, "new", None)
+            or getattr(db, "dirty", None)
+            or getattr(db, "deleted", None)
+        ):
+            return
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            try:
+                res = rollback()
+                if inspect.isawaitable(res):
+                    await res
+            except Exception:
+                pass
+
     async def _validate_and_normalize_image(self, file: UploadFile) -> tuple[bytes, str]:
         chunks: list[bytes] = []
         total = 0
@@ -223,37 +335,7 @@ class LocalOcrScanService:
         if not raw:
             raise HTTPException(status_code=422, detail="A file is required")
 
-        try:
-            with Image.open(BytesIO(raw)) as probe:
-                fmt = (probe.format or "").upper()
-                if fmt not in ALLOWED_SCAN_FORMATS:
-                    raise HTTPException(
-                        status_code=415,
-                        detail="Unsupported upload format; use JPEG, PNG, or WebP",
-                    )
-                width, height = probe.size
-                if width <= 0 or height <= 0:
-                    raise HTTPException(status_code=422, detail="Image dimensions are invalid")
-                if width > MAX_SCAN_IMAGE_DIMENSION or height > MAX_SCAN_IMAGE_DIMENSION:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Image dimensions must not exceed 6000 by 6000 pixels",
-                    )
-                # Apply EXIF orientation so rotated mobile camera photos are upright,
-                # and store compact JPEG q85 (avoiding multi-MB uncompressed PNGs).
-                oriented = ImageOps.exif_transpose(probe)
-                rgb = oriented.convert("RGB")
-                buf = BytesIO()
-                rgb.save(buf, format="JPEG", quality=85, optimize=True)
-                clean_bytes = buf.getvalue()
-        except HTTPException:
-            raise
-        except (UnidentifiedImageError, OSError, ValueError) as exc:
-            raise HTTPException(status_code=422, detail="Image decoding failed") from exc
-
-        # Hash the exact encoded bytes stored/transmitted so remote OCR workers verify cleanly.
-        image_sha256 = hashlib.sha256(clean_bytes).hexdigest()
-        return clean_bytes, image_sha256
+        return await asyncio.to_thread(_decode_and_normalize_image_bytes, raw)
 
     async def _run_remote_ocr_scan(
         self,
@@ -272,10 +354,11 @@ class LocalOcrScanService:
                 status_code=503,
                 detail="Remote OCR worker is offline; live page scan is temporarily unavailable.",
             )
+        await self._release_db_read_txn()
 
-        with Image.open(BytesIO(clean_bytes)) as img:
-            width, height = img.size
-            fmt = (img.format or "PNG").upper()
+        width, height, fmt = await asyncio.to_thread(
+            _probe_image_dimensions_and_format, clean_bytes
+        )
         ext = "jpg" if fmt == "JPEG" else ("webp" if fmt == "WEBP" else "png")
         mime_type = "image/jpeg" if ext == "jpg" else f"image/{ext}"
         storage_path = f"local-scans/{actor_id}/{scan_job_id}.{ext}"
@@ -309,7 +392,9 @@ class LocalOcrScanService:
             try:
                 completed = await job_service.wait_for_job_completion(
                     job.Id,
-                    timeout_seconds=min(float(timeout_seconds), 45.0),
+                    timeout_seconds=min(
+                        float(timeout_seconds), remote_sync_wait_timeout_seconds()
+                    ),
                 )
             except HTTPException:
                 await OcrInferenceJobService(self.repository.db).cancel_job(
@@ -371,16 +456,7 @@ class LocalOcrScanService:
                 raise HTTPException(status_code=404, detail="Child profile not found")
 
         # Release read-only auth transaction before image processing & remote /health check.
-        if not (
-            getattr(self.repository.db, "new", None)
-            or getattr(self.repository.db, "dirty", None)
-            or getattr(self.repository.db, "deleted", None)
-        ):
-            try:
-                await self.repository.db.rollback()
-            except Exception:
-                pass
-
+        await self._release_db_read_txn()
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
 
         if idempotency_key is not None:
@@ -398,10 +474,7 @@ class LocalOcrScanService:
 
         scan_job_id = uuid4()
         started_at = time.perf_counter()
-        timeout_seconds = max(
-            1.0,
-            float(os.getenv("LOCAL_OCR_SCAN_TIMEOUT_SECONDS", str(DEFAULT_SCAN_TIMEOUT_SECONDS))),
-        )
+        timeout_seconds = _resolve_scan_timeout_seconds()
 
         log_diagnostic(
             logger,
@@ -426,7 +499,7 @@ class LocalOcrScanService:
                 )
             else:
                 ocr_result = await asyncio.wait_for(
-                    run_in_threadpool(extract_text_and_boxes, clean_bytes),
+                    asyncio.to_thread(extract_text_and_boxes, clean_bytes),
                     timeout=timeout_seconds,
                 )
         except (TimeoutError, asyncio.TimeoutError) as exc:
@@ -559,15 +632,15 @@ class LocalOcrScanService:
             if not surface:
                 continue
             conf_raw = raw_word.get("ocr_confidence")
-            conf = (
-                max(0.0, min(1.0, float(conf_raw)))
-                if isinstance(conf_raw, (int, float))
-                else None
-            )
+            conf: float | None = None
+            if isinstance(conf_raw, (int, float)) and not isinstance(conf_raw, bool):
+                conf_float = float(conf_raw)
+                if math.isfinite(conf_float):
+                    conf = max(0.0, min(1.0, conf_float))
             parsed_words.append(
                 LocalOcrWordRead(
-                    word_index=int(raw_word.get("word_index", idx)),
-                    line_index=max(0, int(raw_word.get("line_index", 0))),
+                    word_index=_safe_nonneg_int(raw_word.get("word_index"), idx),
+                    line_index=_safe_nonneg_int(raw_word.get("line_index"), 0),
                     text=surface,
                     normalized_text=normalize_word(surface),
                     bbox=_normalize_bbox(raw_word.get("bbox") or raw_word.get("bounding_box")),
@@ -593,7 +666,7 @@ class LocalOcrScanService:
             checkpoint_sha256=str(metadata["checkpoint_sha256"]) if metadata.get("checkpoint_sha256") else None,
             model_load_status=str(metadata["model_load_status"]) if metadata.get("model_load_status") else None,
             cloud_ocr_used=False,
-            elapsed_ms=max(0, int(elapsed_ms)),
+            elapsed_ms=_safe_nonneg_int(elapsed_ms, 0),
         )
 
         # Match extracted Vietnamese text against child-safety-approved catalog pages.
@@ -629,8 +702,8 @@ class LocalOcrScanService:
                 page_revision_id=m_rev.Id,
                 page_number=m_page.PageNumber,
                 confidence=best_score,
-                width=max(1, int(m_page.Width or 1000)),
-                height=max(1, int(m_page.Height or 1400)),
+                width=max(1, _safe_nonneg_int(m_page.Width, 1000)),
+                height=max(1, _safe_nonneg_int(m_page.Height, 1400)),
                 words=[
                     ReadingPageWordRead(
                         word_id=w.Id,
@@ -758,19 +831,11 @@ class LocalOcrScanService:
                 raise HTTPException(status_code=404, detail="Child profile not found")
 
         # Release read-only auth transaction before image processing & remote /health check.
-        if not (
-            getattr(self.repository.db, "new", None)
-            or getattr(self.repository.db, "dirty", None)
-            or getattr(self.repository.db, "deleted", None)
-        ):
-            try:
-                await self.repository.db.rollback()
-            except Exception:
-                pass
-
+        await self._release_db_read_txn()
         clean_bytes, image_sha256 = await self._validate_and_normalize_image(file)
-        with Image.open(BytesIO(clean_bytes)) as img:
-            width, height = img.size
+        width, height, _fmt = await asyncio.to_thread(
+            _probe_image_dimensions_and_format, clean_bytes
+        )
 
         effective_idem_raw = (
             str(idempotency_key)
@@ -797,6 +862,7 @@ class LocalOcrScanService:
                     existing, worker_online=worker_online, request_id=request_id
                 )
 
+        await self._release_db_read_txn()
         scan_req_id = uuid4()
         storage_path = f"local-scans/{actor_id}/{scan_req_id}.jpg"
         proc_meta: dict[str, Any] = {
@@ -811,13 +877,10 @@ class LocalOcrScanService:
             # so async polling works identically in both local and remote_worker modes.
             now = datetime.now(timezone.utc)
             started_at = time.perf_counter()
-            timeout_seconds = max(
-                1.0,
-                float(os.getenv("LOCAL_OCR_SCAN_TIMEOUT_SECONDS", str(DEFAULT_SCAN_TIMEOUT_SECONDS))),
-            )
+            timeout_seconds = _resolve_scan_timeout_seconds()
             try:
                 ocr_result = await asyncio.wait_for(
-                    run_in_threadpool(extract_text_and_boxes, clean_bytes),
+                    asyncio.to_thread(extract_text_and_boxes, clean_bytes),
                     timeout=timeout_seconds,
                 )
                 duration_ms = int((time.perf_counter() - started_at) * 1000)

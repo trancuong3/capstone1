@@ -12,7 +12,7 @@
  */
 
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
-import { ServiceError } from "@/lib/api/service-error";
+import { isSttFallbackEligibleError } from "@/lib/api/speech-error";
 import type { SpeechService, WordTimestamp } from "@/lib/api/speech-service";
 import {
   AndroidNativeSpeechRecognition,
@@ -43,6 +43,13 @@ export interface SegmentAudioQuality {
   readonly rms: number;
   readonly peak: number;
   readonly speechDurationMs: number;
+}
+
+export interface SegmentSpeechWordTiming {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  readonly type?: string;
 }
 
 export interface SegmentSpeechResultItem {
@@ -88,6 +95,8 @@ export interface SegmentSpeechRecognitionLike {
   onresult: ((event: SegmentSpeechEvent) => void) | null;
   onerror: ((event: SegmentSpeechErrorEvent) => void) | null;
   onend: (() => void) | null;
+  onspeechstart?: (() => void) | null;
+  onsoundstart?: (() => void) | null;
   start: (audioTrack?: MediaStreamTrack) => void;
   stop: () => void;
   abort?: () => void;
@@ -434,21 +443,6 @@ export function reconcileSegmentTranscriptWithInterims(
   return changed ? currentTokens.join(" ") : normalizedFinal;
 }
 
-const TECHNICAL_STT_UNAVAILABLE_CODES = new Set<string>([
-  "LOCAL_VOICE_UNCONFIGURED",
-  "STT_TEMPORARILY_UNAVAILABLE",
-  "STT_UNAVAILABLE",
-  "LOCAL_STT_UNAVAILABLE",
-  "LOCAL_STT_TIMEOUT",
-  "LOCAL_STT_BUSY",
-  "GOOGLE_STT_UNCONFIGURED",
-  "GOOGLE_STT_UNAVAILABLE",
-  "STT_NETWORK_ERROR",
-  "STT_TIMEOUT",
-  "STT_RATE_LIMITED",
-  "STT_CONCURRENCY_LIMITED",
-]);
-
 export function isPermanentLocalVoiceUnconfigured(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const rec = error as {
@@ -501,36 +495,13 @@ export function shouldPreferAndroidNativeStt(): boolean {
 export function isTechnicalSttUnavailabilityError(error: unknown): boolean {
   if (!error) return false;
   if (error instanceof Error && error.name === "AbortError") return false;
-  if (error instanceof TypeError) return true;
-  if (error instanceof ServiceError) {
-    if (error.status >= 500 || error.status === 429 || error.status === 0) {
-      return true;
-    }
-    return TECHNICAL_STT_UNAVAILABLE_CODES.has(String(error.code));
-  }
+  if (isSttFallbackEligibleError(error)) return true;
   if (typeof error === "object") {
-    const rec = error as {
-      status?: unknown;
-      code?: unknown;
-      message?: unknown;
-    };
-    if (
-      typeof rec.status === "number" &&
-      (rec.status >= 500 || rec.status === 429 || rec.status === 0)
-    ) {
-      return true;
-    }
+    const rec = error as { code?: unknown; message?: unknown };
     const code = typeof rec.code === "string" ? rec.code : "";
-    if (TECHNICAL_STT_UNAVAILABLE_CODES.has(code)) return true;
     const message = typeof rec.message === "string" ? rec.message : "";
     const combined = `${code} ${message}`;
-    for (const marker of TECHNICAL_STT_UNAVAILABLE_CODES) {
-      if (combined.includes(marker)) return true;
-    }
     return (
-      combined.includes("503") ||
-      combined.includes("502") ||
-      combined.includes("504") ||
       combined.includes("WASM STT") ||
       combined.includes("Model fetch failed") ||
       combined.includes("Model SHA-256") ||
@@ -574,13 +545,23 @@ function toWebSocketSttUrl(apiBaseUrl: string): string {
   return "";
 }
 
-async function resolveDefaultSttStreamEndpoint(): Promise<SttStreamEndpointConfig | null> {
+async function resolveDefaultSttStreamEndpoint(
+  forceRefresh = false,
+): Promise<SttStreamEndpointConfig | null> {
   try {
     const wsUrl = toWebSocketSttUrl(getApiBaseUrl());
     if (!wsUrl) return null;
     const supabase = createBrowserSupabaseClient();
     const { error: initError } = await supabase.auth.initialize();
     if (initError) return null;
+    if (forceRefresh && typeof supabase.auth.refreshSession === "function") {
+      const { data: refreshed, error: refreshErr } =
+        await supabase.auth.refreshSession();
+      const refreshedToken = refreshed.session?.access_token;
+      if (!refreshErr && refreshedToken) {
+        return { wsUrl, token: refreshedToken };
+      }
+    }
     const { data, error } = await supabase.auth.getSession();
     const token = data.session?.access_token;
     if (error || !token) return null;
@@ -588,6 +569,48 @@ async function resolveDefaultSttStreamEndpoint(): Promise<SttStreamEndpointConfi
   } catch {
     return null;
   }
+}
+
+interface ResolvedSegmentResult {
+  readonly text: string;
+  readonly words?: readonly WordTimestamp[] | null;
+  readonly audioQuality?: SegmentAudioQuality;
+}
+
+function normalizeWordTimings(
+  rawWords:
+    | readonly {
+        text?: string;
+        start?: number;
+        end?: number;
+        type?: string;
+        logprob?: number | null;
+      }[]
+    | null
+    | undefined,
+): WordTimestamp[] | undefined {
+  if (!rawWords?.length) return undefined;
+  const out: WordTimestamp[] = [];
+  for (const w of rawWords) {
+    const text = (w.text ?? "").normalize("NFC").trim();
+    if (
+      text &&
+      typeof w.start === "number" &&
+      typeof w.end === "number" &&
+      Number.isFinite(w.start) &&
+      Number.isFinite(w.end) &&
+      w.end >= w.start
+    ) {
+      out.push({
+        text,
+        start: w.start,
+        end: w.end,
+        type: w.type ?? "word",
+        ...(w.logprob !== undefined ? { logprob: w.logprob } : {}),
+      });
+    }
+  }
+  return out.length ? out : undefined;
 }
 
 function float32ToInt16LeBuffer(samples: Float32Array): ArrayBuffer {
@@ -604,11 +627,6 @@ function float32ToInt16LeBuffer(samples: Float32Array): ArrayBuffer {
   return buffer;
 }
 
-interface SegmentTranscriptionPayload {
-  readonly text: string;
-  readonly words?: readonly WordTimestamp[] | null;
-}
-
 interface PendingWsSegment {
   readonly turnId: string;
   readonly capturedEpoch: number;
@@ -621,7 +639,7 @@ interface PendingWsSegment {
   readonly voicedDurationMs: number;
   readonly qualitySnapshot: SegmentAudioQuality;
   readonly audioToEncode: Float32Array;
-  readonly resolve: (result: SegmentTranscriptionPayload | null) => void;
+  readonly resolve: (result: ResolvedSegmentResult | null) => void;
   readonly fallbackTimer: ReturnType<typeof setTimeout>;
   settled: boolean;
 }
@@ -649,6 +667,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private preRoll: Float32Array = new Float32Array(0);
   private speechChunks: Float32Array[] = [];
   private speechSamples = 0;
+  private segmentPreRollSamples = 0;
   private voicedSamples = 0;
   private silenceSamples = 0;
   private quietFrameStreak = 0;
@@ -657,6 +676,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private segmentSumSq = 0;
   private segmentPeak = 0;
   private segmentClippedSamples = 0;
+  private segmentCheckedSamples = 0;
+  private recentChunkClipRatios: number[] = [];
   private segmentClippedFrames = 0;
   private noiseFloor = INITIAL_NOISE_FLOOR;
   private turnSeq = 0;
@@ -673,23 +694,34 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private usingWasmStt = false;
   private wasmFallbackReason: string | null = null;
   private browserBaseOffset = 0;
+  private browserCycleSlotToHistoryIdx = new Map<number, number>();
+  private browserSpeechOnsetAt: number | null = null;
+  private browserNetworkErrorCount = 0;
+  private browserFatalError = false;
+  private browserRestartTimer: ReturnType<typeof setTimeout> | null = null;
   private consecutiveTechnicalFailures = 0;
   private sttCircuitOpen = false;
 
   private ws: WebSocket | null = null;
   private wsReady = false;
   private wsDisabledForRun = false;
-  private wsAuthRetried = false;
+  private wsAuthRetriedForRun = false;
   private wsCurrentTurnId: string | null = null;
+  private wsStreamingCurrentSegment = false;
   private wsStartedPageId: string | null = null;
   private wsStartedSessionId: string | null = null;
   private wsPcmTail: Float32Array = new Float32Array(0);
   private wsPendingByTurnId = new Map<string, PendingWsSegment>();
+  private lifecycleCleanup: (() => void) | null = null;
+  private boundTrack: MediaStreamTrack | null = null;
+  private boundTrackEndedHandler: (() => void) | null = null;
 
   constructor(
     private readonly speechService: SpeechService,
     private readonly getContext?: () => LocalSegmentContextSnapshot,
-    private readonly resolveWsEndpoint: () => Promise<SttStreamEndpointConfig | null> = resolveDefaultSttStreamEndpoint,
+    private readonly resolveWsEndpoint: (
+      forceRefresh?: boolean,
+    ) => Promise<SttStreamEndpointConfig | null> = resolveDefaultSttStreamEndpoint,
     private readonly onBeforeExternalMicStart?: () => void,
   ) {}
 
@@ -714,18 +746,24 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.sttCircuitOpen = false;
     this.browserFallbackRec = null;
     this.browserBaseOffset = 0;
+    this.browserCycleSlotToHistoryIdx.clear();
+    this.browserSpeechOnsetAt = null;
+    this.browserNetworkErrorCount = 0;
+    this.browserFatalError = false;
+    this.clearBrowserRestartTimer();
     this.abortController = new AbortController();
     this.resultsHistory = [];
     this.uploadChain = Promise.resolve();
     this.consecutiveTechnicalFailures = 0;
     this.wsDisabledForRun = false;
-    this.wsAuthRetried = false;
+    this.wsAuthRetriedForRun = false;
     this.wsReady = false;
     this.wsCurrentTurnId = null;
     this.wsStartedPageId = null;
     this.wsStartedSessionId = null;
     this.wsPcmTail = new Float32Array(0);
     this.resetSegmentState();
+    this.attachLifecycleListeners();
 
     const policy = getVoicePolicyPreferences();
     const freshHealth = getFreshVoiceEngineHealth();
@@ -818,7 +856,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
   stop(): void {
     if (!this.active || this.stopping) return;
+    const stopEpoch = this.epoch;
     this.stopping = true;
+    this.clearBrowserRestartTimer();
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     if (this.usingBrowserFallback && this.browserFallbackRec) {
@@ -829,6 +869,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         this.usingBrowserFallback = false;
         this.active = false;
         this.stopping = false;
+        this.detachLifecycleListeners();
         this.onend?.();
       }
       return;
@@ -852,7 +893,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.teardownAudioGraph();
     const inflight = Array.from(this.pendingUploads);
     void Promise.allSettled(inflight).finally(() => {
+      if (this.epoch !== stopEpoch) return;
       this.closeSttWebSocket();
+      this.detachLifecycleListeners();
       this.active = false;
       this.stopping = false;
       this.onend?.();
@@ -864,6 +907,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.epoch += 1;
     this.active = false;
     this.stopping = false;
+    this.clearBrowserRestartTimer();
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     this.abortController?.abort();
@@ -871,6 +915,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const fallbackRec = this.browserFallbackRec;
     this.browserFallbackRec = null;
     this.usingBrowserFallback = false;
+    this.browserCycleSlotToHistoryIdx.clear();
+    this.browserSpeechOnsetAt = null;
     if (fallbackRec) {
       try {
         if (typeof fallbackRec.abort === "function") {
@@ -884,7 +930,42 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     this.resetSegmentState();
     this.teardownAudioGraph();
+    this.detachLifecycleListeners();
     this.onend?.();
+  }
+
+  private clearBrowserRestartTimer(): void {
+    if (this.browserRestartTimer !== null) {
+      clearTimeout(this.browserRestartTimer);
+      this.browserRestartTimer = null;
+    }
+  }
+
+  private attachLifecycleListeners(): void {
+    if (this.lifecycleCleanup || typeof document === "undefined") return;
+    const onVisibility = () => {
+      if (document.hidden && this.active && !this.stopping) {
+        this.abort();
+      }
+    };
+    const onAndroidBg = () => {
+      if (this.active && !this.stopping) {
+        this.abort();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    document.addEventListener("viread:android-background", onAndroidBg);
+    this.lifecycleCleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("viread:android-background", onAndroidBg);
+    };
+  }
+
+  private detachLifecycleListeners(): void {
+    if (this.lifecycleCleanup) {
+      this.lifecycleCleanup();
+      this.lifecycleCleanup = null;
+    }
   }
 
   private canActivateBrowserFallback(): boolean {
@@ -991,8 +1072,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     this.usingBrowserFallback = true;
     this.abortController?.abort();
+    this.closeSttWebSocket();
     this.resetSegmentState();
     this.teardownAudioGraph();
+    this.attachLifecycleListeners();
     if (useAndroidNative) {
       // Release any parallel WebView MediaStream BEFORE Android SpeechRecognizer claims the HAL mic!
       try {
@@ -1020,52 +1103,132 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       : this.maxAlternatives;
     this.browserFallbackRec = nativeRec;
     this.browserBaseOffset = this.resultsHistory.length;
-    let fatalFallbackError = false;
+    this.browserCycleSlotToHistoryIdx.clear();
+    this.browserSpeechOnsetAt = null;
+    this.browserNetworkErrorCount = 0;
+    this.browserFatalError = false;
+
+    const recordSpeechOnset = () => {
+      if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      if (this.browserSpeechOnsetAt === null) {
+        this.browserSpeechOnsetAt =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
+      }
+    };
+    nativeRec.onspeechstart = recordSpeechOnset;
+    nativeRec.onsoundstart = recordSpeechOnset;
 
     nativeRec.onresult = (ev: SegmentSpeechEvent) => {
       if (!this.active || this.browserFallbackRec !== nativeRec) return;
+      this.browserNetworkErrorCount = 0;
       const ctx = this.getContext?.() ?? {};
-      const base = this.browserBaseOffset;
-      const totalLength = base + ev.results.length;
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      const capturedOnset = this.browserSpeechOnsetAt;
+
+      const pendingInterims: SegmentSpeechResultItem[] = [];
+      let firstNewHistoryIdx: number | null = null;
+      let sawFinal = false;
+
+      for (let i = 0; i < ev.results.length; i += 1) {
+        const rawItem = ev.results[i];
+        if (!rawItem) continue;
+        // Explicitly copy WebIDL SpeechRecognitionResult getters (`isFinal`, `length`, `[0..N]`)
+        // instead of `{ ...rawItem }`, which drops non-enumerable prototype getters!
+        const rawAltCount = Number(rawItem.length ?? 0);
+        const copiedAlts: SegmentSpeechResultAlternative[] = [];
+        for (let a = 0; a < rawAltCount; a += 1) {
+          const alt = rawItem[a];
+          if (alt) {
+            copiedAlts.push({
+              transcript: String(alt.transcript ?? "").normalize("NFC"),
+              confidence:
+                typeof alt.confidence === "number" ? alt.confidence : undefined,
+            });
+          }
+        }
+        if (copiedAlts.length === 0 && rawItem[0]) {
+          copiedAlts.push({
+            transcript: String(rawItem[0].transcript ?? "").normalize("NFC"),
+            confidence:
+              typeof rawItem[0].confidence === "number"
+                ? rawItem[0].confidence
+                : undefined,
+          });
+        }
+
+        const isFinal = Boolean(rawItem.isFinal);
+        const fallbackTurnId =
+          rawItem.turnId ?? nextTurnId(ctx.pageId ?? "browser", ++this.turnSeq);
+        const itemObj: Record<number, SegmentSpeechResultAlternative> & {
+          isFinal: boolean;
+          length: number;
+          epoch: number;
+          sessionId: string | null;
+          pageId: string | null;
+          turnId: string;
+          segmentId: string;
+          onsetAt: number | null;
+          audioEndedAt: number;
+          speechDurationMs: number | null;
+          audioQuality?: SegmentAudioQuality;
+          words?: readonly WordTimestamp[] | null;
+        } = {
+          isFinal,
+          length: copiedAlts.length,
+          epoch: rawItem.epoch ?? this.epoch,
+          sessionId: rawItem.sessionId ?? ctx.sessionId ?? null,
+          pageId: rawItem.pageId ?? ctx.pageId ?? null,
+          turnId: fallbackTurnId,
+          segmentId: rawItem.segmentId ?? fallbackTurnId,
+          onsetAt: rawItem.onsetAt ?? capturedOnset ?? null,
+          audioEndedAt: rawItem.audioEndedAt ?? now,
+          speechDurationMs: rawItem.speechDurationMs ?? null,
+          audioQuality: rawItem.audioQuality,
+          words: rawItem.words,
+        };
+        for (let a = 0; a < copiedAlts.length; a += 1) {
+          itemObj[a] = copiedAlts[a];
+        }
+        const item = itemObj as unknown as SegmentSpeechResultItem;
+
+        if (isFinal) {
+          sawFinal = true;
+          if (!this.browserCycleSlotToHistoryIdx.has(i)) {
+            const histIdx = this.resultsHistory.length;
+            this.resultsHistory.push(item);
+            this.browserCycleSlotToHistoryIdx.set(i, histIdx);
+            if (firstNewHistoryIdx === null) {
+              firstNewHistoryIdx = histIdx;
+            }
+          }
+        } else if (!this.browserCycleSlotToHistoryIdx.has(i)) {
+          pendingInterims.push(item);
+        }
+      }
+
+      if (sawFinal) {
+        this.browserSpeechOnsetAt = null;
+      }
+
+      // Build a 100% dense results array-like (zero sparse holes across restarts or out-of-order finals).
+      const historyLen = this.resultsHistory.length;
+      const totalLength = historyLen + pendingInterims.length;
       const resultsObj: Record<number, SegmentSpeechResultItem> & {
         length: number;
       } = { length: totalLength };
-      for (let i = 0; i < base; i += 1) {
+      for (let i = 0; i < historyLen; i += 1) {
         resultsObj[i] = this.resultsHistory[i];
       }
-      const now =
-        typeof performance !== "undefined" ? performance.now() : Date.now();
-      for (let i = 0; i < ev.results.length; i += 1) {
-        const rawItem = ev.results[i];
-        const fallbackTurnId =
-          rawItem?.turnId ??
-          nextTurnId(ctx.pageId ?? "browser", ++this.turnSeq);
-        const normalizedAlt = rawItem?.[0]
-          ? {
-              ...rawItem[0],
-              transcript: (rawItem[0].transcript ?? "").normalize("NFC"),
-            }
-          : { transcript: "" };
-        const item: SegmentSpeechResultItem = {
-          ...rawItem,
-          0: normalizedAlt,
-          epoch: rawItem?.epoch ?? this.epoch,
-          sessionId: rawItem?.sessionId ?? ctx.sessionId ?? null,
-          pageId: rawItem?.pageId ?? ctx.pageId ?? null,
-          turnId: fallbackTurnId,
-          segmentId: rawItem?.segmentId ?? fallbackTurnId,
-          onsetAt: rawItem?.onsetAt ?? null,
-          audioEndedAt: rawItem?.audioEndedAt ?? now,
-          speechDurationMs: rawItem?.speechDurationMs ?? null,
-          audioQuality: rawItem?.audioQuality,
-        };
-        resultsObj[base + i] = item;
-        if (item.isFinal) {
-          this.resultsHistory[base + i] = item;
-        }
+      for (let i = 0; i < pendingInterims.length; i += 1) {
+        resultsObj[historyLen + i] = pendingInterims[i];
       }
+      const emittedResultIndex =
+        firstNewHistoryIdx !== null
+          ? firstNewHistoryIdx
+          : Math.min(historyLen, Math.max(0, totalLength - 1));
       this.onresult?.({
-        resultIndex: base + ev.resultIndex,
+        resultIndex: emittedResultIndex,
         results: resultsObj,
       });
     };
@@ -1078,39 +1241,68 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       ) {
         return;
       }
+      const errCode = ev?.error ?? "";
       if (
-        ev.error === "not-allowed" ||
-        ev.error === "service-not-allowed" ||
-        ev.error === "language-not-supported" ||
-        ev.error === "audio-capture" ||
-        ev.error === "stt-unavailable" ||
-        ev.error === "network"
+        errCode === "not-allowed" ||
+        errCode === "service-not-allowed" ||
+        errCode === "language-not-supported" ||
+        errCode === "stt-unavailable"
       ) {
-        fatalFallbackError = true;
+        this.browserFatalError = true;
+      } else if (errCode === "network" || errCode === "audio-capture") {
+        this.browserNetworkErrorCount += 1;
+        if (this.browserNetworkErrorCount >= 3) {
+          this.browserFatalError = true;
+        }
       }
       this.onerror?.(ev);
     };
 
     nativeRec.onend = () => {
       if (this.browserFallbackRec !== nativeRec) return;
+      this.browserSpeechOnsetAt = null;
       if (
         this.active &&
         !this.stopping &&
         this.continuous &&
-        !fatalFallbackError
+        !this.browserFatalError
       ) {
-        try {
-          this.browserBaseOffset = this.resultsHistory.length;
-          nativeRec.start();
-          return;
-        } catch {
-          // Fall through to clean termination
-        }
+        this.browserCycleSlotToHistoryIdx.clear();
+        this.browserBaseOffset = this.resultsHistory.length;
+        const backoffMs =
+          this.browserNetworkErrorCount > 0
+            ? Math.min(4_000, 500 * 2 ** (this.browserNetworkErrorCount - 1))
+            : 80;
+        this.clearBrowserRestartTimer();
+        this.browserRestartTimer = setTimeout(() => {
+          this.browserRestartTimer = null;
+          if (
+            !this.active ||
+            this.stopping ||
+            this.browserFatalError ||
+            this.browserFallbackRec !== nativeRec
+          ) {
+            return;
+          }
+          try {
+            nativeRec.start();
+          } catch {
+            this.browserFallbackRec = null;
+            this.usingBrowserFallback = false;
+            this.active = false;
+            this.stopping = false;
+            this.detachLifecycleListeners();
+            this.onend?.();
+          }
+        }, backoffMs);
+        return;
       }
+      this.clearBrowserRestartTimer();
       this.browserFallbackRec = null;
       this.usingBrowserFallback = false;
       this.active = false;
       this.stopping = false;
+      this.detachLifecycleListeners();
       this.onend?.();
     };
 
@@ -1136,6 +1328,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.preRoll = new Float32Array(0);
     this.speechChunks = [];
     this.speechSamples = 0;
+    this.segmentPreRollSamples = 0;
     this.voicedSamples = 0;
     this.lastInterimVoicedSamples = 0;
     this.silenceSamples = 0;
@@ -1144,8 +1337,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.segmentSumSq = 0;
     this.segmentPeak = 0;
     this.segmentClippedSamples = 0;
+    this.segmentCheckedSamples = 0;
+    this.recentChunkClipRatios = [];
     this.segmentClippedFrames = 0;
     this.segmentInterims = [];
+    this.wsStreamingCurrentSegment = false;
     this.wsPcmTail = new Float32Array(0);
   }
 
@@ -1182,14 +1378,19 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       clearTimeout(pending.fallbackTimer);
       void this.runHttpFallbackForPendingSegment(pending).then(
         (result) => pending.resolve(result),
-        () => pending.resolve(null),
+        (err) => {
+          if (isTechnicalSttUnavailabilityError(err)) {
+            this.recordTechnicalFailureAndMaybeFallback(err);
+          }
+          pending.resolve(null);
+        },
       );
     }
   }
 
   private async runHttpFallbackForPendingSegment(
     pending: PendingWsSegment,
-  ): Promise<SegmentTranscriptionPayload | null> {
+  ): Promise<ResolvedSegmentResult | null> {
     if (
       pending.capturedEpoch !== this.epoch ||
       this.usingBrowserFallback ||
@@ -1199,7 +1400,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     const signal = this.abortController?.signal;
     let rawText = "";
-    let words: readonly WordTimestamp[] | null | undefined;
+    let rawWords: readonly WordTimestamp[] | null | undefined;
     if (this.usingWasmStt) {
       const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
         pending.audioToEncode,
@@ -1227,7 +1428,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures = 0;
       lastLocalSttOutageAt = 0;
       rawText = (res.text ?? "").normalize("NFC").trim();
-      words = res.words;
+      rawWords = normalizeWordTimings(res.words) ?? null;
     }
     if (!rawText) return null;
     const reconciled = reconcileSegmentTranscriptWithInterims(
@@ -1235,10 +1436,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       pending.capturedInterims,
       pending.keyterms,
     );
-    return reconciled ? { text: reconciled, words } : null;
+    return reconciled ? { text: reconciled, words: rawWords } : null;
   }
 
-  private async openSttWebSocket(): Promise<void> {
+  private async openSttWebSocket(forceRefresh = false): Promise<void> {
     if (
       typeof WebSocket !== "function" ||
       this.wsDisabledForRun ||
@@ -1248,8 +1449,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     ) {
       return;
     }
-    const endpoint = await this.resolveWsEndpoint();
+    const capturedEpoch = this.epoch;
+    const endpoint = await this.resolveWsEndpoint(forceRefresh);
     if (
+      capturedEpoch !== this.epoch ||
       !endpoint ||
       !this.active ||
       this.stopping ||
@@ -1258,10 +1461,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     ) {
       return;
     }
-    const capturedEpoch = this.epoch;
     let socket: WebSocket;
     try {
-      // Never put bearer JWT into Sec-WebSocket-Protocol headers; authenticate via first JSON frame.
+      // Never put JWT tokens in Sec-WebSocket-Protocol (`bearer.<jwt>` leaks in logs/proxies);
+      // authenticate cleanly via first JSON "auth" frame followed by "start" frame.
       socket = new WebSocket(endpoint.wsUrl, ["viread-stt-v1"]);
       socket.binaryType = "arraybuffer";
     } catch {
@@ -1341,7 +1544,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
       if (msg.type === "ready") {
         this.wsReady = true;
-        this.wsAuthRetried = false;
+        this.wsAuthRetriedForRun = false;
         recordSttEngineUsage({
           provider: "local",
           fallbackUsed: false,
@@ -1351,6 +1554,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
 
       if (msg.type === "error") {
+        if (msg.code === "UNAUTHORIZED" && !this.wsAuthRetriedForRun) {
+          this.wsAuthRetriedForRun = true;
+          invalidateBrowserTokenCache();
+          this.closeSttWebSocket();
+          void this.openSttWebSocket(true);
+          return;
+        }
         if (
           msg.code === "LOCAL_STT_UNAVAILABLE" ||
           msg.code === "STT_TEMPORARILY_UNAVAILABLE"
@@ -1370,12 +1580,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         return;
       }
       const rawText = (msg.text ?? "").normalize("NFC").trim();
-      const mappedWords = Array.isArray(msg.words)
-        ? msg.words.map((w) => ({
-            ...w,
-            text: typeof w.text === "string" ? w.text.normalize("NFC") : w.text,
-          }))
-        : null;
+      const mappedWords = normalizeWordTimings(msg.words) ?? null;
       const mappedQuality: SegmentAudioQuality | undefined = msg.audio_quality
         ?.status
         ? {
@@ -1400,10 +1605,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
         const now =
           typeof performance !== "undefined" ? performance.now() : Date.now();
-        const activeSpeechMs = Math.max(
-          0,
-          (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000,
-        );
+        const voicedSpeechMs = (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000;
+        const activeSpeechMs =
+          voicedSpeechMs > 0
+            ? voicedSpeechMs
+            : Math.max(
+                0,
+                ((this.speechSamples -
+                  this.segmentPreRollSamples -
+                  this.silenceSamples) /
+                  TARGET_SAMPLE_RATE) *
+                  1000,
+              );
         const qualitySnapshot =
           mappedQuality ?? this.computeAudioQuality(activeSpeechMs);
         const turnId =
@@ -1425,6 +1638,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           audioEndedAt: now,
           speechDurationMs: qualitySnapshot.speechDurationMs,
           audioQuality: qualitySnapshot,
+          words: mappedWords,
         };
         const resultsObj: Record<number, SegmentSpeechResultItem> & {
           length: number;
@@ -1453,22 +1667,36 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 pending.capturedInterims,
                 pending.keyterms,
               )
-            : null;
+            : "";
           pending.resolve(
-            reconciled ? { text: reconciled, words: mappedWords } : null,
+            reconciled
+              ? {
+                  text: reconciled,
+                  words: mappedWords,
+                  audioQuality: mappedQuality,
+                }
+              : null,
           );
         }
         return;
       }
 
-      // Spontaneous final from WS without a preceding client flush (e.g. server VAD)
+      // Spontaneous final from WS without a preceding client flush (e.g. safety cap)
       if (!rawText || (!this.active && !this.stopping)) return;
       const now =
         typeof performance !== "undefined" ? performance.now() : Date.now();
-      const activeSpeechMs = Math.max(
-        0,
-        (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000,
-      );
+      const voicedSpeechMs = (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000;
+      const activeSpeechMs =
+        voicedSpeechMs > 0
+          ? voicedSpeechMs
+          : Math.max(
+              0,
+              ((this.speechSamples -
+                this.segmentPreRollSamples -
+                this.silenceSamples) /
+                TARGET_SAMPLE_RATE) *
+                1000,
+            );
       const qualitySnapshot =
         mappedQuality ?? this.computeAudioQuality(activeSpeechMs);
       const turnId =
@@ -1502,27 +1730,33 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     socket.onerror = () => {
       if (this.ws !== socket) return;
-      this.wsDisabledForRun = true;
-      this.closeSttWebSocket();
+      // Let onclose distinguish auth refresh (1008/4401) from hard outages.
+      this.wsReady = false;
     };
 
     socket.onclose = (ev: CloseEvent) => {
       if (this.ws !== socket) return;
-      const isAuthClose = ev.code === 4401 || ev.code === 1008;
+      const isAuthClose = ev.code === 1008 || ev.code === 4401;
       if (
         isAuthClose &&
-        !this.wsAuthRetried &&
+        !this.wsAuthRetriedForRun &&
         this.active &&
         !this.stopping &&
-        !this.usingBrowserFallback
+        !this.usingBrowserFallback &&
+        capturedEpoch === this.epoch
       ) {
-        this.wsAuthRetried = true;
+        this.wsAuthRetriedForRun = true;
         invalidateBrowserTokenCache();
         this.closeSttWebSocket();
-        void this.openSttWebSocket();
+        void this.openSttWebSocket(true);
         return;
       }
-      if (ev.code === 4401 || ev.code === 4503 || ev.code !== 1000) {
+      if (
+        ev.code === 1008 ||
+        ev.code === 4401 ||
+        ev.code === 4503 ||
+        ev.code !== 1000
+      ) {
         this.wsDisabledForRun = true;
       }
       this.closeSttWebSocket();
@@ -1541,11 +1775,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const ctx = this.getContext?.() ?? {};
     const nextSessionId = ctx.sessionId ?? null;
     const nextPageId = ctx.pageId ?? null;
-    if (
-      this.wsCurrentTurnId !== turnId ||
+    const scopeChanged =
       this.wsStartedPageId !== nextPageId ||
-      this.wsStartedSessionId !== nextSessionId
-    ) {
+      this.wsStartedSessionId !== nextSessionId;
+    if (!this.wsCurrentTurnId) {
+      this.wsCurrentTurnId = turnId;
+    }
+    // Only send a fresh "start" control frame when session/page scope changes;
+    // normal sentence-to-sentence turns advance via flush.next_turn_id with zero redundant "start"/"ready" RTT!
+    if (scopeChanged) {
       this.wsCurrentTurnId = turnId;
       this.wsStartedSessionId = nextSessionId;
       this.wsStartedPageId = nextPageId;
@@ -1625,6 +1863,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private teardownAudioGraph(): void {
+    if (this.boundTrack && this.boundTrackEndedHandler) {
+      try {
+        this.boundTrack.removeEventListener(
+          "ended",
+          this.boundTrackEndedHandler,
+        );
+      } catch {
+        // Ignore
+      }
+    }
+    this.boundTrack = null;
+    this.boundTrackEndedHandler = null;
     try {
       this.interimAbortController?.abort();
     } catch {
@@ -1675,6 +1925,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private async openAudioGraph(audioTrack?: MediaStreamTrack): Promise<void> {
+    const capturedEpoch = this.epoch;
+    const isStale = () =>
+      capturedEpoch !== this.epoch || !this.active || this.stopping;
     try {
       let stream: MediaStream;
       if (audioTrack && audioTrack.readyState === "live") {
@@ -1690,12 +1943,30 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             autoGainControl: true,
           },
         });
-        if (!this.active || this.stopping) {
+        if (isStale()) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
         this.ownedStream = stream;
       }
+
+      // Cleanly abort capture & close WS if the mic track ends or app enters background.
+      const primaryTrack = stream.getAudioTracks?.()?.[0] ?? audioTrack ?? null;
+      if (primaryTrack) {
+        const onTrackEnded = () => {
+          if (capturedEpoch === this.epoch && this.active && !this.stopping) {
+            this.abort();
+          }
+        };
+        this.boundTrack = primaryTrack;
+        this.boundTrackEndedHandler = onTrackEnded;
+        try {
+          primaryTrack.addEventListener("ended", onTrackEnded, { once: true });
+        } catch {
+          // Ignore
+        }
+      }
+      this.attachLifecycleListeners();
 
       const AudioCtx =
         window.AudioContext ||
@@ -1708,9 +1979,33 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.audioCtx = ctx;
       if (ctx.state === "suspended") {
         await ctx.resume().catch(() => undefined);
+        if (isStale()) {
+          if (this.audioCtx === ctx) {
+            this.teardownAudioGraph();
+          } else {
+            void ctx.close().catch(() => undefined);
+          }
+          return;
+        }
         if (ctx.state === "suspended") {
           await new Promise((resolve) => setTimeout(resolve, 60));
+          if (isStale()) {
+            if (this.audioCtx === ctx) {
+              this.teardownAudioGraph();
+            } else {
+              void ctx.close().catch(() => undefined);
+            }
+            return;
+          }
           await ctx.resume().catch(() => undefined);
+          if (isStale()) {
+            if (this.audioCtx === ctx) {
+              this.teardownAudioGraph();
+            } else {
+              void ctx.close().catch(() => undefined);
+            }
+            return;
+          }
         }
       }
 
@@ -1763,13 +2058,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           const workletUrl = URL.createObjectURL(blob);
           this.workletUrl = workletUrl;
           await ctx.audioWorklet.addModule(workletUrl);
-          if (!this.active || this.stopping) {
-            this.teardownAudioGraph();
+          if (isStale()) {
+            if (this.audioCtx === ctx) {
+              this.teardownAudioGraph();
+            } else {
+              URL.revokeObjectURL(workletUrl);
+              void ctx.close().catch(() => undefined);
+            }
             return;
           }
           const worklet = new AudioWorkletNode(ctx, "viread-capture-processor");
           worklet.port.onmessage = (ev: MessageEvent<Float32Array>) => {
-            if (!this.active || this.stopping) return;
+            if (isStale()) return;
             const raw = ev.data;
             if (!raw?.length) return;
             const mono16 = downsampleTo16k(raw, ctx.sampleRate);
@@ -1785,11 +2085,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
       }
 
+      if (isStale()) {
+        if (this.audioCtx === ctx) {
+          this.teardownAudioGraph();
+        } else {
+          void ctx.close().catch(() => undefined);
+        }
+        return;
+      }
+
       if (!workletAttached) {
         const processor = ctx.createScriptProcessor(512, 1, 1);
         this.processorNode = processor;
         processor.onaudioprocess = (ev: AudioProcessingEvent) => {
-          if (!this.active || this.stopping) return;
+          if (isStale()) return;
           const raw = ev.inputBuffer.getChannelData(0);
           const mono16 = downsampleTo16k(raw, ctx.sampleRate);
           this.consumeSamples16k(mono16);
@@ -1800,9 +2109,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
       void this.openSttWebSocket();
     } catch (err) {
-      if (!this.active) return;
+      if (capturedEpoch !== this.epoch || !this.active) return;
       this.active = false;
       this.teardownAudioGraph();
+      this.detachLifecycleListeners();
       const isDenied =
         err instanceof Error &&
         (err.name === "NotAllowedError" ||
@@ -1827,6 +2137,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const isClippedChunk =
       clippedInChunk >= 16 && clippedInChunk / Math.max(1, chunk.length) > 0.05;
     const rms = Math.sqrt(sumSq / Math.max(1, chunk.length));
+    const chunkClipRatio = clippedInChunk / Math.max(1, chunk.length);
     const onsetThreshold = Math.max(
       MIN_SPEECH_RMS_ONSET,
       this.noiseFloor * 2.0,
@@ -1844,11 +2155,17 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           typeof performance !== "undefined" ? performance.now() : Date.now();
         this.segmentSumSq = sumSq;
         this.segmentPeak = peak;
+        this.segmentPreRollSamples = this.preRoll.length;
         this.segmentClippedSamples = clippedInChunk;
+        this.segmentCheckedSamples = chunk.length;
+        this.recentChunkClipRatios = [chunkClipRatio];
         this.segmentClippedFrames = isClippedChunk ? 1 : 0;
         const ctx = this.getContext?.() ?? {};
-        const turnId = nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
+        const turnId =
+          this.wsCurrentTurnId ??
+          nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
         const wsActive = this.ensureWsTurnStarted(turnId);
+        this.wsStreamingCurrentSegment = wsActive;
         if (this.preRoll.length > 0) {
           if (wsActive) this.streamWsPcmChunk(this.preRoll);
           this.speechChunks.push(this.preRoll);
@@ -1875,11 +2192,22 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       return;
     }
 
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.wsReady) {
+    if (
+      this.wsStreamingCurrentSegment &&
+      this.ws &&
+      this.ws.readyState === WebSocket.OPEN &&
+      this.wsReady
+    ) {
       this.streamWsPcmChunk(chunk);
     }
     this.speechChunks.push(chunk);
     this.speechSamples += chunk.length;
+    this.segmentClippedSamples += clippedInChunk;
+    this.segmentCheckedSamples += chunk.length;
+    this.recentChunkClipRatios.push(chunkClipRatio);
+    if (this.recentChunkClipRatios.length > 8) {
+      this.recentChunkClipRatios.shift();
+    }
     if (!isVoicedFrame) {
       this.quietFrameStreak += 1;
       // Ignore single-frame (~42ms) glottal dips inside Vietnamese hỏi/ngã/nặng/huyền tones
@@ -1892,13 +2220,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.voicedSamples += chunk.length;
       this.segmentSumSq += sumSq;
       if (peak > this.segmentPeak) this.segmentPeak = peak;
-      this.segmentClippedSamples += clippedInChunk;
       if (isClippedChunk) this.segmentClippedFrames += 1;
     }
 
     const silenceMs = (this.silenceSamples / TARGET_SAMPLE_RATE) * 1000;
     const speechMs = (this.speechSamples / TARGET_SAMPLE_RATE) * 1000;
     const wsStreamingActive = Boolean(
+      this.wsStreamingCurrentSegment &&
       this.ws &&
       this.ws.readyState === WebSocket.OPEN &&
       this.wsReady &&
@@ -1938,19 +2266,26 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private computeAudioQuality(speechDurationMs: number): SegmentAudioQuality {
-    // Compute RMS over voiced frames only (never diluted by 0.45s pre-roll / 0.52s tail silence).
+    // Compute RMS over voiced frames only (never diluted by pre-roll / tail silence).
     const rmsDenominator =
       this.voicedSamples > 0
         ? this.voicedSamples
         : Math.max(1, this.speechSamples);
     const rms = Math.sqrt(this.segmentSumSq / rmsDenominator);
     const peak = this.segmentPeak;
-    const sustainedClipping =
-      this.segmentClippedFrames >= 3 || this.segmentClippedSamples >= 480;
+    const clipRatio =
+      this.segmentClippedSamples / Math.max(1, this.segmentCheckedSamples);
+    const sustainedWindowClip =
+      this.recentChunkClipRatios.filter((r) => r >= 0.1).length >= 3 &&
+      this.segmentClippedSamples >= 480;
+    const isClipped =
+      this.segmentClippedFrames >= 3 ||
+      (clipRatio >= 0.05 && this.segmentClippedSamples >= 480) ||
+      sustainedWindowClip;
     let status: SegmentAudioQuality["status"] = "OK";
     if (speechDurationMs < 80) {
       status = "AUDIO_TOO_SHORT";
-    } else if (sustainedClipping) {
+    } else if (isClipped) {
       status = "CLIPPING";
     } else if (rms < 0.002 && peak < 0.01) {
       status = "LOW_VOLUME";
@@ -2004,7 +2339,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         ? voicedDurationMs
         : Math.max(
             0,
-            ((total - this.silenceSamples) / TARGET_SAMPLE_RATE) * 1000,
+            ((total - this.segmentPreRollSamples - this.silenceSamples) /
+              TARGET_SAMPLE_RATE) *
+              1000,
           );
     const qualitySnapshot = this.computeAudioQuality(activeSpeechMs);
     const onsetAt = this.segmentOnsetAt;
@@ -2146,7 +2483,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         ? voicedDurationMs
         : Math.max(
             0,
-            ((total - silenceTailSamples) / TARGET_SAMPLE_RATE) * 1000,
+            ((total - this.segmentPreRollSamples - silenceTailSamples) /
+              TARGET_SAMPLE_RATE) *
+              1000,
           );
     const qualitySnapshot = this.computeAudioQuality(activeSpeechMs);
     const combined = new Float32Array(total);
@@ -2164,6 +2503,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       : Math.min(combined.length, silenceTailSamples, QUIET_TAIL_CARRY_SAMPLES);
     const preservedPreRoll =
       carryCount > 0 ? combined.slice(combined.length - carryCount) : null;
+    const wasStreamingViaWs = this.wsStreamingCurrentSegment;
     this.resetSegmentState();
     this.quietFrameStreak = 0;
     if (preservedPreRoll) {
@@ -2190,14 +2530,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const ctx = this.getContext?.() ?? {};
     const turnId =
       this.wsCurrentTurnId ?? nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
-    this.wsCurrentTurnId = null;
+    const nextTurn = nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
     const signal = this.abortController?.signal;
 
-    const deliverFinalPayload = (
-      payload: SegmentTranscriptionPayload | null,
-    ) => {
+    const deliverFinalResult = (result: ResolvedSegmentResult | null) => {
+      const text = result?.text ?? null;
       if (
-        !payload?.text ||
+        !text ||
         this.usingBrowserFallback ||
         capturedEpoch !== this.epoch ||
         (!this.active && !this.stopping)
@@ -2205,11 +2544,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         return;
       }
       const resultIndex = this.resultsHistory.length;
+      const effectiveQuality = result?.audioQuality ?? qualitySnapshot;
       const item: SegmentSpeechResultItem = {
         isFinal: true,
         length: 1,
         0: {
-          transcript: payload.text.normalize("NFC"),
+          transcript: text.normalize("NFC"),
           // 0 denotes uncalibrated confidence so recognition-evidence treats it honestly
           confidence: 0,
         },
@@ -2220,9 +2560,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         segmentId: turnId,
         onsetAt,
         audioEndedAt,
-        speechDurationMs: qualitySnapshot.speechDurationMs,
-        audioQuality: qualitySnapshot,
-        ...(payload.words ? { words: payload.words } : {}),
+        speechDurationMs: effectiveQuality.speechDurationMs,
+        audioQuality: effectiveQuality,
+        ...(result?.words ? { words: result.words } : {}),
       };
       this.resultsHistory.push(item);
       const resultsObj: Record<number, SegmentSpeechResultItem> & {
@@ -2238,190 +2578,202 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     };
 
     const canFlushViaWs =
+      wasStreamingViaWs &&
       this.ws !== null &&
       this.ws.readyState === WebSocket.OPEN &&
       this.wsReady &&
       !this.wsDisabledForRun;
 
+    this.wsCurrentTurnId = canFlushViaWs ? nextTurn : null;
     let attemptedWasm = false;
 
-    const responsePromise: Promise<SegmentTranscriptionPayload | null> =
-      canFlushViaWs
-        ? new Promise<SegmentTranscriptionPayload | null>((resolve) => {
-            this.streamWsPcmChunk(new Float32Array(0), true);
-            const pending: PendingWsSegment = {
-              turnId,
-              capturedEpoch,
-              sessionId: ctx.sessionId ?? null,
-              pageId: ctx.pageId ?? null,
-              keyterms: ctx.keyterms,
-              capturedInterims,
-              onsetAt,
-              audioEndedAt,
-              voicedDurationMs,
-              qualitySnapshot,
-              audioToEncode,
-              resolve,
-              settled: false,
-              fallbackTimer: setTimeout(() => {
-                this.wsPendingByTurnId.delete(turnId);
-                if (pending.settled) return;
-                pending.settled = true;
-                this.wsDisabledForRun = true;
-                void this.runHttpFallbackForPendingSegment(pending).then(
-                  (result) => resolve(result),
-                  () => resolve(null),
-                );
-              }, WS_FLUSH_FALLBACK_TIMEOUT_MS),
-            };
-            this.wsPendingByTurnId.set(turnId, pending);
-            try {
-              this.ws!.send(
-                JSON.stringify({
-                  type: "flush",
-                  turn_id: turnId,
-                  voiced_duration_ms: voicedDurationMs,
-                }),
-              );
-            } catch {
+    const responsePromise: Promise<ResolvedSegmentResult | null> = canFlushViaWs
+      ? new Promise<ResolvedSegmentResult | null>((resolve) => {
+          this.streamWsPcmChunk(new Float32Array(0), true);
+          const pending: PendingWsSegment = {
+            turnId,
+            capturedEpoch,
+            sessionId: ctx.sessionId ?? null,
+            pageId: ctx.pageId ?? null,
+            keyterms: ctx.keyterms,
+            capturedInterims,
+            onsetAt,
+            audioEndedAt,
+            voicedDurationMs,
+            qualitySnapshot,
+            audioToEncode,
+            resolve,
+            settled: false,
+            fallbackTimer: setTimeout(() => {
               this.wsPendingByTurnId.delete(turnId);
-              clearTimeout(pending.fallbackTimer);
+              if (pending.settled) return;
               pending.settled = true;
               this.wsDisabledForRun = true;
               void this.runHttpFallbackForPendingSegment(pending).then(
-                (result) => resolve(result),
-                () => resolve(null),
-              );
-            }
-          })
-        : (() => {
-            const transcribeWithWasm = async () => {
-              attemptedWasm = true;
-              const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
-                audioToEncode,
-                {
-                  signal,
-                  timeoutMs: 20_000,
-                  voicedDurationMs,
+                (res) => resolve(res),
+                (err) => {
+                  if (isTechnicalSttUnavailabilityError(err)) {
+                    this.recordTechnicalFailureAndMaybeFallback(err);
+                  }
+                  resolve(null);
                 },
               );
-              recordSttEngineUsage({
-                provider: "wasm",
-                fallbackUsed: true,
-                fallbackReason:
-                  this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE",
-              });
-              return {
-                text: wasmRes.text,
-                words: null as readonly WordTimestamp[] | null,
-                fromWasm: true as const,
-              };
-            };
-
-            const transcribeOnce = async () => {
-              if (this.usingWasmStt) {
-                return transcribeWithWasm();
-              }
-              const wavBlob = encodeFloat32ToWav16kBlob(audioToEncode);
-              const res = await this.speechService.transcribe(wavBlob, {
-                filename: "segment.wav",
-                languageCode: "vi",
-                keyterms: ctx.keyterms,
-                sessionId: ctx.sessionId ?? null,
-                pageId: ctx.pageId ?? null,
-                turnId,
-                voicedDurationMs,
-                source: "local_live_segment",
+            }, WS_FLUSH_FALLBACK_TIMEOUT_MS),
+          };
+          this.wsPendingByTurnId.set(turnId, pending);
+          try {
+            this.ws!.send(
+              JSON.stringify({
+                type: "flush",
+                turn_id: turnId,
+                next_turn_id: nextTurn,
+                voiced_duration_ms: voicedDurationMs,
+              }),
+            );
+          } catch {
+            this.wsPendingByTurnId.delete(turnId);
+            clearTimeout(pending.fallbackTimer);
+            pending.settled = true;
+            this.wsDisabledForRun = true;
+            void this.runHttpFallbackForPendingSegment(pending).then(
+              (res) => resolve(res),
+              (err) => {
+                if (isTechnicalSttUnavailabilityError(err)) {
+                  this.recordTechnicalFailureAndMaybeFallback(err);
+                }
+                resolve(null);
+              },
+            );
+          }
+        })
+      : (() => {
+          const transcribeWithWasm = async () => {
+            attemptedWasm = true;
+            const wasmRes = await getBrowserWasmSttClient().transcribeSamples(
+              audioToEncode,
+              {
                 signal,
-                timeoutMs: 12_000,
-              });
-              return {
-                text: res.text,
-                words: res.words ?? null,
-                fromWasm: false as const,
-              };
-            };
-
-            const transcribeWithRetry = async () => {
-              try {
-                return await transcribeOnce();
-              } catch (err) {
-                if (
-                  signal?.aborted ||
-                  capturedEpoch !== this.epoch ||
-                  this.usingBrowserFallback ||
-                  (!this.active && !this.stopping)
-                ) {
-                  throw err;
-                }
-                if (this.usingWasmStt) {
-                  // Tier 1 WASM failed -> fall back immediately to Tier 3 (Android Native / Web Speech).
-                  this.usingWasmStt = false;
-                  if (this.tryActivateBrowserFallback()) {
-                    return {
-                      text: "",
-                      words: null as readonly WordTimestamp[] | null,
-                      fromWasm: true as const,
-                    };
-                  }
-                  throw err;
-                }
-                if (
-                  isTechnicalSttUnavailabilityError(err) &&
-                  this.recordTechnicalFailureAndMaybeFallback(err)
-                ) {
-                  if (this.usingWasmStt) {
-                    try {
-                      return await transcribeWithWasm();
-                    } catch (wasmErr) {
-                      this.usingWasmStt = false;
-                      if (this.tryActivateBrowserFallback()) {
-                        return {
-                          text: "",
-                          words: null as readonly WordTimestamp[] | null,
-                          fromWasm: true as const,
-                        };
-                      }
-                      throw wasmErr;
-                    }
-                  }
-                  throw err;
-                }
-                await new Promise((resolve) => setTimeout(resolve, 250));
-                if (
-                  signal?.aborted ||
-                  capturedEpoch !== this.epoch ||
-                  this.usingBrowserFallback ||
-                  (!this.active && !this.stopping)
-                ) {
-                  throw err;
-                }
-                return await transcribeOnce();
-              }
-            };
-
-            return transcribeWithRetry().then((res) => {
-              if (!res.fromWasm) {
-                this.consecutiveTechnicalFailures = 0;
-                lastLocalSttOutageAt = 0;
-              }
-              const rawText = (res.text ?? "").normalize("NFC").trim();
-              if (!rawText) return null;
-              const reconciled = reconcileSegmentTranscriptWithInterims(
-                rawText,
-                capturedInterims,
-                ctx.keyterms,
-              );
-              return reconciled ? { text: reconciled, words: res.words } : null;
+                timeoutMs: 20_000,
+                voicedDurationMs,
+              },
+            );
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: true,
+              fallbackReason:
+                this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE",
             });
-          })();
+            return {
+              text: wasmRes.text,
+              words: null as readonly WordTimestamp[] | null,
+              fromWasm: true as const,
+            };
+          };
+
+          const transcribeOnce = async () => {
+            if (this.usingWasmStt) {
+              return transcribeWithWasm();
+            }
+            const wavBlob = encodeFloat32ToWav16kBlob(audioToEncode);
+            const res = await this.speechService.transcribe(wavBlob, {
+              filename: "segment.wav",
+              languageCode: "vi",
+              keyterms: ctx.keyterms,
+              sessionId: ctx.sessionId ?? null,
+              pageId: ctx.pageId ?? null,
+              turnId,
+              voicedDurationMs,
+              source: "local_live_segment",
+              signal,
+              timeoutMs: 12_000,
+            });
+            return {
+              text: res.text,
+              words: normalizeWordTimings(res.words) ?? null,
+              fromWasm: false as const,
+            };
+          };
+
+          const transcribeWithRetry = async () => {
+            try {
+              return await transcribeOnce();
+            } catch (err) {
+              if (
+                signal?.aborted ||
+                capturedEpoch !== this.epoch ||
+                this.usingBrowserFallback ||
+                (!this.active && !this.stopping)
+              ) {
+                throw err;
+              }
+              if (this.usingWasmStt) {
+                // Tier 1 WASM failed -> fall back immediately to Tier 3 (Android Native / Web Speech).
+                this.usingWasmStt = false;
+                if (this.tryActivateBrowserFallback()) {
+                  return {
+                    text: "",
+                    words: null as readonly WordTimestamp[] | null,
+                    fromWasm: true as const,
+                  };
+                }
+                throw err;
+              }
+              if (
+                isTechnicalSttUnavailabilityError(err) &&
+                this.recordTechnicalFailureAndMaybeFallback(err)
+              ) {
+                if (this.usingWasmStt) {
+                  try {
+                    return await transcribeWithWasm();
+                  } catch (wasmErr) {
+                    this.usingWasmStt = false;
+                    if (this.tryActivateBrowserFallback()) {
+                      return {
+                        text: "",
+                        words: null as readonly WordTimestamp[] | null,
+                        fromWasm: true as const,
+                      };
+                    }
+                    throw wasmErr;
+                  }
+                }
+                throw err;
+              }
+              await new Promise((resolve) => setTimeout(resolve, 250));
+              if (
+                signal?.aborted ||
+                capturedEpoch !== this.epoch ||
+                this.usingBrowserFallback ||
+                (!this.active && !this.stopping)
+              ) {
+                throw err;
+              }
+              return await transcribeOnce();
+            }
+          };
+
+          return transcribeWithRetry().then((res) => {
+            if (!res.fromWasm) {
+              this.consecutiveTechnicalFailures = 0;
+              lastLocalSttOutageAt = 0;
+            }
+            const rawText = (res.text ?? "").normalize("NFC").trim();
+            if (!rawText) return null;
+            const reconciled = reconcileSegmentTranscriptWithInterims(
+              rawText,
+              capturedInterims,
+              ctx.keyterms,
+            );
+            return reconciled ? { text: reconciled, words: res.words } : null;
+          });
+        })();
 
     // Deliver results strictly in FIFO order via uploadChain so segment N+1
     // NEVER overtakes segment N and causes false RED alignment skips!
     const deliveryTask = this.uploadChain
       .then(async () => {
-        const payload = await responsePromise;
-        deliverFinalPayload(payload);
+        const result = await responsePromise;
+        deliverFinalResult(result);
       })
       .catch((err) => {
         if (signal?.aborted || capturedEpoch !== this.epoch) return;

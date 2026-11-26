@@ -703,10 +703,20 @@ class TtsAudioCacheRepository:
             miss_delta=1,
         )
 
-    async def total_active_bytes(self) -> int:
+    async def total_active_bytes(
+        self,
+        *,
+        scopes: Sequence[str] | None = None,
+        owner_parent_id: UUID | None = None,
+    ) -> int:
+        filters = [TtsAudioCacheEntry.Status == "ACTIVE"]
+        if scopes:
+            filters.append(TtsAudioCacheEntry.Scope.in_(list(scopes)))
+        if owner_parent_id is not None:
+            filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
         total = await self.db.scalar(
             select(func.coalesce(func.sum(TtsAudioCacheEntry.ByteSize), 0)).where(
-                TtsAudioCacheEntry.Status == "ACTIVE"
+                *filters
             )
         )
         return int(total or 0)
@@ -715,9 +725,15 @@ class TtsAudioCacheRepository:
         self,
         *,
         exclude_ids: Sequence[UUID] = (),
+        scopes: Sequence[str] | None = None,
+        owner_parent_id: UUID | None = None,
         limit: int = 100,
     ) -> list[TtsAudioCacheEntry]:
         filters = [TtsAudioCacheEntry.Status == "ACTIVE"]
+        if scopes:
+            filters.append(TtsAudioCacheEntry.Scope.in_(list(scopes)))
+        if owner_parent_id is not None:
+            filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
         if exclude_ids:
             filters.append(TtsAudioCacheEntry.Id.not_in(list(exclude_ids)))
         stmt = (

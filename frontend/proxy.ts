@@ -5,6 +5,7 @@ import {
   buildLoginRedirectPath,
   getProtectedRouteArea,
   getProtectedRouteRedirect,
+  getRoleHome,
 } from "@/lib/auth/route-policy";
 import {
   preserveSupabaseAuthResponse,
@@ -56,11 +57,19 @@ export async function proxy(request: NextRequest) {
   const auth = await refreshSupabaseAuth(request);
 
   if (pathname === "/" && auth.userId) {
-    return redirectWithAuthState(request, "/dashboard", auth.response);
+    return redirectWithAuthState(
+      request,
+      auth.role ? getRoleHome(auth.role) : getRoleHome("parent"),
+      auth.response,
+    );
   }
 
   if (pathname === "/admin" && auth.userId) {
-    return redirectWithAuthState(request, "/admin/parents", auth.response);
+    return redirectWithAuthState(
+      request,
+      auth.role === "parent" ? getRoleHome("parent") : "/admin/parents",
+      auth.response,
+    );
   }
 
   if (protectedArea && !auth.userId) {

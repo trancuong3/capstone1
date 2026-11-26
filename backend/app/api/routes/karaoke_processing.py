@@ -1,4 +1,5 @@
 """Protected HTTP surface for automatic karaoke; never starts an in-process worker."""
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -7,6 +8,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.deps import get_current_parent_id, get_db
 from app.core.karaoke_processing_config import KaraokeConfigurationError
+from app.diagnostic_logging import log_diagnostic
 from app.repositories.karaoke_repository import ConcurrentKaraokeUpdate
 from app.repositories.karaoke_processing_repository import KaraokeProcessingRepository
 from app.schemas.karaoke import AdminDetail, DraftRequest
@@ -16,6 +18,7 @@ from app.schemas.karaoke_processing import (
 )
 from app.services.karaoke_processing_service import KaraokeProcessingService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -29,7 +32,25 @@ async def get_processing_service(db=Depends(get_db)):
         await db.rollback()
         raise HTTPException(409, {"code": "REVISION_CONFLICT",
                                   "message_key": "REVISION_CONFLICT"}) from None
-    except (SQLAlchemyError, ValidationError, ValueError):
+    except (ValidationError, ValueError) as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="karaoke_processing_validation_or_value_error",
+            stage="service_response",
+            exception=exc,
+        )
+        await db.rollback()
+        raise HTTPException(503, {"code": "PROCESSING_UNAVAILABLE",
+                                  "message_key": "PROCESSING_UNAVAILABLE"}) from None
+    except SQLAlchemyError as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="karaoke_processing_database_error",
+            stage="database",
+            exception=exc,
+        )
         await db.rollback()
         raise HTTPException(503, {"code": "PROCESSING_UNAVAILABLE",
                                   "message_key": "PROCESSING_UNAVAILABLE"}) from None

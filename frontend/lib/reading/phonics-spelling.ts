@@ -22,6 +22,7 @@
  * full Vietnamese vowel marks, đ, and all 6 tones).
  */
 
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
@@ -738,11 +739,12 @@ export function isPhonicsCueForWindow(
 
 export function generateSpokenPhonicsGuide(
   word: string,
-  gender: VoiceGender = "female",
+  gender?: VoiceGender,
 ): string {
+  const effectiveGender = gender ?? getEffectiveTeacherPersona().gender;
   return adaptTextToTeacherPersona(
     generateFemaleSpokenPhonicsGuide(word),
-    gender,
+    effectiveGender,
   );
 }
 

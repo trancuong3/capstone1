@@ -1246,9 +1246,10 @@
       "reuploadCreated": "Ein neues Bild für diese Seite wurde per OCR verarbeitet. Die neue Version wartet auf Überprüfung; das für das Lesen verwendete Bild und der Inhalt werden erst nach der Verifizierung auf die neue Version umgestellt.",
       "reuploadError": "Neues Bild konnte nicht geladen oder OCR nicht ausgeführt werden. Die aktuellen Daten werden beibehalten; prüfen Sie Storage, Tesseract 5.x, vie.traineddata und versuchen Sie es erneut.",
       "aiRejectedAll": "KI-Vorschlag verworfen. Der aktuelle Entwurf wird beibehalten.",
-      "wordDeleteSyncError": "Der Text konnte nach dem Löschen des Wortes nicht synchronisiert werden. Überprüfen Sie den Inhalt und die Wortliste vor dem Speichern."
+      "wordDeleteSyncError": "Der Text konnte nach dem Löschen des Wortes nicht synchronisiert werden. Überprüfen Sie den Inhalt und die Wortliste vor dem Speichern.",
+      "wordAddSyncError": "Text konnte nach dem Hinzufügen eines Wortes nicht synchronisiert werden. Bitte Inhalt und Wortliste vor dem Speichern prüfen."
     },
-    "newWordPlaceholder": "Neues Wort",
+    "newWordPlaceholder": "Wort",
     "loading": "Bild und Revision werden geladen...",
     "errors": {
       "notFoundTitle": "Seite nicht gefunden",

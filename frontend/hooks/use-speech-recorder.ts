@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AudioQualityMonitor,
   type AudioQualityMode,
@@ -22,6 +22,7 @@ export interface SpeechRecorder {
   cancel(options?: { retainStream?: boolean }): void;
   getStream(): MediaStream | null;
   getIsSpeaking(): boolean;
+  getAudioLevel?(): number;
   getQuality?(): AudioQualitySnapshot;
   getSettings?(): MediaTrackSettings | null;
 }
@@ -38,6 +39,7 @@ const preferredMimeTypes = PREFERRED_RECORDER_MIME_TYPES;
 
 const MAX_RECORDING_BYTES = 20 * 1024 * 1024;
 const MAX_RECORDING_MS = 5 * 60 * 1000;
+const AUDIO_LEVEL_UI_INTERVAL_MS = 80;
 
 function microphoneConstraints(): MediaStreamConstraints {
   const supported = navigator.mediaDevices.getSupportedConstraints?.();
@@ -70,6 +72,7 @@ export function useSpeechRecorder(
   const chunksRef = useRef<Blob[]>([]);
   const isRecordingRef = useRef(false);
   const isSpeakingRef = useRef(false);
+  const audioLevelRef = useRef(0);
   const retainStreamOnStopRef = useRef(false);
   const qualityRef = useRef(new AudioQualityMonitor());
   const captureErrorRef = useRef<Error | null>(null);
@@ -124,6 +127,7 @@ export function useSpeechRecorder(
     if (!retainStream) streamRef.current = null;
 
     isSpeakingRef.current = false;
+    audioLevelRef.current = 0;
     setIsSpeaking(false);
     setAudioLevel(0);
   }, []);
@@ -193,6 +197,7 @@ export function useSpeechRecorder(
       streamGenerationRef.current += 1;
       prepareRef.current = null;
       startRef.current = null;
+      captureErrorRef.current = null;
       const recorder = recorderRef.current;
 
       if (recorder) {
@@ -379,16 +384,26 @@ export function useSpeechRecorder(
             analyserRef.current = analyser;
 
             const dataArray = new Float32Array(analyser.fftSize);
+            let lastUiLevelAt = -Infinity;
+            let lastUiLevel = -1;
             const checkAudio = () => {
               if (recorderRef.current !== recorder || !isRecordingRef.current)
                 return;
               if (ctx.state === "running") {
                 analyser.getFloatTimeDomainData(dataArray);
-                const quality = qualityRef.current.addFrame(
-                  dataArray,
-                  performance.now(),
-                );
-                setAudioLevel(Math.min(100, Math.round(quality.rms * 500)));
+                const now = performance.now();
+                const quality = qualityRef.current.addFrame(dataArray, now);
+                const nextLevel = Math.min(100, Math.round(quality.rms * 500));
+                audioLevelRef.current = nextLevel;
+                if (
+                  lastUiLevel !== nextLevel &&
+                  (now - lastUiLevelAt >= AUDIO_LEVEL_UI_INTERVAL_MS ||
+                    (nextLevel === 0 && lastUiLevel !== 0))
+                ) {
+                  lastUiLevel = nextLevel;
+                  lastUiLevelAt = now;
+                  setAudioLevel(nextLevel);
+                }
                 if (isSpeakingRef.current !== quality.isSpeaking) {
                   isSpeakingRef.current = quality.isSpeaking;
                   setIsSpeaking(quality.isSpeaking);
@@ -513,23 +528,46 @@ export function useSpeechRecorder(
 
   const getStream = useCallback(() => streamRef.current, []);
   const getIsSpeaking = useCallback(() => isSpeakingRef.current, []);
-
-  return {
-    isRecording,
-    isSpeaking,
-    audioLevel,
-    prepare,
-    start,
-    stop,
-    cancel,
-    getStream,
-    getIsSpeaking,
-    getQuality: () =>
+  const getAudioLevel = useCallback(() => audioLevelRef.current, []);
+  const getQuality = useCallback(
+    (): AudioQualitySnapshot =>
       captureErrorRef.current
         ? { ...qualityRef.current.getSnapshot(), status: "INVALID_AUDIO" }
         : noAudioRef.current
           ? { ...qualityRef.current.getSnapshot(), status: "NO_AUDIO" }
           : qualityRef.current.getSnapshot(),
-    getSettings: () => settingsRef.current,
-  };
+    [],
+  );
+  const getSettings = useCallback(() => settingsRef.current, []);
+
+  return useMemo(
+    () => ({
+      isRecording,
+      isSpeaking,
+      audioLevel,
+      prepare,
+      start,
+      stop,
+      cancel,
+      getStream,
+      getIsSpeaking,
+      getAudioLevel,
+      getQuality,
+      getSettings,
+    }),
+    [
+      isRecording,
+      isSpeaking,
+      audioLevel,
+      prepare,
+      start,
+      stop,
+      cancel,
+      getStream,
+      getIsSpeaking,
+      getAudioLevel,
+      getQuality,
+      getSettings,
+    ],
+  );
 }

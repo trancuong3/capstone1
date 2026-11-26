@@ -78,13 +78,30 @@ export function checkPublishableKey(key) {
   );
 }
 
+export function checkSsrSigningKey(key) {
+  // Never reveal any part of the supplied signing key in errors or logs.
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  const isPlaceholder =
+    /^(?:your-|change[-_]?me|placeholder|example|replace[-_]?me|<)/i.test(
+      trimmed,
+    );
+  const isSingleRepeatedChar =
+    trimmed.length > 0 && new Set(trimmed).size === 1;
+
+  if (trimmed.length < 32 || isPlaceholder || isSingleRepeatedChar) {
+    throw new Error(
+      "VIREAD_SSR_AUTH_SIGNING_KEY: must be a non-placeholder server-only signing secret of at least 32 characters",
+    );
+  }
+}
+
 export function verifyHostingEnvironment(env = process.env) {
   const publicNames = Object.keys(env).filter(
     (name) => name.startsWith("NEXT_PUBLIC_") && env[name],
   );
   if (
     publicNames.some((name) =>
-      /(?:SECRET|SERVICE_ROLE|PRIVATE|PASSWORD|ACCESS_TOKEN|ROOT_KEY)/i.test(
+      /(?:SECRET|SERVICE_ROLE|PRIVATE|PASSWORD|ACCESS_TOKEN|ROOT_KEY|SIGNING_KEY)/i.test(
         name,
       ),
     )
@@ -104,6 +121,7 @@ export function verifyHostingEnvironment(env = process.env) {
     required("NEXT_PUBLIC_SUPABASE_URL", env),
   );
   checkPublishableKey(required("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY", env));
+  checkSsrSigningKey(required("VIREAD_SSR_AUTH_SIGNING_KEY", env));
 
   const apiUrl = publicHttpsOrigin(
     "NEXT_PUBLIC_API_URL",

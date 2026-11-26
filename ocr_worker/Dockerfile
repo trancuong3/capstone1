@@ -4,6 +4,10 @@ ARG APP_UID=10001
 ARG APP_GID=10001
 ARG APP_HOME=/var/cache/viread
 ARG APP_PORT=8020
+ARG PREBAKE_CHECKPOINT_URL=""
+ARG PREBAKE_CHECKPOINT_SHA256="200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6"
+ARG PREBAKE_CONFIG_URL=""
+ARG PREBAKE_CONFIG_SHA256="140f4b4a0b1036b074cf7d661e18d8e26303f8a3f5457a700187a9ec101cfb3c"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -16,6 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     XDG_CACHE_HOME=/tmp/.cache \
     MPLCONFIGDIR=/tmp/matplotlib \
     TORCH_HOME=/tmp/torch \
+    VIREAD_OCR_PREBAKED_MODEL_DIR=${APP_HOME}/viread-models \
     VIREAD_OCR_MODEL_CACHE_DIR=/tmp/viread-models \
     PORT=${APP_PORT} \
     PYTHONPATH=/app:/app/backend
@@ -64,13 +69,16 @@ COPY backend/app/services/viread_vietocr_v2_preprocessing.py /app/backend/app/se
 
 RUN groupadd --gid ${APP_GID} appuser \
     && useradd --uid ${APP_UID} --gid appuser --create-home --home-dir ${APP_HOME} --shell /usr/sbin/nologin appuser \
-    && mkdir -p ${APP_HOME}/.paddleocr /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models \
+    && mkdir -p ${APP_HOME}/.paddleocr ${APP_HOME}/viread-models /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models \
     && chown -R appuser:appuser /app ${APP_HOME} /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models
 
 USER appuser
 
 # Pre-warm PaddleOCR ~16.34 MB det/rec/cls weights into ~/.paddleocr under target UID.
 RUN python -c "import torch, paddle; from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=False, lang='vi', det_algorithm='DB', show_log=False)"
+
+# Optionally pre-bake SHA-256 verified FLOW1_EXTERNAL_TRDG checkpoint for zero-egress cold starts.
+RUN python -m ocr_worker.prebake
 
 EXPOSE ${APP_PORT}
 

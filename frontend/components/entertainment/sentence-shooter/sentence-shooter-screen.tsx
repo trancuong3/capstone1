@@ -90,13 +90,31 @@ function toBookCover(book: SentenceShooterBookDTO): BookListItemDTO {
   };
 }
 
-function playSound(kind: "shot" | "correct" | "wrong" | "celebrate") {
-  if (typeof window === "undefined") return;
+function getOrCreateAudioContext(audioContextRef: {
+  current: AudioContext | null;
+}): AudioContext | null {
+  if (typeof window === "undefined") return null;
   const AudioContextConstructor = window.AudioContext;
-  if (!AudioContextConstructor) return;
+  if (!AudioContextConstructor) return null;
+  if (!audioContextRef.current || audioContextRef.current.state === "closed") {
+    audioContextRef.current = new AudioContextConstructor();
+  }
+  if (
+    audioContextRef.current.state === "suspended" &&
+    typeof audioContextRef.current.resume === "function"
+  ) {
+    void audioContextRef.current.resume().catch(() => undefined);
+  }
+  return audioContextRef.current;
+}
 
+function playSound(
+  kind: "shot" | "correct" | "wrong" | "celebrate",
+  audioContextRef: { current: AudioContext | null },
+) {
   try {
-    const context = new AudioContextConstructor();
+    const context = getOrCreateAudioContext(audioContextRef);
+    if (!context) return;
     const oscillator = context.createOscillator();
     const gain = context.createGain();
     const frequencies = {
@@ -130,7 +148,14 @@ function playSound(kind: "shot" | "correct" | "wrong" | "celebrate") {
     gain.connect(context.destination);
     oscillator.start();
     oscillator.stop(context.currentTime + (notes.length > 1 ? 0.36 : 0.2));
-    oscillator.onended = () => void context.close();
+    oscillator.onended = () => {
+      try {
+        oscillator.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore already-disconnected audio nodes.
+      }
+    };
   } catch {
     // Sound is optional; a browser audio restriction never blocks a turn.
   }
@@ -363,6 +388,7 @@ export function SentenceShooterScreen({
   const actionLockRef = useRef(false);
   const sessionEpochRef = useRef(0);
   const inFlightAbortRef = useRef<AbortController | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const pendingRetryRef = useRef<{
     roundId: string;
     tokenId: string;
@@ -430,6 +456,11 @@ export function SentenceShooterScreen({
       sessionEpochRef.current += 1;
       inFlightAbortRef.current?.abort();
       actionLockRef.current = false;
+      const audioContext = audioContextRef.current;
+      audioContextRef.current = null;
+      if (audioContext && audioContext.state !== "closed") {
+        void audioContext.close().catch(() => undefined);
+      }
     };
   }, []);
 
@@ -591,7 +622,7 @@ export function SentenceShooterScreen({
     setIsBusy(true);
     setWobbleTokenId("");
     animateShot(token.id);
-    if (soundEnabled) playSound("shot");
+    if (soundEnabled) playSound("shot", audioContextRef);
 
     try {
       const response = await shooterService.shoot(
@@ -611,7 +642,10 @@ export function SentenceShooterScreen({
         setPlacedTokens((current) => [...current, token]);
         setHintTargetId("");
         if (soundEnabled) {
-          playSound(response.session_completed ? "celebrate" : "correct");
+          playSound(
+            response.session_completed ? "celebrate" : "correct",
+            audioContextRef,
+          );
         }
         if (response.round_completed) {
           setSession((current) =>
@@ -634,7 +668,7 @@ export function SentenceShooterScreen({
         }
       } else {
         setWobbleTokenId(token.id);
-        if (soundEnabled) playSound("wrong");
+        if (soundEnabled) playSound("wrong", audioContextRef);
       }
     } catch {
       if (epoch === sessionEpochRef.current && !controller.signal.aborted) {

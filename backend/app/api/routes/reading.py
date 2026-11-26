@@ -1,5 +1,9 @@
 import asyncio
+from dataclasses import dataclass
+import inspect
 from io import BytesIO
+import logging
+import math
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,9 +36,11 @@ from app.schemas.reading import (
 )
 from datetime import datetime, timezone
 from app.repositories.reading_content_repository import ReadingContentRepository
+from app.repositories.reading_presence_repository import ReadingPresenceRepository
 from app.repositories.book_repository import CatalogRepository
 from app.services.reading_content_service import ReadingContentService
 from app.services.reading_comparison_service import ReadingComparisonService
+from app.services.reading_presence_service import ReadingPresenceService
 from app.services.local_ocr_scan_service import MAX_SCAN_IMAGE_BYTES
 from app.services.rate_limiter import rate_limit
 from app.schemas.reading import (
@@ -43,7 +49,57 @@ from app.schemas.reading import (
     ReadingSessionPageProgressDTO,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+
+async def _release_db(db: AsyncSession | None) -> None:
+    """End an open read transaction so no DB permit is held during slow I/O or CPU work."""
+    rollback = getattr(db, "rollback", None)
+    if callable(rollback):
+        res = rollback()
+        if inspect.isawaitable(res):
+            await res
+
+
+@dataclass(frozen=True, slots=True)
+class _CameraCandidatePage:
+    Id: UUID
+    BookId: UUID
+    PageNumber: int
+    ImagePath: str | None
+    CurrentVerifiedRevisionId: UUID | None
+    Width: int | None
+    Height: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _CameraCandidateBook:
+    VisibilityScope: str | None
+
+
+def _snapshot_camera_candidates(rows) -> list[tuple[_CameraCandidatePage, _CameraCandidateBook]]:
+    """Snapshot ORM scalars before db.rollback() so Storage/OpenCV never hits expired attributes."""
+    snapshots: list[tuple[_CameraCandidatePage, _CameraCandidateBook]] = []
+    for page_orm, book_row in rows:
+        snapshots.append(
+            (
+                _CameraCandidatePage(
+                    Id=page_orm.Id,
+                    BookId=page_orm.BookId,
+                    PageNumber=page_orm.PageNumber,
+                    ImagePath=page_orm.ImagePath,
+                    CurrentVerifiedRevisionId=page_orm.CurrentVerifiedRevisionId,
+                    Width=getattr(page_orm, "Width", None),
+                    Height=getattr(page_orm, "Height", None),
+                ),
+                _CameraCandidateBook(
+                    VisibilityScope=getattr(book_row, "VisibilityScope", "CATALOG"),
+                ),
+            )
+        )
+    return snapshots
 
 @router.get("/sessions", response_model=List[ReadingSessionResponse])
 async def get_sessions(
@@ -157,9 +213,22 @@ async def finish_session(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ReadingContentService(ReadingContentRepository(db)).finish_session(
+    summary = await ReadingContentService(ReadingContentRepository(db)).finish_session(
         session_id, actor_id
     )
+    try:
+        await ReadingPresenceService(
+            ReadingPresenceRepository(db)
+        ).cancel_for_session(session_id, reason="SESSION_ENDED")
+    except Exception as exc:
+        logger.warning(
+            "reading_presence_cancel_on_finish_failed: %s", type(exc).__name__
+        )
+        try:
+            await _release_db(db)
+        except Exception:
+            pass
+    return summary
 
 
 @router.get("/sessions/{session_id}/completion-summary", response_model=ReadingCompletionSummaryDTO)
@@ -197,6 +266,10 @@ async def create_fluency_assessment(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    if assessment_in.Score is not None and not math.isfinite(assessment_in.Score):
+        raise HTTPException(status_code=422, detail="Score must be a finite number")
+    if assessment_in.Uncertainty is not None and not math.isfinite(assessment_in.Uncertainty):
+        raise HTTPException(status_code=422, detail="Uncertainty must be a finite number")
     return await ReadingContentService(ReadingContentRepository(db)).create_fluency_assessment(
         actor_id, assessment_in
     )
@@ -841,6 +914,7 @@ async def match_book_page_from_camera(
     import asyncio
 
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
+    await _release_db(db)
 
     camera_bytes = await _read_and_validate_camera_frame(file)
     framing = await asyncio.to_thread(vision_page_matcher.check_framing, camera_bytes)
@@ -880,11 +954,13 @@ async def match_book_page_from_camera(
         .limit(max_candidates)
     )
     rows = pages_result.all()[:max_candidates]
+    candidate_rows = _snapshot_camera_candidates(rows)
+    await _release_db(db)
 
-    if not rows:
+    if not candidate_rows:
         raise HTTPException(status_code=404, detail="Resource not found")
 
-    candidate_pages = await _build_match_candidates(rows)
+    candidate_pages = await _build_match_candidates(candidate_rows)
 
     if not candidate_pages:
         raise HTTPException(
@@ -965,6 +1041,7 @@ async def match_page_global_from_camera(
     import asyncio
 
     await HistoryService(HistoryRepository(db)).require_parent(actor_id)
+    await _release_db(db)
 
     camera_bytes = await _read_and_validate_camera_frame(file)
     framing = await asyncio.to_thread(vision_page_matcher.check_framing, camera_bytes)
@@ -1004,11 +1081,13 @@ async def match_page_global_from_camera(
         .limit(max_candidates)
     )
     rows = pages_result.all()[:max_candidates]
+    candidate_rows = _snapshot_camera_candidates(rows)
+    await _release_db(db)
 
-    if not rows:
+    if not candidate_rows:
         raise HTTPException(status_code=404, detail="No active books or pages found")
 
-    candidate_pages = await _build_match_candidates(rows)
+    candidate_pages = await _build_match_candidates(candidate_rows)
 
     if not candidate_pages:
         raise HTTPException(
