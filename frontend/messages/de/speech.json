@@ -79,7 +79,9 @@
       "american": "Amerikanischer Akzent",
       "british": "Britischer Akzent"
     },
-    "googleProviderLabel": "Google-Fallback"
+    "googleProviderLabel": "Google-Fallback",
+    "sessionLockedBadge": "Für diese Lesesitzung gesperrt",
+    "offlineBrowserBadge": "Browser ist offline"
   },
   "engineBadge": {
     "ariaLabel": "Sprachquelle: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "Standard-Cache",
       "android_native": "Android (vi-VN)",
       "google_cloud": "Online (Google API)",
-      "browser_default": "Online (Google/Browser)"
-    }
+      "browser_default": "Online (Google/Browser)",
+      "idle": "Wird geprüft…"
+    },
+    "idleDetail": "{base} (Status der Sprach-Engine wird geprüft)"
   },
   "playback": {
     "unavailable": "Die Gerätestimme ist noch nicht bereit. Eltern und Kind können dem Text auf dem Bildschirm folgen und auf Wiederholen tippen.",

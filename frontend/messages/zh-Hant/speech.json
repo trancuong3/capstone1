@@ -79,7 +79,9 @@
       "american": "美式口音",
       "british": "英式口音"
     },
-    "googleProviderLabel": "Google 備用"
+    "googleProviderLabel": "Google 備用",
+    "sessionLockedBadge": "已鎖定用於本次閱讀",
+    "offlineBrowserBadge": "瀏覽器目前離線"
   },
   "engineBadge": {
     "ariaLabel": "語音來源：STT {stt}，TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "標準快取",
       "android_native": "Android (vi-VN)",
       "google_cloud": "線上 (Google API)",
-      "browser_default": "線上 (Google/瀏覽器)"
-    }
+      "browser_default": "線上 (Google/瀏覽器)",
+      "idle": "檢測中…"
+    },
+    "idleDetail": "{base} (正在檢測語音引擎狀態)"
   },
   "playback": {
     "unavailable": "裝置端語音尚未就緒。請家長和寶貝查看螢幕上的文字，然後點擊「重試」。",
