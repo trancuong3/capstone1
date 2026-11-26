@@ -1,6 +1,13 @@
 "use client";
 
-import { Camera, FileImage, Play, Sparkles, VideoOff } from "lucide-react";
+import {
+  Camera,
+  FileImage,
+  Play,
+  RefreshCw,
+  Sparkles,
+  VideoOff,
+} from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -15,6 +22,7 @@ import {
   scanCameraFrameGlobal,
   type CameraPageMatchDTO,
 } from "@/lib/api/page-match-service";
+import { isServiceError } from "@/lib/api/service-error";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
 
@@ -61,6 +69,10 @@ export function CameraPreview({
   const [isScanning, setIsScanning] = useState(false);
   const [autoScan, setAutoScan] = useState(true);
   const [scanResult, setScanResult] = useState<CameraPageMatchDTO | null>(null);
+  const [ocrUnavailableBanner, setOcrUnavailableBanner] = useState<
+    string | null
+  >(null);
+  const consecutiveErrorCountRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -296,6 +308,9 @@ export function CameraPreview({
               return;
             }
 
+            consecutiveErrorCountRef.current = 0;
+            setOcrUnavailableBanner(null);
+
             const resolvedBookId = response.book_id || bookId;
             if (response.matched) {
               if (response.matched_page && resolvedBookId) {
@@ -323,19 +338,45 @@ export function CameraPreview({
             } else {
               setScanResult(response);
             }
-          } catch {
+          } catch (error) {
             if (!mountedRef.current || controller.signal.aborted) {
               resolve();
               return;
             }
-            setScanResult({
-              framing_valid: false,
-              matched: false,
-              status_code: "INVALID_IMAGE",
-              message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
-              confidence: 0,
-              matched_page: null,
-            });
+            consecutiveErrorCountRef.current += 1;
+            const serviceUnavailable =
+              isServiceError(error) &&
+              (error.status === 503 ||
+                error.status === 504 ||
+                error.status === 502 ||
+                error.status === 429);
+            if (serviceUnavailable || consecutiveErrorCountRef.current >= 3) {
+              const reason =
+                isServiceError(error) && error.status === 504
+                  ? "Máy chủ OCR phản hồi chậm hơn dự kiến. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng."
+                  : isServiceError(error) && error.message
+                    ? error.message
+                    : "Máy chủ OCR đang tạm tắt hoặc tạm bận. Tự động quét đã tạm dừng — bấm Thử quét lại khi sẵn sàng.";
+              setAutoScan(false);
+              setOcrUnavailableBanner(reason);
+              setScanResult({
+                framing_valid: false,
+                matched: false,
+                status_code: "INVALID_IMAGE",
+                message: reason,
+                confidence: 0,
+                matched_page: null,
+              });
+            } else {
+              setScanResult({
+                framing_valid: false,
+                matched: false,
+                status_code: "INVALID_IMAGE",
+                message: "Đang kết nối với ViRead. Giữ sách yên trong khung.",
+                confidence: 0,
+                matched_page: null,
+              });
+            }
           } finally {
             if (mountedRef.current && scanAbortRef.current === controller) {
               scanAbortRef.current = null;
@@ -440,6 +481,32 @@ export function CameraPreview({
           </span>
         ) : null}
       </div>
+
+      {ocrUnavailableBanner && !cameraSuspended ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-sm text-amber-950"
+          data-testid="camera-ocr-unavailable-banner"
+          role="status"
+        >
+          <p className="font-semibold">{ocrUnavailableBanner}</p>
+          <Button
+            className="min-h-10 sm:w-auto"
+            disabled={!cameraReady || isScanning}
+            onClick={() => {
+              consecutiveErrorCountRef.current = 0;
+              setOcrUnavailableBanner(null);
+              setAutoScan(true);
+              void captureAndScan();
+            }}
+            size="compact"
+            type="button"
+            variant="secondary"
+          >
+            <RefreshCw aria-hidden="true" className="size-4" />
+            Thử quét lại
+          </Button>
+        </div>
+      ) : null}
 
       {/* Portrait-first trên điện thoại (aspect-[3/4]), ngang trên màn hình rộng (sm:aspect-[16/10]) */}
       <div

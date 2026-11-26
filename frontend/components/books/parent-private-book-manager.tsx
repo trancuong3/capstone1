@@ -414,28 +414,113 @@ function ParentPrivateBookManagerContent({
     };
   }, [bookId, currentUserId, service]);
 
-  // Auto-poll while any submission is CHECKING + inspect OCR worker online state
+  // Auto-poll while any submission is CHECKING with exponential backoff (3s -> 15s),
+  // in-flight overlap guard, tab-visibility pause, and throttled /health checks (<= 1/30s).
   const hasCheckingSubmission = Boolean(
     detail?.submissions.some((sub) => sub.workflow_status === "CHECKING"),
   );
+  const pollInFlightRef = useRef(false);
+  const lastHealthCheckAtRef = useRef(0);
+  const workerOnlineRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
+  }, [ocrWorkerHealth]);
+
   useEffect(() => {
     if (!hasCheckingSubmission) return;
     let active = true;
-    const pollWorkerStatus = () => {
-      void fetchOcrWorkerHealth().then((snapshot) => {
-        if (active && snapshot) {
-          setOcrWorkerHealth(snapshot);
-        }
-      });
+    let timerId: number | null = null;
+    let idleTicks = 0;
+    const BASE_POLL_MS = 3_000;
+    const MAX_POLL_MS = 15_000;
+    const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
+
+    const clearTimer = () => {
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+        timerId = null;
+      }
     };
-    pollWorkerStatus();
-    const timer = window.setInterval(() => {
-      void loadDetail(true);
-      pollWorkerStatus();
-    }, 2500);
+
+    const maybePollWorkerHealth = async (force = false) => {
+      const now = Date.now();
+      if (
+        !force &&
+        now - lastHealthCheckAtRef.current < HEALTH_POLL_MIN_INTERVAL_MS
+      ) {
+        return;
+      }
+      lastHealthCheckAtRef.current = now;
+      const snapshot = await fetchOcrWorkerHealth();
+      if (active && snapshot) {
+        setOcrWorkerHealth(snapshot);
+      }
+    };
+
+    const nextDelayMs = () => {
+      const offline = workerOnlineRef.current === false;
+      const step = offline ? Math.min(4, idleTicks + 1) : Math.min(3, idleTicks);
+      return Math.min(MAX_POLL_MS, Math.round(BASE_POLL_MS * Math.pow(1.6, step)));
+    };
+
+    const scheduleNext = (delayMs: number) => {
+      clearTimer();
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      timerId = window.setTimeout(() => {
+        void runTick();
+      }, delayMs);
+    };
+
+    const runTick = async () => {
+      if (!active) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      if (pollInFlightRef.current) {
+        scheduleNext(nextDelayMs());
+        return;
+      }
+      pollInFlightRef.current = true;
+      try {
+        await Promise.all([loadDetail(true), maybePollWorkerHealth(false)]);
+        idleTicks += 1;
+      } finally {
+        pollInFlightRef.current = false;
+      }
+      scheduleNext(nextDelayMs());
+    };
+
+    const onVisibilityChange = () => {
+      if (!active) return;
+      if (document.visibilityState === "hidden") {
+        clearTimer();
+      } else {
+        idleTicks = 0;
+        scheduleNext(300);
+      }
+    };
+
+    void maybePollWorkerHealth(true);
+    scheduleNext(BASE_POLL_MS);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
     return () => {
       active = false;
-      window.clearInterval(timer);
+      clearTimer();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
     };
   }, [hasCheckingSubmission, loadDetail]);
 

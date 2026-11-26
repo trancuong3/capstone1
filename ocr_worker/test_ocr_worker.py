@@ -252,6 +252,60 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
         self.assertGreaterEqual(len(out["words"]), 1)
         self.assertLessEqual(torch.get_num_threads(), CPU_THREADS)
 
+    def test_complete_and_fail_job_retry_on_transient_502_503_without_retrying_409(self):
+        token = "r" * 40
+        complete_attempts = 0
+        fail_attempts = 0
+        conflict_attempts = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal complete_attempts, fail_attempts, conflict_attempts
+            if request.url.path == "/internal/ocr-jobs/job-ok/complete":
+                complete_attempts += 1
+                if complete_attempts < 3:
+                    return httpx.Response(503 if complete_attempts == 1 else 502, text="bad gateway")
+                return httpx.Response(200, json={"status": "SUCCEEDED", "job_id": "job-ok"})
+            if request.url.path == "/internal/ocr-jobs/job-fail/fail":
+                fail_attempts += 1
+                if fail_attempts == 1:
+                    return httpx.Response(503, text="temporarily unavailable")
+                return httpx.Response(200, json={"status": "FAILED_RETRYABLE"})
+            if request.url.path == "/internal/ocr-jobs/job-conflict/complete":
+                conflict_attempts += 1
+                return httpx.Response(409, json={"detail": "Fencing token mismatch"})
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+            completion_retry_attempts=5,
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            code, body = client.complete_job("job-ok", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(code, 200)
+            self.assertEqual(body["status"], "SUCCEEDED")
+            self.assertEqual(complete_attempts, 3)
+
+            f_code, f_body = client.fail_job("job-fail", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(f_code, 200)
+            self.assertEqual(f_body["status"], "FAILED_RETRYABLE")
+            self.assertEqual(fail_attempts, 2)
+
+            c_code, _c_body = client.complete_job("job-conflict", {"worker_id": "w1", "fencing_token": 1})
+            self.assertEqual(c_code, 409)
+            self.assertEqual(conflict_attempts, 1)
+        finally:
+            client.close()
+
+    def test_stable_hostname_worker_id_default(self):
+        with patch.dict(os.environ, {"VIREAD_OCR_WORKER_ID": ""}, clear=False):
+            r1 = OcrRuntimeManager()
+            r2 = OcrRuntimeManager()
+            self.assertEqual(r1.worker_id, r2.worker_id)
+            self.assertTrue(r1.worker_id.startswith("win-ocr-"))
+
 
 if __name__ == "__main__":
     unittest.main()

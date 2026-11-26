@@ -17,7 +17,7 @@ import time
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from typing import Any
 from uuid import UUID, uuid4
@@ -988,3 +988,51 @@ class LocalOcrScanService:
         return await self._serialize_scan_job(
             refreshed, worker_online=worker_online, request_id=request_id
         )
+
+
+async def cleanup_expired_local_scan_objects(
+    max_age_hours: int = 24,
+    *,
+    now: datetime | None = None,
+    limit: int = 100,
+    db: Any | None = None,
+) -> int:
+    """Sweep temporary `local-scans/` objects in private Storage older than max_age_hours."""
+    from sqlalchemy import select
+    from app.database.session import AsyncSessionLocal
+
+    current = now or datetime.now(timezone.utc)
+    cutoff = current - timedelta(hours=max(1, int(max_age_hours)))
+    cleaned = 0
+
+    async def _sweep(session: Any) -> int:
+        nonlocal cleaned
+        query = (
+            select(OcrInferenceJob)
+            .where(
+                OcrInferenceJob.JobKind == JOB_KIND_LOCAL_SCAN,
+                OcrInferenceJob.CreatedAt <= cutoff,
+            )
+            .order_by(OcrInferenceJob.CreatedAt.asc())
+            .limit(max(1, min(int(limit), 500)))
+        )
+        rows = list((await session.scalars(query)).all())
+        job_svc = OcrInferenceJobService(session)
+        changed = False
+        for row in rows:
+            image_path = str(getattr(row, "ImagePath", "") or "")
+            meta = dict(getattr(row, "ProcessingMeta", None) or {})
+            if not image_path.startswith("local-scans/") or meta.get("temp_image_cleaned"):
+                continue
+            await job_svc._cleanup_local_scan_temp_object(row)
+            if (getattr(row, "ProcessingMeta", None) or {}).get("temp_image_cleaned"):
+                cleaned += 1
+                changed = True
+        if changed:
+            await session.commit()
+        return cleaned
+
+    if db is not None:
+        return await _sweep(db)
+    async with AsyncSessionLocal() as session:
+        return await _sweep(session)

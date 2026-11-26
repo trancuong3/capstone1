@@ -72,6 +72,89 @@ export async function getAdminOcrJob(
   );
 }
 
+export async function listAdminBookOcrJobs(
+  bookId: string,
+  signal?: AbortSignal,
+): Promise<readonly AdminOcrJobDTO[]> {
+  return requestApi(
+    `/books/admin/catalog/${encodeURIComponent(bookId)}/ocr-jobs`,
+    z.array(adminOcrJobSchema),
+    signal,
+    { method: "GET" },
+  );
+}
+
+function isTransientAdminPollError(error: unknown): boolean {
+  if (isServiceError(error)) {
+    return (
+      error.retryable ||
+      error.status === 0 ||
+      error.status === 429 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    );
+  }
+  return error instanceof TypeError;
+}
+
+function waitAdminPollDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(
+      new DOMException("OCR job polling cancelled", "AbortError"),
+    );
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("OCR job polling cancelled", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function waitForVisibleTab(signal?: AbortSignal): Promise<void> {
+  if (
+    typeof document === "undefined" ||
+    document.visibilityState !== "hidden"
+  ) {
+    return Promise.resolve();
+  }
+  if (signal?.aborted) {
+    return Promise.reject(
+      new DOMException("OCR job polling cancelled", "AbortError"),
+    );
+  }
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") {
+        cleanup();
+        resolve();
+      }
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException("OCR job polling cancelled", "AbortError"));
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isTerminalOcrJobStatus(status: AdminOcrJobDTO["status"]): boolean {
+  return (
+    status === "SUCCEEDED" || status === "DEAD_LETTER" || status === "CANCELLED"
+  );
+}
+
 export async function pollAdminOcrJob(
   initialJob: AdminOcrJobDTO,
   options: {
@@ -81,37 +164,152 @@ export async function pollAdminOcrJob(
     readonly onTick?: (job: AdminOcrJobDTO) => void;
   } = {},
 ): Promise<AdminOcrJobDTO> {
-  const pollIntervalMs = options.pollIntervalMs ?? 1_500;
+  const baseIntervalMs = options.pollIntervalMs ?? 1_500;
+  const maxIntervalMs = Math.max(baseIntervalMs, Math.min(8_000, baseIntervalMs * 5));
   const maxAttempts = options.maxAttempts ?? 60;
   let current = initialJob;
+  let consecutiveErrors = 0;
   options.onTick?.(current);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (
-      current.status === "SUCCEEDED" ||
-      current.status === "DEAD_LETTER" ||
-      current.status === "CANCELLED"
-    ) {
+    if (isTerminalOcrJobStatus(current.status)) {
       return current;
     }
     if (options.signal?.aborted) {
       throw new DOMException("OCR job polling cancelled", "AbortError");
     }
-    await new Promise<void>((resolve, reject) => {
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(new DOMException("OCR job polling cancelled", "AbortError"));
-      };
-      const timer = setTimeout(() => {
-        options.signal?.removeEventListener("abort", onAbort);
-        resolve();
-      }, pollIntervalMs);
-      options.signal?.addEventListener("abort", onAbort, { once: true });
-    });
-    current = await getAdminOcrJob(current.id, options.signal);
-    options.onTick?.(current);
+    const backoffStep = Math.min(4, Math.floor(attempt / 4));
+    const delayMs = Math.min(
+      maxIntervalMs,
+      Math.round(baseIntervalMs * Math.pow(1.4, backoffStep)),
+    );
+    await waitAdminPollDelay(delayMs, options.signal);
+    await waitForVisibleTab(options.signal);
+    try {
+      current = await getAdminOcrJob(current.id, options.signal);
+      consecutiveErrors = 0;
+      options.onTick?.(current);
+    } catch (error) {
+      if (
+        options.signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      consecutiveErrors += 1;
+      if (!isTransientAdminPollError(error) || consecutiveErrors > 3) {
+        throw error;
+      }
+    }
   }
   return current;
+}
+
+export async function pollAdminBookOcrJobsBatch(
+  bookId: string,
+  initialJobs: readonly AdminOcrJobDTO[],
+  options: {
+    readonly pollIntervalMs?: number;
+    readonly maxAttempts?: number;
+    readonly signal?: AbortSignal;
+    readonly onProgress?: (summary: {
+      readonly completedCount: number;
+      readonly failedCount: number;
+      readonly totalCount: number;
+    }) => void;
+  } = {},
+): Promise<readonly AdminOcrJobDTO[]> {
+  const baseIntervalMs = options.pollIntervalMs ?? 1_500;
+  const maxIntervalMs = Math.max(baseIntervalMs, Math.min(8_000, baseIntervalMs * 5));
+  const maxAttempts = options.maxAttempts ?? 60;
+  const jobMap = new Map<string, AdminOcrJobDTO>();
+  for (const job of initialJobs) {
+    jobMap.set(job.id, job);
+  }
+  const targetIds = new Set(jobMap.keys());
+  let batchRouteSupported = true;
+  let consecutiveErrors = 0;
+
+  const report = () => {
+    let completedCount = 0;
+    let failedCount = 0;
+    for (const job of jobMap.values()) {
+      if (job.status === "SUCCEEDED") completedCount += 1;
+      else if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") {
+        failedCount += 1;
+      }
+    }
+    options.onProgress?.({
+      completedCount,
+      failedCount,
+      totalCount: jobMap.size,
+    });
+    return completedCount + failedCount >= jobMap.size;
+  };
+
+  if (report()) return Array.from(jobMap.values());
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (options.signal?.aborted) {
+      throw new DOMException("OCR job polling cancelled", "AbortError");
+    }
+    const backoffStep = Math.min(4, Math.floor(attempt / 4));
+    const delayMs = Math.min(
+      maxIntervalMs,
+      Math.round(baseIntervalMs * Math.pow(1.4, backoffStep)),
+    );
+    await waitAdminPollDelay(delayMs, options.signal);
+    await waitForVisibleTab(options.signal);
+
+    try {
+      if (batchRouteSupported) {
+        try {
+          const latestList = await listAdminBookOcrJobs(bookId, options.signal);
+          for (const item of latestList) {
+            if (targetIds.has(item.id)) {
+              jobMap.set(item.id, item);
+            }
+          }
+          consecutiveErrors = 0;
+        } catch (batchErr) {
+          if (isAsyncRouteUnsupported(batchErr)) {
+            batchRouteSupported = false;
+          } else {
+            throw batchErr;
+          }
+        }
+      }
+      if (!batchRouteSupported) {
+        const pending = Array.from(jobMap.values()).filter(
+          (item) => !isTerminalOcrJobStatus(item.status),
+        );
+        const refreshed = await Promise.all(
+          pending.map((item) => getAdminOcrJob(item.id, options.signal)),
+        );
+        for (const item of refreshed) {
+          jobMap.set(item.id, item);
+        }
+        consecutiveErrors = 0;
+      }
+    } catch (error) {
+      if (
+        options.signal?.aborted ||
+        (error instanceof Error && error.name === "AbortError")
+      ) {
+        throw error;
+      }
+      consecutiveErrors += 1;
+      if (!isTransientAdminPollError(error) || consecutiveErrors > 3) {
+        throw error;
+      }
+      continue;
+    }
+
+    if (report()) {
+      return Array.from(jobMap.values());
+    }
+  }
+  return Array.from(jobMap.values());
 }
 
 function isAsyncRouteUnsupported(error: unknown): boolean {
@@ -390,8 +588,6 @@ export function createAdminPageService(options?: {
                   summary_message: `Đã xếp hàng ${enqueued.queued_count} trang chờ máy chủ OCR Windows bật`,
                 });
               } else {
-                let completedCount = 0;
-                let failedCount = 0;
                 const jobsToPoll =
                   enqueued.jobs && enqueued.jobs.length > 0
                     ? enqueued.jobs
@@ -400,36 +596,38 @@ export function createAdminPageService(options?: {
                         job_kind: "ADMIN_PAGE_UPLOAD",
                         status: "QUEUED",
                       }));
-                for (const jobItem of jobsToPoll) {
-                  const settled = await pollAdminOcrJob(jobItem, {
+                const settledJobs = await pollAdminBookOcrJobsBatch(
+                  bookId,
+                  jobsToPoll,
+                  {
                     pollIntervalMs,
                     maxAttempts: maxPollAttempts,
-                  });
-                  if (settled.status === "SUCCEEDED") {
-                    completedCount += 1;
-                  } else if (
-                    settled.status === "DEAD_LETTER" ||
-                    settled.status === "CANCELLED"
-                  ) {
-                    failedCount += 1;
-                  }
-                  const doneSoFar = completedCount + failedCount;
-                  const pct =
-                    jobsToPoll.length > 0
-                      ? Math.min(
-                          99,
-                          Math.round((doneSoFar / jobsToPoll.length) * 100),
-                        )
-                      : 100;
-                  onProgress?.({
-                    client_id: page.client_id,
-                    file_name: page.file_name,
-                    progress_percent: pct,
-                    status: "PROCESSING",
-                    created_pages_count: completedCount,
-                    failed_pages_count: failedCount,
-                  });
-                }
+                    onProgress: ({ completedCount, failedCount, totalCount }) => {
+                      const doneSoFar = completedCount + failedCount;
+                      const pct =
+                        totalCount > 0
+                          ? Math.min(
+                              99,
+                              Math.round((doneSoFar / totalCount) * 100),
+                            )
+                          : 100;
+                      onProgress?.({
+                        client_id: page.client_id,
+                        file_name: page.file_name,
+                        progress_percent: pct,
+                        status: "PROCESSING",
+                        created_pages_count: completedCount,
+                        failed_pages_count: failedCount,
+                      });
+                    },
+                  },
+                );
+                const completedCount = settledJobs.filter(
+                  (j) => j.status === "SUCCEEDED",
+                ).length;
+                const failedCount = settledJobs.filter(
+                  (j) => j.status === "DEAD_LETTER" || j.status === "CANCELLED",
+                ).length;
                 const pendingCount = Math.max(
                   0,
                   enqueued.queued_count - completedCount - failedCount,
@@ -487,7 +685,7 @@ export function createAdminPageService(options?: {
               });
               const finalJob = await pollAdminOcrJob(job, {
                 pollIntervalMs,
-                maxAttempts: Math.min(maxPollAttempts, 20),
+                maxAttempts: maxPollAttempts,
               });
               if (
                 finalJob.status === "DEAD_LETTER" ||

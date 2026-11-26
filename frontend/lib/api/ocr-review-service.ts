@@ -4,6 +4,7 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
+import { isServiceError } from "@/lib/api/service-error";
 
 export const aiCorrectResponseSchema = z.object({
   corrected_text: z.string(),
@@ -151,12 +152,33 @@ export type AdminAiWorkflowProgress = Pick<
   "status" | "progress"
 >;
 
-function waitForJobPoll(signal?: AbortSignal): Promise<void> {
+const MAX_AI_WORKFLOW_POLL_ATTEMPTS = 80;
+const MAX_AI_WORKFLOW_STALLED_QUEUED_POLLS = 20;
+const MAX_AI_WORKFLOW_TRANSIENT_ERRORS = 3;
+
+function isTransientWorkflowPollError(error: unknown): boolean {
+  if (isServiceError(error)) {
+    return (
+      error.retryable ||
+      error.status === 0 ||
+      error.status === 429 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504
+    );
+  }
+  return error instanceof TypeError;
+}
+
+function waitForJobPoll(
+  signal?: AbortSignal,
+  delayMs = 3_000,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const timeout = globalThis.setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
-    }, 3000);
+    }, delayMs);
     const onAbort = () => {
       globalThis.clearTimeout(timeout);
       signal?.removeEventListener("abort", onAbort);
@@ -164,6 +186,36 @@ function waitForJobPoll(signal?: AbortSignal): Promise<void> {
     };
     if (signal?.aborted) onAbort();
     else signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function waitForVisibleDocument(signal?: AbortSignal): Promise<void> {
+  if (
+    typeof document === "undefined" ||
+    document.visibilityState !== "hidden"
+  ) {
+    return Promise.resolve();
+  }
+  if (signal?.aborted) {
+    return Promise.reject(new AiCorrectionCancelledError());
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState !== "hidden") {
+        cleanup();
+        resolve();
+      }
+    };
+    const onAbort = () => {
+      cleanup();
+      reject(new AiCorrectionCancelledError());
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -430,6 +482,9 @@ export function createOcrReviewService(): OcrReviewService {
       let current = job;
       onProgress?.(current);
 
+      let pollAttempt = 0;
+      let queuedStreak = 0;
+      let transientErrors = 0;
       while (current.status === "QUEUED" || current.status === "RUNNING") {
         if (signal?.aborted) {
           await requestApi(
@@ -440,7 +495,27 @@ export function createOcrReviewService(): OcrReviewService {
           ).catch(() => undefined);
           throw new AiCorrectionCancelledError();
         }
-        await waitForJobPoll(signal).catch(async (error: unknown) => {
+        if (pollAttempt >= MAX_AI_WORKFLOW_POLL_ATTEMPTS) {
+          throw new Error(
+            "Tác vụ AI OCR vượt quá thời gian chờ phản hồi. Hãy thử lại sau ít giây.",
+          );
+        }
+        if (current.status === "QUEUED") {
+          queuedStreak += 1;
+          if (queuedStreak > MAX_AI_WORKFLOW_STALLED_QUEUED_POLLS) {
+            throw new Error(
+              "Tác vụ AI đang chờ worker xử lý quá lâu (worker có thể đang tắt hoặc bận). Bạn có thể bấm Thử lại.",
+            );
+          }
+        } else {
+          queuedStreak = 0;
+        }
+        const delayMs = Math.min(
+          8_000,
+          Math.round(3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4)))),
+        );
+        pollAttempt += 1;
+        await waitForJobPoll(signal, delayMs).catch(async (error: unknown) => {
           if (!(error instanceof AiCorrectionCancelledError)) throw error;
           await requestApi(
             `${basePath}/${current.job_id}`,
@@ -450,21 +525,33 @@ export function createOcrReviewService(): OcrReviewService {
           ).catch(() => undefined);
           throw error;
         });
-        current = await requestApi(
-          `${basePath}/${current.job_id}`,
-          aiCorrectionJobSchema,
-          signal,
-        ).catch(async (error: unknown) => {
-          if (!signal?.aborted) throw error;
-          await requestApi(
+        await waitForVisibleDocument(signal);
+        try {
+          current = await requestApi(
             `${basePath}/${current.job_id}`,
             aiCorrectionJobSchema,
-            undefined,
-            { method: "DELETE" },
-          ).catch(() => undefined);
-          throw new AiCorrectionCancelledError();
-        });
-        onProgress?.(current);
+            signal,
+          );
+          transientErrors = 0;
+          onProgress?.(current);
+        } catch (error: unknown) {
+          if (signal?.aborted) {
+            await requestApi(
+              `${basePath}/${current.job_id}`,
+              aiCorrectionJobSchema,
+              undefined,
+              { method: "DELETE" },
+            ).catch(() => undefined);
+            throw new AiCorrectionCancelledError();
+          }
+          transientErrors += 1;
+          if (
+            !isTransientWorkflowPollError(error) ||
+            transientErrors > MAX_AI_WORKFLOW_TRANSIENT_ERRORS
+          ) {
+            throw error;
+          }
+        }
       }
 
       if (current.status === "SUCCEEDED" && current.result !== null) {
@@ -508,18 +595,54 @@ export function createOcrReviewService(): OcrReviewService {
         },
       );
       onProgress?.({ status: current.status, progress: current.progress });
+      let pollAttempt = 0;
+      let queuedStreak = 0;
+      let transientErrors = 0;
       while (
         current.status !== "READY_FOR_ADMIN_REVIEW" &&
         current.status !== "FAILED"
       ) {
         if (signal?.aborted) throw new AiCorrectionCancelledError();
-        await waitForJobPoll(signal);
-        current = await requestApi(
-          workflowPath(pageId, current.workflow_id),
-          adminAiWorkflowSchema,
-          signal,
+        if (pollAttempt >= MAX_AI_WORKFLOW_POLL_ATTEMPTS) {
+          throw new Error(
+            "Workflow AI vượt quá thời gian chờ phản hồi. Bạn có thể bấm Thử lại hoặc làm mới trang.",
+          );
+        }
+        if (current.status === "QUEUED") {
+          queuedStreak += 1;
+          if (queuedStreak > MAX_AI_WORKFLOW_STALLED_QUEUED_POLLS) {
+            throw new Error(
+              "Workflow AI đang chờ worker xử lý quá lâu (worker có thể đang tắt hoặc bận). Bạn có thể bấm Thử lại.",
+            );
+          }
+        } else {
+          queuedStreak = 0;
+        }
+        const delayMs = Math.min(
+          8_000,
+          Math.round(3_000 * Math.pow(1.25, Math.min(5, Math.floor(pollAttempt / 4)))),
         );
-        onProgress?.({ status: current.status, progress: current.progress });
+        pollAttempt += 1;
+        await waitForJobPoll(signal, delayMs);
+        await waitForVisibleDocument(signal);
+        try {
+          current = await requestApi(
+            workflowPath(pageId, current.workflow_id),
+            adminAiWorkflowSchema,
+            signal,
+          );
+          transientErrors = 0;
+          onProgress?.({ status: current.status, progress: current.progress });
+        } catch (error) {
+          if (signal?.aborted) throw new AiCorrectionCancelledError();
+          transientErrors += 1;
+          if (
+            !isTransientWorkflowPollError(error) ||
+            transientErrors > MAX_AI_WORKFLOW_TRANSIENT_ERRORS
+          ) {
+            throw error;
+          }
+        }
       }
       return current;
     },
