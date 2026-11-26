@@ -256,8 +256,9 @@ class ParentEmailPostgresTests(unittest.IsolatedAsyncioTestCase):
             ):
                 await conn.execute(
                     text(
-                        "INSERT INTO pagerevisionwords (id, pagerevisionid, wordindex, lineindex, text) "
-                        "VALUES (:wid, :rid, :idx, 0, :txt)"
+                        "INSERT INTO pagerevisionwords "
+                        "(id, pagerevisionid, wordindex, lineindex, text, normalizedtext, boundingbox) "
+                        "VALUES (:wid, :rid, :idx, 0, :txt, :txt, '{}'::jsonb)"
                     ),
                     {"wid": wid, "rid": rev_id, "idx": idx, "txt": word_text},
                 )
