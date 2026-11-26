@@ -66,6 +66,12 @@ test("Admin uploads two real PNGs, keeps page images distinct and replaces only 
       });
     }
     if (
+      url.pathname === `/books/admin/catalog/${ids.book}/ocr-jobs` &&
+      route.request().method() === "GET"
+    ) {
+      return respond(route, []);
+    }
+    if (
       url.pathname === `/books/admin/catalog/${ids.book}/pages/jobs` ||
       url.pathname.endsWith("/reupload-ocr/jobs")
     ) {

@@ -945,6 +945,11 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       return respond(route, book);
     if (path === `/books/admin/catalog/${ids.book}/ocr-jobs`)
       return respond(route, []);
+    if (
+      path === "/reading/scan-page-ocr/jobs" &&
+      route.request().method() === "GET"
+    )
+      return respond(route, { worker_online: true, jobs: [] });
     if (path === `/books/admin/catalog/${ids.book}/pages`)
       return respond(
         route,

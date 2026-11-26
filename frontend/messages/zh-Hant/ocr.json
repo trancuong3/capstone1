@@ -70,7 +70,8 @@
     "checkQueueNow": "立即檢查",
     "scanAnotherPageQueued": "繼續掃描其他頁",
     "cancelQueuedTask": "取消任務",
-    "queuedListHeading": "OCR 佇列中儲存的其他書頁（共 {count} 頁）"
+    "queuedListHeading": "OCR 佇列中儲存的其他書頁（共 {count} 頁）",
+    "jobSubtitleQueuedOffline": "正在排隊等待 Windows OCR 伺服器重新啟動 — 即使重新整理或離開頁面，圖片也已安全保存。"
   },
   "camera": {
     "missingBookInfo": "ViRead 已識別頁面但缺少書籍資訊。請對齊後重新掃描。",

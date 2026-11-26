@@ -70,7 +70,8 @@
     "checkQueueNow": "בדיקה עכשיו",
     "scanAnotherPageQueued": "סריקת עמוד נוסף",
     "cancelQueuedTask": "ביטול משימה",
-    "queuedListHeading": "עמודים נוספים שנשמרו בתור ה-OCR ({count} עמודים)"
+    "queuedListHeading": "עמודים נוספים שנשמרו בתור ה-OCR ({count} עמודים)",
+    "jobSubtitleQueuedOffline": "ממתין בתור להפעלת שרת ה-OCR של Windows — תמונת העמוד שמורה בבטחה גם אם תרעננו את הדף."
   },
   "camera": {
     "missingBookInfo": "ViRead זיהה את הדף אך חסרה מידע על הספר. ההורים יישרו וינסו לסרוק שוב.",
