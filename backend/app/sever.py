@@ -87,7 +87,11 @@ def run_active_viread_model_worker(stop_event: threading.Event):
     return _run_worker(stop_event)
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
 from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
-from app.jobs.admin_ai_workflow_worker import run_worker as run_admin_ai_workflow_worker
+from app.jobs.admin_ai_workflow_worker import (
+    run_worker as run_admin_ai_workflow_worker,
+    shutdown_scheduled_admin_ai_workflows,
+)
+from app.services.remote_ocr_wakeup import shutdown_remote_ocr_wakeup_tasks
 from app.jobs.parent_book_submission_worker import run_worker as run_parent_book_submission_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
@@ -539,6 +543,8 @@ async def lifespan(_app: FastAPI):
             await asyncio.gather(
                 _shutdown_subprocess(local_trainer_process),
                 shutdown_post_ocr_tasks(),
+                shutdown_remote_ocr_wakeup_tasks(),
+                shutdown_scheduled_admin_ai_workflows(),
                 _shutdown_worker_task(
                     startup_db_probe_task,
                     asyncio.Event(),

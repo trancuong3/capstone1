@@ -553,9 +553,92 @@ def evict_cached_viread_checkpoint(checkpoint_sha256: str) -> bool:
     return evicted
 
 
+def _install_safe_vietocr_downloaders() -> None:
+    """Serve vendored VietOCR YAML configs first and enforce finite HTTP timeouts on fallbacks."""
+    try:
+        import vietocr.tool.config as vietocr_cfg_mod
+        import vietocr.tool.utils as vietocr_utils_mod
+    except Exception:
+        return
+    if getattr(vietocr_cfg_mod, "_viread_safe_download_installed", False):
+        return
+
+    vendored_dir = Path(__file__).resolve().parents[3] / "ocr_worker" / "configs"
+
+    def _safe_download_config(config_id: str) -> dict[str, Any]:
+        clean_name = os.path.basename(str(config_id or "").strip())
+        local_candidate = vendored_dir / clean_name
+        if clean_name and local_candidate.is_file():
+            loaded = yaml.safe_load(local_candidate.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        urls = (
+            f"https://vocr.vn/data/vietocr/config/{config_id}",
+            f"https://raw.githubusercontent.com/pbcquoc/vietocr/master/config/{config_id}",
+        )
+        last_exc: Exception | None = None
+        for url in urls:
+            try:
+                resp = requests.get(url, timeout=(5, 15))
+                resp.raise_for_status()
+                loaded = yaml.safe_load(resp.text)
+                if isinstance(loaded, dict):
+                    return loaded
+            except Exception as exc:
+                last_exc = exc
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Unable to load VietOCR config: {config_id}")
+
+    def _safe_download_weights(
+        uri: str, cached: str | None = None, md5: str | None = None, quiet: bool = False
+    ) -> str:
+        del cached, md5, quiet
+        if not str(uri).startswith(("http://", "https://")):
+            return uri
+        cache_root = (os.environ.get("VIREAD_OCR_MODEL_CACHE_DIR") or "").strip()
+        target_dir = cache_root if cache_root else tempfile.gettempdir()
+        os.makedirs(target_dir, exist_ok=True)
+        filename = str(uri).rstrip("/").split("/")[-1] or "vgg_transformer.pth"
+        full_path = os.path.join(target_dir, filename)
+        if os.path.isfile(full_path) and os.path.getsize(full_path) > 0:
+            return full_path
+        tmp_path = f"{full_path}.{os.getpid()}.downloading"
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                with requests.get(uri, stream=True, timeout=(10, 120)) as resp:
+                    resp.raise_for_status()
+                    with open(tmp_path, "wb") as out:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                out.write(chunk)
+                os.replace(tmp_path, full_path)
+                return full_path
+            except Exception as exc:
+                last_exc = exc
+                if os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                if attempt < 2:
+                    import time as _time
+                    _time.sleep(1.5 * (attempt + 1))
+        assert last_exc is not None
+        raise last_exc
+
+    vietocr_utils_mod.download_config = _safe_download_config
+    vietocr_cfg_mod.download_config = _safe_download_config
+    vietocr_utils_mod.download_weights = _safe_download_weights
+    vietocr_cfg_mod._viread_safe_download_installed = True
+
+
 def _find_cached_vietocr_weights() -> str | None:
     temp_dir = os.environ.get("TEMP", os.environ.get("TMP", tempfile.gettempdir()))
+    explicit_cache_dir = (os.environ.get("VIREAD_OCR_MODEL_CACHE_DIR") or "").strip()
     candidates = [
+        os.path.join(explicit_cache_dir, "vgg_transformer.pth") if explicit_cache_dir else "",
         os.path.join(temp_dir, "vgg_transformer.pth"),
         os.path.expanduser(r"~\AppData\Local\Temp\vgg_transformer.pth"),
         os.path.expanduser("~/.cache/vietocr/vgg_transformer.pth"),
@@ -619,6 +702,7 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
             try:
                 from vietocr.tool.config import Cfg as vietocr_config
                 from vietocr.tool.predictor import Predictor as vietocr_predictor
+                _install_safe_vietocr_downloaders()
                 Cfg, Predictor = vietocr_config, vietocr_predictor
                 _vietocr_import_status = "success"
                 _vietocr_import_error = None

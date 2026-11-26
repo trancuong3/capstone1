@@ -73,6 +73,10 @@ services:
         sync: false
       - key: VIREAD_OCR_WORKER_TOKEN
         sync: false
+      - key: VIREAD_OCR_REMOTE_WORKER_URL
+        sync: false
+      - key: VIREAD_HF_SPACE_TOKEN
+        sync: false
       - key: VIREAD_VOICE_WORKER_TOKEN
         sync: false
       - key: VIREAD_CRON_DISPATCH_TOKEN

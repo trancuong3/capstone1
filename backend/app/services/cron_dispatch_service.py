@@ -28,6 +28,7 @@ from app.services.ocr_inference_job_service import (
     OcrInferenceJobService,
     reconcile_orphaned_parent_submissions,
 )
+from app.services.remote_ocr_wakeup import maybe_keep_warm_hf_space_from_cron
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +262,7 @@ async def run_scheduled_cron_dispatch(
     book_quality_scans_swept = 0
     ocr_outbox_swept = 0
     local_scan_objects_cleaned = 0
+    hf_space_keepwarm_pinged = False
     sweep_errors: list[str] = []
 
     if run_remote_sweeps:
@@ -405,6 +407,23 @@ async def run_scheduled_cron_dispatch(
                     type(exc).__name__,
                 )
 
+        # 9. Passive 12-hour Hugging Face Space keep-warm (prevents 48h sleep without waking DB loop)
+        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if budget > 0.25:
+            try:
+                hf_space_keepwarm_pinged = bool(
+                    await asyncio.wait_for(
+                        maybe_keep_warm_hf_space_from_cron(),
+                        timeout=budget,
+                    )
+                )
+            except Exception as exc:
+                sweep_errors.append("hf_space_keepwarm")
+                logger.warning(
+                    "cron_hf_keepwarm_skipped error=%s",
+                    type(exc).__name__,
+                )
+
     return {
         "ok": True,
         "dispatched_at": current.isoformat(),
@@ -421,5 +440,6 @@ async def run_scheduled_cron_dispatch(
         "book_quality_scans_swept": book_quality_scans_swept,
         "ocr_outbox_swept": ocr_outbox_swept,
         "local_scan_objects_cleaned": local_scan_objects_cleaned,
+        "hf_space_keepwarm_pinged": hf_space_keepwarm_pinged,
         "sweep_errors": sweep_errors,
     }

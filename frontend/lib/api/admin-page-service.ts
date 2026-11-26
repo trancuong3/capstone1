@@ -68,7 +68,7 @@ export async function getAdminOcrJob(
     `/books/admin/ocr-jobs/${encodeURIComponent(jobId)}`,
     adminOcrJobSchema,
     signal,
-    { method: "GET" },
+    { method: "GET", bypassCache: true },
   );
 }
 
@@ -80,7 +80,7 @@ export async function listAdminBookOcrJobs(
     `/books/admin/catalog/${encodeURIComponent(bookId)}/ocr-jobs`,
     z.array(adminOcrJobSchema),
     signal,
-    { method: "GET" },
+    { method: "GET", bypassCache: true },
   );
 }
 
@@ -169,7 +169,7 @@ export async function pollAdminOcrJob(
     baseIntervalMs,
     Math.min(8_000, baseIntervalMs * 5),
   );
-  const maxAttempts = options.maxAttempts ?? 60;
+  const maxAttempts = options.maxAttempts ?? 100;
   let current = initialJob;
   let consecutiveErrors = 0;
   options.onTick?.(current);
@@ -470,7 +470,7 @@ export function createAdminPageService(options?: {
   readonly maxPollAttempts?: number;
 }): AdminPageService {
   const pollIntervalMs = options?.pollIntervalMs ?? 1_500;
-  const maxPollAttempts = options?.maxPollAttempts ?? 60;
+  const maxPollAttempts = options?.maxPollAttempts ?? 100;
   const uploadIds = new WeakMap<File, string>();
   function uploadIdFor(file: File): string {
     let id = uploadIds.get(file);

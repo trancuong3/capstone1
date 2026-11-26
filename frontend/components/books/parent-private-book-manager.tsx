@@ -134,6 +134,10 @@ function describeToolCheckScope(scope: ToolCheckScopeDTO): string {
   }
   if (scope.local_ai_enforced) {
     parts.push("chạy mô hình cục bộ (Ollama local)");
+  } else {
+    parts.push(
+      "soát chính tả & kiểm tra an toàn qua dịch vụ AI đám mây bảo mật",
+    );
   }
   if (!scope.image_visual_safety_checked) {
     parts.push("chưa tự động phân tích hình ảnh minh họa");
@@ -441,7 +445,6 @@ function ParentPrivateBookManagerContent({
         timerId = null;
       }
     };
-
     const maybePollWorkerHealth = async (force = false) => {
       const now = Date.now();
       if (
@@ -1375,6 +1378,12 @@ function ParentPrivateBookManagerContent({
             Hỗ trợ JPEG, PNG, WebP, BMP, TIFF, PDF, DOCX · tối đa{" "}
             <strong>30 trang mỗi tệp</strong> (≤ 50 MB). Mỗi trang tự động chạy:{" "}
             <strong>OCR → Rà chính tả → Tool Check an toàn</strong>.
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Minh bạch quyền riêng tư: Sách riêng chỉ hiển thị trong tài khoản
+            gia đình; văn bản trang sách tải lên được rà soát chính tả và an
+            toàn trẻ em tự động (mô hình cục bộ hoặc dịch vụ AI đám mây bảo mật
+            tùy cấu hình máy chủ) và mặc định không dùng để huấn luyện OCR.
           </p>
         </div>
 

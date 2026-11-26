@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import gc
 import hashlib
+import hmac
 import importlib.util
 import io
 import logging
@@ -23,8 +24,10 @@ from types import ModuleType
 from typing import Any, Callable
 from uuid import uuid4
 
-from fastapi import FastAPI
+import yaml
+from fastapi import Body, FastAPI, Header, HTTPException, status
 from PIL import Image, ImageDraw, ImageFont
+from pydantic import BaseModel, Field
 
 from ocr_worker import __version__
 
@@ -124,6 +127,98 @@ def ensure_backend_on_sys_path() -> Path:
     return backend_dir
 
 
+def resolve_model_cache_dir() -> Path:
+    """Resolve writable directory for verified VietOCR checkpoints and configs."""
+    explicit = (os.getenv("VIREAD_OCR_MODEL_CACHE_DIR") or "").strip()
+    if explicit:
+        candidate = Path(explicit)
+        try:
+            candidate.mkdir(parents=True, exist_ok=True)
+            return candidate
+        except OSError as exc:
+            logger.warning(
+                "Could not initialize VIREAD_OCR_MODEL_CACHE_DIR (%s); falling back to tempdir.",
+                type(exc).__name__,
+            )
+    return Path(tempfile.gettempdir())
+
+
+def install_vietocr_safe_config_loader() -> None:
+    """Ensure VietOCR loads vendored YAML configs first and never hangs on vocr.vn."""
+    try:
+        import requests
+        import vietocr.tool.config as vietocr_cfg_mod
+        import vietocr.tool.utils as vietocr_utils_mod
+    except Exception:
+        return
+    if getattr(vietocr_cfg_mod, "_viread_worker_safe_cfg_installed", False):
+        return
+
+    vendored_dir = Path(__file__).resolve().parent / "configs"
+
+    def _safe_download_config(config_id: str) -> dict[str, Any]:
+        clean_name = os.path.basename(str(config_id or "").strip())
+        local_candidate = vendored_dir / clean_name
+        if clean_name and local_candidate.is_file():
+            loaded = yaml.safe_load(local_candidate.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        urls = (
+            f"https://vocr.vn/data/vietocr/config/{config_id}",
+            f"https://raw.githubusercontent.com/pbcquoc/vietocr/master/config/{config_id}",
+        )
+        last_exc: Exception | None = None
+        for url in urls:
+            try:
+                resp = requests.get(url, timeout=(5, 15))
+                resp.raise_for_status()
+                loaded = yaml.safe_load(resp.text)
+                if isinstance(loaded, dict):
+                    return loaded
+            except Exception as exc:
+                last_exc = exc
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Unable to load VietOCR config: {config_id}")
+
+    def _safe_download_weights(
+        uri: str, cached: str | None = None, md5: str | None = None, quiet: bool = False
+    ) -> str:
+        del cached, md5, quiet
+        if not str(uri).startswith(("http://", "https://")):
+            return uri
+        cache_dir = resolve_model_cache_dir()
+        filename = str(uri).rstrip("/").split("/")[-1] or "vgg_transformer.pth"
+        full_path = cache_dir / filename
+        if full_path.is_file() and full_path.stat().st_size > 0:
+            return str(full_path)
+        tmp_path = cache_dir / f"{filename}.{uuid4().hex[:8]}.downloading"
+        last_exc: Exception | None = None
+        for attempt in range(3):
+            try:
+                with requests.get(uri, stream=True, timeout=(10, 120)) as resp:
+                    resp.raise_for_status()
+                    with tmp_path.open("wb") as out:
+                        for chunk in resp.iter_content(chunk_size=65536):
+                            if chunk:
+                                out.write(chunk)
+                os.replace(tmp_path, full_path)
+                return str(full_path)
+            except Exception as exc:
+                last_exc = exc
+                if tmp_path.exists():
+                    tmp_path.unlink(missing_ok=True)
+                if attempt < 2:
+                    time.sleep(1.5 * (attempt + 1))
+        assert last_exc is not None
+        raise last_exc
+
+    vietocr_utils_mod.download_config = _safe_download_config
+    vietocr_cfg_mod.download_config = _safe_download_config
+    vietocr_utils_mod.download_weights = _safe_download_weights
+    vietocr_cfg_mod._viread_worker_safe_cfg_installed = True
+
+
 def install_zero_db_config_shim() -> None:
     """Prevent ocr_engine from loading DB/Supabase secrets in the standalone worker."""
     ensure_backend_on_sys_path()
@@ -135,7 +230,35 @@ def install_zero_db_config_shim() -> None:
     ):
         os.environ.pop(scrub_key, None)
 
-    if "app.database.config" in sys.modules:
+    def _is_supabase_jwt_key(api_key: str | None) -> bool:
+        clean = (api_key or "").strip()
+        return clean.count(".") == 2 and not clean.startswith("sb_")
+
+    def _make_admin_headers(cfg_mod: Any):
+        def _supabase_admin_headers(
+            api_key: str | None = None,
+            *,
+            extra: dict[str, str] | None = None,
+        ) -> dict[str, str]:
+            key = (
+                (api_key if api_key is not None else getattr(cfg_mod, "SUPABASE_ADMIN_KEY", None))
+                or ""
+            ).strip()
+            headers: dict[str, str] = {"apikey": key}
+            if _is_supabase_jwt_key(key):
+                headers["Authorization"] = f"Bearer {key}"
+            if extra:
+                headers.update(extra)
+            return headers
+
+        return _supabase_admin_headers
+
+    existing_cfg = sys.modules.get("app.database.config")
+    if existing_cfg is not None:
+        if not hasattr(existing_cfg, "is_supabase_jwt_key"):
+            existing_cfg.is_supabase_jwt_key = _is_supabase_jwt_key  # type: ignore[attr-defined]
+        if not hasattr(existing_cfg, "supabase_admin_headers"):
+            existing_cfg.supabase_admin_headers = _make_admin_headers(existing_cfg)  # type: ignore[attr-defined]
         return
 
     if "app" not in sys.modules:
@@ -158,26 +281,8 @@ def install_zero_db_config_shim() -> None:
     cfg.SUPABASE_AVATAR_BUCKET = None
     cfg.SUPABASE_PRIVATE_BOOKS_BUCKET = None
     cfg.DATABASE_URL = None
-
-    def _is_supabase_jwt_key(api_key: str | None) -> bool:
-        clean = (api_key or "").strip()
-        return clean.count(".") == 2 and not clean.startswith("sb_")
-
-    def _supabase_admin_headers(
-        api_key: str | None = None,
-        *,
-        extra: dict[str, str] | None = None,
-    ) -> dict[str, str]:
-        key = ((api_key if api_key is not None else cfg.SUPABASE_ADMIN_KEY) or "").strip()
-        headers: dict[str, str] = {"apikey": key}
-        if _is_supabase_jwt_key(key):
-            headers["Authorization"] = f"Bearer {key}"
-        if extra:
-            headers.update(extra)
-        return headers
-
     cfg.is_supabase_jwt_key = _is_supabase_jwt_key
-    cfg.supabase_admin_headers = _supabase_admin_headers
+    cfg.supabase_admin_headers = _make_admin_headers(cfg)
     sys.modules["app.database.config"] = cfg
 
 
@@ -363,6 +468,11 @@ class OcrRuntimeManager:
     def __post_init__(self) -> None:
         self._inference_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._wake_event = threading.Event()
+        self._burst_until_monotonic: float = 0.0
+        self._standby_mode: str = "active_polling"
+        self._wakeup_count: int = 0
+        self._last_wakeup_reason: str | None = None
         self._active_job_id: str | None = None
         self._active_job_count: int = 0
         self._last_error: str | None = None
@@ -377,6 +487,67 @@ class OcrRuntimeManager:
         }
         self._ocr_engine_mod: Any | None = None
         self.probe_installed()
+
+    @property
+    def wake_event(self) -> threading.Event:
+        return self._wake_event
+
+    def set_standby_mode(self, mode: str) -> None:
+        with self._state_lock:
+            self._standby_mode = mode
+
+    def burst_until_monotonic(self) -> float:
+        with self._state_lock:
+            return self._burst_until_monotonic
+
+    def extend_burst_window(self, burst_seconds: float) -> float:
+        bounded = max(5.0, min(600.0, float(burst_seconds)))
+        target = time.monotonic() + bounded
+        with self._state_lock:
+            if target > self._burst_until_monotonic:
+                self._burst_until_monotonic = target
+            if self._standby_mode == "quiet_standby":
+                self._standby_mode = "burst_awake"
+            return self._burst_until_monotonic
+
+    def trigger_wakeup(
+        self,
+        *,
+        burst_seconds: float | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        default_burst = 90.0
+        try:
+            default_burst = max(
+                10.0, min(600.0, float(os.getenv("VIREAD_OCR_WAKE_BURST_SECONDS", "90")))
+            )
+        except ValueError:
+            default_burst = 90.0
+        effective_burst = (
+            max(10.0, min(600.0, float(burst_seconds)))
+            if burst_seconds is not None
+            else default_burst
+        )
+        now = time.monotonic()
+        with self._state_lock:
+            self._burst_until_monotonic = max(
+                self._burst_until_monotonic, now + effective_burst
+            )
+            self._standby_mode = "burst_awake"
+            self._wakeup_count += 1
+            if reason:
+                self._last_wakeup_reason = str(reason)[:64]
+            wake_count = self._wakeup_count
+            mode = self._standby_mode
+        self._wake_event.set()
+        return {
+            "ok": True,
+            "woken": True,
+            "worker_id": self.worker_id,
+            "standby_mode": mode,
+            "burst_seconds": effective_burst,
+            "wakeup_count": wake_count,
+        }
 
     def probe_installed(self) -> dict[str, dict[str, Any]]:
         paddle_ok = (
@@ -429,8 +600,9 @@ class OcrRuntimeManager:
         self,
         manifest_fetcher: Callable[[], dict[str, Any]] | None = None,
         artifact_fetcher: Callable[[str, int | None], bytes] | None = None,
+        direct_url_fetcher: Callable[[str], bytes | None] | None = None,
     ) -> dict[str, Any]:
-        """Fetch active VietOCR checkpoint via backend HTTP endpoints (zero DB/Supabase keys)."""
+        """Fetch active VietOCR checkpoint via signed Storage URLs or backend HTTP endpoints (zero DB/Supabase keys)."""
         install_zero_db_config_shim()
         manifest: dict[str, Any] = {}
         if manifest_fetcher is not None:
@@ -448,23 +620,45 @@ class OcrRuntimeManager:
         ).lower()
         storage_path = manifest.get("storage_path")
 
-        # Fallback: if backend active pointer isn't updated yet or offline mode configured with
-        # local verified Flow1 TRDG cache matching EXPECTED_FLOW1_TRDG_SHA256, allow env override only.
-        temp_dir = Path(tempfile.gettempdir())
-        local_pth = temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
-        local_yml = temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
+        cache_dir = resolve_model_cache_dir()
+        fallback_temp_dir = Path(tempfile.gettempdir())
+        local_pth = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
+        local_yml = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
+        if not local_pth.is_file() and fallback_temp_dir != cache_dir:
+            alt_pth = fallback_temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
+            if alt_pth.is_file() and _sha256_file(alt_pth) == checkpoint_sha:
+                local_pth = alt_pth
+                alt_yml = fallback_temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
+                if alt_yml.is_file():
+                    local_yml = alt_yml
 
         if checkpoint_sha != ORIGINAL_VIETOCR_SHA256 and len(checkpoint_sha) == 64:
             pth_valid = local_pth.is_file() and _sha256_file(local_pth) == checkpoint_sha
-            if not pth_valid and artifact_fetcher is not None:
+            if not pth_valid and (artifact_fetcher is not None or direct_url_fetcher is not None):
                 shards = manifest.get("shards") or []
                 if shards:
-                    tmp_pth = temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.{uuid4().hex[:8]}.tmp"
+                    local_pth = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
+                    tmp_pth = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.{uuid4().hex[:8]}.tmp"
                     try:
                         with tmp_pth.open("wb") as out:
                             for idx in range(len(shards)):
-                                chunk = artifact_fetcher("shard", idx)
-                                expected_chunk_sha = str((shards[idx] or {}).get("sha256") or "").lower()
+                                shard_meta = shards[idx] if isinstance(shards[idx], dict) else {}
+                                chunk: bytes | None = None
+                                signed_url = shard_meta.get("signed_url")
+                                if (
+                                    direct_url_fetcher is not None
+                                    and isinstance(signed_url, str)
+                                    and signed_url.startswith(("https://", "http://"))
+                                ):
+                                    try:
+                                        chunk = direct_url_fetcher(signed_url)
+                                    except Exception:
+                                        chunk = None
+                                if chunk is None:
+                                    if artifact_fetcher is None:
+                                        raise ValueError(f"Shard {idx} unavailable from direct URL or backend")
+                                    chunk = artifact_fetcher("shard", idx)
+                                expected_chunk_sha = str(shard_meta.get("sha256") or "").lower()
                                 if expected_chunk_sha and hashlib.sha256(chunk).hexdigest() != expected_chunk_sha:
                                     raise ValueError(f"Shard {idx} checksum mismatch")
                                 out.write(chunk)
@@ -474,14 +668,31 @@ class OcrRuntimeManager:
                     finally:
                         if tmp_pth.exists():
                             tmp_pth.unlink(missing_ok=True)
-            if manifest.get("has_custom_config") and artifact_fetcher is not None:
+            if manifest.get("has_custom_config") and (
+                artifact_fetcher is not None or direct_url_fetcher is not None
+            ):
                 cfg_sha = str(manifest.get("config_sha256") or "").lower()
                 yml_valid = local_yml.is_file() and (not cfg_sha or _sha256_file(local_yml) == cfg_sha)
                 if not yml_valid:
-                    cfg_bytes = artifact_fetcher("config", None)
+                    local_yml = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
+                    cfg_bytes: bytes | None = None
+                    cfg_signed_url = manifest.get("config_signed_url")
+                    if (
+                        direct_url_fetcher is not None
+                        and isinstance(cfg_signed_url, str)
+                        and cfg_signed_url.startswith(("https://", "http://"))
+                    ):
+                        try:
+                            cfg_bytes = direct_url_fetcher(cfg_signed_url)
+                        except Exception:
+                            cfg_bytes = None
+                    if cfg_bytes is None:
+                        if artifact_fetcher is None:
+                            raise ValueError("VietOCR config YAML unavailable")
+                        cfg_bytes = artifact_fetcher("config", None)
                     if cfg_sha and hashlib.sha256(cfg_bytes).hexdigest() != cfg_sha:
                         raise ValueError("VietOCR config YAML SHA-256 mismatch")
-                    tmp_yml = temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.{uuid4().hex[:8]}.yml.tmp"
+                    tmp_yml = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.{uuid4().hex[:8]}.yml.tmp"
                     try:
                         tmp_yml.write_bytes(cfg_bytes)
                         os.replace(tmp_yml, local_yml)
@@ -500,27 +711,30 @@ class OcrRuntimeManager:
         }
 
     def _install_local_artifact_resolver(self, ocr_engine: Any) -> None:
-        """Resolve synced %TEMP% checkpoints directly without importing Supabase storage keys."""
+        """Resolve synced cache checkpoints directly without importing Supabase storage keys."""
         if getattr(ocr_engine, "_viread_worker_patched_resolver", False):
             return
         original_resolver = ocr_engine._v2_artifact_from_storage
-        import yaml
 
         def _worker_v2_artifact_resolver(active: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
             expected_sha = str(active.get("checkpoint_sha256", "")).lower()
-            temp_dir = Path(tempfile.gettempdir())
-            local_pth = temp_dir / f"viread-vietocr-v2-{expected_sha}.pth"
-            local_yml = temp_dir / f"viread-vietocr-v2-{expected_sha}.yml"
-            if len(expected_sha) == 64 and local_pth.is_file() and _sha256_file(local_pth) == expected_sha:
-                cfg_dict: dict[str, Any] | None = None
-                cfg_sha: str | None = None
-                if local_yml.is_file():
-                    yml_bytes = local_yml.read_bytes()
-                    cfg_sha = hashlib.sha256(yml_bytes).hexdigest()
-                    loaded_cfg = yaml.safe_load(yml_bytes.decode("utf-8"))
-                    if isinstance(loaded_cfg, dict):
-                        cfg_dict = loaded_cfg
-                return str(local_pth), cfg_dict, cfg_sha
+            search_dirs = [resolve_model_cache_dir()]
+            sys_temp = Path(tempfile.gettempdir())
+            if sys_temp not in search_dirs:
+                search_dirs.append(sys_temp)
+            for candidate_dir in search_dirs:
+                local_pth = candidate_dir / f"viread-vietocr-v2-{expected_sha}.pth"
+                local_yml = candidate_dir / f"viread-vietocr-v2-{expected_sha}.yml"
+                if len(expected_sha) == 64 and local_pth.is_file() and _sha256_file(local_pth) == expected_sha:
+                    cfg_dict: dict[str, Any] | None = None
+                    cfg_sha: str | None = None
+                    if local_yml.is_file():
+                        yml_bytes = local_yml.read_bytes()
+                        cfg_sha = hashlib.sha256(yml_bytes).hexdigest()
+                        loaded_cfg = yaml.safe_load(yml_bytes.decode("utf-8"))
+                        if isinstance(loaded_cfg, dict):
+                            cfg_dict = loaded_cfg
+                    return str(local_pth), cfg_dict, cfg_sha
             return original_resolver(active)
 
         ocr_engine._v2_artifact_from_storage = _worker_v2_artifact_resolver
@@ -531,6 +745,7 @@ class OcrRuntimeManager:
         *,
         manifest_fetcher: Callable[[], dict[str, Any]] | None = None,
         artifact_fetcher: Callable[[str, int | None], bytes] | None = None,
+        direct_url_fetcher: Callable[[str], bytes | None] | None = None,
         run_smoke_inference: bool = True,
     ) -> dict[str, Any]:
         """Load torch -> paddle -> ocr_engine, sync checkpoint, and verify real inference."""
@@ -540,9 +755,11 @@ class OcrRuntimeManager:
             sync_info = self.sync_active_model(
                 manifest_fetcher=manifest_fetcher,
                 artifact_fetcher=artifact_fetcher,
+                direct_url_fetcher=direct_url_fetcher,
             )
             install_zero_db_config_shim()
             torch_mod, paddle_mod = import_ml_modules_safe_order()
+            install_vietocr_safe_config_loader()
             self._torch_version = getattr(torch_mod, "__version__", None)
             self._paddle_version = getattr(paddle_mod, "__version__", None)
 
@@ -607,6 +824,7 @@ class OcrRuntimeManager:
         *,
         manifest_fetcher: Callable[[], dict[str, Any]],
         artifact_fetcher: Callable[[str, int | None], bytes],
+        direct_url_fetcher: Callable[[str], bytes | None] | None = None,
     ) -> bool:
         """Check backend active VietOCR pointer and hot-reload when Admin promotes/rolls back."""
         manifest = manifest_fetcher() or {}
@@ -632,6 +850,7 @@ class OcrRuntimeManager:
             sync_info = self.sync_active_model(
                 manifest_fetcher=lambda: manifest,
                 artifact_fetcher=artifact_fetcher,
+                direct_url_fetcher=direct_url_fetcher,
             )
             if self._ocr_engine_mod is None:
                 return True
@@ -812,11 +1031,15 @@ class OcrRuntimeManager:
             profile = self._model_profile
             sha = self._model_sha256
             last_error = self._last_error
+            standby_mode = self._standby_mode
+            wakeup_count = self._wakeup_count
         sys_stats = get_system_memory_stats()
         worker_status = "BUSY" if active_count > 0 else ("IDLE" if ready else "DEGRADED")
         return {
             "status": "ok" if ready else "degraded",
             "worker_status": worker_status,
+            "standby_mode": standby_mode,
+            "wakeup_count": wakeup_count,
             "worker_id": self.worker_id,
             "ready": ready,
             "active_job_count": active_count,
@@ -868,15 +1091,69 @@ class OcrRuntimeManager:
         }
 
 
-def build_worker_http_app(runtime: OcrRuntimeManager) -> FastAPI:
+class WorkerWakeupRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=64)
+    job_id: str | None = Field(default=None, max_length=64)
+    burst_seconds: float | None = Field(default=None, ge=10.0, le=600.0)
+
+
+def _verify_worker_token_constant_time(
+    provided_header: str | None, *, explicit_expected: str | None = None
+) -> None:
+    expected = (
+        explicit_expected
+        if explicit_expected is not None
+        else (os.getenv("VIREAD_OCR_WORKER_TOKEN") or "")
+    ).strip()
+    if len(expected) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OCR worker token is not configured.",
+        )
+    provided = (provided_header or "").strip()
+    if not provided:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-ViRead-Ocr-Worker-Token header.",
+        )
+    expected_digest = hashlib.sha256(expected.encode("utf-8")).digest()
+    provided_digest = hashlib.sha256(provided.encode("utf-8")).digest()
+    if not hmac.compare_digest(expected_digest, provided_digest):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid OCR worker token.",
+        )
+
+
+def build_worker_http_app(
+    runtime: OcrRuntimeManager,
+    *,
+    worker_token: str | None = None,
+) -> FastAPI:
     app = FastAPI(title="ViRead Local OCR Worker", version=runtime.app_version)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
+        # Passive readiness probe: resets HF Spaces 48h timer without waking DB poll loop.
         return runtime.health_payload()
 
     @app.get("/version")
     def version() -> dict[str, Any]:
         return runtime.version_payload()
+
+    @app.post("/wakeup")
+    def wakeup(
+        payload: WorkerWakeupRequest | None = Body(default=None),
+        x_viread_ocr_worker_token: str | None = Header(
+            default=None, alias="X-ViRead-Ocr-Worker-Token"
+        ),
+    ) -> dict[str, Any]:
+        _verify_worker_token_constant_time(
+            x_viread_ocr_worker_token, explicit_expected=worker_token
+        )
+        return runtime.trigger_wakeup(
+            burst_seconds=payload.burst_seconds if payload else None,
+            reason=payload.reason if payload else "webhook",
+        )
 
     return app

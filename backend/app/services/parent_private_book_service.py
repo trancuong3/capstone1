@@ -5,6 +5,7 @@ import asyncio
 import gc
 import hashlib
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -472,6 +473,19 @@ class ParentPrivateBookService:
                 "Chỉ bạn và các hồ sơ trẻ của bạn có thể đọc sách này sau khi trang được kiểm tra. "
                 "Sách này hiện không được dùng để huấn luyện OCR."
             )
+        try:
+            from app.services.ocr_ai.config import OcrCorrectionConfig
+
+            if (
+                OcrCorrectionConfig.private_book_allow_cloud_ai()
+                and (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower()
+                in {"1", "true", "yes", "on"}
+            ):
+                privacy_notice = (
+                    f"{privacy_notice} Văn bản trang sách tải lên được soát lỗi chính tả và kiểm tra an toàn trẻ em qua dịch vụ AI đám mây bảo mật."
+                )
+        except Exception:
+            pass
         return ParentPrivateBookSummaryRead(
             id=book.Id,
             title=book.Title,
