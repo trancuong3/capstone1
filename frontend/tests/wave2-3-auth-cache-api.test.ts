@@ -172,7 +172,7 @@ describe("Wave 2-3 frontend core auth, cache, API, Next, and nav fixes", () => {
       );
       expect(adminOnAdminResp.status).toBe(307);
       expect(adminOnAdminResp.headers.get("location")).toBe(
-        "https://app.example.test/admin/books",
+        "https://app.example.test/admin/parents",
       );
     });
   });

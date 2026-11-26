@@ -39,11 +39,9 @@ export async function proxy(request: NextRequest) {
   if (fixtureRole) {
     const destination =
       getProtectedRouteRedirect(pathname, fixtureRole) ??
-      (pathname === "/"
-        ? getRoleHome(fixtureRole)
-        : pathname === "/admin" && fixtureRole === "admin"
-          ? getRoleHome("admin")
-          : null);
+      (pathname === "/admin" && fixtureRole === "admin"
+        ? "/admin/parents"
+        : null);
     return destination
       ? NextResponse.redirect(
           new URL(
@@ -69,7 +67,7 @@ export async function proxy(request: NextRequest) {
   if (pathname === "/admin" && auth.userId) {
     return redirectWithAuthState(
       request,
-      auth.role ? getRoleHome(auth.role) : getRoleHome("admin"),
+      auth.role === "parent" ? getRoleHome("parent") : "/admin/parents",
       auth.response,
     );
   }

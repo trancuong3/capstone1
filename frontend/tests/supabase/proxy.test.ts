@@ -129,7 +129,7 @@ describe("Supabase proxy auth refresh", () => {
     );
   });
 
-  it("redirects authenticated /admin requests immediately to /admin/books", async () => {
+  it("redirects authenticated /admin requests immediately to /admin/parents", async () => {
     getClaimsMock.mockResolvedValue({
       data: { claims: { sub: "admin-user-1" } },
       error: null,
@@ -140,7 +140,7 @@ describe("Supabase proxy auth refresh", () => {
     );
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe(
-      "https://app.example.com/admin/books",
+      "https://app.example.com/admin/parents",
     );
   });
 });
