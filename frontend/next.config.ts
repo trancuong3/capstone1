@@ -113,6 +113,14 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  ...(process.env.PLAYWRIGHT_AUTH_FIXTURES === "1"
+    ? {
+        onDemandEntries: {
+          maxInactiveAge: 60 * 60 * 1000,
+          pagesBufferLength: 100,
+        },
+      }
+    : {}),
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [
