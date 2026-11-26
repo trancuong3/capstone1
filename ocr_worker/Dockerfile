@@ -13,6 +13,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VIREAD_OCR_CPU_THREADS=2 \
     HOME=${APP_HOME} \
     PADDLEOCR_HOME=${APP_HOME}/.paddleocr \
+    XDG_CACHE_HOME=/tmp/.cache \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    TORCH_HOME=/tmp/torch \
     VIREAD_OCR_MODEL_CACHE_DIR=/tmp/viread-models \
     PORT=${APP_PORT} \
     PYTHONPATH=/app:/app/backend
@@ -61,8 +64,8 @@ COPY backend/app/services/viread_vietocr_v2_preprocessing.py /app/backend/app/se
 
 RUN groupadd --gid ${APP_GID} appuser \
     && useradd --uid ${APP_UID} --gid appuser --create-home --home-dir ${APP_HOME} --shell /usr/sbin/nologin appuser \
-    && mkdir -p ${APP_HOME}/.paddleocr /tmp/viread-models \
-    && chown -R appuser:appuser /app ${APP_HOME} /tmp/viread-models
+    && mkdir -p ${APP_HOME}/.paddleocr /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models \
+    && chown -R appuser:appuser /app ${APP_HOME} /tmp/.cache /tmp/matplotlib /tmp/torch /tmp/viread-models
 
 USER appuser
 

@@ -126,6 +126,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   ...(isPlaywrightDev
     ? {
+        onDemandEntries: {
+          maxInactiveAge: 60 * 60 * 1000,
+          pagesBufferLength: 100,
+        },
         experimental: {
           devMemoryThresholdRestart: false,
           serverComponentsHmrCache: false,

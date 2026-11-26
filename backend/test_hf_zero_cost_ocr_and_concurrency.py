@@ -1222,6 +1222,253 @@ class TestHfZeroCostOcrAndConcurrency(unittest.TestCase):
 
         asyncio.run(_scenario())
 
+    def test_scale_to_zero_passive_health_emits_zero_http_and_keeps_worker_online(self) -> None:
+        from app.services.global_tasks_service import GlobalTasksService
+        from app.services.ocr_inference_job_service import remote_sync_wait_timeout_seconds
+        from app.services.remote_ocr_wakeup import (
+            is_remote_ocr_scale_to_zero_enabled,
+            peek_cached_remote_ocr_worker_health,
+            peek_remote_ocr_probe_degraded,
+        )
+
+        aca_url = "https://viread-ocr-worker.eastasia.azurecontainerapps.io"
+        http_calls: list[str] = []
+
+        async def forbidden_transport(request: httpx.Request) -> httpx.Response:
+            http_calls.append(str(request.url))
+            return httpx.Response(200, json={"ready": True})
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(forbidden_transport))
+
+        # Fail-closed when VIREAD_OCR_WORKER_TOKEN is missing/short (<32 chars).
+        with patch.dict(
+            os.environ,
+            {
+                "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "true",
+                "VIREAD_OCR_WORKER_TOKEN": "too-short",
+            },
+            clear=False,
+        ):
+            self.assertFalse(is_remote_ocr_scale_to_zero_enabled())
+
+        async def _scenario() -> None:
+            state = InMemoryDbState()
+            actor_id = uuid4()
+
+            class _SessionCtx:
+                async def __aenter__(self):
+                    s = FakeAsyncSession(state)
+                    s.execute = self._fake_execute  # type: ignore[method-assign]
+                    return s
+
+                async def __aexit__(self, *_a):
+                    return False
+
+                @staticmethod
+                async def _fake_execute(_q):
+                    class _Row:
+                        queued = 0
+                        claimed = 0
+                        running = 0
+                        failed_retryable = 0
+                        dead_letter = 0
+                        succeeded = 3
+                        cancelled = 0
+                        expired_leases = 0
+                        oldest_pending_created = None
+                        latest_succeeded_at = None
+
+                    class _Res:
+                        def one(self):
+                            return _Row()
+
+                    return _Res()
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                        "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "true",
+                        "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                        "VIREAD_REMOTE_OCR_SYNC_TIMEOUT_SECONDS": "",
+                    },
+                    clear=False,
+                ),
+                patch("app.database.session.AsyncSessionLocal", side_effect=_SessionCtx),
+            ):
+                self.assertTrue(is_remote_ocr_scale_to_zero_enabled())
+                self.assertEqual(remote_sync_wait_timeout_seconds(), 90.0)
+                valid_cache, cached = peek_cached_remote_ocr_worker_health()
+                self.assertTrue(valid_cache)
+                assert cached is not None
+                self.assertEqual(cached["standby_mode"], "scale_to_zero")
+                self.assertTrue(cached["online"])
+                self.assertTrue(cached["ready"])
+                self.assertFalse(peek_remote_ocr_probe_degraded())
+
+                gts = GlobalTasksService(FakeAsyncSession(state))  # type: ignore[arg-type]
+                with (
+                    patch.object(gts, "require_actor_role", return_value="admin"),
+                    patch.object(gts.repo, "is_remote_ocr_worker_online", return_value=False),
+                    patch.object(gts.repo, "list_studio_jobs_for_actor", return_value=[]),
+                    patch.object(gts.repo, "list_ocr_inference_jobs_for_actor", return_value=[]),
+                    patch.object(gts.repo, "list_admin_workflows", return_value=[]),
+                ):
+                    task_feed = await gts.list_tasks(actor_id=actor_id)
+                    self.assertTrue(task_feed.worker_online)
+
+                results = await asyncio.gather(
+                    *[collect_remote_ocr_health() for _ in range(10)],
+                    *[
+                        OcrInferenceJobService(FakeAsyncSession(state)).has_online_worker()  # type: ignore[arg-type]
+                        for _ in range(10)
+                    ],
+                    probe_configured_remote_ocr_worker_health(force_refresh=True),
+                    maybe_keep_warm_hf_space_from_cron(min_interval_seconds=60.0),
+                )
+
+                # Zero outbound HTTP calls when scaled to zero!
+                self.assertEqual(http_calls, [])
+                for diag in results[:10]:
+                    assert isinstance(diag, dict)
+                    self.assertTrue(diag["ready"])
+                    self.assertEqual(diag["workers"][0]["standby_mode"], "scale_to_zero")
+                for online_flag in results[10:20]:
+                    self.assertTrue(online_flag)
+                self.assertFalse(results[-1])  # Cron keepwarm is a strict no-op on scale-to-zero
+
+        asyncio.run(_scenario())
+
+    def test_scale_to_zero_single_flight_drain_coalescing_and_pending_rewake(self) -> None:
+        from app.services.remote_ocr_wakeup import maybe_nudge_ocr_wakeup_for_stale_queued_job
+
+        aca_url = "https://viread-ocr-worker.eastasia.azurecontainerapps.io"
+        seen_requests: list[tuple[str, str]] = []
+        in_flight = 0
+        peak_in_flight = 0
+
+        async def drain_transport(request: httpx.Request) -> httpx.Response:
+            nonlocal in_flight, peak_in_flight
+            in_flight += 1
+            peak_in_flight = max(peak_in_flight, in_flight)
+            body = json.loads(request.content.decode("utf-8")) if request.content else {}
+            seen_requests.append((str(request.url), str(body.get("reason") or "")))
+            try:
+                await asyncio.sleep(0.06)
+                return httpx.Response(
+                    200, json={"ok": True, "drained": True, "drained_jobs": 2}
+                )
+            finally:
+                in_flight -= 1
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(drain_transport))
+
+        async def _scenario() -> None:
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                    "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "true",
+                    "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                },
+                clear=False,
+            ):
+                # 1. Start Drain #1, fire 7 concurrent enqueues + 5 poll nudges mid-flight:
+                t_first = asyncio.create_task(
+                    send_remote_ocr_wakeup(reason="enqueue:ADMIN_PAGE_UPLOAD", job_id="job-1")
+                )
+                await asyncio.sleep(0.01)
+
+                # Poll nudges while drain is in-flight MUST return None and NOT trigger rewake.
+                for idx in range(5):
+                    nudge_task = maybe_nudge_ocr_wakeup_for_stale_queued_job(
+                        job_id=f"job-{idx}",
+                        created_at=datetime.now(timezone.utc) - timedelta(seconds=30),
+                        reason="admin_poll_nudge",
+                    )
+                    self.assertIsNone(nudge_task)
+
+                concurrent_enqueues = await asyncio.gather(
+                    *[
+                        send_remote_ocr_wakeup(
+                            reason="enqueue:ADMIN_PAGE_UPLOAD", job_id=f"job-{idx}"
+                        )
+                        for idx in range(2, 9)
+                    ]
+                )
+                self.assertTrue(all(concurrent_enqueues))
+                self.assertTrue(await t_first)
+
+                # Strictly single-flight (peak=1), and all 7 mid-flight enqueues collapsed into 1 pending_rewake!
+                self.assertEqual(peak_in_flight, 1)
+                self.assertEqual(
+                    seen_requests,
+                    [
+                        (f"{aca_url}/wakeup?drain=true", "enqueue:ADMIN_PAGE_UPLOAD"),
+                        (f"{aca_url}/wakeup?drain=true", "pending_rewake"),
+                    ],
+                )
+
+                # 2. Immediately (<1.5s) after Drain finishes, a brand-new scan is NOT suppressed by _LAST_WAKE_SENT!
+                seen_requests.clear()
+                ok_next = await send_remote_ocr_wakeup(
+                    reason="enqueue:LOCAL_PAGE_SCAN", job_id="job-99"
+                )
+                self.assertTrue(ok_next)
+                self.assertEqual(
+                    seen_requests,
+                    [(f"{aca_url}/wakeup?drain=true", "enqueue:LOCAL_PAGE_SCAN")],
+                )
+
+        asyncio.run(_scenario())
+
+    def test_concurrent_stt_tts_cache_isolation_during_long_scale_to_zero_drain(self) -> None:
+        aca_url = "https://viread-ocr-worker.eastasia.azurecontainerapps.io"
+
+        async def slow_cold_boot_drain(_request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0.12)
+            return httpx.Response(200, json={"ok": True, "drained": True, "drained_jobs": 1})
+
+        set_remote_ocr_wakeup_transport_for_tests(httpx.MockTransport(slow_cold_boot_drain))
+
+        async def _scenario() -> None:
+            limiter = DatabaseConcurrencyLimiter(limit=4, wait_timeout=1.5)
+
+            async def _simulated_tts_cache_lookup(word_idx: int) -> int:
+                await limiter.acquire()
+                try:
+                    await asyncio.sleep(0.004)
+                    return word_idx
+                finally:
+                    limiter.release()
+
+            with patch.dict(
+                os.environ,
+                {
+                    "VIREAD_OCR_REMOTE_WORKER_URL": aca_url,
+                    "VIREAD_OCR_REMOTE_SCALE_TO_ZERO": "true",
+                    "VIREAD_OCR_WORKER_TOKEN": WORKER_TOKEN,
+                },
+                clear=False,
+            ):
+                drain_task = asyncio.create_task(
+                    send_remote_ocr_wakeup(reason="enqueue:PARENT_BOOK_SUBMISSION", job_id="p-1")
+                )
+                await asyncio.sleep(0.01)
+                # Drain holds 0 DB permits, so all 16 TTS cache lookups fly through unimpeded!
+                t0 = asyncio.get_running_loop().time()
+                tts_results = await asyncio.gather(
+                    *[_simulated_tts_cache_lookup(i) for i in range(16)]
+                )
+                tts_elapsed = asyncio.get_running_loop().time() - t0
+                self.assertEqual(len(tts_results), 16)
+                self.assertLess(tts_elapsed, 0.08)
+                self.assertTrue(await drain_task)
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

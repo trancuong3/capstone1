@@ -500,6 +500,8 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
     if is_remote_worker_wakeup_configured():
         passive_probe = await probe_configured_remote_ocr_worker_health()
         if isinstance(passive_probe, dict) and passive_probe.get("online"):
+            is_synthetic_scale_to_zero = passive_probe.get("standby_mode") == "scale_to_zero"
+            has_live_db_worker = any(bool(item.get("online")) for item in serialized_workers)
             probe_wid = str(passive_probe.get("worker_id") or "hf-ocr-space")
             existing_idx = next(
                 (
@@ -509,10 +511,11 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                 ),
                 None,
             )
-            if existing_idx is None:
-                serialized_workers.insert(0, passive_probe)
-            elif not serialized_workers[existing_idx].get("online"):
-                serialized_workers[existing_idx] = passive_probe
+            if not (is_synthetic_scale_to_zero and has_live_db_worker):
+                if existing_idx is None:
+                    serialized_workers.insert(0, passive_probe)
+                elif not serialized_workers[existing_idx].get("online"):
+                    serialized_workers[existing_idx] = passive_probe
 
             probe_engines = dict(passive_probe.get("engines") or {})
             if bool(passive_probe.get("ready")):

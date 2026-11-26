@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import gc
 import hashlib
@@ -22,10 +23,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
+from urllib.parse import urlsplit
 from uuid import uuid4
 
+import httpx
 import yaml
-from fastapi import Body, FastAPI, Header, HTTPException, status
+from fastapi import Body, FastAPI, Header, HTTPException, Query, status
 from PIL import Image, ImageDraw, ImageFont
 from pydantic import BaseModel, Field
 
@@ -39,6 +42,22 @@ EXPECTED_FLOW1_TRDG_SHA256 = (
 ORIGINAL_VIETOCR_SHA256 = (
     "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 )
+DEFAULT_PREBAKED_MODEL_DIR = "/home/user/viread-models"
+_TRUTHY_VALUES = {"1", "true", "yes", "on"}
+_VERIFIED_FILE_SHA256_CACHE: dict[tuple[str, int, int], str] = {}
+_VERIFIED_FILE_SHA256_LOCK = threading.Lock()
+
+
+def is_scale_to_zero_enabled() -> bool:
+    """Return True when the OCR worker runs in serverless scale-to-zero mode (ACA / Cloud Run)."""
+    return (os.getenv("VIREAD_OCR_SCALE_TO_ZERO") or "").strip().lower() in _TRUTHY_VALUES
+
+
+def should_skip_startup_smoke(*, prebaked_hit: bool) -> bool:
+    """Skip cold-boot synthetic OCR smoke only when opted in AND pre-baked SHA-256 matched."""
+    if not prebaked_hit:
+        return False
+    return (os.getenv("VIREAD_OCR_SKIP_STARTUP_SMOKE") or "").strip().lower() in _TRUTHY_VALUES
 
 BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 IDLE_PRIORITY_CLASS = 0x00000040
@@ -134,13 +153,134 @@ def resolve_model_cache_dir() -> Path:
         candidate = Path(explicit)
         try:
             candidate.mkdir(parents=True, exist_ok=True)
-            return candidate
+            if os.access(candidate, os.W_OK):
+                return candidate
         except OSError as exc:
             logger.warning(
                 "Could not initialize VIREAD_OCR_MODEL_CACHE_DIR (%s); falling back to tempdir.",
                 type(exc).__name__,
             )
+    tmp_models = Path(tempfile.gettempdir()) / "viread-models"
+    try:
+        tmp_models.mkdir(parents=True, exist_ok=True)
+        if os.access(tmp_models, os.W_OK):
+            return tmp_models
+    except OSError:
+        pass
     return Path(tempfile.gettempdir())
+
+
+def candidate_prebaked_model_dirs() -> list[Path]:
+    """Ordered directories searched for pre-baked or previously synced checkpoints."""
+    dirs: list[Path] = []
+    for raw_dir in (
+        os.getenv("VIREAD_OCR_PREBAKED_MODEL_DIR") or DEFAULT_PREBAKED_MODEL_DIR,
+        str(resolve_model_cache_dir()),
+        os.getenv("VIREAD_OCR_MODEL_CACHE_DIR") or "",
+        tempfile.gettempdir(),
+    ):
+        clean = str(raw_dir).strip()
+        if not clean:
+            continue
+        p = Path(clean)
+        if p not in dirs and p.is_dir():
+            dirs.append(p)
+    return dirs
+
+
+def _resolve_cdn_artifact_url(
+    raw_url: str | None,
+    *,
+    expected_sha: str,
+    suffix: str,
+) -> str | None:
+    clean = (raw_url or "").strip()
+    if not clean:
+        return None
+    expanded = clean.replace("{sha256}", expected_sha)
+    parsed = urlsplit(expanded)
+    if (parsed.scheme or "").lower() not in ("https", "http") or not parsed.hostname:
+        return None
+    path_lower = (parsed.path or "").lower()
+    basename = os.path.basename(path_lower)
+    embedded_sha = re.search(r"([0-9a-f]{64})", basename)
+    if embedded_sha and embedded_sha.group(1) != expected_sha.lower():
+        # Pinned CDN URL targets a different checkpoint SHA (e.g. after a Flow 2 promotion);
+        # skip cleanly so worker falls back to active-model shards.
+        return None
+    if path_lower.endswith(".pth") or path_lower.endswith(".yml"):
+        if suffix == ".yml" and path_lower.endswith(".pth"):
+            prefix_len = len(parsed.path) - 4
+            rebuilt_path = parsed.path[:prefix_len] + ".yml"
+            query_part = f"?{parsed.query}" if parsed.query else ""
+            return f"{parsed.scheme}://{parsed.netloc}{rebuilt_path}{query_part}"
+        if path_lower.endswith(suffix):
+            return expanded
+        return None
+    base_clean = expanded.rstrip("/")
+    return f"{base_clean}/viread-vietocr-v2-{expected_sha}{suffix}"
+
+
+def _cdn_request_headers(url: str) -> dict[str, str]:
+    """Attach optional HF read token ONLY to Hugging Face hosts; never leak worker token."""
+    headers: dict[str, str] = {}
+    hf_token = (
+        os.getenv("VIREAD_HF_MODEL_TOKEN")
+        or os.getenv("HF_READ_TOKEN")
+        or ""
+    ).strip()
+    if not hf_token:
+        return headers
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    if host == "huggingface.co" or host.endswith(".huggingface.co") or host.endswith(".hf.co"):
+        headers["Authorization"] = f"Bearer {hf_token}"
+    return headers
+
+
+def _download_verified_cdn_file(
+    url: str,
+    *,
+    expected_sha: str | None,
+    dst_dir: Path,
+    dst_filename: str,
+    transport: httpx.BaseTransport | None = None,
+) -> tuple[Path | None, bool]:
+    """Download an artifact from CDN, verifying SHA-256 on the fly before atomic rename.
+
+    Returns `(final_path, sha_mismatch_detected)`.
+    """
+    dst_path = dst_dir / dst_filename
+    tmp_path = dst_dir / f"{dst_filename}.{uuid4().hex[:8]}.cdn.tmp"
+    headers = _cdn_request_headers(url)
+    try:
+        with httpx.Client(
+            timeout=httpx.Timeout(180.0, connect=15.0),
+            follow_redirects=True,
+            trust_env=False,
+            transport=transport,
+        ) as client:
+            with client.stream("GET", url, headers=headers) as resp:
+                if resp.status_code != 200:
+                    return None, False
+                digest = hashlib.sha256()
+                with tmp_path.open("wb") as out:
+                    for chunk in resp.iter_bytes(chunk_size=262144):
+                        if chunk:
+                            digest.update(chunk)
+                            out.write(chunk)
+        actual_sha = digest.hexdigest()
+        if expected_sha and actual_sha != expected_sha.lower():
+            logger.warning("Rejected CDN OCR artifact (%s): SHA-256 mismatch.", dst_filename)
+            tmp_path.unlink(missing_ok=True)
+            return None, True
+        os.replace(tmp_path, dst_path)
+        return dst_path, False
+    except Exception as exc:
+        logger.warning("CDN OCR artifact fetch skipped (%s): %s", dst_filename, type(exc).__name__)
+        return None, False
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
 
 
 def install_vietocr_safe_config_loader() -> None:
@@ -384,11 +524,22 @@ def resolve_git_sha() -> str:
 
 
 def _sha256_file(path: Path) -> str:
+    st = path.stat()
+    cache_key = (str(path.resolve()), int(st.st_size), int(st.st_mtime_ns))
+    with _VERIFIED_FILE_SHA256_LOCK:
+        cached = _VERIFIED_FILE_SHA256_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
-    return digest.hexdigest()
+    hex_digest = digest.hexdigest()
+    with _VERIFIED_FILE_SHA256_LOCK:
+        if len(_VERIFIED_FILE_SHA256_CACHE) >= 32:
+            _VERIFIED_FILE_SHA256_CACHE.clear()
+        _VERIFIED_FILE_SHA256_CACHE[cache_key] = hex_digest
+    return hex_digest
 
 
 def _find_smoke_font(size: int = 30) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -466,9 +617,12 @@ class OcrRuntimeManager:
     git_sha: str = field(default_factory=resolve_git_sha)
 
     def __post_init__(self) -> None:
+        self._drain_lock = threading.Lock()
+        self._cycle_lock = threading.Lock()
         self._inference_lock = threading.Lock()
         self._state_lock = threading.Lock()
         self._wake_event = threading.Event()
+        self._pending_redrain: bool = False
         self._burst_until_monotonic: float = 0.0
         self._standby_mode: str = "active_polling"
         self._wakeup_count: int = 0
@@ -480,6 +634,7 @@ class OcrRuntimeManager:
         self._model_sha256: str = ORIGINAL_VIETOCR_SHA256
         self._torch_version: str | None = None
         self._paddle_version: str | None = None
+        self._cdn_transport: httpx.BaseTransport | None = None
         self._engines: dict[str, EngineState] = {
             "paddleocr": EngineState(),
             "vietocr": EngineState(),
@@ -491,6 +646,34 @@ class OcrRuntimeManager:
     @property
     def wake_event(self) -> threading.Event:
         return self._wake_event
+
+    @property
+    def cycle_lock(self) -> threading.Lock:
+        return self._cycle_lock
+
+    def try_acquire_drain(self) -> bool:
+        return self._drain_lock.acquire(blocking=False)
+
+    def release_drain(self) -> None:
+        self._drain_lock.release()
+
+    def is_draining(self) -> bool:
+        return self._drain_lock.locked()
+
+    def mark_pending_redrain(self) -> None:
+        with self._state_lock:
+            self._pending_redrain = True
+        self._wake_event.set()
+
+    def consume_pending_redrain(self) -> bool:
+        with self._state_lock:
+            was_set = self._pending_redrain
+            self._pending_redrain = False
+            return was_set
+
+    def clear_burst_window(self) -> None:
+        with self._state_lock:
+            self._burst_until_monotonic = 0.0
 
     def set_standby_mode(self, mode: str) -> None:
         with self._state_lock:
@@ -621,19 +804,46 @@ class OcrRuntimeManager:
         storage_path = manifest.get("storage_path")
 
         cache_dir = resolve_model_cache_dir()
-        fallback_temp_dir = Path(tempfile.gettempdir())
         local_pth = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
         local_yml = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
-        if not local_pth.is_file() and fallback_temp_dir != cache_dir:
-            alt_pth = fallback_temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
+        prebaked_hit = False
+        for candidate_dir in candidate_prebaked_model_dirs():
+            alt_pth = candidate_dir / f"viread-vietocr-v2-{checkpoint_sha}.pth"
             if alt_pth.is_file() and _sha256_file(alt_pth) == checkpoint_sha:
                 local_pth = alt_pth
-                alt_yml = fallback_temp_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
+                prebaked_hit = True
+                alt_yml = candidate_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
                 if alt_yml.is_file():
                     local_yml = alt_yml
+                break
 
         if checkpoint_sha != ORIGINAL_VIETOCR_SHA256 and len(checkpoint_sha) == 64:
-            pth_valid = local_pth.is_file() and _sha256_file(local_pth) == checkpoint_sha
+            pth_valid = prebaked_hit or (
+                local_pth.is_file() and _sha256_file(local_pth) == checkpoint_sha
+            )
+            cdn_mismatch_seen = False
+
+            # 1. Zero-Supabase-egress CDN fetch (HF Model Repo or GitHub Release) BEFORE shard download.
+            if not pth_valid:
+                cdn_pth_url = _resolve_cdn_artifact_url(
+                    os.getenv("VIREAD_OCR_CHECKPOINT_CDN_URL"),
+                    expected_sha=checkpoint_sha,
+                    suffix=".pth",
+                )
+                if cdn_pth_url:
+                    fetched_pth, sha_mismatch = _download_verified_cdn_file(
+                        cdn_pth_url,
+                        expected_sha=checkpoint_sha,
+                        dst_dir=cache_dir,
+                        dst_filename=f"viread-vietocr-v2-{checkpoint_sha}.pth",
+                        transport=self._cdn_transport,
+                    )
+                    cdn_mismatch_seen = sha_mismatch
+                    if fetched_pth is not None:
+                        local_pth = fetched_pth
+                        pth_valid = True
+
+            # 2. Fallback to signed Storage shards / backend shard endpoint (Flow 2 hot-reload compatible).
             if not pth_valid and (artifact_fetcher is not None or direct_url_fetcher is not None):
                 shards = manifest.get("shards") or []
                 if shards:
@@ -665,15 +875,41 @@ class OcrRuntimeManager:
                         if _sha256_file(tmp_pth) != checkpoint_sha:
                             raise ValueError("Assembled VietOCR checkpoint SHA-256 mismatch")
                         os.replace(tmp_pth, local_pth)
+                        pth_valid = True
                     finally:
                         if tmp_pth.exists():
                             tmp_pth.unlink(missing_ok=True)
-            if manifest.get("has_custom_config") and (
-                artifact_fetcher is not None or direct_url_fetcher is not None
-            ):
+
+            if not pth_valid and cdn_mismatch_seen:
+                raise ValueError(
+                    "VietOCR checkpoint SHA-256 mismatch from VIREAD_OCR_CHECKPOINT_CDN_URL"
+                )
+
+            if manifest.get("has_custom_config"):
                 cfg_sha = str(manifest.get("config_sha256") or "").lower()
                 yml_valid = local_yml.is_file() and (not cfg_sha or _sha256_file(local_yml) == cfg_sha)
                 if not yml_valid:
+                    cdn_yml_url = _resolve_cdn_artifact_url(
+                        os.getenv("VIREAD_OCR_CONFIG_CDN_URL")
+                        or os.getenv("VIREAD_OCR_CHECKPOINT_CDN_URL"),
+                        expected_sha=checkpoint_sha,
+                        suffix=".yml",
+                    )
+                    if cdn_yml_url:
+                        fetched_yml, _ = _download_verified_cdn_file(
+                            cdn_yml_url,
+                            expected_sha=cfg_sha or None,
+                            dst_dir=cache_dir,
+                            dst_filename=f"viread-vietocr-v2-{checkpoint_sha}.yml",
+                            transport=self._cdn_transport,
+                        )
+                        if fetched_yml is not None:
+                            local_yml = fetched_yml
+                            yml_valid = True
+
+                if not yml_valid and (
+                    artifact_fetcher is not None or direct_url_fetcher is not None
+                ):
                     local_yml = cache_dir / f"viread-vietocr-v2-{checkpoint_sha}.yml"
                     cfg_bytes: bytes | None = None
                     cfg_signed_url = manifest.get("config_signed_url")
@@ -708,6 +944,7 @@ class OcrRuntimeManager:
             "storage_path": storage_path,
             "local_pth_exists": local_pth.is_file(),
             "local_yml_exists": local_yml.is_file(),
+            "prebaked_hit": prebaked_hit,
         }
 
     def _install_local_artifact_resolver(self, ocr_engine: Any) -> None:
@@ -718,11 +955,7 @@ class OcrRuntimeManager:
 
         def _worker_v2_artifact_resolver(active: dict[str, Any]) -> tuple[str, dict[str, Any] | None, str | None]:
             expected_sha = str(active.get("checkpoint_sha256", "")).lower()
-            search_dirs = [resolve_model_cache_dir()]
-            sys_temp = Path(tempfile.gettempdir())
-            if sys_temp not in search_dirs:
-                search_dirs.append(sys_temp)
-            for candidate_dir in search_dirs:
+            for candidate_dir in candidate_prebaked_model_dirs():
                 local_pth = candidate_dir / f"viread-vietocr-v2-{expected_sha}.pth"
                 local_yml = candidate_dir / f"viread-vietocr-v2-{expected_sha}.yml"
                 if len(expected_sha) == 64 and local_pth.is_file() and _sha256_file(local_pth) == expected_sha:
@@ -747,10 +980,13 @@ class OcrRuntimeManager:
         artifact_fetcher: Callable[[str, int | None], bytes] | None = None,
         direct_url_fetcher: Callable[[str], bytes | None] | None = None,
         run_smoke_inference: bool = True,
+        force_reinit: bool = False,
     ) -> dict[str, Any]:
         """Load torch -> paddle -> ocr_engine, sync checkpoint, and verify real inference."""
         os.environ["VIREAD_OCR_WORKER_PROCESS"] = "1"
         with self._inference_lock:
+            if not force_reinit and self.is_ready() and self._ocr_engine_mod is not None:
+                return self.health_payload()
             self.probe_installed()
             sync_info = self.sync_active_model(
                 manifest_fetcher=manifest_fetcher,
@@ -814,7 +1050,12 @@ class OcrRuntimeManager:
                 )
                 self._engines["tesseract_vie"].loaded = self._engines["tesseract_vie"].installed
 
-            if run_smoke_inference:
+            prebaked_matched = bool(
+                sync_info.get("prebaked_hit") and loaded_sha == sync_info["checkpoint_sha256"]
+            )
+            if run_smoke_inference and not should_skip_startup_smoke(
+                prebaked_hit=prebaked_matched
+            ):
                 self._run_smoke_verification(ocr_engine)
 
             return self.health_payload()
@@ -1129,6 +1370,7 @@ def build_worker_http_app(
     runtime: OcrRuntimeManager,
     *,
     worker_token: str | None = None,
+    drain_runner: Callable[[str], int] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="ViRead Local OCR Worker", version=runtime.app_version)
 
@@ -1142,7 +1384,8 @@ def build_worker_http_app(
         return runtime.version_payload()
 
     @app.post("/wakeup")
-    def wakeup(
+    async def wakeup(
+        drain: bool | None = Query(default=None),
         payload: WorkerWakeupRequest | None = Body(default=None),
         x_viread_ocr_worker_token: str | None = Header(
             default=None, alias="X-ViRead-Ocr-Worker-Token"
@@ -1151,9 +1394,78 @@ def build_worker_http_app(
         _verify_worker_token_constant_time(
             x_viread_ocr_worker_token, explicit_expected=worker_token
         )
-        return runtime.trigger_wakeup(
-            burst_seconds=payload.burst_seconds if payload else None,
-            reason=payload.reason if payload else "webhook",
-        )
+        reason_val = payload.reason if payload and payload.reason else "webhook"
+        burst_val = payload.burst_seconds if payload else None
+        effective_drain = is_scale_to_zero_enabled() if drain is None else bool(drain)
+        if not effective_drain:
+            return runtime.trigger_wakeup(
+                burst_seconds=burst_val,
+                reason=reason_val,
+            )
+
+        if not runtime.try_acquire_drain():
+            runtime.mark_pending_redrain()
+            with runtime._state_lock:
+                runtime._wakeup_count += 1
+                runtime._last_wakeup_reason = str(reason_val)[:64]
+                wake_count = runtime._wakeup_count
+                mode = runtime._standby_mode
+            return {
+                "ok": True,
+                "woken": True,
+                "drained": False,
+                "already_draining": True,
+                "drained_jobs": 0,
+                "worker_id": runtime.worker_id,
+                "standby_mode": mode,
+                "wakeup_count": wake_count,
+            }
+
+        try:
+            with runtime._state_lock:
+                runtime._wakeup_count += 1
+                runtime._last_wakeup_reason = str(reason_val)[:64]
+                runtime._standby_mode = "draining"
+                wake_count = runtime._wakeup_count
+
+            if drain_runner is None:
+                idle_mode = "scale_to_zero" if is_scale_to_zero_enabled() else "quiet_standby"
+                runtime.set_standby_mode(idle_mode)
+                return {
+                    "ok": True,
+                    "woken": True,
+                    "drained": True,
+                    "already_draining": False,
+                    "drained_jobs": 0,
+                    "worker_id": runtime.worker_id,
+                    "standby_mode": idle_mode,
+                    "wakeup_count": wake_count,
+                }
+
+            try:
+                drained_count = await asyncio.to_thread(drain_runner, reason_val)
+            except Exception as exc:
+                idle_mode = "scale_to_zero" if is_scale_to_zero_enabled() else "quiet_standby"
+                runtime.set_standby_mode(idle_mode)
+                logger.warning("Synchronous /wakeup drain error: %s", type(exc).__name__)
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="OCR worker synchronous drain cycle failed.",
+                ) from None
+
+            with runtime._state_lock:
+                mode = runtime._standby_mode
+            return {
+                "ok": True,
+                "woken": True,
+                "drained": True,
+                "already_draining": False,
+                "drained_jobs": int(drained_count),
+                "worker_id": runtime.worker_id,
+                "standby_mode": mode,
+                "wakeup_count": wake_count,
+            }
+        finally:
+            runtime.release_drain()
 
     return app

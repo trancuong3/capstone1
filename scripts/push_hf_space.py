@@ -91,7 +91,6 @@ def ensure_private_docker_space(*, space_id: str, hf_token: str, public: bool = 
         "type": "space",
         "name": name,
         "visibility": visibility,
-        "private": not public,
         "sdk": "docker",
         "hardware": "cpu-basic",
     }
@@ -122,8 +121,9 @@ def ensure_private_docker_space(*, space_id: str, hf_token: str, public: bool = 
     if create_status in (402, 403):
         raise RuntimeError(
             f"Failed creating Hugging Face Space (HTTP {create_status}: {err_msg}). "
-            "Note: Hugging Face Hub may require an existing Space or PRO/Team plan to create new Docker Spaces; "
-            "see docs/HF_SPACES_ZERO_COST_OCR_DEPLOYMENT.md for 0 VND Google Cloud Run Always Free / Modal deployment."
+            "Note: Hugging Face Hub now requires a PRO/Team plan (HTTP 402) to create new Docker Spaces; "
+            "see docs/AZURE_STUDENTS_ZERO_COST_OCR_DEPLOYMENT.md (0 VND Azure for Students, no card) "
+            "or docs/HF_SPACES_ZERO_COST_OCR_DEPLOYMENT.md for 0 VND Google Cloud Run Always Free / Modal deployment."
         )
     raise RuntimeError(
         f"Failed creating Hugging Face Space (HTTP {create_status}): {err_msg}"

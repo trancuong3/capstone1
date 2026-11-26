@@ -126,11 +126,17 @@ def worker_heartbeat_ttl_seconds() -> int:
 
 
 def remote_sync_wait_timeout_seconds() -> float:
-    raw = os.getenv("VIREAD_REMOTE_OCR_SYNC_TIMEOUT_SECONDS", "45").strip()
-    try:
-        return max(2.0, min(180.0, float(raw)))
-    except ValueError:
-        return 45.0
+    raw = (os.getenv("VIREAD_REMOTE_OCR_SYNC_TIMEOUT_SECONDS") or "").strip()
+    if raw:
+        try:
+            return max(2.0, min(180.0, float(raw)))
+        except ValueError:
+            pass
+    from app.services.remote_ocr_wakeup import is_remote_ocr_scale_to_zero_enabled
+
+    if is_remote_ocr_scale_to_zero_enabled():
+        return 90.0
+    return 45.0
 
 
 def compute_candidate_hash(
