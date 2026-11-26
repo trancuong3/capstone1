@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import hashlib
 import importlib.util
 import io
 import logging
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -326,8 +328,8 @@ class OcrRuntimeManager:
 
     worker_id: str = field(
         default_factory=lambda: (
-            os.getenv("VIREAD_OCR_WORKER_ID")
-            or f"win-ocr-{socket.gethostname().lower()}-{uuid4().hex[:6]}"
+            (os.getenv("VIREAD_OCR_WORKER_ID") or "").strip()
+            or f"win-ocr-{re.sub(r'[^a-z0-9._-]+', '-', socket.gethostname().lower()).strip('-') or 'local'}"[:120]
         )
     )
     app_version: str = field(
@@ -713,7 +715,16 @@ class OcrRuntimeManager:
             except Exception:
                 pass
         with self._active_job_scope(job_id):
-            result = ocr_engine.extract_text_and_boxes(image_bytes)
+            try:
+                result = ocr_engine.extract_text_and_boxes(image_bytes)
+            finally:
+                gc.collect()
+                if torch_mod is not None:
+                    try:
+                        if torch_mod.cuda.is_available():
+                            torch_mod.cuda.empty_cache()
+                    except Exception:
+                        pass
         duration_ms = int((time.perf_counter() - started) * 1000)
 
         meta = dict(result.get("metadata") or {})

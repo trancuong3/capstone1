@@ -149,6 +149,28 @@ const safeBackendMessages: Record<string, string> = {
     "Bộ xử lý OCR cục bộ trên máy chủ hiện chưa sẵn sàng. Hãy kiểm tra dịch vụ backend rồi thử lại.",
   "Local OCR processing timed out; please retry":
     "OCR cục bộ xử lý quá thời gian cho phép. Ba mẹ hãy bấm Thử lại nhé.",
+  "Remote OCR worker is offline; live page scan is temporarily unavailable.":
+    "Máy chủ OCR Windows hiện đang ngoại tuyến nên tính năng quét trang trực tiếp tạm thời không khả dụng. Ba mẹ hãy bật máy trạm OCR hoặc chọn sách trong Thư viện nhé.",
+  "Remote OCR worker is offline; cannot run synchronous page OCR":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy nhận diện OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker is offline; cannot run synchronous replacement OCR":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể thay ảnh và chạy OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker is offline; cannot reprocess page synchronously":
+    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy lại OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+  "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.":
+    "Máy chủ OCR xử lý lâu hơn thời gian chờ trực tiếp. Tác vụ đã được xếp hàng — vui lòng kiểm tra lại trạng thái sau ít giây.",
+  "Remote OCR worker failed":
+    "Máy chủ OCR gặp sự cố khi nhận diện trang. Vui lòng thử lại sau ít giây.",
+  "Database temporarily unavailable":
+    "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
+  "Database temporarily unavailable; please retry":
+    "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
+  "Idempotency key already used for a different OCR payload.":
+    "Mã gửi ảnh đã dùng cho một ảnh khác. Hãy chọn lại ảnh để quét mới.",
+  "OCR inference job not found.":
+    "Không tìm thấy tác vụ OCR hoặc tác vụ đã hết hạn.",
+  "Scan OCR job not found":
+    "Không tìm thấy tác vụ quét trang sách hoặc tác vụ đã hết hạn.",
   "Unsupported upload format; use JPEG, PNG, or WebP":
     "Định dạng ảnh chưa hỗ trợ. Hãy chọn ảnh JPG, PNG hoặc WebP.",
   "Upload identity already belongs to a different image":

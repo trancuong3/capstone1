@@ -111,8 +111,9 @@ def align_edited_text_to_words(
     tokens_with_lines: list[tuple[int, str]] = []
     for line_idx, line in enumerate(lines):
         for tok in line.split():
-            if tok.strip():
-                tokens_with_lines.append((line_idx, tok.strip()))
+            cleaned = tok.strip()
+            if cleaned and normalize_word(cleaned):
+                tokens_with_lines.append((line_idx, cleaned))
     if not tokens_with_lines:
         return []
 
@@ -154,7 +155,9 @@ def align_edited_text_to_words(
     out: list[dict[str, Any]] = []
     word_idx = 0
     for line_idx, line in enumerate(lines):
-        line_tokens = [t.strip() for t in line.split() if t.strip()]
+        line_tokens = [
+            t.strip() for t in line.split() if t.strip() and normalize_word(t.strip())
+        ]
         if not line_tokens:
             continue
         y = min(0.92, top + line_idx * (total_h / line_count))

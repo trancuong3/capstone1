@@ -12,6 +12,8 @@ from app.models import OcrInferenceJob, OcrWorkerHeartbeat
 ACTIVE_JOB_STATUSES = ("QUEUED", "CLAIMED", "RUNNING", "FAILED_RETRYABLE")
 CLAIMABLE_JOB_STATUSES = ("QUEUED", "FAILED_RETRYABLE")
 INFLIGHT_JOB_STATUSES = ("CLAIMED", "RUNNING")
+STARVATION_BOOST_AGE_SECONDS = 300
+PRIORITY_STARVATION_BOOST = 5
 
 
 class OcrInferenceJobRepository:
@@ -52,6 +54,37 @@ class OcrInferenceJobRepository:
         )
         if lock:
             query = query.with_for_update()
+        return await self.db.scalar(query)
+
+    async def find_active_duplicate_job(
+        self,
+        *,
+        job_kind: str,
+        image_sha256: str,
+        owner_user_id: UUID | None = None,
+        page_id: UUID | None = None,
+        submission_id: UUID | None = None,
+    ) -> OcrInferenceJob | None:
+        """Deduplicate concurrent active jobs for the same target + image digest when no idempotency key is set."""
+        filters: list[Any] = [
+            OcrInferenceJob.JobKind == job_kind,
+            OcrInferenceJob.ImageSha256 == image_sha256,
+            OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES),
+        ]
+        if submission_id is not None:
+            filters.append(OcrInferenceJob.SubmissionId == submission_id)
+        elif page_id is not None:
+            filters.append(OcrInferenceJob.PageId == page_id)
+        elif owner_user_id is not None:
+            filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
+        else:
+            return None
+        query = (
+            select(OcrInferenceJob)
+            .where(*filters)
+            .order_by(OcrInferenceJob.CreatedAt.desc(), OcrInferenceJob.Id.desc())
+            .limit(1)
+        )
         return await self.db.scalar(query)
 
     async def list_active_for_page(
@@ -193,6 +226,48 @@ class OcrInferenceJobRepository:
         rows = await self.list_active_for_book(book_id, lock=True)
         return self._cancel_rows(rows, reason=reason, exclude_job_id=None, now=ts)
 
+    async def reclaim_expired_leases(
+        self,
+        *,
+        now: datetime | None = None,
+        retry_delay_seconds: int = 0,
+    ) -> tuple[list[OcrInferenceJob], list[OcrInferenceJob]]:
+        """Reclaim expired in-flight leases: requeue retryable attempts and dead-letter exhausted ones."""
+        ts = now or datetime.now(timezone.utc)
+        query = (
+            select(OcrInferenceJob)
+            .where(
+                OcrInferenceJob.Status.in_(INFLIGHT_JOB_STATUSES),
+                OcrInferenceJob.LeaseExpiresAt.is_not(None),
+                OcrInferenceJob.LeaseExpiresAt <= ts,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        rows = list((await self.db.scalars(query)).all())
+        reclaimed: list[OcrInferenceJob] = []
+        dead_lettered: list[OcrInferenceJob] = []
+        for row in rows:
+            if int(row.AttemptCount or 0) >= int(row.MaxAttempts or 3):
+                row.Status = "DEAD_LETTER"
+                row.ErrorCode = row.ErrorCode or "LEASE_EXPIRED_MAX_ATTEMPTS"
+                row.ErrorMessage = row.ErrorMessage or "Worker lease expired after maximum attempts."
+                row.LeaseExpiresAt = None
+                row.CompletedAt = ts
+                row.UpdatedAt = ts
+                dead_lettered.append(row)
+            else:
+                delay = max(0, int(retry_delay_seconds))
+                row.Status = "FAILED_RETRYABLE"
+                row.ErrorCode = row.ErrorCode or "LEASE_EXPIRED_RECLAIMED"
+                row.ErrorMessage = row.ErrorMessage or "Worker lease expired; reclaimed for retry."
+                row.WorkerId = None
+                row.LeaseExpiresAt = None
+                row.RetryDelaySeconds = delay or None
+                row.NextRetryAt = ts + timedelta(seconds=delay) if delay > 0 else ts
+                row.UpdatedAt = ts
+                reclaimed.append(row)
+        return reclaimed, dead_lettered
+
     async def dead_letter_exhausted_expired_leases(
         self, *, now: datetime | None = None
     ) -> list[OcrInferenceJob]:
@@ -217,6 +292,37 @@ class OcrInferenceJobRepository:
             row.UpdatedAt = ts
         return rows
 
+    async def boost_aged_waiting_jobs(
+        self,
+        *,
+        now: datetime | None = None,
+        starvation_age_seconds: int = STARVATION_BOOST_AGE_SECONDS,
+        boosted_priority: int = PRIORITY_STARVATION_BOOST,
+    ) -> int:
+        """Promote jobs waiting longer than threshold so lower-priority parent submissions never starve."""
+        ts = now or datetime.now(timezone.utc)
+        cutoff = ts - timedelta(seconds=max(60, int(starvation_age_seconds)))
+        query = (
+            select(OcrInferenceJob)
+            .where(
+                OcrInferenceJob.Status.in_(CLAIMABLE_JOB_STATUSES),
+                OcrInferenceJob.Priority > boosted_priority,
+                OcrInferenceJob.CreatedAt <= cutoff,
+            )
+            .order_by(OcrInferenceJob.CreatedAt.asc())
+            .limit(20)
+            .with_for_update(skip_locked=True)
+        )
+        rows = list((await self.db.scalars(query)).all())
+        boosted = 0
+        for row in rows:
+            if row.Status == "FAILED_RETRYABLE" and row.NextRetryAt is not None and row.NextRetryAt > ts:
+                continue
+            row.Priority = boosted_priority
+            row.UpdatedAt = ts
+            boosted += 1
+        return boosted
+
     async def claim_next_job(
         self,
         *,
@@ -225,7 +331,7 @@ class OcrInferenceJobRepository:
         now: datetime | None = None,
     ) -> OcrInferenceJob | None:
         ts = now or datetime.now(timezone.utc)
-        await self.dead_letter_exhausted_expired_leases(now=ts)
+        await self.boost_aged_waiting_jobs(now=ts)
 
         queued_due = and_(
             OcrInferenceJob.Status == "QUEUED",
@@ -315,13 +421,73 @@ class OcrInferenceJobRepository:
         await self.db.flush()
         return existing
 
-    async def list_worker_heartbeats(self, *, limit: int = 20) -> list[OcrWorkerHeartbeat]:
+    async def touch_worker_heartbeat(
+        self,
+        *,
+        worker_id: str,
+        status: str,
+        active_job_id: UUID | None,
+        active_job_count: int,
+        now: datetime | None = None,
+    ) -> OcrWorkerHeartbeat:
+        """Refresh worker liveness and active-job fields without wiping engine/model metadata."""
+        ts = now or datetime.now(timezone.utc)
+        existing = await self.db.scalar(
+            select(OcrWorkerHeartbeat).where(OcrWorkerHeartbeat.WorkerId == worker_id)
+        )
+        if existing is None:
+            existing = OcrWorkerHeartbeat(
+                WorkerId=worker_id,
+                ConcurrencyLimit=1,
+                Engines={},
+                SystemStats={},
+                CreatedAt=ts,
+            )
+            self.db.add(existing)
+        existing.Status = status
+        existing.ActiveJobId = active_job_id
+        existing.ActiveJobCount = max(0, int(active_job_count))
+        existing.LastHeartbeatAt = ts
+        existing.UpdatedAt = ts
+        await self.db.flush()
+        return existing
+
+    async def list_worker_heartbeats(
+        self,
+        *,
+        limit: int = 20,
+        max_age_hours: int | None = 24,
+        now: datetime | None = None,
+    ) -> list[OcrWorkerHeartbeat]:
+        query = select(OcrWorkerHeartbeat)
+        if max_age_hours is not None and max_age_hours > 0:
+            ts = now or datetime.now(timezone.utc)
+            cutoff = ts - timedelta(hours=int(max_age_hours))
+            query = query.where(OcrWorkerHeartbeat.LastHeartbeatAt >= cutoff)
         query = (
-            select(OcrWorkerHeartbeat)
-            .order_by(OcrWorkerHeartbeat.LastHeartbeatAt.desc(), OcrWorkerHeartbeat.WorkerId.asc())
+            query.order_by(
+                OcrWorkerHeartbeat.LastHeartbeatAt.desc(),
+                OcrWorkerHeartbeat.WorkerId.asc(),
+            )
             .limit(max(1, min(limit, 50)))
         )
         return list((await self.db.scalars(query)).all())
+
+    async def prune_stale_worker_heartbeats(
+        self,
+        *,
+        max_age_hours: int = 24,
+        now: datetime | None = None,
+    ) -> int:
+        ts = now or datetime.now(timezone.utc)
+        cutoff = ts - timedelta(hours=max(1, int(max_age_hours)))
+        query = select(OcrWorkerHeartbeat).where(
+            OcrWorkerHeartbeat.LastHeartbeatAt < cutoff
+        )
+        stale_rows = list((await self.db.scalars(query)).all())
+        for row in stale_rows:
+            await self.db.delete(row)
+        return len(stale_rows)
 
     async def queue_depth_counts(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)

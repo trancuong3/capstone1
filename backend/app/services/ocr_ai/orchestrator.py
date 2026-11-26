@@ -86,7 +86,8 @@ class OcrCorrectionOrchestrator:
                     timeout_seconds=self.config.cloud_timeout_seconds,
                 )
             )
-        providers.append(OllamaOcrProvider(self.config.local))
+        if self.config.local_enabled or not providers:
+            providers.append(OllamaOcrProvider(self.config.local))
         return tuple(providers)
 
     async def correct(

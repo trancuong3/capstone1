@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 import logging
 import os
+import random
 import signal
 import sys
 import threading
@@ -45,10 +47,14 @@ class BackendOcrClient:
         transport: httpx.BaseTransport | None = None,
         storage_transport: httpx.BaseTransport | None = None,
         timeout_seconds: float = 30.0,
+        completion_retry_attempts: int = 5,
+        completion_retry_base_delay: float = 1.5,
     ):
         self.backend_url = backend_url.rstrip("/")
         if not worker_token or len(worker_token.strip()) < 32:
             raise ValueError("VIREAD_OCR_WORKER_TOKEN must be at least 32 characters.")
+        self._completion_retry_attempts = max(1, int(completion_retry_attempts))
+        self._completion_retry_base_delay = max(0.0, float(completion_retry_base_delay))
         self._client = httpx.Client(
             base_url=self.backend_url,
             headers={"X-ViRead-Ocr-Worker-Token": worker_token.strip()},
@@ -187,19 +193,59 @@ class BackendOcrClient:
         resp.raise_for_status()
         return bytes(resp.content)
 
+    def _post_idempotent_with_retry(
+        self,
+        path: str,
+        payload: dict[str, Any],
+    ) -> tuple[int, dict[str, Any]]:
+        """Post idempotent job completion/failure with bounded jittered backoff on 5xx/429/network errors."""
+        retryable_statuses = {429, 500, 502, 503, 504}
+        last_exc: Exception | None = None
+        for attempt in range(1, self._completion_retry_attempts + 1):
+            try:
+                resp = self._client.post(path, json=payload)
+                if resp.status_code == 409:
+                    return 409, dict(resp.json() if resp.content else {"detail": "conflict"})
+                if resp.status_code in retryable_statuses and attempt < self._completion_retry_attempts:
+                    delay = min(10.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    jitter = delay * random.uniform(0.8, 1.2)
+                    logger.warning(
+                        "Transient HTTP %s posting %s (attempt %s/%s); retrying in %.2fs",
+                        resp.status_code,
+                        path,
+                        attempt,
+                        self._completion_retry_attempts,
+                        jitter,
+                    )
+                    if jitter > 0:
+                        time.sleep(jitter)
+                    continue
+                resp.raise_for_status()
+                return resp.status_code, dict(resp.json())
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= self._completion_retry_attempts:
+                    raise
+                delay = min(10.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                jitter = delay * random.uniform(0.8, 1.2)
+                logger.warning(
+                    "Transient network error posting %s (%s, attempt %s/%s); retrying in %.2fs",
+                    path,
+                    type(exc).__name__,
+                    attempt,
+                    self._completion_retry_attempts,
+                    jitter,
+                )
+                if jitter > 0:
+                    time.sleep(jitter)
+        assert last_exc is not None
+        raise last_exc
+
     def complete_job(self, job_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        resp = self._client.post(f"/internal/ocr-jobs/{job_id}/complete", json=payload)
-        if resp.status_code == 409:
-            return 409, dict(resp.json() if resp.content else {"detail": "conflict"})
-        resp.raise_for_status()
-        return resp.status_code, dict(resp.json())
+        return self._post_idempotent_with_retry(f"/internal/ocr-jobs/{job_id}/complete", payload)
 
     def fail_job(self, job_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-        resp = self._client.post(f"/internal/ocr-jobs/{job_id}/fail", json=payload)
-        if resp.status_code == 409:
-            return 409, dict(resp.json() if resp.content else {"detail": "conflict"})
-        resp.raise_for_status()
-        return resp.status_code, dict(resp.json())
+        return self._post_idempotent_with_retry(f"/internal/ocr-jobs/{job_id}/fail", payload)
 
 
 def process_claimed_job(
@@ -343,6 +389,7 @@ def process_claimed_job(
     finally:
         stop_hb.set()
         hb_thread.join(timeout=2.0)
+        gc.collect()
 
 
 def run_worker_forever(
@@ -408,6 +455,7 @@ def run_worker_forever(
 
     last_hb = 0.0
     last_model_check = time.monotonic()
+    poll_error_streak = 0
     try:
         model_sync_seconds = max(
             15.0, float(os.getenv("VIREAD_OCR_MODEL_SYNC_SECONDS", "60"))
@@ -425,6 +473,7 @@ def run_worker_forever(
                     logger.warning("Worker heartbeat failed: %s", type(exc).__name__)
 
             did_work = False
+            had_poll_error = False
             if client is not None:
                 try:
                     if not runtime.is_ready():
@@ -447,26 +496,55 @@ def run_worker_forever(
                             except Exception:
                                 pass
                     job = client.claim_next_job(runtime.worker_id, lease_seconds=lease_seconds)
+                    poll_error_streak = 0
                     if job is not None:
                         did_work = True
+                        try:
+                            busy_hb = runtime.heartbeat_payload()
+                            busy_hb["status"] = "BUSY"
+                            busy_hb["active_job_id"] = str(job["job_id"])
+                            busy_hb["active_job_count"] = 1
+                            client.send_worker_heartbeat(busy_hb)
+                            last_hb = time.monotonic()
+                        except Exception:
+                            pass
                         process_claimed_job(
                             client,
                             runtime,
                             job,
                             lease_seconds=lease_seconds,
-                            heartbeat_interval_seconds=max(10.0, lease_seconds / 4.0),
+                            heartbeat_interval_seconds=min(
+                                max(5.0, heartbeat_seconds),
+                                max(10.0, lease_seconds / 4.0),
+                            ),
                         )
                         try:
-                            client.send_worker_heartbeat(runtime.heartbeat_payload())
+                            idle_hb = runtime.heartbeat_payload()
+                            if idle_hb.get("status") == "BUSY":
+                                idle_hb["status"] = "IDLE"
+                            idle_hb["active_job_id"] = None
+                            idle_hb["active_job_count"] = 0
+                            client.send_worker_heartbeat(idle_hb)
                             last_hb = time.monotonic()
                         except Exception:
                             pass
                 except Exception as exc:
-                    logger.warning("Poll/claim cycle error: %s", type(exc).__name__)
+                    had_poll_error = True
+                    poll_error_streak += 1
+                    logger.warning(
+                        "Poll/claim cycle error (streak=%s): %s",
+                        poll_error_streak,
+                        type(exc).__name__,
+                    )
 
             if did_work:
                 continue
-            stop_event.wait(poll_seconds)
+            wait_seconds = (
+                min(30.0, max(poll_seconds, 2.0) * (2 ** min(poll_error_streak - 1, 4)))
+                if had_poll_error
+                else poll_seconds
+            )
+            stop_event.wait(wait_seconds)
     finally:
         server.should_exit = True
         if client is not None:

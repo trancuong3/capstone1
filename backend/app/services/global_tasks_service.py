@@ -703,6 +703,15 @@ class GlobalTasksService:
         if reclaimed_studio or failed_studio or cancelled_expired or stale_fenced:
             await self.db.commit()
 
+        # Also reap expired remote OCR worker leases so crashed workers never strand jobs.
+        try:
+            from app.services.ocr_inference_job_service import OcrInferenceJobService
+
+            await OcrInferenceJobService(self.db).reap_expired_leases(now=current)
+        except SQLAlchemyError as exc:
+            if not _is_missing_table_error(exc):
+                raise
+
         # Also reclaim any orphaned R-01 ParentBookPageSubmission rows stuck in CHECKING!
         parent_reconcile = {"reclaimed_count": 0, "failed_count": 0}
         try:
@@ -1383,6 +1392,11 @@ async def run_smart_studio_worker_loop(
                 processed = await process_one_smart_studio_job(db, worker_id=worker_id)
         except asyncio.CancelledError:
             raise
+        except SQLAlchemyError as exc:
+            if _is_missing_table_error(exc):
+                logger.debug("smart_studio_worker_table_missing_sleeping")
+            else:
+                logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
         except Exception:
             logger.debug("smart_studio_worker_poll_skipped", exc_info=True)
 

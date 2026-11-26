@@ -5,6 +5,7 @@ import hashlib
 import logging
 import os
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import update
@@ -274,23 +275,96 @@ async def _process_page_scan(page_scan_id: UUID) -> None:
     ai_rejected_count = 0
     ai_result = None
     ai_error: LocalCorrectionError | None = None
+    ai_skipped_disabled = False
+    ai_detection_source = "OLLAMA_TEXT"
+
+    from app.services.ocr_ai.config import OcrCorrectionConfig
+    from app.services.ocr_ai.child_safety import build_child_safety_orchestrator
+
     try:
-        ai_result = await analyse_with_ollama(text_snapshot, page_number)
-        ai_rejected_count = ai_result.rejected_excerpt_count
-        for item in ai_result.findings:
-            if (
-                item.excerpt_start < 0
-                or item.excerpt_end > len(text_snapshot)
-                or text_snapshot[item.excerpt_start:item.excerpt_end] != item.excerpt
-            ):
-                ai_rejected_count += 1
-                continue
-            ai_findings.append(item)
-    except LocalCorrectionError as error:
-        ai_error = error
+        ocr_ai_cfg = OcrCorrectionConfig.from_environment()
     except Exception:
-        logger.exception("Book quality Ollama analysis failed")
-        ai_error = LocalCorrectionError(503, "Ollama content inspection is unavailable.")
+        ocr_ai_cfg = OcrCorrectionConfig(local_enabled=OcrCorrectionConfig.local_ollama_enabled())
+
+    has_cloud_fallback = bool(ocr_ai_cfg.gemini_enabled or ocr_ai_cfg.groq_enabled)
+
+    async def _run_cloud_quality_fallback() -> tuple[list[Any], str]:
+        safety_res = await build_child_safety_orchestrator().analyze(text_snapshot)
+        raw_findings = safety_res.get("findings") if isinstance(safety_res, dict) else []
+        mapped: list[Any] = []
+        for entry in (raw_findings or []):
+            if not isinstance(entry, dict):
+                continue
+            excerpt = str(entry.get("evidence_text") or entry.get("excerpt") or "").strip()
+            if not excerpt:
+                continue
+            start_idx = text_snapshot.find(excerpt)
+            if start_idx < 0:
+                continue
+            end_idx = start_idx + len(excerpt)
+            sev = str(entry.get("severity") or "MEDIUM").upper()
+            if sev not in ("LOW", "MEDIUM", "HIGH"):
+                sev = "MEDIUM"
+            mapped.append(
+                type(
+                    "_CloudQualityItem",
+                    (),
+                    {
+                        "issue_type": "AGE_INAPPROPRIATE",
+                        "severity": sev,
+                        "excerpt": excerpt,
+                        "excerpt_start": start_idx,
+                        "excerpt_end": end_idx,
+                        "explanation": str(
+                            entry.get("explanation") or entry.get("reason") or "Phát hiện nội dung cần Admin xem xét."
+                        ),
+                        "suggested_correction": None,
+                        "confidence": None,
+                        "model_name": str(entry.get("model") or "cloud_ai"),
+                    },
+                )()
+            )
+        return mapped, "CLOUD_AI"
+
+    if not ocr_ai_cfg.local_enabled:
+        if has_cloud_fallback:
+            try:
+                ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+            except Exception:
+                logger.exception("Book quality cloud AI analysis failed")
+                ai_error = LocalCorrectionError(503, "Cloud content inspection is unavailable.")
+        else:
+            ai_skipped_disabled = True
+    else:
+        try:
+            ai_result = await analyse_with_ollama(text_snapshot, page_number)
+            ai_rejected_count = ai_result.rejected_excerpt_count
+            for item in ai_result.findings:
+                if (
+                    item.excerpt_start < 0
+                    or item.excerpt_end > len(text_snapshot)
+                    or text_snapshot[item.excerpt_start:item.excerpt_end] != item.excerpt
+                ):
+                    ai_rejected_count += 1
+                    continue
+                ai_findings.append(item)
+        except LocalCorrectionError as error:
+            if error.status_code == 503 and has_cloud_fallback:
+                try:
+                    ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+                except Exception:
+                    ai_error = error
+            else:
+                ai_error = error
+        except Exception:
+            logger.exception("Book quality Ollama analysis failed")
+            if has_cloud_fallback:
+                try:
+                    ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+                except Exception:
+                    ai_error = LocalCorrectionError(503, "Ollama content inspection is unavailable.")
+            else:
+                ai_error = LocalCorrectionError(503, "Ollama content inspection is unavailable.")
 
     async with AsyncSessionLocal() as session:
         repo = BookContentQualityRepository(session)
@@ -328,7 +402,13 @@ async def _process_page_scan(page_scan_id: UUID) -> None:
             await session.commit()
             return
 
-        if ai_error is not None:
+        if ai_skipped_disabled:
+            page_scan.AIAnalysisStatus = "SKIPPED"
+            page_scan.ErrorCode = "LOCAL_OLLAMA_DISABLED"
+            page_scan.ErrorSummary = (
+                "Local Ollama is disabled on hosted web runtime; deterministic rule check completed."
+            )
+        elif ai_error is not None:
             page_scan.AIAnalysisStatus = (
                 "UNAVAILABLE" if ai_error.status_code == 503 else "FAILED"
             )
@@ -351,7 +431,7 @@ async def _process_page_scan(page_scan_id: UUID) -> None:
                     excerpt_start=item.excerpt_start,
                     excerpt_end=item.excerpt_end,
                     explanation=item.explanation,
-                    source="OLLAMA_TEXT",
+                    source=ai_detection_source,
                     suggestion=item.suggested_correction,
                     confidence=item.confidence,
                     model_name=item.model_name,
