@@ -321,7 +321,7 @@
     "overviewAria": "Tổng quan nhanh trạng thái các trang",
     "overviewChipTitle": "Trang nguồn {page}: {status}",
     "workerFailuresSummary": "Có {count} trang gặp lỗi OCR/AI (dịch vụ kiểm tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại kiểm tra» ở từng trang bị lỗi.",
-    "windowsOcrQueueWaiting": "Đã lưu trong hàng chờ OCR ({count} trang) — Đang chờ máy chủ bật lại. Hệ thống sẽ tự động nhận diện ngay khi máy chủ OCR hoạt động trở lại.",
+    "windowsOcrQueueWaiting": "Đã lưu trong hàng chờ OCR ({count} trang) — Đang chờ máy chủ OCR Windows bật lại. Hệ thống sẽ tự động nhận diện ngay khi máy chủ hoạt động trở lại.",
     "ocrRunningStatus": "Đang nhận diện OCR {running} trang",
     "ocrQueuedSuffix": " ({count} trang đang xếp hàng tiếp theo)",
     "ocrOtherPagesStillVisible": ". Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao tác ngay.",

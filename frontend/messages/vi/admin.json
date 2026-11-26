@@ -526,7 +526,7 @@
         "noValidFiles": "Không có file hợp lệ để upload. Kiểm tra định dạng, dung lượng và kích thước ảnh.",
         "someInvalidFiles": "Một số tệp không hợp lệ nên chưa được upload. Các tệp hợp lệ vẫn đang được xử lý."
       },
-      "workerOfflineTitle": "Máy chủ OCR đang tạm tắt",
+      "workerOfflineTitle": "Máy chủ OCR Windows hiện đang tắt",
       "workerOfflineBody": "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ lưu bền vững vào hàng chờ và tự động xử lý OCR ngay khi máy chủ OCR bật lại.",
       "workerUnreachableTitle": "Chưa kiểm tra được trạng thái máy chủ OCR",
       "workerUnreachableBody": "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để lưu vào hàng chờ OCR.",
@@ -2521,7 +2521,7 @@
     "skippedEmptyNote": "bỏ qua {count} trang trắng",
     "failedPagesNote": "lỗi {count} trang",
     "createdPagesSummary": "Đã tạo {count} trang · Cần duyệt{suffix}",
-    "queuedDocPagesForWorker": "Đã lưu {count} trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
+    "queuedDocPagesForWorker": "Đã xếp hàng {count} trang trong hàng chờ OCR — Tự động xử lý ngay khi máy chủ OCR bật lại",
     "docPagesPartialProgress": "Hoàn tất {completed}/{total} trang ({pending} trang đang tiếp tục xếp hàng OCR)",
     "docPagesComplete": "Đã hoàn tất OCR {completed}/{total} trang · Cần duyệt",
     "singlePageQueued": "Đã xếp hàng chờ máy chủ OCR Windows xử lý",

@@ -1025,7 +1025,7 @@ class LocalOcrScanService:
 
         queue_position: int | None = None
         if job.Status in ("QUEUED", "FAILED_RETRYABLE"):
-            positions = await job_service.repo.get_queue_positions([job.Id])
+            positions = await self._safe_queue_positions(job_service, [job.Id])
             queue_position = positions.get(job.Id)
 
         return await self._serialize_scan_job(
@@ -1034,6 +1034,18 @@ class LocalOcrScanService:
             request_id=request_id,
             queue_position=queue_position,
         )
+
+    @staticmethod
+    async def _safe_queue_positions(
+        job_service: OcrInferenceJobService,
+        job_ids: list[UUID],
+    ) -> dict[UUID, int]:
+        if not job_ids:
+            return {}
+        get_positions = getattr(job_service.repo, "get_queue_positions", None)
+        if not callable(get_positions):
+            return {}
+        return await get_positions(job_ids)
 
     async def list_scan_page_jobs(
         self,
@@ -1055,11 +1067,7 @@ class LocalOcrScanService:
             limit=limit,
         )
         queued_ids = [row.Id for row in rows if row.Status in ("QUEUED", "FAILED_RETRYABLE")]
-        positions = (
-            await job_service.repo.get_queue_positions(queued_ids)
-            if queued_ids
-            else {}
-        )
+        positions = await self._safe_queue_positions(job_service, queued_ids)
         first_queued = next(
             (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
             None,
@@ -1136,7 +1144,7 @@ class LocalOcrScanService:
 
         queue_position: int | None = None
         if job.Status in ("QUEUED", "FAILED_RETRYABLE"):
-            positions = await job_service.repo.get_queue_positions([job.Id])
+            positions = await self._safe_queue_positions(job_service, [job.Id])
             queue_position = positions.get(job.Id)
 
         serialized = await self._serialize_scan_job(

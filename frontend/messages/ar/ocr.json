@@ -70,7 +70,8 @@
     "checkQueueNow": "تحقق الآن",
     "scanAnotherPageQueued": "مسح صفحة أخرى",
     "cancelQueuedTask": "إلغاء المهمة",
-    "queuedListHeading": "صفحات أخرى محفوظة في قائمة انتظار OCR ({count} صفحة)"
+    "queuedListHeading": "صفحات أخرى محفوظة في قائمة انتظار OCR ({count} صفحة)",
+    "jobSubtitleQueuedOffline": "في قائمة الانتظار حتى يعود خادم OCR Windows للعمل — تم حفظ صورة الصفحة بأمان ولن تُفقد عند إعادة التحميل."
   },
   "camera": {
     "missingBookInfo": "ViRead تعرفت على الصفحة لكن معلومات الكتاب مفقودة. يرجى محاذاة وإعادة المسح الضوئي.",

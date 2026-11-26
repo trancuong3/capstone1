@@ -70,7 +70,8 @@
     "checkQueueNow": "Jetzt prüfen",
     "scanAnotherPageQueued": "Weitere Seite scannen",
     "cancelQueuedTask": "Aufgabe abbrechen",
-    "queuedListHeading": "Weitere Seiten in der OCR-Warteschlange ({count} Seiten)"
+    "queuedListHeading": "Weitere Seiten in der OCR-Warteschlange ({count} Seiten)",
+    "jobSubtitleQueuedOffline": "In der Warteschlange, bis der Windows-OCR-Server wieder startet — das Seitenbild ist sicher gespeichert, auch beim Neuladen."
   },
   "camera": {
     "missingBookInfo": "ViRead hat die Seite erkannt, aber es fehlen Buchinformationen. Bitte richten Sie das Buch aus und scannen Sie erneut.",
