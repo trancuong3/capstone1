@@ -204,9 +204,55 @@ _WORKER_LABELS = {
     "book_quality": "Book quality worker",
     "admin_ai_workflow": "Admin AI workflow worker",
     "parent_book_submission": "Parent book submission worker",
+    "parent_email_dispatcher": "Parent email dispatcher worker",
     "active_model_registry": "Model registry worker",
     "local_trainer_process": "Local training process",
 }
+
+
+def collect_email_delivery_health() -> dict[str, str]:
+    """Read-only check of parent email provider configuration (never leaks secrets)."""
+    from app.database import config as settings
+    from app.providers.parent_email_transport import (
+        active_email_provider,
+        is_public_app_url,
+    )
+
+    provider = active_email_provider()
+    if provider == "unconfigured":
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "UNAVAILABLE",
+            "disabled",
+            "Chưa cấu hình RESEND_API_KEY hoặc SMTP_* để tự động gửi email cho phụ huynh.",
+        )
+    if provider != "mail_sink" and not SUPABASE_ADMIN_KEY:
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "DEGRADED",
+            "failed",
+            "Đã cấu hình gửi mail nhưng thiếu SUPABASE_SECRET_KEY để tra cứu email xác minh.",
+        )
+    if (
+        settings.APP_ENVIRONMENT == "production"
+        and not is_public_app_url(settings.PARENT_EMAIL_APP_URL)
+    ):
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "DEGRADED",
+            "unknown",
+            f"Đã cấu hình nhà cung cấp ({provider}) nhưng PARENT_EMAIL_APP_URL chưa phải URL HTTPS công khai.",
+        )
+    return _health_item(
+        "parent_email_delivery",
+        "Gửi email phụ huynh",
+        "HEALTHY",
+        "healthy",
+        f"Dịch vụ gửi email phụ huynh sẵn sàng ({provider}).",
+    )
 
 
 def _worker_state(worker: Any) -> str:

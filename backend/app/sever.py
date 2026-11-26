@@ -93,6 +93,7 @@ from app.jobs.admin_ai_workflow_worker import (
 )
 from app.services.remote_ocr_wakeup import shutdown_remote_ocr_wakeup_tasks
 from app.jobs.parent_book_submission_worker import run_worker as run_parent_book_submission_worker
+from app.jobs.parent_email_dispatcher_worker import run_worker as run_parent_email_dispatcher_worker
 from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
 
@@ -387,6 +388,8 @@ async def lifespan(_app: FastAPI):
     admin_ai_workflow_task = None
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
+    stop_parent_email_worker = asyncio.Event()
+    parent_email_task = None
     worker_startup_delay = _background_worker_startup_delay_seconds()
     if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and not worker_disabled:
         book_quality_task = asyncio.create_task(
@@ -418,6 +421,21 @@ async def lifespan(_app: FastAPI):
                 worker_startup_delay,
             ),
             name="parent_book_submission_worker",
+        )
+    parent_email_worker_override = _optional_bool_env("PARENT_EMAIL_WORKER_ENABLED")
+    parent_email_worker_enabled = (
+        parent_email_worker_override
+        if parent_email_worker_override is not None
+        else lightweight_workers_enabled
+    )
+    if APP_ENVIRONMENT != "test" and parent_email_worker_enabled:
+        parent_email_task = asyncio.create_task(
+            _run_worker_with_startup_delay(
+                run_parent_email_dispatcher_worker,
+                stop_parent_email_worker,
+                worker_startup_delay,
+            ),
+            name="parent_email_dispatcher_worker",
         )
     ocr_outbox_enabled = os.getenv(
         "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
@@ -505,6 +523,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "parent_email_dispatcher": parent_email_task,
             "smart_studio": smart_studio_worker_task,
             "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
@@ -526,6 +545,7 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        stop_parent_email_worker.set()
         stop_smart_studio_worker.set()
         if startup_db_probe_task is not None and not startup_db_probe_task.done():
             startup_db_probe_task.cancel()
@@ -539,6 +559,7 @@ async def lifespan(_app: FastAPI):
             book_quality_task,
             admin_ai_workflow_task,
             parent_book_task,
+            parent_email_task,
         )
         try:
             # Book quality worker releases its lease on cancellation; an interrupted
@@ -570,6 +591,7 @@ async def lifespan(_app: FastAPI):
                     admin_ai_workflow_task, stop_admin_ai_workflow
                 ),
                 _shutdown_worker_task(parent_book_task, stop_parent_book_worker),
+                _shutdown_worker_task(parent_email_task, stop_parent_email_worker),
             )
         except asyncio.CancelledError:
             for worker_task in worker_tasks:
@@ -923,6 +945,7 @@ async def get_health(request: Request) -> dict[str, object]:
         "book_quality": _task_runtime_state(workers.get("book_quality")),
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
+        "parent_email_dispatcher": _task_runtime_state(workers.get("parent_email_dispatcher")),
         "smart_studio": _task_runtime_state(workers.get("smart_studio")),
         "smart_studio_worker": _task_runtime_state(workers.get("smart_studio")),
         "local_voice_bootstrap": _task_runtime_state(workers.get("local_voice_bootstrap")),

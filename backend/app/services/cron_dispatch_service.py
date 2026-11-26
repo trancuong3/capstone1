@@ -267,6 +267,7 @@ async def run_scheduled_cron_dispatch(
     run_remote_sweeps: bool = False,
     reminders_runner: Callable[..., Awaitable[int]],
     alerts_runner: Callable[..., Awaitable[int]],
+    engagement_runner: Callable[..., Awaitable[int]] | None = None,
     temp_cleanup_runner: Callable[..., Awaitable[int]] | None = None,
     parent_post_ocr_runner: Callable[..., Awaitable[bool]] | None = None,
     total_budget_seconds: float = DEFAULT_CRON_TOTAL_BUDGET_SECONDS,
@@ -279,6 +280,26 @@ async def run_scheduled_cron_dispatch(
 
     reminders_delivered = int(await reminders_runner(now=current))
     presence_alerts_delivered = int(await alerts_runner(now=current))
+    engagement_emails_delivered = 0
+    sweep_errors: list[str] = []
+
+    if engagement_runner is not None:
+        engagement_budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if engagement_budget > 0.25:
+            try:
+                engagement_emails_delivered = int(
+                    await asyncio.wait_for(
+                        engagement_runner(now=current),
+                        timeout=engagement_budget,
+                    )
+                    or 0
+                )
+            except Exception as exc:
+                sweep_errors.append("parent_email_engagement")
+                logger.warning(
+                    "cron_parent_email_engagement_skipped error=%s",
+                    type(exc).__name__,
+                )
 
     temp_submissions_cleaned = 0
     post_ocr_swept = 0
@@ -292,7 +313,6 @@ async def run_scheduled_cron_dispatch(
     ocr_outbox_swept = 0
     local_scan_objects_cleaned = 0
     hf_space_keepwarm_pinged = False
-    sweep_errors: list[str] = []
 
     if run_remote_sweeps:
         effective_temp_cleanup = (
@@ -458,6 +478,7 @@ async def run_scheduled_cron_dispatch(
         "dispatched_at": current.isoformat(),
         "reminders_delivered": reminders_delivered,
         "presence_alerts_delivered": presence_alerts_delivered,
+        "engagement_emails_delivered": engagement_emails_delivered,
         "temp_submissions_cleaned": temp_submissions_cleaned,
         "post_ocr_swept": post_ocr_swept,
         "ocr_leases_requeued": ocr_leases_requeued,

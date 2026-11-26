@@ -93,3 +93,17 @@ services:
         sync: false
       - key: SMTP_FROM_EMAIL
         sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_FROM_NAME
+        sync: false
+      - key: PARENT_EMAIL_APP_URL
+        sync: false
+      - key: PARENT_EMAIL_CRON_SECRET
+        sync: false
+      - key: PARENT_EMAIL_WORKER_ENABLED
+        sync: false

@@ -21,6 +21,7 @@ from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
 from app.services.ocr_inference_job_service import is_remote_ocr_mode
 from app.services.runtime_diagnostics import (
+    collect_email_delivery_health,
     collect_ocr_health,
     collect_remote_ocr_health,
     collect_worker_health,
@@ -1336,6 +1337,9 @@ class AdminSystemService:
         items.append(cache_item)
 
         items.append(AdminHealthItemRead(**storage_details, checked_at=checked_at))
+        items.append(
+            AdminHealthItemRead(**collect_email_delivery_health(), checked_at=checked_at)
+        )
         items.extend(AdminHealthItemRead(**entry, checked_at=checked_at) for entry in ocr_details)
         if workers is not None:
             metrics: dict[str, dict[str, object]] = {}
