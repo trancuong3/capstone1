@@ -114,6 +114,19 @@ class BookCoverGenerateRequest(BaseModel):
     force_regenerate: bool = False
 
 
+class BookCoverFromPageRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    page_id: UUID
+    crop_x: float | None = Field(default=None, ge=0.0, le=1.0)
+    crop_y: float | None = Field(default=None, ge=0.0, le=1.0)
+    crop_w: float | None = Field(default=None, ge=0.05, le=1.0)
+    crop_h: float | None = Field(default=None, ge=0.05, le=1.0)
+    rotation: int = Field(default=0)
+    apply_clahe_restore: bool = True
+    force_replace_user_upload: bool = False
+
+
 class BookCoverGenerateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -123,6 +136,7 @@ class BookCoverGenerateResponse(BaseModel):
         "BLOCKED_NO_IMAGE_PROVIDER",
         "WAITING_FOR_QUOTA",
         "SUPERSEDED_BY_USER_UPLOAD",
+        "REJECTED_CONTAINS_TEXT",
     ]
     job_id: UUID | None = None
     provider_name: str | None = None

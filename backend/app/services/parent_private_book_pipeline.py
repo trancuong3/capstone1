@@ -49,6 +49,16 @@ from app.services.ocr_engine import (
     extract_text_and_boxes,
     normalize_word,
 )
+from app.services.ocr_content_extraction import (
+    build_extraction_provenance_meta,
+    extract_ocr_content,
+    filter_word_dicts_by_extraction,
+    is_stage3_semantic_provider_configured,
+    ocr_words_from_dicts,
+    persist_committed_parent_page_v2,
+    run_stage3_semantic_filter_if_needed,
+    safe_detect_document_boundary,
+)
 from app.services.parent_private_book_post_ocr import (
     build_empty_text_findings,
     build_image_only_findings,
@@ -62,7 +72,10 @@ from app.services.parent_private_book_post_ocr import (
     normalize_private_book_text as _normalize_text,
     should_auto_accept_spelling,
 )
+from app.services.smart_studio_flags import SmartStudioFlags
 from app.services.storage_service import download_object
+
+finalize_committed_private_book_page_v2 = persist_committed_parent_page_v2
 
 logger = logging.getLogger(__name__)
 
@@ -379,6 +392,47 @@ async def process_submission_stages(
                 error_code="OCR_PROCESSING_FAILED",
             )
 
+        # Stage 1B: Smart Book Studio V2 boundary + 20-class extraction (strict local-only privacy default)
+        allow_cloud_ai = not local_ai_enforced
+        studio_flags = SmartStudioFlags.from_environment()
+        raw_word_boxes = [
+            w["bounding_box"]
+            for w in extracted_words
+            if isinstance(w, dict) and _valid_box(w.get("bounding_box")) is not None
+        ]
+        boundary_result = await asyncio.to_thread(
+            safe_detect_document_boundary, image_bytes, raw_word_boxes or None
+        )
+        source_word_inputs = ocr_words_from_dicts(extracted_words)
+        smart_extraction = extract_ocr_content(
+            source_word_inputs,
+            page_number=max(1, candidate_page_num),
+            boundary=boundary_result,
+            flags=studio_flags,
+            book_id=book_id,
+        )
+        if (
+            studio_flags.semantic_layout_enabled
+            and smart_extraction.filter_mode != "off"
+            and any(b.decision == "REVIEW" for b in smart_extraction.blocks)
+            and is_stage3_semantic_provider_configured(
+                allow_cloud=allow_cloud_ai, is_private_book=True
+            )
+        ):
+            smart_extraction = await run_stage3_semantic_filter_if_needed(
+                smart_extraction,
+                source_words=source_word_inputs,
+                allow_cloud=allow_cloud_ai,
+                is_private_book=True,
+                tenant_scope=f"parent:{book_id}",
+                flags=studio_flags,
+            )
+        extracted_meta["smart_ocr_extraction"] = build_extraction_provenance_meta(
+            smart_extraction,
+            source_word_inputs,
+            allow_cloud_ai=allow_cloud_ai,
+        )
+
         # Persist Stage 1 atomically with stale-version & lease check
         locked = await repo.get_submission(submission_id, lock=True)
         if locked is None or _is_stale(
@@ -390,6 +444,7 @@ async def process_submission_stages(
         now = datetime.now(timezone.utc)
         if not extracted_text or not extracted_words:
             # Blank or image-only page: NEVER mark safe; escalate to Admin visual review.
+            extracted_meta["smart_ocr_extraction"]["artwork_candidate"] = True
             locked.OcrStatus = "NO_TEXT_DETECTED"
             locked.OcrText = ""
             locked.OcrWordsJson = []
@@ -441,6 +496,20 @@ async def process_submission_stages(
             await db.refresh(locked)
             return locked
 
+        # Layer 2 clean candidate (only excludes high-confidence noise in active mode;
+        # shadow/off or 0 exclusions keep exact raw OCR text & words!)
+        stage1_candidate_text = extracted_text
+        stage1_candidate_words = extracted_words
+        if (
+            smart_extraction.filter_mode == "active"
+            and smart_extraction.stats.exclude_blocks > 0
+            and smart_extraction.canonical_text.strip()
+        ):
+            filtered_words = filter_word_dicts_by_extraction(extracted_words, smart_extraction)
+            if filtered_words:
+                stage1_candidate_text = _normalize_text(smart_extraction.canonical_text)
+                stage1_candidate_words = filtered_words
+
         locked.OcrStatus = "COMPLETED"
         locked.OcrText = extracted_text
         locked.OcrWordsJson = extracted_words
@@ -448,17 +517,17 @@ async def process_submission_stages(
         locked.OcrHash = safety_content_hash(extracted_text)
         locked.OcrErrorCode = None
         locked.IsImageOnly = False
-        locked.CandidateText = extracted_text
-        locked.CandidateWordsJson = extracted_words
-        locked.CandidateHash = compute_candidate_hash(extracted_text, source_sha256=captured_sha)
+        locked.CandidateText = stage1_candidate_text
+        locked.CandidateWordsJson = stage1_candidate_words
+        locked.CandidateHash = compute_candidate_hash(stage1_candidate_text, source_sha256=captured_sha)
         locked.UpdatedAt = now
         await db.commit()
         await db.refresh(locked)
 
         ocr_status = "COMPLETED"
-        ocr_text = extracted_text
-        ocr_words = extracted_words
-        candidate_text = extracted_text
+        ocr_text = stage1_candidate_text
+        ocr_words = stage1_candidate_words
+        candidate_text = stage1_candidate_text
         candidate_hash = locked.CandidateHash
         is_image_only = False
         await db.rollback()

@@ -2519,6 +2519,26 @@ class ParentPrivateBookService:
             await asyncio.to_thread(delete_object, permanent_path, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET)
             raise
 
+        # Non-fatal V2 post-commit hook: persist PageOcrExtraction + extract clean artwork
+        try:
+            from app.services.ocr_content_extraction import persist_committed_parent_page_v2
+
+            await persist_committed_parent_page_v2(
+                self.db,
+                actor_id=actor_id,
+                book_id=book.Id,
+                page_id=created_page.Id,
+                revision_id=created_rev.Id,
+                submission=sub,
+                image_bytes=image_bytes,
+                trigger_illustration_extract=True,
+            )
+        except Exception:
+            logger.warning(
+                "Non-fatal Smart Book Studio V2 post-commit hook skipped for page %s",
+                created_page.Id,
+            )
+
         await self.db.refresh(sub)
         readable = await self.repo.is_private_book_readable(book.Id, actor_id)
         return ParentAddPageResponse(

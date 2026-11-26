@@ -19,11 +19,14 @@ import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import {
+  applyPageOcrExtractionToDraft,
   computeCanonicalPreviewText,
   extractPageOcrBlocks,
   getPageOcrExtraction,
   patchPageOcrBlocks,
+  type ApplyOcrExtractionToDraftResponseDTO,
 } from "@/lib/api/ocr-extraction-service";
+import { isServiceError } from "@/lib/api/service-error";
 import { cn } from "@/lib/utils/cn";
 import {
   BLOCK_TYPE_LABELS_VI,
@@ -43,6 +46,16 @@ export interface SmartOcrBlockReviewProps {
   readonly pageNumber?: number;
   readonly pageImageUrl?: string | null;
   readonly pageId?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly isRevisionVerified?: boolean;
+  readonly canApplyToDraft?: boolean;
+  readonly applyToDraftFn?: (
+    pageId: string,
+    payload?: { readonly page_revision_id?: string | null },
+  ) => Promise<ApplyOcrExtractionToDraftResponseDTO>;
+  readonly onApplyToDraft?: (
+    result: ApplyOcrExtractionToDraftResponseDTO,
+  ) => Promise<void> | void;
   readonly onPatchBlocks?: (
     payload: PatchPageBlocksRequestDTO,
   ) => Promise<PageOcrExtractionDTO> | PageOcrExtractionDTO;
@@ -261,6 +274,11 @@ export function SmartOcrBlockReview({
   pageNumber,
   pageImageUrl,
   pageId,
+  pageRevisionId,
+  isRevisionVerified = false,
+  canApplyToDraft,
+  applyToDraftFn,
+  onApplyToDraft,
   onPatchBlocks,
   onExtractionChange,
   className,
@@ -276,6 +294,7 @@ export function SmartOcrBlockReview({
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<string>("");
   const [busy, setBusy] = useState(false);
+  const [applyingToDraft, setApplyingToDraft] = useState(false);
   const [notice, setNotice] = useState<{
     tone: "info" | "success" | "warning" | "error";
     text: string;
@@ -313,6 +332,55 @@ export function SmartOcrBlockReview({
 
   const clearBlockCount = cleanBlocks.length + excludedBlocks.length;
   const canUndo = extraction.undo_available || localUndoStack.length > 0;
+  const showApplyToDraftAction =
+    canApplyToDraft ?? Boolean(pageId || applyToDraftFn);
+
+  async function handleApplyCleanTextToDraft() {
+    if (
+      busy ||
+      applyingToDraft ||
+      isRevisionVerified ||
+      !extraction.canonical_text.trim()
+    ) {
+      return;
+    }
+    const targetPageId = pageId ?? extraction.book_page_id;
+    if (!targetPageId && !applyToDraftFn) {
+      return;
+    }
+    setApplyingToDraft(true);
+    setNotice(null);
+    try {
+      const targetRevisionId =
+        pageRevisionId ?? extraction.page_revision_id ?? null;
+      const result = applyToDraftFn
+        ? await applyToDraftFn(targetPageId ?? "", {
+            page_revision_id: targetRevisionId,
+          })
+        : await applyPageOcrExtractionToDraft(targetPageId!, {
+            page_revision_id: targetRevisionId,
+          });
+      await onApplyToDraft?.(result);
+      setNotice({
+        tone: "success",
+        text: `Đã áp dụng văn bản sạch (${result.applied_word_count} từ) vào bản nháp OCR.`,
+      });
+    } catch (error) {
+      if (isServiceError(error) && error.status === 409) {
+        setNotice({
+          tone: "warning",
+          text: "Revision hiện tại đã ở trạng thái VERIFIED nên không thể ghi đè bản nháp.",
+        });
+      } else {
+        setNotice({
+          tone: "error",
+          text: "Chưa thể áp dụng văn bản sạch vào bản nháp. Vui lòng thử lại.",
+        });
+      }
+    } finally {
+      setApplyingToDraft(false);
+    }
+  }
 
   async function commitPatch(
     payload: PatchPageBlocksRequestDTO,
@@ -621,8 +689,35 @@ export function SmartOcrBlockReview({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {showApplyToDraftAction ? (
+            <Button
+              className="min-h-11"
+              data-testid="apply-ocr-to-draft-btn"
+              disabled={
+                busy ||
+                applyingToDraft ||
+                isRevisionVerified ||
+                !extraction.canonical_text.trim()
+              }
+              fullWidth={false}
+              isLoading={applyingToDraft}
+              onClick={() => void handleApplyCleanTextToDraft()}
+              size="compact"
+              title={
+                isRevisionVerified
+                  ? "Revision đã VERIFIED nên không thể chỉnh sửa bản nháp"
+                  : undefined
+              }
+              type="button"
+              variant="primary"
+            >
+              <FileText aria-hidden="true" className="size-4" />
+              Áp dụng văn bản sạch vào bản nháp
+            </Button>
+          ) : null}
           <Button
-            disabled={busy || clearBlockCount === 0}
+            className="min-h-11"
+            disabled={busy || applyingToDraft || clearBlockCount === 0}
             fullWidth={false}
             onClick={() =>
               void commitPatch({
@@ -636,7 +731,8 @@ export function SmartOcrBlockReview({
             Chấp nhận các khối rõ ràng
           </Button>
           <Button
-            disabled={busy || !canUndo}
+            className="min-h-11"
+            disabled={busy || applyingToDraft || !canUndo}
             fullWidth={false}
             onClick={() => void commitPatch({ undo: true })}
             size="compact"
@@ -895,10 +991,20 @@ export function SmartOcrBlockReviewLoader({
   pageId,
   pageNumber,
   pageImageUrl,
+  pageRevisionId,
+  isRevisionVerified = false,
+  canApplyToDraft = true,
+  onApplyToDraft,
 }: {
   readonly pageId: string;
   readonly pageNumber?: number;
   readonly pageImageUrl?: string | null;
+  readonly pageRevisionId?: string | null;
+  readonly isRevisionVerified?: boolean;
+  readonly canApplyToDraft?: boolean;
+  readonly onApplyToDraft?: (
+    result: ApplyOcrExtractionToDraftResponseDTO,
+  ) => Promise<void> | void;
 }) {
   const [extraction, setExtraction] = useState<PageOcrExtractionDTO | null>(
     null,
@@ -949,12 +1055,16 @@ export function SmartOcrBlockReviewLoader({
       {extraction ? (
         <SmartOcrBlockReview
           key={`${pageId}:${extraction.extraction_id ?? "transient"}:${extraction.blocks.length}`}
+          canApplyToDraft={canApplyToDraft}
           extraction={extraction}
+          isRevisionVerified={isRevisionVerified}
+          onApplyToDraft={onApplyToDraft}
           onExtractionChange={setExtraction}
           onPatchBlocks={(payload) => patchPageOcrBlocks(pageId, payload)}
           pageId={pageId}
           pageImageUrl={pageImageUrl}
           pageNumber={pageNumber}
+          pageRevisionId={pageRevisionId}
         />
       ) : null}
     </div>

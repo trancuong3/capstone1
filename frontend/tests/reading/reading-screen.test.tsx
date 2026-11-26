@@ -3426,4 +3426,73 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await screen.findByLabelText("Trang sách 5");
     expect(screen.queryByTestId("phonics-lesson-card")).toBeNull();
   });
+
+  it("does not trigger the page sample banner while phonics playback is active and persists reading mode across page turns", async () => {
+    let finishPhonics!: () => void;
+    const phonicsPlayback = new Promise<void>((resolve) => {
+      finishPhonics = resolve;
+    });
+    speechPlayerMock.play.mockImplementationOnce(() => {
+      speechPlayerMock.isPlaying = true;
+      return phonicsPlayback;
+    });
+    services.readingService.getCurrentPage
+      .mockResolvedValueOnce({
+        ...pageFour,
+        image_url: "https://example.test/page-4.png",
+      })
+      .mockResolvedValue({
+        ...pageFive,
+        image_url: "https://example.test/page-5.png",
+        illustration_url: "https://example.test/page-5-art.webp",
+        illustration_text_free: true,
+      });
+    services.readingService.navigateToPage.mockResolvedValue({
+      ...pageProgressFixture,
+      current_page_id: pageFive.page_id,
+      current_page_number: 5,
+      current_index: 1,
+    });
+
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    await screen.findByLabelText("Trang sách 4");
+    const switcher = screen.getByTestId("reading-mode-switcher");
+    expect(switcher).toBeInTheDocument();
+
+    // Start phonics playback -> MUST NOT show the full-page "Đọc mẫu" banner!
+    await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
+    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      screen.queryByText(
+        "Đang phát âm toàn bộ trang sách theo giọng mẫu...",
+      ),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      speechPlayerMock.isPlaying = false;
+      finishPhonics();
+    });
+
+    // Switch reading mode to ORIGINAL ("Trang gốc đối chiếu") on page 4
+    await user.click(
+      screen.getByRole("tab", { name: "Trang gốc đối chiếu" }),
+    );
+    expect(screen.getByRole("article")).toHaveAttribute(
+      "data-reading-mode",
+      "ORIGINAL",
+    );
+
+    // Turn to page 5 (even with a verified illustration) -> session mode persists as ORIGINAL!
+    await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
+    await screen.findByLabelText("Trang sách 5");
+    expect(screen.getByRole("article")).toHaveAttribute(
+      "data-reading-mode",
+      "ORIGINAL",
+    );
+    expect(
+      screen.getByRole("tab", { name: "Đọc có tranh" }),
+    ).toBeInTheDocument();
+  });
 });

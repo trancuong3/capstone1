@@ -92,6 +92,18 @@ from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
 from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
+from app.schemas.ocr_extraction import DocumentBoundaryResult
+from app.services.ocr_content_extraction import (
+    extract_ocr_content,
+    filter_word_dicts_by_extraction,
+    is_stage3_semantic_provider_configured,
+    load_sibling_cross_pages_safe,
+    ocr_words_from_dicts,
+    persist_extraction_savepoint_safe,
+    run_stage3_semantic_filter_if_needed,
+    safe_detect_document_boundary,
+)
+from app.services.smart_studio_flags import SmartStudioFlags
 from app.services.storage_service import create_signed_image_url, delete_object, download_object, upload_object
 
 logger = logging.getLogger(__name__)
@@ -1344,6 +1356,197 @@ class AdminOcrService:
         revision.ProcessingMeta = metadata
 
 
+    async def _run_smart_ocr_layer2(
+        self,
+        *,
+        book: Book | None,
+        page: BookPage,
+        revision_id: UUID,
+        raw_text: str,
+        raw_words: list[dict[str, object]],
+        metadata: dict[str, object],
+        boundary: DocumentBoundaryResult | None = None,
+        cross_pages: list[Any] | None = None,
+    ) -> tuple[str, list[dict[str, object]], Any | None, list[Any]]:
+        """Run V2 boundary/block extraction respecting SMART_OCR_FILTER_MODE (off|shadow|active).
+
+        Preserves Layer 1 `raw_text` & `source_words` untouched. In `shadow` or `off` mode
+        (or whenever 0 blocks are excluded), returns exact legacy `raw_text` and `raw_words`.
+        In `active` mode with high-confidence exclusions, returns clean Layer 2 `draft_text`
+        and filtered `draft_words` while honoring the 35% Total-Loss Circuit Breaker.
+        """
+        flags = SmartStudioFlags.from_environment()
+        source_words = ocr_words_from_dicts(raw_words)
+        if not source_words:
+            return raw_text, raw_words, None, []
+
+        sibling_pages = (
+            cross_pages
+            if cross_pages is not None
+            else await load_sibling_cross_pages_safe(
+                self.db, book_id=page.BookId, exclude_page_id=page.Id
+            )
+        )
+        extraction = extract_ocr_content(
+            source_words,
+            page_number=max(1, int(getattr(page, "PageNumber", 1) or 1)),
+            book_title=getattr(book, "Title", None) if book is not None else None,
+            book_author=getattr(book, "Author", None) if book is not None else None,
+            cross_pages=sibling_pages,
+            boundary=boundary,
+            flags=flags,
+            book_id=page.BookId,
+            book_page_id=page.Id,
+            page_revision_id=revision_id,
+        )
+        if (
+            flags.semantic_layout_enabled
+            and extraction.filter_mode != "off"
+            and any(b.decision == "REVIEW" for b in extraction.blocks)
+            and is_stage3_semantic_provider_configured(
+                allow_cloud=True, is_private_book=False
+            )
+        ):
+            extraction = await run_stage3_semantic_filter_if_needed(
+                extraction,
+                source_words=source_words,
+                allow_cloud=True,
+                is_private_book=False,
+                tenant_scope="admin:catalog",
+                flags=flags,
+            )
+
+        metadata["smart_ocr_extraction"] = {
+            "source_hash": extraction.source_hash,
+            "algorithm_version": extraction.algorithm_version,
+            "filter_mode": extraction.filter_mode,
+            "page_kind": extraction.page_kind,
+            "requires_review": bool(extraction.requires_review),
+            "circuit_breaker_triggered": bool(extraction.stats.circuit_breaker_triggered),
+            "total_blocks": extraction.stats.total_blocks,
+            "keep_blocks": extraction.stats.keep_blocks,
+            "exclude_blocks": extraction.stats.exclude_blocks,
+            "review_blocks": extraction.stats.review_blocks,
+            "retention_ratio": extraction.stats.retention_ratio,
+            "boundary_auto_crop": bool(boundary.auto_crop) if boundary is not None else False,
+        }
+
+        draft_text = raw_text
+        draft_words = raw_words
+        if (
+            extraction.filter_mode == "active"
+            and extraction.stats.exclude_blocks > 0
+            and extraction.canonical_text.strip()
+        ):
+            filtered_words = filter_word_dicts_by_extraction(raw_words, extraction)
+            if filtered_words:
+                canonical_clean = unicodedata.normalize("NFC", extraction.canonical_text.strip())
+                if normalize_text_tokens(canonical_clean) == [
+                    str(w["normalized_text"]) for w in filtered_words
+                ]:
+                    draft_text = canonical_clean
+                    draft_words = filtered_words
+                    metadata["word_review_statuses"] = [
+                        str(word.get("ocr_review_status", "needs_review"))
+                        for word in draft_words
+                    ]
+                    metadata["word_score_sources"] = self._word_score_sources(
+                        draft_words, metadata
+                    )
+                    metadata["word_evidence_v2"] = [
+                        self._normalize_word_evidence(word.get("ocr_evidence"))
+                        for word in draft_words
+                    ]
+                    metadata["word_evidence_v2_authoritative"] = True
+
+        return draft_text, draft_words, extraction, source_words
+
+    async def dispatch_batch_book_import_job(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        *,
+        total_pages: int = 0,
+        file_name: str | None = None,
+        source_format: str | None = None,
+        ocr_job_ids: list[str] | None = None,
+        page_ids: list[str] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, object] | None:
+        """Create a durable BATCH_BOOK_IMPORT SmartStudioJob with savepoint degradation safety."""
+        from app.repositories.global_tasks_repository import (
+            GlobalTasksRepository,
+            _is_missing_table_error,
+        )
+        from app.services.global_tasks_service import notify_smart_studio_worker
+        from sqlalchemy.exc import SQLAlchemyError
+
+        if not hasattr(self.db, "begin_nested"):
+            return None
+        safe_total = max(0, int(total_pages))
+        raw_idem = (
+            (idempotency_key or "").strip()
+            or f"batch-import:{book_id}:{uuid4().hex[:12]}"
+        )[:128]
+        input_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "book_id": str(book_id),
+                    "file_name": file_name or "",
+                    "source_format": source_format or "",
+                    "total_pages": safe_total,
+                    "ocr_job_ids": list(ocr_job_ids or []),
+                    "page_ids": list(page_ids or []),
+                },
+                sort_keys=True,
+                ensure_ascii=False,
+            ).encode("utf-8")
+        ).hexdigest()
+        checkpoints = {
+            "file_name": file_name,
+            "source_format": source_format,
+            "total_source_pages": safe_total,
+            "ocr_job_ids": list(ocr_job_ids or []),
+            "page_ids": list(page_ids or []),
+            "completed_stages": [],
+        }
+        try:
+            async with self.db.begin_nested():
+                repo = GlobalTasksRepository(self.db)
+                job, created = await repo.create_or_get_idempotent(
+                    job_type="BATCH_BOOK_IMPORT",
+                    actor_id=actor_id,
+                    actor_role="admin",
+                    book_id=book_id,
+                    book_page_id=None,
+                    source_revision_id=None,
+                    input_hash=input_hash,
+                    idempotency_key=raw_idem,
+                    priority=60,
+                    max_attempts=3,
+                    progress_completed=0 if safe_total > 0 else None,
+                    progress_total=safe_total if safe_total > 0 else None,
+                    progress_unit="trang" if safe_total > 0 else None,
+                    initial_checkpoints=checkpoints,
+                )
+            await self.db.commit()
+            if created:
+                notify_smart_studio_worker()
+            return {
+                "smart_studio_job_id": str(job.Id),
+                "job_type": job.JobType,
+                "status": job.Status,
+                "deduplicated": not created,
+            }
+        except SQLAlchemyError as exc:
+            if _is_missing_table_error(exc):
+                logger.warning("smart_studio_jobs table unavailable for BATCH_BOOK_IMPORT")
+                return None
+            raise
+        except Exception as exc:
+            logger.warning("Skipping BATCH_BOOK_IMPORT studio job tracking: %s", type(exc).__name__)
+            return None
+
     async def _renumber_active_pages(self, book_id: UUID, *, lock: bool = True) -> bool:
         """Normalize ACTIVE pages and PROCESSING reservations to 1..N in page order."""
         active_pages = await self.repo.active_pages_for_renumber(book_id, lock=lock)
@@ -1530,6 +1733,11 @@ class AdminOcrService:
                 text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
                 if not text_value:
                     raise HTTPException(status_code=422, detail="OCR produced empty text")
+                boundary = await run_in_threadpool(
+                    safe_detect_document_boundary,
+                    data,
+                    [w["bbox"] for w in words],
+                )
                 metadata = dict(ocr["metadata"])
                 metadata.update({"source_image_path": object_path, "source_image_width": width,
                                  "source_image_height": height, "source_image_sha256": image_digest})
@@ -1631,6 +1839,25 @@ class AdminOcrService:
                     "upload_id": str(upload_id), "image_sha256": image_digest,
                     "upload_revision_id": str(revision_id),
                 } if upload_id else {})}
+                draft_text, draft_words, smart_extraction, smart_source_words = (
+                    await self._run_smart_ocr_layer2(
+                        book=book,
+                        page=page,
+                        revision_id=revision_id,
+                        raw_text=text_value,
+                        raw_words=words,
+                        metadata=metadata,
+                        boundary=boundary,
+                    )
+                )
+                if draft_text != text_value or len(draft_words) != len(words):
+                    content_hash = hashlib.sha256(
+                        json.dumps(
+                            {"text": draft_text, "words": draft_words},
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        ).encode("utf-8")
+                    ).hexdigest()
                 revision = PageRevision(
                     Id=revision_id,
                     PageId=page_id,
@@ -1638,13 +1865,23 @@ class AdminOcrService:
                     VerificationStatus="NEEDS_REVIEW",
                     OriginalOcrText=text_value,
                     VerifiedText=None,
-                    DraftText=text_value,
+                    DraftText=draft_text,
                     ContentHash=content_hash,
                     ProcessingMeta=metadata,
                     CreatedAt=datetime.now(timezone.utc),
                 )
-                self.repo.stage_page_revision_bundle(page, revision, words)
+                self.repo.stage_page_revision_bundle(page, revision, draft_words)
                 await self.repo.flush()
+                if smart_extraction is not None:
+                    await persist_extraction_savepoint_safe(
+                        self.db,
+                        book_id=book_id,
+                        page_id=page_id,
+                        page_revision_id=revision_id,
+                        owner_id=None,
+                        extraction=smart_extraction,
+                        source_words=smart_source_words,
+                    )
                 result = await self.revision_detail(page, revision)
                 assigned_page_number = int(page.PageNumber)
                 await self.db.commit()
@@ -1714,7 +1951,30 @@ class AdminOcrService:
         file: UploadFile,
         *,
         upload_id: UUID | None = None,
-    ) -> AdminDocumentUploadResponse:
+        dispatch_batch_job: bool = False,
+    ) -> AdminDocumentUploadResponse | dict[str, object]:
+        if dispatch_batch_job:
+            enqueued = await self.enqueue_upload_document_jobs(
+                actor_id,
+                book_id,
+                file,
+                upload_id=upload_id,
+            )
+            batch_job = await self.dispatch_batch_book_import_job(
+                actor_id,
+                book_id,
+                total_pages=int(enqueued.get("total_source_pages", 0) or 0),
+                file_name=getattr(file, "filename", None),
+                source_format=str(enqueued.get("source_format") or ""),
+                ocr_job_ids=[str(jid) for jid in (enqueued.get("job_ids") or [])],
+                idempotency_key=(
+                    f"batch-import:{book_id}:{upload_id}" if upload_id is not None else None
+                ),
+            )
+            return {
+                **enqueued,
+                "batch_import_job": batch_job,
+            }
         started_at = time.perf_counter()
         log_diagnostic(
             logger,
@@ -4326,11 +4586,35 @@ class AdminOcrService:
         metadata["word_evidence_v2"] = [
             self._normalize_word_evidence(word.get("ocr_evidence")) for word in normalized_words
         ]
-        content_hash = hashlib.sha256(
-            json.dumps({"text": text_value, "words": normalized_words}, ensure_ascii=False, sort_keys=True).encode("utf-8")
-        ).hexdigest()
 
         revision_id = uuid4()
+        raw_boundary = (ocr_meta or {}).get("geometry_transform") or (ocr_meta or {}).get("boundary")
+        parsed_boundary: DocumentBoundaryResult | None = None
+        if isinstance(raw_boundary, dict) and raw_boundary:
+            try:
+                parsed_boundary = DocumentBoundaryResult.model_validate(raw_boundary)
+            except Exception:
+                parsed_boundary = None
+
+        draft_text, draft_words, smart_extraction, smart_source_words = (
+            await self._run_smart_ocr_layer2(
+                book=book,
+                page=page,
+                revision_id=revision_id,
+                raw_text=text_value,
+                raw_words=normalized_words,
+                metadata=metadata,
+                boundary=parsed_boundary,
+            )
+        )
+        content_hash = hashlib.sha256(
+            json.dumps(
+                {"text": draft_text, "words": draft_words},
+                ensure_ascii=False,
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
         upload_id_raw = proc_meta.get("upload_id")
         if getattr(job, "JobKind", None) == JOB_KIND_ADMIN_UPLOAD:
             if page.LifecycleStatus != "PROCESSING":
@@ -4350,13 +4634,23 @@ class AdminOcrService:
                 VerificationStatus="NEEDS_REVIEW",
                 OriginalOcrText=text_value,
                 VerifiedText=None,
-                DraftText=text_value,
+                DraftText=draft_text,
                 ContentHash=content_hash,
                 ProcessingMeta=metadata,
                 CreatedAt=now,
             )
-            self.repo.stage_page_revision_bundle(page, revision, normalized_words)
+            self.repo.stage_page_revision_bundle(page, revision, draft_words)
             await self.repo.flush()
+            if smart_extraction is not None:
+                await persist_extraction_savepoint_safe(
+                    self.db,
+                    book_id=book_id,
+                    page_id=page.Id,
+                    page_revision_id=revision.Id,
+                    owner_id=None,
+                    extraction=smart_extraction,
+                    source_words=smart_source_words,
+                )
             return {"revision_id": revision.Id}
 
         if page.LifecycleStatus != "ACTIVE":
@@ -4393,13 +4687,23 @@ class AdminOcrService:
             VerificationStatus="NEEDS_REVIEW",
             OriginalOcrText=text_value,
             VerifiedText=None,
-            DraftText=text_value,
+            DraftText=draft_text,
             ContentHash=content_hash,
             ProcessingMeta=metadata,
             CreatedAt=now,
         )
-        self.repo.stage_revision_bundle(revision, normalized_words)
+        self.repo.stage_revision_bundle(revision, draft_words)
         await self.repo.flush()
+        if smart_extraction is not None:
+            await persist_extraction_savepoint_safe(
+                self.db,
+                book_id=book_id,
+                page_id=page.Id,
+                page_revision_id=revision.Id,
+                owner_id=None,
+                extraction=smart_extraction,
+                source_words=smart_source_words,
+            )
         return {"revision_id": revision.Id}
 
     async def image_url(self, page: BookPage) -> str:

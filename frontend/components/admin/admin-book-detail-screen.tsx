@@ -212,7 +212,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           maxGrade: book.max_grade,
         })}
       />
-      <div className="mb-4 grid gap-4 sm:grid-cols-2">
+      <div className="mb-4 grid gap-4 sm:grid-cols-3">
         <Link
           className="inline-flex min-h-12 items-center justify-center gap-2 rounded-control bg-white px-4 font-bold text-ink focus-visible:outline-3 focus-visible:outline-primary"
           href="/admin/books"
@@ -225,6 +225,12 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
           href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
         >
           {t("books.detail.editMetadata")}
+        </Link>
+        <Link
+          className="inline-flex min-h-12 items-center justify-center rounded-control border border-border bg-white px-4 font-bold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary"
+          href="/admin/tasks"
+        >
+          Trung tâm tác vụ AI
         </Link>
       </div>
       <div className="mb-4 flex flex-wrap items-center gap-4">

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
@@ -15,9 +15,16 @@ import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
+import {
+  createBookAssetsService,
+  type BookAssetsService,
+} from "@/lib/api/book-assets-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookCreateDTO, AdminBookDTO } from "@/types/admin";
-import type { BookPresentationAssetDTO } from "@/types/book-assets";
+import type {
+  AssetSourceType,
+  BookPresentationAssetDTO,
+} from "@/types/book-assets";
 
 const ISSUE_KEYS = new Set([
   "MISSING_TITLE",
@@ -31,6 +38,7 @@ interface AdminBookEditorScreenProps {
   returnTo?: "detail" | "metadata-quality";
   issue?: string;
   defaultCoverStudioOpen?: boolean;
+  assetsService?: BookAssetsService;
 }
 
 export function AdminBookEditorScreen({
@@ -38,8 +46,13 @@ export function AdminBookEditorScreen({
   returnTo = "detail",
   issue,
   defaultCoverStudioOpen = false,
+  assetsService,
 }: AdminBookEditorScreenProps) {
   const { books } = useAdminServices();
+  const resolvedAssetsService = useMemo(
+    () => assetsService ?? createBookAssetsService(),
+    [assetsService],
+  );
   const t = useTranslations("admin");
   const router = useRouter();
   const [book, setBook] = useState<AdminBookDTO | null>(null);
@@ -52,6 +65,7 @@ export function AdminBookEditorScreen({
   );
   const [activeCoverAsset, setActiveCoverAsset] =
     useState<BookPresentationAssetDTO | null>(null);
+  const [coverExplicitlyCleared, setCoverExplicitlyCleared] = useState(false);
   const [notice, setNotice] = useState<{
     tone: "info" | "error";
     title: string;
@@ -63,10 +77,22 @@ export function AdminBookEditorScreen({
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
+    setCoverExplicitlyCleared(false);
     try {
       const current = await books.get(bookId);
       if (requestId !== requestIdRef.current) return;
       setBook(current);
+      // Hydrate active cover asset immediately on mount without waiting for Cover Studio modal.
+      void resolvedAssetsService
+        .getBookAssets(bookId)
+        .then((summary) => {
+          if (requestId !== requestIdRef.current) return;
+          setActiveCoverAsset(summary.active_cover ?? null);
+          setCoverExplicitlyCleared(summary.active_cover == null);
+        })
+        .catch(() => {
+          // Graceful degradation: fall back to book.cover_url / METADATA_RENDER.
+        });
     } catch (cause) {
       if (requestId !== requestIdRef.current) return;
       setBook(null);
@@ -78,7 +104,7 @@ export function AdminBookEditorScreen({
     } finally {
       if (requestId === requestIdRef.current) setLoading(false);
     }
-  }, [bookId, books]);
+  }, [bookId, books, resolvedAssetsService]);
 
   useEffect(() => {
     const timeout = globalThis.setTimeout(() => void load(), 0);
@@ -197,6 +223,14 @@ export function AdminBookEditorScreen({
       ? "/admin/metadata-quality"
       : `/admin/books/${encodeURIComponent(bookId)}`;
 
+  const resolvedCoverUrl = coverExplicitlyCleared
+    ? null
+    : (activeCoverAsset?.media_url ?? book.cover_url ?? null);
+  const resolvedCoverSourceType: AssetSourceType | null = coverExplicitlyCleared
+    ? "METADATA_RENDER"
+    : (activeCoverAsset?.source_type ??
+      ((book.cover_source_type as AssetSourceType | null | undefined) ?? null));
+
   return (
     <section className="figma-form-page mx-auto flex w-full max-w-[960px] flex-col gap-4">
       <AdminPageHeader
@@ -245,8 +279,8 @@ export function AdminBookEditorScreen({
                 max_grade: book.max_grade,
                 lifecycle_status: book.lifecycle_status,
               }}
-              coverSourceType={activeCoverAsset?.source_type ?? null}
-              coverUrl={activeCoverAsset?.media_url ?? null}
+              coverSourceType={resolvedCoverSourceType}
+              coverUrl={resolvedCoverUrl}
               showTitle={false}
               size="small"
             />
@@ -277,11 +311,15 @@ export function AdminBookEditorScreen({
               autoLoad
               bookId={bookId}
               bookTitle={book.title.trim() ? book.title : "Chưa có tiêu đề"}
-              initialCoverSourceType={activeCoverAsset?.source_type ?? null}
-              initialCoverUrl={activeCoverAsset?.media_url ?? null}
+              initialCoverSourceType={resolvedCoverSourceType}
+              initialCoverUrl={resolvedCoverUrl}
               maxGrade={book.max_grade}
               minGrade={book.min_grade}
-              onCoverUpdated={(asset) => setActiveCoverAsset(asset)}
+              onCoverUpdated={(asset) => {
+                setActiveCoverAsset(asset);
+                setCoverExplicitlyCleared(asset === null);
+              }}
+              service={resolvedAssetsService}
             />
           </div>
         ) : null}
@@ -293,8 +331,8 @@ export function AdminBookEditorScreen({
         <AdminBookForm
           bookId={bookId}
           cancelHref={cancelHref}
-          coverSourceType={activeCoverAsset?.source_type ?? null}
-          coverUrl={activeCoverAsset?.media_url ?? null}
+          coverSourceType={resolvedCoverSourceType}
+          coverUrl={resolvedCoverUrl}
           initial={initial}
           onSubmit={saveMetadata}
           submitLabel={t("books.editor.submitLabel")}

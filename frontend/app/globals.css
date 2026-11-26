@@ -654,8 +654,9 @@
   }
   .reader-bookplate > div:first-child {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
   }
   .reader-sheet:not([data-render-mode="image-overlay"]) .reader-folio,
   .reader-sheet[data-render-mode="image-overlay"] .reader-folio {

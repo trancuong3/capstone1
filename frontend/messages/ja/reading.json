@@ -260,7 +260,17 @@
     "referencePageAlt": "ページ {page} の参照画像",
     "scrollToCurrentWord": "読み上げ中の単語について",
     "currentWordPrefix": "現在の単語： ",
-    "overlayAria": "バウンディングボックスで現在の単語をハイライト"
+    "overlayAria": "バウンディングボックスで現在の単語をハイライト",
+    "readingModeSwitcherAria": "ページの表示モード",
+    "readingModeIllustrated": "イラスト付き",
+    "readingModeIllustratedTitle": "文字のない挿絵と読み上げ本文を一緒に表示します",
+    "readingModeText": "文字のみ",
+    "readingModeTextTitle": "読みやすい本文テキストに集中して表示します",
+    "readingModeOriginal": "元のページ",
+    "readingModeOriginalTitle": "比較用にスキャンした元のページ画像を表示します",
+    "illustrationAlt": "{page}ページのイラスト",
+    "originalReferenceHeading": "元のページ画像（比較用）",
+    "originalReferenceAlt": "{page}ページの元画像"
   },
   "pageContent": {
     "incorrectWordAria": "正しくありません：\"{word}\"。もう一度読んでみましょう。",

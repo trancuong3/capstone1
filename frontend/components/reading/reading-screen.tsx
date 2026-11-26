@@ -161,6 +161,7 @@ import {
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
 import type { SessionPhase } from "@/lib/reading/presence-monitor";
 import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
   ReadingCompletionSummaryUI,
@@ -342,6 +343,11 @@ function ReadingSessionScreen({
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
+  const [isPlayingPageSample, setIsPlayingPageSample] = useState(false);
+  const [isPlayingTutorAudio, setIsPlayingTutorAudio] = useState(false);
+  const [readingMode, setReadingMode] = useState<ReadingDisplayMode | null>(
+    null,
+  );
   const [previewSnapshot, setPreviewSnapshot] =
     useState<RealtimeAlignmentSnapshot | null>(null);
   const [spokenWords, setSpokenWords] = useState<Set<string>>(() => new Set());
@@ -639,6 +645,7 @@ function ReadingSessionScreen({
 
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      setIsPlayingPageSample(false);
     }
 
     setIsReadingWord(true);
@@ -3523,6 +3530,8 @@ function ReadingSessionScreen({
       retryResumeAfterAssistantAudioRef.current =
         retryCandidatesRef.current[retryPositionRef.current] ?? null;
     }
+    setIsPlayingPageSample(false);
+    setIsPlayingTutorAudio(false);
     speechPlayer.stop();
   }
 
@@ -3542,6 +3551,7 @@ function ReadingSessionScreen({
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      setIsPlayingPageSample(false);
       setIsReadingWord(false);
       setIsBusy(false);
       return;
@@ -3557,6 +3567,7 @@ function ReadingSessionScreen({
 
     setIsBusy(true);
     setIsReadingWord(false);
+    setIsPlayingPageSample(true);
     const readingCursorBeforeSample =
       alignmentEngineRef.current?.getSnapshot().currentWordId ??
       currentWordId ??
@@ -3610,6 +3621,7 @@ function ReadingSessionScreen({
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
+        setIsPlayingPageSample(false);
         setIsBusy(false);
       }
     }
@@ -3630,6 +3642,7 @@ function ReadingSessionScreen({
     if (isBusy && !speechPlayer.isPlaying) return;
     if (speechPlayer.isPlaying) {
       speechPlayer.stop();
+      setIsPlayingPageSample(false);
       setIsReadingWord(false);
       setIsBusy(false);
     }
@@ -3809,6 +3822,8 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     preventAssistantAudioResume();
     tutorResumeMicAfterPlaybackRef.current = false;
+    setIsPlayingPageSample(false);
+    setIsPlayingTutorAudio(false);
     speechPlayer.stop();
     if (
       listeningStopRef.current ||
@@ -3928,6 +3943,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     preventAssistantAudioResume();
     speechPlayer.stop();
+    setIsPlayingPageSample(false);
     setIsReadingWord(false);
     try {
       if (
@@ -4204,11 +4220,13 @@ function ReadingSessionScreen({
             tutorText,
             performance.now(),
           );
+          setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(tutorText, {
               wordSample: !action || action.tts_text === word,
             });
           } finally {
+            setIsPlayingTutorAudio(false);
             echoGuard.playbackEnded(tutorPlaybackId, performance.now());
           }
           if (
@@ -4275,11 +4293,13 @@ function ReadingSessionScreen({
             retryTutorText,
             performance.now(),
           );
+          setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(retryTutorText, {
               wordSample: !nextAction || nextAction.tts_text === word,
             });
           } finally {
+            setIsPlayingTutorAudio(false);
             echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
           }
         },
@@ -4310,6 +4330,7 @@ function ReadingSessionScreen({
     const shouldResumeListening = tutorResumeListeningRef.current;
     tutorResumeListeningRef.current = false;
     tutorPlaybackGenerationRef.current += 1;
+    setIsPlayingTutorAudio(false);
     speechPlayer.stop();
     setTutorOpen(false);
     setUiState("reading");
@@ -6756,8 +6777,15 @@ function ReadingSessionScreen({
         retryWordCount={retryCandidates.length}
         retryFeedback={retryFeedback}
         isPageTransitioning={uiState === "page-turn"}
-        isPlayingSample={speechPlayer.isPlaying && !isReadingWord}
+        isPlayingSample={
+          speechPlayer.isPlaying &&
+          (retryMode
+            ? !isReadingWord && !isPlayingPhonicsLesson && !isPlayingTutorAudio
+            : isPlayingPageSample)
+        }
         isSamplePaused={speechPlayer.isPaused}
+        readingMode={readingMode}
+        onReadingModeChange={setReadingMode}
         onToggleSamplePause={() => {
           if (speechPlayer.isPaused)
             void speechPlayer.resume().catch(() => setUiState("tts-error"));
@@ -6854,7 +6882,13 @@ function ReadingSessionScreen({
         hesitationWordIds={hesitationWordIds}
         assistedWordIds={assistedWordIds}
         companionBubble={companionBubble}
-        isCompanionSpeaking={speechPlayer.isPlaying}
+        isCompanionSpeaking={
+          speechPlayer.isPlaying &&
+          !isPlayingPageSample &&
+          !isPlayingPhonicsLesson &&
+          !isReadingWord &&
+          !isPlayingTutorAudio
+        }
         comparisonResult={comparisonResult}
         sentenceReinforcementPanel={
           activeSentenceReinforcement ? (
