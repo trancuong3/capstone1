@@ -114,6 +114,10 @@ def build_remote_backend_state_store_factory(
 
 
 class ColabWorker:
+    ARTIFACT_FETCH_MAX_ATTEMPTS = 5
+    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
+    RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+
     def __init__(
         self,
         api_base: str,
@@ -136,6 +140,8 @@ class ColabWorker:
         self.work_root.mkdir(parents=True, exist_ok=True)
         self.drive_root = Path(drive_root) if (drive_root is not None and str(drive_root).strip()) else None
         self.poll_seconds = max(5, poll_seconds)
+        self.artifact_fetch_max_attempts = self.ARTIFACT_FETCH_MAX_ATTEMPTS
+        self.artifact_fetch_retry_base_seconds = self.ARTIFACT_FETCH_RETRY_BASE_SECONDS
         has_resume_root = resume_root is not None and str(resume_root).strip() != ""
         if state_store_factory is None:
             if has_resume_root or self.drive_root is not None:
@@ -267,29 +273,105 @@ class ColabWorker:
         return dataset, items
 
     @staticmethod
-    def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
+    def _parse_content_length(header_value: Any) -> int | None:
+        raw = str(header_value or "").strip()
+        if raw.isdigit():
+            return int(raw)
+        return None
+
+    @classmethod
+    def _stream_http_download(
+        cls,
+        getter: Callable[[], Any],
+        destination: Path,
+        expected_sha256: str | None = None,
+        *,
+        max_attempts: int | None = None,
+        retry_base_seconds: float | None = None,
+    ) -> None:
         expected = expected_sha256.lower() if expected_sha256 else None
         if destination.exists():
             if expected is None or sha256_file(destination) == expected:
                 return
             raise ValueError("CACHED_OBJECT_HASH_MISMATCH")
+        attempts = max(1, int(max_attempts if max_attempts is not None else cls.ARTIFACT_FETCH_MAX_ATTEMPTS))
+        base_delay = max(
+            0.0,
+            float(
+                retry_base_seconds
+                if retry_base_seconds is not None
+                else cls.ARTIFACT_FETCH_RETRY_BASE_SECONDS
+            ),
+        )
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".download")
-        temporary.unlink(missing_ok=True)
-        digest = hashlib.sha256()
-        try:
-            with requests.get(url, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                with temporary.open("xb") as output:
-                    for block in response.iter_content(1024 * 1024):
-                        if block:
-                            output.write(block)
-                            digest.update(block)
-            if expected and digest.hexdigest() != expected:
-                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
-            temporary.replace(destination)
-        finally:
+        for attempt in range(1, attempts + 1):
             temporary.unlink(missing_ok=True)
+            digest = hashlib.sha256()
+            bytes_received = 0
+            retry_reason: str | None = None
+            last_error: Exception | None = None
+            try:
+                with getter() as response:
+                    response.raise_for_status()
+                    headers = getattr(response, "headers", None)
+                    expected_length = (
+                        cls._parse_content_length(headers.get("Content-Length"))
+                        if headers is not None and hasattr(headers, "get")
+                        else None
+                    )
+                    with temporary.open("xb") as output:
+                        for block in response.iter_content(1024 * 1024):
+                            if block:
+                                output.write(block)
+                                digest.update(block)
+                                bytes_received += len(block)
+                actual_sha = digest.hexdigest()
+                if expected_length is not None and bytes_received != expected_length:
+                    last_error = requests.exceptions.ChunkedEncodingError(
+                        f"Incomplete artifact response ({bytes_received}/{expected_length} bytes)"
+                    )
+                    retry_reason = f"truncated_content_length({bytes_received}/{expected_length})"
+                elif expected and actual_sha != expected:
+                    last_error = ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
+                    retry_reason = (
+                        f"hash_mismatch(bytes={bytes_received},expected={expected[:12]},actual={actual_sha[:12]})"
+                    )
+                else:
+                    temporary.replace(destination)
+                    return
+            except requests.HTTPError as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code is not None and status_code not in cls.RETRYABLE_HTTP_STATUSES:
+                    raise
+                last_error = exc
+                retry_reason = f"http_{status_code or 'unknown'}"
+            except requests.RequestException as exc:
+                last_error = exc
+                retry_reason = type(exc).__name__
+            finally:
+                temporary.unlink(missing_ok=True)
+
+            assert last_error is not None
+            if attempt >= attempts:
+                raise last_error
+            delay = base_delay * (2 ** (attempt - 1))
+            logger.warning(
+                "Artifact download attempt %d/%d failed (%s); retrying in %.1fs",
+                attempt,
+                attempts,
+                retry_reason or type(last_error).__name__,
+                delay,
+            )
+            time.sleep(delay)
+
+    @staticmethod
+    def download(url: str, destination: Path, expected_sha256: str | None = None) -> None:
+        ColabWorker._stream_http_download(
+            lambda: requests.get(url, stream=True, timeout=300),
+            destination,
+            expected_sha256,
+        )
 
     def _fetch_artifact(
         self,
@@ -332,23 +414,13 @@ class ColabWorker:
             return
 
         resolved_url = self.api_base + url if url.startswith("/") else url
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination.with_suffix(destination.suffix + ".download")
-        temporary.unlink(missing_ok=True)
-        digest = hashlib.sha256()
-        try:
-            with self.session.get(resolved_url, stream=True, timeout=300) as response:
-                response.raise_for_status()
-                with temporary.open("xb") as output:
-                    for block in response.iter_content(1024 * 1024):
-                        if block:
-                            output.write(block)
-                            digest.update(block)
-            if expected and digest.hexdigest() != expected:
-                raise ValueError("DOWNLOADED_OBJECT_HASH_MISMATCH")
-            temporary.replace(destination)
-        finally:
-            temporary.unlink(missing_ok=True)
+        self._stream_http_download(
+            lambda: self.session.get(resolved_url, stream=True, timeout=300),
+            destination,
+            expected,
+            max_attempts=self.artifact_fetch_max_attempts,
+            retry_base_seconds=self.artifact_fetch_retry_base_seconds,
+        )
 
     def materialize_dataset(self, job_id: str, dataset: dict[str, Any], items: list[dict[str, Any]],
                             run_dir: Path, *, locked_test: bool = False) -> tuple[Path, Path, Path]:
@@ -370,7 +442,8 @@ class ColabWorker:
         )
         image_root = run_dir / f"{prefix}-images"
         rows = []
-        for item in items:
+        total_items = len(items)
+        for idx, item in enumerate(items, start=1):
             image_path = image_root / item["image_sha256"]
             img_candidates: list[Path] = []
             if self.drive_root:
@@ -387,6 +460,8 @@ class ColabWorker:
                 item["image_sha256"],
                 local_drive_candidates=img_candidates,
             )
+            if idx % 25 == 0 or idx == total_items:
+                print(f"Downloaded {prefix} images: {idx}/{total_items}", flush=True)
             if locked_test:
                 rows.append({"sample_id": item.get("source_annotation_id") or item["sample_id"],
                              "group_id": item["group_id"], "reference": item["label"],

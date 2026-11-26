@@ -493,6 +493,39 @@ def run_worker_forever(
         set_windows_below_normal_priority()
 
     runtime = OcrRuntimeManager()
+    use_quiet_standby = (
+        is_quiet_standby_enabled() if quiet_standby is None else bool(quiet_standby)
+    )
+    try:
+        resolved_burst_seconds = (
+            float(wake_burst_seconds)
+            if wake_burst_seconds is not None
+            else max(
+                10.0,
+                min(
+                    600.0,
+                    float(
+                        os.getenv(
+                            "VIREAD_OCR_WAKE_BURST_SECONDS",
+                            str(DEFAULT_WAKE_BURST_SECONDS),
+                        )
+                    ),
+                ),
+            )
+        )
+    except ValueError:
+        resolved_burst_seconds = DEFAULT_WAKE_BURST_SECONDS
+
+    try:
+        max_idle_poll_seconds = max(
+            poll_seconds,
+            min(60.0, float(os.getenv("VIREAD_OCR_MAX_IDLE_POLL_SECONDS", "15"))),
+        )
+    except ValueError:
+        max_idle_poll_seconds = max(poll_seconds, 15.0)
+
+    runtime.set_standby_mode("quiet_standby" if use_quiet_standby else "active_polling")
+
     app = build_worker_http_app(runtime, worker_token=worker_token)
     server = uvicorn.Server(
         uvicorn.Config(
@@ -535,40 +568,11 @@ def run_worker_forever(
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
-    use_quiet_standby = (
-        is_quiet_standby_enabled() if quiet_standby is None else bool(quiet_standby)
-    )
-    try:
-        resolved_burst_seconds = (
-            float(wake_burst_seconds)
-            if wake_burst_seconds is not None
-            else max(
-                10.0,
-                min(
-                    600.0,
-                    float(
-                        os.getenv(
-                            "VIREAD_OCR_WAKE_BURST_SECONDS",
-                            str(DEFAULT_WAKE_BURST_SECONDS),
-                        )
-                    ),
-                ),
-            )
-        )
-    except ValueError:
-        resolved_burst_seconds = DEFAULT_WAKE_BURST_SECONDS
-
-    try:
-        max_idle_poll_seconds = max(
-            poll_seconds,
-            min(60.0, float(os.getenv("VIREAD_OCR_MAX_IDLE_POLL_SECONDS", "15"))),
-        )
-    except ValueError:
-        max_idle_poll_seconds = max(poll_seconds, 15.0)
-
     if use_quiet_standby:
-        runtime.trigger_wakeup(burst_seconds=resolved_burst_seconds, reason="startup")
-        runtime.wake_event.clear()
+        if client is not None:
+            runtime.extend_burst_window(resolved_burst_seconds)
+        else:
+            runtime.set_standby_mode("quiet_standby")
     else:
         runtime.set_standby_mode("active_polling")
 
