@@ -79,7 +79,12 @@
       "american": "Amerikanischer Akzent",
       "british": "Britischer Akzent"
     },
-    "googleProviderLabel": "Google-Fallback"
+    "googleProviderLabel": "Google-Fallback",
+    "wifiReadyBadge": "Offline bereit",
+    "offlineCacheMultiple": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus sind vorab erzeugte Stimmen bereit für: {voices}; weitere Stimmen erfordern den lokalen Worker oder den Fallback unten.",
+    "offlineCacheSingle": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus ist vorab erzeugtes Audio für {voice} verfügbar; für weitere Stimmen starten Sie bitte den lokalen Worker oder aktivieren Sie den Fallback unten.",
+    "offlineCacheEmpty": "Der lokale Sprach-Worker ist offline und es ist kein vorab erzeugtes Audio lokal gespeichert. Starten Sie den lokalen Worker oder aktivieren Sie unten den Fallback.",
+    "localWorkerLabel": "Lokaler Worker:"
   },
   "engineBadge": {
     "ariaLabel": "Sprachquelle: STT {stt}, TTS {tts}",

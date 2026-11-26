@@ -103,6 +103,7 @@ export function ReadingLayout({
   unresolvedWordIds,
   uncertainWordIds,
   progressLabel,
+  audioLevel,
   bookTitle,
   book,
   child,
@@ -571,7 +572,8 @@ export function ReadingLayout({
         ) : null}
 
         <ReadingControls
-          pauseDisabled={false}
+          audioLevel={audioLevel}
+          pauseDisabled={controlsDisabled}
           disabled={controlsDisabled}
           isListening={isMicRecording}
           isPlayingSample={isPlayingSample}

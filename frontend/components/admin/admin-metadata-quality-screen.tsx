@@ -111,20 +111,20 @@ export function AdminMetadataQualityScreen() {
 
       <section aria-label={t("metadataQuality.filterAria")} className="mb-4">
         <div className="grid gap-4 lg:grid-cols-3">
-          <div className="relative">
-            <Search
-              aria-hidden
-              className="pointer-events-none absolute end-4 top-9 size-5 text-muted"
-            />
-            <TextField
-              label={t("metadataQuality.searchLabel")}
-              onChange={(event) => {
-                setOffset(0);
-                setSearch(event.target.value);
-              }}
-              value={search}
-            />
-          </div>
+          <TextField
+            endAdornment={
+              <Search
+                aria-hidden
+                className="pointer-events-none size-5 text-muted"
+              />
+            }
+            label={t("metadataQuality.searchLabel")}
+            onChange={(event) => {
+              setOffset(0);
+              setSearch(event.target.value);
+            }}
+            value={search}
+          />
           <SelectField
             label={t("metadataQuality.issueTypeLabel")}
             onChange={(event) => {

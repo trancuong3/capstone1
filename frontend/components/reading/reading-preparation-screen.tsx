@@ -262,7 +262,10 @@ export function ReadingPreparationScreen({
         const previousState = permissionStateRef.current;
         permissionStateRef.current = nextState;
         setPermissionState(nextState);
-        if (previousState === "granted" && nextState !== "granted") {
+        if (nextState === "granted") {
+          setMicrophoneVerified(true);
+          setPermissionMessage(null);
+        } else if (previousState === "granted") {
           setMicrophoneVerified(false);
           setPermissionMessage(t("preparation.permChangedError"));
         } else if (nextState === "denied") {

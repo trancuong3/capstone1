@@ -209,7 +209,12 @@ export function AppShell({ children }: AppShellProps) {
   const isChildSwitcherVisible = childSwitcherOpenForPath === pathname;
   const isMobileImmersive =
     immersiveEventState.active && immersiveEventState.pathname === pathname;
-  const isChildOnboarding = pathname === "/children/new";
+  const isFromRegister =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("from") === "register";
+  const isChildOnboarding =
+    pathname === "/children/new" &&
+    (availableChildren.length === 0 || isFromRegister);
   const isBookRoute = pathname === "/books" || pathname.startsWith("/books/");
   const isReadingRoute = pathname.startsWith("/reading/");
   const isImmersiveRoute = isBookRoute || isReadingRoute;

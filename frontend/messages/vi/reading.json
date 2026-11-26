@@ -360,7 +360,8 @@
     "finish": "Hoàn thành",
     "nextQuestion": "Câu tiếp theo",
     "chosenCorrectFeedback": "Con vừa chọn {label}. {hint}",
-    "chosenWrongFeedback": "Con vừa chọn {label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!"
+    "chosenWrongFeedback": "Con vừa chọn {label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!",
+    "skipToReport": "Bỏ qua và xem kết quả"
   },
   "automation": {
     "sectionTitle": "Tự động khi đọc",

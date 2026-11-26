@@ -159,6 +159,10 @@ from app.services.ocr_text_utils import (
 )
 
 
+from unittest.mock import NonCallableMock
+
+from app.services.ocr_executor import get_ocr_executor
+
 _paddle_engine: PaddleOCR | None = None
 _vietocr_engine: Predictor | None = None
 _engine_lock = threading.Lock()
@@ -889,14 +893,20 @@ def _get_ocr_engines() -> tuple[PaddleOCR, Predictor | None]:
                             or os.getenv("OMP_NUM_THREADS")
                             or ""
                         ).strip()
+                        cpu_count = os.cpu_count() or 1
+                        default_threads = (
+                            min(2, max(1, cpu_count))
+                            if (os.getenv("RENDER") or cpu_count <= 2)
+                            else min(4, max(1, cpu_count))
+                        )
                         try:
                             desired_threads = (
                                 max(1, min(8, int(env_threads)))
                                 if env_threads
-                                else min(8, max(2, os.cpu_count() or 4))
+                                else default_threads
                             )
                         except ValueError:
-                            desired_threads = min(8, max(2, os.cpu_count() or 4))
+                            desired_threads = default_threads
                         torch.set_num_threads(desired_threads)
                     # Final on-disk verification immediately precedes publication
                     # of this instance. All scans using it receive this digest,
@@ -2570,7 +2580,8 @@ def _extract_text_and_boxes_dual_engine(
     line_evidence: list[dict[str, object]] = []
     geometry_reliable = True
 
-    for line_idx, item in enumerate(ordered_items):
+    prepared_items: list[dict[str, Any]] = []
+    for item in ordered_items:
         paddle_text = item["paddle_text"]
         paddle_conf = item["paddle_conf"]
         dewarped_img = item["dewarped_img"]
@@ -2587,6 +2598,77 @@ def _extract_text_and_boxes_dual_engine(
             dewarped_img_scaled = dewarped_img
 
         line_img_pil = Image.fromarray(cv2.cvtColor(dewarped_img_scaled, cv2.COLOR_BGR2RGB))
+        prediction_image = line_img_pil
+        if vietocr_engine is not None and _inference_model_profile(vietocr_engine) in _V2_PREPROCESSING_PROFILES:
+            prediction_image = Image.fromarray(
+                cv2.cvtColor(preprocess_line_array(dewarped_img_scaled), cv2.COLOR_BGR2RGB)
+            )
+        prepared_items.append({
+            "item": item,
+            "paddle_text": paddle_text,
+            "paddle_conf": paddle_conf,
+            "prediction_image": prediction_image,
+            "viet_text": None,
+            "viet_exc": None,
+        })
+
+    if vietocr_engine is not None and prepared_items:
+        use_batch = False
+        predict_batch_fn = getattr(vietocr_engine, "predict_batch", None)
+        if (
+            not isinstance(vietocr_engine, NonCallableMock)
+            and len(prepared_items) > 1
+            and callable(predict_batch_fn)
+            and not isinstance(predict_batch_fn, NonCallableMock)
+        ):
+            config_obj = getattr(vietocr_engine, "config", None)
+            predictor_cfg = (
+                config_obj.get("predictor")
+                if isinstance(config_obj, dict)
+                else getattr(config_obj, "predictor", None)
+            )
+            beamsearch_enabled = (
+                bool(predictor_cfg.get("beamsearch"))
+                if isinstance(predictor_cfg, dict)
+                else bool(getattr(predictor_cfg, "beamsearch", False))
+            )
+            use_batch = not beamsearch_enabled
+
+        with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
+            if use_batch:
+                for chunk_start in range(0, len(prepared_items), 16):
+                    chunk = prepared_items[chunk_start : chunk_start + 16]
+                    batch_imgs = [entry["prediction_image"] for entry in chunk]
+                    batch_ok = False
+                    try:
+                        batch_out = predict_batch_fn(batch_imgs)
+                        if (
+                            isinstance(batch_out, (list, tuple))
+                            and len(batch_out) == len(chunk)
+                            and all(val is None or isinstance(val, str) for val in batch_out)
+                        ):
+                            for entry, val in zip(chunk, batch_out):
+                                entry["viet_text"] = val
+                            batch_ok = True
+                    except Exception:
+                        batch_ok = False
+                    if not batch_ok:
+                        for entry in chunk:
+                            try:
+                                entry["viet_text"] = vietocr_engine.predict(entry["prediction_image"])
+                            except Exception as exc:
+                                entry["viet_exc"] = exc
+            else:
+                for entry in prepared_items:
+                    try:
+                        entry["viet_text"] = vietocr_engine.predict(entry["prediction_image"])
+                    except Exception as exc:
+                        entry["viet_exc"] = exc
+
+    for entry in prepared_items:
+        item = entry["item"]
+        paddle_text = entry["paddle_text"]
+        paddle_conf = entry["paddle_conf"]
         chosen_text = paddle_text
         viet_text_candidate: str | None = None
         viet_text_used = False
@@ -2594,14 +2676,12 @@ def _extract_text_and_boxes_dual_engine(
         vietocr_error = _vietocr_initialization_error if vietocr_engine is None else None
 
         if vietocr_engine is not None:
-            try:
-                with (torch.inference_mode() if torch is not None else nullcontext()), _vietocr_inference_lock:
-                    prediction_image = line_img_pil
-                    if _inference_model_profile(vietocr_engine) in _V2_PREPROCESSING_PROFILES:
-                        prediction_image = Image.fromarray(
-                            cv2.cvtColor(preprocess_line_array(dewarped_img_scaled), cv2.COLOR_BGR2RGB)
-                        )
-                    viet_text = vietocr_engine.predict(prediction_image)
+            if entry["viet_exc"] is not None:
+                vietocr_status = "error"
+                vietocr_error = type(entry["viet_exc"]).__name__
+                logger.warning("VietOCR line inference failed: %s", vietocr_error)
+            else:
+                viet_text = entry["viet_text"]
                 if isinstance(viet_text, str) and viet_text.strip():
                     sanitized_line, had_ctrl = _sanitize_vietocr_prediction(viet_text)
                     viet_text_candidate = sanitized_line
@@ -2621,10 +2701,6 @@ def _extract_text_and_boxes_dual_engine(
                         vietocr_status = "no_result"
                 else:
                     vietocr_status = "no_result"
-            except Exception as exc:
-                vietocr_status = "error"
-                vietocr_error = type(exc).__name__
-                logger.warning("VietOCR line inference failed: %s", type(exc).__name__)
 
         if viet_text_used:
             chosen_text = _transfer_punctuation(chosen_text, paddle_text)

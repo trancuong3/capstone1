@@ -360,7 +360,8 @@
     "finish": "Terminé",
     "nextQuestion": "Question suivante",
     "chosenCorrectFeedback": "Tu viens de choisir {label}. {hint}",
-    "chosenWrongFeedback": "Tu viens de choisir {label}. Ce n'est pas tout à fait ça, repense aux détails du texte et réessaie !"
+    "chosenWrongFeedback": "Tu viens de choisir {label}. Ce n'est pas tout à fait ça, repense aux détails du texte et réessaie !",
+    "skipToReport": "Passer et voir les résultats"
   },
   "automation": {
     "sectionTitle": "Automatique pendant la lecture",

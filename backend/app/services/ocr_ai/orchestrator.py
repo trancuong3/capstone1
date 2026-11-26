@@ -39,6 +39,7 @@ class OcrCorrectionOrchestrator:
         providers: Sequence[OcrCorrectionProvider] | None = None,
     ) -> None:
         self.config = config
+        self._owns_providers = providers is None
         self.providers = tuple(providers) if providers is not None else self._providers()
         if config.cloud_enabled:
             for provider, configured in (
@@ -151,6 +152,15 @@ class OcrCorrectionOrchestrator:
             return await asyncio.wait_for(run(), timeout=self.config.total_timeout_seconds)
         except asyncio.TimeoutError as exc:
             raise OcrOrchestrationError("DOCUMENT_TIMEOUT") from exc
+        finally:
+            if self._owns_providers:
+                for provider in self.providers:
+                    close_fn = getattr(provider, "aclose", None)
+                    if callable(close_fn):
+                        try:
+                            await close_fn()
+                        except Exception:
+                            pass
 
     @staticmethod
     def _is_local_provider(provider: OcrCorrectionProvider) -> bool:

@@ -79,7 +79,12 @@
       "american": "美式口音",
       "british": "英式口音"
     },
-    "googleProviderLabel": "Google 備用"
+    "googleProviderLabel": "Google 備用",
+    "wifiReadyBadge": "離線可用",
+    "offlineCacheMultiple": "本地語音服務目前離線。獨立 Wi-Fi 模式已為以下語音備妥預生成音訊：{voices}；若使用其他語音，請啟動本地語音服務或開啟下方備援模式。",
+    "offlineCacheSingle": "本地語音服務目前離線。獨立 Wi-Fi 模式已為 {voice} 備妥預生成音訊；若要即時試聽其他地區語音，請啟動本地語音服務或開啟下方備援模式。",
+    "offlineCacheEmpty": "本地語音服務目前離線，且裝置上尚無預生成音訊。請啟動本地語音服務或開啟下方備援模式以播放示範朗讀。",
+    "localWorkerLabel": "本地服務:"
   },
   "engineBadge": {
     "ariaLabel": "語音來源：STT {stt}，TTS {tts}",

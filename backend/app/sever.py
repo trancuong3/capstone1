@@ -612,7 +612,21 @@ async def lifespan(_app: FastAPI):
             pass
 
 
-app = FastAPI(title="ReadAlong Vision API", version="1.0.0", lifespan=lifespan)
+def _is_production_runtime() -> bool:
+    """Return True when running on production/Render runtimes, False in test/dev."""
+    env_name = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+    return env_name == "production" or bool((os.getenv("RENDER") or "").strip())
+
+
+_prod_docs_disabled = _is_production_runtime()
+app = FastAPI(
+    title="ReadAlong Vision API",
+    version="1.0.0",
+    lifespan=lifespan,
+    docs_url=None if _prod_docs_disabled else "/docs",
+    redoc_url=None if _prod_docs_disabled else "/redoc",
+    openapi_url=None if _prod_docs_disabled else "/openapi.json",
+)
 
 
 def _route_template(request: Request) -> str:
@@ -675,6 +689,15 @@ async def request_diagnostic_middleware(request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Request-ID"] = request_id
         response.headers["X-ViRead-Version"] = get_viread_app_version()
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if _is_production_runtime():
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        if (request.headers.get("authorization") or "").strip() and "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = "no-store"
         log_diagnostic(
             logger,
             logging.INFO if response.status_code < 500 else logging.ERROR,
@@ -1028,6 +1051,23 @@ async def get_health(request: Request) -> dict[str, object]:
             "queue": {},
             "heartbeat_ttl_seconds": worker_heartbeat_ttl_seconds(),
             "probe_degraded": True,
+        }
+
+    if _is_production_runtime():
+        ocr_minimal: dict[str, object] = {
+            "mode": ocr_payload.get("mode", get_ocr_mode()),
+            "ready": bool(ocr_payload.get("ready", False)),
+        }
+        if ocr_payload.get("probe_degraded"):
+            ocr_minimal["probe_degraded"] = True
+        return {
+            "status": "ok" if db_probe["ok"] else "degraded",
+            "version": get_viread_app_version(),
+            "ocr_mode": get_ocr_mode(),
+            "database": {
+                "status": "healthy" if db_probe["ok"] else "unavailable",
+            },
+            "ocr": ocr_minimal,
         }
 
     return {

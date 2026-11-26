@@ -13,7 +13,7 @@ interface TutorMessageProps {
   onClose: () => void;
   onRetry: () => void;
   ttsFailed?: boolean;
-  word: string;
+  word: string | null | undefined;
 }
 
 export function TutorMessage({
@@ -27,18 +27,21 @@ export function TutorMessage({
   word,
 }: TutorMessageProps) {
   const t = useTranslations("reading");
+  const normalizedWord = word?.trim() ?? "";
 
   return (
     <ReadingStatusDialog
       body={
         <div className="space-y-3">
-          <p
-            className="viread-learning-content text-[32px] font-semibold text-primary"
-            dir="ltr"
-            lang="vi"
-          >
-            {word}
-          </p>
+          {normalizedWord ? (
+            <p
+              className="viread-learning-content text-[32px] font-semibold text-primary"
+              dir="ltr"
+              lang="vi"
+            >
+              {normalizedWord}
+            </p>
+          ) : null}
           <p>
             {ttsFailed
               ? (errorMessage ?? t("tutor.audioUnavailable"))

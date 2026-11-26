@@ -444,6 +444,7 @@ interface PendingJob {
 export class BrowserWasmSttClient {
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
+  private workerReady = false;
   private reqCounter = 0;
   private readonly pending = new Map<string, PendingJob>();
   private readonly progressListeners = new Set<
@@ -611,16 +612,22 @@ export class BrowserWasmSttClient {
       : null;
     try {
       if (!this.readyPromise) {
+        this.workerReady = false;
         // Keep shared init independent of individual caller aborts so a TTS pause
         // never cancels an in-flight 34MB model download for the next utterance.
         this.readyPromise = this.postRequest<void>(
           { type: "init" },
           [],
           90_000,
-        ).catch((err) => {
-          this.readyPromise = null;
-          throw err;
-        });
+        )
+          .then(() => {
+            this.workerReady = true;
+          })
+          .catch((err) => {
+            this.workerReady = false;
+            this.readyPromise = null;
+            throw err;
+          });
       }
       await raceWithSignalAndTimeout(this.readyPromise, {
         signal,
@@ -690,10 +697,17 @@ export class BrowserWasmSttClient {
     });
   }
 
+  isReady(): boolean {
+    return (
+      this.workerReady && this.worker !== null && this.readyPromise !== null
+    );
+  }
+
   dispose(): void {
     const worker = this.worker;
     this.worker = null;
     this.readyPromise = null;
+    this.workerReady = false;
     this.failAllPending(new DOMException("Disposed", "AbortError"));
     if (worker) {
       try {

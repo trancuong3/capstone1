@@ -687,6 +687,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private interimInFlight = false;
   private interimGeneration = 0;
   private segmentInterims: string[] = [];
+  private carriedOverlapTailTokens: string[] = [];
+  private segmentStartsWithOverlapCarry = false;
+  private browserStopWatchdog: ReturnType<typeof setTimeout> | null = null;
   private pendingUploads: Set<Promise<void>> = new Set();
   private uploadChain: Promise<void> = Promise.resolve();
   private browserFallbackRec: SegmentSpeechRecognitionLike | null = null;
@@ -750,7 +753,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.browserSpeechOnsetAt = null;
     this.browserNetworkErrorCount = 0;
     this.browserFatalError = false;
+    this.carriedOverlapTailTokens = [];
+    this.segmentStartsWithOverlapCarry = false;
     this.clearBrowserRestartTimer();
+    this.clearBrowserStopWatchdog();
     this.abortController = new AbortController();
     this.resultsHistory = [];
     this.uploadChain = Promise.resolve();
@@ -859,18 +865,27 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const stopEpoch = this.epoch;
     this.stopping = true;
     this.clearBrowserRestartTimer();
+    this.clearBrowserStopWatchdog();
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     if (this.usingBrowserFallback && this.browserFallbackRec) {
-      try {
-        this.browserFallbackRec.stop();
-      } catch {
+      const finalizeBrowserStop = () => {
+        if (this.epoch !== stopEpoch || !this.stopping) return;
+        this.clearBrowserStopWatchdog();
         this.browserFallbackRec = null;
         this.usingBrowserFallback = false;
         this.active = false;
         this.stopping = false;
         this.detachLifecycleListeners();
         this.onend?.();
+      };
+      this.browserStopWatchdog = setTimeout(() => {
+        finalizeBrowserStop();
+      }, 1_500);
+      try {
+        this.browserFallbackRec.stop();
+      } catch {
+        finalizeBrowserStop();
       }
       return;
     }
@@ -892,13 +907,32 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
     this.teardownAudioGraph();
     const inflight = Array.from(this.pendingUploads);
-    void Promise.allSettled(inflight).finally(() => {
+    let stopCompleted = false;
+    let stopTimer: ReturnType<typeof setTimeout> | null = null;
+    const finalizeStop = (timedOut: boolean) => {
+      if (stopCompleted) return;
+      stopCompleted = true;
+      if (stopTimer !== null) {
+        clearTimeout(stopTimer);
+        stopTimer = null;
+      }
       if (this.epoch !== stopEpoch) return;
+      if (timedOut) {
+        this.abortController?.abort();
+      }
       this.closeSttWebSocket();
       this.detachLifecycleListeners();
       this.active = false;
       this.stopping = false;
       this.onend?.();
+    };
+    if (inflight.length > 0) {
+      stopTimer = setTimeout(() => {
+        finalizeStop(true);
+      }, 1_500);
+    }
+    void Promise.allSettled(inflight).finally(() => {
+      finalizeStop(false);
     });
   }
 
@@ -908,6 +942,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.active = false;
     this.stopping = false;
     this.clearBrowserRestartTimer();
+    this.clearBrowserStopWatchdog();
+    this.carriedOverlapTailTokens = [];
+    this.segmentStartsWithOverlapCarry = false;
     this.interimAbortController?.abort();
     this.interimAbortController = null;
     this.abortController?.abort();
@@ -938,6 +975,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     if (this.browserRestartTimer !== null) {
       clearTimeout(this.browserRestartTimer);
       this.browserRestartTimer = null;
+    }
+  }
+
+  private clearBrowserStopWatchdog(): void {
+    if (this.browserStopWatchdog !== null) {
+      clearTimeout(this.browserStopWatchdog);
+      this.browserStopWatchdog = null;
     }
   }
 
@@ -1260,6 +1304,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
     nativeRec.onend = () => {
       if (this.browserFallbackRec !== nativeRec) return;
+      this.clearBrowserStopWatchdog();
       this.browserSpeechOnsetAt = null;
       if (
         this.active &&
@@ -2309,7 +2354,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.stopping ||
       !this.inSpeech ||
       !this.speechChunks.length ||
-      this.interimInFlight
+      this.interimInFlight ||
+      this.pendingUploads.size > 0 ||
+      (this.usingWasmStt && !getBrowserWasmSttClient().isReady())
     ) {
       return;
     }
@@ -2441,6 +2488,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       .catch((err) => {
         if (interimCtrl.signal.aborted) return;
         if (usedWasm && this.usingWasmStt) {
+          if (!getBrowserWasmSttClient().isReady()) {
+            // Cold-start WASM download/init is still warming up: never fall back
+            // permanently just because the 4s rolling-interim budget elapsed.
+            return;
+          }
           this.usingWasmStt = false;
           this.tryActivateBrowserFallback();
           return;
@@ -2504,7 +2556,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const preservedPreRoll =
       carryCount > 0 ? combined.slice(combined.length - carryCount) : null;
     const wasStreamingViaWs = this.wsStreamingCurrentSegment;
+    const startsWithOverlapCarry = this.segmentStartsWithOverlapCarry;
+    const emitsWithOverlapCarry = Boolean(carryOverlap && preservedPreRoll);
     this.resetSegmentState();
+    this.segmentStartsWithOverlapCarry = emitsWithOverlapCarry;
     this.quietFrameStreak = 0;
     if (preservedPreRoll) {
       this.preRoll = preservedPreRoll;
@@ -2534,15 +2589,54 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const signal = this.abortController?.signal;
 
     const deliverFinalResult = (result: ResolvedSegmentResult | null) => {
-      const text = result?.text ?? null;
+      const rawDeliveredText = result?.text ?? null;
       if (
-        !text ||
+        !rawDeliveredText ||
         this.usingBrowserFallback ||
         capturedEpoch !== this.epoch ||
         (!this.active && !this.stopping)
       ) {
+        if (!emitsWithOverlapCarry) {
+          this.carriedOverlapTailTokens = [];
+        }
         return;
       }
+      let normalizedText = rawDeliveredText.normalize("NFC").trim();
+      const rawSurfaceWords = normalizedText.split(/\s+/).filter(Boolean);
+      const rawNormalizedTokens = tokenizeVietnameseText(normalizedText);
+      const prevTail = this.carriedOverlapTailTokens;
+      if (
+        startsWithOverlapCarry &&
+        prevTail.length > 0 &&
+        rawNormalizedTokens.length > 0 &&
+        rawNormalizedTokens.length === rawSurfaceWords.length
+      ) {
+        let stripCount = 0;
+        const maxOverlap = Math.min(2, prevTail.length, rawNormalizedTokens.length);
+        for (let k = maxOverlap; k >= 1; k -= 1) {
+          const tailSlice = prevTail.slice(prevTail.length - k);
+          const headSlice = rawNormalizedTokens.slice(0, k);
+          if (tailSlice.every((tok, idx) => tok === headSlice[idx])) {
+            stripCount = k;
+            break;
+          }
+        }
+        if (stripCount > 0) {
+          const remainingWords = rawSurfaceWords.slice(stripCount);
+          if (remainingWords.length === 0) {
+            if (!emitsWithOverlapCarry) {
+              this.carriedOverlapTailTokens = [];
+            }
+            return;
+          }
+          normalizedText = remainingWords.join(" ");
+        }
+      }
+      const nextTokens = tokenizeVietnameseText(normalizedText);
+      this.carriedOverlapTailTokens = emitsWithOverlapCarry
+        ? nextTokens.slice(-2)
+        : [];
+      const text = normalizedText;
       const resultIndex = this.resultsHistory.length;
       const effectiveQuality = result?.audioQuality ?? qualitySnapshot;
       const item: SegmentSpeechResultItem = {

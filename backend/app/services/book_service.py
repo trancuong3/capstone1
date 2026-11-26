@@ -52,12 +52,14 @@ class BookService:
         values["CreatedBy"] = actor_id
         return await self.repository.create(Book(**values))
 
-    async def list_pages(self, book_id: UUID):
+    async def list_pages(self, book_id: UUID, *, is_authenticated: bool = True):
         catalog_repo = CatalogRepository(self.repository.db)
         book = await catalog_repo.get(book_id)
         if book is None or is_book_private(book):
             raise HTTPException(status_code=404, detail="Resource not found")
         if not await catalog_repo.is_eligible(book_id):
+            if not is_authenticated:
+                raise HTTPException(status_code=404, detail="Resource not found")
             raise HTTPException(
                 status_code=409,
                 detail={

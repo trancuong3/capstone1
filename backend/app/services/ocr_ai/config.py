@@ -59,7 +59,7 @@ class OcrCorrectionConfig:
     gemini_fallback_model: str = "gemini-3.1-flash-lite"
     groq_model: str = "qwen/qwen3.8-27b"
     cloud_timeout_seconds: int = 60
-    total_timeout_seconds: int = 7200
+    total_timeout_seconds: int = 300
     local_enabled: bool = True
     local: LocalOcrConfig = field(default_factory=LocalOcrConfig, repr=False)
 
@@ -82,7 +82,7 @@ class OcrCorrectionConfig:
             groq_model=self.groq_model,
             cloud_timeout_seconds=self.cloud_timeout_seconds,
             total_timeout_seconds=self.total_timeout_seconds,
-            local_enabled=True,
+            local_enabled=self.local_enabled,
             local=self.local,
         )
 

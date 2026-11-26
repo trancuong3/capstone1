@@ -103,10 +103,17 @@ def _snapshot_camera_candidates(rows) -> list[tuple[_CameraCandidatePage, _Camer
 
 @router.get("/sessions", response_model=List[ReadingSessionResponse])
 async def get_sessions(
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
+    sessions = await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
+    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
+    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    if safe_offset == 0 and safe_limit is None:
+        return sessions
+    return sessions[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
 
 @router.post("/sessions", response_model=ReadingSessionResponse)
 async def create_session(

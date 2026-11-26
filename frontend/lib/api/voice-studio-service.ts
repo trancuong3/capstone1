@@ -14,6 +14,7 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
 } from "@/lib/reading/session-voice-lock";
 import {
   getPreferredJsonTtsAcceptHeader,
@@ -249,6 +250,9 @@ export function createVoiceStudioService(): VoiceStudioService {
           method: "POST",
           headers: {
             Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+            ...(hasPendingSessionVoiceSwitch(activeLock?.sessionId)
+              ? { "X-Voice-Lock-Update": "1" }
+              : {}),
           },
           body: JSON.stringify({
             words,

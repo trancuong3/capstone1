@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -27,6 +27,8 @@ export function AdminLoginScreen({
 }) {
   const { auth } = useAdminServices();
   const t = useTranslations("admin");
+  const tAuth = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
   const { refresh, replace } = useRouter();
   const schema = useMemo(
     () =>
@@ -99,9 +101,28 @@ export function AdminLoginScreen({
             />
             <TextField
               autoComplete="current-password"
+              endAdornment={
+                <button
+                  aria-label={
+                    showPassword
+                      ? tAuth("passwordToggle.hide")
+                      : tAuth("passwordToggle.show")
+                  }
+                  aria-pressed={showPassword}
+                  className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  type="button"
+                >
+                  {showPassword ? (
+                    <EyeOff aria-hidden className="size-5" />
+                  ) : (
+                    <Eye aria-hidden className="size-5" />
+                  )}
+                </button>
+              }
               error={errors.password?.message}
               label={t("login.passwordLabel")}
-              type="password"
+              type={showPassword ? "text" : "password"}
               {...register("password")}
             />
             <Button
@@ -115,7 +136,7 @@ export function AdminLoginScreen({
           <p className="text-body text-muted">{t("login.adminOnlyHint")}</p>
         </Card>
       </main>
-      <SiteFooter variant="admin" />
+      <SiteFooter variant="admin-login" />
     </div>
   );
 }

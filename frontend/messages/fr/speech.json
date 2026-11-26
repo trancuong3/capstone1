@@ -79,7 +79,12 @@
       "american": "Accent américain",
       "british": "Accent britannique"
     },
-    "googleProviderLabel": "Secours Google"
+    "googleProviderLabel": "Secours Google",
+    "wifiReadyBadge": "Prêt hors ligne",
+    "offlineCacheMultiple": "Le service vocal local est hors ligne. L’audio pré-généré en mode Wi-Fi autonome est prêt pour : {voices} ; les autres voix nécessitent de démarrer le service local ou d’activer le secours ci-dessous.",
+    "offlineCacheSingle": "Le service vocal local est hors ligne. L’audio pré-généré en mode Wi-Fi autonome est prêt pour {voice} ; pour écouter d’autres voix régionales, démarrez le service local ou activez le secours ci-dessous.",
+    "offlineCacheEmpty": "Le service vocal local est hors ligne et aucun audio pré-généré n’est disponible localement. Démarrez le service local ou activez le secours ci-dessous pour écouter un exemple.",
+    "localWorkerLabel": "Service local :"
   },
   "engineBadge": {
     "ariaLabel": "Source audio : STT {stt}, TTS {tts}",

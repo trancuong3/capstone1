@@ -67,6 +67,7 @@ class VoicePolicyContext:
     book_id: UUID | None = None
     page_revision_id: UUID | None = None
     cache_scope: str | None = None
+    allow_voice_switch: bool = False
 
 
 _TURN_CACHE_MAX = 512
@@ -300,9 +301,17 @@ class VoiceOrchestrator:
         )
         return svc, target
 
-    def _can_fallback_unlocked_tts(self, policy: VoicePolicyContext) -> bool:
+    def _can_fallback_unlocked_tts(
+        self,
+        policy: VoicePolicyContext,
+        *,
+        local_error_code: str | None = None,
+    ) -> bool:
         return (
-            not policy.session_id
+            (
+                not policy.session_id
+                or local_error_code == "LOCAL_VOICE_UNCONFIGURED"
+            )
             and policy.provider_mode == "local_with_google_fallback"
             and policy.allow_google_tts
             and self.google.is_tts_configured()
@@ -332,6 +341,23 @@ class VoiceOrchestrator:
         if existing is not None:
             _ts, locked_voice_id, locked_provider = existing
             if locked_provider != requested_provider or locked_voice_id != canonical_voice:
+                if ctx.allow_voice_switch:
+                    _session_voice_locks[lock_key] = (
+                        now,
+                        canonical_voice,
+                        requested_provider,
+                    )
+                    _session_voice_locks.move_to_end(lock_key)
+                    logger.info(
+                        "tts_session_voice_lock_updated session=%s from=%s(%s) to=%s(%s) request_id=%s",
+                        raw_sid,
+                        locked_voice_id,
+                        locked_provider,
+                        canonical_voice,
+                        requested_provider,
+                        get_request_id(),
+                    )
+                    return
                 logger.warning(
                     "tts_session_voice_lock_rejected session=%s locked=%s(%s) requested=%s(%s) request_id=%s",
                     raw_sid,
@@ -450,7 +476,7 @@ class VoiceOrchestrator:
             )
             return audio
         except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
+            if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                 logger.warning(
                     "tts_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
                     local_err.code,
@@ -693,7 +719,7 @@ class VoiceOrchestrator:
             )
             return speech
         except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
+            if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                 logger.warning(
                     "tts_timed_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
                     local_err.code,
@@ -868,7 +894,7 @@ class VoiceOrchestrator:
             )
             return speech
         except LocalVoiceTechnicalError as local_err:
-            if not self._can_fallback_unlocked_tts(ctx):
+            if not self._can_fallback_unlocked_tts(ctx, local_error_code=local_err.code):
                 logger.warning(
                     "tts_phonics_fail provider=local reason=%s voice=%s ms=%.1f session=%s request_id=%s",
                     local_err.code,

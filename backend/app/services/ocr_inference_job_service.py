@@ -1338,7 +1338,7 @@ class OcrInferenceJobService:
                 if worker.LastHeartbeatAt.tzinfo is not None
                 else worker.LastHeartbeatAt.replace(tzinfo=timezone.utc)
             )
-            if (now - hb_at) <= ttl and str(worker.Status or "").upper() != "OFFLINE":
+            if (now - hb_at) <= ttl and str(worker.Status or "").upper() in {"IDLE", "BUSY"}:
                 await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
                 return True
 

@@ -15,6 +15,7 @@ const { refreshMock, replaceMock } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/login",
   useRouter: () => ({ refresh: refreshMock, replace: replaceMock }),
 }));
 

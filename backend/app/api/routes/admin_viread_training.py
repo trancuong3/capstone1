@@ -217,7 +217,7 @@ async def connect_viread_training_drive_desktop(
         except TrainingStorageError as exc:
             raise HTTPException(
                 status_code=exc.http_status or 400,
-                detail=f"{exc.code}: {exc}",
+                detail=exc.code,
             ) from exc
     return await VireadDriveConnectionService(db).connect_drive_desktop(
         actor_id=actor_id,
@@ -950,7 +950,9 @@ async def claim_viread_colab_training_job(
             f"?worker_id={quote(payload.worker_id, safe='')}&token={quote(manifest_token, safe='')}"
         )
     else:
-        manifest_url = create_signed_image_url(dataset_row["manifest_storage_path"])
+        manifest_url = await asyncio.to_thread(
+            create_signed_image_url, dataset_row["manifest_storage_path"]
+        )
     if (job["locked_test_version_id"] or job["locked_test_manifest_sha256"]) and not locked_row:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Pinned evaluation dataset is missing or its hash changed")
@@ -1087,7 +1089,8 @@ async def get_viread_colab_job_locked_test(
 async def stream_viread_colab_job_artifact(
     job_id: UUID,
     worker_id: str = Query(..., min_length=1, max_length=120, pattern=_WORKER_ID_PATTERN),
-    token: str = Query(..., min_length=1),
+    token: str | None = Query(default=None, min_length=1),
+    header_token: str | None = Header(default=None, alias="X-ViRead-Artifact-Token"),
     _worker: None = Depends(_require_training_worker_token),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1095,20 +1098,28 @@ async def stream_viread_colab_job_artifact(
 
     Enforces four independent controls:
     1. Valid X-ViRead-Training-Worker credential.
-    2. Server-only HMAC token bound to (job_id, worker_id, gdrive:// ref, sha256, exp).
+    2. Server-only HMAC token (supplied via X-ViRead-Artifact-Token header or legacy query token)
+       bound to (job_id, worker_id, gdrive:// ref, sha256, exp).
     3. Active COLAB_RUNNING lease owned by worker_id.
     4. Server-side DB authorization proving claims.reference belongs to this job's
        dataset, pinned Locked Test, active parent model, or attached candidate run.
     """
     worker_id = _validate_worker_id(worker_id)
+    effective_token = (
+        header_token.strip()
+        if isinstance(header_token, str) and header_token.strip()
+        else (token.strip() if isinstance(token, str) and token.strip() else None)
+    )
+    if not effective_token:
+        raise HTTPException(status_code=401, detail="Artifact stream token is required")
     try:
         claims = verify_worker_artifact_token(
-            token,
+            effective_token,
             expected_job_id=str(job_id),
             expected_worker_id=worker_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+        raise HTTPException(status_code=403, detail="Invalid or expired artifact token") from exc
 
     if not is_gdrive_ref(claims.reference):
         raise HTTPException(
@@ -1204,7 +1215,7 @@ async def stream_viread_colab_job_artifact(
                 preloaded_meta=meta,
             )
     except TrainingStorageError as exc:
-        raise HTTPException(status_code=exc.http_status or 503, detail=f"{exc.code}: {exc}") from exc
+        raise HTTPException(status_code=exc.http_status or 503, detail=exc.code) from exc
     if meta.trashed:
         raise HTTPException(status_code=404, detail="Requested training artifact is unavailable")
 

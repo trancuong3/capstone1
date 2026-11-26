@@ -89,6 +89,8 @@ const DEFAULT_POLICY: VoicePolicyPreferences = {
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
+const policyListeners = new Set<Listener>();
+const voiceSwitchedSessions = new Set<string>();
 let cachedPolicy: VoicePolicyPreferences | null = null;
 let activeSessionId: string | null = null;
 const memoryLocks = new Map<string, SessionVoiceLock>();
@@ -167,6 +169,10 @@ function notifyListeners(): void {
   listeners.forEach((fn) => fn());
 }
 
+function notifyPolicyListeners(): void {
+  policyListeners.forEach((fn) => fn());
+}
+
 export function getDefaultVoicePolicyPreferences(): VoicePolicyPreferences {
   return DEFAULT_POLICY;
 }
@@ -196,6 +202,7 @@ export function setVoicePolicyPreferences(
     }
   }
   notifyListeners();
+  notifyPolicyListeners();
   return next;
 }
 
@@ -203,6 +210,13 @@ export function subscribeVoicePolicy(listener: Listener): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+  };
+}
+
+export function subscribeVoicePolicyPreferences(listener: Listener): () => void {
+  policyListeners.add(listener);
+  return () => {
+    policyListeners.delete(listener);
   };
 }
 
@@ -362,6 +376,9 @@ export function lockSessionVoice(
       // Keep in-memory lock active
     }
   }
+  if (existing && overrides?.forceUpdate) {
+    voiceSwitchedSessions.add(cleanSessionId);
+  }
   notifyListeners();
   return lock;
 }
@@ -379,6 +396,7 @@ export function getActiveSessionVoiceLock(): SessionVoiceLock | null {
 export function releaseSessionVoiceLock(sessionId: string): void {
   const clean = sessionId.trim();
   memoryLocks.delete(clean);
+  voiceSwitchedSessions.delete(clean);
   if (activeSessionId === clean) {
     activeSessionId = null;
   }
@@ -459,9 +477,26 @@ export function getEffectiveTeacherPersona(): TeacherPersona {
   return getTeacherPersonaForVoice(voiceId, active?.gender ?? null);
 }
 
+export function approveSessionVoiceSwitch(
+  sessionId: string | null | undefined,
+): void {
+  const clean = (sessionId ?? "").trim();
+  if (clean) {
+    voiceSwitchedSessions.add(clean);
+  }
+}
+
+export function hasPendingSessionVoiceSwitch(
+  sessionId: string | null | undefined,
+): boolean {
+  const clean = (sessionId ?? "").trim();
+  return clean ? voiceSwitchedSessions.has(clean) : false;
+}
+
 export function resetVoiceLockAndPolicyForTests(): void {
   cachedPolicy = null;
   activeSessionId = null;
   memoryLocks.clear();
+  voiceSwitchedSessions.clear();
   utteranceAudits.clear();
 }

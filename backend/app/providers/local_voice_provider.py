@@ -216,7 +216,6 @@ class LocalSynthesizedAudio:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,7 +240,6 @@ class LocalTimedSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -267,7 +265,6 @@ class LocalPhonicsSpeech:
     cache_hit: bool = False
     cache_scope: str | None = None
     cached_speed: float | None = None
-    fallback_reason: str | None = None
 
 
 def fix_wav_header_sizes(content: bytes) -> bytes:
@@ -302,27 +299,6 @@ class LocalTranscription:
     fallback_used: bool = False
     fallback_reason: str | None = None
     superseded: bool = False
-
-
-def fix_wav_header_sizes(content: bytes) -> bytes:
-    """Rewrite streaming/placeholder RIFF & data chunk sizes to exact byte counts."""
-    if (
-        len(content) < 44
-        or content[:4] != b"RIFF"
-        or content[8:12] != b"WAVE"
-        or content[36:40] != b"data"
-    ):
-        return content
-    actual_riff = len(content) - 8
-    actual_data = len(content) - 44
-    cur_riff = struct.unpack_from("<I", content, 4)[0]
-    cur_data = struct.unpack_from("<I", content, 40)[0]
-    if cur_riff == actual_riff and cur_data == actual_data:
-        return content
-    patched = bytearray(content)
-    struct.pack_into("<I", patched, 4, actual_riff)
-    struct.pack_into("<I", patched, 40, actual_data)
-    return bytes(patched)
 
 
 class LocalVoiceTechnicalError(VoiceProviderError):

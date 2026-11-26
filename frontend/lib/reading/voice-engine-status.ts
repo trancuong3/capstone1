@@ -25,6 +25,9 @@ export interface VoiceEngineHealthSnapshot {
     readonly available: boolean;
     readonly stt_ready: boolean;
     readonly tts_ready: boolean;
+    readonly error_code?: string | null;
+    readonly stt_error_code?: string | null;
+    readonly tts_error_code?: string | null;
     readonly stt_model_version?: string | null;
     readonly tts_model_version?: string | null;
   };

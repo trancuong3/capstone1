@@ -79,7 +79,12 @@
       "american": "미국 억양",
       "british": "영국 억양"
     },
-    "googleProviderLabel": "Google 대체"
+    "googleProviderLabel": "Google 대체",
+    "wifiReadyBadge": "오프라인 준비됨",
+    "offlineCacheMultiple": "로컬 음성 워커가 오프라인입니다. Wi-Fi 독립 모드에서 사전 생성된 음성이 준비되었습니다: {voices}. 다른 음성을 사용하려면 로컬 워커를 시작하거나 아래 대체를 활성화하세요.",
+    "offlineCacheSingle": "로컬 음성 워커가 오프라인입니다. Wi-Fi 독립 모드에서 {voice} 음성의 사전 생성 오디오가 준비되었습니다. 다른 지역 음성을 들으려면 로컬 워커를 시작하거나 아래 대체를 활성화하세요.",
+    "offlineCacheEmpty": "로컬 음성 워커가 오프라인이며 기기에 사전 생성된 오디오가 없습니다. 샘플 음성을 들으려면 로컬 워커를 시작하거나 아래 대체를 활성화하세요.",
+    "localWorkerLabel": "로컬 워커:"
   },
   "engineBadge": {
     "ariaLabel": "음성 소스: STT {stt}, TTS {tts}",
