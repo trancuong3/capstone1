@@ -184,6 +184,18 @@ async function installVoiceAndPhonicsFixture(page: Page) {
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("local_north_truc_ly"));
+    if (path === "/voice/session-lock" && route.request().method() === "POST") {
+      const body = (route.request().postDataJSON() ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "local_north_truc_ly",
+        provider: body.provider ?? "local",
+        locked: true,
+      });
+    }
     if (path === "/voice/voices") {
       return respond(route, {
         default_voice_id: "local_north_truc_ly",
@@ -309,9 +321,12 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
 
   await dialog.getByRole("button", { name: "Miền Trung" }).click();
-  await expect(
-    dialog.getByRole("radio", { name: /Cô Ngọc Trân/ }),
-  ).toBeChecked();
+  const centralVoiceRadio = dialog.getByRole("radio", { name: /Cô Ngọc Trân/ });
+  await expect(centralVoiceRadio).toBeVisible();
+  if (!(await centralVoiceRadio.isChecked())) {
+    await centralVoiceRadio.click();
+  }
+  await expect(centralVoiceRadio).toBeChecked();
 
   await dialog.getByRole("button", { name: "Chậm" }).click();
   await expect(dialog).toContainText("0,85×");

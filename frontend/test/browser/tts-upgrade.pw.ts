@@ -162,6 +162,18 @@ async function installReading(
     const path = new URL(route.request().url()).pathname;
     if (path === "/voice/status" && route.request().method() === "GET")
       return respond(route, readyVoiceStatus("voice_female"));
+    if (path === "/voice/session-lock" && route.request().method() === "POST") {
+      const body = (route.request().postDataJSON() ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "voice_female",
+        provider: body.provider ?? "local",
+        locked: true,
+      });
+    }
     if (path === "/voice/voices")
       return respond(route, {
         default_voice_id: "voice_female",

@@ -1070,6 +1070,133 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (request.method() === "GET" && path === "/voice/status")
       return respond(route, readyVoiceStatus("Binh"));
+    if (request.method() === "POST" && path === "/voice/session-lock") {
+      const body = (route.request().postDataJSON() ?? {}) as Record<
+        string,
+        unknown
+      >;
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "local_north_truc_ly",
+        provider: body.provider ?? "local",
+        locked: true,
+      });
+    }
+    if (
+      request.method() === "GET" &&
+      /^\/learning\/children\/[^/]+\/parent-analytics$/.test(path)
+    ) {
+      const childIdFromPath = path.split("/")[3] ?? ids.child;
+      return respond(route, {
+        child_id: childIdFromPath,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        window_days: 30,
+        is_diagnostic: false,
+        disclaimer_vi:
+          "Tổng hợp hỗ trợ luyện đọc và giải trí học tập, không phải chẩn đoán y khoa.",
+        observed_skills_count: 0,
+        estimated_skills_count: 0,
+        unknown_skills_count: 0,
+        skills: [],
+        practiced_difficult_words: [],
+        module_activities: [],
+        karaoke_weak_segments: [],
+        home_support_tips_vi: [],
+        generated_at: timestamp,
+      });
+    }
+    if (
+      request.method() === "GET" &&
+      /^\/learning\/children\/[^/]+\/recommendations$/.test(path)
+    ) {
+      const childIdFromPath = path.split("/")[3] ?? ids.child;
+      const primary = {
+        game_key: "SENTENCE_SHOOTER",
+        zone_title_vi: "Vườn trò chơi",
+        game_title_vi: "Bắn chữ ghép câu",
+        reason_vi: "Gợi ý luyện tập nhẹ nhàng cho bé hôm nay.",
+        suggested_mode: "WORD_ORDER",
+        suggested_difficulty: 1,
+        target_words: [],
+        href: "/entertainment/sentence-shooter",
+        priority: 1,
+      };
+      return respond(route, {
+        child_id: childIdFromPath,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        mascot_greeting_vi: `Chào ${child.alias}! Mình cùng chơi nhé!`,
+        natural_break_reminder_vi: "Chơi 10 phút rồi nghỉ mắt nhé.",
+        today_activities_count: 0,
+        focus_difficult_words: [],
+        primary_recommendation: primary,
+        recommendations: [primary],
+      });
+    }
+    if (
+      request.method() === "GET" &&
+      /^\/karaoke\/songs\/[^/]+\/musical-profile$/.test(path)
+    ) {
+      return respond(route, {
+        song_id: path.split("/")[3] ?? "11111111-1111-4111-8111-111111111111",
+        song_version_id: "22222222-2222-4222-8222-222222222222",
+        bpm: 108,
+        audio_type: "VOCAL_FULL",
+        has_pitch_contour: false,
+        has_beat_grid: true,
+        source_method: "LYRICS_TIMING",
+        beat_grid_ms: [0, 500, 1000, 1500],
+        pitch_contour: [],
+        phrase_windows: [],
+        updated_at: timestamp,
+      });
+    }
+    if (path === "/karaoke/practice-sessions") {
+      if (request.method() === "GET") {
+        return respond(route, {
+          child_id: url.searchParams.get("child_id") ?? ids.child,
+          song_id: url.searchParams.get("song_id"),
+          best_full_song_score: null,
+          best_full_song_stars: 0,
+          total_sessions: 0,
+          items: [],
+          storage_ready: true,
+        });
+      }
+      if (request.method() === "POST") {
+        const body = (route.request().postDataJSON() ?? {}) as Record<
+          string,
+          unknown
+        >;
+        return respond(
+          route,
+          {
+            id: ids.session,
+            child_id: body.child_id ?? ids.child,
+            song_id: body.song_id ?? "11111111-1111-4111-8111-111111111111",
+            song_version_id: "22222222-2222-4222-8222-222222222222",
+            practice_mode: body.practice_mode ?? "FULL_SONG",
+            scoring_mode: body.scoring_mode ?? "LYRICS_ONLY",
+            playback_rate: Number(body.playback_rate ?? 1),
+            headphone_mode: Boolean(body.headphone_mode),
+            overall_score: (body.overall_score as number | null) ?? null,
+            rhythm_score: (body.rhythm_score as number | null) ?? null,
+            pitch_score: (body.pitch_score as number | null) ?? null,
+            lyrics_score: (body.lyrics_score as number | null) ?? null,
+            fluency_score: (body.fluency_score as number | null) ?? null,
+            stars: Number(body.stars ?? 0),
+            segment_start_ms: null,
+            segment_end_ms: null,
+            report_payload:
+              (body.report_payload as Record<string, unknown>) ?? {},
+            created_at: timestamp,
+            persisted: true,
+          },
+          201,
+        );
+      }
+    }
     if (request.method() === "GET" && path === "/studio/tasks")
       return respond(route, {
         actor_id: ids.parent,

@@ -2030,7 +2030,7 @@ export function KaraokeSimpleUploadScreen({
               <Button
                 disabled={!canPublish}
                 isLoading={publishing}
-                className="sm:w-auto"
+                className="min-h-11 sm:w-auto"
                 onClick={() => void handleSimplePublish()}
               >
                 {t("karaoke.simpleUpload.publishBtn")}

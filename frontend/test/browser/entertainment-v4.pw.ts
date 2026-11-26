@@ -1346,7 +1346,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   ).toBeVisible();
   await musicalSummary.getByText(/Báo cáo theo từng đoạn/).click();
   await expect(
-    musicalSummary.getByText(/Câu 1 \(0:01–0:03\)|Câu 1/),
+    musicalSummary.getByText(/Câu 1 \(0:01–0:03\)|Câu 1\b/).first(),
   ).toBeVisible();
   expect(capturedSession.body?.practice_mode).toBe("RHYTHM_TAP");
 

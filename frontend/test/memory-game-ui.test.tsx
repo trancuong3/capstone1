@@ -449,12 +449,12 @@ describe("MemoryGameScreen", () => {
   });
 
   it("starts countdown strictly AFTER SVG sceneReady fires", async () => {
-    let pendingRaf: FrameRequestCallback | null = null;
+    const pendingRafs: FrameRequestCallback[] = [];
     vi.stubGlobal(
       "requestAnimationFrame",
       vi.fn((cb: FrameRequestCallback) => {
-        pendingRaf = cb;
-        return 1;
+        pendingRafs.push(cb);
+        return pendingRafs.length;
       }),
     );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
@@ -486,9 +486,11 @@ describe("MemoryGameScreen", () => {
       "Đang chuẩn bị",
     );
 
-    // Fire rAF -> sceneReady === true -> timer begins ticking from 10s
+    // Fire all queued rAF callbacks -> sceneReady === true -> timer begins ticking from 10s
     act(() => {
-      pendingRaf?.(16);
+      for (const cb of pendingRafs.splice(0)) {
+        cb(16);
+      }
     });
     expect(screen.getByTestId("countdown-seconds")).toHaveTextContent(
       "10 giây",
