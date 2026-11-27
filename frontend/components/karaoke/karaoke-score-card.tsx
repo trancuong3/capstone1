@@ -1,6 +1,13 @@
 "use client";
 
-import { Flame, Headphones, Music2, RotateCcw, Sparkles, Star } from "lucide-react";
+import {
+  Flame,
+  Headphones,
+  Music2,
+  RotateCcw,
+  Sparkles,
+  Star,
+} from "lucide-react";
 import { Button } from "@/components/common/button";
 import { useTranslations } from "@/hooks/use-i18n";
 import type {
@@ -62,7 +69,9 @@ function SongPitchOverviewChart({
   const targetMidis = targetNotes.map((n) => n.midi + keyShift);
   const targetCenterMidi =
     targetMidis.length > 0
-      ? [...targetMidis].sort((a, b) => a - b)[Math.floor(targetMidis.length / 2)]
+      ? [...targetMidis].sort((a, b) => a - b)[
+          Math.floor(targetMidis.length / 2)
+        ]
       : null;
   const foldNearTarget = (midi: number) => {
     if (targetCenterMidi === null) return midi;
@@ -233,9 +242,9 @@ export function KaraokeScoreCard({
   const t = useTranslations("entertainment");
   const hasProAcoustic = Boolean(
     proScore &&
-      proScore.kind === "scored" &&
-      (proScore.activePillars.pitch || proScore.activePillars.rhythm) &&
-      !practice,
+    proScore.kind === "scored" &&
+    (proScore.activePillars.pitch || proScore.activePillars.rhythm) &&
+    !practice,
   );
 
   const overallAccuracy = score?.overallAccuracy ?? null;
@@ -270,7 +279,10 @@ export function KaraokeScoreCard({
       className="mx-auto grid w-full max-w-2xl gap-4 rounded-card border border-border bg-white p-5 text-center shadow-sm"
     >
       {/* PRO 3-PILLAR HEADER (when acoustic DSP captured real singing) */}
-      {hasProAcoustic && proScore && proScore.totalScore !== null && proScore.rank ? (
+      {hasProAcoustic &&
+      proScore &&
+      proScore.totalScore !== null &&
+      proScore.rank ? (
         <div
           data-testid="karaoke-pro-score-header"
           className="grid gap-3 rounded-2xl border border-primary/20 bg-gradient-to-b from-sky/70 via-white to-cream/50 p-4"
@@ -302,7 +314,10 @@ export function KaraokeScoreCard({
             )}
           </div>
 
-          <div aria-hidden className="flex justify-center gap-1.5 text-amber-600">
+          <div
+            aria-hidden
+            className="flex justify-center gap-1.5 text-amber-600"
+          >
             {Array.from({ length: 5 }, (_, i) => (
               <Star
                 key={i}
@@ -389,7 +404,8 @@ export function KaraokeScoreCard({
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-orange-300 bg-orange-50 p-3 text-start">
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-extrabold text-orange-900">
-                  Câu nên luyện thêm nhất · Câu {proScore.worstLine.lineIndex + 1}
+                  Câu nên luyện thêm nhất · Câu{" "}
+                  {proScore.worstLine.lineIndex + 1}
                 </p>
                 <p
                   className="viread-learning-content truncate text-sm font-bold text-ink"
@@ -418,7 +434,8 @@ export function KaraokeScoreCard({
           {onPractice && proScore.lineScores.length > 0 && (
             <details className="rounded-control border border-border bg-white p-3 text-start">
               <summary className="cursor-pointer text-sm font-bold text-primary">
-                Xem điểm chi tiết 3 trụ cột từng câu ({proScore.lineScores.length} câu)
+                Xem điểm chi tiết 3 trụ cột từng câu (
+                {proScore.lineScores.length} câu)
               </summary>
               <ol className="mt-2.5 grid max-h-64 gap-2 overflow-y-auto">
                 {proScore.lineScores.map((line) => (
@@ -442,13 +459,16 @@ export function KaraokeScoreCard({
                       </p>
                       <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] font-bold">
                         <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-900">
-                          Tông: {line.pitchScore !== null ? line.pitchScore : "—"}
+                          Tông:{" "}
+                          {line.pitchScore !== null ? line.pitchScore : "—"}
                         </span>
                         <span className="rounded-full bg-sky-100 px-2 py-0.5 text-sky-900">
-                          Nhịp: {line.rhythmScore !== null ? line.rhythmScore : "—"}
+                          Nhịp:{" "}
+                          {line.rhythmScore !== null ? line.rhythmScore : "—"}
                         </span>
                         <span className="rounded-full bg-violet-100 px-2 py-0.5 text-violet-900">
-                          Lời: {line.lyricsScore !== null ? line.lyricsScore : "—"}
+                          Lời:{" "}
+                          {line.lyricsScore !== null ? line.lyricsScore : "—"}
                         </span>
                       </div>
                     </div>

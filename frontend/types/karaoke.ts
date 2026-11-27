@@ -215,7 +215,9 @@ export type KaraokeSyllable = z.infer<typeof syllableSchema>;
 export type AdminKaraokeDetail = z.infer<typeof adminKaraokeDetailSchema>;
 export type AdminKaraokeList = z.infer<typeof adminKaraokeListSchema>;
 export type KaraokeMelodyNote = z.infer<typeof melodyNoteSchema>;
-export type KaraokeMelodyContourPoint = z.infer<typeof melodyContourPointSchema>;
+export type KaraokeMelodyContourPoint = z.infer<
+  typeof melodyContourPointSchema
+>;
 export type KaraokeMelodyProfile = z.infer<typeof melodyProfileSchema>;
 export type KaraokePreview = z.infer<typeof karaokePreviewSchema>;
 export type KaraokeValidation = z.infer<typeof karaokeValidationSchema>;

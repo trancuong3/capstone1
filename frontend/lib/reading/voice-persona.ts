@@ -101,20 +101,13 @@ export function getTeacherPersonaForVoice(
   return getTeacherPersona(resolveVoiceGender(voiceId, explicitGender));
 }
 
-const QUOTED_SPAN_RE =
-  /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
+const QUOTED_SPAN_RE = /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
 
 const NON_TEACHER_CO_FOLLOWERS =
   "(?!\\s+(?:bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
 
-const CO_GIAO_CAP_RE = new RegExp(
-  `(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`,
-  "gu",
-);
-const CO_GIAO_LOW_RE = new RegExp(
-  `(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`,
-  "gu",
-);
+const CO_GIAO_CAP_RE = new RegExp(`(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`, "gu");
+const CO_GIAO_LOW_RE = new RegExp(`(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`, "gu");
 const CO_CAP_RE = new RegExp(
   `(^|[^\\p{L}])Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
   "gu",

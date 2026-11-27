@@ -530,7 +530,8 @@ export function lockSessionVoice(
     Number.isFinite(existingLockedAtMs) &&
     speechMeta.globalSelectionUpdatedAt > existingLockedAtMs &&
     ((speechPrefs.voiceId && speechPrefs.voiceId !== existing!.voiceId) ||
-      speechMeta.gender !== (existing!.gender ?? resolveVoiceGender(existing!.voiceId)));
+      speechMeta.gender !==
+        (existing!.gender ?? resolveVoiceGender(existing!.voiceId)));
 
   if (
     existing &&
@@ -1012,7 +1013,9 @@ export function hydrateTeacherVoiceFromChildProfile(
       ? rec.region
       : inferRegionFromVoiceId(rawVoiceId, "north");
   const rawSpeed =
-    typeof rec.speed === "number" ? clampSpeed(rec.speed) : getSpeechPreferences().speed;
+    typeof rec.speed === "number"
+      ? clampSpeed(rec.speed)
+      : getSpeechPreferences().speed;
   const rawUpdatedAt =
     typeof rec.updated_at === "number" &&
     Number.isFinite(rec.updated_at) &&

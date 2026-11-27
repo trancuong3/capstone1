@@ -87,10 +87,7 @@ export async function refreshSupabaseAuth(
 
   // Fast-path: when no Supabase auth cookie is present in production/dev,
   // avoid instantiating @supabase/ssr and calling getClaims() on every guest hit.
-  if (
-    process.env.NODE_ENV !== "test" &&
-    !incomingCookieHash
-  ) {
+  if (process.env.NODE_ENV !== "test" && !incomingCookieHash) {
     if (hasIncomingRoleCache) {
       clearRoleCacheCookie(response, request);
     }

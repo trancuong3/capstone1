@@ -288,12 +288,14 @@ export function DifficultWordBookCard({
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-1.5 tabular-nums">
                     <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-bold text-ink">
-                      {t("bookCard.wordStats", {
-                        score: formatNumber(word.difficulty_score),
-                        mispronounced: formatNumber(mispronounced),
-                        omitted: formatNumber(word.omission_count),
-                        repeated: formatNumber(word.repetition_count),
-                      }).split(" · ")[0]}
+                      {
+                        t("bookCard.wordStats", {
+                          score: formatNumber(word.difficulty_score),
+                          mispronounced: formatNumber(mispronounced),
+                          omitted: formatNumber(word.omission_count),
+                          repeated: formatNumber(word.repetition_count),
+                        }).split(" · ")[0]
+                      }
                     </span>
                     {mispronounced > 0 ? (
                       <span className="rounded-full bg-orange-100/90 px-2 py-0.5 text-[11px] font-bold text-orange-900">

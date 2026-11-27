@@ -601,10 +601,7 @@ export function SessionHistoryScreen({
                 >
                   {formatGroupHeading(group.dayKey, group.heading)}
                 </h2>
-                <span
-                  aria-hidden="true"
-                  className="h-px flex-1 bg-border/80"
-                />
+                <span aria-hidden="true" className="h-px flex-1 bg-border/80" />
                 <span className="inline-flex shrink-0 items-center rounded-full border border-border bg-white px-2.5 py-0.5 text-xs font-bold text-muted tabular-nums">
                   {t("sessions.groupCount", { count: group.items.length })}
                 </span>

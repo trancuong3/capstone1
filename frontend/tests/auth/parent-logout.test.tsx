@@ -96,9 +96,7 @@ describe("parent logout", () => {
     expect(firstItem).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
-    expect(
-      screen.getByRole("menuitem", { name: "Lịch sử đọc" }),
-    ).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Lịch sử đọc" })).toHaveFocus();
     await user.keyboard("{End}");
     expect(screen.getByRole("menuitem", { name: "Đăng xuất" })).toHaveFocus();
 

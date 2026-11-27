@@ -36,14 +36,13 @@ import {
   type DspSessionSummary,
   type LyricTimeSpan,
 } from "./musical-dsp";
-import type { MusicalProfileData, ReferencePitchPoint } from "./musical-scoring";
+import type {
+  MusicalProfileData,
+  ReferencePitchPoint,
+} from "./musical-scoring";
 
 export type PitchJudgement =
-  | "perfect"
-  | "great"
-  | "good"
-  | "off_pitch"
-  | "unvoiced";
+  "perfect" | "great" | "good" | "off_pitch" | "unvoiced";
 
 export type TimingBias = "early" | "on_beat" | "late" | "unknown";
 
@@ -216,7 +215,8 @@ export function resolveTargetNotes(
   musicalProfile?: MusicalProfileData | null,
   lyrics?: KaraokeLyrics | null,
 ): TargetNoteSpan[] {
-  const effectiveMelody = melodyProfile ?? musicalProfile?.melodyProfile ?? null;
+  const effectiveMelody =
+    melodyProfile ?? musicalProfile?.melodyProfile ?? null;
   if (effectiveMelody?.notes?.length) {
     return effectiveMelody.notes
       .filter((n: KaraokeMelodyNote) => n.voiced && n.end_ms > n.start_ms)
@@ -260,7 +260,11 @@ export function resolveTargetNotes(
             ]
           : [];
       for (const u of units) {
-        if (u.start_ms === null || u.end_ms === null || u.end_ms <= u.start_ms) {
+        if (
+          u.start_ms === null ||
+          u.end_ms === null ||
+          u.end_ms <= u.start_ms
+        ) {
           continue;
         }
         const pts = contour.filter(
@@ -303,9 +307,7 @@ export function resolveTargetNotes(
       sorted[j].timeMs - sorted[j - 1].timeMs <= 120
     ) {
       const m =
-        sorted[j].midi !== undefined
-          ? sorted[j].midi!
-          : hzToMidi(sorted[j].hz);
+        sorted[j].midi !== undefined ? sorted[j].midi! : hzToMidi(sorted[j].hz);
       if (Math.abs(m - group[0]) > 0.85) break;
       group.push(m);
       j++;
@@ -387,7 +389,10 @@ export function evaluateLivePitchJudgement(
     };
   }
   const sungHz = midiToHz(sungMidi);
-  const signedSemitones = octaveInvariantSemitoneError(sungHz, target.shiftedHz);
+  const signedSemitones = octaveInvariantSemitoneError(
+    sungHz,
+    target.shiftedHz,
+  );
   const signedCents = signedSemitones * 100;
   const absCents = Math.abs(signedCents);
   const { judgement } = gradePitchCents(absCents);
@@ -417,8 +422,7 @@ function iqr(values: number[]): number {
   if (values.length < 4) return 0;
   const s = [...values].sort((a, b) => a - b);
   return (
-    s[Math.floor((s.length - 1) * 0.75)] -
-    s[Math.floor((s.length - 1) * 0.25)]
+    s[Math.floor((s.length - 1) * 0.75)] - s[Math.floor((s.length - 1) * 0.25)]
   );
 }
 
@@ -445,7 +449,12 @@ function extractSyllableWindows(
   lyrics: KaraokeLyrics,
   range?: LyricTimeSpan | null,
 ): {
-  lines: { line: KaraokeLine; lineIndex: number; startMs: number; endMs: number }[];
+  lines: {
+    line: KaraokeLine;
+    lineIndex: number;
+    startMs: number;
+    endMs: number;
+  }[];
   syllables: SyllableWindow[];
 } {
   const lines: {
@@ -582,7 +591,9 @@ function evaluateRhythmForWindows(
       }
     }
     const sylSustain =
-      totalInSyl > 0 ? clamp01(voicedInSyl / Math.max(1, totalInSyl * 0.72)) : 0;
+      totalInSyl > 0
+        ? clamp01(voicedInSyl / Math.max(1, totalInSyl * 0.72))
+        : 0;
     const curSylMedianMidi = sylMidis.length > 0 ? median(sylMidis) : null;
     const pitchChangedFromPrev =
       curSylMedianMidi !== null &&
@@ -621,8 +632,7 @@ function evaluateRhythmForWindows(
   }
 
   const onsetScore = (onsetCreditSum / syllables.length) * 100;
-  const sustainCoverage =
-    sustainCount > 0 ? sustainRatioSum / sustainCount : 0;
+  const sustainCoverage = sustainCount > 0 ? sustainRatioSum / sustainCount : 0;
   const sustainScore = sustainCoverage * 100;
   const rhythmScore = Math.max(
     0,
@@ -630,9 +640,7 @@ function evaluateRhythmForWindows(
   );
 
   const meanDeltaMs = signedDeltas.length
-    ? Math.round(
-        signedDeltas.reduce((a, b) => a + b, 0) / signedDeltas.length,
-      )
+    ? Math.round(signedDeltas.reduce((a, b) => a + b, 0) / signedDeltas.length)
     : null;
   const meanAbsErrorMs = absErrors.length
     ? Math.round(absErrors.reduce((a, b) => a + b, 0) / absErrors.length)
@@ -826,14 +834,20 @@ function evaluatePitchForFrames(
   };
 }
 
-function buildHeadlineVi(score: number | null, rank: ProKaraokeRank | null): string {
+function buildHeadlineVi(
+  score: number | null,
+  rank: ProKaraokeRank | null,
+): string {
   if (score === null || rank === null) {
     return "Mình chưa nghe rõ giọng hát của bé. Bé thử lại gần micro hơn nhé!";
   }
   if (rank === "S") return "Xuất sắc tuyệt đỉnh! Giọng ca nhí tỏa sáng rực rỡ!";
-  if (rank === "A+") return "Tuyệt vời quá! Bé hát rất đúng tông và bắt nhịp cực chuẩn!";
-  if (rank === "A") return "Giỏi lắm bé ơi! Bài hát nghe rất hay và truyền cảm!";
-  if (rank === "B") return "Khá tốt rồi! Bé luyện thêm vài câu nữa là đạt điểm A ngay!";
+  if (rank === "A+")
+    return "Tuyệt vời quá! Bé hát rất đúng tông và bắt nhịp cực chuẩn!";
+  if (rank === "A")
+    return "Giỏi lắm bé ơi! Bài hát nghe rất hay và truyền cảm!";
+  if (rank === "B")
+    return "Khá tốt rồi! Bé luyện thêm vài câu nữa là đạt điểm A ngay!";
   return "Cố lên bé ơi! Bấm luyện từng câu chậm lại một chút để hát hay hơn nhé!";
 }
 
@@ -864,10 +878,10 @@ export function evaluateProKaraokePerformance(
   const lyricsEvaluated = liveLyrics?.evaluatedWords ?? 0;
   const hummedWithoutWordsUnderActiveStt = Boolean(
     input.sttActive &&
-      dspUsable &&
-      liveLyrics !== null &&
-      liveLyrics.totalWords > 0 &&
-      (liveLyrics.kind === "insufficient" || lyricsEvaluated === 0),
+    dspUsable &&
+    liveLyrics !== null &&
+    liveLyrics.totalWords > 0 &&
+    (liveLyrics.kind === "insufficient" || lyricsEvaluated === 0),
   );
   const lyricsScore =
     liveLyrics &&
@@ -975,7 +989,12 @@ export function evaluateProKaraokePerformance(
   }
 
   const rhythmEval = dspUsable
-    ? evaluateRhythmForWindows(syllables, dsp!.onsets, dsp!.frames, playbackRate)
+    ? evaluateRhythmForWindows(
+        syllables,
+        dsp!.onsets,
+        dsp!.frames,
+        playbackRate,
+      )
     : {
         score: null,
         meanDeltaMs: null,
@@ -1099,7 +1118,12 @@ export function evaluateProKaraokePerformance(
           ? evaluatePitchForFrames(lineFrames, lineNotes, keyShift)
           : null;
       const lr = dspUsable
-        ? evaluateRhythmForWindows(lineSyls, lineOnsets, lineFrames, playbackRate)
+        ? evaluateRhythmForWindows(
+            lineSyls,
+            lineOnsets,
+            lineFrames,
+            playbackRate,
+          )
         : null;
       const lineWordScore = liveLyrics?.lineScores.find(
         (l) => l.lineId === line.id,
@@ -1118,9 +1142,7 @@ export function evaluateProKaraokePerformance(
       const lineOverall =
         wSum > 0
           ? Math.round(
-              ((lp?.score ?? 0) * wP +
-                (lr?.score ?? 0) * wR +
-                (ll ?? 0) * wL) /
+              ((lp?.score ?? 0) * wP + (lr?.score ?? 0) * wR + (ll ?? 0) * wL) /
                 wSum,
             )
           : null;

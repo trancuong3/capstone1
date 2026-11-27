@@ -507,7 +507,9 @@ export function clearPinnedBrowserVoices(): void {
 
 registerVoiceCacheInvalidator(clearPinnedBrowserVoices);
 
-function inferBrowserVoiceGender(voice: SpeechSynthesisVoice): VoiceGender | null {
+function inferBrowserVoiceGender(
+  voice: SpeechSynthesisVoice,
+): VoiceGender | null {
   const name = voice.name ?? "";
   if (MALE_BROWSER_VOICE_RE.test(name)) return "male";
   if (FEMALE_BROWSER_VOICE_RE.test(name)) return "female";
@@ -534,8 +536,7 @@ function pickVietnameseBrowserVoice(
         const inferred = inferBrowserVoiceGender(pinned);
         return {
           voice: pinned,
-          genderMismatch:
-            inferred !== null && inferred !== preferredGender,
+          genderMismatch: inferred !== null && inferred !== preferredGender,
         };
       }
     }
@@ -564,9 +565,9 @@ function pickVietnameseBrowserVoice(
     const inferred = chosen ? inferBrowserVoiceGender(chosen) : null;
     const genderMismatch = Boolean(
       chosen &&
-        preferredGender &&
-        inferred !== null &&
-        inferred !== preferredGender,
+      preferredGender &&
+      inferred !== null &&
+      inferred !== preferredGender,
     );
     return { voice: chosen, genderMismatch };
   } catch {
@@ -664,7 +665,9 @@ function resolveOperationVoice(
   const prefs = getSpeechPreferences();
   const prefsUpdatedAt = getGlobalVoiceSelectionUpdatedAt();
   const policy = getVoicePolicyPreferences();
-  const lockTimestampMs = rawActiveLock ? Date.parse(rawActiveLock.lockedAt) : 0;
+  const lockTimestampMs = rawActiveLock
+    ? Date.parse(rawActiveLock.lockedAt)
+    : 0;
   const prefsNewerThanLock =
     Boolean(rawActiveLock) &&
     prefsUpdatedAt > 0 &&
@@ -707,7 +710,8 @@ function resolveOperationVoice(
   );
 
   return {
-    sessionId: rawActiveLock && !bypassSessionLock ? rawActiveLock.sessionId : null,
+    sessionId:
+      rawActiveLock && !bypassSessionLock ? rawActiveLock.sessionId : null,
     bypassSessionLock,
     provider,
     requestedVoiceId,
@@ -1193,7 +1197,9 @@ export class TtsPlayback {
                 return;
               if (meta?.voiceGenderMismatch) {
                 this.setFallbackNotice(
-                  tSpeechPlayback("speech.playback.deviceVoiceGenderMismatchNotice"),
+                  tSpeechPlayback(
+                    "speech.playback.deviceVoiceGenderMismatchNotice",
+                  ),
                 );
               }
               this.onState("playing");

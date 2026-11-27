@@ -612,18 +612,14 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     expect(screen.getByText(/Đã luyện đúng 1\/2 từ/)).toBeInTheDocument();
 
     // Status filter pills narrow chips inside book group
-    await user.click(
-      screen.getByRole("button", { name: /^Đã thuộc/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /^Đã thuộc/ }));
     expect(
       screen.queryByRole("button", { name: /Luyện từ có/ }),
     ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Luyện từ ngập ngừng/ }),
     ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: /^Tất cả/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /^Tất cả/ }));
 
     mockSpeechRecorder.start.mockRejectedValueOnce(
       new DOMException("Denied", "NotAllowedError"),

@@ -487,6 +487,25 @@ function computeRadix2Fft(ws: YinWorkspace): void {
 }
 
 /**
+ * Zero-Crossing Rate (ZCR) unvoiced/wind/breath/white-noise detector combined
+ * with spectral flatness. Child singing (130–1100 Hz, harmonic-rich) has low
+ * ZCR (~0.005–0.14 @ 48 kHz), whereas white noise (~0.50) and unvoiced
+ * fricatives/breath/wind hiss exhibit high ZCR + flat/broadband spectra.
+ */
+function isHighZcrNoise(
+  zeroCrossingRate: number,
+  spectralFlatness: number,
+  sampleRate: number,
+): boolean {
+  const zcrHz = zeroCrossingRate * sampleRate * 0.5;
+  return (
+    zeroCrossingRate >= 0.35 ||
+    (zcrHz >= 5000 && spectralFlatness >= 0.22) ||
+    (zeroCrossingRate >= 0.22 && spectralFlatness >= 0.26)
+  );
+}
+
+/**
  * Pure TypeScript YIN fundamental frequency detector (de Cheveigné & Kawahara, 2002)
  * with 4th-order 115 Hz hum-rejection high-pass, CMND, and parabolic interpolation.
  */
@@ -623,8 +642,11 @@ export function detectPitchYIN(
   const lowBandRatio = clamp01(lowBandEnergy / (trimmedFullEnergy + EPS));
   const highBandRatio = clamp01(highBandEnergy / (trimmedFullEnergy + EPS));
   const isHumLike = lowBandRatio >= 0.65 && rms >= 0.003;
+  const zcrHz = zeroCrossingRate * sampleRate * 0.5;
+  const isUnvoicedZcrBurst =
+    zeroCrossingRate >= 0.35 || (zcrHz >= 5200 && highBandRatio >= 0.35);
 
-  if (isHumLike || vocalBandRms < minVocalRms) {
+  if (isHumLike || isUnvoicedZcrBurst || vocalBandRms < minVocalRms) {
     return {
       frequencyHz: null,
       midiNote: null,
@@ -977,11 +999,18 @@ export class MusicalDspAnalyzer {
     const adaptiveMean =
       this.noveltyRingCount > 0 ? ringSum / this.noveltyRingCount : 0;
 
+    const zcrNoise = isHighZcrNoise(
+      pitch.zeroCrossingRate,
+      spectralFlatness,
+      this.sampleRate,
+    );
+    const frameVoiced = pitch.voiced && !pitch.isHumLike && !zcrNoise;
+
     // Detect note/syllable attack: either clear novelty spike OR voiced onset/pitch step.
     const voicedEntry =
-      pitch.voiced && !this.prevVoiced && pitch.vocalBandRms >= 0.01;
+      frameVoiced && !this.prevVoiced && pitch.vocalBandRms >= 0.01;
     const pitchJumpSemitones =
-      pitch.voiced &&
+      frameVoiced &&
       this.prevVoiced &&
       pitch.frequencyHz !== null &&
       this.prevFrequencyHz !== null
@@ -991,6 +1020,7 @@ export class MusicalDspAnalyzer {
       novelty > Math.max(0.085, adaptiveMean * 1.9 + 0.035) &&
       pitch.vocalBandRms >= 0.01 &&
       !pitch.isHumLike &&
+      !zcrNoise &&
       spectralFlatness < 0.48;
     const pitchAttack =
       pitchJumpSemitones >= 1.2 &&
@@ -1007,7 +1037,7 @@ export class MusicalDspAnalyzer {
         timeMs,
         strength: Number((novelty + (voicedEntry ? 0.12 : 0)).toFixed(4)),
         vocalBandRms: pitch.vocalBandRms,
-        frequencyHz: pitch.frequencyHz,
+        frequencyHz: frameVoiced ? pitch.frequencyHz : null,
         clarity: pitch.clarity,
       });
     }
@@ -1019,13 +1049,13 @@ export class MusicalDspAnalyzer {
       this.noveltyRingCount++;
     }
     this.prevVocalRms = pitch.vocalBandRms;
-    this.prevVoiced = pitch.voiced;
-    this.prevFrequencyHz = pitch.frequencyHz;
+    this.prevVoiced = frameVoiced;
+    this.prevFrequencyHz = frameVoiced ? pitch.frequencyHz : null;
 
     const frame: DspFrame = {
       timeMs,
-      frequencyHz: pitch.frequencyHz,
-      midiNote: pitch.midiNote,
+      frequencyHz: frameVoiced ? pitch.frequencyHz : null,
+      midiNote: frameVoiced ? pitch.midiNote : null,
       clarity: pitch.clarity,
       rms: pitch.rms,
       rmsDb: pitch.rmsDb,
@@ -1035,7 +1065,7 @@ export class MusicalDspAnalyzer {
       spectralFlux,
       spectralFlatness,
       zeroCrossingRate: pitch.zeroCrossingRate,
-      voiced: pitch.voiced,
+      voiced: frameVoiced,
       isHumLike: pitch.isHumLike,
       inLyricSpan,
       isOnset,
@@ -1043,26 +1073,26 @@ export class MusicalDspAnalyzer {
     this.frames.push(frame);
 
     const smoothedMidi = this.pitchSmoother.update(
-      pitch.midiNote,
-      pitch.voiced && !pitch.isHumLike && spectralFlatness < 0.35,
+      frame.midiNote,
+      frameVoiced && spectralFlatness < 0.35,
     );
     let signalState: LiveDspTelemetry["signalState"] = "quiet";
     if (pitch.isHumLike) signalState = "hum";
     else if (pitch.rms < 0.004) signalState = "quiet";
-    else if (pitch.voiced && spectralFlatness < 0.35) signalState = "singing";
-    else if (spectralFlatness >= 0.35 || pitch.clarity < 0.45)
+    else if (frameVoiced && spectralFlatness < 0.35) signalState = "singing";
+    else if (zcrNoise || spectralFlatness >= 0.35 || pitch.clarity < 0.45)
       signalState = "noise";
     else signalState = "bleed";
 
     this.pitchRing.push({
       timeMs,
-      rawMidi: pitch.midiNote,
+      rawMidi: frame.midiNote,
       smoothedMidi,
-      frequencyHz: pitch.frequencyHz,
+      frequencyHz: frame.frequencyHz,
       clarity: pitch.clarity,
       rms: pitch.rms,
       vocalBandRms: pitch.vocalBandRms,
-      voiced: pitch.voiced && !pitch.isHumLike,
+      voiced: frameVoiced,
       signalState,
     });
     if (this.pitchRing.length > this.maxPitchRingSize) {
@@ -1076,12 +1106,17 @@ export class MusicalDspAnalyzer {
   getLiveTelemetry(): LiveDspTelemetry | null {
     const last = this.frames[this.frames.length - 1];
     if (!last) return null;
+    const zcrNoise = isHighZcrNoise(
+      last.zeroCrossingRate,
+      last.spectralFlatness,
+      this.sampleRate,
+    );
     let signalState: LiveDspTelemetry["signalState"] = "quiet";
     if (last.isHumLike) signalState = "hum";
     else if (last.rms < 0.004) signalState = "quiet";
-    else if (last.voiced && last.spectralFlatness < 0.35)
+    else if (last.voiced && !zcrNoise && last.spectralFlatness < 0.35)
       signalState = "singing";
-    else if (last.spectralFlatness >= 0.35 || last.clarity < 0.45)
+    else if (zcrNoise || last.spectralFlatness >= 0.35 || last.clarity < 0.45)
       signalState = "noise";
     else signalState = "bleed";
 
@@ -1172,11 +1207,16 @@ export class MusicalDspAnalyzer {
       if (f.vocalBandRms > peakVocalRms) peakVocalRms = f.vocalBandRms;
 
       const isSilent = f.rms < 0.004;
+      const zcrNoise = isHighZcrNoise(
+        f.zeroCrossingRate,
+        f.spectralFlatness,
+        this.sampleRate,
+      );
       const isNoise =
         !isSilent &&
         !f.isHumLike &&
         !f.voiced &&
-        (f.spectralFlatness >= 0.34 || f.clarity < 0.45);
+        (zcrNoise || f.spectralFlatness >= 0.34 || f.clarity < 0.45);
 
       if (isSilent) silentCount++;
       else {
@@ -1399,6 +1439,15 @@ export function createBrowserMusicalMonitor(
   let workletActive = false;
   let stopped = false;
 
+  const onVisibilityChange = () => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      stop();
+    }
+  };
+
   const stop = () => {
     if (stopped) return;
     stopped = true;
@@ -1434,6 +1483,7 @@ export function createBrowserMusicalMonitor(
     }
     if (typeof document !== "undefined") {
       document.removeEventListener("viread:android-background", stop);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     }
   };
 
@@ -1510,6 +1560,7 @@ export function createBrowserMusicalMonitor(
     }
     if (typeof document !== "undefined") {
       document.addEventListener("viread:android-background", stop);
+      document.addEventListener("visibilitychange", onVisibilityChange);
     }
 
     // Attempt AudioWorkletNode upgrade asynchronously while AnalyserNode polling runs immediately.
@@ -1694,7 +1745,9 @@ export function createLocalVocalRecorder(
           }
           revokeUrl();
           objectUrl = URL.createObjectURL(
-            new Blob(chunks, { type: mimeType || active.mimeType || "audio/webm" }),
+            new Blob(chunks, {
+              type: mimeType || active.mimeType || "audio/webm",
+            }),
           );
           resolve(objectUrl);
         };

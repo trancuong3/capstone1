@@ -212,7 +212,11 @@ export function I18nProvider({
     let active = true;
     const targetLocale = localeState.locale;
     void loadLocaleMessages(targetLocale).then((fullBundle) => {
-      if (!active || !mountedRef.current || localeRef.current !== targetLocale) {
+      if (
+        !active ||
+        !mountedRef.current ||
+        localeRef.current !== targetLocale
+      ) {
         return;
       }
       setLocaleState((prev) =>

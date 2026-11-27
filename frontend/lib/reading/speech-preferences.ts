@@ -65,7 +65,10 @@ function sanitize(value: unknown): SpeechPreferences {
   return { voiceId, speed };
 }
 
-function sanitizeMeta(value: unknown, voiceId: string | null): SpeechPreferencesMeta {
+function sanitizeMeta(
+  value: unknown,
+  voiceId: string | null,
+): SpeechPreferencesMeta {
   const record =
     typeof value === "object" && value !== null
       ? (value as Record<string, unknown>)
@@ -104,8 +107,12 @@ function read(): SpeechPreferences {
 
 function readMeta(voiceId: string | null): SpeechPreferencesMeta {
   try {
-    const raw = window.localStorage.getItem(SPEECH_PREFERENCES_META_STORAGE_KEY);
-    return raw ? sanitizeMeta(JSON.parse(raw), voiceId) : sanitizeMeta(null, voiceId);
+    const raw = window.localStorage.getItem(
+      SPEECH_PREFERENCES_META_STORAGE_KEY,
+    );
+    return raw
+      ? sanitizeMeta(JSON.parse(raw), voiceId)
+      : sanitizeMeta(null, voiceId);
   } catch {
     return sanitizeMeta(null, voiceId);
   }

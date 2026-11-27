@@ -311,10 +311,7 @@ export function GlobalTaskCenterDrawer() {
             className="mx-4 mt-3 flex items-start gap-2.5 rounded-control border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-900 sm:mx-5"
             role="status"
           >
-            <WifiOff
-              aria-hidden="true"
-              className="mt-0.5 size-4 shrink-0"
-            />
+            <WifiOff aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
             <span>
               {t(
                 "taskCenter.workerOfflineBanner",
@@ -342,11 +339,7 @@ export function GlobalTaskCenterDrawer() {
                 className="mx-auto size-8 text-muted"
               />
               <p className="mt-2 text-sm font-semibold text-ink">
-                {t(
-                  "taskCenter.emptyTitle",
-                  undefined,
-                  "Chưa có tác vụ AI nào",
-                )}
+                {t("taskCenter.emptyTitle", undefined, "Chưa có tác vụ AI nào")}
               </p>
               <p className="mt-1 text-xs text-muted">
                 {t(
@@ -381,11 +374,7 @@ export function GlobalTaskCenterDrawer() {
                       {task.book_title || task.page_number ? (
                         <p className="mt-0.5 truncate text-xs text-muted">
                           {task.book_title ??
-                            t(
-                              "taskCenter.defaultBookLabel",
-                              undefined,
-                              "Sách",
-                            )}
+                            t("taskCenter.defaultBookLabel", undefined, "Sách")}
                           {task.page_number
                             ? t(
                                 "taskCenter.pageSeparator",
@@ -475,10 +464,7 @@ export function GlobalTaskCenterDrawer() {
                           undefined,
                           "Xem kết quả",
                         )}
-                        <ExternalLink
-                          aria-hidden="true"
-                          className="size-3.5"
-                        />
+                        <ExternalLink aria-hidden="true" className="size-3.5" />
                       </Link>
                     ) : null}
                   </div>

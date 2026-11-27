@@ -250,7 +250,12 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
 
       const nowMs = forcedMs ?? readClock();
       if (nowMs < 200 && liveStatsRef.current.lastJudgedMs > 1000) {
-        liveStatsRef.current = { hits: 0, total: 0, combo: 0, lastJudgedMs: -1 };
+        liveStatsRef.current = {
+          hits: 0,
+          total: 0,
+          combo: 0,
+          lastJudgedMs: -1,
+        };
         particlesRef.current = [];
       }
 
@@ -648,7 +653,14 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
       document.removeEventListener("visibilitychange", onVisibility);
       document.removeEventListener("viread:android-background", stopLoop);
     };
-  }, [playing, listening, subscribeClock, targetNotes, keyShift, reducedMotion]);
+  }, [
+    playing,
+    listening,
+    subscribeClock,
+    targetNotes,
+    keyShift,
+    reducedMotion,
+  ]);
 
   return (
     <div

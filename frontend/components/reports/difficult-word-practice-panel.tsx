@@ -1839,10 +1839,7 @@ export function DifficultWordPracticePanel({
           {word.display_text}
         </h2>
 
-        <p
-          aria-live="polite"
-          className="max-w-md text-base font-bold text-ink"
-        >
+        <p aria-live="polite" className="max-w-md text-base font-bold text-ink">
           {flowState === "PREPARING"
             ? t("practice.promptPreparing")
             : flowState === "INSTRUCTING"

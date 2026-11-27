@@ -244,9 +244,9 @@ export function AiTeacherVoiceSection({
     () => STATIC_LOCAL_VOICES[0].voice_id,
   );
 
-  const [remoteVoices, setRemoteVoices] = useState<readonly VoiceOption[] | null>(
-    null,
-  );
+  const [remoteVoices, setRemoteVoices] = useState<
+    readonly VoiceOption[] | null
+  >(null);
   const googleBackupEnabled =
     policy.providerMode === "local_with_google_fallback" &&
     policy.allowGoogleTtsFallback;
@@ -538,7 +538,9 @@ export function AiTeacherVoiceSection({
           onClick={handlePreviewToggle}
           size="compact"
           type="button"
-          variant={isPreviewing || speechPlayer.isPlaying ? "secondary" : "primary"}
+          variant={
+            isPreviewing || speechPlayer.isPlaying ? "secondary" : "primary"
+          }
         >
           {isPreviewing || speechPlayer.isPlaying ? (
             <>
@@ -572,7 +574,8 @@ export function AiTeacherVoiceSection({
               gender: "male" as const,
               title: tParent("teacherVoice.maleTitle"),
               desc: tParent("teacherVoice.maleDesc"),
-              mappedVoice: cleanVoiceName(malePreviewVoice) || "Thầy Thiện Minh",
+              mappedVoice:
+                cleanVoiceName(malePreviewVoice) || "Thầy Thiện Minh",
             },
           ] as const
         ).map((card) => {

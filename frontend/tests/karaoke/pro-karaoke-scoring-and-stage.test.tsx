@@ -1,4 +1,10 @@
-import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KaraokeScoreCard } from "@/components/karaoke/karaoke-score-card";
 import { PitchHighwayCanvas } from "@/components/karaoke/pitch-highway-canvas";
@@ -47,8 +53,12 @@ function buildTestSong(): {
   notes: { startMs: number; endMs: number; midi: number; text: string }[];
 } {
   const spans: LyricTimeSpan[] = [];
-  const notes: { startMs: number; endMs: number; midi: number; text: string }[] =
-    [];
+  const notes: {
+    startMs: number;
+    endMs: number;
+    midi: number;
+    text: string;
+  }[] = [];
   const profileNotes: KaraokeMelodyProfile["notes"] = [];
   const pitchContour: KaraokeMelodyProfile["pitch_contour"] = [];
 
@@ -167,7 +177,8 @@ function synthesizePerformanceDsp(
       let targetMidi = active.midi;
       if (options.mode === "octave_up") targetMidi += 12;
       else if (options.mode === "shifted_plus2") targetMidi += 2;
-      else if (options.mode === "off_pitch") targetMidi += 2.6; // +260 cents
+      else if (options.mode === "off_pitch")
+        targetMidi += 2.6; // +260 cents
       else if (options.mode === "monotone") targetMidi = 57.2; // flat speaking A3
 
       const hz = midiToHz(targetMidi);
@@ -244,7 +255,11 @@ describe("Pro Karaoke 3-Pillar Synthetic DSP & Honest Scoring Engine", () => {
     });
 
     expect(res.kind).toBe("scored");
-    expect(res.activePillars).toEqual({ pitch: true, rhythm: true, lyrics: true });
+    expect(res.activePillars).toEqual({
+      pitch: true,
+      rhythm: true,
+      lyrics: true,
+    });
     expect(res.totalScore).toBeGreaterThanOrEqual(92);
     expect(res.pitchScore).toBeGreaterThanOrEqual(92);
     expect(res.rhythmScore).toBeGreaterThanOrEqual(88);
@@ -529,7 +544,11 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
       melodyProfile: song.melodyProfile,
     });
     const onPractice = vi.fn();
-    const targetNotes = resolveTargetNotes(song.melodyProfile, null, song.lyrics);
+    const targetNotes = resolveTargetNotes(
+      song.melodyProfile,
+      null,
+      song.lyrics,
+    );
 
     render(
       <KaraokeScoreCard
@@ -546,7 +565,9 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
     expect(screen.getByTestId("karaoke-pro-score-header")).toBeInTheDocument();
     expect(screen.getByTestId("karaoke-pro-rank")).toHaveTextContent("S");
     expect(screen.getByTestId("karaoke-pro-pillars")).toBeInTheDocument();
-    expect(screen.getByTestId("karaoke-pitch-overview-chart")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("karaoke-pitch-overview-chart"),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("karaoke-local-vocal-replay")).toHaveTextContent(
       /Chỉ lưu tạm trên máy của bé/,
     );
@@ -598,7 +619,11 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
       .mockReturnValue(fakeCtx as unknown as CanvasRenderingContext2D);
 
     const song = buildTestSong();
-    const targetNotes = resolveTargetNotes(song.melodyProfile, null, song.lyrics);
+    const targetNotes = resolveTargetNotes(
+      song.melodyProfile,
+      null,
+      song.lyrics,
+    );
     const liveRing = [
       {
         timeMs: 880,
@@ -649,7 +674,9 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
     );
     // Combo badge keeps its Flame SVG icon intact across drawn frames
     expect(
-      screen.getByTestId("karaoke-pitch-highway").querySelector("svg.lucide-flame"),
+      screen
+        .getByTestId("karaoke-pitch-highway")
+        .querySelector("svg.lucide-flame"),
     ).not.toBeNull();
 
     act(() => {
@@ -690,7 +717,9 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
     );
 
     expect(screen.getByTestId("karaoke-pitch-highway")).toBeInTheDocument();
-    expect(screen.getByTestId("karaoke-key-shift-controls")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("karaoke-key-shift-controls"),
+    ).toBeInTheDocument();
 
     const upBtn = screen.getByRole("button", { name: "Tăng tông 1 bán âm" });
     fireEvent.click(upBtn);
@@ -710,7 +739,13 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
 
   it("useKaraokeScoring starts companion Vocal DSP stream even when SpeechRecognition.start(track) is unsupported (standard browsers)", async () => {
     const song = buildTestSong();
-    const recognizers: { start: ReturnType<typeof vi.fn>; abort: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn>; onstart: (() => void) | null; onend: (() => void) | null }[] = [];
+    const recognizers: {
+      start: ReturnType<typeof vi.fn>;
+      abort: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+      onstart: (() => void) | null;
+      onend: (() => void) | null;
+    }[] = [];
     class StandardBrowserRecognition {
       lang = "";
       continuous = false;
@@ -731,8 +766,24 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
     const stopTrackSpy = vi.fn();
     const makeStream = () =>
       ({
-        getTracks: () => [{ readyState: "live", enabled: true, muted: false, stop: stopTrackSpy, onended: null }],
-        getAudioTracks: () => [{ readyState: "live", enabled: true, muted: false, stop: stopTrackSpy, onended: null }],
+        getTracks: () => [
+          {
+            readyState: "live",
+            enabled: true,
+            muted: false,
+            stop: stopTrackSpy,
+            onended: null,
+          },
+        ],
+        getAudioTracks: () => [
+          {
+            readyState: "live",
+            enabled: true,
+            muted: false,
+            stop: stopTrackSpy,
+            onended: null,
+          },
+        ],
       }) as unknown as MediaStream;
     const getUserMediaSpy = vi.fn(async () => makeStream());
     vi.stubGlobal("navigator", {
@@ -743,7 +794,10 @@ describe("Pro Karaoke UI Components & Lifecycle Cleanup", () => {
     class FakeAudioContext {
       sampleRate = 48_000;
       state = "running";
-      createMediaStreamSource = vi.fn(() => ({ connect: vi.fn(), disconnect: vi.fn() }));
+      createMediaStreamSource = vi.fn(() => ({
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      }));
       createAnalyser = vi.fn(() => ({
         fftSize: 2048,
         smoothingTimeConstant: 0,

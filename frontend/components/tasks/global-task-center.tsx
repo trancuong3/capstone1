@@ -20,11 +20,7 @@ const LazyGlobalTaskCenterDrawer = dynamic(
 
 export interface GlobalTaskCenterProps {
   readonly variant?:
-    | "header-pill"
-    | "floating"
-    | "sidebar"
-    | "topbar"
-    | "drawer-only";
+    "header-pill" | "floating" | "sidebar" | "topbar" | "drawer-only";
   readonly hideOnPaths?: readonly string[];
   readonly className?: string;
 }

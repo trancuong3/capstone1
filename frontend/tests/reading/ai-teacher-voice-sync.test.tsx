@@ -38,23 +38,30 @@ const { pushMock, replaceMock, searchParamsMock } = vi.hoisted(() => ({
   searchParamsMock: new URLSearchParams(),
 }));
 
-const { listVoicesMock, updateSessionVoiceLockMock, speechPlayerPlayMock, speechPlayerStopMock } =
-  vi.hoisted(() => ({
-    listVoicesMock: vi.fn(),
-    updateSessionVoiceLockMock: vi.fn(),
-    speechPlayerPlayMock: vi.fn(),
-    speechPlayerStopMock: vi.fn(),
-  }));
+const {
+  listVoicesMock,
+  updateSessionVoiceLockMock,
+  speechPlayerPlayMock,
+  speechPlayerStopMock,
+} = vi.hoisted(() => ({
+  listVoicesMock: vi.fn(),
+  updateSessionVoiceLockMock: vi.fn(),
+  speechPlayerPlayMock: vi.fn(),
+  speechPlayerStopMock: vi.fn(),
+}));
 
-const { getDashboardSummaryMock, updateVoicePreferencesMock, profileServiceMock } =
-  vi.hoisted(() => {
-    const getDashboardSummary = vi.fn();
-    return {
-      getDashboardSummaryMock: getDashboardSummary,
-      updateVoicePreferencesMock: vi.fn(),
-      profileServiceMock: { getDashboardSummary },
-    };
-  });
+const {
+  getDashboardSummaryMock,
+  updateVoicePreferencesMock,
+  profileServiceMock,
+} = vi.hoisted(() => {
+  const getDashboardSummary = vi.fn();
+  return {
+    getDashboardSummaryMock: getDashboardSummary,
+    updateVoicePreferencesMock: vi.fn(),
+    profileServiceMock: { getDashboardSummary },
+  };
+});
 
 const { routerMock, speechPlayerMock } = vi.hoisted(() => ({
   routerMock: { push: vi.fn(), replace: vi.fn(), refresh: vi.fn() },
@@ -143,10 +150,12 @@ beforeEach(() => {
     local_worker_ready: true,
     google_tts_available: false,
   });
-  updateVoicePreferencesMock.mockReset().mockImplementation(async (childId, payload) => ({
-    ...(childId === CHILD_2.id ? CHILD_2 : CHILD_1),
-    settings: { voice_preferences: payload },
-  }));
+  updateVoicePreferencesMock
+    .mockReset()
+    .mockImplementation(async (childId, payload) => ({
+      ...(childId === CHILD_2.id ? CHILD_2 : CHILD_1),
+      settings: { voice_preferences: payload },
+    }));
   getDashboardSummaryMock.mockReset().mockResolvedValue({
     profile: {
       id: "00000000-0000-4000-8000-000000000001",
@@ -313,10 +322,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     });
 
     render(
-      <ReadingVoiceSettings
-        onPreview={vi.fn()}
-        onStopPreview={vi.fn()}
-      />,
+      <ReadingVoiceSettings onPreview={vi.fn()} onStopPreview={vi.fn()} />,
     );
 
     await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
@@ -575,9 +581,11 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
       region: "north",
     });
 
-    const synthesizeMock = vi.fn().mockResolvedValue(
-      new Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/mpeg" }),
-    );
+    const synthesizeMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Blob([new Uint8Array([1, 2, 3, 4])], { type: "audio/mpeg" }),
+      );
     const fakeSpeechService = {
       synthesize: synthesizeMock,
       synthesizePhonics: vi.fn(),
@@ -641,10 +649,10 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
   it("adaptTextToTeacherPersona preserves quoted book words and non-teacher phrases while adapting teacher pronouns", () => {
     expect(
       adaptTextToTeacherPersona(
-        "Con nghe cô đọc từ “cô giáo” và \"cô\" nhé.",
+        'Con nghe cô đọc từ “cô giáo” và "cô" nhé.',
         "male",
       ),
-    ).toBe("Con nghe thầy đọc từ “cô giáo” và \"cô\" nhé.");
+    ).toBe('Con nghe thầy đọc từ “cô giáo” và "cô" nhé.');
 
     expect(
       adaptTextToTeacherPersona(
@@ -675,5 +683,34 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     hydrateTeacherVoiceFromChildProfile(CHILD_2);
     expect(getEffectiveVoiceId()).toBe("local_south_thai_son");
     expect(getEffectiveTeacherPersona().gender).toBe("male");
+  });
+
+  it("picture-description timeout error adapts to Thầy giáo AI when male persona is active", async () => {
+    const apiClient = await import("@/lib/api/api-client");
+    const { createPictureDescriptionService } =
+      await import("@/lib/api/picture-description-service");
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+    });
+
+    vi.useFakeTimers();
+    const requestApiSpy = vi
+      .spyOn(apiClient, "requestApi")
+      .mockImplementation(() => new Promise(() => {}));
+    try {
+      const service = createPictureDescriptionService();
+      const pending = service.getCatalog(CHILD_1.id).catch((err) => err);
+      await vi.advanceTimersByTimeAsync(21_000);
+      const error = (await pending) as Error & { status?: number };
+      expect(error).toBeInstanceOf(Error);
+      expect(error.status).toBe(504);
+      expect(error.message).toContain("Thầy giáo AI");
+      expect(error.message).not.toContain("Cô giáo AI");
+    } finally {
+      requestApiSpy.mockRestore();
+      vi.useRealTimers();
+    }
   });
 });

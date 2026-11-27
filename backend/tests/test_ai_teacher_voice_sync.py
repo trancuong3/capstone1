@@ -2,9 +2,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 import pytest
 from fastapi import HTTPException

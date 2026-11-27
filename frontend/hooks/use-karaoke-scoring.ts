@@ -247,7 +247,9 @@ class KaraokeMicSession {
         ? this.savedSong.snapshot.musicalScore
         : musicalScore,
       proScore,
-      songProScore: this.savedSong ? this.savedSong.snapshot.proScore : proScore,
+      songProScore: this.savedSong
+        ? this.savedSong.snapshot.proScore
+        : proScore,
       replayAudioUrl: this.snapshot.replayAudioUrl,
       dspFrames: this.lastDspSummary?.frames ?? this.snapshot.dspFrames,
       sttAvailable: this.provider.supported(),
@@ -808,7 +810,10 @@ class KaraokeMicSession {
     const { status } = this.snapshot;
     if (
       status !== "listening" &&
-      !((this.recognition || this.dspOnlyActive) && (status === "armed" || status === "paused"))
+      !(
+        (this.recognition || this.dspOnlyActive) &&
+        (status === "armed" || status === "paused")
+      )
     )
       return;
     this.release(true);

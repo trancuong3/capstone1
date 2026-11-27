@@ -1723,9 +1723,7 @@ export function KaraokeStage({
               max={MIC_LATENCY_MAX_MS}
               step={10}
               value={micLatencyMs}
-              onChange={(event) =>
-                setMicLatencyMs(Number(event.target.value))
-              }
+              onChange={(event) => setMicLatencyMs(Number(event.target.value))}
               className="min-h-12 w-full accent-primary"
             />
           </label>

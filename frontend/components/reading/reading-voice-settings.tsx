@@ -309,9 +309,9 @@ export function ReadingVoiceSettings({
     const explicitVoiceId =
       value.voiceId !== undefined
         ? value.voiceId === null
-          ? (loadState.status === "ready"
-              ? loadState.data.default_voice_id
-              : "local_north_truc_ly")
+          ? loadState.status === "ready"
+            ? loadState.data.default_voice_id
+            : "local_north_truc_ly"
           : value.voiceId
         : undefined;
     const storedVoiceId =

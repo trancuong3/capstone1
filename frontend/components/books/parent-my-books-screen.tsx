@@ -506,10 +506,7 @@ function ParentMyBooksContent({
         role="note"
         className="flex items-center gap-2.5 rounded-control border border-emerald-200/80 bg-emerald-50/60 px-3.5 py-2.5 text-xs text-emerald-950 sm:text-sm"
       >
-        <Lock
-          aria-hidden="true"
-          className="size-4 shrink-0 text-emerald-700"
-        />
+        <Lock aria-hidden="true" className="size-4 shrink-0 text-emerald-700" />
         <p className="min-w-0 leading-relaxed text-emerald-900">
           <strong className="font-bold text-emerald-950">
             {t("myBooks.privacyBannerTitle")}:

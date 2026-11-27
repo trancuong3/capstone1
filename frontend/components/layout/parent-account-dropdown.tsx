@@ -130,9 +130,7 @@ export function ParentAccountDropdown({
 
   const isOpen = menuState.isOpen && menuState.pathname === pathname;
   const lastSeenTaskMs =
-    seenState.userId === userId
-      ? seenState.ms
-      : readLastSeenTimestamp(userId);
+    seenState.userId === userId ? seenState.ms : readLastSeenTimestamp(userId);
 
   const activeCount = taskCenter?.activeCount ?? 0;
   const waitingReviewCount = taskCenter?.waitingReviewCount ?? 0;

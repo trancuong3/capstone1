@@ -21,6 +21,129 @@ export function readyVoiceStatus(
   };
 }
 
+const FIXTURE_LOCAL_VOICES = [
+  {
+    voice_id: "local_north_truc_ly",
+    name: "Cô Trúc Ly",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Bắc",
+    use_case: "reading_coach",
+    description: "Miền Bắc · Nữ · Tự nhiên, ấm áp",
+    preview_url: null,
+    is_default: true,
+  },
+  {
+    voice_id: "local_north_ngoc_linh",
+    name: "Cô Ngọc Linh",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Bắc",
+    use_case: "storytelling",
+    description: "Miền Bắc · Nữ · Kể chuyện dịu dàng",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_north_thien_minh",
+    name: "Thầy Thiện Minh",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Bắc",
+    use_case: "storytelling",
+    description: "Miền Bắc · Nam · Kể chuyện truyền cảm",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_central_ngoc_tran",
+    name: "Cô Ngọc Trân",
+    provider: "local",
+    region: "central",
+    region_label: "Miền Trung",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Trung",
+    use_case: "reading_coach",
+    description: "Miền Trung · Nữ · Tự nhiên, dịu dàng",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_central_quang_son",
+    name: "Thầy Quang Sơn",
+    provider: "local",
+    region: "central",
+    region_label: "Miền Trung",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Trung",
+    use_case: "reading_coach",
+    description: "Miền Trung · Nam · Tự nhiên, rõ chữ",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_thuc_doan",
+    name: "Cô Thục Đoan",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nữ · Kể chuyện ấm áp",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_my_duyen",
+    name: "Cô Mỹ Duyên",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nữ · Đọc truyện thiếu nhi",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_thai_son",
+    name: "Thầy Thái Sơn",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: "vieneu-v3-turbo-onnx-fp32-3.8.5",
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nam · Kể chuyện rõ ràng",
+    preview_url: null,
+    is_default: false,
+  },
+] as const;
+
 export const ids = {
   parent: "11111111-1111-4111-8111-111111111111",
   child: "22222222-2222-4222-8222-222222222222",
@@ -187,10 +310,21 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
     verifyRequest: null,
   };
   await seedBrowserSession(page);
+  const childState: {
+    id: string;
+    parent_id: string;
+    alias: string;
+    grade: number;
+    settings: Record<string, unknown>;
+    created_at: string;
+  } = {
+    ...child,
+    settings: { ...child.settings },
+  };
   const headers = {
     "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
     "access-control-allow-headers": "authorization,content-type,accept",
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
     await route.fulfill({
@@ -587,9 +721,9 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           email_verified: true,
           contact_info_status: "available",
           avatar_url: null,
-          children: state.emptyChildren ? [] : [child],
+          children: state.emptyChildren ? [] : [childState],
         },
-        children: state.emptyChildren ? [] : [child],
+        children: state.emptyChildren ? [] : [childState],
         latest_sessions_by_child: {},
       });
     if (path === "/profiles/me")
@@ -602,7 +736,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         contact_phone: "+84900000000",
         email_verified: true,
         contact_info_status: "available",
-        children: state.emptyChildren ? [] : [child],
+        children: state.emptyChildren ? [] : [childState],
       });
     if (path === "/parent-notifications/preferences")
       return respond(route, {
@@ -620,10 +754,43 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         updated_at: timestamp,
       });
     if (path === "/parent-notifications/history") return respond(route, []);
+    const voicePrefsMatch =
+      request.method() === "PATCH"
+        ? /^\/(?:profiles\/)?children\/([^/]+)\/voice-preferences$/.exec(path)
+        : null;
+    if (voicePrefsMatch) {
+      const targetChildId = decodeURIComponent(voicePrefsMatch[1]);
+      if (targetChildId !== ids.child) return respond(route, {}, 404);
+      const body = (request.postDataJSON() ?? {}) as Record<string, unknown>;
+      childState.settings = {
+        ...childState.settings,
+        voice_preferences: {
+          voice_id:
+            typeof body.voice_id === "string"
+              ? body.voice_id
+              : "local_north_truc_ly",
+          gender: body.gender === "male" ? "male" : "female",
+          region:
+            body.region === "central" || body.region === "south"
+              ? body.region
+              : "north",
+          speed:
+            typeof body.speed === "number" && Number.isFinite(body.speed)
+              ? body.speed
+              : 1.0,
+          updated_at:
+            typeof body.updated_at === "number" &&
+            Number.isFinite(body.updated_at)
+              ? body.updated_at
+              : Date.now(),
+        },
+      };
+      return respond(route, childState);
+    }
     if (path === "/profiles/children")
-      return respond(route, state.emptyChildren ? [] : [child]);
+      return respond(route, state.emptyChildren ? [] : [childState]);
     if (path === `/profiles/children/${ids.child}`)
-      return respond(route, child);
+      return respond(route, childState);
     if (path.startsWith("/profiles/children/")) return respond(route, {}, 404);
     if (path === "/profiles/admin/parents")
       return respond(route, {
@@ -639,7 +806,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         email: "parent@example.test",
         phone: null,
         created_at: timestamp,
-        children: [child],
+        children: [childState],
         contact_info_status: "not_configured",
       });
     if (path === "/books/catalog") {
@@ -1088,6 +1255,15 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (request.method() === "GET" && path === "/voice/status")
       return respond(route, readyVoiceStatus("Binh"));
+    if (request.method() === "GET" && path === "/voice/voices")
+      return respond(route, {
+        default_voice_id: "local_north_truc_ly",
+        local_worker_ready: true,
+        google_tts_available: false,
+        voices: FIXTURE_LOCAL_VOICES,
+      });
+    if (request.method() === "PUT" && path === "/voice/session-lock")
+      return respond(route, { ok: true });
     if (request.method() === "GET" && path === "/studio/tasks")
       return respond(route, {
         actor_id: ids.parent,

@@ -85,7 +85,7 @@ class handler(BaseHTTPRequestHandler):
                 self.send_header(key, value)
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        if self.command != "HEAD":
+        if getattr(self, "command", None) != "HEAD":
             self.wfile.write(data)
 
     def _method_not_allowed(self):
