@@ -380,7 +380,13 @@ function shouldSkipBackendTtsForVoice(
   const health = getVoiceEngineHealthForRouting();
   if (!health) return false;
   const allowCloud = canUseGoogleTtsFallback();
-  if (allowCloud && health.elevenlabs?.tts_configured) return false;
+  if (
+    allowCloud &&
+    health.elevenlabs?.tts_configured &&
+    !health.elevenlabs?.tts_cooldown
+  ) {
+    return false;
+  }
   const googleUsable =
     allowCloud && health.google.tts_configured && !health.google.tts_cooldown;
   return (!health.local.available || !health.local.tts_ready) && !googleUsable;

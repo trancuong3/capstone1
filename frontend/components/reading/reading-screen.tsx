@@ -55,6 +55,7 @@ import {
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
@@ -878,6 +879,10 @@ function ReadingSessionScreen({
           } else if (sttAllowsFallback) {
             const useGoogleStt =
               health.google.stt_configured && !health.google.stt_cooldown;
+            const useElevenLabsStt = Boolean(
+              health.elevenlabs?.stt_configured &&
+              !health.elevenlabs?.stt_cooldown,
+            );
             const hasNativeWebSpeech =
               typeof window !== "undefined" &&
               Boolean(
@@ -889,11 +894,13 @@ function ReadingSessionScreen({
             recordSttEngineUsage({
               provider: useGoogleStt
                 ? "google"
-                : hasNativeWebSpeech
-                  ? "browser"
-                  : wasmSupported
-                    ? "wasm"
-                    : "browser",
+                : useElevenLabsStt
+                  ? "elevenlabs"
+                  : hasNativeWebSpeech
+                    ? "browser"
+                    : wasmSupported
+                      ? "wasm"
+                      : "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
@@ -929,6 +936,10 @@ function ReadingSessionScreen({
         if (ttsAllowsFallback && localTtsDown) {
           const useGoogleTts =
             health.google.tts_configured && !health.google.tts_cooldown;
+          const useElevenLabsTts = Boolean(
+            health.elevenlabs?.tts_configured &&
+            !health.elevenlabs?.tts_cooldown,
+          );
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
@@ -966,6 +977,20 @@ function ReadingSessionScreen({
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
                 voiceId: googleVoiceId,
                 voiceGender: resolveVoiceGender(googleVoiceId),
+              });
+            }
+          } else if (useElevenLabsTts) {
+            if (!activeLock || activeLock.sessionId !== sessionId) {
+              lockSessionVoice(sessionId);
+            }
+            const resolvedLock = getActiveSessionVoiceLock();
+            if (!ttsUsingCachedAudio) {
+              recordTtsEngineUsage({
+                provider: "elevenlabs",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+                voiceId: resolvedLock?.voiceId ?? null,
+                voiceGender: resolveVoiceGender(resolvedLock?.voiceId),
               });
             }
           } else {
@@ -3774,10 +3799,15 @@ function ReadingSessionScreen({
     const handoff = options.preserveAlignment || options.forPassageHelp;
 
     const sttStatus = getVoiceEngineStatus().stt;
-    const freshSttHealth = getFreshVoiceEngineHealth();
+    const freshSttHealth = getVoiceEngineHealthForRouting();
+    const elevenLabsSttUsable = Boolean(
+      freshSttHealth?.elevenlabs?.stt_configured &&
+      !freshSttHealth?.elevenlabs?.stt_cooldown,
+    );
     const backendSttUnavailable =
       freshSttHealth !== null &&
       (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
+      !elevenLabsSttUsable &&
       (!freshSttHealth.google.stt_configured ||
         freshSttHealth.google.stt_cooldown);
     const alreadyUsingEmergencyBrowserStt =

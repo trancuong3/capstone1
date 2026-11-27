@@ -144,6 +144,7 @@ class KaraokeMicSession {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private resolveArm: ((started: boolean) => void) | null = null;
   private emptyRestarts = 0;
+  private transientNativeErrors = 0;
   private stopSignal: (() => void) | null = null;
   private signalClassifier = new SingingSignalClassifier();
   private musicalMonitor: BrowserMusicalMonitor | null = null;
@@ -271,6 +272,7 @@ class KaraokeMicSession {
     this.lastDspSummary = null;
     this.snapshot = idle;
     this.emptyRestarts = 0;
+    this.transientNativeErrors = 0;
     this.update("idle", null, null, null);
   };
 
@@ -311,6 +313,7 @@ class KaraokeMicSession {
     this.attempt = new LiveSingingAttempt(this.activeLyrics);
     this.snapshot = { ...idle, liveScore: this.attempt.result(!!lineId) };
     this.emptyRestarts = 0;
+    this.transientNativeErrors = 0;
     this.update("arming", null, null, null);
     return new Promise<boolean>((resolve) => {
       this.resolveArm = resolve;
@@ -326,6 +329,7 @@ class KaraokeMicSession {
     this.savedSong = null;
     this.practiceLyrics = null;
     this.emptyRestarts = 0;
+    this.transientNativeErrors = 0;
     this.attempt = saved.attempt;
     this.lastDspSummary = saved.dspSummary;
     this.snapshot = saved.snapshot;
@@ -516,7 +520,10 @@ class KaraokeMicSession {
         if (this.recognition !== recognition || !capturing || !this.attempt)
           return;
         const outcome = windows.consume(event, this.attempt);
-        if (outcome.changed) this.emptyRestarts = 0;
+        if (outcome.changed) {
+          this.emptyRestarts = 0;
+          this.transientNativeErrors = 0;
+        }
         this.snapshot = {
           ...this.snapshot,
           liveScore: this.attempt.result(!!this.savedSong),
@@ -531,7 +538,16 @@ class KaraokeMicSession {
       }
       recognition.onerror = ({ error }) => {
         if (this.recognition !== recognition) return;
-        if (error === "no-speech") {
+        if (
+          error === "no-speech" ||
+          (!probe &&
+            recognition.managesOwnMicrophone &&
+            error === "aborted" &&
+            this.transientNativeErrors < 3)
+        ) {
+          if (error === "aborted") {
+            this.transientNativeErrors += 1;
+          }
           noSpeech = true;
           return;
         }
@@ -558,7 +574,14 @@ class KaraokeMicSession {
           (!deliberate && !noSpeech && ++this.emptyRestarts > maxEmptyRestarts)
         )
           this.fail(microphoneError());
-        else {
+        else if (recognition.managesOwnMicrophone) {
+          this.update("armed");
+          this.timer = setTimeout(() => {
+            if (this.snapshot.status === "armed" && !this.recognition) {
+              this.open(false);
+            }
+          }, 120);
+        } else {
           this.update("armed");
           this.open(false);
         }
