@@ -955,6 +955,66 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             self.assertEqual(stt_resp.headers["x-voice-provider"], "elevenlabs")
             self.assertEqual(stt_resp.json()["text"], "bộ lông của miu")
 
+    def test_transient_local_busy_retries_offline_without_switching_to_online(self) -> None:
+        from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+
+        flaky_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        flaky_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                LocalVoiceTechnicalError(503, "VOICE_WORKER_BUSY"),
+                LocalSynthesizedAudio(
+                    content=_make_pcm_wav(),
+                    content_type="audio/wav",
+                    resolved_voice_id="local_north_truc_ly",
+                    region="north",
+                    model_version="vieneu-v3-turbo-onnx-fp32-3.8.5",
+                ),
+            ]
+        )
+        flaky_local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                LocalVoiceTechnicalError(503, "LOCAL_STT_BUSY"),
+                LocalTranscription(
+                    text="con mèo",
+                    language_code="vi",
+                    language_probability=0.95,
+                    words=[{"text": "con", "start": 0.0, "end": 0.2}],
+                    provider="local",
+                ),
+            ]
+        )
+        el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+        el.synthesize = AsyncMock()  # type: ignore[method-assign]
+        el.transcribe = AsyncMock()  # type: ignore[method-assign]
+        google = GoogleCloudVoiceProvider(stt_api_key="k", tts_api_key="k")
+        google.synthesize = AsyncMock()  # type: ignore[method-assign]
+        google.transcribe = AsyncMock()  # type: ignore[method-assign]
+
+        orch = VoiceOrchestrator(
+            local_provider=flaky_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+        with _make_app(orch) as client:
+            tts_resp = client.post(
+                "/voice/text-to-speech",
+                json={"text": "con mèo", "voice_id": "local_north_truc_ly", "speed": 1.0},
+            )
+            stt_resp = client.post(
+                "/voice/speech-to-text",
+                data={"language_code": "vi"},
+                files={"file": ("clip.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 64, "audio/webm")},
+            )
+
+        self.assertEqual(tts_resp.status_code, 200)
+        self.assertEqual(tts_resp.headers["x-voice-provider"], "local")
+        self.assertEqual(stt_resp.status_code, 200)
+        self.assertEqual(stt_resp.headers["x-voice-provider"], "local")
+        el.synthesize.assert_not_called()
+        el.transcribe.assert_not_called()
+        google.synthesize.assert_not_called()
+        google.transcribe.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

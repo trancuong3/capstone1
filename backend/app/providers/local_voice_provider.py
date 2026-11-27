@@ -662,11 +662,20 @@ class LocalVoiceProvider:
             headers.update(extra_headers)
         http_timeout = self._make_timeout(timeout)
         retry_limit = max(0, int(max_retries))
+        busy_retry_limit = max(3, retry_limit)
         retries_used = 0
+        busy_retries_used = 0
         protocol_resets_used = 0
         backoffs = (0.25, 0.6)
+        busy_backoffs = (0.35, 0.75, 1.25)
+        busy_codes = {
+            "VOICE_WORKER_BUSY",
+            "LOCAL_VOICE_BUSY",
+            "LOCAL_TTS_BUSY",
+            "LOCAL_STT_BUSY",
+        }
         last_exc: Exception | None = None
-        for attempt in range(retry_limit + 3):
+        for attempt in range(retry_limit + busy_retry_limit + 3):
             backoff_s = backoffs[min(retries_used, len(backoffs) - 1)]
             client = self._acquire_client()
             try:
@@ -728,13 +737,21 @@ class LocalVoiceProvider:
             else:
                 await self._release_client(client)
 
+            worker_code = _extract_worker_error_code(resp) if resp.status_code in (429, 503) else None
+            if resp.status_code in (429, 503) and worker_code in busy_codes:
+                if busy_retries_used < busy_retry_limit:
+                    busy_wait = busy_backoffs[min(busy_retries_used, len(busy_backoffs) - 1)]
+                    busy_retries_used += 1
+                    await asyncio.sleep(busy_wait)
+                    continue
+                return resp
+
             if resp.status_code == 200:
                 self._clear_remote_circuit()
             elif not self.is_loopback and resp.status_code in _REMOTE_GATEWAY_DOWN_STATUSES:
                 self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
 
             if resp.status_code == 503 and retries_used < retry_limit:
-                worker_code = _extract_worker_error_code(resp)
                 if worker_code not in {"LOCAL_TTS_UNAVAILABLE", "LOCAL_STT_UNAVAILABLE"}:
                     retries_used += 1
                     await asyncio.sleep(backoff_s)

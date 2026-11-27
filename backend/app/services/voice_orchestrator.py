@@ -122,6 +122,27 @@ def _prune_turn_cache(now: float) -> None:
         _turn_results.popitem(last=False)
 
 
+_TRANSIENT_BUSY_CODES = frozenset(
+    {
+        "VOICE_WORKER_BUSY",
+        "LOCAL_VOICE_BUSY",
+        "LOCAL_TTS_BUSY",
+        "LOCAL_STT_BUSY",
+    }
+)
+
+
+async def _call_local_with_busy_retry(call_fn: Any) -> Any:
+    """Keep offline fixed voices primary by retrying once on transient BUSY before any online failover."""
+    try:
+        return await call_fn()
+    except LocalVoiceTechnicalError as err:
+        if err.code not in _TRANSIENT_BUSY_CODES:
+            raise
+        await asyncio.sleep(0.45)
+        return await call_fn()
+
+
 def _resolve_local_voice_region_gender(voice_id: str) -> tuple[str, str]:
     region = "north"
     gender = "female"
@@ -627,12 +648,14 @@ class VoiceOrchestrator:
 
             # Local voice locked: NEVER switch to Google or to another local voice!
             try:
-                audio = await self.local.synthesize(
-                    text=text,
-                    voice_id=voice_id,
-                    speed=speed,
-                    word_sample=word_sample,
-                    **self._audio_negotiation_kwargs(ctx),
+                audio = await _call_local_with_busy_retry(
+                    lambda: self.local.synthesize(
+                        text=text,
+                        voice_id=voice_id,
+                        speed=speed,
+                        word_sample=word_sample,
+                        **self._audio_negotiation_kwargs(ctx),
+                    )
                 )
                 if (
                     cache_svc is not None
@@ -977,11 +1000,13 @@ class VoiceOrchestrator:
                 return speech
 
             try:
-                speech = await self.local.synthesize_timed(
-                    words=words,
-                    voice_id=voice_id,
-                    speed=speed,
-                    **self._audio_negotiation_kwargs(ctx),
+                speech = await _call_local_with_busy_retry(
+                    lambda: self.local.synthesize_timed(
+                        words=words,
+                        voice_id=voice_id,
+                        speed=speed,
+                        **self._audio_negotiation_kwargs(ctx),
+                    )
                 )
                 if (
                     cache_svc is not None
@@ -1251,11 +1276,13 @@ class VoiceOrchestrator:
                 return speech
 
             try:
-                speech = await self.local.synthesize_phonics(
-                    steps=steps,
-                    voice_id=voice_id,
-                    speed=speed,
-                    **self._audio_negotiation_kwargs(ctx),
+                speech = await _call_local_with_busy_retry(
+                    lambda: self.local.synthesize_phonics(
+                        steps=steps,
+                        voice_id=voice_id,
+                        speed=speed,
+                        **self._audio_negotiation_kwargs(ctx),
+                    )
                 )
                 if (
                     cache_svc is not None
@@ -1441,14 +1468,16 @@ class VoiceOrchestrator:
     ) -> LocalTranscription:
         t0 = time.perf_counter()
         try:
-            res = await self.local.transcribe(
-                audio=audio,
-                filename=filename,
-                content_type=content_type,
-                language_code=language_code,
-                source=ctx.source,
-                session_id=ctx.session_id,
-                turn_id=ctx.turn_id,
+            res = await _call_local_with_busy_retry(
+                lambda: self.local.transcribe(
+                    audio=audio,
+                    filename=filename,
+                    content_type=content_type,
+                    language_code=language_code,
+                    source=ctx.source,
+                    session_id=ctx.session_id,
+                    turn_id=ctx.turn_id,
+                )
             )
             logger.info(
                 "stt_ok provider=local fallback=0 ms=%.1f session=%s page=%s turn=%s request_id=%s",

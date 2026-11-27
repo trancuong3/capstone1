@@ -309,8 +309,17 @@ function canUseAllowedDeviceFallbackTts(
   const isSessionLocked = voice?.bypassSessionLock
     ? false
     : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
+  const isTransientBusyError = (err: unknown): boolean => {
+    if (!err) return false;
+    const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
+    const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${err instanceof Error ? err.message : String(err)}`;
+    return /VOICE_WORKER_BUSY|LOCAL_VOICE_BUSY|LOCAL_TTS_BUSY|LOCAL_STT_BUSY/i.test(
+      combined,
+    );
+  };
   const isTechnicalServerOutage = (err: unknown): boolean => {
     if (!err) return false;
+    if (isTransientBusyError(err)) return false;
     if (isLocalVoiceUnconfiguredError(err)) return true;
     const status =
       typeof err === "object" && "status" in err
