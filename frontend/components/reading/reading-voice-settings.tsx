@@ -219,7 +219,7 @@ export function ReadingVoiceSettings({
     expectedDurationMs: 4_000,
   });
   const previewVoiceProgress = useAiProgress({
-    active: isSynthesizingPreview || isPreviewing,
+    active: isSynthesizingPreview && !isPreviewing,
     stages: [
       { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
       { atPct: 70, label: tCommon("aiProgress.finalizing") },
@@ -320,6 +320,7 @@ export function ReadingVoiceSettings({
     selectedOption?: VoiceOption,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
@@ -374,6 +375,7 @@ export function ReadingVoiceSettings({
 
   function selectTeacherGender(nextGender: VoiceGender) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
@@ -427,6 +429,7 @@ export function ReadingVoiceSettings({
     }>,
   ) {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
@@ -520,6 +523,7 @@ export function ReadingVoiceSettings({
 
   function close() {
     previewGenerationRef.current += 1;
+    setIsSynthesizingPreview(false);
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
@@ -647,7 +651,7 @@ export function ReadingVoiceSettings({
                   : t("settings.preview")}
               </Button>
             </footer>
-            {isSynthesizingPreview || isPreviewing ? (
+            {isSynthesizingPreview && !isPreviewing ? (
               <AiProgressBar
                 active
                 label={
