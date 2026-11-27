@@ -23,6 +23,13 @@ from app.models.book_content_quality import (
 
 from .game_session import GameAttempt, GameRound, GameSession
 from .picture_description import PictureDescriptionAttempt, PictureDescriptionSession
+from .entertainment_v4 import (
+    KaraokeMusicalProfile,
+    KaraokePracticeSession,
+    LearningSkillEvidence,
+    MemoryGameAttempt,
+    MemoryGameSession,
+)
 from .admin_ai_workflow import AdminAiWorkflow
 from .difficult_word_practice import DifficultWordPracticeAttempt
 from .ocr_inference_job import OcrInferenceJob, OcrWorkerHeartbeat

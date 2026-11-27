@@ -12,7 +12,52 @@
     "pictureCta": "选择图片",
     "karaokeTitle": "亲子欢唱",
     "karaokeDesc": "选择喜欢的歌曲，聆听音乐，并跟随屏幕上的歌词一起唱。",
-    "karaokeCta": "打开歌曲库"
+    "karaokeCta": "打开歌曲库",
+    "eyebrow": "每天快乐学越南语",
+    "selectChildLabel": "选择孩子档案",
+    "selectChildAria": "为趣味学习区选择孩子档案",
+    "childOptionLabel": "{alias} · {grade}年级",
+    "calmSound": "柔和音效",
+    "soundMuted": "已静音",
+    "reduceMotion": "减少动画",
+    "reducedMotionActive": "已开启减少动画",
+    "onboardingGuideButton": "玩法指南",
+    "mascotBadge": "ViRead 猫头鹰推荐",
+    "childProfileBadge": "档案 {alias} · {grade}年级",
+    "defaultGreeting": "你好小读者！今天想看图讲故事、拼句子、开心唱歌，还是玩记忆小游戏呢？",
+    "defaultRecommendationReason": "每个活动都与孩子正在阅读的图书温和连接，在毫无压力中牢记词汇。",
+    "focusDifficultWordsLabel": "正在温习的词语：",
+    "playSuggestedCta": "立即开始推荐活动",
+    "onboardingRegionAria": "趣味学习区新手引导",
+    "onboardingCounter": "快速指南 ({current}/{total})",
+    "onboardingStep1Title": "1. 选择喜欢的活动角落",
+    "onboardingStep1Body": "四大轻松角落：看图讲故事、造句射手、快乐卡拉OK，以及“你记住了什么？”。",
+    "onboardingStep2Title": "2. 用声音或轻触来玩",
+    "onboardingStep2Body": "大而清晰的按钮，手机和平板都轻松点击。孩子可以开口说，也可以点选文字。",
+    "onboardingStep3Title": "3. 快乐学习零压力",
+    "onboardingStep3Body": "每次 10–15 分钟最合适。没有紧张倒计时，还有 AI 老师和猫头鹰一直为你加油！",
+    "onboardingNext": "下一步",
+    "onboardingDone": "我明白了！",
+    "onboardingClose": "关闭",
+    "pictureZoneBadge": "故事世界",
+    "todaySuggestionBadge": "今日推荐",
+    "suggestedWordsLabel": "推荐词汇：",
+    "shooterZoneBadge": "文字大冒险",
+    "karaokeZoneBadge": "音乐舞台",
+    "karaokeChipRhythm": "节奏与旋律评分",
+    "karaokeChipTap": "快乐打节拍",
+    "karaokeChipSlowPractice": "0.85倍速分段练习",
+    "memoryZoneBadge": "记忆探索",
+    "newBadge": "新",
+    "memoryChipObserve": "观察图画",
+    "memoryChipRemember": "回忆细节",
+    "memoryChipStory": "续编故事",
+    "memoryTitle": "你记住了什么？",
+    "memoryDesc": "按自己选择的节奏观察越南语插画，记住颜色和位置，然后发挥想象续编精彩故事！",
+    "memoryCta": "开始记忆探索",
+    "breakReminderTitle": "护眼休息提示：",
+    "defaultBreakReminder": "每次游玩约 10–15 分钟恰到好处，让孩子眼睛更舒适、吸收更自然。",
+    "recommendationLoadError": "暂时无法加载学习推荐。"
   },
   "karaoke": {
     "title": "儿童卡拉OK",
@@ -150,6 +195,62 @@
         "countdownNext": "{seconds} 秒后开始",
         "interludeNext": "音乐片段 · 准备下一句",
         "outro": "一起听最后一段吧"
+      },
+      "practiceModeGroupAria": "练唱模式",
+      "headphoneRecommendation": "建议佩戴耳机，以获得最准确的音高与节奏评分！",
+      "speakerFilterHint": "使用外放扬声器时，已开启智能防回声过滤。",
+      "speakerBackingOn": "扬声器伴奏已开启",
+      "speakerBackingOff": "开启扬声器伴奏（智能降噪）",
+      "unsupportedScoringWithRhythmHint": "当前浏览器支持自由欢唱与节拍敲击。如需麦克风评分，请使用支持语音识别的浏览器打开。",
+      "micReadyNoticeDsp": "开始唱歌时请允许麦克风权限。节奏和音高分析仅在本地设备运行，不会保存孩子的音频。",
+      "rhythmTapButton": "按节拍敲击（空格键）",
+      "rhythmTapFeedback": "{feedback} · 连击：{streak}",
+      "livePitchHz": "当前音高：{hz} Hz",
+      "practicingSegment": "正在练习难点片段 {number}",
+      "practicingRateSuffix": "（{rate}倍速）",
+      "tempoSegment": "片段慢练 · 0.85×",
+      "spaceHintRhythmTap": "歌曲播放时按空格键跟随节拍敲击。",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "整首演唱",
+          "shortLabel": "整首",
+          "description": "唱完一整首歌曲并保存孩子的最高分纪录。"
+        },
+        "SEGMENT": {
+          "label": "难点片段练习",
+          "shortLabel": "分段",
+          "description": "以 0.85 倍速循环练习难点片段 — 不会覆盖整首歌的高分纪录。"
+        },
+        "LINE_PRACTICE": {
+          "label": "逐句学唱",
+          "shortLabel": "逐句",
+          "description": "挑选每一句歌词逐句练唱，吐字更清晰、节奏更稳。"
+        },
+        "RHYTHM_TAP": {
+          "label": "跟随节拍敲击",
+          "shortLabel": "打拍子",
+          "description": "跟着每拍按下节拍按钮或空格键 — 不开麦克风也能快乐练节奏！"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "本次演唱音乐表现分析",
+        "unmeasured": "未测得",
+        "points": "{score} 分",
+        "statusGreat": "非常棒",
+        "statusGood": "不错",
+        "statusPractice": "还需练习",
+        "bestFullSong": "整首最高纪录：{score} 分",
+        "rhythmLabel": "节奏",
+        "pitchLabel": "旋律",
+        "lyricsLabel": "歌词",
+        "fluencyLabel": "流畅度",
+        "pitchBasisPrefix": "音高评分依据：",
+        "speakerBleedNote": "麦克风检测到轻微扬声器伴奏串音。",
+        "insufficientHint": "本次语音信号不足，暂无法完成音乐评分。请把麦克风拿近些或戴上耳机再唱一遍吧！",
+        "weakestSegmentTitle": "建议多练片段 · 第 {number} 句",
+        "retrySegmentSlow": "以 0.85 倍速重练此段",
+        "segmentReportSummary": "分段报告（共 {count} 句）",
+        "segmentLineHeader": "第 {number} 句 ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "第 {number} 句 · ",
       "lineMatchedRetry": "{matched}/{evaluated} 个字匹配 · 再次练习",
       "lineUnheardRetry": "未听清 · 再次练习"
+    },
+    "rhythmTap": {
+      "steady": "节奏很稳！",
+      "early": "稍早了一点！",
+      "late": "稍晚了一点！",
+      "perfect": "节拍完美！",
+      "good": "很接近节拍了！",
+      "slightlyFast": "稍微快了一点！",
+      "slightlySlow": "稍微慢了一点！"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "完整音乐评分（节奏 · 旋律 · 歌词）",
+        "RHYTHM_AND_LYRICS": "节奏与歌词评分",
+        "LYRICS_ONLY": "仅歌词评分",
+        "INSUFFICIENT_EVIDENCE": "人声信号不足",
+        "RHYTHM_TAP": "节拍敲击评分"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "对照标准旋律（自动忽略八度差异）",
+        "VOCAL_STEADINESS_AND_CONTOUR": "歌声稳定性与旋律轮廓",
+        "UNAVAILABLE": "未测得音高"
+      },
+      "gate": {
+        "silence": "还没听到你的歌声哦。请把麦克风拿近一点或检查设备后再试！",
+        "noiseOnly": "周围有点吵，系统听不清孩子的歌声。请换到安静一点的地方或戴上耳机吧！",
+        "electricalHum": "麦克风存在电流底噪，请家长帮忙检查麦克风或连接线后再试！",
+        "bleedHeadphones": "音频存在回传干扰，请稍微调低耳机音量再清晰地唱一遍！",
+        "bleedSpeaker": "麦克风收录到的扬声器伴奏多于人声。请戴上耳机或让麦克风更靠近嘴巴！",
+        "lowCoverage": "刚才只唱了很短一段，再多唱几句就能获得完整评分啦！",
+        "okHeadphones": "耳机模式让麦克风非常清晰地收录了你的歌声！",
+        "okSpeaker": "小提示：戴上耳机能让麦克风最清晰地听出你的旋律和节奏哦！"
+      },
+      "encouragement": {
+        "insufficient": "本次语音信号不足以评分，试着靠近麦克风再清晰唱一遍吧！",
+        "high": "太棒了！节拍准、吐字清，还非常有感情！",
+        "good": "真棒！节奏和旋律都把握得很好！",
+        "medium": "很不错！试着用 0.85 倍速慢练一下难点片段吧！",
+        "low": "加油！我们一起逐句慢练，越唱越好听！"
+      },
+      "lineTips": {
+        "unclear": "这句唱得还不够清晰，点按 0.85 倍速慢练一遍吧！",
+        "great": "太棒了！这一句唱得自信又合拍！",
+        "rhythmLate": "这句进拍稍微晚了一点，听好伴奏早一点开口吧！",
+        "rhythmFast": "这一句稍微抢拍了一点，跟着高亮字幕稳稳地唱吧！",
+        "rhythmSteady": "试着用节拍敲击或 0.85 倍速练习这句，让节奏更稳！",
+        "pitch": "仔细听这句旋律，饱满自然地把每个音唱稳！",
+        "lyrics": "先把这句歌词慢读一遍，再把每个字清楚唱出来！",
+        "practiceMore": "相当不错！再用 0.85 倍速多练一遍会更好听！",
+        "insufficientLine": "这句没听太清楚，试着离麦克风近一点再唱哦！"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "请随着屏幕上亮起的音节点击节拍按钮或空格键！",
+        "insufficientTip": "试着跟着这一句稳定打拍子吧！",
+        "okGuidance": "打拍子模式帮助孩子在用麦克风演唱前熟悉歌曲节奏！"
+      },
+      "lyricsOnlyFallbackGuidance": "此设备未启用 Web Audio 音频分析，本次仅对歌词准确度进行评分。",
+      "mildSpeakerBleedGuidance": "有少量扬声器音乐进入麦克风。佩戴耳机可以让音高与节奏评分更加精确！"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "描述正在进行的活动和周围的场景。",
       "step3Title": "颜色和感受如何？",
       "step3Detail": "添加关于颜色、天气或孩子感受的细节。"
+    },
+    "aiTimeoutError": "AI 老师响应稍慢，请点击重试。",
+    "micPausedBackground": "应用刚刚切入后台，麦克风已安全关闭，你的描述内容已完整保留！",
+    "waitingTtsCooldown": "正在等待语音播报完全结束后再开启麦克风...",
+    "offlineNotice": "设备当前离线。你的故事已安全保存，恢复网络后点击立即重新评分即可！",
+    "gradeHintChipsLowerTitle": "看图小提示（1–2 年级）",
+    "collapseGradeHints": "收起讲故事框架提示",
+    "expandGradeHints": "展开讲故事框架提示",
+    "listenGuideButton": "收听引导",
+    "gradeHintsCollapsedNote": "为 {grade} 年级默认收起框架提示，鼓励自由表达 — 随时点击“展开讲故事框架提示”即可查看！",
+    "teachingModeSectionAria": "AI 老师指导模式",
+    "teachingModeHeading": "AI 老师陪伴学习模式",
+    "listenModeButton": "听模式提示",
+    "teachingModeGroupAria": "选择讲故事练习模式",
+    "targetWordsProgress": "正在练习的目标重点词 ({used}/{total})",
+    "followUpSectionAria": "老师的下一道启发问题",
+    "practiceFollowUpTitle": "老师接下来的提问",
+    "listenQuestionButton": "听问题",
+    "resultModeBadge": "模式：{mode}",
+    "usedTargetWordsTitle": "用得很棒的目标重点词",
+    "resultFollowUpTitle": "老师给出的下一道思考题",
+    "answerFollowUpButton": "回答这个问题",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "仔细观察",
+        "cue": "仔细看看图画：有谁、什么物品，哪些颜色最醒目？",
+        "audioHint": "观察模式。请仔细看图画，说出最显眼的人物、动物或物品。"
+      },
+      "VOCABULARY": {
+        "label": "积累词汇",
+        "cue": "试着在句子里用上上面的 1–2 个提示词或重点词吧。",
+        "audioHint": "词汇模式。请从上面选一两个提示词放进你的句子里。"
+      },
+      "SENTENCE": {
+        "label": "学造句",
+        "cue": "把“谁 + 在做什么 + 在哪里”连成一句完整的话吧。",
+        "audioHint": "造句模式。请说出完整的一句话，说明谁在哪里做什么。"
+      },
+      "STORY": {
+        "label": "讲故事",
+        "cue": "用 2–3 句话连贯讲出故事里正在发生什么。",
+        "audioHint": "讲故事模式。请把两三句话连起来，讲清楚图画里发生了什么故事。"
+      },
+      "INFER": {
+        "label": "猜一猜",
+        "cue": "人物为什么会这样做？前后可能还会发生什么？",
+        "audioHint": "推理模式。猜猜人物为什么那样做，或者接下来会发生什么吧。"
+      },
+      "CREATE": {
+        "label": "创意想象",
+        "cue": "发挥想象，为画面加上有趣的对话或精彩结局吧！",
+        "audioHint": "创意模式。请你给这幅画编一段好玩的对话或精彩的后续吧。"
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "启发开场",
+      "EXPAND": "拓展句子",
+      "PRAISE": "鼓励表扬",
+      "NEXT_CHALLENGE": "下一个挑战"
+    },
+    "visualHintChips": {
+      "who": "有谁 / 什么动物？",
+      "action": "正在做什么？",
+      "where": "在哪里 / 什么颜色？"
     }
   },
   "karaokeRuntime": {

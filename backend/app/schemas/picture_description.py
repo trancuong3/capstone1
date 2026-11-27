@@ -11,6 +11,44 @@ SourceType = Literal["BOOK_PAGE", "CUSTOM_UPLOAD", "SAMPLE"]
 SessionStatus = Literal["ACTIVE", "COMPLETED"]
 InputMode = Literal["VOICE", "TEXT"]
 EvaluationSource = Literal["AI", "FALLBACK"]
+TeachingMode = Literal[
+    "OBSERVE",
+    "VOCABULARY",
+    "SENTENCE",
+    "STORY",
+    "INFER",
+    "CREATE",
+]
+ScaffoldingStep = Literal["PRAISE", "EXPAND", "PROMPT", "NEXT_CHALLENGE"]
+ProviderTier = Literal[
+    "CURATED",
+    "GEMINI_PRIMARY",
+    "GEMINI_FALLBACK",
+    "GROQ_FREE",
+    "LOCAL_OLLAMA",
+    "DETERMINISTIC_FALLBACK",
+]
+
+
+def _normalize_target_words(value: list[str] | None) -> list[str]:
+    if not value:
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        if not isinstance(raw, str):
+            continue
+        item = " ".join(raw.strip().split())[:60]
+        if not item:
+            continue
+        key = item.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(item)
+        if len(cleaned) >= 8:
+            break
+    return cleaned
 
 
 class PictureVocabItem(BaseModel):
@@ -46,6 +84,8 @@ class PictureGuideRead(BaseModel):
     guiding_questions: list[str]
     suggested_vocabulary: list[PictureVocabItem]
     model_sample_sentences: list[str]
+    teaching_mode: TeachingMode = "OBSERVE"
+    target_words: list[str] = Field(default_factory=list)
 
 
 class PictureEvaluationFeedbackRead(BaseModel):
@@ -58,6 +98,11 @@ class PictureEvaluationFeedbackRead(BaseModel):
     improvement_tip: str
     upgraded_sentences: list[str]
     vocabulary_highlights: list[str]
+    teaching_mode: TeachingMode = "OBSERVE"
+    scaffolding_step: ScaffoldingStep | None = None
+    next_prompt_question: str | None = None
+    used_target_words: list[str] = Field(default_factory=list)
+    provider_tier: ProviderTier | None = None
 
 
 class PictureAttemptRead(BaseModel):
@@ -70,6 +115,7 @@ class PictureAttemptRead(BaseModel):
     score_out_of_10: int = Field(..., ge=0, le=10)
     stars: int = Field(..., ge=0, le=3)
     evaluation_source: EvaluationSource = "AI"
+    provider_tier: ProviderTier | None = None
     feedback: PictureEvaluationFeedbackRead
     created_at: datetime
 
@@ -88,6 +134,9 @@ class PictureSessionRead(BaseModel):
     best_stars: int = Field(..., ge=0, le=3)
     best_score: int = Field(..., ge=0, le=10)
     attempts_count: int = Field(..., ge=0)
+    teaching_mode: TeachingMode = "OBSERVE"
+    target_words: list[str] = Field(default_factory=list)
+    provider_tier: ProviderTier | None = None
     guide: PictureGuideRead
     attempts: list[PictureAttemptRead] = Field(default_factory=list)
     created_at: datetime
@@ -113,6 +162,8 @@ class PictureSessionSummaryRead(BaseModel):
 class PictureEvaluateRequest(BaseModel):
     transcript_text: str = Field(..., min_length=1, max_length=2000)
     input_mode: InputMode = "TEXT"
+    teaching_mode: TeachingMode | None = None
+    target_words: list[str] | None = None
 
     @field_validator("transcript_text")
     @classmethod
@@ -121,6 +172,13 @@ class PictureEvaluateRequest(BaseModel):
         if not cleaned:
             raise ValueError("Bé hãy nói hoặc viết câu mô tả trước nhé")
         return cleaned
+
+    @field_validator("target_words")
+    @classmethod
+    def normalize_target_words(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return _normalize_target_words(value)
 
 
 class PictureEvaluateResponse(BaseModel):

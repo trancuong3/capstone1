@@ -673,4 +673,51 @@ describe("child karaoke microphone lifecycle", () => {
       screen.getByText("Chưa đánh giá: 3 tiếng. Phần này không tính là sai."),
     ).toBeVisible();
   });
+
+  it("syncs reducedMotion & calmSound preferences and isolates Vietnamese lyrics with RTL attributes", async () => {
+    window.localStorage.setItem(
+      "viread:entertainment-preferences.v1",
+      JSON.stringify({ reducedMotion: true, calmSound: false }),
+    );
+    const audioPlayed: number[] = [];
+    class SpyCueContext {
+      currentTime = 0;
+      state = "running";
+      destination = {};
+      resume = vi.fn(async () => {});
+      close = vi.fn(async () => {
+        this.state = "closed";
+      });
+      createOscillator = () => ({
+        frequency: {
+          setValueAtTime: (hz: number) => audioPlayed.push(hz),
+        },
+        connect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+        onended: null,
+      });
+      createGain = () => ({
+        gain: { setValueAtTime: vi.fn(), linearRampToValueAtTime: vi.fn() },
+        connect: vi.fn(),
+      });
+    }
+    vi.stubGlobal("AudioContext", SpyCueContext);
+
+    const { container } = stage();
+    const rootSection = container.querySelector("section[data-reduced-motion]");
+    expect(rootSection).toHaveAttribute("data-reduced-motion", "true");
+    const ltrLyric = container.querySelector(
+      '.viread-learning-content[dir="ltr"][lang="vi"]',
+    );
+    expect(ltrLyric).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Bắt đầu hát" }));
+    await finishPreparation();
+    // calmSound=false suppresses countdown oscillator beeps without blocking playback.
+    expect(audioPlayed).toHaveLength(0);
+    expect(audios[0].play).toHaveBeenCalledOnce();
+
+    window.localStorage.removeItem("viread:entertainment-preferences.v1");
+  });
 });

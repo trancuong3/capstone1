@@ -312,6 +312,11 @@ test("repeat proposal requires consent, supports undo, and makes no writes", asy
 }) => {
   const state = await setup(page);
   await page.goto("/admin/karaoke/new");
+  const switchWizardBtn = page.getByRole("button", {
+    name: "Tách giọng nâng cao",
+  });
+  await expect(switchWizardBtn).toBeVisible();
+  await switchWizardBtn.click();
   const field = page.getByLabel("Lời bài hát", { exact: true });
   await field.fill("Bé hát, vui! ×2");
   await expect(field).toHaveValue("Bé hát, vui! ×2");
@@ -422,6 +427,11 @@ test("wizard upload → staging → apply → explicit review → publish, with 
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/admin/karaoke/new");
+  const switchWizardBtn = page.getByRole("button", {
+    name: "Tách giọng nâng cao",
+  });
+  await expect(switchWizardBtn).toBeVisible();
+  await switchWizardBtn.click();
   await expect(
     page.getByRole("heading", { name: "Tạo karaoke dễ dàng" }),
   ).toBeVisible();
@@ -579,6 +589,11 @@ test("replacement after rejection keeps pasted lyrics and uses the already-creat
   const state = await setup(page);
   state.rejection.remaining = 1;
   await page.goto("/admin/karaoke/new");
+  const switchWizardBtn = page.getByRole("button", {
+    name: "Tách giọng nâng cao",
+  });
+  await expect(switchWizardBtn).toBeVisible();
+  await switchWizardBtn.click();
   const input = page.getByLabel("Bài hát có giọng (MP3)", { exact: true });
   await input.setInputFiles({
     name: "fixture-song.mp3",

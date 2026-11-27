@@ -12,7 +12,52 @@
     "pictureCta": "Bild auswählen",
     "karaokeTitle": "Mitsingen",
     "karaokeDesc": "Wählen Sie ein Lieblingslied, hören Sie die Musik und singen Sie gemeinsam mit dem Text auf dem Bildschirm.",
-    "karaokeCta": "Liederbibliothek öffnen"
+    "karaokeCta": "Liederbibliothek öffnen",
+    "eyebrow": "Jeden Tag mit Freude Vietnamesisch lernen",
+    "selectChildLabel": "Kinderprofil auswählen",
+    "selectChildAria": "Kinderprofil für den Spiel- und Lernbereich auswählen",
+    "childOptionLabel": "{alias} · Klasse {grade}",
+    "calmSound": "Sanfter Ton",
+    "soundMuted": "Stummgeschaltet",
+    "reduceMotion": "Bewegung reduzieren",
+    "reducedMotionActive": "Bewegung reduziert",
+    "onboardingGuideButton": "Spielanleitung",
+    "mascotBadge": "Tipp der ViRead-Eule",
+    "childProfileBadge": "Profil {alias} · Klasse {grade}",
+    "defaultGreeting": "Hallo! Möchtest du heute eine Bildergeschichte erzählen, Sätze bauen, mitsingen oder dein Gedächtnis testen?",
+    "defaultRecommendationReason": "Jedes Spiel knüpft sanft an die gelesenen Bücher an, damit Wörter ganz ohne Druck im Gedächtnis bleiben.",
+    "focusDifficultWordsLabel": "Wörter zum sanften Üben:",
+    "playSuggestedCta": "Empfohlenes Spiel starten",
+    "onboardingRegionAria": "Einstiegshilfe für den Spiel- und Lernbereich",
+    "onboardingCounter": "Kurzanleitung ({current}/{total})",
+    "onboardingStep1Title": "1. Wähle deinen Lieblingsbereich",
+    "onboardingStep1Body": "Vier ruhige Bereiche: Bildergeschichten, Satz-Shooter, Fröhliches Karaoke und Was merkst du dir?",
+    "onboardingStep2Title": "2. Spiele per Stimme oder Antippen",
+    "onboardingStep2Body": "Große, klare Schaltflächen für Handy und Tablet. Du kannst sprechen oder Wörter antippen.",
+    "onboardingStep3Title": "3. Mit Freude und ohne Druck lernen",
+    "onboardingStep3Body": "10–15 Minuten pro Runde sind ideal. Keine hektischen Timer — unsere KI-Lehrerin und die Eule feuern dich immer an!",
+    "onboardingNext": "Weiter",
+    "onboardingDone": "Verstanden!",
+    "onboardingClose": "Schließen",
+    "pictureZoneBadge": "Geschichtenwelt",
+    "todaySuggestionBadge": "Tipp für heute",
+    "suggestedWordsLabel": "Wortvorschläge:",
+    "shooterZoneBadge": "Wörter-Abenteuer",
+    "karaokeZoneBadge": "Musikbühne",
+    "karaokeChipRhythm": "Rhythmus & Melodie",
+    "karaokeChipTap": "Rhythmus tippen",
+    "karaokeChipSlowPractice": "0,85x-Übungsmodus",
+    "memoryZoneBadge": "Gedächtnis-Entdecker",
+    "newBadge": "Neu",
+    "memoryChipObserve": "Bild beobachten",
+    "memoryChipRemember": "Details merken",
+    "memoryChipStory": "Geschichte fortsetzen",
+    "memoryTitle": "Was merkst du dir?",
+    "memoryDesc": "Betrachte vietnamesische Bilder in deinem Tempo, merke dir Farben und Orte und erzähle die Geschichte kreativ weiter!",
+    "memoryCta": "Gedächtnisspiel starten",
+    "breakReminderTitle": "Gesunde Augenpause:",
+    "defaultBreakReminder": "Etwa 10–15 Minuten pro Sitzung halten die Augen fit und fördern entspanntes Lernen.",
+    "recommendationLoadError": "Lernempfehlungen konnten gerade nicht geladen werden."
   },
   "karaoke": {
     "title": "Kinder-Karaoke",
@@ -150,6 +195,62 @@
         "countdownNext": "Beginnt in {seconds} Sekunden",
         "interludeNext": "Musiksegment · Nächste Zeile vorbereiten",
         "outro": "Lass uns das letzte Segment anhören"
+      },
+      "practiceModeGroupAria": "Gesangs-Übungsmodus",
+      "headphoneRecommendation": "Kopfhörer werden für die genaueste Tonhöhen- und Rhythmusbewertung empfohlen!",
+      "speakerFilterHint": "Bei Lautsprecherwiedergabe ist die intelligente Rückkopplungsfilterung aktiv.",
+      "speakerBackingOn": "Lautsprecher-Begleitung an",
+      "speakerBackingOff": "Begleitung über Lautsprecher abspielen (gefiltert)",
+      "unsupportedScoringWithRhythmHint": "Dieser Browser unterstützt freies Singen und Rhythmus-Tippen. Für Mikrofonwertung bitte einen Browser mit Spracherkennung nutzen.",
+      "micReadyNoticeDsp": "Bitte erlaube den Mikrofonzugriff beim Singen. Rhythmus- und Tonhöhenanalyse laufen lokal ohne Speicherung der Stimme.",
+      "rhythmTapButton": "Rhythmus tippen (Leertaste)",
+      "rhythmTapFeedback": "{feedback} · Serie: {streak}",
+      "livePitchHz": "Stimmhöhe: {hz} Hz",
+      "practicingSegment": "Übe schwierigen Abschnitt {number}",
+      "practicingRateSuffix": "({rate}× Tempo)",
+      "tempoSegment": "Abschnitt · 0,85×",
+      "spaceHintRhythmTap": "Drücke während des Liedes im Takt die Leertaste.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "Ganzes Lied",
+          "shortLabel": "Ganz",
+          "description": "Singe das ganze Lied und speichere deinen Rekord."
+        },
+        "SEGMENT": {
+          "label": "Schwieriger Abschnitt",
+          "shortLabel": "Abschnitt",
+          "description": "Wiederhole knifflige Stellen bei 0,85x Tempo ohne deinen Rekord zu verlieren."
+        },
+        "LINE_PRACTICE": {
+          "label": "Zeile für Zeile",
+          "shortLabel": "Zeilenweise",
+          "description": "Übe einzelne Zeilen für deutliche Aussprache und sicheren Takt."
+        },
+        "RHYTHM_TAP": {
+          "label": "Rhythmus-Tippen",
+          "shortLabel": "Tippen",
+          "description": "Tippe im Takt auf den Button oder die Leertaste — macht auch ohne Mikrofon Spaß!"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "Musikalische Auswertung",
+        "unmeasured": "Nicht gemessen",
+        "points": "{score} Pkt.",
+        "statusGreat": "Sehr gut",
+        "statusGood": "Gut",
+        "statusPractice": "Übungsbedarf",
+        "bestFullSong": "Rekord ganzes Lied: {score} Pkt.",
+        "rhythmLabel": "Rhythmus",
+        "pitchLabel": "Melodie",
+        "lyricsLabel": "Liedtext",
+        "fluencyLabel": "Flüssigkeit",
+        "pitchBasisPrefix": "Grundlage der Tonhöhenwertung:",
+        "speakerBleedNote": "Leichtes Übersprechen vom Lautsprecher erkannt.",
+        "insufficientHint": "Zu wenig Gesangssignal für diese Wertung. Halte das Mikrofon näher oder nutze Kopfhörer!",
+        "weakestSegmentTitle": "Übungsabschnitt · Zeile {number}",
+        "retrySegmentSlow": "Diesen Abschnitt üben (0,85x)",
+        "segmentReportSummary": "Zeilenbericht ({count} Zeilen)",
+        "segmentLineHeader": "Zeile {number} ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "Zeile {number} · ",
       "lineMatchedRetry": "{matched}/{evaluated} Wörter getroffen · Erneut üben",
       "lineUnheardRetry": "Nicht klar gehört · Erneut üben"
+    },
+    "rhythmTap": {
+      "steady": "Schöner gleichmäßiger Takt!",
+      "early": "Etwas zu früh!",
+      "late": "Etwas zu spät!",
+      "perfect": "Perfekt im Takt!",
+      "good": "Sehr nah am Takt!",
+      "slightlyFast": "Ein klein wenig zu schnell!",
+      "slightlySlow": "Ein klein wenig zu langsam!"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "Vollständige Musikwertung (Rhythmus · Melodie · Text)",
+        "RHYTHM_AND_LYRICS": "Rhythmus- & Textwertung",
+        "LYRICS_ONLY": "Nur Liedtext-Wertung",
+        "INSUFFICIENT_EVIDENCE": "Unzureichendes Gesangssignal",
+        "RHYTHM_TAP": "Rhythmus-Tipp-Wertung"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "Mit Referenzmelodie verglichen (oktavunabhängig)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "Stimmstabilität und Melodieverlauf",
+        "UNAVAILABLE": "Tonhöhe nicht gemessen"
+      },
+      "gate": {
+        "silence": "Wir konnten deine Stimme noch nicht hören. Halte das Mikro näher oder prüfe es!",
+        "noiseOnly": "Im Raum ist es etwas laut. Suche dir einen ruhigeren Platz oder nutze Kopfhörer!",
+        "electricalHum": "Am Mikrofon brummt es leicht. Bitte lass ein Elternteil Mikro oder Kabel prüfen!",
+        "bleedHeadphones": "Ton wurde zurückgekoppelt. Drehe den Kopfhörer etwas leiser und singe deutlich!",
+        "bleedSpeaker": "Das Mikrofon hört mehr Musik als deine Stimme. Nutze Kopfhörer oder geh näher ans Mikro!",
+        "lowCoverage": "Du hast nur einen kurzen Teil gesungen. Sing noch ein paar Zeilen weiter!",
+        "okHeadphones": "Mit Kopfhörern nimmt das Mikrofon deine Stimme besonders klar auf!",
+        "okSpeaker": "Tipp: Mit Kopfhörern erkennt das Mikrofon Melodie und Rhythmus am besten!"
+      },
+      "encouragement": {
+        "insufficient": "Signal zu leise für diese Wertung. Sing bitte etwas deutlicher am Mikrofon!",
+        "high": "Wunderbar! Du hast im Takt, deutlich und mit viel Gefühl gesungen!",
+        "good": "Toll gemacht! Dein Rhythmus und deine Melodie sitzen schon richtig gut!",
+        "medium": "Schon richtig gut! Übe den kniffligen Teil ruhig mit 0,85x Tempo!",
+        "low": "Weiter so! Lass uns Zeile für Zeile ganz in Ruhe üben!"
+      },
+      "lineTips": {
+        "unclear": "Diese Zeile war noch undeutlich — übe sie langsam bei 0,85x!",
+        "great": "Super! Diese Zeile hast du sicher und genau im Takt gesungen!",
+        "rhythmLate": "Bei dieser Zeile warst du etwas spät — höre auf die Musik und starte minimal früher!",
+        "rhythmFast": "Du warst etwas zu schnell — folge dem hervorgehobenen Text ganz ruhig!",
+        "rhythmSteady": "Nutze Rhythmus-Tippen oder 0,85x Tempo für gleichmäßigeres Timing!",
+        "pitch": "Höre genau auf die Melodie dieser Zeile und halte die Töne gleichmäßig!",
+        "lyrics": "Lies den Text erst einmal langsam vor und sing dann jede Silbe deutlich!",
+        "practiceMore": "Schon ganz gut! Noch ein Durchgang bei 0,85x macht es noch besser!",
+        "insufficientLine": "Diese Zeile war kaum zu hören — sing bitte etwas näher am Mikrofon!"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "Tippe im Takt der Silben auf dem Bildschirm oder drücke die Leertaste!",
+        "insufficientTip": "Versuche, zu dieser Zeile gleichmäßig den Takt zu tippen!",
+        "okGuidance": "Rhythmus-Tippen hilft, das Tempo vor dem Singen am Mikrofon sicher zu fühlen!"
+      },
+      "lyricsOnlyFallbackGuidance": "Web Audio war auf diesem Gerät nicht aktiv, daher wurde diesmal nur der Text bewertet.",
+      "mildSpeakerBleedGuidance": "Leichte Lautsprechergeräusche gelangten ins Mikro. Kopfhörer verbessern die Genauigkeit weiter!"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "Beschreibe die Aktivität und die Umgebung.",
       "step3Title": "Wie sieht es mit Farben und Gefühlen aus?",
       "step3Detail": "Füge Details zu Farben, Wetter oder deinen Gefühlen hinzu."
+    },
+    "aiTimeoutError": "Die KI-Lehrerin braucht gerade etwas länger. Bitte tippe auf Erneut versuchen.",
+    "micPausedBackground": "Die App war im Hintergrund, daher wurde das Mikrofon sicher pausiert. Dein Text bleibt erhalten!",
+    "waitingTtsCooldown": "Warte, bis die Sprachausgabe beendet ist, bevor das Mikrofon startet...",
+    "offlineNotice": "Dein Gerät ist offline. Deine Geschichte bleibt gespeichert — tippe auf Erneut bewerten, sobald du wieder online bist!",
+    "gradeHintChipsLowerTitle": "Visuelle Erzählhilfen (Klasse 1–2)",
+    "collapseGradeHints": "Erzählhilfen einklappen",
+    "expandGradeHints": "Erzählhilfen anzeigen",
+    "listenGuideButton": "Anleitung anhören",
+    "gradeHintsCollapsedNote": "Die Erzählhilfen sind für Klasse {grade} eingeklappt, damit du frei erzählen kannst — jederzeit wieder aufklappbar!",
+    "teachingModeSectionAria": "Übungsmodi mit der KI-Lehrerin",
+    "teachingModeHeading": "Lernmodus mit der KI-Lehrerin",
+    "listenModeButton": "Modushinweis anhören",
+    "teachingModeGroupAria": "Erzähl-Übungsmodus auswählen",
+    "targetWordsProgress": "Geübte Zielwörter ({used}/{total})",
+    "followUpSectionAria": "Nächste Impulsfrage der Lehrerin",
+    "practiceFollowUpTitle": "Anschlussfrage der Lehrerin",
+    "listenQuestionButton": "Frage anhören",
+    "resultModeBadge": "Modus: {mode}",
+    "usedTargetWordsTitle": "Gut verwendete Zielwörter",
+    "resultFollowUpTitle": "Nächste weiterführende Frage der Lehrerin",
+    "answerFollowUpButton": "Diese Frage beantworten",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "Beobachten",
+        "cue": "Schau genau hin: Wen oder was siehst du und welche Farben fallen auf?",
+        "audioHint": "Beobachtungsmodus. Schau genau hin und nenne die auffälligsten Personen, Tiere oder Dinge."
+      },
+      "VOCABULARY": {
+        "label": "Wortschatz",
+        "cue": "Versuche, 1–2 der vorgeschlagenen Wörter oder Zielwörter oben in deinen Satz einzubauen.",
+        "audioHint": "Wortschatzmodus. Wähle ein bis zwei Wortvorschläge oben aus und baue sie in deine Beschreibung ein."
+      },
+      "SENTENCE": {
+        "label": "Satzbau",
+        "cue": "Verbinde Wer + Handlung + Ort zu einem vollständigen Satz.",
+        "audioHint": "Satzbaumodus. Sprich einen vollständigen Satz darüber, wer was und wo tut."
+      },
+      "STORY": {
+        "label": "Erzählen",
+        "cue": "Verbinde 2–3 Sätze und erzähle, was in der Geschichte gerade passiert.",
+        "audioHint": "Erzählmodus. Verbinde zwei bis drei Sätze und erzähle die Geschichte im Bild."
+      },
+      "INFER": {
+        "label": "Mitdenken",
+        "cue": "Warum macht die Figur das wohl? Was könnte davor oder danach passieren?",
+        "audioHint": "Mitdenkmodus. Überlege, warum die Figur so handelt oder was als Nächstes geschieht."
+      },
+      "CREATE": {
+        "label": "Kreativ",
+        "cue": "Erfinde einen lustigen Dialog oder ein spannendes Ende für dieses Bild!",
+        "audioHint": "Kreativmodus. Erfinde ein lustiges Gespräch oder eine tolle Fortsetzung zum Bild."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "Einstiegsimpuls",
+      "EXPAND": "Satz erweitern",
+      "PRAISE": "Ermutigendes Lob",
+      "NEXT_CHALLENGE": "Nächste Herausforderung"
+    },
+    "visualHintChips": {
+      "who": "Wer oder welches Tier?",
+      "action": "Was passiert gerade?",
+      "where": "Wo und welche Farbe?"
     }
   },
   "karaokeRuntime": {

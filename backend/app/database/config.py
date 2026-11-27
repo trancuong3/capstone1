@@ -183,8 +183,10 @@ READING_PRESENCE_MAIL_SINK_DIR = (
 # Unified parent email automation settings (server-only).
 # Supports both Resend HTTPS API (recommended for cloud hosting) and SMTP.
 EMAIL_PROVIDER = (os.getenv("EMAIL_PROVIDER") or "auto").strip().lower()
-if EMAIL_PROVIDER not in {"auto", "smtp", "resend"}:
-    raise ValueError("EMAIL_PROVIDER must be 'auto', 'smtp', or 'resend'")
+if EMAIL_PROVIDER not in {"auto", "smtp", "resend", "vercel_relay"}:
+    raise ValueError("EMAIL_PROVIDER must be auto, smtp, resend, or vercel_relay")
+EMAIL_RELAY_URL = (os.getenv("EMAIL_RELAY_URL") or "").strip()
+EMAIL_RELAY_SECRET = (os.getenv("EMAIL_RELAY_SECRET") or "").strip()
 RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip() or None
 RESEND_API_BASE_URL = (
     os.getenv("RESEND_API_BASE_URL") or "https://api.resend.com"

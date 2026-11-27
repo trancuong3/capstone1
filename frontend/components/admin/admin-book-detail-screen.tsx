@@ -229,6 +229,26 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     };
   }, [load]);
 
+  const pageStats = useMemo(() => {
+    const list = items ?? [];
+    let verified = 0;
+    let needsReview = 0;
+    let processing = 0;
+    for (const item of list) {
+      if (item.processing.verification_status === "VERIFIED") verified += 1;
+      else if (item.processing.verification_status === "NEEDS_REVIEW")
+        needsReview += 1;
+      else if (item.processing.verification_status === "PROCESSING")
+        processing += 1;
+    }
+    return {
+      total: list.length,
+      verified,
+      needsReview,
+      processing,
+    };
+  }, [items]);
+
   const activeOcrJobs = ocrJobs.filter((job) =>
     isActiveAdminOcrJobStatus(job.status),
   );
@@ -325,26 +345,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     refreshPages,
   ]);
 
-  const pageStats = useMemo(() => {
-    const list = items ?? [];
-    let verified = 0;
-    let needsReview = 0;
-    let processing = 0;
-    for (const item of list) {
-      if (item.processing.verification_status === "VERIFIED") verified += 1;
-      else if (item.processing.verification_status === "NEEDS_REVIEW")
-        needsReview += 1;
-      else if (item.processing.verification_status === "PROCESSING")
-        processing += 1;
-    }
-    return {
-      total: list.length,
-      verified,
-      needsReview,
-      processing,
-    };
-  }, [items]);
-
   if (!book && !error) return <AdminLoading variant="skeleton" />;
   if (error) {
     return (
@@ -381,6 +381,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     );
   }
   if (!book) return null;
+  const resolvedTitle = book.title.trim()
+    ? book.title
+    : t("books.detail.missingTitle");
+  const isUploaderExpanded =
+    uploaderOpenOverride ?? (items !== null && items.length === 0);
   const activePageIds = new Set(
     (items ?? []).map((item) => item.processing.page_id),
   );
@@ -395,12 +400,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       job.job_kind === "ADMIN_PAGE_UPLOAD" &&
       (!job.page_id || !activePageIds.has(job.page_id)),
   );
-
-  const resolvedTitle = book.title.trim()
-    ? book.title
-    : t("books.detail.missingTitle");
-  const isUploaderExpanded =
-    uploaderOpenOverride ?? (items !== null && items.length === 0);
   const visibleItems = items?.slice(
     (pageNumber - 1) * pageSize,
     pageNumber * pageSize,
@@ -618,6 +617,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </Button>
           </div>
         </div>
+
         {activeOcrJobs.length > 0 ? (
           <div
             className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
