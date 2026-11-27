@@ -243,17 +243,21 @@ if _use_null_pool:
         connect_args=asyncpg_connect_args,
     )
 elif DATABASE_POOLER_MODE == "transaction":
-    # Tiny bounded pool avoids per-request TLS/SCRAM handshakes across Supavisor
-    # transaction pooler (port 6543) while prepared statements remain disabled.
+    # Bounded pool sized to match DATABASE_CONCURRENCY_LIMIT avoids QueuePool
+    # exhaustion under concurrent health/API probes across Supavisor transaction
+    # pooler (port 6543) while prepared statements remain disabled.
     # pool_pre_ping defaults False here (DATABASE_POOL_PRE_PING=true overrides)
-    # so warm checkouts avoid a synchronous extra Oregon<->APAC SELECT 1 RTT;
+    # so warm checkouts avoid a synchronous extra cross-region SELECT 1 RTT;
     # pool_recycle=180 + asyncpg connection lifecycle guard staleness.
+    _tx_pool_size = max(2, min(DATABASE_CONCURRENCY_LIMIT, 4))
+    _tx_max_overflow = max(2, DATABASE_CONCURRENCY_LIMIT - _tx_pool_size)
+    _tx_pool_timeout = max(10.0, float(DATABASE_CONCURRENCY_WAIT_TIMEOUT))
     engine = create_async_engine(
         sqlalchemy_database_url,
         echo=False,
-        pool_size=2,
-        max_overflow=2,
-        pool_timeout=DATABASE_CONCURRENCY_WAIT_TIMEOUT,
+        pool_size=_tx_pool_size,
+        max_overflow=_tx_max_overflow,
+        pool_timeout=_tx_pool_timeout,
         pool_recycle=DATABASE_POOL_RECYCLE_SECONDS,
         pool_pre_ping=DATABASE_POOL_PRE_PING,
         pool_use_lifo=True,

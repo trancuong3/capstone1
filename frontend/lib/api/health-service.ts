@@ -4,9 +4,17 @@ import type {
 } from "@/types/admin";
 import { z } from "zod";
 import { requestApi } from "@/lib/api/api-client";
+import { registerCacheResetListener } from "@/lib/api/read-cache";
+
+export interface HealthGetOptions {
+  forceFresh?: boolean;
+}
 
 export interface HealthService {
-  get(signal?: AbortSignal): Promise<HealthSnapshotUI>;
+  get(
+    signal?: AbortSignal,
+    options?: HealthGetOptions,
+  ): Promise<HealthSnapshotUI>;
   wakeOcrWorker(signal?: AbortSignal): Promise<OcrWorkerWakeupResponseUI>;
 }
 
@@ -108,12 +116,119 @@ const ocrWorkerWakeupSchema = z.object({
   detail: z.string(),
 });
 
+interface InflightHealthEntry {
+  readonly promise: Promise<HealthSnapshotUI>;
+  readonly controller: AbortController;
+  readonly waiters: Set<AbortController>;
+}
+
+let inflightHealthGet: InflightHealthEntry | null = null;
+let resetListenerRegistered = false;
+
+function clearInflightHealthGet(abortInflight = false): void {
+  const current = inflightHealthGet;
+  inflightHealthGet = null;
+  if (current && abortInflight) {
+    current.controller.abort();
+  }
+}
+
+function ensureResetListener(): void {
+  if (resetListenerRegistered) return;
+  resetListenerRegistered = true;
+  registerCacheResetListener(() => {
+    clearInflightHealthGet(true);
+  });
+}
+
+function wrapHealthWaiter(
+  entry: InflightHealthEntry,
+  signal?: AbortSignal,
+): Promise<HealthSnapshotUI> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  const waiterToken = new AbortController();
+  entry.waiters.add(waiterToken);
+
+  return new Promise<HealthSnapshotUI>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      signal?.removeEventListener("abort", onAbort);
+      entry.waiters.delete(waiterToken);
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+      // Defer aborting the underlying fetch by one microtask so React StrictMode
+      // remounts or concurrent callers subscribing in the same tick can reuse it.
+      queueMicrotask(() => {
+        if (
+          inflightHealthGet === entry &&
+          entry.waiters.size === 0 &&
+          !entry.controller.signal.aborted
+        ) {
+          clearInflightHealthGet(true);
+        }
+      });
+    };
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+
+    entry.promise.then(
+      (value) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
 export function createHealthService(): HealthService {
+  ensureResetListener();
   return {
-    get: (signal?: AbortSignal) =>
-      requestApi("/system/admin/health", healthSnapshotSchema, signal, {
-        bypassCache: true,
-      }),
+    get: (signal?: AbortSignal, options?: HealthGetOptions) => {
+      if (signal?.aborted) {
+        return Promise.reject(new DOMException("Aborted", "AbortError"));
+      }
+      const forceFresh = Boolean(options?.forceFresh);
+      if (forceFresh) {
+        clearInflightHealthGet(true);
+      } else if (inflightHealthGet) {
+        return wrapHealthWaiter(inflightHealthGet, signal);
+      }
+
+      const controller = new AbortController();
+      const entry: InflightHealthEntry = {
+        promise: requestApi(
+          "/system/admin/health",
+          healthSnapshotSchema,
+          controller.signal,
+          {
+            bypassCache: true,
+          },
+        ).finally(() => {
+          if (inflightHealthGet === entry) {
+            inflightHealthGet = null;
+          }
+        }),
+        controller,
+        waiters: new Set(),
+      };
+      inflightHealthGet = entry;
+      entry.promise.catch(() => undefined);
+      return wrapHealthWaiter(entry, signal);
+    },
     wakeOcrWorker: (signal?: AbortSignal) =>
       requestApi(
         "/system/admin/health/ocr-worker/wakeup",

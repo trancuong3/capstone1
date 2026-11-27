@@ -72,6 +72,15 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  if (
+    pathname === "/admin/login" &&
+    auth.userId &&
+    auth.role === "admin" &&
+    !request.nextUrl.searchParams.has("state")
+  ) {
+    return redirectWithAuthState(request, getRoleHome("admin"), auth.response);
+  }
+
   if (protectedArea && !auth.userId) {
     return redirectWithAuthState(
       request,
@@ -86,6 +95,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/|_next/static|_next/image|wasm/|sounds/|favicon.ico|sitemap.xml|robots.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|wasm|onnx|mp3|wav|ogg|json|mjs|map)$).*)",
+    "/((?!api/cron|api/parent-email-relay|_next/static|_next/image|wasm/|workers/|audio/|sounds/|favicon\\.ico|icon\\.svg|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|wasm|onnx|mp3|wav|ogg|json|js|mjs|map)$).*)",
   ],
 };

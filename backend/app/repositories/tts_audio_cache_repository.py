@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, case, func, literal_column, or_, select, update
+from sqlalchemy import and_, case, func, literal_column, or_, select, true, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -1034,19 +1034,37 @@ class TtsAudioCacheRepository:
 
     async def get_summary(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)
-        agg = (
-            await self.db.execute(
-                select(
-                    func.count(TtsAudioCacheEntry.Id).label("entry_count"),
-                    func.coalesce(func.sum(TtsAudioCacheEntry.ByteSize), 0).label("storage_used_bytes"),
-                ).where(TtsAudioCacheEntry.Status == "ACTIVE")
+        usage_day = ts.date()
+        entry_subq = (
+            select(
+                func.count(TtsAudioCacheEntry.Id).label("entry_count"),
+                func.coalesce(func.sum(TtsAudioCacheEntry.ByteSize), 0).label("storage_used_bytes"),
             )
-        ).one()
-        daily = await self.get_daily_usage(ts.date())
+            .where(TtsAudioCacheEntry.Status == "ACTIVE")
+            .subquery()
+        )
+        daily_subq = (
+            select(
+                TtsAudioCacheDailyUsage.BytesServed.label("bytes_served"),
+                TtsAudioCacheDailyUsage.HitCount.label("hit_count"),
+                TtsAudioCacheDailyUsage.MissCount.label("miss_count"),
+            )
+            .where(TtsAudioCacheDailyUsage.UsageDate == usage_day)
+            .limit(1)
+            .subquery()
+        )
+        stmt = select(
+            entry_subq.c.entry_count,
+            entry_subq.c.storage_used_bytes,
+            func.coalesce(daily_subq.c.bytes_served, 0).label("daily_egress_bytes"),
+            func.coalesce(daily_subq.c.hit_count, 0).label("hit_count"),
+            func.coalesce(daily_subq.c.miss_count, 0).label("miss_count"),
+        ).select_from(entry_subq.outerjoin(daily_subq, true()))
+        row = (await self.db.execute(stmt)).one()
         return {
-            "entry_count": int(agg.entry_count or 0),
-            "storage_used_bytes": int(agg.storage_used_bytes or 0),
-            "daily_egress_bytes": int(daily["bytes_served"]),
-            "hit_count": int(daily["hit_count"]),
-            "miss_count": int(daily["miss_count"]),
+            "entry_count": int(row.entry_count or 0),
+            "storage_used_bytes": int(row.storage_used_bytes or 0),
+            "daily_egress_bytes": int(row.daily_egress_bytes or 0),
+            "hit_count": int(row.hit_count or 0),
+            "miss_count": int(row.miss_count or 0),
         }

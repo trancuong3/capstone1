@@ -670,6 +670,483 @@ class ColabWorkerTests(unittest.TestCase):
             self.assertEqual(dest.read_bytes(), payload)
             worker.session.close()
 
+    def test_linux_available_ram_uses_proc_meminfo_and_cgroup_v2_reclaimable(self):
+        gib = 1024**3
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            meminfo = root / "meminfo"
+            # Low MemFree (1 GiB) but high MemAvailable (10 GiB) due to page cache
+            meminfo.write_text(
+                "MemTotal:       13000000 kB\n"
+                f"MemFree:        {1 * 1024 * 1024} kB\n"
+                f"MemAvailable:   {10 * 1024 * 1024} kB\n"
+                f"Buffers:        {1 * 1024 * 1024} kB\n"
+                f"Cached:         {7 * 1024 * 1024} kB\n"
+                f"SReclaimable:   {1 * 1024 * 1024} kB\n",
+                encoding="ascii",
+            )
+            cg2 = root / "cg2"
+            cg2.mkdir()
+            # Cgroup v2: max=12 GiB, current=10 GiB, inactive_file=6 GiB, slab_reclaimable=1 GiB
+            # Raw max-current would be 2 GiB (false COLAB_INSUFFICIENT_RAM!),
+            # whereas adjusted used=3 GiB -> cgroup_available=9 GiB.
+            (cg2 / "memory.max").write_text(str(12 * gib), encoding="ascii")
+            (cg2 / "memory.current").write_text(str(10 * gib), encoding="ascii")
+            (cg2 / "memory.stat").write_text(
+                f"anon {3 * gib}\n"
+                f"inactive_file {6 * gib}\n"
+                f"slab_reclaimable {1 * gib}\n",
+                encoding="ascii",
+            )
+            avail_v2, breakdown_v2 = ColabWorker._linux_available_ram_breakdown(
+                meminfo_path=meminfo,
+                cgroup_v2_dir=cg2,
+                cgroup_v1_dir=root / "nonexistent_cg1",
+            )
+            self.assertEqual(avail_v2, 9 * gib)
+            self.assertEqual(breakdown_v2["host_source"], "proc_meminfo:MemAvailable")
+            self.assertEqual(breakdown_v2["cgroup_version"], "v2")
+            self.assertEqual(breakdown_v2["cgroup_used_bytes"], 3 * gib)
+            self.assertEqual(breakdown_v2["cgroup_available_bytes"], 9 * gib)
+
+            # Fallback when MemAvailable is absent: MemFree + Buffers + Cached + SReclaimable
+            meminfo_fallback = root / "meminfo_no_avail"
+            meminfo_fallback.write_text(
+                f"MemFree:        {2 * 1024 * 1024} kB\n"
+                f"Buffers:        {1 * 1024 * 1024} kB\n"
+                f"Cached:         {4 * 1024 * 1024} kB\n"
+                f"SReclaimable:   {1 * 1024 * 1024} kB\n",
+                encoding="ascii",
+            )
+            cg1 = root / "cg1"
+            cg1.mkdir()
+            (cg1 / "memory.limit_in_bytes").write_text(str(12 * gib), encoding="ascii")
+            (cg1 / "memory.usage_in_bytes").write_text(str(10 * gib), encoding="ascii")
+            (cg1 / "memory.stat").write_text(f"total_inactive_file {5 * gib}\n", encoding="ascii")
+            avail_v1, breakdown_v1 = ColabWorker._linux_available_ram_breakdown(
+                meminfo_path=meminfo_fallback,
+                cgroup_v2_dir=root / "nonexistent_cg2",
+                cgroup_v1_dir=cg1,
+            )
+            # host=8 GiB, cgroup_used=5 GiB -> cgroup_avail=7 GiB -> min(8, 7)=7 GiB
+            self.assertEqual(avail_v1, 7 * gib)
+            self.assertEqual(breakdown_v1["host_source"], "proc_meminfo:MemFree+Buffers+Cached+SReclaimable")
+            self.assertEqual(breakdown_v1["cgroup_version"], "v1")
+
+            # Verify assert_runtime_capacity logs numeric breakdown and keeps exact error string
+            fake_torch = types.SimpleNamespace(
+                __version__="2.14.1",
+                version=types.SimpleNamespace(cuda="13.0"),
+                cuda=types.SimpleNamespace(
+                    is_available=lambda: True,
+                    mem_get_info=lambda _idx: (12 * gib, 16 * gib),
+                    get_device_name=lambda _idx: "Tesla T4",
+                ),
+            )
+            with (
+                patch.dict(sys.modules, {"torch": fake_torch}),
+                patch.object(ColabWorker, "available_ram_bytes", return_value=2 * gib),
+                patch(f"{__package__}.colab_worker.logger.warning") as mock_warn,
+            ):
+                with self.assertRaises(RuntimeError) as ctx:
+                    ColabWorker.assert_runtime_capacity(root / "work")
+            self.assertEqual(str(ctx.exception), "COLAB_INSUFFICIENT_RAM")
+            self.assertTrue(mock_warn.called)
+            warn_msg = mock_warn.call_args[0][0] % mock_warn.call_args[0][1:]
+            self.assertIn("available_bytes=", warn_msg)
+            self.assertIn("minimum_bytes=", warn_msg)
+
+    def test_process_job_skips_final_sync_after_finish_and_syncs_on_error(self):
+        from .colab_state_store import RemoteBackendJobStateStore
+        from .contracts import canonical_sha256
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, use_remote_resume_store=True)
+            training_dir = Path(__file__).parent
+            config = {
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+                "batch_size": 8,
+                "freeze_epochs": 1,
+                "optimizer": "AdamW",
+                "scheduler": "CosineAnnealingLR",
+                "preprocessing": "opencv-line-v1",
+                "fp16": True,
+                "seed": 20261113,
+                "trainer_sha256": sha256_file(training_dir / "train.py"),
+                "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+                "colab_requirements_sha256": sha256_file(training_dir / "requirements-colab.txt"),
+            }
+            config_sha = canonical_sha256(config)
+            job = {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "dataset_version_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                "manifest_sha256": "a" * 64,
+                "parent_checkpoint_sha256": "b" * 64,
+                "config_sha256": config_sha,
+                "metadata": {"training_config": config},
+            }
+            fake_cand = Path(temp_dir) / "produced.pth"
+            fake_cand.write_bytes(b"candidate-weights")
+            cand_sha = sha256_file(fake_cand)
+            cand_payload = {
+                "candidate_path": str(fake_cand),
+                "checkpoint_sha256": cand_sha,
+                "parent_checkpoint_sha256": "b" * 64,
+                "manifest_sha256": "a" * 64,
+                "config_sha256": config_sha,
+                "architecture_sha256": "c" * 64,
+                "vocabulary_sha256": "d" * 64,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+            }
+
+            events: list[str] = []
+
+            def fake_sync(_self):
+                events.append("sync")
+
+            def fake_call(method, path, **kwargs):
+                if path.endswith("/finish"):
+                    events.append("finish")
+                return {}
+
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", fake_sync),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
+                patch.object(worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                patch.object(worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                patch.object(worker, "upload_candidate", return_value=("run-1", "CANDIDATE", fake_cand)),
+                patch.object(worker, "call", side_effect=fake_call),
+                patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=lambda **_kw: dict(cand_payload))}),
+            ):
+                worker.process_job(job)
+
+            # Only post-training sync happened before upload; NO sync after /finish!
+            self.assertEqual(events, ["sync", "finish"])
+
+            # Error before /finish MUST still trigger final sync in finally
+            events.clear()
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", fake_sync),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "dataset", side_effect=RuntimeError("boom")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "boom"):
+                    worker.process_job({**job, "id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"})
+            self.assertEqual(events, ["sync"])
+            worker.session.close()
+
+    def test_single_pass_benchmark_frees_cuda_cache_and_tolerates_pre_benchmark_remote_sync_error(self):
+        from .colab_state_store import RemoteBackendJobStateStore
+        from .contracts import ORIGINAL_CHECKPOINT_SHA256, canonical_sha256
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, use_remote_resume_store=True)
+            training_dir = Path(__file__).parent
+            config = {
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+                "batch_size": 8,
+                "freeze_epochs": 1,
+                "optimizer": "AdamW",
+                "scheduler": "CosineAnnealingLR",
+                "preprocessing": "opencv-line-v1",
+                "fp16": True,
+                "seed": 20261113,
+                "trainer_sha256": sha256_file(training_dir / "train.py"),
+                "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+                "colab_requirements_sha256": sha256_file(training_dir / "requirements-colab.txt"),
+            }
+            config_sha = canonical_sha256(config)
+            job_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+            locked_sha = "e" * 64
+            job = {
+                "id": job_id,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "dataset_version_id": "22222222-2222-4222-8222-222222222222",
+                "manifest_sha256": "a" * 64,
+                "parent_checkpoint_sha256": "b" * 64,
+                "config_sha256": config_sha,
+                "locked_test_version_id": "lt-version-1",
+                "locked_test_manifest_sha256": locked_sha,
+                "active_model": {"profile": "ORIGINAL"},
+                "metadata": {"training_config": config},
+            }
+            run_dir = Path(temp_dir) / job_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            fake_cand = Path(temp_dir) / "produced.pth"
+            fake_cand.write_bytes(b"candidate-weights")
+            cand_sha = sha256_file(fake_cand)
+            cand_payload = {
+                "candidate_path": str(fake_cand),
+                "checkpoint_sha256": cand_sha,
+                "parent_checkpoint_sha256": "b" * 64,
+                "manifest_sha256": "a" * 64,
+                "config_sha256": config_sha,
+                "architecture_sha256": "c" * 64,
+                "vocabulary_sha256": "d" * 64,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+            }
+            orig_file = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+            orig_file.write_bytes(b"orig")
+
+            events: list[str] = []
+            sync_calls = [0]
+
+            def fake_sync(_self):
+                sync_calls[0] += 1
+                events.append(f"sync-{sync_calls[0]}")
+                raise requests.HTTPError("502 Bad Gateway")
+
+            def fake_dataset(_jid, *, locked_test=False):
+                if locked_test:
+                    return {"id": "lt-version-1", "version_sha256": locked_sha}, []
+                return {"version_sha256": "a" * 64}, []
+
+            def fake_empty_cache():
+                events.append("empty_cache")
+
+            def fake_run_locked_benchmark(**_kw):
+                events.append("run_locked_benchmark")
+                return {
+                    "candidate_checkpoint_sha256": cand_sha,
+                    "locked_manifest_sha256": locked_sha,
+                    "quality_gate": {"status": "V2_WIN"},
+                    "outputs": [{"sample_id": "s1", "group_id": "g1", "original": "a", "candidate": "b"}],
+                }
+
+            def fake_call(method, path, **kwargs):
+                if path.endswith("/benchmarks"):
+                    events.append("post_benchmarks")
+                    return {"gate_status": "V2_WIN"}
+                if path.endswith("/finish"):
+                    events.append(f"finish:{kwargs['json']['status']}")
+                    return {}
+                return {}
+
+            fake_torch = types.SimpleNamespace(
+                cuda=types.SimpleNamespace(
+                    is_available=lambda: True,
+                    empty_cache=fake_empty_cache,
+                )
+            )
+            real_sha256_file = sha256_file
+
+            def fake_sha256(path):
+                if Path(path) == orig_file:
+                    return ORIGINAL_CHECKPOINT_SHA256
+                return real_sha256_file(path)
+
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", fake_sync),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "dataset", side_effect=fake_dataset),
+                patch.object(worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                patch.object(worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                patch.object(worker, "upload_candidate", return_value=("run-1", "CANDIDATE", fake_cand)),
+                patch.object(worker, "call", side_effect=fake_call),
+                patch(f"{__package__}.colab_worker.sha256_file", side_effect=fake_sha256),
+                patch(f"{__package__}.colab_worker.gc.collect", side_effect=lambda: events.append("gc_collect")),
+                patch.dict(
+                    sys.modules,
+                    {
+                        "torch": fake_torch,
+                        f"{__package__}.train": types.SimpleNamespace(run_training=lambda **_kw: dict(cand_payload)),
+                        f"{__package__}.benchmark": types.SimpleNamespace(run_locked_benchmark=fake_run_locked_benchmark),
+                    },
+                ),
+            ):
+                worker.process_job(job)
+
+            self.assertEqual(
+                events,
+                [
+                    "sync-1",
+                    "gc_collect",
+                    "empty_cache",
+                    "run_locked_benchmark",
+                    "sync-2",
+                    "post_benchmarks",
+                    "finish:BENCHMARKED",
+                ],
+            )
+            worker.session.close()
+
+    def test_colab_worker_notebook_rerun_safety_guards(self):
+        nb_path = Path(__file__).with_name("viread_vietocr_v2_colab_worker.ipynb")
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        code_src = "".join(nb["cells"][1].get("source", []))
+        compile(code_src, str(nb_path), "exec")
+        chdir_idx = code_src.find('os.chdir("/content")')
+        repo_exists_idx = code_src.find("if REPO.exists():")
+        self.assertGreaterEqual(chdir_idx, 0)
+        self.assertGreater(repo_exists_idx, chdir_idx)
+        self.assertIn("importlib.metadata.version", code_src)
+        self.assertIn('"--no-cache-dir"', code_src)
+        self.assertIn("*missing_or_mismatched", code_src)
+        self.assertNotIn('"-r", str(req_file)', code_src)
+        self.assertIn('os.environ["VIREAD_TRAINING_WORKER_TOKEN"]', code_src)
+        self.assertIn('"viread_vietocr_v2_preprocessing"', code_src)
+
+    def test_process_job_starts_heartbeat_before_restore_sets_complete_timeout_and_cleans_ephemeral_files(self):
+        from .colab_state_store import RemoteBackendJobStateStore
+        from .contracts import ORIGINAL_CHECKPOINT_SHA256, canonical_sha256
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir, use_remote_resume_store=True)
+            training_dir = Path(__file__).parent
+            config = {
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+                "batch_size": 8,
+                "freeze_epochs": 1,
+                "optimizer": "AdamW",
+                "scheduler": "CosineAnnealingLR",
+                "preprocessing": "opencv-line-v1",
+                "fp16": True,
+                "seed": 20261113,
+                "trainer_sha256": sha256_file(training_dir / "train.py"),
+                "requirements_sha256": sha256_file(training_dir / "requirements.txt"),
+                "colab_requirements_sha256": sha256_file(training_dir / "requirements-colab.txt"),
+            }
+            config_sha = canonical_sha256(config)
+            job_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+            job = {
+                "id": job_id,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "dataset_version_id": "22222222-2222-4222-8222-222222222222",
+                "manifest_sha256": "a" * 64,
+                "parent_checkpoint_sha256": "b" * 64,
+                "config_sha256": config_sha,
+                "metadata": {"training_config": config},
+            }
+            run_dir = Path(temp_dir) / job_id
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "training-images").mkdir()
+            (run_dir / "training-images" / "img1").write_bytes(b"img")
+            (run_dir / "upload-shards-8mib").mkdir()
+            (run_dir / "upload-shards-8mib" / "part-0000.bin").write_bytes(b"part")
+            (run_dir / "latest.pt").write_bytes(b"resume-ckpt")
+            (run_dir / "best-1234.pth").write_bytes(b"best")
+            (run_dir / "candidate.json").write_text("{}", encoding="utf-8")
+            (run_dir / "production-bench-benchmark.json").write_text("{}", encoding="utf-8")
+
+            fake_cand = Path(temp_dir) / "produced.pth"
+            fake_cand.write_bytes(b"candidate-weights")
+            cand_sha = sha256_file(fake_cand)
+            cand_payload = {
+                "candidate_path": str(fake_cand),
+                "checkpoint_sha256": cand_sha,
+                "parent_checkpoint_sha256": "b" * 64,
+                "manifest_sha256": "a" * 64,
+                "config_sha256": config_sha,
+                "architecture_sha256": "c" * 64,
+                "vocabulary_sha256": "d" * 64,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+            }
+
+            events: list[str] = []
+
+            def fake_heartbeat(_jid, _stop, _progress):
+                events.append("heartbeat")
+
+            def fake_restore(_self):
+                events.append("restore")
+                return {}
+
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", fake_restore),
+                patch.object(RemoteBackendJobStateStore, "sync", return_value={}),
+                patch.object(worker, "heartbeat_loop", side_effect=fake_heartbeat),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "dataset", return_value=({"version_sha256": "a" * 64}, [])),
+                patch.object(worker, "materialize_parent", return_value=Path(temp_dir) / "parent.pth"),
+                patch.object(worker, "materialize_dataset", return_value=(Path(temp_dir) / "m.jsonl", Path(temp_dir) / "r.json", Path(temp_dir) / "imgs")),
+                patch.object(worker, "upload_candidate", return_value=("run-1", "CANDIDATE", fake_cand)),
+                patch.object(worker, "call", return_value={}),
+                patch.dict(sys.modules, {f"{__package__}.train": types.SimpleNamespace(run_training=lambda **_kw: dict(cand_payload))}),
+            ):
+                worker.process_job(job)
+
+            self.assertLess(events.index("heartbeat"), events.index("restore"))
+            self.assertFalse((run_dir / "training-images").exists())
+            self.assertFalse((run_dir / "upload-shards-8mib").exists())
+            self.assertFalse((run_dir / "latest.pt").exists())
+            self.assertFalse((run_dir / "best-1234.pth").exists())
+            self.assertTrue((run_dir / "candidate.json").is_file())
+            self.assertTrue((run_dir / "production-bench-benchmark.json").is_file())
+
+            # Failed job preserves latest.pt and does not delete run_dir artifacts
+            fail_job_id = "ffffffff-ffff-4fff-8fff-ffffffffffff"
+            fail_dir = Path(temp_dir) / fail_job_id
+            fail_dir.mkdir(parents=True, exist_ok=True)
+            (fail_dir / "latest.pt").write_bytes(b"keep-for-resume")
+            with (
+                patch.object(RemoteBackendJobStateStore, "restore", return_value={}),
+                patch.object(RemoteBackendJobStateStore, "sync", return_value={}),
+                patch.object(worker, "heartbeat_loop"),
+                patch.object(worker, "assert_runtime_capacity", return_value={"device": "Tesla T4"}),
+                patch.object(worker, "dataset", side_effect=RuntimeError("transient-fail")),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "transient-fail"):
+                    worker.process_job({**job, "id": fail_job_id})
+            self.assertTrue((fail_dir / "latest.pt").is_file())
+
+            # _ensure_original_checkpoint reuses parent / shared cache without network call
+            cache_dir = Path(temp_dir) / "cache_test_run"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            parent_file = Path(temp_dir) / "parent_orig.pth"
+            parent_file.write_bytes(b"cached-original-bytes")
+            with (
+                patch(f"{__package__}.colab_worker.sha256_file", return_value=ORIGINAL_CHECKPOINT_SHA256),
+                patch.object(worker, "download", side_effect=AssertionError("should not download")),
+            ):
+                resolved = worker._ensure_original_checkpoint(cache_dir, reuse_candidates=[parent_file])
+            self.assertEqual(resolved, cache_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth")
+            self.assertEqual(resolved.read_bytes(), b"cached-original-bytes")
+            self.assertTrue((Path(temp_dir) / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth").is_file())
+
+            # upload_candidate passes timeout=600 for /complete
+            upload_dir = Path(temp_dir) / "upload_timeout_test"
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            (upload_dir / "candidate.pth").write_bytes(b"ckpt-bytes")
+            (upload_dir / "candidate.json").write_text(json.dumps({
+                "candidate_path": str(upload_dir / "candidate.pth"),
+                "checkpoint_sha256": hashlib.sha256(b"ckpt-bytes").hexdigest(),
+                "parent_checkpoint_sha256": "a" * 64,
+                "manifest_sha256": "b" * 64,
+                "config_sha256": "c" * 64,
+                "architecture_sha256": "d" * 64,
+                "vocabulary_sha256": "e" * 64,
+                "profile": "FLOW2_ADMIN_VERIFIED",
+                "steps": 100,
+            }), encoding="utf-8")
+            complete_timeouts: list[int | None] = []
+
+            def capture_call(method, path, **kwargs):
+                if path.endswith("/runs"):
+                    return {"run_id": "run-timeout-1", "status": "RUNNING"}
+                if path.endswith("/complete"):
+                    complete_timeouts.append(kwargs.get("timeout"))
+                    return {"run_id": "run-timeout-1", "status": "CANDIDATE"}
+                return {}
+
+            with patch.object(worker, "call", side_effect=capture_call):
+                worker.upload_candidate(job, {"checkpoint_sha256": hashlib.sha256(b"ckpt-bytes").hexdigest()}, upload_dir)
+            self.assertEqual(complete_timeouts, [600])
+            worker.session.close()
+
 
 if __name__ == "__main__":
     unittest.main()

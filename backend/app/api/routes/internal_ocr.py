@@ -29,7 +29,9 @@ def require_ocr_worker_token(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Remote OCR worker token is not configured on backend.",
         )
-    provided = (x_viread_ocr_worker_token or "").strip()
+    provided = (
+        x_viread_ocr_worker_token if isinstance(x_viread_ocr_worker_token, str) else ""
+    ).strip()
     if not provided:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -280,12 +282,12 @@ async def download_active_ocr_model_shard(
     shard_index: int,
     _: str = Depends(require_ocr_worker_token),
     db: AsyncSession = Depends(get_db),
-) -> Response:
-    payload, sha = await OcrInferenceJobService(db).get_active_model_artifact_bytes(
-        kind="shard", shard_index=shard_index
-    )
-    return Response(
-        content=payload,
-        media_type="application/octet-stream",
-        headers={"X-Content-Sha256": sha},
+) -> StreamingResponse:
+    chunk_iterator, media_type, headers = await OcrInferenceJobService(
+        db
+    ).open_active_model_artifact_stream(kind="shard", shard_index=shard_index)
+    return StreamingResponse(
+        chunk_iterator,
+        media_type=media_type,
+        headers=headers,
     )

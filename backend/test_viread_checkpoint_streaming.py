@@ -289,6 +289,157 @@ class CompleteRunStreamingTests(unittest.TestCase):
         self.assertLess(repo.events.index("commit"), repo.events.index("lock-job"))
         self.assertIn("lock-run", repo.events)
 
+    def test_complete_run_drive_chunks_resolves_router_once_before_commit_and_maps_bridge_errors_to_502(self):
+        from fastapi import HTTPException
+        from app.services.training_storage import StorageProvider, StoredArtifact
+
+        actor_id = UUID("03db2619-ea6a-41ef-b7fd-02e5cc91cc53")
+        job_id = UUID("bb934c35-5ba2-45f8-b4c0-6159fd6b20cf")
+        run_id = UUID("0122c065-25d4-4ac5-9f57-4f379aa6b2ee")
+        shard_bodies = [b"drive-shard-0", b"drive-shard-1"]
+        checkpoint = b"".join(shard_bodies)
+        identity = {
+            "profile": "FLOW2_ADMIN_VERIFIED",
+            "parent_checkpoint_sha256": "a" * 64,
+            "manifest_sha256": "b" * 64,
+            "config_sha256": "c" * 64,
+            "architecture_sha256": "d" * 64,
+            "vocabulary_sha256": "e" * 64,
+        }
+        run = {"id": run_id, "status": "RUNNING", **identity}
+        chunks = [
+            {
+                "chunk_index": index,
+                "chunk_sha256": hashlib.sha256(body).hexdigest(),
+                "storage_path": f"gdrive://file-{index}",
+                "byte_count": len(body),
+            }
+            for index, body in enumerate(shard_bodies)
+        ]
+        latest_run = {
+            "status": "RUNNING",
+            "checkpoint_sha256": None,
+            "checkpoint_bytes": None,
+            "step": 0,
+            "checkpoint_storage_path": None,
+        }
+        job = {
+            "id": job_id,
+            "target": "COLAB",
+            "status": "COLAB_RUNNING",
+            "worker_id": "worker-test",
+            "run_id": run_id,
+            "profile": identity["profile"],
+            "created_by": actor_id,
+            "lease_expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        }
+
+        class FakeRepo:
+            def __init__(self):
+                self.events: list[str] = []
+
+            async def one(self, sql, _params=None):
+                if "SELECT * FROM public.viread_ocr_training_runs" in sql:
+                    self.events.append("load-run")
+                    return run
+                if "FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE" in sql:
+                    self.events.append("lock-job")
+                    return job
+                if "FROM public.viread_ocr_training_runs WHERE id=:run_id FOR UPDATE" in sql:
+                    self.events.append("lock-run")
+                    return latest_run
+                raise AssertionError(f"Unexpected query: {sql}")
+
+            async def all(self, _sql, _params=None):
+                self.events.append("load-chunks")
+                return chunks
+
+            async def execute(self, _sql, _params=None):
+                self.events.append("write")
+
+            async def commit(self):
+                self.events.append("commit")
+
+            async def rollback(self):
+                self.events.append("rollback")
+
+        repo = FakeRepo()
+        service = VireadOcrTrainingService(SimpleNamespace())
+        service.repo = repo
+        service._admin = AsyncMock()
+        service._exec_optional_column_update = AsyncMock()
+        router_calls = [0]
+
+        class FakeRouter:
+            def __init__(self, target_repo):
+                self._repo = target_repo
+
+            def open_stream(self, ref):
+                assert "commit" in self._repo.events
+                assert "lock-job" not in self._repo.events
+                self._repo.events.append(f"stream:{ref}")
+                idx = int(ref.rsplit("-", 1)[1])
+                yield shard_bodies[idx]
+
+            def put(self, logical_path, data, **_kwargs):
+                assert "commit" in self._repo.events
+                assert "lock-job" not in self._repo.events
+                self._repo.events.append(f"put:{logical_path}")
+                return StoredArtifact(
+                    provider=StorageProvider.GOOGLE_DRIVE,
+                    reference="gdrive://manifest-file-id",
+                    logical_path=logical_path,
+                    sha256=hashlib.sha256(data).hexdigest(),
+                    size_bytes=len(data),
+                    content_type="application/json",
+                    drive_file_id="manifest-file-id",
+                )
+
+        async def fake_artifact_router(*, write_provider=None):
+            assert write_provider == StorageProvider.GOOGLE_DRIVE
+            router_calls[0] += 1
+            repo.events.append("router")
+            return FakeRouter(repo)
+
+        service._artifact_router = fake_artifact_router
+        payload = TrainingRunComplete(
+            **identity,
+            checkpoint_sha256=hashlib.sha256(checkpoint).hexdigest(),
+            checkpoint_bytes=len(checkpoint),
+            step=5000,
+        )
+        result = asyncio.run(
+            service.complete_run(actor_id, run_id, payload, job_id=job_id, worker_id="worker-test")
+        )
+        self.assertEqual(result["status"], "CANDIDATE")
+        self.assertEqual(router_calls[0], 1)
+        self.assertLess(repo.events.index("router"), repo.events.index("commit"))
+        self.assertLess(repo.events.index("commit"), repo.events.index("stream:gdrive://file-0"))
+        self.assertLess(
+            repo.events.index(f"put:checkpoints/{run_id}/checkpoint.manifest.json"),
+            repo.events.index("lock-job"),
+        )
+
+        # Bridge KeyError during Drive put maps to clean HTTP 502 instead of 500
+        repo2 = FakeRepo()
+        service2 = VireadOcrTrainingService(SimpleNamespace())
+        service2.repo = repo2
+        service2._admin = AsyncMock()
+
+        class BrokenPutRouter(FakeRouter):
+            def put(self, *_args, **_kwargs):
+                raise KeyError("file")
+
+        async def broken_router(*, write_provider=None):
+            return BrokenPutRouter(repo2)
+
+        service2._artifact_router = broken_router
+        with self.assertRaises(HTTPException) as err_ctx:
+            asyncio.run(
+                service2.complete_run(actor_id, run_id, payload, job_id=job_id, worker_id="worker-test")
+            )
+        self.assertEqual(err_ctx.exception.status_code, 502)
+
 
 if __name__ == "__main__":
     unittest.main()

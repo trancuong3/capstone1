@@ -17,6 +17,15 @@ from .quality_gate import GatePolicy, evaluate_gate
 from .train import _LOCKED_VOCAB_PUNCTUATION
 
 
+def _normalize_benchmark_text(text: Any) -> str:
+    cleaned = "".join(
+        ch
+        for ch in unicodedata.normalize("NFC", str(text))
+        if unicodedata.category(ch) != "Cf"
+    )
+    return cleaned.translate(_LOCKED_VOCAB_PUNCTUATION)
+
+
 def _predictor(config: dict[str, Any], weights: str):
     from vietocr.tool.predictor import Predictor
 
@@ -78,22 +87,37 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
     if original_hash != "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59":
         raise ValueError("VietOCR Original checkpoint hash mismatch")
     original = _predictor(config, str(Path(original_checkpoint).resolve()))
-    candidate = _predictor(config, str(Path(candidate_checkpoint).resolve()))
-    predictors: dict[str, Any] = {}
+    candidate_resolved = str(Path(candidate_checkpoint).resolve())
+    candidate_hash = sha256_file(candidate_resolved)
+    loaded_by_hash: dict[str, Any] = {original_hash: original}
+    if candidate_hash in loaded_by_hash:
+        candidate = loaded_by_hash[candidate_hash]
+    else:
+        candidate = _predictor(config, candidate_resolved)
+        loaded_by_hash[candidate_hash] = candidate
+    predictors: dict[str, tuple[Any, str, str]] = {}
+    baseline_hashes: dict[str, str | None] = {"parent": None, "active": None}
     for baseline, checkpoint, profile in (("parent", parent_checkpoint, parent_profile),
                                            ("active", active_checkpoint, active_profile)):
         if checkpoint:
-            baseline_hash = sha256_file(checkpoint)
+            baseline_resolved = str(Path(checkpoint).resolve())
+            baseline_hash = sha256_file(baseline_resolved)
+            baseline_hashes[baseline] = baseline_hash
             if baseline_hash == original_hash:
-                predictors[baseline] = (original, "ORIGINAL")
+                predictors[baseline] = (original, "ORIGINAL", original_hash)
+            elif baseline_hash in loaded_by_hash:
+                predictors[baseline] = (loaded_by_hash[baseline_hash], profile, baseline_hash)
             else:
-                predictors[baseline] = (_predictor(config, str(Path(checkpoint).resolve())), profile)
+                predictor = _predictor(config, baseline_resolved)
+                loaded_by_hash[baseline_hash] = predictor
+                predictors[baseline] = (predictor, profile, baseline_hash)
     paired: list[PairedLine] = []
     seen: set[str] = set()
+    cand_uses_v2 = candidate_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}
     for item in rows:
         sample_id = str(item.get("sample_id", ""))
         group_id = str(item.get("group_id", ""))
-        reference = unicodedata.normalize("NFC", str(item.get("reference", item.get("label", "")))).translate(_LOCKED_VOCAB_PUNCTUATION)
+        reference = _normalize_benchmark_text(item.get("reference", item.get("label", "")))
         raw_image = item.get("image") or item.get("image_storage_path")
         image = Path(str(raw_image or ""))
         if not sample_id or not group_id or not reference.strip() or sample_id in seen:
@@ -107,17 +131,30 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
         seen.add(sample_id)
         with Image.open(image) as source:
             crop = ImageOps.exif_transpose(source).convert("RGB")
-            original_text = unicodedata.normalize("NFC", str(original.predict(crop))).translate(_LOCKED_VOCAB_PUNCTUATION)
-            candidate_image = crop
-            if candidate_profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
-                candidate_image = _preprocess_v2_candidate_image(crop)
-            candidate_text = unicodedata.normalize("NFC", str(candidate.predict(candidate_image))).translate(_LOCKED_VOCAB_PUNCTUATION)
+            v2_crop: Image.Image | None = None
+            pred_cache: dict[tuple[str, bool], str] = {}
+
+            def _predict_cached(predictor: Any, model_sha: str, uses_v2: bool) -> str:
+                nonlocal v2_crop
+                key = (model_sha, uses_v2)
+                cached = pred_cache.get(key)
+                if cached is not None:
+                    return cached
+                img_input = crop
+                if uses_v2:
+                    if v2_crop is None:
+                        v2_crop = _preprocess_v2_candidate_image(crop)
+                    img_input = v2_crop
+                text = _normalize_benchmark_text(predictor.predict(img_input))
+                pred_cache[key] = text
+                return text
+
+            original_text = _predict_cached(original, original_hash, False)
+            candidate_text = _predict_cached(candidate, candidate_hash, cand_uses_v2)
             baseline_text: dict[str, str | None] = {"parent": None, "active": None}
-            for baseline, (predictor, profile) in predictors.items():
-                baseline_image = crop
-                if profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}:
-                    baseline_image = _preprocess_v2_candidate_image(crop)
-                baseline_text[baseline] = unicodedata.normalize("NFC", str(predictor.predict(baseline_image))).translate(_LOCKED_VOCAB_PUNCTUATION)
+            for baseline, (predictor, profile, model_sha) in predictors.items():
+                baseline_uses_v2 = profile in {"FLOW1_EXTERNAL_TRDG", "FLOW2_ADMIN_VERIFIED"}
+                baseline_text[baseline] = _predict_cached(predictor, model_sha, baseline_uses_v2)
         paired.append(PairedLine(group_id, reference, original_text, candidate_text, sample_id,
                                  baseline_text["parent"], baseline_text["active"]))
 
@@ -125,9 +162,9 @@ def run_locked_benchmark(*, manifest_path: str, expected_manifest_sha256: str, o
     metrics.update({"locked_manifest_sha256": actual_manifest_sha256,
                     "locked_manifest_id": manifest.get("manifest_id"),
                     "original_checkpoint_sha256": original_hash,
-                    "parent_checkpoint_sha256": sha256_file(parent_checkpoint) if parent_checkpoint else None,
-                    "active_checkpoint_sha256": sha256_file(active_checkpoint) if active_checkpoint else None,
-                    "candidate_checkpoint_sha256": sha256_file(candidate_checkpoint),
+                    "parent_checkpoint_sha256": baseline_hashes["parent"],
+                    "active_checkpoint_sha256": baseline_hashes["active"],
+                    "candidate_checkpoint_sha256": candidate_hash,
                     "candidate_profile": candidate_profile,
                     "architecture_sha256": canonical_sha256({key: config.get(key) for key in ("backbone", "cnn", "transformer", "seq_modeling")}),
                     "outputs": [{"sample_id": line.sample_id, "group_id": line.group_id, "reference": line.reference,

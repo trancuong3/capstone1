@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, case, desc, exists, func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert
@@ -289,6 +290,166 @@ class ParentEmailNotificationRepository:
             await self.db.commit()
         return recovered
 
+    async def expire_stale_retries(
+        self,
+        now: datetime,
+        *,
+        inactivity_retry_ttl: timedelta = timedelta(hours=24),
+        digest_retry_ttl: timedelta = timedelta(hours=36),
+        milestone_retry_ttl: timedelta = timedelta(hours=48),
+        max_attempts: int = 3,
+        limit: int = 100,
+    ) -> int:
+        """Expire TTL-aged retries and skip INACTIVITY_ALERT retries once reading resumes."""
+        retry_rows = list(
+            (
+                await self.db.execute(
+                    select(ParentEmailDelivery)
+                    .where(ParentEmailDelivery.Status == "RETRY")
+                    .order_by(ParentEmailDelivery.CreatedAt, ParentEmailDelivery.Id)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not retry_rows:
+            return 0
+
+        utc_now = _ensure_utc(now, now)
+        ttl_by_category = {
+            "INACTIVITY_ALERT": inactivity_retry_ttl,
+            "WEEKLY_DIGEST": digest_retry_ttl,
+            "MILESTONE": milestone_retry_ttl,
+        }
+        updated = 0
+        inactivity_rows: list[ParentEmailDelivery] = []
+
+        for row in retry_rows:
+            if (row.Attempts or 0) >= max_attempts:
+                row.Status = "FAILED"
+                row.ErrorCode = row.ErrorCode or "DELIVERY_RETRY_LIMIT"
+                row.NextAttemptAt = None
+                updated += 1
+            elif row.Category == "TEST_EMAIL":
+                row.Status = "SKIPPED"
+                row.ErrorCode = "RETRY_EXPIRED"
+                row.NextAttemptAt = None
+                updated += 1
+            elif (
+                row.CreatedAt is not None
+                and (utc_now - _ensure_utc(row.CreatedAt, utc_now))
+                >= ttl_by_category.get(row.Category, inactivity_retry_ttl)
+            ):
+                row.Status = "SKIPPED"
+                row.ErrorCode = "RETRY_EXPIRED"
+                row.NextAttemptAt = None
+                updated += 1
+            elif row.Category == "INACTIVITY_ALERT":
+                inactivity_rows.append(row)
+
+        if inactivity_rows:
+            parent_ids = list({row.ParentId for row in inactivity_rows})
+            active_rows = (
+                await self.db.execute(
+                    select(Profile.Id, Profile.Active).where(Profile.Id.in_(parent_ids))
+                )
+            ).all()
+            active_by_parent = {pid: active for pid, active in active_rows}
+
+            pref_rows = list(
+                (
+                    await self.db.execute(
+                        select(ParentEmailPreference).where(
+                            ParentEmailPreference.ParentId.in_(parent_ids)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            pref_by_parent = {pref.ParentId: pref for pref in pref_rows}
+
+            child_rows = (
+                await self.db.execute(
+                    select(
+                        ChildProfile.Id, ChildProfile.ParentId, ChildProfile.CreatedAt
+                    ).where(ChildProfile.ParentId.in_(parent_ids))
+                )
+            ).all()
+            children_by_parent: dict[UUID, list[tuple[UUID, datetime | None]]] = {}
+            child_ids: list[UUID] = []
+            for child_id, parent_id, created_at in child_rows:
+                children_by_parent.setdefault(parent_id, []).append(
+                    (child_id, created_at)
+                )
+                child_ids.append(child_id)
+
+            last_session_by_child: dict[UUID, datetime | None] = {}
+            if child_ids:
+                session_rows = (
+                    await self.db.execute(
+                        select(
+                            ReadingSession.ChildId,
+                            func.max(ReadingSession.StartedAt),
+                        )
+                        .where(ReadingSession.ChildId.in_(child_ids))
+                        .group_by(ReadingSession.ChildId)
+                    )
+                ).all()
+                last_session_by_child = {
+                    cid: last_at for cid, last_at in session_rows
+                }
+
+            for row in inactivity_rows:
+                pref = pref_by_parent.get(row.ParentId)
+                parent_children = children_by_parent.get(row.ParentId, [])
+                if (
+                    active_by_parent.get(row.ParentId) != 1
+                    or not parent_children
+                    or (pref is not None and not pref.InactivityAlertEnabled)
+                ):
+                    row.Status = "SKIPPED"
+                    row.ErrorCode = "PARENT_OPTED_OUT"
+                    row.NextAttemptAt = None
+                    updated += 1
+                    continue
+
+                threshold_days = int(pref.InactivityDays) if pref is not None else 5
+                tz_name = (
+                    str(pref.Timezone or "Asia/Ho_Chi_Minh")
+                    if pref is not None
+                    else "Asia/Ho_Chi_Minh"
+                )
+                try:
+                    zone = ZoneInfo(tz_name)
+                except (ZoneInfoNotFoundError, ValueError):
+                    zone = ZoneInfo("Asia/Ho_Chi_Minh")
+                local_today = utc_now.astimezone(zone).date()
+
+                still_has_inactive_child = False
+                for child_id, child_created_at in parent_children:
+                    ref_at = last_session_by_child.get(child_id) or child_created_at
+                    if ref_at is None:
+                        continue
+                    days_inactive = (
+                        local_today
+                        - _ensure_utc(ref_at, utc_now).astimezone(zone).date()
+                    ).days
+                    if days_inactive >= threshold_days:
+                        still_has_inactive_child = True
+                        break
+
+                if not still_has_inactive_child:
+                    row.Status = "SKIPPED"
+                    row.ErrorCode = "CHILD_ACTIVITY_RESUMED"
+                    row.NextAttemptAt = None
+                    updated += 1
+
+        if updated > 0:
+            await self.db.commit()
+        return updated
+
     async def get_delivery_by_dedupe_key(
         self, dedupe_key: str
     ) -> ParentEmailDelivery | None:
@@ -514,13 +675,19 @@ class ParentEmailNotificationRepository:
             .scalars()
             .all()
         )
+        utc_cutoff_7d = _ensure_utc(cutoff_7d, now)
+        utc_cutoff_14d = _ensure_utc(cutoff_14d, now)
         sessions_last_7d = tuple(
-            s for s in recent_sessions if s.StartedAt is not None and s.StartedAt >= cutoff_7d
+            s
+            for s in recent_sessions
+            if s.StartedAt is not None
+            and _ensure_utc(s.StartedAt, now) >= utc_cutoff_7d
         )
         sessions_prev_7d_count = sum(
             1
             for s in recent_sessions
-            if s.StartedAt is not None and cutoff_14d <= s.StartedAt < cutoff_7d
+            if s.StartedAt is not None
+            and utc_cutoff_14d <= _ensure_utc(s.StartedAt, now) < utc_cutoff_7d
         )
 
         total_completed = int(
@@ -936,25 +1103,30 @@ class ParentEmailNotificationRepository:
                     (row.word_text, int(row.cnt or 0))
                 )
 
+        utc_cutoff_7d = _ensure_utc(cutoff_7d, now)
+        utc_cutoff_14d = _ensure_utc(cutoff_14d, now)
+        target_digest_id_set = set(target_digest_ids)
         snapshots: dict[UUID, ChildActivitySnapshot] = {}
         for child in children:
             recent_sessions = recent_by_child.get(child.Id, [])
             sessions_last_7d = tuple(
                 s
                 for s in recent_sessions
-                if s.StartedAt is not None and s.StartedAt >= cutoff_7d
+                if s.StartedAt is not None
+                and _ensure_utc(s.StartedAt, now) >= utc_cutoff_7d
             )
             sessions_prev_7d_count = sum(
                 1
                 for s in recent_sessions
-                if s.StartedAt is not None and cutoff_14d <= s.StartedAt < cutoff_7d
+                if s.StartedAt is not None
+                and utc_cutoff_14d <= _ensure_utc(s.StartedAt, now) < utc_cutoff_7d
             )
             total_completed, first_completed_at, last_session_at = agg_by_child.get(
                 child.Id, (0, None, None)
             )
             avg_fluency = fluency_by_child.get(child.Id)
             top_difficult_words: tuple[str, ...] = ()
-            if child.Id in target_digest_ids:
+            if child.Id in target_digest_id_set:
                 report_accuracy, report_word_errors = _summarize_comparison_reports(
                     reports_by_child.get(child.Id, []), now
                 )

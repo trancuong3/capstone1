@@ -117,6 +117,29 @@ describe("i18n formatter and Intl helpers", () => {
       formatDateTime(sampleDate, "vi", { timeZone: "Asia/Ho_Chi_Minh" }),
     ).toContain("2026");
 
+    const styledDateTime = formatDateTime("2026-11-27T17:09:49.254Z", "vi", {
+      dateStyle: "short",
+      timeStyle: "short",
+      timeZone: "Asia/Ho_Chi_Minh",
+    });
+    expect(styledDateTime).not.toContain("T17:09");
+    expect(styledDateTime).not.toMatch(/Z$/);
+    expect(styledDateTime).toContain("00:09");
+
+    const styledDate = formatDate(sampleDate, "vi", {
+      dateStyle: "medium",
+      timeZone: "Asia/Ho_Chi_Minh",
+    });
+    expect(styledDate).not.toContain("T14:30");
+    expect(styledDate).toContain("2026");
+
+    const styledTime = formatTime(sampleDate, "vi", {
+      timeStyle: "short",
+      timeZone: "Asia/Ho_Chi_Minh",
+    });
+    expect(styledTime).not.toContain("T14:30");
+    expect(styledTime).toContain("21:30");
+
     expect(formatDate("invalid-date", "vi")).toBe("—");
     expect(formatNumber(1234.5, "en")).toBe("1,234.5");
     expect(formatNumber(1234.5, "vi")).toContain("1.234");
