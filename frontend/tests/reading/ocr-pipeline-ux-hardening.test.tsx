@@ -89,7 +89,9 @@ describe("OCR pipeline UX & polling hardening", () => {
       );
       let caught: unknown = null;
       try {
-        await requestApi("/reading/scan-page-ocr", z.object({}));
+        await requestApi("/reading/scan-page-ocr", z.object({}), undefined, {
+          method: "POST",
+        });
       } catch (err) {
         caught = err;
       }
