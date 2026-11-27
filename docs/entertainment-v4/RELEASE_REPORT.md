@@ -43,9 +43,9 @@ ViRead Entertainment has been transformed from isolated games into an interconne
 ## 3. Rollout, Migration & Honest Residual Items
 
 1. **Database Migration (Additive, Zero-Downtime)**:
-   - Apply `supabase/migrations/20261126120000_entertainment_v4_ecosystem.sql` via Supabase CLI / SQL Editor during deployment.
+   - Apply `supabase/migrations/20261126130000_entertainment_v4_ecosystem.sql` via Supabase CLI / SQL Editor during deployment.
    - Application code is strictly backward-compatible and degrades gracefully if deployed prior to migration.
-   - Tested rollback script stored cleanly at `supabase/rollbacks/20261126120000_entertainment_v4_ecosystem_rollback.sql`.
+   - Tested rollback script stored cleanly at `supabase/rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql`.
 2. **Optional Free-Tier Environment Variables** (Zero-cost; all optional with deterministic fallbacks):
    - `GROQ_API_KEY`: enables Cloud 3 Groq Free fallback for AI Teacher / Memory coaching and optional `whisper-large-v3-turbo` draft lyrics in Admin Karaoke Simple Mode.
    - `PICTURE_DESC_HEDGED_GEMINI`: now defaults to `false` (preserving Gemini Free Tier RPM/RPD).

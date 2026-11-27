@@ -613,6 +613,7 @@ class PictureDescriptionService:
                 )
             await self.repository.db.rollback()
             sample_spec = spec
+            image_mime = "image/jpeg"
             storage_path = spec.storage_ref
             resolved_sample_key = spec.sample_key
             context_hint = f"{spec.title}: {spec.description}"

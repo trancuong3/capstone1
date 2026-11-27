@@ -23,6 +23,11 @@ class EmailDeliveryNotConfigured(RuntimeError):
 def email_delivery_is_configured() -> bool:
     from app.database import config as settings
 
+    if settings.EMAIL_PROVIDER == "vercel_relay":
+        from app.providers.parent_email_transport import parent_email_delivery_is_configured
+
+        return parent_email_delivery_is_configured()
+
     has_smtp = bool(
         SMTP_HOST
         and SMTP_PORT
@@ -108,7 +113,7 @@ def send_reading_reminder_email(
         occurrence_id=occurrence_id,
         locale=locale,
     )
-    if provider in {"resend", "mail_sink"}:
+    if provider in {"resend", "mail_sink", "vercel_relay"}:
         send_email_message(message)
         return
     context = ssl.create_default_context()

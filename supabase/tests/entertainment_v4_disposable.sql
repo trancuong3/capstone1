@@ -107,8 +107,8 @@ create table public.karaoke_song_versions (
 grant usage on schema public to anon, authenticated, service_role;
 
 -- 1. Execute exact proposed migration TWICE to verify idempotency.
-\ir ../migrations/20261127000000_entertainment_v4_ecosystem.sql
-\ir ../migrations/20261127000000_entertainment_v4_ecosystem.sql
+\ir ../migrations/20261126130000_entertainment_v4_ecosystem.sql
+\ir ../migrations/20261126130000_entertainment_v4_ecosystem.sql
 
 -- 2. Verify all 5 tables, RLS flags, and hot FK indexes exist.
 do $schema_and_indexes$
@@ -347,8 +347,8 @@ $no_claim_rls$;
 reset role;
 
 -- 6. Execute rollback TWICE and verify all 5 V4 tables are dropped while core tables stay intact.
-\ir ../rollbacks/20261127000000_entertainment_v4_ecosystem_rollback.sql
-\ir ../rollbacks/20261127000000_entertainment_v4_ecosystem_rollback.sql
+\ir ../rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql
+\ir ../rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql
 
 do $post_rollback$
 declare
@@ -385,6 +385,6 @@ end;
 $post_rollback$;
 
 -- 7. Verify forward migration re-applies cleanly after rollback.
-\ir ../migrations/20261127000000_entertainment_v4_ecosystem.sql
+\ir ../migrations/20261126130000_entertainment_v4_ecosystem.sql
 
-\echo 'PASS: Entertainment V4 migration 20261127000000, hot FK indexes, RLS isolation, and rollback verified'
+\echo 'PASS: Entertainment V4 migration 20261126120000, hot FK indexes, RLS isolation, and rollback verified'

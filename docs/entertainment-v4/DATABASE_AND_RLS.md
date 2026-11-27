@@ -1,7 +1,7 @@
 # ViRead Play & Learn V4.0 — Database Schema, RLS & Privacy Design
 
-- **Migration**: `supabase/migrations/20261126120000_entertainment_v4_ecosystem.sql`
-- **Rollback**: `supabase/rollbacks/20261126120000_entertainment_v4_ecosystem_rollback.sql`
+- **Migration**: `supabase/migrations/20261126130000_entertainment_v4_ecosystem.sql`
+- **Rollback**: `supabase/rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql`
 - **Disposable Test**: `supabase/tests/entertainment_v4_disposable.sql`
 - **ORM Models**: `backend/app/models/entertainment_v4.py`
 

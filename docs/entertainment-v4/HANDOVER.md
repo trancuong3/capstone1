@@ -16,8 +16,8 @@
   - `/karaoke/admin/songs/simple-import` & `/karaoke/admin/songs/{song_id}/simple-publish` -> `app/api/routes/karaoke_simple_import.py` -> `KaraokeSimpleImportService` + `karaoke_media_service.py`
   - Enhanced `/games/picture-description/*` and `/games/sentence-shooter/*` (100% backward-compatible with V3 clients)
 - **ORM Models**: `backend/app/models/entertainment_v4.py` (`LearningSkillEvidence`, `MemoryGameSession`, `MemoryGameAttempt`, `KaraokePracticeSession`, `KaraokeMusicalProfile`)
-- **Database Migration**: `supabase/migrations/20261126120000_entertainment_v4_ecosystem.sql`
-- **Database Rollback**: `supabase/rollbacks/20261126120000_entertainment_v4_ecosystem_rollback.sql`
+- **Database Migration**: `supabase/migrations/20261126130000_entertainment_v4_ecosystem.sql`
+- **Database Rollback**: `supabase/rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql`
 
 ### Frontend (`frontend/`)
 - **Entertainment Hub V4.0**: `components/entertainment/entertainment-screen.tsx`
@@ -34,12 +34,12 @@
 
 1. **Apply Additive SQL Migration** in Supabase before (or alongside) backend deploy:
    ```sql
-   -- Run supabase/migrations/20261126120000_entertainment_v4_ecosystem.sql
+   -- Run supabase/migrations/20261126130000_entertainment_v4_ecosystem.sql
    ```
    *(If backend deploys first, all V4 endpoints degrade safely without HTTP 500.)*
 2. **Rollback Plan** (if ever needed):
    - Revert PR commit on `main`.
-   - Optionally run `supabase/rollbacks/20261126120000_entertainment_v4_ecosystem_rollback.sql` (drops ONLY the 5 new additive V4 tables; zero impact on existing reading, books, profiles, or karaoke catalog tables).
+   - Optionally run `supabase/rollbacks/20261126130000_entertainment_v4_ecosystem_rollback.sql` (drops ONLY the 5 new additive V4 tables; zero impact on existing reading, books, profiles, or karaoke catalog tables).
 3. **Optional Free-Tier AI Keys on Render**:
    - Keep `GEMINI_API_KEY` (and optional fallback model env) configured.
    - Optionally add `GROQ_API_KEY` (Free Tier) to unlock Groq LLM coaching fallback and 2–5s `whisper-large-v3-turbo` draft lyrics in Admin Karaoke Simple Mode.

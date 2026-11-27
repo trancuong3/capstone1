@@ -13,6 +13,10 @@ export const adminCompactTextareaClass =
 export const adminCompactFileInputClass =
   "block w-full min-w-0 cursor-pointer rounded-control border border-dashed border-border bg-surface-subtle/60 px-3 py-2 text-sm font-normal text-muted transition-colors hover:border-primary/50 hover:bg-sky/20 file:me-3 file:cursor-pointer file:rounded-control file:border file:border-border file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink hover:file:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-60";
 
+export const karaokeInputClass = adminCompactInputClass;
+export const karaokeTextareaClass = adminCompactTextareaClass;
+export const karaokeFileInputClass = adminCompactFileInputClass;
+
 export function SongMetadataForm({
   value,
   onChange,
