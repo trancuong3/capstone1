@@ -6,9 +6,12 @@ import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 import { ACTIVE_GLOBAL_TASK_STATUSES } from "@/types/global-tasks";
+
+export { TaskProgressView } from "@/components/tasks/task-progress-view";
 
 const LazyGlobalTaskCenterDrawer = dynamic(
   () =>
@@ -46,7 +49,7 @@ export function GlobalTaskCenter({
   hideOnPaths = [],
   className,
 }: GlobalTaskCenterProps) {
-  const t = useTranslations("admin");
+  const t = useTranslations("common");
   const pathname = usePathname() ?? "/";
   const taskCenter = useOptionalAiTaskCenter();
 
@@ -65,7 +68,27 @@ export function GlobalTaskCenter({
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [isOpen, taskCenter]);
 
-  if (!taskCenter || !taskCenter.scopeKey) {
+  const activeTasks = (taskCenter?.tasks ?? []).filter((item) =>
+    ACTIVE_GLOBAL_TASK_STATUSES.has(item.status),
+  );
+  const allActiveWaitingForWorker =
+    activeCount > 0 &&
+    activeTasks.length > 0 &&
+    activeTasks.every((item) => item.status === "WAITING_FOR_WORKER");
+  const leadTask = activeTasks[0] ?? null;
+  const leadProgress = useAiProgress({
+    active: Boolean(leadTask) && !allActiveWaitingForWorker,
+    realPercent: leadTask?.progress_pct ?? null,
+    progressMode:
+      leadTask?.progress_mode ??
+      (leadTask && !leadTask.is_indeterminate ? "measured" : "staged"),
+    floorPct: leadTask?.status === "QUEUED" ? 5 : 8,
+    ceilingPct: 94,
+    expectedDurationMs: 18_000,
+    resetKey: leadTask?.id ?? null,
+  });
+
+  if (!taskCenter || !taskCenter.scopeKey || !taskCenter.actorRole) {
     return null;
   }
 
@@ -74,19 +97,12 @@ export function GlobalTaskCenter({
     return null;
   }
 
-  const { tasks, waitingReviewCount, failedCount, togglePanel } = taskCenter;
-
   if (variant === "drawer-only") {
     return isOpen ? <LazyGlobalTaskCenterDrawer /> : null;
   }
 
-  const activeTasks = tasks.filter((item) =>
-    ACTIVE_GLOBAL_TASK_STATUSES.has(item.status),
-  );
-  const allActiveWaitingForWorker =
-    activeCount > 0 &&
-    activeTasks.length > 0 &&
-    activeTasks.every((item) => item.status === "WAITING_FOR_WORKER");
+  const { actorRole, waitingReviewCount, failedCount, togglePanel } =
+    taskCenter;
 
   const pillText = allActiveWaitingForWorker
     ? t(
@@ -96,9 +112,9 @@ export function GlobalTaskCenter({
       )
     : activeCount > 0
       ? t(
-          "taskCenter.pillRunning",
-          { count: activeCount },
-          "AI đang chạy ({count})",
+          "taskCenter.pillRunningWithPct",
+          { count: activeCount, percent: leadProgress.displayPercent },
+          "AI đang chạy ({count}) · {percent}%",
         )
       : waitingReviewCount > 0
         ? t(
@@ -151,6 +167,7 @@ export function GlobalTaskCenter({
                 : "border-border bg-white text-ink hover:bg-canvas",
         className,
       )}
+      data-portal={actorRole}
       data-testid="global-task-center-trigger"
       data-variant={variant}
       onClick={togglePanel}
@@ -177,7 +194,7 @@ export function GlobalTaskCenter({
         )}
         <span
           className={cn(
-            "truncate whitespace-nowrap",
+            "truncate whitespace-nowrap tabular-nums",
             isCompactTopbar && "sr-only sm:not-sr-only",
           )}
         >
@@ -186,7 +203,9 @@ export function GlobalTaskCenter({
       </span>
       {isCompactTopbar && highlightCount > 0 ? (
         <span aria-hidden="true" className="tabular-nums sm:hidden">
-          {highlightCount}
+          {activeCount > 0 && !allActiveWaitingForWorker
+            ? `${leadProgress.displayPercent}%`
+            : highlightCount}
         </span>
       ) : null}
       {variant === "sidebar" && highlightCount > 0 ? (

@@ -20,12 +20,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
@@ -198,6 +200,7 @@ export interface MemoryGameScreenProps {
 
 export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const defaultErrorMessage = t("memoryGame.defaultError");
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
@@ -274,6 +277,32 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const [focusedObjectId, setFocusedObjectId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
+  const startProgress = useAiProgress({
+    active: isStarting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 48, label: tCommon("aiProgress.analyzing") },
+      { atPct: 84, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const hintProgress = useAiProgress({
+    active: isLoadingHint,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingHint") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const submitProgress = useAiProgress({
+    active: isSubmitting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 55, label: tCommon("aiProgress.analyzing") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 8_000,
+  });
 
   // Anti-TTS-Self-Capture Voice Lifecycle (matching G10)
   const [isListeningVoice, setIsListeningVoice] = useState(false);
@@ -1263,7 +1292,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             </div>
           </div>
 
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-3">
             <Button
               className="max-w-md text-lg"
               data-testid="start-memory-game-btn"
@@ -1273,6 +1302,19 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               <Sparkles aria-hidden="true" className="size-5" />
               {t("memoryGame.startObserveButton")}
             </Button>
+            {isStarting ? (
+              <div className="w-full max-w-md">
+                <AiProgressBar
+                  active
+                  label={
+                    startProgress.stageLabel ?? tCommon("aiProgress.preparing")
+                  }
+                  percent={startProgress.percent}
+                  size="sm"
+                  testId="memory-game-starting-progress"
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Recent sessions */}
@@ -1490,6 +1532,20 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 </strong>{" "}
                 {t("memoryGame.curtainPromptSuffix")}
               </p>
+              {isLoadingHint ? (
+                <div className="mx-auto w-full max-w-sm">
+                  <AiProgressBar
+                    active
+                    label={
+                      hintProgress.stageLabel ??
+                      tCommon("aiProgress.generatingHint")
+                    }
+                    percent={hintProgress.percent}
+                    size="compact"
+                    testId="memory-game-hint-progress"
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-wrap justify-center gap-2 pt-1">
                 <Button
                   data-testid="request-hint-btn"
@@ -1658,6 +1714,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 {t("memoryGame.submitRecallButton")}
               </Button>
             </div>
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  submitProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={submitProgress.percent}
+                size="compact"
+                testId="memory-game-recall-evaluating-progress"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -1967,6 +2035,18 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 {t("memoryGame.submitCreativeButton")}
               </Button>
             </div>
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  submitProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={submitProgress.percent}
+                size="compact"
+                testId="memory-game-creative-evaluating-progress"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}

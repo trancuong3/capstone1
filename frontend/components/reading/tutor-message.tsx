@@ -4,8 +4,10 @@ import { useEffect } from "react";
 
 import type { TutorAction } from "@/types/reading";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 
 interface TutorMessageProps {
@@ -32,7 +34,17 @@ export function TutorMessage({
   word,
 }: TutorMessageProps) {
   const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
   const normalizedWord = word?.trim() ?? "";
+  const voiceSynthProgress = useAiProgress({
+    active: isRetrying,
+    expectedDurationMs: 4_500,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.connecting") },
+      { atPct: 35, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 80, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   useEffect(() => {
     if (!nonBlocking) return;
@@ -74,6 +86,18 @@ export function TutorMessage({
                   ? t("tutor.playingSample")
                   : t("tutor.listenHint")}
             </p>
+            {isRetrying ? (
+              <AiProgressBar
+                active
+                label={
+                  voiceSynthProgress.stageLabel ??
+                  tCommon("aiProgress.synthesizingVoice")
+                }
+                percent={voiceSynthProgress.percent}
+                size="compact"
+                testId="tutor-voice-progress"
+              />
+            ) : null}
             {action?.message_code === "READ_EXAMPLE_REPLAYED" ? (
               <p className="text-sm font-semibold text-success-ink">
                 {t("tutor.retriedStatus")}
@@ -129,6 +153,18 @@ export function TutorMessage({
                 ? t("tutor.playingSample")
                 : t("tutor.listenHint")}
           </p>
+          {isRetrying ? (
+            <AiProgressBar
+              active
+              label={
+                voiceSynthProgress.stageLabel ??
+                tCommon("aiProgress.synthesizingVoice")
+              }
+              percent={voiceSynthProgress.percent}
+              size="compact"
+              testId="tutor-voice-dialog-progress"
+            />
+          ) : null}
           {action?.message_code === "READ_EXAMPLE_REPLAYED" ? (
             <p className="font-semibold text-success-ink" role="status">
               {t("tutor.retriedStatus")}

@@ -141,6 +141,7 @@ export const bookQualityScanSchema = z.object({
   scope: z.enum(["BOOK", "PAGE"]),
   target_page_id: z.guid().nullable(),
   status: bookQualityScanStatusSchema,
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
   total_pages: z.number().int().nonnegative(),
   completed_pages: z.number().int().nonnegative(),
   skipped_pages: z.number().int().nonnegative(),

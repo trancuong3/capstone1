@@ -36,8 +36,12 @@ import { useAuthService } from "@/hooks/use-auth-service";
 import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
-import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
+import {
+  broadcastActorSwitch,
+  clearGlobalTasksMemoryCache,
+} from "@/lib/api/global-tasks-service";
 import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
+import { clearStoredScanJobIds } from "@/lib/cache/scan-job-storage";
 import {
   clearUserCache,
   DEFAULT_USER_CACHE_TTL_MS,
@@ -333,9 +337,11 @@ export function AppShell({ children }: AppShellProps) {
     if (prevId !== undefined && prevId !== user?.id) {
       resetApiReadCacheForActorSwitch();
       clearUserCache(prevId);
+      clearStoredScanJobIds(user?.id ?? null);
       if (!user?.id) {
         clearUserCache();
       }
+      broadcastActorSwitch();
     }
     previousUserIdRef.current = user?.id;
   }, [user?.id]);
@@ -349,8 +355,10 @@ export function AppShell({ children }: AppShellProps) {
     try {
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
+      clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
       clearUserCache();
+      broadcastActorSwitch();
       await authService.signOut();
       dispatchI18nAuthSync({ userId: null, preferredLocale: null });
       router.replace("/login");
@@ -362,12 +370,10 @@ export function AppShell({ children }: AppShellProps) {
     }
   }
 
-  const taskActorId = user?.id ?? null;
-  const taskActorRole = taskActorId
-    ? profile?.role === "admin"
-      ? "admin"
-      : "parent"
-    : null;
+  // AppShell is strictly the Parent portal. Never escalate its AI Task Center
+  // to "admin" even if the signed-in account holds an admin role.
+  const taskActorId = userId;
+  const taskActorRole = taskActorId ? ("parent" as const) : null;
 
   if (isReadingRoute) {
     return (
@@ -394,9 +400,14 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const autoSyncStudioTasks =
-    pathname.startsWith("/my-books") ||
-    pathname.startsWith("/book-scanner") ||
-    pathname.startsWith("/studio/tasks");
+    Boolean(taskActorId) &&
+    !isChildOnboarding &&
+    (pathname.startsWith("/studio") ||
+      pathname.startsWith("/my-books") ||
+      pathname.startsWith("/books") ||
+      pathname.startsWith("/library") ||
+      pathname.startsWith("/book-scanner") ||
+      pathname.startsWith("/scan"));
 
   return (
     <AiTaskCenterProvider

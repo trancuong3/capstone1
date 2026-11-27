@@ -2,14 +2,24 @@
 
 import { useMemo, useSyncExternalStore } from "react";
 
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+
 const eventName = "viread-ai-batch-skipped";
 
-function storageKey(bookId: string) {
-  return `viread:ai-batch-skipped:${bookId}`;
+function storageKey(bookId: string, actorId?: string | null) {
+  const normalizedActor =
+    typeof actorId === "string" && actorId.trim().length > 0
+      ? actorId.trim()
+      : "anon";
+  return `viread:ai-batch-skipped:${normalizedActor}:${bookId}`;
 }
 
-export function useSkippedAiPageIds(bookId: string): ReadonlySet<string> {
-  const key = storageKey(bookId);
+export function useSkippedAiPageIds(
+  bookId: string,
+  actorId?: string | null,
+): ReadonlySet<string> {
+  const taskCenter = useOptionalAiTaskCenter();
+  const key = storageKey(bookId, actorId ?? taskCenter?.actorId ?? null);
   const serialized = useSyncExternalStore(
     (onStoreChange) => {
       const onStorage = (event: StorageEvent) => {
@@ -53,8 +63,9 @@ export function useSkippedAiPageIds(bookId: string): ReadonlySet<string> {
 export function markAiPageRevisionSkipped(
   bookId: string,
   pageRevisionId: string,
+  actorId?: string | null,
 ) {
-  const key = storageKey(bookId);
+  const key = storageKey(bookId, actorId);
   try {
     const saved = window.localStorage.getItem(key) ?? "[]";
     const parsed: unknown = JSON.parse(saved);

@@ -188,10 +188,14 @@ describe("Phase 5 real-data runtime cleanup", () => {
   });
   it("uploader accepts multiple page images and exposes the real upload action", async () => {
     fetchMock.mockImplementation(async (url: string) => {
-      if (String(url).includes("/studio/tasks")) {
+      if (
+        String(url).includes("/studio/admin/tasks") ||
+        String(url).includes("/studio/tasks")
+      ) {
         return Response.json({
           actor_id: "admin-1",
           actor_role: "admin",
+          portal: "admin",
           active_count: 0,
           waiting_review_count: 0,
           failed_count: 0,
@@ -226,8 +230,10 @@ describe("Phase 5 real-data runtime cleanup", () => {
     );
     await waitFor(() =>
       expect(
-        fetchMock.mock.calls.some(([url]) =>
-          String(url).includes("/studio/tasks"),
+        fetchMock.mock.calls.some(
+          ([url]) =>
+            String(url).includes("/studio/admin/tasks") ||
+            String(url).includes("/studio/tasks"),
         ),
       ).toBe(true),
     );
@@ -236,6 +242,7 @@ describe("Phase 5 real-data runtime cleanup", () => {
       fetchMock.mock.calls.every(
         ([url, init]) =>
           (String(url).endsWith("/health") ||
+            String(url).includes("/studio/admin/tasks") ||
             String(url).includes("/studio/tasks")) &&
           ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
       ),

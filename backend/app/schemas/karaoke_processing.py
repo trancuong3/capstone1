@@ -63,6 +63,7 @@ class JobRead(Contract):
     source_kind: SourceKind
     status: ProcessingStatus
     stage: ProcessingStage
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     input_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     created_at: datetime
     updated_at: datetime

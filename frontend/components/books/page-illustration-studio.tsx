@@ -12,8 +12,11 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   fetchAuthenticatedBlobUrl,
   revokePrivateBlobUrl,
@@ -109,6 +112,7 @@ export function PageIllustrationStudio({
 }: PageIllustrationStudioProps) {
   const defaultService = useMemo(() => createBookAssetsService(), []);
   const service = injectedService ?? defaultService;
+  const tCommon = useTranslations("common");
 
   const [summary, setSummary] = useState<BookAssetsSummaryDTO | null>(null);
   const [asset, setAsset] = useState<BookPresentationAssetDTO | null>(null);
@@ -203,7 +207,7 @@ export function PageIllustrationStudio({
         canonical_text: canonicalText,
         apply_clahe_restore: true,
       });
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       if (res.asset) {
         setAsset(res.asset);
         onAssetChanged?.(res.asset);
@@ -248,7 +252,7 @@ export function PageIllustrationStudio({
       const res = await service.generatePageIllustration(bookId, pageId, {
         prompt_hint: promptHint.trim() || null,
       });
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       if (res.asset) {
         setAsset(res.asset);
         onAssetChanged?.(res.asset);
@@ -313,7 +317,7 @@ export function PageIllustrationStudio({
       );
       setAsset(updated);
       onAssetChanged?.(updated);
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       setNotice({
         tone: action === "REJECT" ? "warning" : "success",
         title:
@@ -347,6 +351,34 @@ export function PageIllustrationStudio({
     typeof asset?.metadata?.ocr_gate_mode === "string"
       ? asset.metadata.ocr_gate_mode
       : null;
+
+  const extractIllustrationStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.analyzing") },
+      { atPct: 38, label: tCommon("aiProgress.generatingIllustration") },
+      { atPct: 74, label: tCommon("aiProgress.safetyChecking") },
+    ],
+    [tCommon],
+  );
+  const generateIllustrationStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 22, label: tCommon("aiProgress.generatingIllustration") },
+      { atPct: 70, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 88, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const extractProgress = useAiProgress({
+    active: busyAction === "extract",
+    stages: extractIllustrationStages,
+    expectedDurationMs: 12_000,
+  });
+  const generateProgress = useAiProgress({
+    active: busyAction === "generate",
+    stages: generateIllustrationStages,
+    expectedDurationMs: 18_000,
+  });
 
   return (
     <section
@@ -527,6 +559,20 @@ export function PageIllustrationStudio({
             ) : null}
           </div>
 
+          {busyAction === "extract" ? (
+            <AiProgressBar
+              active
+              elapsedSeconds={extractProgress.elapsedSeconds}
+              label={
+                extractProgress.stageLabel ??
+                tCommon("aiProgress.generatingIllustration")
+              }
+              percent={extractProgress.percent}
+              size="sm"
+              testId="page-illustration-extract-progress"
+            />
+          ) : null}
+
           {/* 0 VND AI Generation block */}
           <div className="flex flex-col gap-2 rounded-control border border-border bg-canvas/70 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -576,6 +622,19 @@ export function PageIllustrationStudio({
                 Tạo tranh AI
               </Button>
             </div>
+            {busyAction === "generate" ? (
+              <AiProgressBar
+                active
+                elapsedSeconds={generateProgress.elapsedSeconds}
+                label={
+                  generateProgress.stageLabel ??
+                  tCommon("aiProgress.generatingIllustration")
+                }
+                percent={generateProgress.percent}
+                size="sm"
+                testId="page-illustration-generate-progress"
+              />
+            ) : null}
             {summary && !summary.ai_image_provider_available ? (
               <p className="text-[11px] text-muted">
                 {summary.ai_image_provider_message_vi}

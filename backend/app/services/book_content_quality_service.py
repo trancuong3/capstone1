@@ -90,6 +90,8 @@ class BookContentQualityService:
 
     @staticmethod
     def _scan_read(run: BookQualityScanRun) -> BookQualityScanRead:
+        from app.services.ai_task_progress import compute_quality_scan_progress
+
         return BookQualityScanRead(
             id=run.Id,
             book_id=run.BookId,
@@ -104,6 +106,13 @@ class BookContentQualityService:
             failed_pages=run.FailedPages,
             ai_completed_pages=run.AICompletedPages,
             ai_unavailable_pages=run.AIUnavailablePages,
+            progress_pct=compute_quality_scan_progress(
+                status=run.Status,
+                completed_pages=run.CompletedPages,
+                skipped_pages=run.SkippedPages,
+                failed_pages=run.FailedPages,
+                total_pages=run.TotalPages,
+            ),
             error_summary=run.ErrorSummary,
             started_at=run.StartedAt,
             completed_at=run.CompletedAt,

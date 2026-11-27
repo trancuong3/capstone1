@@ -575,22 +575,34 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
     expect(screen.queryByTestId("book-cover-studio")).not.toBeInTheDocument();
   });
 
-  it("renders dedicated StudioTasksPageScreen with status/role filters, Retry, Cancel, deep links, and drawer link", async () => {
+  it("renders dedicated StudioTasksPageScreen isolated to its portal with status filters, Retry, Cancel, and deep links", async () => {
     const user = userEvent.setup();
     const adminFailed = makeTask({
       id: "task-admin-failed",
       title_vi: "Nhập sách PDF 12 trang",
       actor_role: "admin",
+      portal: "admin",
       status: "FAILED",
       status_label_vi: "Xử lý thất bại",
       can_retry: true,
       can_cancel: false,
       error_message_vi: "Tạm hết hạn mức AI.",
     });
-    const parentRunning = makeTask({
+    const adminRunning = makeTask({
+      id: "task-admin-running",
+      title_vi: "Nhận diện chữ sách danh mục",
+      actor_role: "admin",
+      portal: "admin",
+      status: "RUNNING",
+      status_label_vi: "Đang xử lý",
+      can_retry: false,
+      can_cancel: true,
+    });
+    const leakedParentTask = makeTask({
       id: "task-parent-running",
       title_vi: "Kiểm tra trang sách gia đình",
       actor_role: "parent",
+      portal: "parent",
       status: "RUNNING",
       status_label_vi: "Đang xử lý",
       can_retry: false,
@@ -598,19 +610,29 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
       result_href: `/my-books?bookId=${BOOK_ID}`,
     });
     const mockService: GlobalTasksService = {
-      listTasks: vi
-        .fn()
-        .mockResolvedValue(makeTaskFeed([adminFailed, parentRunning])),
+      listTasks: vi.fn().mockResolvedValue(
+        makeTaskFeed([adminFailed, adminRunning, leakedParentTask], {
+          actor_role: "admin",
+          portal: "admin",
+        }),
+      ),
       createTask: vi.fn(),
       retryTask: vi.fn().mockResolvedValue({
-        task: makeTask({ id: "task-admin-failed", status: "QUEUED" }),
+        task: makeTask({
+          id: "task-admin-failed",
+          actor_role: "admin",
+          portal: "admin",
+          status: "QUEUED",
+        }),
         action: "retried",
         deduplicated: false,
         message_vi: "Đã xếp lịch chạy lại.",
       } satisfies GlobalTaskActionResponse),
       cancelTask: vi.fn().mockResolvedValue({
         task: makeTask({
-          id: "task-parent-running",
+          id: "task-admin-running",
+          actor_role: "admin",
+          portal: "admin",
           status: "CANCEL_REQUESTED",
         }),
         action: "cancel_requested",
@@ -626,8 +648,15 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
       await screen.findByTestId("studio-task-row-task-admin-failed"),
     ).toBeInTheDocument();
     expect(
-      screen.getByTestId("studio-task-row-task-parent-running"),
+      screen.getByTestId("studio-task-row-task-admin-running"),
     ).toBeInTheDocument();
+    // Cross-portal parent task MUST NEVER appear in admin view!
+    expect(
+      screen.queryByTestId("studio-task-row-task-parent-running"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "Lọc tác vụ theo vai trò" }),
+    ).not.toBeInTheDocument();
 
     // Filter by status = Thất bại
     const statusGroup = screen.getByRole("group", {
@@ -640,7 +669,7 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
       screen.getByTestId("studio-task-row-task-admin-failed"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByTestId("studio-task-row-task-parent-running"),
+      screen.queryByTestId("studio-task-row-task-admin-running"),
     ).not.toBeInTheDocument();
 
     // Retry failed task
@@ -651,27 +680,24 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
       ),
     );
     await waitFor(() =>
-      expect(mockService.retryTask).toHaveBeenCalledWith("task-admin-failed"),
+      expect(mockService.retryTask).toHaveBeenCalledWith("task-admin-failed", {
+        portal: "admin",
+      }),
     );
 
-    // Reset to Tất cả, filter by role = Phụ huynh, then Cancel
+    // Reset to Tất cả, verify admin book link, then Cancel running admin task
     await user.click(
       within(statusGroup).getByRole("button", { name: /Tất cả/ }),
     );
-    const roleGroup = screen.getByRole("group", {
-      name: "Lọc tác vụ theo vai trò",
-    });
-    await user.click(
-      within(roleGroup).getByRole("button", { name: "Phụ huynh" }),
-    );
-    const parentRow = screen.getByTestId("studio-task-row-task-parent-running");
+    const runningRow = screen.getByTestId("studio-task-row-task-admin-running");
     expect(
-      within(parentRow).getByRole("link", { name: /Mở sách/ }),
+      within(runningRow).getByRole("link", { name: /Mở sách/ }),
     ).toHaveAttribute("href", `/admin/books/${BOOK_ID}`);
-    await user.click(within(parentRow).getByRole("button", { name: "Hủy" }));
+    await user.click(within(runningRow).getByRole("button", { name: "Hủy" }));
     await waitFor(() =>
       expect(mockService.cancelTask).toHaveBeenCalledWith(
-        "task-parent-running",
+        "task-admin-running",
+        { portal: "admin" },
       ),
     );
   });
@@ -724,13 +750,16 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
     ).toHaveAttribute("href", "/studio/tasks");
   });
 
-  it("rehydrates active server-side book OCR jobs in AdminPageUploader from GET /studio/tasks after reload", async () => {
+  it("rehydrates active server-side book OCR jobs in AdminPageUploader from GET /studio/admin/tasks after reload", async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/health")) {
         return Response.json({ ocr: { ready: true } });
       }
-      if (url.includes("/studio/tasks")) {
+      if (
+        url.includes("/studio/admin/tasks") ||
+        url.includes("/studio/tasks")
+      ) {
         return Response.json(
           makeTaskFeed([
             makeTask({
@@ -739,10 +768,13 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
               job_type: "BATCH_BOOK_IMPORT",
               title_vi: "OCR 5 trang đang chạy trên máy chủ",
               book_id: BOOK_ID,
+              actor_role: "admin",
+              portal: "admin",
               status: "RUNNING",
               progress_completed: 2,
               progress_total: 5,
               progress_pct: 40,
+              progress_mode: "measured",
               is_indeterminate: false,
             }),
           ]),
@@ -759,7 +791,8 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
 
     const rehydrated = await screen.findByTestId("rehydrated-server-tasks");
     expect(rehydrated).toHaveTextContent("OCR 5 trang đang chạy trên máy chủ");
-    expect(rehydrated).toHaveTextContent("2/5 (40%)");
+    expect(rehydrated).toHaveTextContent("2/5");
+    expect(rehydrated).toHaveTextContent("40%");
     expect(
       within(rehydrated).getByRole("link", { name: /Mở trung tâm tác vụ/ }),
     ).toHaveAttribute("href", "/admin/tasks");
