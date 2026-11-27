@@ -21,14 +21,17 @@ import {
   isAndroidNativeSpeechAvailable,
 } from "@/lib/reading/native-speech-bridge";
 import {
+  getActiveSessionVoiceLock,
   getEffectiveVoiceId,
   getVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
 import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
   isHostedLocalVoiceUnconfigured,
+  type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 
 export type VoiceEnginePreloadStatus =
@@ -204,20 +207,40 @@ function startWasmSttWarmup(): Promise<boolean> {
   return wasmInitPromise;
 }
 
+function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
+  if (!health) return false;
+  const policy = getVoicePolicyPreferences();
+  const localTtsReady = Boolean(
+    health.local.available && health.local.tts_ready,
+  );
+  return Boolean(
+    localTtsReady ||
+    health.elevenlabs?.tts_configured ||
+    (policy.providerMode === "local_with_google_fallback" &&
+      policy.allowGoogleTtsFallback &&
+      health.google.tts_configured &&
+      !health.google.tts_cooldown),
+  );
+}
+
 async function warmInitialTtsCues(
   options: PreloadReadingVoiceOptions,
 ): Promise<void> {
   if (options.warmTts === false) return;
+  const activeLock = getActiveSessionVoiceLock();
   const voiceId = getEffectiveVoiceId();
-  const speed = getSpeechPreferences().speed;
+  const speed = activeLock?.speed ?? getSpeechPreferences().speed;
   const speechService = createSpeechService();
   const cues: Array<{ text: string; wordSample: boolean }> = [
     { text: "Đến lượt con đọc nhé.", wordSample: false },
   ];
-  const sampleWords = (options.previewWords ?? [])
-    .map((w) => w.normalize("NFC").trim())
-    .filter(Boolean)
-    .slice(0, 3);
+  const sampleWords = Array.from(
+    new Set(
+      (options.previewWords ?? [])
+        .map((w) => normalizeVietnameseWord(w))
+        .filter(Boolean),
+    ),
+  ).slice(0, 3);
   for (const word of sampleWords) {
     cues.push({ text: word, wordSample: true });
   }
@@ -277,7 +300,7 @@ export function preloadReadingVoiceEngines(
   if (activePreloadPromise) {
     if (options.previewWords?.length && options.warmTts !== false) {
       const freshHealth = getFreshVoiceEngineHealth();
-      if (freshHealth && !isHostedLocalVoiceUnconfigured(freshHealth)) {
+      if (hasLiveServerTts(freshHealth)) {
         void warmInitialTtsCues(options);
       }
     }
@@ -334,9 +357,6 @@ export function preloadReadingVoiceEngines(
     const localSttReady = Boolean(
       health?.local.available && health.local.stt_ready,
     );
-    const localTtsReady = Boolean(
-      health?.local.available && health.local.tts_ready,
-    );
     const hostedUnconfigured = health
       ? isHostedLocalVoiceUnconfigured(health)
       : true;
@@ -374,15 +394,7 @@ export function preloadReadingVoiceEngines(
     }
 
     // 2. TTS Readiness
-    const hasLiveServerTts = Boolean(
-      localTtsReady ||
-      health?.elevenlabs?.tts_configured ||
-      (policy.providerMode === "local_with_google_fallback" &&
-        policy.allowGoogleTtsFallback &&
-        health?.google.tts_configured &&
-        !health.google.tts_cooldown),
-    );
-    if (hasLiveServerTts) {
+    if (hasLiveServerTts(health)) {
       void warmInitialTtsCues(options);
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
     } else {

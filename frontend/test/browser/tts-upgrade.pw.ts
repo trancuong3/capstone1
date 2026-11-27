@@ -54,7 +54,12 @@ async function installReading(
   const requests: { words: string[]; voice_id?: string; speed?: number }[] = [];
   const unexpected: string[] = [];
   const writes: string[] = [];
-  const prompts: { text: string; voice_id?: string; speed?: number }[] = [];
+  const prompts: {
+    text: string;
+    voice_id?: string;
+    speed?: number;
+    word_sample?: boolean;
+  }[] = [];
   const headers = {
     "access-control-allow-origin": "http://127.0.0.1:3106",
     "access-control-allow-headers":
@@ -360,7 +365,14 @@ test("Phase 3: a second word cancels the first locked-voice sample with zero OS 
   expect(playback.firstPaused).toBe(true);
   expect(playback.secondActive).toBe(true);
   await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
-  expect(fixture.prompts.slice(-2).map((p) => p.text)).toEqual(["bé", "mèo"]);
+  const wordPromptTexts = fixture.prompts
+    .filter((p) => p.word_sample)
+    .map((p) => p.text);
+  expect(wordPromptTexts).toContain("bé");
+  expect(wordPromptTexts).toContain("mèo");
+  expect(wordPromptTexts.indexOf("bé")).toBeLessThan(
+    wordPromptTexts.indexOf("mèo"),
+  );
   expect(fixture.requests).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });

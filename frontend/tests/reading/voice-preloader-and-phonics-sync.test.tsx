@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import * as browserAuth from "@/lib/api/browser-auth";
 import { buildSpeechServiceError } from "@/lib/api/speech-error";
 import type { SpeechService } from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
@@ -131,6 +132,7 @@ describe("Unified voice & speed sync across guidance, reading, phonics, comprehe
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("pins ONE gender-matched Vietnamese browser voice (treating Microsoft An as female and NamMinh as male) across guidance, phonics, comprehension, and difficult words on hosted LOCAL_VOICE_UNCONFIGURED at exact user speed", async () => {
@@ -411,6 +413,183 @@ describe("Unified voice & speed sync across guidance, reading, phonics, comprehe
     expect(snap.sttStatus).toBe("ready");
     expect(snap.ttsStatus).toBe("ready");
     expect(snap.startedAt).not.toBeNull();
+  });
+
+  it("does not probe /voice/text-to-speech when local TTS is unavailable during initial or concurrent preload", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    vi.spyOn(browserAuth, "getBrowserAccessToken").mockResolvedValue(
+      "test-access-token",
+    );
+
+    const voiceChangeListeners: Array<() => void> = [];
+    vi.stubGlobal("speechSynthesis", {
+      getVoices: () => [],
+      addEventListener: (_event: string, listener: () => void) => {
+        voiceChangeListeners.push(listener);
+      },
+      removeEventListener: vi.fn(),
+    });
+
+    const ttsBodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/voice/status")) {
+          return new Response(
+            JSON.stringify({
+              default_mode: "local_only",
+              default_voice_id: "local_north_truc_ly",
+              local: {
+                available: false,
+                stt_ready: false,
+                tts_ready: false,
+              },
+              google: {
+                stt_configured: false,
+                tts_configured: false,
+                stt_cooldown: false,
+                tts_cooldown: false,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/voice/text-to-speech")) {
+          ttsBodies.push(
+            JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          );
+          return new Response(
+            JSON.stringify({ detail: { code: "LOCAL_TTS_UNAVAILABLE" } }),
+            { status: 503, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        throw new Error(`Unexpected fetch URL: ${url}`);
+      }),
+    );
+
+    const firstPreload = preloadReadingVoiceEngines();
+    await vi.waitFor(() => {
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+    // Second call arrives while first preload is still waiting on browser voices
+    const secondPreload = preloadReadingVoiceEngines({
+      previewWords: ["Bé", "mèo"],
+    });
+    voiceChangeListeners.forEach((listener) => listener());
+    await Promise.all([firstPreload, secondPreload]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(ttsBodies).toEqual([]);
+  });
+
+  it("normalizes and deduplicates preloaded preview words and uses the active session lock speed", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    vi.spyOn(browserAuth, "getBrowserAccessToken").mockResolvedValue(
+      "test-access-token",
+    );
+
+    setSpeechPreferences({
+      voiceId: "local_north_truc_ly",
+      speed: 1.0,
+    });
+    lockSessionVoice("sess-preload-norm", {
+      voiceId: "local_north_truc_ly",
+      speed: 0.75,
+      forceUpdate: true,
+    });
+
+    const ttsPayloads: Array<{
+      text: string;
+      speed?: number;
+      voice_id?: string;
+      word_sample?: boolean;
+    }> = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/voice/status")) {
+          return new Response(
+            JSON.stringify({
+              default_mode: "local_only",
+              default_voice_id: "local_north_truc_ly",
+              local: {
+                configured: true,
+                available: true,
+                stt_ready: true,
+                tts_ready: true,
+              },
+              google: {
+                stt_configured: false,
+                tts_configured: false,
+                stt_cooldown: false,
+                tts_cooldown: false,
+              },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (url.endsWith("/voice/text-to-speech")) {
+          ttsPayloads.push(
+            JSON.parse(String(init?.body ?? "{}")) as {
+              text: string;
+              speed?: number;
+              voice_id?: string;
+              word_sample?: boolean;
+            },
+          );
+          return new Response(new Blob(["RIFFwav"], { type: "audio/wav" }), {
+            status: 200,
+            headers: { "Content-Type": "audio/wav" },
+          });
+        }
+        throw new Error(`Unexpected fetch URL: ${url}`);
+      }),
+    );
+
+    await preloadReadingVoiceEngines({
+      previewWords: ["Bé", "mẹ.", "mèo", "Bé"],
+    });
+    await vi.waitFor(() => {
+      expect(ttsPayloads).toHaveLength(4);
+    });
+
+    expect(ttsPayloads[0]).toMatchObject({
+      text: "Đến lượt con đọc nhé.",
+      voice_id: "local_north_truc_ly",
+      speed: 0.75,
+    });
+    expect(ttsPayloads[0]?.word_sample).toBeUndefined();
+    expect(
+      ttsPayloads.slice(1).map((payload) => ({
+        text: payload.text,
+        voice_id: payload.voice_id,
+        speed: payload.speed,
+        word_sample: payload.word_sample,
+      })),
+    ).toEqual([
+      {
+        text: "bé",
+        voice_id: "local_north_truc_ly",
+        speed: 0.75,
+        word_sample: true,
+      },
+      {
+        text: "mẹ",
+        voice_id: "local_north_truc_ly",
+        speed: 0.75,
+        word_sample: true,
+      },
+      {
+        text: "mèo",
+        voice_id: "local_north_truc_ly",
+        speed: 0.75,
+        word_sample: true,
+      },
+    ]);
+
+    releaseSessionVoiceLock("sess-preload-norm");
   });
 
   it("exposes useSpeechPlayer cleanly without crashing", () => {

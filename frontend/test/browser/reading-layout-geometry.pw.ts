@@ -520,6 +520,8 @@ async function installLongReadingSession(
     });
   });
 
+  voice503Counts.tts = 0;
+  voice503Counts.stt = 0;
   await page.goto(
     `/reading/${ids.session}?state=${options.initialState ?? "reading"}`,
   );
@@ -978,9 +980,9 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
         ).__geomSpeech.spoken(),
       ),
     ).toEqual([]);
-    // The updated reading preparation flow probes local TTS during preload.
-    // Both probes fail closed locally and never trigger STT or online fallback.
-    expect(voice503Counts.tts).toBeGreaterThan(0);
+    // Local TTS is unavailable, so preload fails closed without probing
+    // /voice/text-to-speech or triggering STT / online fallback.
+    expect(voice503Counts.tts).toBe(0);
     expect(voice503Counts.stt).toBe(0);
   });
 });
