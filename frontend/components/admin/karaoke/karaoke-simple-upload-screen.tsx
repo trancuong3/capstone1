@@ -2032,6 +2032,7 @@ export function KaraokeSimpleUploadScreen({
               <Button
                 disabled={!canPublish}
                 isLoading={publishing}
+                size="compact"
                 className="sm:w-auto"
                 onClick={() => void handleSimplePublish()}
               >
@@ -2040,6 +2041,7 @@ export function KaraokeSimpleUploadScreen({
               {onSwitchAdvanced ? (
                 <Button
                   variant="secondary"
+                  size="compact"
                   className="sm:w-auto"
                   onClick={() => onSwitchAdvanced(imported.song_id)}
                 >
@@ -2049,6 +2051,7 @@ export function KaraokeSimpleUploadScreen({
                 <ButtonLink
                   href={`/admin/karaoke/${imported.song_id}/edit?mode=advanced`}
                   variant="secondary"
+                  size="compact"
                   className="sm:w-auto"
                 >
                   {t("karaoke.simpleUpload.openAdvancedEditorBtn")}

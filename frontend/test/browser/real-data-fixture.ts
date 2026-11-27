@@ -1200,6 +1200,39 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         generated_at: timestamp,
       });
     }
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/catalog"
+    )
+      return respond(route, {
+        samples: [
+          {
+            sample_key: "sunny-garden",
+            title: "Khu vườn đầy nắng",
+            theme: "Thiên nhiên",
+            description: "Chú mèo mướp và chú bướm trong khu vườn đầy nắng.",
+            image_url: "/images/picture-description/sunny-garden.jpg",
+          },
+        ],
+        book_pages: [],
+      });
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/sessions"
+    )
+      return respond(route, []);
+    if (request.method() === "GET" && path === "/games/sentence-shooter/books")
+      return respond(route, [
+        {
+          id: ids.book,
+          name: book.name,
+          title: book.title,
+          author: book.author,
+          min_grade: book.min_grade,
+          max_grade: book.max_grade,
+          available_rounds: 3,
+        },
+      ]);
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });
