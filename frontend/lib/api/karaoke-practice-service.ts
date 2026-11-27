@@ -5,6 +5,7 @@ import type {
   MusicalEvaluationResult,
   MusicalProfileData,
 } from "@/lib/karaoke/musical-scoring";
+import { melodyProfileSchema } from "@/types/karaoke";
 
 const practiceModeSchema = z.enum([
   "FULL_SONG",
@@ -84,6 +85,7 @@ export const musicalProfileResponseSchema = z.object({
     .array(z.object({ start_ms: z.number().int(), end_ms: z.number().int() }))
     .optional()
     .default([]),
+  melody_profile: melodyProfileSchema.nullable().optional(),
   updated_at: z.string().nullable().optional(),
 });
 
@@ -212,6 +214,7 @@ export function createKaraokePracticeService() {
           hz: pt.hz,
           midi: pt.midi ?? undefined,
         })),
+        melodyProfile: dto.melody_profile ?? null,
       };
     },
   };

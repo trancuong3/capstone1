@@ -52,7 +52,12 @@
     "emptyFilterDescription": "Aucun mot ne correspond au statut d'entraînement sélectionné.",
     "viewAllWords": "Voir tous les mots ({count})",
     "paginationAria": "Pagination des groupes de livres pour l'entraînement",
-    "paginationItemLabel": "livres"
+    "paginationItemLabel": "livres",
+    "statTotal": "Total",
+    "statCompleted": "Bien lus",
+    "statRemaining": "À revoir",
+    "quickMastered": "Maîtrisés",
+    "quickNeedsMoreFull": "À renforcer"
   },
   "bookCard": {
     "gradeSingle": "Classe {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Non relu",
     "badgeNeedsMore": "À pratiquer davantage",
     "badgeInProgress": "En cours",
-    "badgeCompleted": "Lu correctement"
+    "badgeCompleted": "Lu correctement",
+    "showMoreWords": "+{count} autres",
+    "showFewerWords": "Réduire",
+    "tagMispronounced": "Err. {count}",
+    "tagOmitted": "Oublis {count}",
+    "tagRepeated": "Rép. {count}"
   },
   "item": {
     "notPracticed": "Non pratiqué",

@@ -388,7 +388,20 @@
         "repeated": "Lặp từ",
         "hesitation": "Ngập ngừng"
       }
-    }
+    },
+    "summarySessions": "Số buổi đọc",
+    "summaryDuration": "Tổng thời lượng",
+    "summaryCompleted": "Hoàn thành",
+    "summaryDurationZero": "0 phút",
+    "filterAria": "Lọc buổi đọc theo trạng thái",
+    "filterAll": "Tất cả",
+    "filterCompleted": "Hoàn thành",
+    "filterIncomplete": "Đang đọc dở",
+    "searchPlaceholder": "Tìm theo tên sách trong trang này…",
+    "searchAria": "Tìm buổi đọc theo tên sách",
+    "filterEmptyTitle": "Không có buổi đọc khớp bộ lọc",
+    "filterEmptyDesc": "Thử đổi bộ lọc trạng thái hoặc xóa từ khóa tìm kiếm.",
+    "clearFilterAction": "Xem tất cả buổi đọc"
   },
   "readingManagement": {
     "title": "Quản lý đọc & nhắc lịch",

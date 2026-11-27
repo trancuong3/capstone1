@@ -52,7 +52,12 @@
     "emptyFilterDescription": "No words match the selected practice status.",
     "viewAllWords": "View all words ({count})",
     "paginationAria": "Paginate word practice book groups",
-    "paginationItemLabel": "books"
+    "paginationItemLabel": "books",
+    "statTotal": "Total words",
+    "statCompleted": "Read clearly",
+    "statRemaining": "To review",
+    "quickMastered": "Mastered",
+    "quickNeedsMoreFull": "Needs review"
   },
   "bookCard": {
     "gradeSingle": "Grade {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Not re-read",
     "badgeNeedsMore": "Needs practice",
     "badgeInProgress": "Practicing",
-    "badgeCompleted": "Read correctly"
+    "badgeCompleted": "Read correctly",
+    "showMoreWords": "+{count} more",
+    "showFewerWords": "Show less",
+    "tagMispronounced": "Misread {count}",
+    "tagOmitted": "Skipped {count}",
+    "tagRepeated": "Repeated {count}"
   },
   "item": {
     "notPracticed": "Not practiced",

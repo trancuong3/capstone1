@@ -15,6 +15,7 @@ from app.schemas.picture_description import (
     PictureSessionRead,
     PictureSessionSummaryRead,
     SourceType,
+    TeacherGender,
     TeachingMode,
     _normalize_target_words,
 )
@@ -75,6 +76,7 @@ async def create_picture_session(
     teaching_mode: TeachingMode = Form(default="OBSERVE"),
     target_words: str | None = Form(default=None),
     refresh_ai_guide: bool = Form(default=False),
+    teacher_gender: TeacherGender | None = Form(default=None),
     image: UploadFile | None = File(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
@@ -91,6 +93,9 @@ async def create_picture_session(
                 detail="INVALID_IMAGE",
             )
 
+    safe_teacher_gender = (
+        teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
+    )
     return await _service(db).create_session(
         actor_id,
         child_id=child_id,
@@ -101,6 +106,7 @@ async def create_picture_session(
         teaching_mode=teaching_mode,
         target_words=_parse_target_words_form(target_words),
         refresh_ai_guide=refresh_ai_guide,
+        teacher_gender=safe_teacher_gender,
     )
 
 

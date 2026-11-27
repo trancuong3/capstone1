@@ -11,6 +11,7 @@ SourceType = Literal["BOOK_PAGE", "CUSTOM_UPLOAD", "SAMPLE"]
 SessionStatus = Literal["ACTIVE", "COMPLETED"]
 InputMode = Literal["VOICE", "TEXT"]
 EvaluationSource = Literal["AI", "FALLBACK"]
+TeacherGender = Literal["female", "male"]
 TeachingMode = Literal[
     "OBSERVE",
     "VOCABULARY",
@@ -164,6 +165,7 @@ class PictureEvaluateRequest(BaseModel):
     input_mode: InputMode = "TEXT"
     teaching_mode: TeachingMode | None = None
     target_words: list[str] | None = None
+    teacher_gender: TeacherGender | None = None
 
     @field_validator("transcript_text")
     @classmethod

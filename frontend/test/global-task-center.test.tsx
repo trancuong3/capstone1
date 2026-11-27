@@ -258,7 +258,7 @@ describe("Global AI Task Center", () => {
 
     fireEvent.click(trigger);
 
-    const measuredBox = screen.getByTestId("task-progress-job-measured");
+    const measuredBox = await screen.findByTestId("task-progress-job-measured");
     expect(measuredBox).toHaveTextContent("3/10 trang");
     expect(measuredBox).toHaveTextContent("30%");
     const measuredBar = within(measuredBox).getByRole("progressbar");

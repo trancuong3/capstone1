@@ -720,7 +720,7 @@ describe("Wave 2B Studio V2 Complete Integration", () => {
     // Open drawer -> verify link to /studio/tasks
     fireEvent.click(screen.getByTestId("global-task-center-trigger"));
     expect(
-      screen.getByTestId("global-task-center-full-page-link"),
+      await screen.findByTestId("global-task-center-full-page-link"),
     ).toHaveAttribute("href", "/studio/tasks");
   });
 

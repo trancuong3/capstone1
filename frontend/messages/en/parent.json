@@ -233,5 +233,22 @@
         "a3": "Open the Progress section to view reports or the History section to see saved reading sessions."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "System-wide voice sync",
+    "title": "Choose Female or Male AI Teacher",
+    "subtitle": "Your chosen teacher voice stays in sync across Reading · Phonics · Mistake Replay · Comprehension · Games.",
+    "savedForChild": "Saved for {alias}",
+    "previewButton": "Preview voice",
+    "stopPreviewButton": "Stop preview",
+    "personaGroupAria": "Choose Female AI Teacher or Male AI Teacher",
+    "femaleTitle": "Female AI Teacher",
+    "femaleDesc": "Gentle, warm female voice",
+    "maleTitle": "Male AI Teacher",
+    "maleDesc": "Warm, expressive male voice",
+    "selectedBadge": "Selected",
+    "regionLabel": "Accent region",
+    "voiceListLabel": "Specific voice",
+    "voiceListAria": "Voices matching selected teacher and region"
   }
 }

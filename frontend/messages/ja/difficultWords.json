@@ -52,7 +52,12 @@
     "emptyFilterDescription": "選択した練習状態に一致する単語はありません。",
     "viewAllWords": "すべての単語を表示 ({count})",
     "paginationAria": "練習が必要な単語のブックグループをページ分け",
-    "paginationItemLabel": "冊"
+    "paginationItemLabel": "冊",
+    "statTotal": "合計単語",
+    "statCompleted": "読めた単語",
+    "statRemaining": "復習中",
+    "quickMastered": "習得済み",
+    "quickNeedsMoreFull": "もう少し練習"
   },
   "bookCard": {
     "gradeSingle": "学年 {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "未再読",
     "badgeNeedsMore": "練習が必要",
     "badgeInProgress": "練習中",
-    "badgeCompleted": "正しく読みました"
+    "badgeCompleted": "正しく読みました",
+    "showMoreWords": "ほか +{count}語",
+    "showFewerWords": "折りたたむ",
+    "tagMispronounced": "誤読 {count}",
+    "tagOmitted": "飛ばし {count}",
+    "tagRepeated": "繰返し {count}"
   },
   "item": {
     "notPracticed": "未練習",

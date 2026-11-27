@@ -1,0 +1,766 @@
+"use client";
+
+import {
+  BookOpenCheck,
+  CalendarClock,
+  Check,
+  CircleHelp,
+  History,
+  LogOut,
+  Mic,
+  Settings,
+  Sparkles,
+  UserRound,
+  UsersRound,
+} from "lucide-react";
+import Link from "next/link";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
+
+import { Button, ButtonLink } from "@/components/common/button";
+import { Modal } from "@/components/common/modal";
+import { ProfileAvatar } from "@/components/common/profile-avatar";
+import { LanguageSelector } from "@/components/i18n/language-selector";
+import type { AppStore } from "@/components/providers/app-store-provider";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+import { useI18n } from "@/hooks/use-i18n";
+import { cn } from "@/lib/utils/cn";
+import type { ChildProfileDTO } from "@/types/child";
+
+const TASK_LAST_SEEN_KEY_PREFIX = "viread_tasks_last_seen:";
+
+function readLastSeenTimestamp(userId: string | null): number {
+  if (!userId || typeof window === "undefined") return 0;
+  try {
+    const raw = window.localStorage.getItem(
+      `${TASK_LAST_SEEN_KEY_PREFIX}${userId}`,
+    );
+    const parsed = raw ? Number(raw) : 0;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeLastSeenTimestamp(userId: string | null, value: number): void {
+  if (!userId || typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      `${TASK_LAST_SEEN_KEY_PREFIX}${userId}`,
+      String(value),
+    );
+  } catch {
+    // Ignore storage quota / privacy mode errors.
+  }
+}
+
+function normalizePath(pathname: string): string {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.replace(/\/+$/, "");
+  }
+  return pathname;
+}
+
+function isRouteActive(pathname: string, href: string): boolean {
+  const normalized = normalizePath(pathname);
+  return normalized === href || normalized.startsWith(`${href}/`);
+}
+
+export interface ParentAccountDropdownProps {
+  readonly userId: string | null;
+  readonly pathname: string;
+  readonly displayName: string | null;
+  readonly email: string | null;
+  readonly avatarUrl: string | null | undefined;
+  readonly roleLabel: string | null;
+  readonly availableChildren: readonly ChildProfileDTO[];
+  readonly selectedChild: ChildProfileDTO | null;
+  readonly appStore: AppStore | null;
+  readonly isSigningOut: boolean;
+  readonly onSignOut: () => Promise<void>;
+  readonly onBeforeOpen?: () => void;
+  readonly hideAiTasks?: boolean;
+}
+
+const GUIDE_STEPS = [
+  { key: "1", href: "/children" },
+  { key: "2", href: "/my-books" },
+  { key: "3", href: "/device-permissions" },
+  { key: "4", href: "/reports/difficult-words" },
+  { key: "5", href: "/reading-management" },
+] as const;
+
+export function ParentAccountDropdown({
+  userId,
+  pathname,
+  displayName,
+  email,
+  avatarUrl,
+  roleLabel,
+  availableChildren,
+  selectedChild,
+  appStore,
+  isSigningOut,
+  onSignOut,
+  onBeforeOpen,
+  hideAiTasks = false,
+}: ParentAccountDropdownProps) {
+  const { t } = useI18n();
+  const taskCenter = useOptionalAiTaskCenter();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openedByKeyboardRef = useRef(false);
+
+  const [menuState, setMenuState] = useState<{
+    readonly isOpen: boolean;
+    readonly pathname: string;
+  }>({ isOpen: false, pathname: "" });
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [seenState, setSeenState] = useState<{
+    readonly userId: string | null;
+    readonly ms: number;
+  }>({ userId: null, ms: 0 });
+
+  const isOpen = menuState.isOpen && menuState.pathname === pathname;
+  const lastSeenTaskMs =
+    seenState.userId === userId ? seenState.ms : readLastSeenTimestamp(userId);
+
+  const activeCount = taskCenter?.activeCount ?? 0;
+  const waitingReviewCount = taskCenter?.waitingReviewCount ?? 0;
+  const failedCount = taskCenter?.failedCount ?? 0;
+
+  const { newlyCompletedCount, latestTaskTimestampMs } = useMemo(() => {
+    const taskList = taskCenter?.tasks ?? [];
+    let newest = 0;
+    let newlyDone = 0;
+    for (const task of taskList) {
+      const ts = Date.parse(
+        task.updated_at || task.completed_at || task.created_at,
+      );
+      if (Number.isFinite(ts) && ts > newest) {
+        newest = ts;
+      }
+      if (
+        (task.status === "SUCCEEDED" || task.status === "PARTIAL_SUCCESS") &&
+        Number.isFinite(ts) &&
+        ts > lastSeenTaskMs
+      ) {
+        newlyDone += 1;
+      }
+    }
+    return {
+      newlyCompletedCount: newlyDone,
+      latestTaskTimestampMs: newest,
+    };
+  }, [lastSeenTaskMs, taskCenter?.tasks]);
+
+  const hasRedAlert =
+    !hideAiTasks &&
+    (waitingReviewCount > 0 || failedCount > 0 || newlyCompletedCount > 0);
+  const hasRunningActivity = !hideAiTasks && !hasRedAlert && activeCount > 0;
+
+  const taskSummaryText = useMemo(() => {
+    if (failedCount > 0) {
+      return t("navigation.accountMenu.taskStatusFailed", {
+        count: failedCount,
+      });
+    }
+    if (waitingReviewCount > 0) {
+      return t("navigation.accountMenu.taskStatusReview", {
+        count: waitingReviewCount,
+      });
+    }
+    if (activeCount > 0) {
+      return t("navigation.accountMenu.taskStatusRunning", {
+        count: activeCount,
+      });
+    }
+    if (newlyCompletedCount > 0) {
+      return t("navigation.accountMenu.taskStatusNewDone", {
+        count: newlyCompletedCount,
+      });
+    }
+    return t("navigation.accountMenu.taskStatusIdle");
+  }, [activeCount, failedCount, newlyCompletedCount, t, waitingReviewCount]);
+
+  const taskBadgeCount =
+    failedCount > 0
+      ? failedCount
+      : waitingReviewCount > 0
+        ? waitingReviewCount
+        : newlyCompletedCount > 0
+          ? newlyCompletedCount
+          : activeCount > 0
+            ? activeCount
+            : 0;
+
+  const closeMenu = useCallback(() => {
+    openedByKeyboardRef.current = false;
+    setMenuState((current) => ({ ...current, isOpen: false }));
+  }, []);
+
+  const markTasksSeen = useCallback(() => {
+    const seenAt = Math.max(Date.now(), latestTaskTimestampMs);
+    setSeenState({ userId, ms: seenAt });
+    writeLastSeenTimestamp(userId, seenAt);
+  }, [latestTaskTimestampMs, userId]);
+
+  const handleOpenAiTasks = useCallback(() => {
+    markTasksSeen();
+    closeMenu();
+    taskCenter?.openPanel();
+  }, [closeMenu, markTasksSeen, taskCenter]);
+
+  // Only auto-focus the first menuitem when opened via keyboard so mouse clicks
+  // never leave a heavy focus ring around the top item.
+  useEffect(() => {
+    if (!isOpen || !openedByKeyboardRef.current) return;
+    containerRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')
+      ?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !containerRef.current?.contains(event.target)
+      ) {
+        closeMenu();
+      }
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMenu();
+        triggerRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [closeMenu, isOpen]);
+
+  function handleTriggerClick(event: MouseEvent<HTMLButtonElement>) {
+    onBeforeOpen?.();
+    if (isOpen) {
+      closeMenu();
+      return;
+    }
+    // Keyboard activation via Enter/Space reports event.detail === 0.
+    openedByKeyboardRef.current = event.detail === 0;
+    setMenuState({ isOpen: true, pathname });
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown" && !isOpen) {
+      event.preventDefault();
+      onBeforeOpen?.();
+      openedByKeyboardRef.current = true;
+      setMenuState({ isOpen: true, pathname });
+    }
+  }
+
+  function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    const items = containerRef.current?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"]:not([disabled])',
+    );
+    if (!items?.length) return;
+
+    event.preventDefault();
+    const currentIndex = Array.from(items).indexOf(
+      document.activeElement as HTMLElement,
+    );
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : event.key === "ArrowDown"
+            ? currentIndex < 0
+              ? 0
+              : (currentIndex + 1) % items.length
+            : currentIndex < 0
+              ? items.length - 1
+              : (currentIndex - 1 + items.length) % items.length;
+
+    items[nextIndex]?.focus();
+  }
+
+  const menuItemClass = (active = false) =>
+    cn(
+      "flex min-h-11 w-full items-center gap-3 rounded-control px-3 py-2 text-start text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
+      active ? "bg-sky text-primary-hover" : "text-ink hover:bg-canvas",
+    );
+
+  return (
+    <>
+      <div className="relative shrink-0" ref={containerRef}>
+        <button
+          aria-controls="parent-account-menu"
+          aria-expanded={isOpen}
+          aria-haspopup="menu"
+          aria-label={
+            isOpen
+              ? t("navigation.accountMenu.closeAria")
+              : t("navigation.accountMenu.openAria")
+          }
+          className="relative flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-xs transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+          onClick={handleTriggerClick}
+          onKeyDown={handleTriggerKeyDown}
+          ref={triggerRef}
+          title={
+            hasRedAlert
+              ? t("navigation.accountMenu.unreadBadgeAria")
+              : hasRunningActivity
+                ? t("navigation.accountMenu.runningBadgeAria")
+                : undefined
+          }
+          type="button"
+        >
+          <ProfileAvatar
+            ariaLabel={t("accessibility.accountAvatar")}
+            displayName={displayName}
+            imageUrl={avatarUrl}
+            size="sm"
+          />
+          {hasRedAlert ? (
+            <span
+              className="pointer-events-none absolute -end-0.5 -top-0.5 flex size-3.5 items-center justify-center"
+              data-testid="avatar-notification-dot"
+            >
+              <span className="absolute inline-flex size-full animate-ping rounded-full bg-rose-400 opacity-75" />
+              <span className="relative inline-flex size-3 rounded-full bg-rose-500 ring-2 ring-white" />
+              <span className="sr-only">
+                {t("navigation.accountMenu.unreadBadgeAria")}
+              </span>
+            </span>
+          ) : hasRunningActivity ? (
+            <span
+              className="pointer-events-none absolute -end-0.5 -top-0.5 flex size-3.5 items-center justify-center"
+              data-testid="avatar-running-dot"
+            >
+              <span className="relative inline-flex size-3 animate-pulse rounded-full bg-primary ring-2 ring-white" />
+              <span className="sr-only">
+                {t("navigation.accountMenu.runningBadgeAria")}
+              </span>
+            </span>
+          ) : null}
+        </button>
+
+        <div
+          aria-label={t("navigation.accountMenu.shortMenuAria")}
+          className="absolute end-0 top-full z-50 mt-2 max-h-[min(82dvh,640px)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-card border border-border bg-white p-2.5 shadow-xl"
+          hidden={!isOpen}
+          id="parent-account-menu"
+          onKeyDown={handleMenuKeyDown}
+          role="menu"
+        >
+          {/* Compact horizontal profile header */}
+          <div className="flex items-center gap-3 rounded-control bg-canvas/70 px-3 py-2.5">
+            <ProfileAvatar
+              ariaLabel={t("accessibility.accountAvatar")}
+              className="shrink-0"
+              displayName={displayName}
+              imageUrl={avatarUrl}
+              size="md"
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p className="truncate text-sm font-extrabold text-ink">
+                  {displayName ??
+                    t("navigation.accountMenu.defaultAccountLabel")}
+                </p>
+                {roleLabel ? (
+                  <span className="inline-flex shrink-0 items-center rounded-full bg-sky px-2 py-0.5 text-[11px] font-bold text-primary-hover">
+                    {roleLabel}
+                  </span>
+                ) : null}
+              </div>
+              {email ? (
+                <p className="mt-0.5 truncate text-xs text-muted" title={email}>
+                  {email}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Quick Child Switcher */}
+          {availableChildren.length > 0 && appStore ? (
+            <>
+              <div className="my-2 border-t border-border/80" />
+              <div className="px-1">
+                <div className="flex items-center justify-between px-2 pb-1 pt-0.5">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t("navigation.accountMenu.quickChildTitle")}
+                  </p>
+                  <Link
+                    className="text-xs font-bold text-primary hover:underline"
+                    href="/children"
+                    onClick={closeMenu}
+                  >
+                    {t("navigation.childSwitcher.manageChildren")}
+                  </Link>
+                </div>
+                <div className="flex flex-wrap gap-1.5 px-1.5 pb-1">
+                  {availableChildren.map((child) => {
+                    const isSelected = selectedChild?.id === child.id;
+                    return (
+                      <button
+                        aria-pressed={isSelected}
+                        className={cn(
+                          "inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                          isSelected
+                            ? "border-primary/40 bg-sky text-primary-hover"
+                            : "border-border bg-white text-ink hover:bg-canvas",
+                        )}
+                        key={child.id}
+                        onClick={() => {
+                          appStore.selectChild(child.id);
+                          appStore.setValidatedSelectedChild(child);
+                          closeMenu();
+                        }}
+                        type="button"
+                      >
+                        <span className="truncate">
+                          {t("navigation.childSwitcher.compactLabel", {
+                            alias: child.alias,
+                            grade: child.grade,
+                          })}
+                        </span>
+                        {isSelected ? (
+                          <Check
+                            aria-hidden="true"
+                            className="size-3.5 shrink-0 text-primary"
+                          />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {/* Group 1: Activity & Utilities */}
+          <div className="my-2 border-t border-border/80" />
+          <p className="px-3 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+            {t("navigation.accountMenu.activitiesSection")}
+          </p>
+          <div className="space-y-0.5">
+            {!hideAiTasks && taskCenter?.scopeKey ? (
+              <button
+                className={menuItemClass(false)}
+                data-testid="menu-ai-tasks-trigger"
+                onClick={handleOpenAiTasks}
+                role="menuitem"
+                tabIndex={isOpen ? 0 : -1}
+                type="button"
+              >
+                <span className="relative flex size-5 shrink-0 items-center justify-center">
+                  <Sparkles
+                    aria-hidden="true"
+                    className="size-[18px] text-primary"
+                  />
+                  {hasRedAlert ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -end-1 -top-1 size-2 rounded-full bg-rose-500 ring-2 ring-white"
+                      data-testid="menu-ai-tasks-red-dot"
+                    />
+                  ) : hasRunningActivity ? (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -end-1 -top-1 size-2 animate-pulse rounded-full bg-primary ring-2 ring-white"
+                    />
+                  ) : null}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate leading-tight">
+                    {t("navigation.parent.aiTasksNotifications")}
+                  </span>
+                  <span className="block truncate text-[11px] font-medium text-muted">
+                    {taskSummaryText}
+                  </span>
+                </span>
+                {taskBadgeCount > 0 ? (
+                  <span
+                    className={cn(
+                      "inline-flex min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums text-white",
+                      hasRedAlert ? "bg-rose-500" : "bg-primary",
+                    )}
+                  >
+                    {taskBadgeCount}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/reading-management")
+                  ? "page"
+                  : undefined
+              }
+              className={menuItemClass(
+                isRouteActive(pathname, "/reading-management"),
+              )}
+              href="/reading-management"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <CalendarClock
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-amber-700"
+              />
+              {t("navigation.parent.readingManagement")}
+            </Link>
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/sessions") ? "page" : undefined
+              }
+              className={menuItemClass(isRouteActive(pathname, "/sessions"))}
+              href="/sessions"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <History
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-sky-700"
+              />
+              {t("navigation.parent.sessionsLong")}
+            </Link>
+          </div>
+
+          {/* Group 2: Account & Devices */}
+          <div className="my-2 border-t border-border/80" />
+          <p className="px-3 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+            {t("navigation.accountMenu.accountDeviceSection")}
+          </p>
+          <div className="space-y-0.5">
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/profile") ? "page" : undefined
+              }
+              className={menuItemClass(isRouteActive(pathname, "/profile"))}
+              href="/profile"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <UserRound
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-primary"
+              />
+              {t("navigation.parent.parentProfile")}
+            </Link>
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/children") ? "page" : undefined
+              }
+              className={menuItemClass(isRouteActive(pathname, "/children"))}
+              href="/children"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <UsersRound
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-primary"
+              />
+              {t("navigation.parent.children")}
+            </Link>
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/device-permissions")
+                  ? "page"
+                  : undefined
+              }
+              className={menuItemClass(
+                isRouteActive(pathname, "/device-permissions"),
+              )}
+              href="/device-permissions"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <Mic
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-primary"
+              />
+              {t("navigation.parent.devicePermissions")}
+            </Link>
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/settings") ? "page" : undefined
+              }
+              className={menuItemClass(isRouteActive(pathname, "/settings"))}
+              href="/settings"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <Settings
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-muted"
+              />
+              {t("navigation.parent.settings")}
+            </Link>
+
+            <div className="px-1 pt-1">
+              <div className="flex items-center justify-between gap-2 rounded-control border border-border/70 bg-canvas/50 px-2 py-1">
+                <span className="ps-1 text-xs font-semibold text-muted">
+                  {t("navigation.accountMenu.languageLabel")}
+                </span>
+                <div className="w-40 shrink-0">
+                  <LanguageSelector variant="menu" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Group 3: Guide & Support */}
+          <div className="my-2 border-t border-border/80" />
+          <p className="px-3 pb-1 pt-0.5 text-[11px] font-bold uppercase tracking-wider text-muted">
+            {t("navigation.accountMenu.guideSupportSection")}
+          </p>
+          <div className="space-y-0.5">
+            <button
+              className={menuItemClass(false)}
+              onClick={() => {
+                closeMenu();
+                setGuideOpen(true);
+              }}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+              type="button"
+            >
+              <BookOpenCheck
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-primary"
+              />
+              {t("navigation.parent.userGuide")}
+            </button>
+
+            <Link
+              aria-current={
+                isRouteActive(pathname, "/help-support") ? "page" : undefined
+              }
+              className={menuItemClass(
+                isRouteActive(pathname, "/help-support"),
+              )}
+              href="/help-support"
+              onClick={closeMenu}
+              role="menuitem"
+              tabIndex={isOpen ? 0 : -1}
+            >
+              <CircleHelp
+                aria-hidden="true"
+                className="size-[18px] shrink-0 text-muted"
+              />
+              {t("navigation.parent.helpFeedback")}
+            </Link>
+          </div>
+
+          {/* Sign out */}
+          <div className="my-2 border-t border-border/80" />
+          <button
+            className="flex min-h-11 w-full items-center gap-3 rounded-control px-3 py-2 text-start text-sm font-semibold text-danger transition-colors outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-55"
+            disabled={isSigningOut}
+            onClick={() => void onSignOut()}
+            role="menuitem"
+            tabIndex={isOpen ? 0 : -1}
+            type="button"
+          >
+            <LogOut
+              aria-hidden="true"
+              className="size-[18px] shrink-0 viread-rtl-flip"
+            />
+            {isSigningOut
+              ? t("auth.session.signingOut")
+              : t("auth.session.signOut")}
+          </button>
+        </div>
+      </div>
+
+      {/* Step-by-step Quick User Guide Modal */}
+      <Modal
+        closeOnBackdropClick
+        footer={
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <ButtonLink
+              className="sm:w-auto"
+              href="/help-support"
+              onClick={() => setGuideOpen(false)}
+              variant="secondary"
+            >
+              {t("navigation.guide.openHelpCenter")}
+            </ButtonLink>
+            <Button
+              className="sm:w-auto"
+              onClick={() => setGuideOpen(false)}
+              type="button"
+            >
+              {t("navigation.guide.closeAction")}
+            </Button>
+          </div>
+        }
+        isOpen={guideOpen}
+        onClose={() => setGuideOpen(false)}
+        title={t("navigation.guide.title")}
+        tone="paper"
+      >
+        <p className="mb-4 text-sm text-muted">
+          {t("navigation.guide.subtitle")}
+        </p>
+        <ol className="space-y-3">
+          {GUIDE_STEPS.map((step) => (
+            <li
+              className="flex flex-col gap-2 rounded-control border border-border bg-canvas/60 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+              key={step.key}
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-extrabold text-ink">
+                  {t(`navigation.guide.steps.${step.key}.title`)}
+                </p>
+                <p className="mt-0.5 text-xs leading-5 text-muted">
+                  {t(`navigation.guide.steps.${step.key}.body`)}
+                </p>
+              </div>
+              <Link
+                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-control border border-primary/30 bg-white px-3 text-xs font-bold text-primary transition-colors hover:bg-sky"
+                href={step.href}
+                onClick={() => setGuideOpen(false)}
+              >
+                {t(`navigation.guide.steps.${step.key}.action`)}
+              </Link>
+            </li>
+          ))}
+        </ol>
+      </Modal>
+    </>
+  );
+}

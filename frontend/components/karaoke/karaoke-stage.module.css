@@ -23,8 +23,14 @@
   display: grid;
   align-content: center;
   gap: 1.25rem;
-  padding: clamp(1rem, 4vw, 3rem) 0;
+  padding: clamp(1rem, 3.5vw, 2.25rem) clamp(0.75rem, 2.5vw, 1.5rem);
   text-align: center;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
+}
+.teleprompter {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.5rem 0.25rem;
 }
 .countIn {
   display: grid;

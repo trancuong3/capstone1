@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "本地语音服务当前离线，且设备上尚无预生成音频。请启动本地语音服务或开启下方备用模式以播放示例朗读。",
     "localWorkerLabel": "本地服务:",
     "sessionLockedBadge": "已锁定用于本次阅读",
-    "offlineBrowserBadge": "浏览器当前离线"
+    "offlineBrowserBadge": "浏览器当前离线",
+    "teacherPersonaAria": "快速切换 AI 女老师或男老师",
+    "femaleTeacherQuickBtn": "AI 女老师（女声）",
+    "maleTeacherQuickBtn": "AI 男老师（男声）"
   },
   "engineBadge": {
     "ariaLabel": "语音源：STT {stt}, TTS {tts}",
@@ -115,7 +118,8 @@
     "androidNativeFallbackNotice": "服务器语音未开启 — ViRead 正在使用 Android 设备上的越南语语音。",
     "browserFallbackNotice": "设备语音未开启 — ViRead 正在使用浏览器的在线语音。",
     "autoplayBlocked": "浏览器正在等待点击“回放”以开启声音。",
-    "partialPlayback": "音频中断。您可以从头开始收听。"
+    "partialPlayback": "音频中断。您可以从头开始收听。",
+    "deviceVoiceGenderMismatchNotice": "当前设备离线仅安装了不同性别的越南语语音包。请开启本地语音服务或 Google 备用语音以收听所选性别声音。"
   },
   "wasm": {
     "workerUnavailable": "Web Worker 不可用",

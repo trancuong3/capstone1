@@ -388,7 +388,20 @@
         "repeated": "Repetición",
         "hesitation": "Vacilante"
       }
-    }
+    },
+    "summarySessions": "Sesiones",
+    "summaryDuration": "Duración total",
+    "summaryCompleted": "Completadas",
+    "summaryDurationZero": "0 min",
+    "filterAria": "Filtrar sesiones por estado",
+    "filterAll": "Todas",
+    "filterCompleted": "Completadas",
+    "filterIncomplete": "En curso",
+    "searchPlaceholder": "Filtrar por título en esta página…",
+    "searchAria": "Buscar sesiones por título de libro",
+    "filterEmptyTitle": "No hay sesiones coincidentes",
+    "filterEmptyDesc": "Prueba otro filtro o borra la búsqueda.",
+    "clearFilterAction": "Ver todas las sesiones"
   },
   "readingManagement": {
     "title": "Gestión de lectura y recordatorios",

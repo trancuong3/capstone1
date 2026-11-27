@@ -233,5 +233,22 @@
         "a3": "Abre la sección de Progreso para ver los informes o la sección de Historial para ver las sesiones de lectura guardadas."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Voz sincronizada en todo el sistema",
+    "title": "Elegir Maestra o Maestro IA",
+    "subtitle": "La voz elegida acompaña Lectura · Deletreo · Palabras difíciles · Comprensión · Juegos.",
+    "savedForChild": "Guardado para {alias}",
+    "previewButton": "Probar voz",
+    "stopPreviewButton": "Detener prueba",
+    "personaGroupAria": "Elegir Maestra IA o Maestro IA",
+    "femaleTitle": "Maestra IA",
+    "femaleDesc": "Voz femenina cálida y suave",
+    "maleTitle": "Maestro IA",
+    "maleDesc": "Voz masculina cálida y expresiva",
+    "selectedBadge": "Seleccionado",
+    "regionLabel": "Región",
+    "voiceListLabel": "Voz específica",
+    "voiceListAria": "Voces disponibles por docente y región"
   }
 }

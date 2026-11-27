@@ -48,7 +48,11 @@ export interface AndroidNativeTtsSpeakOptions {
   readonly voiceId?: string | null;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
-  readonly onStart?: () => void;
+  readonly onStart?: (meta?: {
+    readonly voiceGenderMismatch?: boolean;
+    readonly resolvedVoiceName?: string | null;
+    readonly actualVoiceGender?: string | null;
+  }) => void;
   readonly onRangeStart?: (start: number, end: number) => void;
   readonly onDone?: () => void;
 }
@@ -64,6 +68,8 @@ export interface NativeSpeechIncomingEvent {
   readonly sttAvailable?: boolean;
   readonly onDeviceSttAvailable?: boolean;
   readonly platform?: string;
+  readonly voiceGenderMismatch?: boolean;
+  readonly resolvedVoiceName?: string | null;
   readonly start?: number;
   readonly end?: number;
   readonly onsetAt?: number;
@@ -477,10 +483,14 @@ export async function speakWithAndroidNativeTts(
       }
     };
 
-    const emitStart = () => {
+    const emitStart = (meta?: {
+      readonly voiceGenderMismatch?: boolean;
+      readonly resolvedVoiceName?: string | null;
+      readonly actualVoiceGender?: string | null;
+    }) => {
       if (startedEmitted) return;
       startedEmitted = true;
-      opts.onStart?.();
+      opts.onStart?.(meta);
     };
 
     const onAbort = () => {
@@ -493,7 +503,17 @@ export async function speakWithAndroidNativeTts(
       if (event.requestId && event.requestId !== requestId) return;
       switch (event.type) {
         case "tts_start":
-          emitStart();
+          emitStart({
+            voiceGenderMismatch: Boolean(event.voiceGenderMismatch),
+            resolvedVoiceName:
+              typeof event.resolvedVoiceName === "string"
+                ? event.resolvedVoiceName
+                : null,
+            actualVoiceGender:
+              typeof event.actualVoiceGender === "string"
+                ? event.actualVoiceGender
+                : null,
+          });
           break;
         case "tts_range":
           emitStart();

@@ -213,4 +213,5 @@ class MusicalProfileRead(BaseModel):
     beat_grid_ms: list[int] = Field(default_factory=list)
     pitch_contour: list[PitchContourPointRead] = Field(default_factory=list)
     phrase_windows: list[dict[str, int]] = Field(default_factory=list)
+    melody_profile: dict[str, Any] | None = None
     updated_at: datetime | None = None

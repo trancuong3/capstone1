@@ -1,9 +1,11 @@
 """SQLAlchemy repository for karaoke musical practice sessions & musical profiles."""
 
-from typing import Sequence
+from datetime import datetime, timezone
+import json
+from typing import Any, Sequence
 from uuid import UUID
 
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.exc import OperationalError, ProgrammingError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +32,19 @@ def is_missing_table_error(error: BaseException) -> bool:
         "undefinedtable" in message
         or "no such table" in message
         or ("relation" in message and "does not exist" in message)
+    )
+
+
+def is_missing_column_error(error: BaseException) -> bool:
+    orig = getattr(error, "orig", None)
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    if sqlstate == "42703":
+        return True
+    message = f"{error} {orig or ''}".lower()
+    return (
+        "undefinedcolumn" in message
+        or "no such column" in message
+        or ("column" in message and "does not exist" in message)
     )
 
 
@@ -166,13 +181,121 @@ class KaraokePracticeRepository:
         self, song_version_id: UUID
     ) -> KaraokeMusicalProfile | None:
         try:
-            return await self.db.scalar(
-                select(KaraokeMusicalProfile).where(
-                    KaraokeMusicalProfile.SongVersionId == song_version_id
+            async with self.db.begin_nested():
+                return await self.db.scalar(
+                    select(KaraokeMusicalProfile).where(
+                        KaraokeMusicalProfile.SongVersionId == song_version_id
+                    )
                 )
-            )
         except (ProgrammingError, OperationalError, SQLAlchemyError) as exc:
             if is_missing_table_error(exc):
-                await self.db.rollback()
                 return None
+            raise
+
+    async def is_storage_ready(self) -> bool:
+        """Check whether karaoke_musical_profiles storage is migrated & queryable."""
+        try:
+            async with self.db.begin_nested():
+                await self.db.execute(
+                    select(KaraokeMusicalProfile.SongVersionId).limit(1)
+                )
+            return True
+        except (ProgrammingError, OperationalError, SQLAlchemyError) as exc:
+            if is_missing_table_error(exc):
+                return False
+            return False
+
+    async def get_version_melody_profile(
+        self, song_version_id: UUID
+    ) -> dict[str, Any] | None:
+        """Read `karaoke_song_versions.melody_profile` safely (degrades to None if unmigrated)."""
+        try:
+            async with self.db.begin_nested():
+                result = await self.db.execute(
+                    text(
+                        "SELECT melody_profile FROM karaoke_song_versions WHERE id = :vid"
+                    ),
+                    {"vid": song_version_id},
+                )
+                row = result.first()
+                if not row or row[0] is None:
+                    return None
+                val = row[0]
+                if isinstance(val, str):
+                    val = json.loads(val)
+                return val if isinstance(val, dict) else None
+        except (ProgrammingError, OperationalError, SQLAlchemyError, ValueError) as exc:
+            if is_missing_column_error(exc) or is_missing_table_error(exc):
+                return None
+            return None
+
+    async def save_version_melody_profile(
+        self, song_version_id: UUID, melody_profile: dict[str, Any]
+    ) -> bool:
+        """Persist `karaoke_song_versions.melody_profile` safely (no-op if column not yet migrated)."""
+        try:
+            async with self.db.begin_nested():
+                await self.db.execute(
+                    text(
+                        "UPDATE karaoke_song_versions "
+                        "SET melody_profile = CAST(:payload AS jsonb) "
+                        "WHERE id = :vid"
+                    ),
+                    {
+                        "vid": song_version_id,
+                        "payload": json.dumps(melody_profile, ensure_ascii=False),
+                    },
+                )
+            return True
+        except (ProgrammingError, OperationalError, SQLAlchemyError) as exc:
+            if is_missing_column_error(exc) or is_missing_table_error(exc):
+                return False
+            return False
+
+    async def upsert_musical_profile(
+        self,
+        song_version_id: UUID,
+        *,
+        bpm: float | None,
+        audio_type: str,
+        has_pitch_contour: bool,
+        has_beat_grid: bool,
+        source_method: str,
+        profile_json: dict[str, Any],
+    ) -> bool:
+        """Upsert a version's musical & melody profile safely; returns False if table unavailable."""
+        now = datetime.now(timezone.utc)
+        try:
+            async with self.db.begin_nested():
+                existing = await self.db.scalar(
+                    select(KaraokeMusicalProfile).where(
+                        KaraokeMusicalProfile.SongVersionId == song_version_id
+                    )
+                )
+                if existing is None:
+                    self.db.add(
+                        KaraokeMusicalProfile(
+                            SongVersionId=song_version_id,
+                            Bpm=bpm,
+                            AudioType=audio_type,
+                            HasPitchContour=has_pitch_contour,
+                            HasBeatGrid=has_beat_grid,
+                            SourceMethod=source_method,
+                            ProfileJson=profile_json,
+                            UpdatedAt=now,
+                        )
+                    )
+                else:
+                    existing.Bpm = bpm
+                    existing.AudioType = audio_type
+                    existing.HasPitchContour = has_pitch_contour
+                    existing.HasBeatGrid = has_beat_grid
+                    existing.SourceMethod = source_method
+                    existing.ProfileJson = profile_json
+                    existing.UpdatedAt = now
+                await self.db.flush()
+            return True
+        except (ProgrammingError, OperationalError, SQLAlchemyError) as exc:
+            if is_missing_table_error(exc):
+                return False
             raise

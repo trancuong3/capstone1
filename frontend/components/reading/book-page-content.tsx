@@ -11,12 +11,12 @@ import {
   type RefObject,
 } from "react";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   computeUniversalPageWordLayout,
   type WordLayoutEntry,
 } from "@/lib/reading/ocr-text-reflow";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import {
   getWordHighlightTier,
   wordPresentationClasses,
@@ -188,7 +188,8 @@ const MemoWordToken = memo(function WordToken({
 
 export function BookPageContent(props: BookPageContentProps) {
   const t = useTranslations("reading");
-  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
+  const teacherPersona = useTeacherPersona();
+  const isMalePersona = teacherPersona.gender === "male";
   const {
     page,
     currentWordId,
