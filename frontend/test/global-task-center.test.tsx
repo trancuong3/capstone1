@@ -620,4 +620,49 @@ describe("Global AI Task Center", () => {
     );
     expect(offlineBanner).toHaveTextContent(/Dịch vụ OCR hiện chưa sẵn sàng/i);
   });
+
+  it("paginates tasks inside the drawer (6 per page) when many background tasks exist", async () => {
+    const manyTasks = Array.from({ length: 10 }, (_, idx) =>
+      makeTask({
+        id: `job-paged-${idx + 1}`,
+        title_vi: `Tác vụ số ${idx + 1}`,
+        status: idx < 2 ? "RUNNING" : "SUCCEEDED",
+        status_label_vi: idx < 2 ? "Đang xử lý" : "Hoàn thành",
+        can_cancel: idx < 2,
+      }),
+    );
+    const service = createMockService(makeFeed(manyTasks));
+
+    render(
+      <AiTaskCenterProvider
+        actorId="parent-a"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="header-pill" />
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    fireEvent.click(trigger);
+
+    expect(screen.getByTestId("task-card-job-paged-1")).toBeInTheDocument();
+    expect(screen.getByTestId("task-card-job-paged-6")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-card-job-paged-7"),
+    ).not.toBeInTheDocument();
+
+    const nav = within(
+      screen.getByTestId("global-task-center-panel"),
+    ).getByRole("navigation", { name: "Trung tâm tác vụ AI" });
+    expect(nav).toHaveTextContent("Trang 1 / 2");
+
+    fireEvent.click(within(nav).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByTestId("task-card-job-paged-7")).toBeInTheDocument();
+    expect(screen.getByTestId("task-card-job-paged-10")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("task-card-job-paged-1"),
+    ).not.toBeInTheDocument();
+    expect(nav).toHaveTextContent("Trang 2 / 2");
+  });
 });

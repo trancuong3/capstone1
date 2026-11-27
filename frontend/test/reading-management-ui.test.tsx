@@ -382,4 +382,189 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
       "T2, T4, T6 · Asia/Ho_Chi_Minh",
     );
   });
+
+  it("paginates goals, due reminders, collections with filter reset, and VerifiedBookPicker with search reset", async () => {
+    const ts = "2026-11-20T08:00:00Z";
+    const goalsList = Array.from({ length: 9 }, (_, i) => ({
+      id: `33333333-3333-4333-8333-${String(i + 1).padStart(12, "0")}`,
+      child_id: childId,
+      metric: "MINUTES",
+      target_value: 15 + i * 5,
+      period: "DAILY",
+      starts_on: "2026-11-01",
+      ends_on: null,
+      timezone: "Asia/Ho_Chi_Minh",
+      status: "ACTIVE",
+      current_value: 5,
+      progress_percent: 25,
+      created_at: ts,
+      updated_at: ts,
+      phase: "RUNNING",
+      streak_cycles: 0,
+      cycle_starts_on: "2026-11-20",
+      cycle_ends_on: "2026-11-20",
+    }));
+    const dueList = Array.from({ length: 8 }, (_, i) => ({
+      id: `99999999-9999-4999-8999-${String(i + 1).padStart(12, "0")}`,
+      reminder_id: `55555555-5555-4555-8555-${String(i + 1).padStart(12, "0")}`,
+      scheduled_local_date: `2026-11-${String(10 + i).padStart(2, "0")}`,
+      scheduled_for: ts,
+      status: "PENDING",
+      acknowledged_at: null,
+      email_status: "NOT_REQUESTED",
+      email_attempts: 0,
+      email_sent_at: null,
+      email_error_code: null,
+      reminder: {
+        id: `55555555-5555-4555-8555-${String(i + 1).padStart(12, "0")}`,
+        child_id: childId,
+        remind_at: `${String(10 + i).padStart(2, "0")}:00:00`,
+        weekdays: [0, 2, 4],
+        timezone: "Asia/Ho_Chi_Minh",
+        is_active: true,
+        email_enabled: false,
+        deleted_at: null,
+        created_at: ts,
+        updated_at: ts,
+      },
+    }));
+    const collectionsList = Array.from({ length: 8 }, (_, i) => ({
+      id: `77777777-7777-4777-8777-${String(i + 1).padStart(12, "0")}`,
+      child_id: childId,
+      book_id: `88888888-8888-4888-8888-${String(i + 1).padStart(12, "0")}`,
+      collection_type: i < 2 ? "FAVORITE" : "WANT_TO_READ",
+      created_at: ts,
+      book: {
+        id: `88888888-8888-4888-8888-${String(i + 1).padStart(12, "0")}`,
+        title: `Sách bộ sưu tập ${i + 1}`,
+        author: "Tác giả",
+        min_grade: 1,
+        max_grade: 3,
+        lifecycle_status: "ACTIVE",
+        available_to_read: true,
+      },
+    }));
+    const catalogBooks = Array.from({ length: 12 }, (_, i) => ({
+      id: `12121212-1212-4121-8121-${String(i + 1).padStart(12, "0")}`,
+      title: i === 11 ? "Truyện Đặc Biệt Cuối" : `Sách thư viện số ${i + 1}`,
+      author: "Tác giả mẫu",
+      min_grade: 1,
+      max_grade: 3,
+      page_count: 10,
+      cover_url: null,
+      lifecycle_status: "ACTIVE",
+      is_private: false,
+      created_at: ts,
+    }));
+
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/profiles/children") return Response.json([child]);
+      if (url.pathname === "/books/catalog") return Response.json(catalogBooks);
+      if (url.pathname === "/reading-management/goals")
+        return Response.json(goalsList);
+      if (url.pathname === "/reading-management/plans")
+        return Response.json([]);
+      if (url.pathname === "/reading-management/collections")
+        return Response.json(collectionsList);
+      if (url.pathname === "/reading-management/reminders")
+        return Response.json([]);
+      if (url.pathname === "/reading-management/reminders/due")
+        return Response.json(dueList);
+      throw new Error("Unexpected API route: " + url.pathname);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    // Goals paginated at 4/page
+    const goalsSection = await screen.findByRole("region", {
+      name: "Mục tiêu đọc",
+    });
+    expect(goalsSection.querySelectorAll("article[data-goal-id]")).toHaveLength(
+      4,
+    );
+    const goalsNav = within(goalsSection).getByRole("navigation", {
+      name: "Phân trang mục tiêu đọc",
+    });
+    expect(goalsNav).toHaveTextContent("Trang 1 / 3");
+    await user.click(within(goalsNav).getByRole("button", { name: /Tiếp/ }));
+    expect(goalsNav).toHaveTextContent("Trang 2 / 3");
+    expect(goalsSection.querySelectorAll("article[data-goal-id]")).toHaveLength(
+      4,
+    );
+
+    // Due reminders paginated at 5/page
+    const remindersSection = screen.getByRole("region", {
+      name: "Lịch nhắc đọc",
+    });
+    expect(remindersSection.querySelectorAll("li[data-due-id]")).toHaveLength(
+      5,
+    );
+    const dueNav = within(remindersSection).getByRole("navigation", {
+      name: "Phân trang lời nhắc đến giờ",
+    });
+    await user.click(within(dueNav).getByRole("button", { name: /Tiếp/ }));
+    expect(remindersSection.querySelectorAll("li[data-due-id]")).toHaveLength(
+      3,
+    );
+
+    // Collections paginated at 5/page and reset page on filter click
+    const collectionsSection = screen.getByRole("region", {
+      name: "Sách yêu thích và danh sách muốn đọc",
+    });
+    const collectionsNav = within(collectionsSection).getByRole("navigation", {
+      name: "Phân trang sách đã lưu",
+    });
+    await user.click(
+      within(collectionsNav).getByRole("button", { name: /Tiếp/ }),
+    );
+    expect(
+      within(collectionsSection).getByText("Sách bộ sưu tập 6"),
+    ).toBeInTheDocument();
+    const filterGroup = within(collectionsSection).getByRole("group", {
+      name: "Lọc sách đã lưu",
+    });
+    await user.click(
+      within(filterGroup).getByRole("button", { name: /Yêu thích/ }),
+    );
+    expect(
+      within(collectionsSection).getByText("Sách bộ sưu tập 1"),
+    ).toBeInTheDocument();
+    expect(
+      within(collectionsSection).queryByText("Sách bộ sưu tập 6"),
+    ).not.toBeInTheDocument();
+
+    // VerifiedBookPicker paginated at 5/page with search resetting page to 1
+    await user.click(
+      within(collectionsSection).getByText(/Thêm từ thư viện sách đã xác minh/i),
+    );
+    expect(
+      within(collectionsSection).getByText("Sách thư viện số 1"),
+    ).toBeInTheDocument();
+    expect(
+      within(collectionsSection).queryByText("Sách thư viện số 6"),
+    ).not.toBeInTheDocument();
+
+    const pickerNav = within(collectionsSection).getByRole("navigation", {
+      name: "Trang thư viện sách",
+    });
+    expect(pickerNav).toHaveTextContent("Trang 1 / 3");
+    await user.click(within(pickerNav).getByRole("button", { name: /Tiếp/ }));
+    expect(pickerNav).toHaveTextContent("Trang 2 / 3");
+    expect(
+      within(collectionsSection).getByText("Sách thư viện số 6"),
+    ).toBeInTheDocument();
+
+    const searchInput = within(collectionsSection).getByRole("searchbox");
+    await user.type(searchInput, "Đặc Biệt");
+    expect(
+      within(collectionsSection).getByText("Truyện Đặc Biệt Cuối"),
+    ).toBeInTheDocument();
+    expect(
+      within(collectionsSection).queryByRole("navigation", {
+        name: "Trang thư viện sách",
+      }),
+    ).not.toBeInTheDocument();
+  });
 });

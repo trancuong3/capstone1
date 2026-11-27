@@ -618,6 +618,14 @@ export function AdminVireadTrainingScreen() {
 
   const flow2Blockers =
     data?.flow2_blockers ?? data?.storage_summary?.flow2_blockers ?? [];
+  const safeJobsPage = Math.min(
+    Math.max(1, jobsPage),
+    Math.max(1, Math.ceil((data?.jobs.length ?? 0) / TRAINING_LIST_PAGE_SIZE)),
+  );
+  const safeRunsPage = Math.min(
+    Math.max(1, runsPage),
+    Math.max(1, Math.ceil((data?.runs.length ?? 0) / TRAINING_LIST_PAGE_SIZE)),
+  );
   const hasWaitingColabJob = Boolean(
     data?.jobs.some(
       (j) =>
@@ -1150,22 +1158,8 @@ export function AdminVireadTrainingScreen() {
                 <div className="space-y-3">
                   {data.jobs
                     .slice(
-                      (Math.min(
-                        jobsPage,
-                        Math.max(
-                          1,
-                          Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
-                        ),
-                      ) -
-                        1) *
-                        TRAINING_LIST_PAGE_SIZE,
-                      Math.min(
-                        jobsPage,
-                        Math.max(
-                          1,
-                          Math.ceil(data.jobs.length / TRAINING_LIST_PAGE_SIZE),
-                        ),
-                      ) * TRAINING_LIST_PAGE_SIZE,
+                      (safeJobsPage - 1) * TRAINING_LIST_PAGE_SIZE,
+                      safeJobsPage * TRAINING_LIST_PAGE_SIZE,
                     )
                     .map((job) => {
                       const stage = job.progress.stage;
@@ -1582,7 +1576,7 @@ export function AdminVireadTrainingScreen() {
                     compact
                     itemLabel={t("training.jobsItemLabel")}
                     onPageChange={setJobsPage}
-                    page={jobsPage}
+                    page={safeJobsPage}
                     pageSize={TRAINING_LIST_PAGE_SIZE}
                     total={data.jobs.length}
                   />
@@ -1601,22 +1595,8 @@ export function AdminVireadTrainingScreen() {
                 <div className="space-y-3">
                   {data.runs
                     .slice(
-                      (Math.min(
-                        runsPage,
-                        Math.max(
-                          1,
-                          Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
-                        ),
-                      ) -
-                        1) *
-                        TRAINING_LIST_PAGE_SIZE,
-                      Math.min(
-                        runsPage,
-                        Math.max(
-                          1,
-                          Math.ceil(data.runs.length / TRAINING_LIST_PAGE_SIZE),
-                        ),
-                      ) * TRAINING_LIST_PAGE_SIZE,
+                      (safeRunsPage - 1) * TRAINING_LIST_PAGE_SIZE,
+                      safeRunsPage * TRAINING_LIST_PAGE_SIZE,
                     )
                     .map((run) => {
                       const runBenchmarks = data.benchmarks.filter(
@@ -1706,7 +1686,7 @@ export function AdminVireadTrainingScreen() {
                     compact
                     itemLabel={t("training.runsItemLabel")}
                     onPageChange={setRunsPage}
-                    page={runsPage}
+                    page={safeRunsPage}
                     pageSize={TRAINING_LIST_PAGE_SIZE}
                     total={data.runs.length}
                   />

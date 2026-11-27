@@ -13,6 +13,7 @@ import {
 } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -20,6 +21,7 @@ import type { AuditLogDTO } from "@/types/admin";
 
 const AUDIT_TABLE_GRID_COLS =
   "md:grid-cols-[minmax(0,11rem)_minmax(0,1.25fr)_minmax(0,1.7fr)_minmax(0,1.15fr)_7.5rem]";
+const AUDIT_PAGE_SIZE = 10;
 
 function resolveAuditActionTone(action: string): AdminBadgeTone {
   const normalized = action.toLowerCase();
@@ -168,6 +170,7 @@ export function AdminAuditScreen() {
   const t = useTranslations("admin");
   const { formatDateTime } = useI18n();
   const [items, setItems] = useState<readonly AuditLogDTO[] | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
   const [cursor, setCursor] = useState<string | null>(null);
   const [action, setAction] = useState("");
   const [resource, setResource] = useState("");
@@ -200,8 +203,8 @@ export function AdminAuditScreen() {
           limit: 10,
         });
         if (requestId !== requestIdRef.current) return;
-        setItems((current) =>
-          append
+        setItems((current) => {
+          const nextList = append
             ? Array.from(
                 new Map(
                   [...(current ?? []), ...page.items].map((item) => [
@@ -210,8 +213,18 @@ export function AdminAuditScreen() {
                   ]),
                 ).values(),
               )
-            : page.items,
-        );
+            : page.items;
+          if (!append) {
+            setPageNumber(1);
+          } else if (
+            current &&
+            nextList.length > current.length &&
+            nextList.length > AUDIT_PAGE_SIZE
+          ) {
+            setPageNumber(Math.ceil(nextList.length / AUDIT_PAGE_SIZE));
+          }
+          return nextList;
+        });
         setCursor(page.next_cursor);
       } catch {
         if (requestId !== requestIdRef.current) return;
@@ -241,6 +254,14 @@ export function AdminAuditScreen() {
   }, [action, load, resource]);
 
   const hasFilters = Boolean(action.trim() || resource.trim());
+  const totalPages = Math.max(
+    1,
+    Math.ceil((items?.length ?? 0) / AUDIT_PAGE_SIZE),
+  );
+  const safePage = Math.min(Math.max(1, pageNumber), totalPages);
+  const visibleItems =
+    items?.slice((safePage - 1) * AUDIT_PAGE_SIZE, safePage * AUDIT_PAGE_SIZE) ??
+    [];
 
   return (
     <>
@@ -380,7 +401,7 @@ export function AdminAuditScreen() {
             </div>
 
             <ul className="divide-y divide-border">
-              {items.map((item) => {
+              {visibleItems.map((item) => {
                 const metadataPreview = summarizeMetadata(item.metadata);
                 return (
                   <li
@@ -397,11 +418,14 @@ export function AdminAuditScreen() {
 
                       <div className="min-w-0">
                         <AdminBadge
-                          className="max-w-full truncate font-mono"
+                          className="max-w-full overflow-hidden font-mono"
                           dot
+                          title={item.action}
                           tone={resolveAuditActionTone(item.action)}
                         >
-                          {item.action}
+                          <span className="min-w-0 truncate">
+                            {item.action}
+                          </span>
                         </AdminBadge>
                       </div>
                     </div>
@@ -448,6 +472,15 @@ export function AdminAuditScreen() {
               })}
             </ul>
           </section>
+
+          <PaginationBar
+            className="mt-4"
+            compact
+            onPageChange={setPageNumber}
+            page={safePage}
+            pageSize={AUDIT_PAGE_SIZE}
+            total={items.length}
+          />
 
           {loadMoreError ? (
             <div className="mt-4">

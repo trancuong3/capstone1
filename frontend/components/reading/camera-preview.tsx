@@ -41,7 +41,7 @@ interface CameraPreviewProps {
   onPickDeviceImage?: () => void;
 }
 
-const AUTO_SCAN_COOLDOWN_MS = 1800;
+const AUTO_SCAN_COOLDOWN_MS = 3500;
 
 export function CameraPreview({
   children,

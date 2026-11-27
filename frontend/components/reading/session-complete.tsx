@@ -22,6 +22,7 @@ import Image from "next/image";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
@@ -64,6 +65,14 @@ export function SessionComplete({
   const speechPlayer = useSpeechPlayer();
   const offeredVoiceRef = useRef(false);
   const [showWordList, setShowWordList] = useState(false);
+  const [unassessedPage, setUnassessedPage] = useState(1);
+  const [correctWordsPage, setCorrectWordsPage] = useState(1);
+  const [mispronouncedWordsPage, setMispronouncedWordsPage] = useState(1);
+  const [skippedWordsPage, setSkippedWordsPage] = useState(1);
+  const [transcriptsPage, setTranscriptsPage] = useState(1);
+  const WORDS_PAGE_SIZE = 24;
+  const ISSUE_WORDS_PAGE_SIZE = 18;
+  const TRANSCRIPTS_PAGE_SIZE = 5;
   const rangeWasPartial =
     summary.selected_range_pages !== undefined &&
     summary.selected_range_pages !== null &&
@@ -385,138 +394,277 @@ export function SessionComplete({
             skippedWords.length > 0 ? (
               <div className="space-y-3.5">
                 {!hasWordAssessment && spokenWords.length > 0 ? (
-                  <div>
-                    <p className="mb-2 text-sm text-muted">
-                      {t("complete.unassessedOnlyLabel")}
-                    </p>
-                    <div
-                      className="viread-learning-content flex flex-wrap gap-2"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {spokenWords.map((word, index) => (
-                        <span
-                          key={`${word}-${index}`}
-                          className="rounded-full border border-border bg-white px-3 py-1 text-sm text-ink"
-                        >
-                          {word}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                {correctWords.length > 0 && (
-                  <div>
-                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted">
-                      <CheckCircle2 className="size-4 text-emerald-600" />
-                      <span>
-                        {t("complete.correctWordsTitle", {
-                          count: formatNumber(correctWords.length),
-                        })}
-                      </span>
-                    </p>
-                    <div
-                      className="viread-learning-content flex max-h-48 flex-wrap gap-1.5 overflow-y-auto pe-1"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {correctWords.map((word, idx) => (
-                        <span
-                          key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-sm font-semibold text-ink shadow-2xs transition-colors hover:bg-emerald-50/50"
-                        >
-                          <CheckCircle2
-                            aria-hidden="true"
-                            className="size-3.5 shrink-0 text-success-ink"
-                          />
-                          {word}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {mispronouncedWords.length > 0 && (
-                  <div className="rounded-control border border-rose-200 bg-rose-50/60 p-3.5">
-                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-danger">
-                      <AlertCircle className="size-4 text-rose-600" />
-                      <span>
-                        {t("complete.mispronouncedWordsTitle", {
-                          count: formatNumber(mispronouncedWords.length),
-                        })}
-                      </span>
-                    </p>
-                    <div
-                      className="viread-learning-content flex max-h-40 flex-wrap gap-1.5 overflow-y-auto pe-1"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {mispronouncedWords.map((word, idx) => (
-                        <span
-                          key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 py-1 text-sm font-semibold text-rose-800 shadow-2xs"
-                        >
-                          <XCircle
-                            aria-hidden="true"
-                            className="size-3.5 shrink-0 text-rose-600"
-                          />
-                          {word}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {skippedWords.length > 0 && (
-                  <div className="rounded-control border border-amber-200 bg-amber-50/60 p-3.5">
-                    <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-warning">
-                      <AlertCircle className="size-4 text-amber-700" />
-                      <span>
-                        {t("complete.skippedWordsTitle", {
-                          count: formatNumber(skippedWords.length),
-                        })}
-                      </span>
-                    </p>
-                    <div
-                      className="viread-learning-content flex max-h-40 flex-wrap gap-1.5 overflow-y-auto pe-1"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {skippedWords.map((word, idx) => (
-                        <span
-                          key={`${word}-${idx}`}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-3 py-1 text-sm font-semibold text-amber-900 shadow-2xs"
-                        >
-                          <AlertCircle
-                            aria-hidden="true"
-                            className="size-3.5 shrink-0 text-amber-700"
-                          />
-                          {word}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {transcripts.length > 0 && (
-                  <div>
-                    <p className="mb-1.5 text-sm font-semibold text-muted">
-                      {t("complete.micSentencesTitle")}
-                    </p>
-                    <div className="max-h-32 space-y-1.5 overflow-y-auto pe-1">
-                      {transcripts.map((transcriptItem, idx) => (
+                  (() => {
+                    const totalUnassessedPages = Math.max(
+                      1,
+                      Math.ceil(spokenWords.length / WORDS_PAGE_SIZE),
+                    );
+                    const safeUnassessedPage = Math.min(
+                      Math.max(1, unassessedPage),
+                      totalUnassessedPages,
+                    );
+                    const unassessedStart =
+                      (safeUnassessedPage - 1) * WORDS_PAGE_SIZE;
+                    const visibleSpoken = spokenWords.slice(
+                      unassessedStart,
+                      unassessedStart + WORDS_PAGE_SIZE,
+                    );
+                    return (
+                      <div>
+                        <p className="mb-2 text-sm text-muted">
+                          {t("complete.unassessedOnlyLabel")}
+                        </p>
                         <div
-                          key={idx}
-                          className="viread-learning-content rounded-lg border border-border bg-white/80 px-3 py-1.5 text-sm italic text-ink"
+                          className="viread-learning-content flex flex-wrap gap-2"
                           dir="ltr"
                           lang="vi"
                         >
-                          &ldquo;{transcriptItem}&rdquo;
+                          {visibleSpoken.map((word, index) => (
+                            <span
+                              key={`${word}-${unassessedStart + index}`}
+                              className="rounded-full border border-border bg-white px-3 py-1 text-sm text-ink"
+                            >
+                              {word}
+                            </span>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                        <PaginationBar
+                          ariaLabel={t("complete.sttResultsTitle")}
+                          className="mt-2.5"
+                          compact
+                          onPageChange={setUnassessedPage}
+                          page={safeUnassessedPage}
+                          pageSize={WORDS_PAGE_SIZE}
+                          total={spokenWords.length}
+                        />
+                      </div>
+                    );
+                  })()
+                ) : null}
+                {correctWords.length > 0 &&
+                  (() => {
+                    const totalCorrectPages = Math.max(
+                      1,
+                      Math.ceil(correctWords.length / WORDS_PAGE_SIZE),
+                    );
+                    const safeCorrectPage = Math.min(
+                      Math.max(1, correctWordsPage),
+                      totalCorrectPages,
+                    );
+                    const correctStart =
+                      (safeCorrectPage - 1) * WORDS_PAGE_SIZE;
+                    const visibleCorrect = correctWords.slice(
+                      correctStart,
+                      correctStart + WORDS_PAGE_SIZE,
+                    );
+                    return (
+                      <div>
+                        <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-muted">
+                          <CheckCircle2 className="size-4 text-emerald-600" />
+                          <span>
+                            {t("complete.correctWordsTitle", {
+                              count: formatNumber(correctWords.length),
+                            })}
+                          </span>
+                        </p>
+                        <div
+                          className="viread-learning-content flex flex-wrap gap-1.5"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {visibleCorrect.map((word, idx) => (
+                            <span
+                              key={`${word}-${correctStart + idx}`}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1 text-sm font-semibold text-ink shadow-2xs transition-colors hover:bg-emerald-50/50"
+                            >
+                              <CheckCircle2
+                                aria-hidden="true"
+                                className="size-3.5 shrink-0 text-success-ink"
+                              />
+                              {word}
+                            </span>
+                          ))}
+                        </div>
+                        <PaginationBar
+                          ariaLabel={t("complete.correctWordsTitle", {
+                            count: formatNumber(correctWords.length),
+                          })}
+                          className="mt-2.5"
+                          compact
+                          onPageChange={setCorrectWordsPage}
+                          page={safeCorrectPage}
+                          pageSize={WORDS_PAGE_SIZE}
+                          total={correctWords.length}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                {mispronouncedWords.length > 0 &&
+                  (() => {
+                    const totalMispronouncedPages = Math.max(
+                      1,
+                      Math.ceil(
+                        mispronouncedWords.length / ISSUE_WORDS_PAGE_SIZE,
+                      ),
+                    );
+                    const safeMispronouncedPage = Math.min(
+                      Math.max(1, mispronouncedWordsPage),
+                      totalMispronouncedPages,
+                    );
+                    const mispronouncedStart =
+                      (safeMispronouncedPage - 1) * ISSUE_WORDS_PAGE_SIZE;
+                    const visibleMispronounced = mispronouncedWords.slice(
+                      mispronouncedStart,
+                      mispronouncedStart + ISSUE_WORDS_PAGE_SIZE,
+                    );
+                    return (
+                      <div className="rounded-control border border-rose-200 bg-rose-50/60 p-3.5">
+                        <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-danger">
+                          <AlertCircle className="size-4 text-rose-600" />
+                          <span>
+                            {t("complete.mispronouncedWordsTitle", {
+                              count: formatNumber(mispronouncedWords.length),
+                            })}
+                          </span>
+                        </p>
+                        <div
+                          className="viread-learning-content flex flex-wrap gap-1.5"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {visibleMispronounced.map((word, idx) => (
+                            <span
+                              key={`${word}-${mispronouncedStart + idx}`}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-white px-3 py-1 text-sm font-semibold text-rose-800 shadow-2xs"
+                            >
+                              <XCircle
+                                aria-hidden="true"
+                                className="size-3.5 shrink-0 text-rose-600"
+                              />
+                              {word}
+                            </span>
+                          ))}
+                        </div>
+                        <PaginationBar
+                          ariaLabel={t("complete.mispronouncedWordsTitle", {
+                            count: formatNumber(mispronouncedWords.length),
+                          })}
+                          className="mt-2.5"
+                          compact
+                          onPageChange={setMispronouncedWordsPage}
+                          page={safeMispronouncedPage}
+                          pageSize={ISSUE_WORDS_PAGE_SIZE}
+                          total={mispronouncedWords.length}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                {skippedWords.length > 0 &&
+                  (() => {
+                    const totalSkippedPages = Math.max(
+                      1,
+                      Math.ceil(skippedWords.length / ISSUE_WORDS_PAGE_SIZE),
+                    );
+                    const safeSkippedPage = Math.min(
+                      Math.max(1, skippedWordsPage),
+                      totalSkippedPages,
+                    );
+                    const skippedStart =
+                      (safeSkippedPage - 1) * ISSUE_WORDS_PAGE_SIZE;
+                    const visibleSkipped = skippedWords.slice(
+                      skippedStart,
+                      skippedStart + ISSUE_WORDS_PAGE_SIZE,
+                    );
+                    return (
+                      <div className="rounded-control border border-amber-200 bg-amber-50/60 p-3.5">
+                        <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-warning">
+                          <AlertCircle className="size-4 text-amber-700" />
+                          <span>
+                            {t("complete.skippedWordsTitle", {
+                              count: formatNumber(skippedWords.length),
+                            })}
+                          </span>
+                        </p>
+                        <div
+                          className="viread-learning-content flex flex-wrap gap-1.5"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {visibleSkipped.map((word, idx) => (
+                            <span
+                              key={`${word}-${skippedStart + idx}`}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-white px-3 py-1 text-sm font-semibold text-amber-900 shadow-2xs"
+                            >
+                              <AlertCircle
+                                aria-hidden="true"
+                                className="size-3.5 shrink-0 text-amber-700"
+                              />
+                              {word}
+                            </span>
+                          ))}
+                        </div>
+                        <PaginationBar
+                          ariaLabel={t("complete.skippedWordsTitle", {
+                            count: formatNumber(skippedWords.length),
+                          })}
+                          className="mt-2.5"
+                          compact
+                          onPageChange={setSkippedWordsPage}
+                          page={safeSkippedPage}
+                          pageSize={ISSUE_WORDS_PAGE_SIZE}
+                          total={skippedWords.length}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                {transcripts.length > 0 &&
+                  (() => {
+                    const totalTranscriptPages = Math.max(
+                      1,
+                      Math.ceil(transcripts.length / TRANSCRIPTS_PAGE_SIZE),
+                    );
+                    const safeTranscriptsPage = Math.min(
+                      Math.max(1, transcriptsPage),
+                      totalTranscriptPages,
+                    );
+                    const transcriptsStart =
+                      (safeTranscriptsPage - 1) * TRANSCRIPTS_PAGE_SIZE;
+                    const visibleTranscripts = transcripts.slice(
+                      transcriptsStart,
+                      transcriptsStart + TRANSCRIPTS_PAGE_SIZE,
+                    );
+                    return (
+                      <div>
+                        <p className="mb-1.5 text-sm font-semibold text-muted">
+                          {t("complete.micSentencesTitle")}
+                        </p>
+                        <div className="space-y-1.5">
+                          {visibleTranscripts.map((transcriptItem, idx) => (
+                            <div
+                              key={transcriptsStart + idx}
+                              className="viread-learning-content rounded-lg border border-border bg-white/80 px-3 py-1.5 text-sm italic text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              &ldquo;{transcriptItem}&rdquo;
+                            </div>
+                          ))}
+                        </div>
+                        <PaginationBar
+                          ariaLabel={t("complete.micSentencesTitle")}
+                          className="mt-2.5"
+                          compact
+                          onPageChange={setTranscriptsPage}
+                          page={safeTranscriptsPage}
+                          pageSize={TRANSCRIPTS_PAGE_SIZE}
+                          total={transcripts.length}
+                        />
+                      </div>
+                    );
+                  })()}
               </div>
             ) : (
               <div className="py-4 text-center">

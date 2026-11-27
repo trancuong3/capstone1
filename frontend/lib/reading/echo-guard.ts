@@ -57,6 +57,7 @@ export interface EchoSegment {
   readonly text: string;
   readonly receivedAt: number;
   readonly onsetAt?: number | null;
+  readonly audioEndedAt?: number | null;
 }
 
 interface PlaybackRecord {
@@ -98,23 +99,47 @@ export class EchoGuard {
     if (record && record.endedAt === null) record.endedAt = now;
   }
 
+  /** Remove a playback record that failed before any audio ever played. */
+  discardPlayback(id: string): void {
+    const index = this.records.findIndex((entry) => entry.id === id);
+    if (index >= 0) this.records.splice(index, 1);
+  }
+
   isPlaying(): boolean {
     return this.records.some((record) => record.endedAt === null);
   }
 
   evaluate(segment: EchoSegment): EchoVerdict {
-    const active = this.records.find(
-      (record) =>
+    const active = this.records.find((record) => {
+      // When VAD timestamps show the child finished speaking BEFORE TTS even
+      // started, never drop the utterance merely because STT delivery was late.
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt < record.startedAt
+      ) {
+        return false;
+      }
+      return (
         record.startedAt <= segment.receivedAt &&
-        (record.endedAt === null || segment.receivedAt < record.endedAt),
-    );
+        (record.endedAt === null || segment.receivedAt < record.endedAt)
+      );
+    });
     if (active)
       return { accept: false, reason: "playing", playbackId: active.id };
 
     const tokens = tokenizeVietnameseText(segment.text);
     for (let index = this.records.length - 1; index >= 0; index -= 1) {
       const record = this.records[index];
-      if (record.endedAt === null || segment.receivedAt < record.startedAt) {
+      if (record.endedAt === null) {
+        continue;
+      }
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt < record.startedAt
+      ) {
+        continue;
+      }
+      if (segment.receivedAt < record.startedAt) {
         continue;
       }
       const sinceEnd = segment.receivedAt - record.endedAt;
@@ -145,6 +170,17 @@ export class EchoGuard {
           };
         }
         continue;
+      }
+      if (
+        segment.audioEndedAt != null &&
+        segment.audioEndedAt >= record.startedAt &&
+        segment.audioEndedAt < record.endedAt + this.onsetGraceMs
+      ) {
+        return {
+          accept: false,
+          reason: "onset-during-playback",
+          playbackId: record.id,
+        };
       }
       if (
         sinceEnd <= this.tailMs &&

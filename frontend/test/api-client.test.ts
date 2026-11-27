@@ -246,4 +246,33 @@ describe("real API client", () => {
       message: "Có lỗi xảy ra. Vui lòng thử lại sau.",
     });
   });
+
+  it("aborts stalled fetches after timeoutMs and surfaces a retryable ServiceError", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      );
+
+      const pending = requestApi("/reading/scan-page-ocr", schema, undefined, {
+        timeoutMs: 250,
+      }).catch((err: unknown) => err);
+
+      await vi.advanceTimersByTimeAsync(250);
+      const caught = await pending;
+      expect(caught).toBeInstanceOf(ServiceError);
+      expect(caught).toMatchObject({
+        code: "NETWORK_ERROR",
+        status: 0,
+        retryable: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

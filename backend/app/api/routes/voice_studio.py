@@ -7,12 +7,13 @@ import base64
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_active_profile_id
 from app.api.routes.voice import (
     _accepts_db_kwarg,
+    _accepts_kwarg,
     _extract_audio_accept,
     _tts_cache_headers,
     get_voice_orchestrator,
@@ -126,6 +127,7 @@ async def timed_text_to_speech(
     payload: TimedSpeechRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     actor_id: UUID = Depends(require_active_profile_id),
     db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
@@ -145,6 +147,9 @@ async def timed_text_to_speech(
         book_id=payload.book_id,
         page_revision_id=payload.page_revision_id,
         cache_scope=payload.cache_scope,
+        allow_voice_switch=(
+            (request.headers.get("x-voice-lock-update") or "").strip() == "1"
+        ),
     )
     orchestrator = get_voice_orchestrator()
     timed_kwargs: dict[str, Any] = {
@@ -155,6 +160,8 @@ async def timed_text_to_speech(
     }
     if _accepts_db_kwarg(orchestrator.synthesize_timed):
         timed_kwargs["db"] = db
+    if _accepts_kwarg(orchestrator.synthesize_timed, "background_tasks"):
+        timed_kwargs["background_tasks"] = background_tasks
     try:
         speech = await orchestrator.synthesize_timed(**timed_kwargs)
     except VoiceProviderError as error:

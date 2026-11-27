@@ -88,7 +88,9 @@ const DEFAULT_POLICY: VoicePolicyPreferences = {
 };
 
 type Listener = () => void;
-const listeners = new Set<Listener>();
+const policyListeners = new Set<Listener>();
+const lockListeners = new Set<Listener>();
+const voiceSwitchedSessions = new Set<string>();
 let cachedPolicy: VoicePolicyPreferences | null = null;
 let activeSessionId: string | null = null;
 const memoryLocks = new Map<string, SessionVoiceLock>();
@@ -163,8 +165,12 @@ function sanitizePolicy(raw: unknown): VoicePolicyPreferences {
   };
 }
 
-function notifyListeners(): void {
-  listeners.forEach((fn) => fn());
+function notifyPolicyListeners(): void {
+  policyListeners.forEach((fn) => fn());
+}
+
+function notifyLockListeners(): void {
+  lockListeners.forEach((fn) => fn());
 }
 
 export function getDefaultVoicePolicyPreferences(): VoicePolicyPreferences {
@@ -195,14 +201,30 @@ export function setVoicePolicyPreferences(
       // In-memory state still applies for this page view.
     }
   }
-  notifyListeners();
+  notifyPolicyListeners();
   return next;
 }
 
 export function subscribeVoicePolicy(listener: Listener): () => void {
-  listeners.add(listener);
+  policyListeners.add(listener);
   return () => {
-    listeners.delete(listener);
+    policyListeners.delete(listener);
+  };
+}
+
+export function subscribeVoiceLock(listener: Listener): () => void {
+  lockListeners.add(listener);
+  return () => {
+    lockListeners.delete(listener);
+  };
+}
+
+export function subscribeVoicePolicyPreferences(
+  listener: Listener,
+): () => void {
+  policyListeners.add(listener);
+  return () => {
+    policyListeners.delete(listener);
   };
 }
 
@@ -301,7 +323,7 @@ export function lockSessionVoice(
     const changedActive = activeSessionId !== cleanSessionId;
     activeSessionId = cleanSessionId;
     if (changedActive) {
-      notifyListeners();
+      notifyLockListeners();
     }
     return existing;
   }
@@ -362,13 +384,16 @@ export function lockSessionVoice(
       // Keep in-memory lock active
     }
   }
-  notifyListeners();
+  if (existing && overrides?.forceUpdate) {
+    voiceSwitchedSessions.add(cleanSessionId);
+  }
+  notifyLockListeners();
   return lock;
 }
 
 export function setActiveVoiceSession(sessionId: string | null): void {
   activeSessionId = sessionId ? sessionId.trim() || null : null;
-  notifyListeners();
+  notifyLockListeners();
 }
 
 export function getActiveSessionVoiceLock(): SessionVoiceLock | null {
@@ -379,6 +404,7 @@ export function getActiveSessionVoiceLock(): SessionVoiceLock | null {
 export function releaseSessionVoiceLock(sessionId: string): void {
   const clean = sessionId.trim();
   memoryLocks.delete(clean);
+  voiceSwitchedSessions.delete(clean);
   if (activeSessionId === clean) {
     activeSessionId = null;
   }
@@ -389,7 +415,7 @@ export function releaseSessionVoiceLock(sessionId: string): void {
       // Ignore
     }
   }
-  notifyListeners();
+  notifyLockListeners();
 }
 
 export function recordSessionUtteranceVoice(
@@ -459,9 +485,26 @@ export function getEffectiveTeacherPersona(): TeacherPersona {
   return getTeacherPersonaForVoice(voiceId, active?.gender ?? null);
 }
 
+export function approveSessionVoiceSwitch(
+  sessionId: string | null | undefined,
+): void {
+  const clean = (sessionId ?? "").trim();
+  if (clean) {
+    voiceSwitchedSessions.add(clean);
+  }
+}
+
+export function hasPendingSessionVoiceSwitch(
+  sessionId: string | null | undefined,
+): boolean {
+  const clean = (sessionId ?? "").trim();
+  return clean ? voiceSwitchedSessions.has(clean) : false;
+}
+
 export function resetVoiceLockAndPolicyForTests(): void {
   cachedPolicy = null;
   activeSessionId = null;
   memoryLocks.clear();
+  voiceSwitchedSessions.clear();
   utteranceAudits.clear();
 }

@@ -295,6 +295,52 @@ describe("TodaySummary", () => {
       screen.getByText(/Buổi tiếp theo: Thứ tư, 11\/11 \(Đọc buổi tối\)/),
     ).toBeInTheDocument();
   });
+
+  it("paginates combined today plans and daily goals at 4 per page and clamps if items shrink", async () => {
+    const user = userEvent.setup();
+    const sixPlans = Array.from({ length: 4 }, (_, i) =>
+      plan({
+        id: `44444444-4444-4444-8444-${String(i + 1).padStart(12, "0")}`,
+        title: `Kế hoạch hôm nay ${i + 1}`,
+      }),
+    );
+    const twoGoals = Array.from({ length: 2 }, (_, i) =>
+      goal({
+        id: `33333333-3333-4333-8333-${String(i + 1).padStart(12, "0")}`,
+        target_value: 25 + i * 10,
+      }),
+    );
+    const { rerender } = render(
+      <TodaySummary childName="Bé An" plans={sixPlans} goals={twoGoals} />,
+    );
+
+    const region = screen.getByRole("region", { name: "Hôm nay" });
+    expect(within(region).getAllByRole("listitem")).toHaveLength(4);
+    expect(within(region).getByText("Kế hoạch hôm nay 1")).toBeInTheDocument();
+    expect(within(region).queryByText(/25 phút/)).not.toBeInTheDocument();
+
+    const nav = within(region).getByRole("navigation");
+    expect(nav).toHaveTextContent("Trang 1 / 2");
+
+    await user.click(within(nav).getByRole("button", { name: /Tiếp/ }));
+    expect(within(region).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(region).getByText(/25 phút/)).toBeInTheDocument();
+    expect(
+      within(region).queryByText("Kế hoạch hôm nay 1"),
+    ).not.toBeInTheDocument();
+
+    // Clamps cleanly when items shrink to 2
+    rerender(
+      <TodaySummary
+        childName="Bé An"
+        plans={sixPlans.slice(0, 2)}
+        goals={[]}
+      />,
+    );
+    expect(within(region).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(region).getByText("Kế hoạch hôm nay 1")).toBeInTheDocument();
+    expect(within(region).queryByRole("navigation")).not.toBeInTheDocument();
+  });
 });
 
 describe("conflictMessage", () => {

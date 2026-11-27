@@ -3,6 +3,8 @@ import { createPlaywrightAuthFixtureHeaders } from "../../lib/auth/playwright-au
 import type { VoiceEngineHealthSnapshot } from "../../lib/reading/voice-engine-status";
 import type { ProcessingCapabilities } from "../../types/karaoke-processing";
 
+export const PLAYWRIGHT_ORIGIN = `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? "3106"}`;
+
 export function readyVoiceStatus(
   defaultVoiceId: string,
 ): VoiceEngineHealthSnapshot {
@@ -186,7 +188,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   };
   await seedBrowserSession(page);
   const headers = {
-    "access-control-allow-origin": "http://127.0.0.1:3106",
+    "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
     "access-control-allow-headers": "authorization,content-type,accept",
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
@@ -282,7 +284,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   await page.context().route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.origin === "http://127.0.0.1:3106") return route.continue();
+    if (url.origin === PLAYWRIGHT_ORIGIN) return route.continue();
     if (
       url.hostname === "example.supabase.co" &&
       url.pathname === "/auth/v1/user"
@@ -602,6 +604,22 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         contact_info_status: "available",
         children: state.emptyChildren ? [] : [child],
       });
+    if (path === "/parent-notifications/preferences")
+      return respond(route, {
+        weekly_digest_enabled: true,
+        inactivity_alert_enabled: true,
+        inactivity_days: 5,
+        milestone_enabled: true,
+        digest_weekday: 6,
+        timezone: "Asia/Ho_Chi_Minh",
+        quiet_hours_start: 21,
+        quiet_hours_end: 7,
+        max_emails_per_week: 4,
+        delivery_configured: true,
+        delivery_provider: "resend",
+        updated_at: timestamp,
+      });
+    if (path === "/parent-notifications/history") return respond(route, []);
     if (path === "/profiles/children")
       return respond(route, state.emptyChildren ? [] : [child]);
     if (path === `/profiles/children/${ids.child}`)
@@ -1114,6 +1132,107 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
           "Chưa cấu hình nhà cung cấp tạo ảnh AI miễn phí.",
         v2_storage_degraded: false,
       });
+    const recMatch =
+      request.method() === "GET"
+        ? /^\/learning\/children\/([^/]+)\/recommendations$/.exec(path)
+        : null;
+    if (recMatch) {
+      const targetChildId = decodeURIComponent(recMatch[1]);
+      return respond(route, {
+        child_id: targetChildId,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        mascot_greeting_vi: `Chào ${child.alias}! Hôm nay cùng vui học nhé!`,
+        natural_break_reminder_vi:
+          "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh.",
+        today_activities_count: 1,
+        focus_difficult_words: [word.display_text],
+        primary_recommendation: {
+          game_key: "KARAOKE",
+          zone_title_vi: "Sân khấu âm nhạc",
+          game_title_vi: "Hát vui cùng bé",
+          reason_vi: "Cùng bé luyện nhịp điệu và câu hát rõ lời.",
+          suggested_mode: "FULL_SONG",
+          suggested_difficulty: 1,
+          target_words: [word.display_text],
+          href: "/karaoke",
+          priority: 1,
+        },
+        recommendations: [
+          {
+            game_key: "KARAOKE",
+            zone_title_vi: "Sân khấu âm nhạc",
+            game_title_vi: "Hát vui cùng bé",
+            reason_vi: "Cùng bé luyện nhịp điệu và câu hát rõ lời.",
+            suggested_mode: "FULL_SONG",
+            suggested_difficulty: 1,
+            target_words: [word.display_text],
+            href: "/karaoke",
+            priority: 1,
+          },
+        ],
+      });
+    }
+    const analyticsMatch =
+      request.method() === "GET"
+        ? /^\/learning\/children\/([^/]+)\/parent-analytics$/.exec(path)
+        : null;
+    if (analyticsMatch) {
+      const targetChildId = decodeURIComponent(analyticsMatch[1]);
+      const windowDays =
+        Number(url.searchParams.get("window_days") ?? "30") || 30;
+      return respond(route, {
+        child_id: targetChildId,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        window_days: windowDays,
+        is_diagnostic: false,
+        disclaimer_vi:
+          "Báo cáo này tổng hợp hoạt động Học mà Chơi để hỗ trợ luyện đọc tại nhà, không phải đánh giá hay chẩn đoán y khoa.",
+        observed_skills_count: 0,
+        estimated_skills_count: 0,
+        unknown_skills_count: 0,
+        skills: [],
+        practiced_difficult_words: [],
+        module_activities: [],
+        karaoke_weak_segments: [],
+        home_support_tips_vi: [],
+        generated_at: timestamp,
+      });
+    }
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/catalog"
+    )
+      return respond(route, {
+        samples: [
+          {
+            sample_key: "sunny-garden",
+            title: "Khu vườn đầy nắng",
+            theme: "Thiên nhiên",
+            description: "Chú mèo mướp và chú bướm trong khu vườn đầy nắng.",
+            image_url: "/images/picture-description/sunny-garden.jpg",
+          },
+        ],
+        book_pages: [],
+      });
+    if (
+      request.method() === "GET" &&
+      path === "/games/picture-description/sessions"
+    )
+      return respond(route, []);
+    if (request.method() === "GET" && path === "/games/sentence-shooter/books")
+      return respond(route, [
+        {
+          id: ids.book,
+          name: book.name,
+          title: book.title,
+          author: book.author,
+          min_grade: book.min_grade,
+          max_grade: book.max_grade,
+          available_rounds: 3,
+        },
+      ]);
     state.unexpected.push(`unknown:${path}`);
     return respond(route, {}, 404);
   });

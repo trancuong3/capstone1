@@ -36,6 +36,7 @@ _STORAGE_HTTP_CLIENTS: weakref.WeakKeyDictionary[
 ] = weakref.WeakKeyDictionary()
 _STORAGE_HEALTH_CACHE_TTL_SECONDS = 15.0
 _STORAGE_HEALTH_CACHE: tuple[float, tuple[str, str, str], dict[str, str]] | None = None
+_STORAGE_PROBE_TIMEOUT = httpx.Timeout(5.0, connect=3.0)
 
 
 def clear_storage_health_cache() -> None:
@@ -55,7 +56,7 @@ def _get_pooled_storage_http_client() -> httpx.AsyncClient | None:
     client = _STORAGE_HTTP_CLIENTS.get(loop)
     if client is None or getattr(client, "is_closed", False):
         client = httpx.AsyncClient(
-            timeout=httpx.Timeout(2.5, connect=1.5),
+            timeout=_STORAGE_PROBE_TIMEOUT,
             follow_redirects=False,
             trust_env=False,
             limits=httpx.Limits(
@@ -240,16 +241,31 @@ async def probe_storage_health(*, bypass_cache: bool = False) -> dict[str, str]:
             f"{quote(SUPABASE_STORAGE_BUCKET, safe='')}"
         )
         headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
+
+        async def _probe_with_client(client: httpx.AsyncClient) -> httpx.Response:
+            try:
+                resp = await client.head(url, headers=headers)
+            except (httpx.HTTPError, TimeoutError, ValueError, OSError):
+                return await client.get(url, headers=headers)
+            head_status = getattr(resp, "status_code", None)
+            if isinstance(head_status, int) and head_status not in {200, 401, 403, 404}:
+                try:
+                    return await client.get(url, headers=headers)
+                except (httpx.HTTPError, TimeoutError, ValueError, OSError):
+                    return resp
+            return resp
+
         pooled = _get_pooled_storage_http_client()
         if pooled is not None:
-            response = await pooled.head(url, headers=headers)
+            response = await _probe_with_client(pooled)
         else:
             async with httpx.AsyncClient(
-                timeout=httpx.Timeout(2.5, connect=1.5),
+                timeout=_STORAGE_PROBE_TIMEOUT,
                 follow_redirects=False, trust_env=False,
             ) as client:
-                response = await client.head(url, headers=headers)
-        if response.status_code == 200:
+                response = await _probe_with_client(client)
+        status_code = getattr(response, "status_code", None)
+        if status_code == 200:
             item = {
                 **_health_item(
                     "storage", "Supabase Storage", "HEALTHY", "healthy",
@@ -257,7 +273,7 @@ async def probe_storage_health(*, bypass_cache: bool = False) -> dict[str, str]:
                 ),
                 **core_meta,
             }
-        elif response.status_code in {401, 403}:
+        elif isinstance(status_code, int) and status_code in {401, 403}:
             item = {
                 **_health_item(
                     "storage", "Supabase Storage", "UNAVAILABLE", "failed",
@@ -265,7 +281,7 @@ async def probe_storage_health(*, bypass_cache: bool = False) -> dict[str, str]:
                 ),
                 **core_meta,
             }
-        elif response.status_code == 404:
+        elif status_code == 404:
             item = {
                 **_health_item(
                     "storage", "Supabase Storage", "UNAVAILABLE", "failed",
@@ -290,11 +306,12 @@ async def probe_storage_health(*, bypass_cache: bool = False) -> dict[str, str]:
             **core_meta,
         }
 
-    _STORAGE_HEALTH_CACHE = (
-        time.monotonic() + _STORAGE_HEALTH_CACHE_TTL_SECONDS,
-        cache_key,
-        dict(item),
-    )
+    if item["status"] in {"HEALTHY", "UNAVAILABLE"}:
+        _STORAGE_HEALTH_CACHE = (
+            time.monotonic() + _STORAGE_HEALTH_CACHE_TTL_SECONDS,
+            cache_key,
+            dict(item),
+        )
     return item
 
 
@@ -304,9 +321,55 @@ _WORKER_LABELS = {
     "book_quality": "Book quality worker",
     "admin_ai_workflow": "Admin AI workflow worker",
     "parent_book_submission": "Parent book submission worker",
+    "parent_email_dispatcher": "Parent email dispatcher worker",
     "active_model_registry": "Model registry worker",
     "local_trainer_process": "Local training process",
 }
+
+
+def collect_email_delivery_health() -> dict[str, str]:
+    """Read-only check of parent email provider configuration (never leaks secrets)."""
+    from app.database import config as settings
+    from app.providers.parent_email_transport import (
+        active_email_provider,
+        is_public_app_url,
+    )
+
+    provider = active_email_provider()
+    if provider == "unconfigured":
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "UNAVAILABLE",
+            "disabled",
+            "Chưa cấu hình RESEND_API_KEY hoặc SMTP_* để tự động gửi email cho phụ huynh.",
+        )
+    if provider != "mail_sink" and not SUPABASE_ADMIN_KEY:
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "DEGRADED",
+            "failed",
+            "Đã cấu hình gửi mail nhưng thiếu SUPABASE_SECRET_KEY để tra cứu email xác minh.",
+        )
+    if (
+        settings.APP_ENVIRONMENT == "production"
+        and not is_public_app_url(settings.PARENT_EMAIL_APP_URL)
+    ):
+        return _health_item(
+            "parent_email_delivery",
+            "Gửi email phụ huynh",
+            "DEGRADED",
+            "unknown",
+            f"Đã cấu hình nhà cung cấp ({provider}) nhưng PARENT_EMAIL_APP_URL chưa phải URL HTTPS công khai.",
+        )
+    return _health_item(
+        "parent_email_delivery",
+        "Gửi email phụ huynh",
+        "HEALTHY",
+        "healthy",
+        f"Dịch vụ gửi email phụ huynh sẵn sàng ({provider}).",
+    )
 
 
 def _worker_state(worker: Any) -> str:
@@ -441,10 +504,24 @@ _NON_OCR_WORKER_QUEUE_BRANCHES: tuple[tuple[str, str], ...] = (
         """
         SELECT
             'viread_ocr_training'::text AS worker_key,
-            COALESCE(COUNT(*) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')), 0)::int AS queue_depth,
-            MIN(created_at) FILTER (WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB'))::timestamptz AS oldest_pending,
-            MAX(updated_at) FILTER (WHERE status = 'COMPLETED')::timestamptz AS last_success
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','LOCAL_RUNNING','COLAB_RUNNING','COLAB_SUBMITTING','COLAB_SUBMITTED','COLAB_EXECUTING','WAITING_FOR_COLAB_WORKER','FALLBACK_QUEUED_COLAB')), 0)::int AS queue_depth,
+            MIN(created_at) FILTER (
+                WHERE (status = 'QUEUED' AND target = 'LOCAL')
+                   OR (status IN ('LOCAL_RUNNING','COLAB_RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at < now())
+            )::timestamptz AS oldest_pending,
+            MAX(updated_at) FILTER (WHERE status IN ('COMPLETED','BENCHMARKED','CANDIDATE'))::timestamptz AS last_success
         FROM public.viread_ocr_training_jobs
+        """,
+    ),
+    (
+        "parent_email_dispatcher",
+        """
+        SELECT
+            'parent_email_dispatcher'::text AS worker_key,
+            COALESCE(COUNT(*) FILTER (WHERE status IN ('RETRY','SENDING') AND (nextattemptat IS NULL OR nextattemptat <= now())), 0)::int AS queue_depth,
+            MIN(COALESCE(nextattemptat, createdat)) FILTER (WHERE status IN ('RETRY','SENDING') AND (nextattemptat IS NULL OR nextattemptat <= now()))::timestamptz AS oldest_pending,
+            MAX(sentat) FILTER (WHERE status = 'SENT')::timestamptz AS last_success
+        FROM public.parentemaildeliveries
         """,
     ),
     (
@@ -512,6 +589,7 @@ def _sqlite_portable_sql(sql: str) -> str:
         .replace("::text", "")
         .replace("::int", "")
         .replace("::timestamptz", "")
+        .replace("now()", "CURRENT_TIMESTAMP")
     )
 
 
@@ -540,13 +618,13 @@ async def _execute_worker_queue_metrics_on_session(
         else _NON_OCR_WORKER_QUEUE_BRANCHES
     )
     is_real_session = isinstance(session, AsyncSession)
-    is_sqlite = False
-    if is_real_session:
-        bind = getattr(session, "bind", None)
-        dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
-        is_sqlite = str(dialect_name).lower() == "sqlite"
-        if not session.in_transaction() and not is_sqlite:
-            await session.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+    bind = getattr(session, "bind", None) or getattr(
+        getattr(session, "sync_session", None), "bind", None
+    )
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", "")
+    is_sqlite = str(dialect_name).lower() == "sqlite"
+    if is_real_session and not session.in_transaction() and not is_sqlite:
+        await session.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
 
     union_sql = "\nUNION ALL\n".join(
         _sqlite_portable_sql(sql) if is_sqlite else sql for _k, sql in branches
@@ -717,22 +795,145 @@ def is_ocr_engine_ready_status(detail_status: object) -> bool:
 
 async def collect_remote_ocr_health() -> dict[str, Any]:
     """Collect remote Windows OCR worker heartbeats, engine states, and durable queue depth."""
-    from datetime import datetime, timezone
+    from datetime import datetime, timedelta, timezone
+    import json
+    from types import SimpleNamespace
 
     from app.database.session import AsyncSessionLocal
     from app.repositories.ocr_inference_job_repository import OcrInferenceJobRepository
     from app.services.ocr_inference_job_service import worker_heartbeat_ttl_seconds
+    from sqlalchemy import text
     from sqlalchemy.ext.asyncio import AsyncSession
 
     now = datetime.now(timezone.utc)
     ttl_seconds = worker_heartbeat_ttl_seconds()
+    hb_cutoff = now - timedelta(hours=24)
+
+    workers: list[Any] = []
+    queue: dict[str, Any] = {}
+
     async with AsyncSessionLocal() as db:
+        is_real_app_session = (
+            isinstance(db, AsyncSession)
+            and type(db).__module__.startswith("app.database")
+        )
+        dialect_name = ""
         if isinstance(db, AsyncSession):
-            # Read-only health queries skip BEGIN/ROLLBACK round-trips over cross-region pooler.
-            await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
-        repo = OcrInferenceJobRepository(db)
-        workers = await repo.list_worker_heartbeats(limit=10)
-        queue = await repo.queue_depth_counts(now=now)
+            bind = getattr(db, "bind", None)
+            dialect_name = str(getattr(getattr(bind, "dialect", None), "name", "")).lower()
+            if not db.in_transaction() and dialect_name != "sqlite":
+                # Read-only health queries skip BEGIN/ROLLBACK round-trips over cross-region pooler.
+                await db.connection(execution_options={"isolation_level": "AUTOCOMMIT"})
+
+        used_single_rtt = False
+        if is_real_app_session and dialect_name == "postgresql":
+            try:
+                row = (
+                    await db.execute(
+                        text(
+                            """
+                            SELECT
+                                COALESCE(
+                                    (
+                                        SELECT json_agg(row_to_json(w))
+                                        FROM (
+                                            SELECT
+                                                worker_id,
+                                                hostname,
+                                                status,
+                                                last_heartbeat_at,
+                                                active_job_count,
+                                                concurrency_limit,
+                                                model_profile,
+                                                model_sha256,
+                                                app_version,
+                                                git_sha,
+                                                engines
+                                            FROM public.ocr_worker_heartbeats
+                                            WHERE last_heartbeat_at >= :hb_cutoff
+                                            ORDER BY last_heartbeat_at DESC, worker_id ASC
+                                            LIMIT 10
+                                        ) w
+                                    ),
+                                    '[]'::json
+                                ) AS workers_json,
+                                (
+                                    SELECT row_to_json(q)
+                                    FROM (
+                                        SELECT
+                                            COALESCE(SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END), 0)::int AS queued,
+                                            COALESCE(SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END), 0)::int AS claimed,
+                                            COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0)::int AS running,
+                                            COALESCE(SUM(CASE WHEN status = 'FAILED_RETRYABLE' THEN 1 ELSE 0 END), 0)::int AS failed_retryable,
+                                            COALESCE(SUM(CASE WHEN status = 'DEAD_LETTER' THEN 1 ELSE 0 END), 0)::int AS dead_letter,
+                                            COALESCE(SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END), 0)::int AS succeeded,
+                                            COALESCE(SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END), 0)::int AS cancelled,
+                                            COALESCE(SUM(CASE WHEN status IN ('CLAIMED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= :now_ts THEN 1 ELSE 0 END), 0)::int AS expired_leases,
+                                            MIN(CASE WHEN status IN ('QUEUED', 'FAILED_RETRYABLE', 'CLAIMED', 'RUNNING') THEN created_at ELSE NULL END) AS oldest_pending_created,
+                                            MAX(CASE WHEN status = 'SUCCEEDED' THEN completed_at ELSE NULL END) AS latest_succeeded_at
+                                        FROM public.ocr_inference_jobs
+                                    ) q
+                                ) AS queue_json
+                            """
+                        ),
+                        {"hb_cutoff": hb_cutoff, "now_ts": now},
+                    )
+                ).mappings().first()
+                if row is not None:
+                    raw_workers = row.get("workers_json")
+                    if isinstance(raw_workers, str):
+                        raw_workers = json.loads(raw_workers)
+                    raw_queue = row.get("queue_json")
+                    if isinstance(raw_queue, str):
+                        raw_queue = json.loads(raw_queue)
+                    workers = [
+                        SimpleNamespace(
+                            WorkerId=item.get("worker_id"),
+                            Hostname=item.get("hostname"),
+                            Status=item.get("status"),
+                            LastHeartbeatAt=_normalize_utc_timestamp(item.get("last_heartbeat_at")),
+                            ActiveJobCount=item.get("active_job_count"),
+                            ConcurrencyLimit=item.get("concurrency_limit"),
+                            ModelProfile=item.get("model_profile"),
+                            ModelSha256=item.get("model_sha256"),
+                            AppVersion=item.get("app_version"),
+                            GitSha=item.get("git_sha"),
+                            Engines=item.get("engines") or {},
+                        )
+                        for item in (raw_workers or [])
+                        if isinstance(item, dict)
+                    ]
+                    q_map = raw_queue if isinstance(raw_queue, dict) else {}
+                    oldest_dt = _normalize_utc_timestamp(q_map.get("oldest_pending_created"))
+                    latest_dt = _normalize_utc_timestamp(q_map.get("latest_succeeded_at"))
+                    queued_c = int(q_map.get("queued") or 0)
+                    claimed_c = int(q_map.get("claimed") or 0)
+                    running_c = int(q_map.get("running") or 0)
+                    failed_retryable_c = int(q_map.get("failed_retryable") or 0)
+                    queue = {
+                        "queued": queued_c,
+                        "claimed": claimed_c,
+                        "running": running_c,
+                        "failed_retryable": failed_retryable_c,
+                        "dead_letter": int(q_map.get("dead_letter") or 0),
+                        "succeeded": int(q_map.get("succeeded") or 0),
+                        "cancelled": int(q_map.get("cancelled") or 0),
+                        "expired_leases": int(q_map.get("expired_leases") or 0),
+                        "pending_total": queued_c + failed_retryable_c,
+                        "active_total": claimed_c + running_c,
+                        "oldest_pending_job_age_seconds": _age_seconds(oldest_dt, now),
+                        "latest_succeeded_at": latest_dt.isoformat() if latest_dt is not None else None,
+                    }
+                    used_single_rtt = True
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                used_single_rtt = False
+
+        if not used_single_rtt:
+            repo = OcrInferenceJobRepository(db)
+            workers = await repo.list_worker_heartbeats(limit=10)
+            queue = await repo.queue_depth_counts(now=now)
 
     serialized_workers: list[dict[str, Any]] = []
     latest_online_engines: dict[str, Any] = {}

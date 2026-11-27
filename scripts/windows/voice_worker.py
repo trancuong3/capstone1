@@ -493,6 +493,7 @@ class VoiceRuntimeEngine:
         self._load_lock = asyncio.Lock()
         self.active_stt_jobs = 0
         self.active_tts_jobs = 0
+        self.tts_waiters = 0
         self._prewarm_task: asyncio.Task[None] | None = None
 
     def select_tts_engine(
@@ -682,11 +683,13 @@ async def _prewarm_coaching_phrases() -> None:
         await asyncio.sleep(0.25)
         if runtime.tts_engine is None:
             return
-        while runtime.active_tts_jobs > 0:
-            await asyncio.sleep(0.3)
+        while runtime.active_tts_jobs > 0 or runtime.tts_waiters > 0:
+            await asyncio.sleep(0.5)
         try:
             await runtime.tts_semaphore.acquire()
             try:
+                if runtime.tts_waiters > 0:
+                    continue
                 word_count = len(WORD_TOKEN_RE.findall(phrase))
                 engine, active_prec = runtime.select_tts_engine(
                     word_sample=False, is_phonics=False, word_count=word_count
@@ -2058,6 +2061,7 @@ async def post_tts(req: TtsSynthesisRequest, request: Request) -> Response:
             duration_s,
         )
     else:
+        runtime.tts_waiters += 1
         try:
             await asyncio.wait_for(
                 runtime.tts_semaphore.acquire(), timeout=QUEUE_WAIT_SECONDS
@@ -2071,6 +2075,8 @@ async def post_tts(req: TtsSynthesisRequest, request: Request) -> Response:
                     "message": "Bộ đọc giọng nói trên máy đang bận xử lý câu trước.",
                 },
             ) from exc
+        finally:
+            runtime.tts_waiters = max(0, runtime.tts_waiters - 1)
 
         runtime.active_tts_jobs += 1
         try:

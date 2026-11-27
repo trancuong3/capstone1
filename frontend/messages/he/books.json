@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "נשמר בתור — ממתין למערכת",
     "queuedWaitingWorkerShort": "נשמר בתור — יזוהה אוטומטית",
     "reasonQueuedOffline": "העמוד נשמר בתור ויזוהה אוטומטית כשהמערכת תהיה זמינה.",
-    "toolCheckFailedNotice": "הבדיקה האוטומטית נתקלה בתקלה טכנית.",
-    "toolCheckCheckingNotice": "בודק את תוכן העמוד.",
+    "toolCheckFailedNotice": "תהליך הבדיקה נתקל בתקלה טכנית.",
+    "toolCheckCheckingNotice": "מריץ בדיקות אוטומטיות עבור דף זה.",
     "toolCheckReadyNotice": "העמוד מוכן להוספה לספר.",
-    "toolCheckRejectedNotice": "עמוד זה לא אושר.",
-    "toolCheckRecheckNotice": "העמוד דורש בדיקה חוזרת לפני הוספה לספר.",
+    "toolCheckRejectedNotice": "גרסת דף זו לא אושרה על ידי המנהל.",
+    "toolCheckRecheckNotice": "יש לבדוק מחדש דף זה לפני הוספתו לספר.",
     "toolCheckAddedNotice": "העמוד נוסף לספר שלך.",
     "uploadOfflineQueueButton": "העלה עמוד והוסף לתור OCR",
     "uploadQueuedOfflineNotice": "נשמרו {total} עמודים ({format}) בתור OCR. זיהוי הטקסט, ההגהה ובדיקת הבטיחות יופעלו אוטומטית עם חזרת שירות ה-OCR.",
     "retriedQueuedOfflineNotice": "בקשת הניסיון החוזר נשמרה בתור OCR. העמוד יעובד אוטומטית עם חזרת השירות.",
     "replacedPageImageQueuedOfflineNotice": "תמונת עמוד {page} הוחלפה ונוספה לתור OCR. הבדיקה תתחדש אוטומטית עם חזרת שירות ה-OCR.",
-    "replacedSubmissionImageQueuedOfflineNotice": "התמונה הוחלפה ונוספה לתור OCR. הבדיקה תתחדש אוטומטית עם חזרת שירות ה-OCR."
+    "replacedSubmissionImageQueuedOfflineNotice": "התמונה הוחלפה ונוספה לתור OCR. הבדיקה תתחדש אוטומטית עם חזרת שירות ה-OCR.",
+    "toolCheckPassedNotice": "הדף עבר את בדיקת הבטיחות בהצלחה."
   },
   "ocrContribution": {
     "cardAria": "תרומת דוגמאות לשיפור זיהוי הטקסט עבור {title}",

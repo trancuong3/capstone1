@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -85,6 +86,7 @@ const POLL_INTERVAL_WORKER_OFFLINE_MS = 12_000;
 const POLL_INTERVAL_OFFLINE_MAX_MS = 15_000;
 const MAX_ONLINE_POLL_ATTEMPTS = 120;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
+const QUEUED_JOBS_PAGE_SIZE = 5;
 const LAST_SCAN_JOB_STORAGE_KEY = "viread:book-scanner:last-job-id";
 
 function readStoredScanJobId(): string | null {
@@ -286,6 +288,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const [queuedJobs, setQueuedJobs] = useState<
     readonly LocalOcrPageScanJobDTO[]
   >([]);
+  const [queuedJobsPage, setQueuedJobsPage] = useState(1);
   const [checkingQueueNow, setCheckingQueueNow] = useState(false);
 
   const queuedJobsRef = useRef<readonly LocalOcrPageScanJobDTO[]>([]);
@@ -1018,6 +1021,18 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     ocrState.status === "queued"
       ? queuedJobs.filter((item) => item.job_id !== ocrState.jobId)
       : queuedJobs;
+  const queuedJobsTotalPages = Math.max(
+    1,
+    Math.ceil(listedQueuedJobs.length / QUEUED_JOBS_PAGE_SIZE),
+  );
+  const safeQueuedJobsPage = Math.min(
+    Math.max(1, queuedJobsPage),
+    queuedJobsTotalPages,
+  );
+  const visibleListedQueuedJobs = listedQueuedJobs.slice(
+    (safeQueuedJobsPage - 1) * QUEUED_JOBS_PAGE_SIZE,
+    safeQueuedJobsPage * QUEUED_JOBS_PAGE_SIZE,
+  );
 
   return (
     <section
@@ -1286,7 +1301,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             ) : null}
           </div>
           <ul className="space-y-1.5">
-            {listedQueuedJobs.map((item) => (
+            {visibleListedQueuedJobs.map((item) => (
               <li
                 className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-white/90 px-3 py-2 text-xs"
                 key={item.job_id}
@@ -1317,6 +1332,13 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </li>
             ))}
           </ul>
+          <PaginationBar
+            compact
+            onPageChange={setQueuedJobsPage}
+            page={safeQueuedJobsPage}
+            pageSize={QUEUED_JOBS_PAGE_SIZE}
+            total={listedQueuedJobs.length}
+          />
         </div>
       ) : null}
 

@@ -12,7 +12,52 @@
     "pictureCta": "그림 선택",
     "karaokeTitle": "아이와 함께 노래하기",
     "karaokeDesc": "좋아하는 노래를 선택하고, 음악을 들으며 화면의 가사에 맞춰 함께 노래를 불러보세요.",
-    "karaokeCta": "노래 도서관 열기"
+    "karaokeCta": "노래 도서관 열기",
+    "eyebrow": "매일 즐겁게 베트남어를 배워요",
+    "selectChildLabel": "자녀 프로필 선택",
+    "selectChildAria": "놀이 학습 영역의 자녀 프로필 선택",
+    "childOptionLabel": "{alias} · {grade}학년",
+    "calmSound": "부드러운 소리",
+    "soundMuted": "음소거됨",
+    "reduceMotion": "모션 줄이기",
+    "reducedMotionActive": "모션 줄이기 켜짐",
+    "onboardingGuideButton": "놀이 안내",
+    "mascotBadge": "ViRead 부엉이 추천",
+    "childProfileBadge": "프로필 {alias} · {grade}학년",
+    "defaultGreeting": "안녕! 오늘은 그림 이야기, 문장 만들기, 노래, 기억력 게임 중 무엇을 해볼까?",
+    "defaultRecommendationReason": "모든 활동이 읽고 있는 책과 부드럽게 연결되어 부담 없이 단어를 오래 기억할 수 있어요.",
+    "focusDifficultWordsLabel": "가볍게 복습 중인 단어:",
+    "playSuggestedCta": "추천 놀이 시작하기",
+    "onboardingRegionAria": "놀이 학습 영역 시작 안내",
+    "onboardingCounter": "빠른 안내 ({current}/{total})",
+    "onboardingStep1Title": "1. 좋아하는 놀이 코너를 골라요",
+    "onboardingStep1Body": "네 가지 편안한 코너: 그림 이야기, 문장 슈터, 신나는 노래방, 무엇을 기억하나요?",
+    "onboardingStep2Title": "2. 목소리나 터치로 놀이해요",
+    "onboardingStep2Body": "휴대폰과 태블릿에서 누르기 쉬운 크고 선명한 버튼이에요. 말로 하거나 글자를 골라도 좋아요.",
+    "onboardingStep3Title": "3. 부담 없이 즐겁게 배워요",
+    "onboardingStep3Body": "한 번에 10~15분이 가장 좋아요. 긴장되는 시간 제한 없이 AI 선생님과 부엉이가 늘 응원해요!",
+    "onboardingNext": "다음",
+    "onboardingDone": "이해했어요!",
+    "onboardingClose": "닫기",
+    "pictureZoneBadge": "이야기 세상",
+    "todaySuggestionBadge": "오늘의 추천",
+    "suggestedWordsLabel": "추천 단어:",
+    "shooterZoneBadge": "글자 모험",
+    "karaokeZoneBadge": "음악 무대",
+    "karaokeChipRhythm": "리듬·멜로디 채점",
+    "karaokeChipTap": "리듬 탭 놀이",
+    "karaokeChipSlowPractice": "0.85배속 구간 연습",
+    "memoryZoneBadge": "기억력 탐험",
+    "newBadge": "새 기능",
+    "memoryChipObserve": "그림 관찰",
+    "memoryChipRemember": "세부 기억하기",
+    "memoryChipStory": "이야기 이어가기",
+    "memoryTitle": "무엇을 기억하나요?",
+    "memoryDesc": "원하는 시간 동안 베트남어 그림을 살펴보고 색깔과 위치를 기억한 뒤 멋진 이야기를 이어서 말해보세요!",
+    "memoryCta": "기억력 게임 시작",
+    "breakReminderTitle": "건강한 눈 휴식:",
+    "defaultBreakReminder": "한 번에 10~15분 정도가 눈에 편안하고 자연스럽게 배우기에 알맞아요.",
+    "recommendationLoadError": "지금은 학습 추천을 불러올 수 없습니다."
   },
   "karaoke": {
     "title": "어린이 노래방",
@@ -150,6 +195,62 @@
         "countdownNext": "{seconds}초 후 시작",
         "interludeNext": "음악 구간 · 다음 문장 준비 중",
         "outro": "마지막 구간을 함께 들어볼까요"
+      },
+      "practiceModeGroupAria": "노래 연습 방식",
+      "headphoneRecommendation": "음정과 리듬을 가장 정확하게 채점하려면 이어폰 또는 헤드폰 착용을 권장해요!",
+      "speakerFilterHint": "스피커 사용 시 스마트 스피커 잡음 필터링이 작동합니다.",
+      "speakerBackingOn": "스피커 반주 켜짐",
+      "speakerBackingOff": "스피커로 반주 켜기 (잡음 필터링)",
+      "unsupportedScoringWithRhythmHint": "이 브라우저는 자유 부르기와 리듬 탭을 지원해요. 마이크 채점을 사용하려면 음성 인식을 지원하는 브라우저로 열어주세요.",
+      "micReadyNoticeDsp": "노래를 시작할 때 마이크 사용을 허용해주세요. 리듬과 음정 분석은 기기 내에서만 처리되며 음성은 저장되지 않아요.",
+      "rhythmTapButton": "노래 박자 맞추기 (스페이스바)",
+      "rhythmTapFeedback": "{feedback} · 연속 성공: {streak}",
+      "livePitchHz": "목소리 음높이: {hz} Hz",
+      "practicingSegment": "어려운 구간 {number} 연습 중",
+      "practicingRateSuffix": "({rate}배속)",
+      "tempoSegment": "구간 연습 · 0.85×",
+      "spaceHintRhythmTap": "노래가 재생될 때 스페이스바를 눌러 박자를 맞춰보세요.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "전체 부르기",
+          "shortLabel": "전체",
+          "description": "노래 한 곡을 끝까지 부르고 최고 점수를 기록해요."
+        },
+        "SEGMENT": {
+          "label": "어려운 구간 연습",
+          "shortLabel": "구간",
+          "description": "어려운 부분을 0.85배속으로 반복 연습해요. 전체 곡 최고 기록은 유지됩니다."
+        },
+        "LINE_PRACTICE": {
+          "label": "한 줄씩 연습",
+          "shortLabel": "한 줄",
+          "description": "한 줄씩 골라 또박또박 가사를 부르고 박자를 익혀요."
+        },
+        "RHYTHM_TAP": {
+          "label": "노래 박자 탭",
+          "shortLabel": "박자",
+          "description": "박자에 맞춰 탭 버튼이나 스페이스바를 눌러보세요. 마이크 없이도 즐겁게 리듬을 익혀요!"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "노래 음악성 분석",
+        "unmeasured": "측정 안 됨",
+        "points": "{score}점",
+        "statusGreat": "매우 좋음",
+        "statusGood": "좋음",
+        "statusPractice": "연습 필요",
+        "bestFullSong": "전체 곡 최고 기록: {score}점",
+        "rhythmLabel": "리듬",
+        "pitchLabel": "멜로디",
+        "lyricsLabel": "가사",
+        "fluencyLabel": "유창성",
+        "pitchBasisPrefix": "음정 채점 기준:",
+        "speakerBleedNote": "스피커 반주 소리가 마이크에 약간 섞여 들어왔어요.",
+        "insufficientHint": "이번에는 노래 신호가 충분하지 않아 채점할 수 없었어요. 마이크를 입 가까이에 대거나 이어폰을 쓰고 다시 불러보세요!",
+        "weakestSegmentTitle": "추가 연습 추천 구간 · {number}번째 줄",
+        "retrySegmentSlow": "이 구간 다시 연습 (0.85x)",
+        "segmentReportSummary": "구간별 리포트 ({count}줄)",
+        "segmentLineHeader": "{number}줄 ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "{number}번 문장 · ",
       "lineMatchedRetry": "{matched}/{evaluated}개 단어 일치 · 다시 연습",
       "lineUnheardRetry": "잘 들리지 않음 · 다시 연습"
+    },
+    "rhythmTap": {
+      "steady": "박자가 아주 고르네요!",
+      "early": "조금 빨랐어요!",
+      "late": "조금 늦었어요!",
+      "perfect": "정확한 박자예요!",
+      "good": "박자에 거의 맞았어요!",
+      "slightlyFast": "살짝 빨랐어요!",
+      "slightlySlow": "살짝 느렸어요!"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "전체 음악 채점 (리듬 · 멜로디 · 가사)",
+        "RHYTHM_AND_LYRICS": "리듬 및 가사 채점",
+        "LYRICS_ONLY": "가사만 채점",
+        "INSUFFICIENT_EVIDENCE": "음성 신호 부족",
+        "RHYTHM_TAP": "리듬 탭 채점"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "기준 멜로디 대조 (옥타브 무관)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "음정 안정도 및 멜로디 윤곽",
+        "UNAVAILABLE": "음정 측정 안 됨"
+      },
+      "gate": {
+        "silence": "아직 노랫소리가 들리지 않았어요. 마이크를 조금 가까이 대거나 확인 후 다시 해보세요!",
+        "noiseOnly": "주변이 조금 시끄러워 목소리가 잘 안 들려요. 조용한 곳으로 이동하거나 이어폰을 사용해보세요!",
+        "electricalHum": "마이크에 잡음이 섞여 있어요. 부모님께 마이크나 연결선을 확인해 달라고 부탁해요!",
+        "bleedHeadphones": "소리가 되울려 목소리 분리가 어려워요. 이어폰 볼륨을 살짝 낮추고 또렷하게 불러보세요!",
+        "bleedSpeaker": "마이크에 목소리보다 스피커 음악이 더 크게 들려요. 이어폰을 쓰거나 마이크를 가까이 대세요!",
+        "lowCoverage": "아직 아주 짧은 부분만 불렀어요. 몇 소절 더 부르면 전체 점수를 매길 수 있어요!",
+        "okHeadphones": "이어폰 모드 덕분에 목소리가 아주 깨끗하게 들렸어요!",
+        "okSpeaker": "작은 팁: 이어폰을 쓰면 마이크가 멜로디와 리듬을 가장 정확히 들을 수 있어요!"
+      },
+      "encouragement": {
+        "insufficient": "신호가 부족해 채점하지 못했어요. 마이크 가까이에서 또렷하게 불러볼까요?",
+        "high": "정말 멋져요! 박자도 정확하고 가사도 또렷하며 감정이 살아 있었어요!",
+        "good": "참 잘했어요! 리듬과 멜로디를 아주 안정적으로 잘 맞췄어요!",
+        "medium": "좋아요! 어려운 구간을 0.85배속으로 천천히 연습해보면 더 잘할 수 있어요!",
+        "low": "힘내세요! 한 줄씩 천천히 연습하면 노래 실력이 쑥쑥 늘어요!"
+      },
+      "lineTips": {
+        "unclear": "이 줄은 아직 발음이 선명하지 않았어요. 0.85배속으로 천천히 연습해보세요!",
+        "great": "최고예요! 이 줄을 자신 있고 정확한 박자로 불렀어요!",
+        "rhythmLate": "이 줄에서 박자가 살짝 늦었어요. 반주를 듣고 조금만 일찍 시작해보세요!",
+        "rhythmFast": "박자보다 살짝 빨랐어요. 하이라이트되는 글자에 맞춰 차분히 불러보세요!",
+        "rhythmSteady": "리듬 탭을 하거나 0.85배속으로 연습하면 박자가 훨씬 고르게 맞을 거예요!",
+        "pitch": "이 줄의 멜로디를 귀 기울여 듣고 음을 고르게 이어 불러보세요!",
+        "lyrics": "가사를 한 번 천천히 읽은 다음, 한 글자씩 또렷하게 불러보세요!",
+        "practiceMore": "꽤 잘했어요! 0.85배속으로 한 번만 더 연습하면 훨씬 좋아질 거예요!",
+        "insufficientLine": "이 줄이 잘 안 들렸어요. 마이크에 조금 더 가까이 대고 불러보세요!"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "화면의 글자 흐름에 맞춰 리듬 탭 버튼(또는 스페이스바)을 눌러보세요!",
+        "insufficientTip": "이 줄에 맞춰 일정한 박자로 탭해보세요!",
+        "okGuidance": "리듬 탭 모드는 마이크로 노래하기 전에 곡의 박자감을 익히는 데 큰 도움이 돼요!"
+      },
+      "lyricsOnlyFallbackGuidance": "이 기기에서 Web Audio 분석이 활성화되지 않아 이번에는 가사만 채점했습니다.",
+      "mildSpeakerBleedGuidance": "스피커 음악이 마이크에 조금 들어왔어요. 이어폰을 쓰면 음정과 리듬 채점이 더 정확해져요!"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "진행 중인 활동과 주변 풍경을 설명해보세요.",
       "step3Title": "색깔이나 느낌은 어떤가요?",
       "step3Detail": "색깔, 날씨 또는 아이가 느끼는 감정에 대한 세부 정보를 추가해보세요."
+    },
+    "aiTimeoutError": "AI 선생님 응답이 조금 늦어지고 있어요. 다시 시도를 눌러주세요.",
+    "micPausedBackground": "앱이 백그라운드로 전환되어 마이크를 안전하게 껐어요. 작성한 내용은 그대로 남아 있어요!",
+    "waitingTtsCooldown": "음성 안내가 완전히 끝난 뒤 마이크를 켜고 있어요...",
+    "offlineNotice": "기기가 오프라인 상태예요. 이야기는 그대로 보관되니 인터넷이 연결되면 바로 다시 채점을 눌러주세요!",
+    "gradeHintChipsLowerTitle": "시각적 말하기 힌트 (1~2학년)",
+    "collapseGradeHints": "이야기 틀 힌트 접기",
+    "expandGradeHints": "이야기 틀 힌트 펼치기",
+    "listenGuideButton": "안내 듣기",
+    "gradeHintsCollapsedNote": "{grade}학년의 자유로운 표현을 위해 힌트를 접어두었어요. 언제든 '이야기 틀 힌트 펼치기'를 누를 수 있어요!",
+    "teachingModeSectionAria": "AI 선생님 코칭 모드",
+    "teachingModeHeading": "AI 선생님 학습 모드",
+    "listenModeButton": "모드 안내 듣기",
+    "teachingModeGroupAria": "이야기하기 연습 모드 선택",
+    "targetWordsProgress": "연습 중인 목표 핵심 단어 ({used}/{total})",
+    "followUpSectionAria": "선생님의 다음 확장 질문",
+    "practiceFollowUpTitle": "선생님의 이어지는 질문",
+    "listenQuestionButton": "질문 듣기",
+    "resultModeBadge": "모드: {mode}",
+    "usedTargetWordsTitle": "잘 활용한 목표 핵심 단어",
+    "resultFollowUpTitle": "선생님의 다음 도전 질문",
+    "answerFollowUpButton": "이 질문에 답하기",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "관찰하기",
+        "cue": "그림을 자세히 살펴보세요. 누구와 무엇이 보이고 어떤 색이 눈에 띄나요?",
+        "audioHint": "관찰 모드예요. 그림을 자세히 보고 가장 눈에 띄는 사람, 동물, 사물을 말해보세요."
+      },
+      "VOCABULARY": {
+        "label": "어휘 익히기",
+        "cue": "위에 있는 추천 단어나 핵심 단어 1~2개를 문장에 넣어보세요.",
+        "audioHint": "어휘 모드예요. 위의 추천 단어 중 한두 개를 골라 설명 문장에 넣어보세요."
+      },
+      "SENTENCE": {
+        "label": "문장 만들기",
+        "cue": "누가 + 무엇을 하는지 + 어디서인지 이어서 완전한 한 문장을 만들어보세요.",
+        "audioHint": "문장 만들기 모드예요. 누가 어디서 무엇을 하고 있는지 완전한 문장으로 말해보세요."
+      },
+      "STORY": {
+        "label": "이야기하기",
+        "cue": "2~3문장을 자연스럽게 이어서 그림 속에서 어떤 일이 일어나고 있는지 들려주세요.",
+        "audioHint": "이야기하기 모드예요. 두세 문장을 이어서 그림 속 이야기를 들려주세요."
+      },
+      "INFER": {
+        "label": "추론하기",
+        "cue": "인물이 왜 그렇게 했을까요? 그 앞이나 뒤에는 어떤 일이 생길까요?",
+        "audioHint": "추론 모드예요. 인물이 왜 그렇게 행동했는지, 다음엔 어떤 일이 일어날지 상상해보세요."
+      },
+      "CREATE": {
+        "label": "창의 상상",
+        "cue": "재미있는 대사나 멋진 결말을 자유롭게 상상해보세요!",
+        "audioHint": "창의 모드예요. 그림 속 인물의 재미있는 말이나 멋진 다음 이야기를 만들어보세요."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "시작 힌트",
+      "EXPAND": "문장 확장하기",
+      "PRAISE": "칭찬과 응원",
+      "NEXT_CHALLENGE": "다음 도전"
+    },
+    "visualHintChips": {
+      "who": "누가 / 무엇이 있나요?",
+      "action": "무엇을 하고 있나요?",
+      "where": "어디 / 무슨 색인가요?"
     }
   },
   "karaokeRuntime": {

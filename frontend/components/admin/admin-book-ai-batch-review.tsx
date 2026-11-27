@@ -2,10 +2,11 @@
 
 import { LoaderCircle, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import {
   markAiPageRevisionSkipped,
@@ -198,6 +199,8 @@ export function AdminBookAiBatchReview({
   const { ocr } = useAdminServices();
   const t = useTranslations("admin");
   const { formatNumber } = useI18n();
+  const BATCH_RESULTS_PAGE_SIZE = 6;
+  const [resultsPage, setResultsPage] = useState(1);
   const session = useSyncExternalStore(
     (onChange) => subscribeBatchSession(bookId, onChange),
     () => getBatchSession(bookId),
@@ -248,6 +251,18 @@ export function AdminBookAiBatchReview({
   const verifiedResults = results.filter((item) => item.status === "verified");
   const savedResults = results.filter((item) => item.status === "saved");
   const failedResults = results.filter((item) => item.status === "failed");
+  const resultsTotalPages = Math.max(
+    1,
+    Math.ceil(results.length / BATCH_RESULTS_PAGE_SIZE),
+  );
+  const safeResultsPage = Math.min(
+    Math.max(1, resultsPage),
+    resultsTotalPages,
+  );
+  const visibleResults = results.slice(
+    (safeResultsPage - 1) * BATCH_RESULTS_PAGE_SIZE,
+    safeResultsPage * BATCH_RESULTS_PAGE_SIZE,
+  );
   const currentPageProgress =
     progress && progress.totalChunks > 0
       ? progress.completedChunks / progress.totalChunks
@@ -597,8 +612,8 @@ export function AdminBookAiBatchReview({
               failed: formatNumber(failedResults.length),
             })}
           </p>
-          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border px-3">
-            {results.map((result) => (
+          <ul className="divide-y divide-border rounded-lg border border-border px-3">
+            {visibleResults.map((result) => (
               <li
                 className="space-y-1.5 py-2.5 text-xs"
                 key={`${result.pageId}:${result.revisionId}`}
@@ -693,6 +708,13 @@ export function AdminBookAiBatchReview({
               </li>
             ))}
           </ul>
+          <PaginationBar
+            compact
+            onPageChange={setResultsPage}
+            page={safeResultsPage}
+            pageSize={BATCH_RESULTS_PAGE_SIZE}
+            total={results.length}
+          />
         </div>
       ) : null}
     </div>

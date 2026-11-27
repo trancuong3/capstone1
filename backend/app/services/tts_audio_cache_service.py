@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 import hashlib
@@ -24,9 +25,31 @@ from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
-from app.services.storage_service import delete_object, download_object, upload_object
+from app.services.storage_service import (
+    delete_object,
+    download_object,
+    download_object_async,
+    is_local_storage_enabled,
+    upload_object,
+)
 
 logger = logging.getLogger(__name__)
+
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
+_SCOPE_CACHE_CATALOG_TTL_SECONDS = 60.0
+_SCOPE_CACHE_PRIVATE_TTL_SECONDS = 15.0
+_SCOPE_CACHE_MAX_ENTRIES = 1024
+_DAILY_USAGE_CACHE_TTL_SECONDS = 15.0
+_SUMMARY_CACHE_TTL_SECONDS = 15.0
+_AUDIO_RAM_LRU_MAX_BYTES = 32 * 1024 * 1024  # 32 MiB bounded server RAM LRU
+_AUDIO_RAM_LRU_MAX_ITEM_BYTES = 4 * 1024 * 1024  # Never pin >4 MiB single clip
+
+_CACHE_STATE_LOCK = threading.Lock()
+_SCOPE_TARGET_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, Any]]" = OrderedDict()
+_DAILY_USAGE_CACHE: dict[tuple[int, date], tuple[float, dict[str, int]]] = {}
+_SUMMARY_CACHE: dict[tuple[int, int, int, date], tuple[float, dict[str, Any]]] = {}
+_AUDIO_RAM_LRU: "OrderedDict[tuple[str, str], tuple[bytes, str]]" = OrderedDict()
+_AUDIO_RAM_LRU_BYTES = 0
 
 DEFAULT_TTS_CACHE_MAX_BYTES = 150 * 1024 * 1024  # 150 MiB
 DEFAULT_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES = 300 * 1024 * 1024  # 300 MiB/day
@@ -57,13 +80,233 @@ def _reset_day_if_needed_locked(today: date) -> None:
         _RUNTIME_METRICS["quota_exhausted"] = False
 
 
+def invalidate_tts_cache_summary_cache() -> None:
+    """Clear the 15s RAM TTL summary cache when cache entries change."""
+    with _CACHE_STATE_LOCK:
+        _SUMMARY_CACHE.clear()
+
+
+def is_tts_cache_runtime_quota_exhausted() -> bool:
+    today = datetime.now(timezone.utc).date()
+    with _METRICS_LOCK:
+        _reset_day_if_needed_locked(today)
+        return bool(_RUNTIME_METRICS["quota_exhausted"])
+
+
+def get_cached_tts_audio_cache_summary(
+    db: AsyncSession | None,
+    *,
+    max_bytes: int | None = None,
+    daily_limit: int | None = None,
+    bypass_cache: bool = False,
+) -> dict[str, Any] | None:
+    if bypass_cache:
+        return None
+    bind_id = _db_bind_cache_key(db)
+    if bind_id == 0:
+        return None
+    resolved_max = get_tts_cache_max_bytes() if max_bytes is None else int(max_bytes)
+    resolved_daily = (
+        get_tts_cache_daily_egress_limit_bytes()
+        if daily_limit is None
+        else int(daily_limit)
+    )
+    today = datetime.now(timezone.utc).date()
+    key = (bind_id, resolved_max, resolved_daily, today)
+    now_mono = time.monotonic()
+    with _CACHE_STATE_LOCK:
+        entry = _SUMMARY_CACHE.get(key)
+        if entry is None or entry[0] <= now_mono:
+            if entry is not None:
+                _SUMMARY_CACHE.pop(key, None)
+            return None
+        payload = dict(entry[1])
+    if is_tts_cache_runtime_quota_exhausted():
+        payload["quota_exhausted"] = True
+    return payload
+
+
+def set_cached_tts_audio_cache_summary(
+    db: AsyncSession | None,
+    summary: dict[str, Any],
+    *,
+    max_bytes: int | None = None,
+    daily_limit: int | None = None,
+) -> None:
+    bind_id = _db_bind_cache_key(db)
+    if bind_id == 0:
+        return
+    resolved_max = get_tts_cache_max_bytes() if max_bytes is None else int(max_bytes)
+    resolved_daily = (
+        get_tts_cache_daily_egress_limit_bytes()
+        if daily_limit is None
+        else int(daily_limit)
+    )
+    today = datetime.now(timezone.utc).date()
+    key = (bind_id, resolved_max, resolved_daily, today)
+    now_mono = time.monotonic()
+    with _CACHE_STATE_LOCK:
+        expired = [k for k, (exp, _) in _SUMMARY_CACHE.items() if exp <= now_mono]
+        for k in expired:
+            _SUMMARY_CACHE.pop(k, None)
+        _SUMMARY_CACHE[key] = (now_mono + _SUMMARY_CACHE_TTL_SECONDS, dict(summary))
+
+
 def clear_tts_cache_runtime_metrics() -> None:
+    global _AUDIO_RAM_LRU_BYTES
     with _METRICS_LOCK:
         _RUNTIME_METRICS["usage_date"] = None
         _RUNTIME_METRICS["hits"] = 0
         _RUNTIME_METRICS["misses"] = 0
         _RUNTIME_METRICS["bytes_served"] = 0
         _RUNTIME_METRICS["quota_exhausted"] = False
+    with _CACHE_STATE_LOCK:
+        _SCOPE_TARGET_CACHE.clear()
+        _DAILY_USAGE_CACHE.clear()
+        _SUMMARY_CACHE.clear()
+        _AUDIO_RAM_LRU.clear()
+        _AUDIO_RAM_LRU_BYTES = 0
+
+
+def _audio_ram_lru_get(bucket: str, path: str) -> tuple[bytes, str] | None:
+    key = (bucket, path)
+    with _CACHE_STATE_LOCK:
+        entry = _AUDIO_RAM_LRU.get(key)
+        if entry is None:
+            return None
+        _AUDIO_RAM_LRU.move_to_end(key)
+        return entry
+
+
+def _audio_ram_lru_put(bucket: str, path: str, data: bytes, content_type: str) -> None:
+    global _AUDIO_RAM_LRU_BYTES
+    size = len(data)
+    if size <= 0 or size > _AUDIO_RAM_LRU_MAX_ITEM_BYTES or size > _AUDIO_RAM_LRU_MAX_BYTES:
+        return
+    key = (bucket, path)
+    with _CACHE_STATE_LOCK:
+        existing = _AUDIO_RAM_LRU.pop(key, None)
+        if existing is not None:
+            _AUDIO_RAM_LRU_BYTES = max(0, _AUDIO_RAM_LRU_BYTES - len(existing[0]))
+        while _AUDIO_RAM_LRU and (_AUDIO_RAM_LRU_BYTES + size) > _AUDIO_RAM_LRU_MAX_BYTES:
+            _, evicted = _AUDIO_RAM_LRU.popitem(last=False)
+            _AUDIO_RAM_LRU_BYTES = max(0, _AUDIO_RAM_LRU_BYTES - len(evicted[0]))
+        _AUDIO_RAM_LRU[key] = (data, content_type)
+        _AUDIO_RAM_LRU_BYTES += size
+
+
+def _audio_ram_lru_evict(objects: list[tuple[str, str]]) -> None:
+    global _AUDIO_RAM_LRU_BYTES
+    if not objects:
+        return
+    with _CACHE_STATE_LOCK:
+        for bucket, path in objects:
+            existing = _AUDIO_RAM_LRU.pop((str(bucket), str(path)), None)
+            if existing is not None:
+                _AUDIO_RAM_LRU_BYTES = max(0, _AUDIO_RAM_LRU_BYTES - len(existing[0]))
+
+
+def _scope_cache_invalidate(
+    *,
+    book_id: UUID | None = None,
+    page_id: UUID | None = None,
+    page_revision_id: UUID | None = None,
+) -> None:
+    if book_id is None and page_id is None and page_revision_id is None:
+        return
+    with _CACHE_STATE_LOCK:
+        to_remove = [
+            key
+            for key, (_, target) in _SCOPE_TARGET_CACHE.items()
+            if (book_id is not None and target.book_id == book_id)
+            or (page_id is not None and target.page_id == page_id)
+            or (page_revision_id is not None and target.page_revision_id == page_revision_id)
+        ]
+        for key in to_remove:
+            _SCOPE_TARGET_CACHE.pop(key, None)
+
+
+def _db_bind_cache_key(db: AsyncSession | None) -> int:
+    if db is None:
+        return 0
+    bind = getattr(db, "bind", None)
+    if bind is None:
+        try:
+            bind = db.get_bind()
+        except Exception:
+            bind = None
+    return id(bind) if bind is not None else 0
+
+
+async def _bg_record_hit(entry_id: UUID, byte_size: int) -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            await TtsAudioCacheRepository(session).record_hit(
+                entry_id, byte_size=max(0, int(byte_size))
+            )
+            await session.commit()
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="tts_cache_bg_record_hit_failed",
+            stage="tts_cache",
+            exception=exc,
+        )
+
+
+async def _bg_record_miss(stale_entry_id: UUID | None = None) -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            repo = TtsAudioCacheRepository(session)
+            if stale_entry_id is not None:
+                await repo.mark_entries_status([stale_entry_id], status="STALE")
+            await repo.record_miss()
+            await session.commit()
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="tts_cache_bg_record_miss_failed",
+            stage="tts_cache",
+            exception=exc,
+        )
+
+
+async def _bg_store_cached_audio(
+    *,
+    target: ResolvedCacheTarget,
+    normalized_text: str,
+    voice_id: str,
+    model_version: str,
+    speed: float,
+    audio_bytes: bytes,
+    source_content_type: str | None = None,
+    duration_seconds: float | None = None,
+    word_timings_json: list[dict[str, Any]] | dict[str, Any] | None = None,
+) -> None:
+    try:
+        async with AsyncSessionLocal() as session:
+            svc = TtsAudioCacheService(session)
+            await svc.store_cached_audio(
+                target=target,
+                normalized_text=normalized_text,
+                voice_id=voice_id,
+                model_version=model_version,
+                speed=speed,
+                audio_bytes=audio_bytes,
+                source_content_type=source_content_type,
+                duration_seconds=duration_seconds,
+                word_timings_json=word_timings_json,
+            )
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.WARNING,
+            event="tts_cache_bg_store_failed",
+            stage="tts_cache",
+            exception=exc,
+        )
 
 
 def is_tts_cache_enabled() -> bool:
@@ -746,6 +989,43 @@ class TtsAudioCacheService:
         if self.repo is not None and (
             page_revision_id is not None or page_id is not None or book_id is not None
         ):
+            use_scope_cache = isinstance(self.repo, TtsAudioCacheRepository) and (
+                defer_allowlist_check or allow_cache_write
+            )
+            scope_cache_key: tuple[Any, ...] | None = None
+            if use_scope_cache:
+                scope_cache_key = (
+                    _db_bind_cache_key(self.db),
+                    str(actor_id or "-"),
+                    str(book_id or "-"),
+                    str(page_id or "-"),
+                    str(page_revision_id or "-"),
+                    bool(allow_cache_write),
+                    bool(defer_allowlist_check),
+                )
+                now_mono = time.monotonic()
+                with _CACHE_STATE_LOCK:
+                    cached_scope = _SCOPE_TARGET_CACHE.get(scope_cache_key)
+                    if cached_scope is not None:
+                        if cached_scope[0] > now_mono:
+                            _SCOPE_TARGET_CACHE.move_to_end(scope_cache_key)
+                            return cached_scope[1]
+                        _SCOPE_TARGET_CACHE.pop(scope_cache_key, None)
+
+            def _cache_resolved_target(resolved: ResolvedCacheTarget) -> ResolvedCacheTarget:
+                if scope_cache_key is not None:
+                    ttl = (
+                        _SCOPE_CACHE_PRIVATE_TTL_SECONDS
+                        if resolved.scope == "PRIVATE"
+                        else _SCOPE_CACHE_CATALOG_TTL_SECONDS
+                    )
+                    with _CACHE_STATE_LOCK:
+                        _SCOPE_TARGET_CACHE[scope_cache_key] = (time.monotonic() + ttl, resolved)
+                        _SCOPE_TARGET_CACHE.move_to_end(scope_cache_key)
+                        while len(_SCOPE_TARGET_CACHE) > _SCOPE_CACHE_MAX_ENTRIES:
+                            _SCOPE_TARGET_CACHE.popitem(last=False)
+                return resolved
+
             if page_revision_id is not None:
                 info = await self.repo.get_page_revision_scope_info(
                     page_revision_id=page_revision_id,
@@ -795,25 +1075,29 @@ class TtsAudioCacheService:
                     await self._end_read_tx()
                     raise HTTPException(status_code=404, detail="Resource not found")
                 await self._end_read_tx()
-                return ResolvedCacheTarget(
-                    scope="PRIVATE",
-                    owner_parent_id=actor_id,
-                    book_id=resolved_book_id,
-                    page_id=resolved_page_id,
-                    page_revision_id=page_revision_id,
-                    can_store_on_miss=True,
+                return _cache_resolved_target(
+                    ResolvedCacheTarget(
+                        scope="PRIVATE",
+                        owner_parent_id=actor_id,
+                        book_id=resolved_book_id,
+                        page_id=resolved_page_id,
+                        page_revision_id=page_revision_id,
+                        can_store_on_miss=True,
+                    )
                 )
 
             if defer_allowlist_check and not allow_cache_write:
                 await self._end_read_tx()
-                return ResolvedCacheTarget(
-                    scope="CATALOG",
-                    owner_parent_id=None,
-                    book_id=resolved_book_id,
-                    page_id=resolved_page_id,
-                    page_revision_id=page_revision_id,
-                    can_store_on_miss=True,
-                    defer_allowlist_check=True,
+                return _cache_resolved_target(
+                    ResolvedCacheTarget(
+                        scope="CATALOG",
+                        owner_parent_id=None,
+                        book_id=resolved_book_id,
+                        page_id=resolved_page_id,
+                        page_revision_id=page_revision_id,
+                        can_store_on_miss=True,
+                        defer_allowlist_check=True,
+                    )
                 )
 
             can_store_catalog = (
@@ -827,13 +1111,15 @@ class TtsAudioCacheService:
                 )
             )
             await self._end_read_tx()
-            return ResolvedCacheTarget(
-                scope="CATALOG",
-                owner_parent_id=None,
-                book_id=resolved_book_id,
-                page_id=resolved_page_id,
-                page_revision_id=page_revision_id,
-                can_store_on_miss=can_store_catalog,
+            return _cache_resolved_target(
+                ResolvedCacheTarget(
+                    scope="CATALOG",
+                    owner_parent_id=None,
+                    book_id=resolved_book_id,
+                    page_id=resolved_page_id,
+                    page_revision_id=page_revision_id,
+                    can_store_on_miss=can_store_catalog,
+                )
             )
 
         norm_scope = (cache_scope or "").strip().upper() or None
@@ -918,128 +1204,213 @@ class TtsAudioCacheService:
         normalized_text: str,
         voice_id: str,
         model_version: str | None = None,
+        preferred_model_version: str | None = None,
         speed: float = 1.0,
         accept: str | None = None,
         audio_format: str | None = None,
         allow_speed_fallback: bool = True,
         require_word_timings: bool = False,
+        background_tasks: Any = None,
     ) -> CachedTtsHit | None:
         if not is_tts_cache_enabled() or self.repo is None or self.db is None:
             return None
         content_sha256 = canonical_tts_sha256(normalized_text)
         formats = preferred_cache_formats(accept=accept, audio_format=audio_format)
+        is_real_repo = isinstance(self.repo, TtsAudioCacheRepository)
+        use_bg_writes = background_tasks is not None and is_real_repo
+        bind_key = _db_bind_cache_key(self.db) if is_real_repo else 0
+        today = datetime.now(timezone.utc).date()
+        usage_cache_key = (bind_key, today)
         try:
             daily_limit = get_tts_cache_daily_egress_limit_bytes()
-            daily_usage = await self.repo.get_daily_usage()
+            daily_usage: dict[str, int]
+            if is_real_repo and daily_limit <= 0:
+                daily_usage = {"bytes_served": 0, "hit_count": 0, "miss_count": 0}
+            elif is_real_repo:
+                now_mono = time.monotonic()
+                cached_usage: dict[str, int] | None = None
+                with _CACHE_STATE_LOCK:
+                    entry_usage = _DAILY_USAGE_CACHE.get(usage_cache_key)
+                    if entry_usage is not None and entry_usage[0] > now_mono:
+                        cached_usage = dict(entry_usage[1])
+                if cached_usage is not None:
+                    daily_usage = cached_usage
+                else:
+                    daily_usage = await self.repo.get_daily_usage()
+                    now_put = time.monotonic()
+                    with _CACHE_STATE_LOCK:
+                        expired_keys = [
+                            k for k, (exp, _) in _DAILY_USAGE_CACHE.items() if exp <= now_put
+                        ]
+                        for k in expired_keys:
+                            _DAILY_USAGE_CACHE.pop(k, None)
+                        _DAILY_USAGE_CACHE[usage_cache_key] = (
+                            now_put + _DAILY_USAGE_CACHE_TTL_SECONDS,
+                            dict(daily_usage),
+                        )
+            else:
+                daily_usage = await self.repo.get_daily_usage()
+
             if daily_limit > 0 and daily_usage["bytes_served"] >= daily_limit:
                 await self._end_read_tx()
                 self._set_quota_exhausted(True)
                 return None
             self._set_quota_exhausted(False)
 
-            lookup_kwargs: dict[str, Any] = {
-                "scope": target.scope,
-                "owner_parent_id": target.owner_parent_id,
-                "content_sha256": content_sha256,
-                "voice_id": voice_id,
-                "model_version": model_version,
-                "speed": speed,
-                "audio_formats": formats,
-            }
-            if require_word_timings:
-                lookup_kwargs["require_word_timings"] = True
-
-            entry = await self.repo.get_active_entry(**lookup_kwargs)
+            entry = None
             folded: str | None = None
             folded_sha256: str | None = None
-            page_fallback_entry = None
-            if (
-                entry is None
-                and target.scope == "CATALOG"
-                and not normalized_text.startswith("phonics:")
-            ):
-                folded = folded_catalog_tts_text(normalized_text)
-                if folded and folded != canonical_tts_text(normalized_text):
-                    folded_sha256 = canonical_tts_sha256(folded)
-                    entry = await self.repo.get_active_entry(
-                        **{**lookup_kwargs, "content_sha256": folded_sha256}
-                    )
+            if is_real_repo:
+                is_phonics = normalized_text.startswith("phonics:")
+                if target.scope == "CATALOG" and not is_phonics:
+                    folded = folded_catalog_tts_text(normalized_text)
+                    if folded and folded != canonical_tts_text(normalized_text):
+                        folded_sha256 = canonical_tts_sha256(folded)
                 can_search_page_timed = (
-                    bool(folded)
+                    target.scope == "CATALOG"
+                    and bool(folded)
                     and target.page_id is not None
-                    and not normalized_text.startswith("phonics:")
-                    and (require_word_timings or " " in folded)
-                    and callable(
-                        getattr(self.repo, "get_active_timed_entries_for_page", None)
-                    )
+                    and not is_phonics
+                    and (require_word_timings or " " in (folded or ""))
                 )
-                if entry is None and can_search_page_timed:
-                    try:
-                        candidates = await self.repo.get_active_timed_entries_for_page(
-                            scope=target.scope,
-                            page_id=target.page_id,
-                            voice_id=voice_id,
-                            model_version=model_version,
-                            speed=speed,
-                            audio_formats=formats,
-                            allow_speed_fallback=allow_speed_fallback,
-                        )
-                    except TypeError:
-                        candidates = await self.repo.get_active_timed_entries_for_page(
-                            scope=target.scope,
-                            page_id=target.page_id,
-                            voice_id=voice_id,
-                            model_version=model_version,
-                            speed=speed,
-                            audio_formats=formats,
-                        )
-                    for candidate in candidates or []:
-                        cand_text = getattr(candidate, "NormalizedText", None)
-                        if (
-                            isinstance(cand_text, str)
-                            and folded_catalog_tts_text(cand_text) == folded
-                        ):
-                            cand_speed = getattr(candidate, "Speed", None)
-                            if (
-                                cand_speed is None
-                                or abs(float(cand_speed) - float(speed)) < 1e-6
-                                or not allow_speed_fallback
-                            ):
-                                entry = candidate
-                                break
-                            if page_fallback_entry is None:
-                                page_fallback_entry = candidate
-            if entry is None and allow_speed_fallback:
-                nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
-                if callable(nearest_fn):
-                    entry = await nearest_fn(**lookup_kwargs)
-                    if entry is None and folded_sha256 is not None:
-                        entry = await nearest_fn(
+                candidates = await self.repo.get_best_active_entries(
+                    scope=target.scope,
+                    owner_parent_id=target.owner_parent_id,
+                    content_sha256=content_sha256,
+                    voice_id=voice_id,
+                    model_version=model_version,
+                    preferred_model_version=preferred_model_version,
+                    speed=speed,
+                    audio_formats=formats,
+                    folded_sha256=folded_sha256,
+                    page_id=target.page_id if can_search_page_timed else None,
+                    allow_page_timed_fallback=can_search_page_timed,
+                    allow_speed_fallback=allow_speed_fallback,
+                    require_word_timings=require_word_timings,
+                    include_coaching_fallback=(target.scope == "CATALOG" and is_phonics),
+                )
+                for candidate in candidates:
+                    cand_sha = getattr(candidate, "ContentSha256", None)
+                    if cand_sha == content_sha256 or (
+                        folded_sha256 is not None and cand_sha == folded_sha256
+                    ):
+                        entry = candidate
+                        break
+                    cand_text = getattr(candidate, "NormalizedText", None)
+                    if (
+                        folded
+                        and isinstance(cand_text, str)
+                        and folded_catalog_tts_text(cand_text) == folded
+                    ):
+                        entry = candidate
+                        break
+            else:
+                lookup_kwargs: dict[str, Any] = {
+                    "scope": target.scope,
+                    "owner_parent_id": target.owner_parent_id,
+                    "content_sha256": content_sha256,
+                    "voice_id": voice_id,
+                    "model_version": model_version,
+                    "speed": speed,
+                    "audio_formats": formats,
+                }
+                if require_word_timings:
+                    lookup_kwargs["require_word_timings"] = True
+
+                entry = await self.repo.get_active_entry(**lookup_kwargs)
+                page_fallback_entry = None
+                if (
+                    entry is None
+                    and target.scope == "CATALOG"
+                    and not normalized_text.startswith("phonics:")
+                ):
+                    folded = folded_catalog_tts_text(normalized_text)
+                    if folded and folded != canonical_tts_text(normalized_text):
+                        folded_sha256 = canonical_tts_sha256(folded)
+                        entry = await self.repo.get_active_entry(
                             **{**lookup_kwargs, "content_sha256": folded_sha256}
                         )
-                if entry is None and page_fallback_entry is not None:
-                    entry = page_fallback_entry
-            if (
-                entry is None
-                and target.scope == "CATALOG"
-                and normalized_text.startswith("phonics:")
-            ):
-                # Shared public phonics clips are deduplicated in COACHING scope
-                # (used by ReadingScreen and DifficultWordPracticePanel); allow
-                # CATALOG-scoped phonics requests to read them too (never PRIVATE).
-                coaching_phonics_kwargs = {
-                    **lookup_kwargs,
-                    "scope": "COACHING",
-                    "owner_parent_id": None,
-                }
-                entry = await self.repo.get_active_entry(**coaching_phonics_kwargs)
+                    can_search_page_timed = (
+                        bool(folded)
+                        and target.page_id is not None
+                        and not normalized_text.startswith("phonics:")
+                        and (require_word_timings or " " in folded)
+                        and callable(
+                            getattr(self.repo, "get_active_timed_entries_for_page", None)
+                        )
+                    )
+                    if entry is None and can_search_page_timed:
+                        try:
+                            candidates = await self.repo.get_active_timed_entries_for_page(
+                                scope=target.scope,
+                                page_id=target.page_id,
+                                voice_id=voice_id,
+                                model_version=model_version,
+                                speed=speed,
+                                audio_formats=formats,
+                                allow_speed_fallback=allow_speed_fallback,
+                            )
+                        except TypeError:
+                            candidates = await self.repo.get_active_timed_entries_for_page(
+                                scope=target.scope,
+                                page_id=target.page_id,
+                                voice_id=voice_id,
+                                model_version=model_version,
+                                speed=speed,
+                                audio_formats=formats,
+                            )
+                        for candidate in candidates or []:
+                            cand_text = getattr(candidate, "NormalizedText", None)
+                            if (
+                                isinstance(cand_text, str)
+                                and folded_catalog_tts_text(cand_text) == folded
+                            ):
+                                cand_speed = getattr(candidate, "Speed", None)
+                                if (
+                                    cand_speed is None
+                                    or abs(float(cand_speed) - float(speed)) < 1e-6
+                                    or not allow_speed_fallback
+                                ):
+                                    entry = candidate
+                                    break
+                                if page_fallback_entry is None:
+                                    page_fallback_entry = candidate
                 if entry is None and allow_speed_fallback:
                     nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
                     if callable(nearest_fn):
-                        entry = await nearest_fn(**coaching_phonics_kwargs)
+                        entry = await nearest_fn(**lookup_kwargs)
+                        if entry is None and folded_sha256 is not None:
+                            entry = await nearest_fn(
+                                **{**lookup_kwargs, "content_sha256": folded_sha256}
+                            )
+                    if entry is None and page_fallback_entry is not None:
+                        entry = page_fallback_entry
+                if (
+                    entry is None
+                    and target.scope == "CATALOG"
+                    and normalized_text.startswith("phonics:")
+                ):
+                    # Shared public phonics clips are deduplicated in COACHING scope
+                    # (used by ReadingScreen and DifficultWordPracticePanel); allow
+                    # CATALOG-scoped phonics requests to read them too (never PRIVATE).
+                    coaching_phonics_kwargs = {
+                        **lookup_kwargs,
+                        "scope": "COACHING",
+                        "owner_parent_id": None,
+                    }
+                    entry = await self.repo.get_active_entry(**coaching_phonics_kwargs)
+                    if entry is None and allow_speed_fallback:
+                        nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
+                        if callable(nearest_fn):
+                            entry = await nearest_fn(**coaching_phonics_kwargs)
+
             if entry is None:
-                await self.repo.record_miss()
-                await self.db.commit()
+                if use_bg_writes:
+                    await self._end_read_tx()
+                    background_tasks.add_task(_bg_record_miss)
+                else:
+                    await self.repo.record_miss()
+                    await self.db.commit()
                 self._record_runtime_miss()
                 return None
 
@@ -1065,31 +1436,75 @@ class TtsAudioCacheService:
             # Release read transaction & pool permit before external Storage HTTP download.
             await self._end_read_tx()
 
-            try:
-                audio_bytes = await asyncio.to_thread(
-                    download_object,
-                    entry_path,
-                    bucket_name=entry_bucket,
-                )
-            except Exception as exc:
-                if _is_storage_not_found_error(exc):
-                    await self.repo.mark_entries_status([entry_id], status="STALE")
-                else:
-                    log_diagnostic(
-                        logger,
-                        logging.WARNING,
-                        event="tts_cache_download_transient_error",
-                        stage="tts_cache",
-                        exception=exc,
-                    )
-                await self.repo.record_miss()
-                await self.db.commit()
-                self._record_runtime_miss()
-                return None
+            ram_cache_eligible = (
+                entry_scope in ("CATALOG", "COACHING")
+                and download_object is _ORIGINAL_DOWNLOAD_OBJECT
+            )
+            cached_ram = (
+                _audio_ram_lru_get(entry_bucket, entry_path)
+                if ram_cache_eligible
+                else None
+            )
+            if cached_ram is not None:
+                audio_bytes, actual_type = cached_ram
+            else:
+                try:
+                    if (
+                        download_object is _ORIGINAL_DOWNLOAD_OBJECT
+                        and not is_local_storage_enabled()
+                    ):
+                        audio_bytes = await download_object_async(
+                            entry_path,
+                            bucket_name=entry_bucket,
+                        )
+                    else:
+                        audio_bytes = await asyncio.to_thread(
+                            download_object,
+                            entry_path,
+                            bucket_name=entry_bucket,
+                        )
+                except Exception as exc:
+                    is_not_found = _is_storage_not_found_error(exc)
+                    if not is_not_found:
+                        log_diagnostic(
+                            logger,
+                            logging.WARNING,
+                            event="tts_cache_download_transient_error",
+                            stage="tts_cache",
+                            exception=exc,
+                        )
+                    if use_bg_writes:
+                        background_tasks.add_task(
+                            _bg_record_miss,
+                            entry_id if is_not_found else None,
+                        )
+                    else:
+                        if is_not_found:
+                            await self.repo.mark_entries_status([entry_id], status="STALE")
+                        await self.repo.record_miss()
+                        await self.db.commit()
+                    self._record_runtime_miss()
+                    return None
+                actual_type = detect_audio_content_type(audio_bytes, entry_format)
+                if ram_cache_eligible:
+                    _audio_ram_lru_put(entry_bucket, entry_path, audio_bytes, actual_type)
 
-            actual_type = detect_audio_content_type(audio_bytes, entry_format)
-            await self.repo.record_hit(entry_id, byte_size=len(audio_bytes))
-            await self.db.commit()
+            if is_real_repo:
+                with _CACHE_STATE_LOCK:
+                    existing_usage = _DAILY_USAGE_CACHE.get(usage_cache_key)
+                    if existing_usage is not None:
+                        updated_usage = dict(existing_usage[1])
+                        updated_usage["bytes_served"] = (
+                            int(updated_usage.get("bytes_served", 0)) + len(audio_bytes)
+                        )
+                        updated_usage["hit_count"] = int(updated_usage.get("hit_count", 0)) + 1
+                        _DAILY_USAGE_CACHE[usage_cache_key] = (existing_usage[0], updated_usage)
+
+            if use_bg_writes:
+                background_tasks.add_task(_bg_record_hit, entry_id, len(audio_bytes))
+            else:
+                await self.repo.record_hit(entry_id, byte_size=len(audio_bytes))
+                await self.db.commit()
             self._record_runtime_hit(len(audio_bytes))
             return CachedTtsHit(
                 content=audio_bytes,
@@ -1114,6 +1529,53 @@ class TtsAudioCacheService:
                 exception=exc,
             )
             return None
+
+    async def schedule_store_cached_audio(
+        self,
+        *,
+        background_tasks: Any = None,
+        target: ResolvedCacheTarget,
+        normalized_text: str,
+        voice_id: str,
+        model_version: str,
+        speed: float,
+        audio_bytes: bytes,
+        source_content_type: str | None = None,
+        duration_seconds: float | None = None,
+        word_timings_json: list[dict[str, Any]] | dict[str, Any] | None = None,
+    ) -> bool:
+        """Schedule cache persistence off the response hot path when FastAPI BackgroundTasks is available."""
+        if (
+            not is_tts_cache_enabled()
+            or not target.can_store_on_miss
+            or not audio_bytes
+        ):
+            return False
+        if background_tasks is not None and isinstance(self.repo, TtsAudioCacheRepository):
+            background_tasks.add_task(
+                _bg_store_cached_audio,
+                target=target,
+                normalized_text=normalized_text,
+                voice_id=voice_id,
+                model_version=model_version,
+                speed=speed,
+                audio_bytes=audio_bytes,
+                source_content_type=source_content_type,
+                duration_seconds=duration_seconds,
+                word_timings_json=word_timings_json,
+            )
+            return True
+        return await self.store_cached_audio(
+            target=target,
+            normalized_text=normalized_text,
+            voice_id=voice_id,
+            model_version=model_version,
+            speed=speed,
+            audio_bytes=audio_bytes,
+            source_content_type=source_content_type,
+            duration_seconds=duration_seconds,
+            word_timings_json=word_timings_json,
+        )
 
     async def store_cached_audio(
         self,
@@ -1266,6 +1728,7 @@ class TtsAudioCacheService:
                 owner_parent_id=target.owner_parent_id,
             )
             await self.db.commit()
+            invalidate_tts_cache_summary_cache()
         except Exception as exc:
             await self._safe_rollback()
             still_owned = await _storage_path_owned_by_active_row(bucket, storage_path)
@@ -1286,12 +1749,22 @@ class TtsAudioCacheService:
             )
             return False
 
+        _audio_ram_lru_evict([(bucket, storage_path), *replaced, *evicted_objects])
+        to_delete: list[tuple[str, str]] = []
         for old_bucket, old_path in [*replaced, *evicted_objects]:
             if (old_bucket, old_path) == (bucket, storage_path):
                 continue
             if await _storage_path_owned_by_active_row(old_bucket, old_path):
                 continue
-            await asyncio.to_thread(delete_object, old_path, bucket_name=old_bucket)
+            to_delete.append((old_bucket, old_path))
+        if to_delete:
+            sem = asyncio.Semaphore(4)
+
+            async def _delete_one(old_bucket: str, old_path: str) -> None:
+                async with sem:
+                    await asyncio.to_thread(delete_object, old_path, bucket_name=old_bucket)
+
+            await asyncio.gather(*(_delete_one(b, p) for b, p in to_delete))
         return True
 
     async def _enforce_lru_quota(
@@ -1426,30 +1899,45 @@ class TtsAudioCacheService:
             )
             return 0 if commit else []
 
+        if stale_objects:
+            invalidate_tts_cache_summary_cache()
+        _scope_cache_invalidate(
+            book_id=book_id,
+            page_id=page_id,
+            page_revision_id=page_revision_id,
+        )
+        _audio_ram_lru_evict(list(stale_objects))
         if not commit:
             return list(stale_objects)
 
         await delete_stale_tts_objects(stale_objects)
         return len(stale_objects)
 
-    async def get_summary(self) -> dict[str, Any]:
+    async def get_summary(self, *, bypass_cache: bool = False) -> dict[str, Any]:
         max_bytes = get_tts_cache_max_bytes()
         daily_limit = get_tts_cache_daily_egress_limit_bytes()
         if self.repo is not None:
+            use_summary_cache = isinstance(self.repo, TtsAudioCacheRepository) and self.db is not None
+            if use_summary_cache:
+                cached = get_cached_tts_audio_cache_summary(
+                    self.db,
+                    max_bytes=max_bytes,
+                    daily_limit=daily_limit,
+                    bypass_cache=bypass_cache,
+                )
+                if cached is not None:
+                    return cached
             try:
                 summary = await self.repo.get_summary()
                 hits = int(summary["hit_count"])
                 misses = int(summary["miss_count"])
                 total_reqs = hits + misses
                 daily_egress = int(summary["daily_egress_bytes"])
-                today = datetime.now(timezone.utc).date()
-                with _METRICS_LOCK:
-                    _reset_day_if_needed_locked(today)
-                    runtime_quota = bool(_RUNTIME_METRICS["quota_exhausted"])
+                runtime_quota = is_tts_cache_runtime_quota_exhausted()
                 quota_exhausted = runtime_quota or (
                     daily_limit > 0 and daily_egress >= daily_limit
                 )
-                return {
+                result = {
                     "entry_count": int(summary["entry_count"]),
                     "storage_used_bytes": int(summary["storage_used_bytes"]),
                     "storage_quota_bytes": max_bytes,
@@ -1458,6 +1946,14 @@ class TtsAudioCacheService:
                     "cache_hit_ratio": round(hits / total_reqs, 4) if total_reqs > 0 else None,
                     "quota_exhausted": quota_exhausted,
                 }
+                if use_summary_cache:
+                    set_cached_tts_audio_cache_summary(
+                        self.db,
+                        result,
+                        max_bytes=max_bytes,
+                        daily_limit=daily_limit,
+                    )
+                return result
             except SQLAlchemyError:
                 await self._safe_rollback()
 
@@ -1490,17 +1986,26 @@ class TtsAudioCacheService:
 
 async def delete_stale_tts_objects(stale_objects: list[tuple[str, str]]) -> None:
     """Delete invalidated TTS cache objects from Storage AFTER the caller commits DB."""
-    for bucket, path in stale_objects:
-        try:
-            await asyncio.to_thread(delete_object, path, bucket_name=bucket)
-        except Exception as exc:
-            log_diagnostic(
-                logger,
-                logging.WARNING,
-                event="tts_cache_post_commit_delete_failed",
-                stage="tts_cache",
-                exception=exc,
-            )
+    if not stale_objects:
+        return
+    invalidate_tts_cache_summary_cache()
+    _audio_ram_lru_evict(stale_objects)
+    sem = asyncio.Semaphore(4)
+
+    async def _delete_one(bucket: str, path: str) -> None:
+        async with sem:
+            try:
+                await asyncio.to_thread(delete_object, path, bucket_name=bucket)
+            except Exception as exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="tts_cache_post_commit_delete_failed",
+                    stage="tts_cache",
+                    exception=exc,
+                )
+
+    await asyncio.gather(*(_delete_one(bucket, path) for bucket, path in stale_objects))
 
 
 async def invalidate_tts_cache_best_effort(

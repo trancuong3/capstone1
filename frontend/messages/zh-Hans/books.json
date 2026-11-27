@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "已存队列 — 等待系统就绪",
     "queuedWaitingWorkerShort": "已存队列 — 就绪后自动识别",
     "reasonQueuedOffline": "书页已安全保存至队列，系统就绪后将自动识别。",
-    "toolCheckFailedNotice": "自动检查遇到技术问题。",
-    "toolCheckCheckingNotice": "正在检查页面内容。",
+    "toolCheckFailedNotice": "检查过程遇到技术故障。",
+    "toolCheckCheckingNotice": "正在对此页面运行自动检查。",
     "toolCheckReadyNotice": "该页面已准备好添加到书中。",
-    "toolCheckRejectedNotice": "此页未通过审核。",
-    "toolCheckRecheckNotice": "添加到书籍前需要重新检查该页面。",
+    "toolCheckRejectedNotice": "此页面版本未获管理员批准。",
+    "toolCheckRecheckNotice": "添加到书籍前需要重新检查此页面。",
     "toolCheckAddedNotice": "页面已添加到您的书籍中。",
     "uploadOfflineQueueButton": "上传页面并加入 OCR 队列",
     "uploadQueuedOfflineNotice": "已将 {total} 页（{format}）保存到 OCR 队列。OCR 服务恢复后将自动执行文字识别、校对和安全检查。",
     "retriedQueuedOfflineNotice": "已将重试请求保存到 OCR 队列。OCR 服务恢复后将自动处理该页面。",
     "replacedPageImageQueuedOfflineNotice": "已替换第 {page} 页图片并加入 OCR 队列。OCR 服务恢复后将自动重新检查。",
-    "replacedSubmissionImageQueuedOfflineNotice": "已替换新图片并加入 OCR 队列。OCR 服务恢复后将自动重新检查。"
+    "replacedSubmissionImageQueuedOfflineNotice": "已替换新图片并加入 OCR 队列。OCR 服务恢复后将自动重新检查。",
+    "toolCheckPassedNotice": "此页面已通过安全检查。"
   },
   "ocrContribution": {
     "cardAria": "为《{title}》贡献样本以提升文字识别",

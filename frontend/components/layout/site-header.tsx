@@ -1,5 +1,7 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 import { ButtonLink } from "@/components/common/button";
 import { ViReadLogo } from "@/components/common/viread-logo";
 import { LanguageSelector } from "@/components/i18n/language-selector";
@@ -15,7 +17,10 @@ interface SiteHeaderProps {
 export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
   const tAuth = useTranslations("auth");
   const tNav = useTranslations("navigation");
+  const pathname = usePathname();
   const isAdminLogin = variant === "admin-login";
+  const isLoginActive = pathname === "/login";
+  const isRegisterActive = pathname === "/register";
 
   return (
     <header
@@ -56,17 +61,26 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
               className="flex shrink-0 items-center gap-2 sm:gap-3"
             >
               <ButtonLink
+                aria-current={isLoginActive ? "page" : undefined}
                 href="/login"
                 size="compact"
-                variant="quiet"
-                className="h-11 min-h-11! w-auto whitespace-nowrap border border-border px-3 py-0! text-sm sm:min-w-32 sm:px-4 sm:text-label"
+                variant={isLoginActive ? "primary" : "quiet"}
+                className={cn(
+                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
+                  !isLoginActive && "border border-border",
+                )}
               >
                 {tAuth("login.submit")}
               </ButtonLink>
               <ButtonLink
+                aria-current={isRegisterActive ? "page" : undefined}
                 href="/register"
                 size="compact"
-                className="h-11 min-h-11! w-auto whitespace-nowrap px-3 py-0! text-sm sm:min-w-32 sm:px-4 sm:text-label"
+                variant={isLoginActive ? "quiet" : "primary"}
+                className={cn(
+                  "w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label",
+                  isLoginActive && "border border-border",
+                )}
               >
                 {tAuth("register.submit")}
               </ButtonLink>

@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "Saved in queue — Waiting for recognition",
     "queuedWaitingWorkerShort": "Saved in queue — Auto-recognizes when ready",
     "reasonQueuedOffline": "This page is safely saved in the queue and will be recognized automatically once the system is ready.",
-    "toolCheckFailedNotice": "Automated check encountered a technical issue.",
-    "toolCheckCheckingNotice": "Checking page content.",
+    "toolCheckFailedNotice": "The verification process encountered a technical issue.",
+    "toolCheckCheckingNotice": "Running automated checks for this page.",
     "toolCheckReadyNotice": "Page is ready to add to your book.",
-    "toolCheckRejectedNotice": "This page was not approved.",
-    "toolCheckRecheckNotice": "Page needs re-checking before adding to book.",
+    "toolCheckRejectedNotice": "This page version was not approved by Admin.",
+    "toolCheckRecheckNotice": "This page needs to be re-checked before adding to the book.",
     "toolCheckAddedNotice": "Page has been added to your book.",
     "uploadOfflineQueueButton": "Upload & add to OCR queue",
     "uploadQueuedOfflineNotice": "Saved {total} page(s) ({format}) to the OCR queue. Text recognition, proofreading, and safety checks will run automatically once OCR is back online.",
     "retriedQueuedOfflineNotice": "Saved retry request to the OCR queue. The page will be processed automatically once OCR is back online.",
     "replacedPageImageQueuedOfflineNotice": "Replaced image for page {page} and added it to the OCR queue. Re-checking will start automatically once OCR is back online.",
-    "replacedSubmissionImageQueuedOfflineNotice": "Replaced page image and added it to the OCR queue. Re-checking will start automatically once OCR is back online."
+    "replacedSubmissionImageQueuedOfflineNotice": "Replaced page image and added it to the OCR queue. Re-checking will start automatically once OCR is back online.",
+    "toolCheckPassedNotice": "This page passed the safety check."
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead page reading for {title}",

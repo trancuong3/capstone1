@@ -30,6 +30,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
@@ -51,8 +52,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const t = useTranslations("admin");
   const { formatDateTime, formatNumber } = useI18n();
   const skippedAiPageIds = useSkippedAiPageIds(bookId);
-  const pageSize = 24;
+  const pageSize = 12;
+  const ocrJobsPageSize = 5;
   const [pageNumber, setPageNumber] = useState(1);
+  const [queuedJobsPage, setQueuedJobsPage] = useState(1);
+  const [deadLetterPage, setDeadLetterPage] = useState(1);
   const [book, setBook] = useState<AdminBookDTO | null>(null);
   const [items, setItems] = useState<readonly AdminPageListItemUI[] | null>(
     null,
@@ -318,6 +322,26 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     };
   }, [load]);
 
+  const pageStats = useMemo(() => {
+    const list = items ?? [];
+    let verified = 0;
+    let needsReview = 0;
+    let processing = 0;
+    for (const item of list) {
+      if (item.processing.verification_status === "VERIFIED") verified += 1;
+      else if (item.processing.verification_status === "NEEDS_REVIEW")
+        needsReview += 1;
+      else if (item.processing.verification_status === "PROCESSING")
+        processing += 1;
+    }
+    return {
+      total: list.length,
+      verified,
+      needsReview,
+      processing,
+    };
+  }, [items]);
+
   const activeOcrJobs = ocrJobs.filter((job) =>
     isActiveAdminOcrJobStatus(job.status),
   );
@@ -417,26 +441,6 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     refreshPages,
   ]);
 
-  const pageStats = useMemo(() => {
-    const list = items ?? [];
-    let verified = 0;
-    let needsReview = 0;
-    let processing = 0;
-    for (const item of list) {
-      if (item.processing.verification_status === "VERIFIED") verified += 1;
-      else if (item.processing.verification_status === "NEEDS_REVIEW")
-        needsReview += 1;
-      else if (item.processing.verification_status === "PROCESSING")
-        processing += 1;
-    }
-    return {
-      total: list.length,
-      verified,
-      needsReview,
-      processing,
-    };
-  }, [items]);
-
   if (!book && !error) return <AdminLoading variant="skeleton" />;
   if (error) {
     return (
@@ -473,6 +477,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     );
   }
   if (!book) return null;
+  const resolvedTitle = book.title.trim()
+    ? book.title
+    : t("books.detail.missingTitle");
+  const isUploaderExpanded =
+    uploaderOpenOverride ?? (items !== null && items.length === 0);
   const activePageIds = new Set(
     (items ?? []).map((item) => item.processing.page_id),
   );
@@ -487,30 +496,57 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
       job.job_kind === "ADMIN_PAGE_UPLOAD" &&
       (!job.page_id || !activePageIds.has(job.page_id)),
   );
-
-  const resolvedTitle = book.title.trim()
-    ? book.title
-    : t("books.detail.missingTitle");
-  const isUploaderExpanded =
-    uploaderOpenOverride ?? (items !== null && items.length === 0);
+  const totalPages = Math.max(1, Math.ceil((items?.length ?? 0) / pageSize));
+  const safePage = Math.min(Math.max(1, pageNumber), totalPages);
   const visibleItems = items?.slice(
-    (pageNumber - 1) * pageSize,
-    pageNumber * pageSize,
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
   );
   const showPagination = items !== null && items.length > pageSize;
+
+  const queuedJobsTotalPages = Math.max(
+    1,
+    Math.ceil(pendingNewPageJobs.length / ocrJobsPageSize),
+  );
+  const safeQueuedJobsPage = Math.min(
+    Math.max(1, queuedJobsPage),
+    queuedJobsTotalPages,
+  );
+  const visiblePendingNewPageJobs = pendingNewPageJobs.slice(
+    (safeQueuedJobsPage - 1) * ocrJobsPageSize,
+    safeQueuedJobsPage * ocrJobsPageSize,
+  );
+
+  const deadLetterTotalPages = Math.max(
+    1,
+    Math.ceil(deadLetterOcrJobs.length / ocrJobsPageSize),
+  );
+  const safeDeadLetterPage = Math.min(
+    Math.max(1, deadLetterPage),
+    deadLetterTotalPages,
+  );
+  const visibleDeadLetterOcrJobs = deadLetterOcrJobs.slice(
+    (safeDeadLetterPage - 1) * ocrJobsPageSize,
+    safeDeadLetterPage * ocrJobsPageSize,
+  );
 
   return (
     <div className="space-y-4">
       <AdminPageHeader
         actions={
-          <ButtonLink
-            href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
-            size="admin"
-            variant="outline"
-          >
-            <Pencil aria-hidden="true" className="size-3.5 shrink-0" />
-            {t("books.detail.editMetadata")}
-          </ButtonLink>
+          <div className="flex flex-wrap items-center gap-2">
+            <ButtonLink
+              href={`/admin/books/${encodeURIComponent(book.id)}/edit`}
+              size="admin"
+              variant="outline"
+            >
+              <Pencil aria-hidden="true" className="size-3.5 shrink-0" />
+              {t("books.detail.editMetadata")}
+            </ButtonLink>
+            <ButtonLink href="/admin/tasks" size="admin" variant="outline">
+              Trung tâm tác vụ AI
+            </ButtonLink>
+          </div>
         }
         badge={<AdminStatusBadge status={book.lifecycle_status} />}
         breadcrumbs={[
@@ -734,6 +770,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </Button>
           </div>
         </div>
+
         {activeOcrJobs.length > 0 ? (
           <div
             className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50/85 p-4 text-amber-950"
@@ -778,67 +815,78 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
             </div>
             {pendingNewPageJobs.length > 0 ? (
               <div className="space-y-2">
-                {pendingNewPageJobs.map((job, idx) => (
-                  <div
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-amber-950"
-                    data-testid={`admin-queued-new-page-row-${job.id}`}
-                    key={job.id}
-                  >
-                    <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span
-                        className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 font-bold text-amber-950"
-                        data-testid="admin-queued-new-page-badge"
-                      >
-                        <Clock3
-                          aria-hidden="true"
-                          className="size-3.5 text-amber-700"
-                        />
-                        {t("books.detail.queuedNewPageBadge", {
-                          index: formatNumber(idx + 1),
-                        })}
-                      </span>
-                      {job.file_name ? (
-                        <span className="truncate font-semibold text-ink">
-                          {t(
-                            "books.detail.queuedNewPageFile",
-                            { fileName: job.file_name },
-                            `Tệp: ${job.file_name}`,
-                          )}
-                        </span>
-                      ) : null}
-                      {job.queue_position != null ? (
-                        <span className="rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-950 tabular-nums">
-                          #{formatNumber(job.queue_position)}
-                        </span>
-                      ) : null}
-                      {job.created_at ? (
-                        <span className="text-muted">
-                          {t(
-                            "books.detail.queuedAtLabel",
-                            { time: formatDateTime(job.created_at) },
-                            `Đã xếp hàng lúc ${formatDateTime(job.created_at)}`,
-                          )}
-                        </span>
-                      ) : null}
-                    </div>
-                    <Button
-                      data-testid={`cancel-queued-ocr-job-${job.id}`}
-                      disabled={busyJobId !== null}
-                      isLoading={busyJobId === job.id}
-                      onClick={() => void handleCancelOcrJob(job.id)}
-                      size="admin"
-                      type="button"
-                      variant="outline"
+                {visiblePendingNewPageJobs.map((job, localIdx) => {
+                  const idx =
+                    (safeQueuedJobsPage - 1) * ocrJobsPageSize + localIdx;
+                  return (
+                    <div
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs text-amber-950"
+                      data-testid={`admin-queued-new-page-row-${job.id}`}
+                      key={job.id}
                     >
-                      <X aria-hidden="true" className="size-3.5 shrink-0" />
-                      {t(
-                        "books.detail.cancelQueuedJobBtn",
-                        undefined,
-                        "Hủy chờ",
-                      )}
-                    </Button>
-                  </div>
-                ))}
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span
+                          className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 font-bold text-amber-950"
+                          data-testid="admin-queued-new-page-badge"
+                        >
+                          <Clock3
+                            aria-hidden="true"
+                            className="size-3.5 text-amber-700"
+                          />
+                          {t("books.detail.queuedNewPageBadge", {
+                            index: formatNumber(idx + 1),
+                          })}
+                        </span>
+                        {job.file_name ? (
+                          <span className="truncate font-semibold text-ink">
+                            {t(
+                              "books.detail.queuedNewPageFile",
+                              { fileName: job.file_name },
+                              `Tệp: ${job.file_name}`,
+                            )}
+                          </span>
+                        ) : null}
+                        {job.queue_position != null ? (
+                          <span className="rounded-md bg-amber-100 px-2 py-0.5 font-bold text-amber-950 tabular-nums">
+                            #{formatNumber(job.queue_position)}
+                          </span>
+                        ) : null}
+                        {job.created_at ? (
+                          <span className="text-muted">
+                            {t(
+                              "books.detail.queuedAtLabel",
+                              { time: formatDateTime(job.created_at) },
+                              `Đã xếp hàng lúc ${formatDateTime(job.created_at)}`,
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                      <Button
+                        data-testid={`cancel-queued-ocr-job-${job.id}`}
+                        disabled={busyJobId !== null}
+                        isLoading={busyJobId === job.id}
+                        onClick={() => void handleCancelOcrJob(job.id)}
+                        size="admin"
+                        type="button"
+                        variant="outline"
+                      >
+                        <X aria-hidden="true" className="size-3.5 shrink-0" />
+                        {t(
+                          "books.detail.cancelQueuedJobBtn",
+                          undefined,
+                          "Hủy chờ",
+                        )}
+                      </Button>
+                    </div>
+                  );
+                })}
+                <PaginationBar
+                  compact
+                  onPageChange={setQueuedJobsPage}
+                  page={safeQueuedJobsPage}
+                  pageSize={ocrJobsPageSize}
+                  total={pendingNewPageJobs.length}
+                />
               </div>
             ) : null}
           </div>
@@ -873,7 +921,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               </div>
             </div>
             <div className="space-y-2">
-              {deadLetterOcrJobs.map((job) => {
+              {visibleDeadLetterOcrJobs.map((job) => {
                 const matchedPage = job.page_id
                   ? items?.find((p) => p.processing.page_id === job.page_id)
                   : undefined;
@@ -952,6 +1000,13 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                   </div>
                 );
               })}
+              <PaginationBar
+                compact
+                onPageChange={setDeadLetterPage}
+                page={safeDeadLetterPage}
+                pageSize={ocrJobsPageSize}
+                total={deadLetterOcrJobs.length}
+              />
             </div>
           </div>
         ) : null}
@@ -1005,7 +1060,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               <AdminResultsPagination
                 itemLabel={t("books.detail.pageItemLabel")}
                 onPageChange={setPageNumber}
-                page={pageNumber}
+                page={safePage}
                 pageSize={pageSize}
                 total={items.length}
               />
@@ -1165,7 +1220,7 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
               <AdminResultsPagination
                 itemLabel={t("books.detail.pageItemLabel")}
                 onPageChange={setPageNumber}
-                page={pageNumber}
+                page={safePage}
                 pageSize={pageSize}
                 total={items.length}
               />

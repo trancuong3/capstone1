@@ -35,6 +35,38 @@ import type { ReadingAssessmentMetricsDTO } from "@/types/reading";
 
 const REPORTS_PER_PAGE = 5;
 
+type PageSlot = number | "ellipsis-start" | "ellipsis-end";
+
+function buildVisiblePageSlots(total: number, activeIndex: number): PageSlot[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, idx) => idx);
+  }
+  const safeActive = Math.min(Math.max(0, activeIndex), total - 1);
+  if (safeActive <= 3) {
+    return [0, 1, 2, 3, 4, "ellipsis-end", total - 1];
+  }
+  if (safeActive >= total - 4) {
+    return [
+      0,
+      "ellipsis-start",
+      total - 5,
+      total - 4,
+      total - 3,
+      total - 2,
+      total - 1,
+    ];
+  }
+  return [
+    0,
+    "ellipsis-start",
+    safeActive - 1,
+    safeActive,
+    safeActive + 1,
+    "ellipsis-end",
+    total - 1,
+  ];
+}
+
 export default function ReadingReportPage() {
   const t = useTranslations("reports");
   const { formatDateTime } = useI18n();
@@ -292,31 +324,47 @@ export default function ReadingReportPage() {
               />{" "}
               {t("sessions.readingReports.prevShort")}
             </button>
-            {pageGroups.map((group, idx) => (
-              <button
-                aria-current={idx === safeGroupIndex ? "page" : undefined}
-                aria-label={t("sessions.readingReports.pageLabel", {
-                  page: idx + 1,
-                })}
-                className={cn(
-                  "h-9 min-h-9 min-w-9 rounded-control px-2.5 text-xs font-bold tabular-nums",
-                  idx === safeGroupIndex
-                    ? "bg-primary text-white"
-                    : "border border-border bg-white text-ink hover:bg-canvas",
-                )}
-                key={group.key}
-                onClick={() => {
-                  setSelectedGroupIndex(idx);
-                  setReportPage(1);
-                }}
-                type="button"
-              >
-                <span className="hidden sm:inline">
-                  {t("sessions.readingReports.standalonePagePrefix")}{" "}
-                </span>
-                {idx + 1}
-              </button>
-            ))}
+            {buildVisiblePageSlots(pageGroups.length, safeGroupIndex).map(
+              (slot) => {
+                if (typeof slot !== "number") {
+                  return (
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-9 min-w-7 items-center justify-center px-1 text-xs font-bold text-muted select-none"
+                      key={slot}
+                    >
+                      …
+                    </span>
+                  );
+                }
+                const group = pageGroups[slot];
+                return (
+                  <button
+                    aria-current={slot === safeGroupIndex ? "page" : undefined}
+                    aria-label={t("sessions.readingReports.pageLabel", {
+                      page: slot + 1,
+                    })}
+                    className={cn(
+                      "h-9 min-h-9 min-w-9 rounded-control px-2.5 text-xs font-bold tabular-nums",
+                      slot === safeGroupIndex
+                        ? "bg-primary text-white"
+                        : "border border-border bg-white text-ink hover:bg-canvas",
+                    )}
+                    key={group.key}
+                    onClick={() => {
+                      setSelectedGroupIndex(slot);
+                      setReportPage(1);
+                    }}
+                    type="button"
+                  >
+                    <span className="hidden sm:inline">
+                      {t("sessions.readingReports.standalonePagePrefix")}{" "}
+                    </span>
+                    {slot + 1}
+                  </button>
+                );
+              },
+            )}
             <button
               aria-label={t("sessions.nextPage")}
               className="inline-flex h-9 min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40"
@@ -454,6 +502,8 @@ export default function ReadingReportPage() {
 
           <PaginationBar
             ariaLabel={t("sessions.readingReports.additionalPaginationAria")}
+            className="mt-3"
+            compact
             itemLabel={t("sessions.readingReports.additionalPaginationItem")}
             onPageChange={setReportPage}
             page={safeReportPage}

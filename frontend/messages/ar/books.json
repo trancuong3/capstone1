@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "محفوظ في الانتظار — بانتظار جاهزية النظام",
     "queuedWaitingWorkerShort": "محفوظ في الانتظار — تعرف تلقائي عند الجاهزية",
     "reasonQueuedOffline": "تم حفظ الصفحة بأمان في قائمة الانتظار وسيتم التعرف عليها تلقائياً عند جاهزية النظام.",
-    "toolCheckFailedNotice": "واجه الفحص التلقائي مشكلة تقنية.",
-    "toolCheckCheckingNotice": "جارٍ فحص محتوى الصفحة.",
+    "toolCheckFailedNotice": "واجهت عملية التحقق مشكلة تقنية.",
+    "toolCheckCheckingNotice": "جارٍ تشغيل الفحوصات التلقائية لهذه الصفحة.",
     "toolCheckReadyNotice": "الصفحة جاهزة للإضافة إلى كتابك.",
-    "toolCheckRejectedNotice": "لم يتم اعتماد هذه الصفحة.",
-    "toolCheckRecheckNotice": "تحتاج الصفحة إلى إعادة فحص قبل إضافتها إلى الكتاب.",
+    "toolCheckRejectedNotice": "لم يوافق المسؤول على هذا الإصدار من الصفحة.",
+    "toolCheckRecheckNotice": "تحتاج هذه الصفحة إلى إعادة فحص قبل إضافتها إلى الكتاب.",
     "toolCheckAddedNotice": "تمت إضافة الصفحة إلى كتابك.",
     "uploadOfflineQueueButton": "رفع الصفحة وإضافتها إلى قائمة انتظار OCR",
     "uploadQueuedOfflineNotice": "تم حفظ {total} صفحة ({format}) في قائمة انتظار OCR. سيتم التعرف على النص والتدقيق وفحص الأمان تلقائياً فور عودة خدمة OCR.",
     "retriedQueuedOfflineNotice": "تم حفظ طلب إعادة المحاولة في قائمة انتظار OCR. ستتم معالجة الصفحة تلقائياً عند عودة الخدمة.",
     "replacedPageImageQueuedOfflineNotice": "تم استبدال صورة الصفحة {page} وإضافتها إلى قائمة انتظار OCR. ستبدأ إعادة الفحص تلقائياً عند عودة خدمة OCR.",
-    "replacedSubmissionImageQueuedOfflineNotice": "تم استبدال الصورة وإضافتها إلى قائمة انتظار OCR. ستبدأ إعادة الفحص تلقائياً عند عودة خدمة OCR."
+    "replacedSubmissionImageQueuedOfflineNotice": "تم استبدال الصورة وإضافتها إلى قائمة انتظار OCR. ستبدأ إعادة الفحص تلقائياً عند عودة خدمة OCR.",
+    "toolCheckPassedNotice": "اجتازت هذه الصفحة فحص الأمان بنجاح."
   },
   "ocrContribution": {
     "cardAria": "المساهمة بنماذج لتحسين قراءة الصفحات لـ {title}",

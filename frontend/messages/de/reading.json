@@ -260,7 +260,17 @@
     "referencePageAlt": "Referenzbild für Seite {page}",
     "scrollToCurrentWord": "Über das gelesene Wort",
     "currentWordPrefix": "Aktuelles Wort: ",
-    "overlayAria": "Hervorhebungsbereich für das aktuelle Wort"
+    "overlayAria": "Hervorhebungsbereich für das aktuelle Wort",
+    "readingModeSwitcherAria": "Lesemodus der Buchseite",
+    "readingModeIllustrated": "Mit Bild lesen",
+    "readingModeIllustratedTitle": "Textfreie Illustration zusammen mit dem Lesetext anzeigen",
+    "readingModeText": "Nur Text",
+    "readingModeTextTitle": "Auf klaren Lesetext konzentrieren",
+    "readingModeOriginal": "Originalseite",
+    "readingModeOriginalTitle": "Originale gescannte Buchseite zum Vergleich anzeigen",
+    "illustrationAlt": "Illustration für Seite {page}",
+    "originalReferenceHeading": "Originalbild der Seite (Vergleich)",
+    "originalReferenceAlt": "Originalbild für Seite {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Nicht ganz: \"{word}\". Versuche es noch einmal.",
@@ -360,7 +370,8 @@
     "finish": "Abgeschlossen",
     "nextQuestion": "Nächste Frage",
     "chosenCorrectFeedback": "Du hast {label} gewählt. {hint}",
-    "chosenWrongFeedback": "Du hast {label} gewählt. Das ist nicht ganz richtig. Lass uns die Details aus dem Text noch einmal durchgehen und es erneut versuchen!"
+    "chosenWrongFeedback": "Du hast {label} gewählt. Das ist nicht ganz richtig. Lass uns die Details aus dem Text noch einmal durchgehen und es erneut versuchen!",
+    "skipToReport": "Überspringen und Ergebnisse ansehen"
   },
   "automation": {
     "sectionTitle": "Automatisch beim Lesen",

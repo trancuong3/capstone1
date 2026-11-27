@@ -3,5 +3,17 @@
   "framework": "nextjs",
   "regions": ["sin1"],
   "buildCommand": "npm run build:hosting",
-  "installCommand": "npm ci"
+  "installCommand": "npm ci",
+  "functions": {
+    "api/parent-email-relay.py": {
+      "maxDuration": 60,
+      "excludeFiles": "{node_modules/**,.next/**,public/**,tests/**,test/**}"
+    }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/parent-emails",
+      "schedule": "0 2 * * *"
+    }
+  ]
 }

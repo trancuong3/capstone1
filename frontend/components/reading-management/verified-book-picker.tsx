@@ -73,7 +73,7 @@ export function VerifiedBookPicker({
       ),
     ) ?? [];
   const pageCount = Math.max(1, Math.ceil(matches.length / PAGE_SIZE));
-  const activePage = Math.min(page, pageCount);
+  const activePage = Math.min(Math.max(1, page), pageCount);
   const visible = matches.slice(
     (activePage - 1) * PAGE_SIZE,
     activePage * PAGE_SIZE,

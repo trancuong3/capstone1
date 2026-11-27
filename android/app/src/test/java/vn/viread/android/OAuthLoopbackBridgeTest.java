@@ -68,6 +68,17 @@ public class OAuthLoopbackBridgeTest {
                 "UTF-8");
         assertNull(TrustedNavigation.extractOAuthLoopbackNonce(
                 "https://hgkklatgepyzbkkmwfvp.supabase.co/auth/v1/authorize?redirect_to=" + shortNonce));
+
+        assertNull(TrustedNavigation.extractOAuthLoopbackNonce(
+                "https://evil.example/auth/v1/authorize?redirect_to=" + validRedirect));
+        assertNull(TrustedNavigation.extractOAuthLoopbackNonce(
+                "https://supabase.co/auth/v1/authorize?redirect_to=" + validRedirect));
+        assertNull(TrustedNavigation.extractOAuthLoopbackNonce(
+                "https://otherproject.supabase.co/auth/v1/authorize?redirect_to=" + validRedirect,
+                "hgkklatgepyzbkkmwfvp.supabase.co"));
+        assertNotNull(TrustedNavigation.extractOAuthLoopbackNonce(
+                "https://hgkklatgepyzbkkmwfvp.supabase.co/auth/v1/authorize?redirect_to=" + validRedirect,
+                "hgkklatgepyzbkkmwfvp.supabase.co"));
     }
 
     @Test

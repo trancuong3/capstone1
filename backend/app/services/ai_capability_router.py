@@ -523,6 +523,9 @@ def _has_secret(env: Mapping[str, str], key: str) -> bool:
     return bool((env.get(key) or "").strip())
 
 
+_MAX_IMAGE_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap on generated image responses
+
+
 def build_default_provider_registry(
     env: Mapping[str, str] | None = None,
 ) -> tuple[ProviderSpec, ...]:
@@ -563,14 +566,21 @@ def build_default_provider_registry(
         and _has_secret(source_env, "CLOUDFLARE_API_TOKEN")
     )
     local_diffusers_ready = ai_image_enabled and _has_secret(source_env, "LOCAL_IMAGE_GEN_URL")
-    gemini_image_billing = _env_bool(source_env, "GEMINI_IMAGE_BILLING_ENABLED", False)
+    # Strict 0 VND invariant: Gemini Image / Imagen is PAID-ONLY (limit: 0 on free tier)
+    # and stays disabled unless an explicit paid opt-in flag is set.
+    gemini_image_paid_opt_in = _env_bool(
+        source_env, "GEMINI_IMAGE_GEN_PAID_OPT_IN", False
+    ) or _env_bool(source_env, "GEMINI_IMAGE_BILLING_ENABLED", False)
 
-    gemini_primary = (source_env.get("GEMINI_OCR_PRIMARY_MODEL") or "gemini-3.5-flash-lite").strip()
-    gemini_fallback = (source_env.get("GEMINI_OCR_FALLBACK_MODEL") or "gemini-3.1-flash-lite").strip()
-    groq_model = (source_env.get("GROQ_OCR_MODEL") or "qwen/qwen3.8-27b").strip()
+    gemini_primary = (source_env.get("GEMINI_OCR_PRIMARY_MODEL") or "gemini-2.5-flash-lite").strip()
+    gemini_fallback = (source_env.get("GEMINI_OCR_FALLBACK_MODEL") or "gemini-2.5-flash").strip()
+    groq_model = (source_env.get("GROQ_OCR_MODEL") or "llama-3.3-70b-versatile").strip()
     ollama_model = (source_env.get("LOCAL_OCR_MODEL") or "qwen3-vl:4b-instruct-q4_K_M").strip()
     cloudflare_model = (
         source_env.get("CLOUDFLARE_IMAGE_MODEL") or "@cf/black-forest-labs/flux-1-schnell"
+    ).strip()
+    local_diffusers_model = (
+        source_env.get("LOCAL_IMAGE_GEN_MODEL") or "Lykon/dreamshaper-8+lcm-lora-sdv1-5"
     ).strip()
     gemini_image_model = (
         source_env.get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
@@ -652,7 +662,7 @@ def build_default_provider_registry(
         ProviderSpec(
             provider_id="local_diffusers",
             family="local_diffusers",
-            model_id="sd15-lcm-local",
+            model_id=local_diffusers_model,
             capabilities=frozenset(
                 {
                     AiCapability.IMAGE_GENERATION,
@@ -679,10 +689,10 @@ def build_default_provider_registry(
             ),
             quota_group="gemini_image_free",
             is_local=False,
-            enabled=ai_image_enabled and gemini_key_present and gemini_image_billing,
+            enabled=ai_image_enabled and gemini_key_present and gemini_image_paid_opt_in,
             max_attempt_timeout_seconds=20.0,
             priority_order=70,
-            notes="Gemini native image model (disabled on Free Tier limit:0 unless billing opt-in).",
+            notes="Gemini native image model (disabled on Free Tier limit:0 unless paid opt-in).",
         ),
     )
 
@@ -855,26 +865,33 @@ class ImageGenerationResult:
     attempts: tuple[AttemptRecord, ...] = ()
 
 
-def _validate_local_worker_url(raw_url: str) -> str:
-    parsed = urlparse(raw_url.strip())
-    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+def _validate_local_worker_url(
+    raw_url: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    cleaned = raw_url.strip()
+    parsed = urlparse(cleaned)
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme not in ("http", "https") or not hostname:
         raise AiProviderCallError(
             provider_id="local_diffusers",
             kind=AiErrorKind.UNSUPPORTED_CAPABILITY,
             code="INVALID_LOCAL_IMAGE_URL",
         )
     allowed_hosts = {"127.0.0.1", "localhost", "::1"}
-    if parsed.hostname not in allowed_hosts and not os.getenv("LOCAL_IMAGE_GEN_ALLOW_LAN", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-    }:
+    source_env: Mapping[str, str] = os.environ if env is None else env
+    allow_lan = _env_bool(source_env, "LOCAL_IMAGE_GEN_ALLOW_LAN", False)
+    if hostname not in allowed_hosts and not allow_lan:
         raise AiProviderCallError(
             provider_id="local_diffusers",
             kind=AiErrorKind.PERMISSION_FAILURE,
             code="LOCAL_IMAGE_URL_NON_LOOPBACK",
         )
-    return raw_url.strip().rstrip("/")
+    normalized = cleaned.rstrip("/")
+    if normalized.lower().endswith("/generate"):
+        normalized = normalized[: -len("/generate")].rstrip("/")
+    return normalized
 
 
 class AiCapabilityRouter:
@@ -891,16 +908,36 @@ class AiCapabilityRouter:
     ) -> None:
         self._env = env
         self._clock = clock
-        base_providers = (
-            tuple(providers)
+        self._explicit_providers: tuple[ProviderSpec, ...] | None = (
+            tuple(sorted(providers, key=lambda item: item.priority_order))
             if providers is not None
-            else build_default_provider_registry(env=env)
+            else None
         )
-        self.providers: tuple[ProviderSpec, ...] = tuple(
-            sorted(base_providers, key=lambda item: item.priority_order)
+        self._static_env_providers: tuple[ProviderSpec, ...] | None = (
+            tuple(
+                sorted(
+                    build_default_provider_registry(env=env),
+                    key=lambda item: item.priority_order,
+                )
+            )
+            if providers is None and env is not None
+            else None
         )
         self.circuit_breaker = circuit_breaker or CircuitBreakerRegistry(clock=clock)
         self.cache = cache or TenantAiCache(clock=clock)
+
+    @property
+    def providers(self) -> tuple[ProviderSpec, ...]:
+        if self._explicit_providers is not None:
+            return self._explicit_providers
+        if self._static_env_providers is not None:
+            return self._static_env_providers
+        return tuple(
+            sorted(
+                build_default_provider_registry(env=os.environ),
+                key=lambda item: item.priority_order,
+            )
+        )
 
     @staticmethod
     def _provider_circuit_key(provider: ProviderSpec) -> str:
@@ -1349,6 +1386,12 @@ class AiCapabilityRouter:
                 body_text=response.text[:1024],
                 retry_after_header=response.headers.get("retry-after"),
             )
+        if len(response.content) > _MAX_IMAGE_RESPONSE_BYTES:
+            raise AiProviderCallError(
+                provider_id=provider.provider_id,
+                kind=AiErrorKind.INVALID_OUTPUT,
+                code="IMAGE_RESPONSE_TOO_LARGE",
+            )
         content_type = (response.headers.get("content-type") or "").lower()
         if content_type.startswith("image/"):
             if not response.content:
@@ -1363,7 +1406,10 @@ class AiCapabilityRouter:
             b64_img = body.get("result", {}).get("image") if isinstance(body, dict) else None
             if not isinstance(b64_img, str) or not b64_img.strip():
                 raise ValueError("missing image")
-            return base64.b64decode(b64_img), "image/jpeg"
+            decoded = base64.b64decode(b64_img)
+            if not decoded or len(decoded) > _MAX_IMAGE_RESPONSE_BYTES:
+                raise ValueError("decoded image size invalid")
+            return decoded, "image/jpeg"
         except Exception as exc:
             raise AiProviderCallError(
                 provider_id=provider.provider_id,
@@ -1387,23 +1433,22 @@ class AiCapabilityRouter:
                 kind=AiErrorKind.UNSUPPORTED_CAPABILITY,
                 code="LOCAL_IMAGE_WORKER_UNCONFIGURED",
             )
-        base_url = _validate_local_worker_url(raw_url)
+        base_url = _validate_local_worker_url(raw_url, env=env)
         payload: dict[str, Any] = {
             "prompt": request.prompt,
             "negative_prompt": request.negative_prompt,
             "width": request.width,
             "height": request.height,
             "steps": max(1, min(12, int(request.steps))),
+            "seed": int(request.seed) if request.seed is not None else None,
         }
-        if request.seed is not None:
-            payload["seed"] = int(request.seed)
         async with httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_seconds),
             trust_env=False,
             follow_redirects=False,
             transport=transport,
         ) as client:
-            response = await client.post(f"{base_url}/generate", json=payload)
+            response = await client.post(f"{base_url.rstrip('/')}/generate", json=payload)
         if response.status_code != 200:
             raise classify_http_error(
                 provider_id=provider.provider_id,
@@ -1411,8 +1456,20 @@ class AiCapabilityRouter:
                 body_text=response.text[:1024],
                 retry_after_header=response.headers.get("retry-after"),
             )
+        if len(response.content) > _MAX_IMAGE_RESPONSE_BYTES:
+            raise AiProviderCallError(
+                provider_id=provider.provider_id,
+                kind=AiErrorKind.INVALID_OUTPUT,
+                code="IMAGE_RESPONSE_TOO_LARGE",
+            )
         content_type = (response.headers.get("content-type") or "").lower()
         if content_type.startswith("image/"):
+            if not response.content:
+                raise AiProviderCallError(
+                    provider_id=provider.provider_id,
+                    kind=AiErrorKind.INVALID_OUTPUT,
+                    code="EMPTY_IMAGE_BODY",
+                )
             return response.content, content_type.split(";")[0].strip()
         try:
             body = response.json()
@@ -1420,7 +1477,10 @@ class AiCapabilityRouter:
             mime = str(body.get("mime_type") or "image/png")
             if not isinstance(b64_img, str) or not b64_img.strip():
                 raise ValueError("missing image_base64")
-            return base64.b64decode(b64_img), mime
+            decoded = base64.b64decode(b64_img)
+            if not decoded or len(decoded) > _MAX_IMAGE_RESPONSE_BYTES:
+                raise ValueError("decoded image size invalid")
+            return decoded, mime
         except Exception as exc:
             raise AiProviderCallError(
                 provider_id=provider.provider_id,
@@ -1467,6 +1527,12 @@ class AiCapabilityRouter:
                 body_text=response.text[:1024],
                 retry_after_header=response.headers.get("retry-after"),
             )
+        if len(response.content) > _MAX_IMAGE_RESPONSE_BYTES:
+            raise AiProviderCallError(
+                provider_id=provider.provider_id,
+                kind=AiErrorKind.INVALID_OUTPUT,
+                code="IMAGE_RESPONSE_TOO_LARGE",
+            )
         try:
             data = response.json()
             candidates = data.get("candidates") if isinstance(data, dict) else None
@@ -1475,7 +1541,10 @@ class AiCapabilityRouter:
                 inline = part.get("inlineData") or part.get("inline_data")
                 if isinstance(inline, dict) and inline.get("data"):
                     mime = str(inline.get("mimeType") or inline.get("mime_type") or "image/png")
-                    return base64.b64decode(inline["data"]), mime
+                    decoded = base64.b64decode(inline["data"])
+                    if not decoded or len(decoded) > _MAX_IMAGE_RESPONSE_BYTES:
+                        raise ValueError("decoded image size invalid")
+                    return decoded, mime
             raise ValueError("no image inline data")
         except Exception as exc:
             raise AiProviderCallError(

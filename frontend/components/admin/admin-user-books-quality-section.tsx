@@ -247,9 +247,12 @@ export const AdminUserBooksQualitySection = memo(
     const [conflictError, setConflictError] = useState<string | null>(null);
     const detailRequestIdRef = useRef(0);
 
-    const USER_BOOKS_PAGE_SIZE = 30;
+    const USER_BOOKS_PAGE_SIZE = 10;
+    const USER_BOOK_DRAWER_PAGE_SIZE = 5;
     const [queueOffset, setQueueOffset] = useState(0);
     const [queueReloadKey, setQueueReloadKey] = useState(0);
+    const [findingsPage, setFindingsPage] = useState(1);
+    const [historyPage, setHistoryPage] = useState(1);
 
     const loadQueue = useCallback(async () => {
       setQueueReloadKey((prev) => prev + 1);
@@ -314,6 +317,8 @@ export const AdminUserBooksQualitySection = memo(
         if (!bookContentQuality.getUserBookSubmission) return;
         const requestId = ++detailRequestIdRef.current;
         setSelectedId(submissionId);
+        setFindingsPage(1);
+        setHistoryPage(1);
         setLoadingDetail(true);
         setDetailError(null);
         setConflictError(null);
@@ -454,6 +459,33 @@ export const AdminUserBooksQualitySection = memo(
     }
 
     const summary = queue?.summary ?? {};
+    const detailFindings = detail?.tool_check_findings ?? [];
+    const findingsTotalPages = Math.max(
+      1,
+      Math.ceil(detailFindings.length / USER_BOOK_DRAWER_PAGE_SIZE),
+    );
+    const safeFindingsPage = Math.min(
+      Math.max(1, findingsPage),
+      findingsTotalPages,
+    );
+    const visibleDetailFindings = detailFindings.slice(
+      (safeFindingsPage - 1) * USER_BOOK_DRAWER_PAGE_SIZE,
+      safeFindingsPage * USER_BOOK_DRAWER_PAGE_SIZE,
+    );
+
+    const detailHistory = detail?.history ?? [];
+    const historyTotalPages = Math.max(
+      1,
+      Math.ceil(detailHistory.length / USER_BOOK_DRAWER_PAGE_SIZE),
+    );
+    const safeHistoryPage = Math.min(
+      Math.max(1, historyPage),
+      historyTotalPages,
+    );
+    const visibleDetailHistory = detailHistory.slice(
+      (safeHistoryPage - 1) * USER_BOOK_DRAWER_PAGE_SIZE,
+      safeHistoryPage * USER_BOOK_DRAWER_PAGE_SIZE,
+    );
 
     return (
       <div className="flex flex-col gap-4">
@@ -1072,7 +1104,7 @@ export const AdminUserBooksQualitySection = memo(
                             })}
                           </p>
                           <ul className="mt-2 space-y-2 text-xs">
-                            {detail.tool_check_findings.map((finding, idx) => (
+                            {visibleDetailFindings.map((finding, idx) => (
                               <li
                                 className="rounded-control border border-amber-200 bg-white p-2.5"
                                 key={finding.finding_id ?? idx}
@@ -1124,6 +1156,14 @@ export const AdminUserBooksQualitySection = memo(
                               </li>
                             ))}
                           </ul>
+                          <PaginationBar
+                            className="mt-2.5"
+                            compact
+                            onPageChange={setFindingsPage}
+                            page={safeFindingsPage}
+                            pageSize={USER_BOOK_DRAWER_PAGE_SIZE}
+                            total={detailFindings.length}
+                          />
                         </div>
                       ) : null}
 
@@ -1159,8 +1199,9 @@ export const AdminUserBooksQualitySection = memo(
                             {t("userBooks.noHistoryYet")}
                           </p>
                         ) : (
-                          <ul className="mt-2 space-y-2 text-xs">
-                            {detail.history.map((hist) => (
+                          <>
+                            <ul className="mt-2 space-y-2 text-xs">
+                              {visibleDetailHistory.map((hist) => (
                               <li
                                 className="rounded-control border border-border bg-surface-subtle/50 p-2"
                                 key={hist.request_id}
@@ -1201,6 +1242,15 @@ export const AdminUserBooksQualitySection = memo(
                               </li>
                             ))}
                           </ul>
+                            <PaginationBar
+                              className="mt-2.5"
+                              compact
+                              onPageChange={setHistoryPage}
+                              page={safeHistoryPage}
+                              pageSize={USER_BOOK_DRAWER_PAGE_SIZE}
+                              total={detailHistory.length}
+                            />
+                          </>
                         )}
                       </div>
                     </div>

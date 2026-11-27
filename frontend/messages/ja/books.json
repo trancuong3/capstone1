@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "待機列に保存 — システム待機中",
     "queuedWaitingWorkerShort": "待機列に保存 — 準備後に自動認識",
     "reasonQueuedOffline": "ページは待機列に安全に保存されており、準備完了後に自動認識されます。",
-    "toolCheckFailedNotice": "自動チェック中に技術的な問題が発生しました。",
-    "toolCheckCheckingNotice": "ページ内容を確認しています。",
+    "toolCheckFailedNotice": "検証プロセスで技術的な問題が発生しました。",
+    "toolCheckCheckingNotice": "このページの自動チェックを実行しています。",
     "toolCheckReadyNotice": "このページは本に追加できます。",
-    "toolCheckRejectedNotice": "このページは承認されませんでした。",
-    "toolCheckRecheckNotice": "本に追加する前に再チェックが必要です。",
+    "toolCheckRejectedNotice": "このページバージョンは管理者に承認されませんでした。",
+    "toolCheckRecheckNotice": "本に追加する前にこのページを再チェックする必要があります。",
     "toolCheckAddedNotice": "ページが本に追加されました。",
     "uploadOfflineQueueButton": "ページをアップロードしてOCR待機列に追加",
     "uploadQueuedOfflineNotice": "{total}ページ（{format}）をOCR待機列に保存しました。OCRサービス再開後に文字認識・校正・安全確認が自動実行されます。",
     "retriedQueuedOfflineNotice": "再試行リクエストをOCR待機列に保存しました。OCR再開後に自動で処理されます。",
     "replacedPageImageQueuedOfflineNotice": "ページ{page}の画像を差し替え、OCR待機列に追加しました。OCR再開後に自動で再確認されます。",
-    "replacedSubmissionImageQueuedOfflineNotice": "新しい画像に差し替え、OCR待機列に追加しました。OCR再開後に自動で再確認されます。"
+    "replacedSubmissionImageQueuedOfflineNotice": "新しい画像に差し替え、OCR待機列に追加しました。OCR再開後に自動で再確認されます。",
+    "toolCheckPassedNotice": "このページは安全チェックを通過しました。"
   },
   "ocrContribution": {
     "cardAria": "「{title}」の文字読み取り精度向上への協力",

@@ -343,4 +343,49 @@ describe("Saved reading progress UI", () => {
       ),
     ).toBe(false);
   });
+
+  it("paginates large difficult words lists (6 per page) instead of expanding all at once", async () => {
+    const user = userEvent.setup();
+    const manyWords = Array.from({ length: 15 }, (_, idx) => ({
+      normalized_word: `tu-${idx + 1}`,
+      display_text: `Từ khó ${idx + 1}`,
+      difficulty_score: 15 - idx,
+      omission_count: 1,
+      repetition_count: 0,
+      long_pause_count: 0,
+      read_example_count: 0,
+      session_count: 2,
+      last_seen_at: "2026-10-01T01:00:00Z",
+      evidence_word_ids: [`word-${idx + 1}`],
+    }));
+    current = {
+      ...report,
+      difficult_words: manyWords,
+    };
+
+    renderReport();
+    await screen.findByText("Từ khó 1");
+
+    expect(screen.getByText("Từ khó 6")).toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 7")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Xem tất cả/ }),
+    ).not.toBeInTheDocument();
+
+    const pagination = screen.getByRole("navigation", {
+      name: "Từ cần luyện nổi bật",
+    });
+    expect(within(pagination).getByText("Trang 1 / 3")).toBeInTheDocument();
+
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByText("Từ khó 7")).toBeInTheDocument();
+    expect(screen.getByText("Từ khó 12")).toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 13")).not.toBeInTheDocument();
+
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByText("Từ khó 13")).toBeInTheDocument();
+    expect(screen.getByText("Từ khó 15")).toBeInTheDocument();
+    expect(within(pagination).getByText("Trang 3 / 3")).toBeInTheDocument();
+  });
 });

@@ -142,9 +142,16 @@ READING_REMINDER_POLL_SECONDS = _int_env(
 READING_REMINDER_MAX_ATTEMPTS = _int_env(
     "READING_REMINDER_MAX_ATTEMPTS", 5, minimum=1, maximum=10
 )
+_RAW_PARENT_EMAIL_APP_URL = (os.getenv("PARENT_EMAIL_APP_URL") or "").strip()
+_RAW_READING_REMINDER_APP_URL = (os.getenv("READING_REMINDER_APP_URL") or "").strip()
+PARENT_EMAIL_APP_URL = (
+    _RAW_PARENT_EMAIL_APP_URL
+    or _RAW_READING_REMINDER_APP_URL.removesuffix("/reading-management")
+    or "http://localhost:3000"
+).rstrip("/")
 READING_REMINDER_APP_URL = (
-    os.getenv("READING_REMINDER_APP_URL") or "http://localhost:3000/reading-management"
-).strip()
+    _RAW_READING_REMINDER_APP_URL or f"{PARENT_EMAIL_APP_URL}/reading-management"
+)
 
 # "Nobody in frame" parent email (opt-in per parent, off by default).
 # The client only reports an absence episode; all timing, TTL and limits below
@@ -171,6 +178,29 @@ READING_PRESENCE_MAX_PER_PARENT_PER_DAY = _int_env(
 # of being sent through SMTP (local mail sink for acceptance testing).
 READING_PRESENCE_MAIL_SINK_DIR = (
     os.getenv("READING_PRESENCE_MAIL_SINK_DIR") or ""
+).strip() or None
+
+# Unified parent email automation settings (server-only).
+# Supports both Resend HTTPS API (recommended for cloud hosting) and SMTP.
+EMAIL_PROVIDER = (os.getenv("EMAIL_PROVIDER") or "auto").strip().lower()
+if EMAIL_PROVIDER not in {"auto", "smtp", "resend", "vercel_relay"}:
+    raise ValueError("EMAIL_PROVIDER must be auto, smtp, resend, or vercel_relay")
+EMAIL_RELAY_URL = (os.getenv("EMAIL_RELAY_URL") or "").strip()
+EMAIL_RELAY_SECRET = (os.getenv("EMAIL_RELAY_SECRET") or "").strip()
+RESEND_API_KEY = (os.getenv("RESEND_API_KEY") or "").strip() or None
+RESEND_API_BASE_URL = (
+    os.getenv("RESEND_API_BASE_URL") or "https://api.resend.com"
+).strip().rstrip("/")
+EMAIL_FROM_ADDRESS = (
+    os.getenv("EMAIL_FROM_ADDRESS") or SMTP_FROM_EMAIL or ""
+).strip() or None
+EMAIL_FROM_NAME = (os.getenv("EMAIL_FROM_NAME") or "ViRead").strip() or "ViRead"
+PARENT_EMAIL_CRON_SECRET = (os.getenv("PARENT_EMAIL_CRON_SECRET") or "").strip() or None
+PARENT_EMAIL_DIGEST_POLL_SECONDS = _int_env(
+    "PARENT_EMAIL_DIGEST_POLL_SECONDS", 900, minimum=30, maximum=3600
+)
+PARENT_EMAIL_MAIL_SINK_DIR = (
+    os.getenv("PARENT_EMAIL_MAIL_SINK_DIR") or READING_PRESENCE_MAIL_SINK_DIR or ""
 ).strip() or None
 
 APP_ENVIRONMENT = (

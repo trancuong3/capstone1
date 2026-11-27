@@ -12,7 +12,52 @@
     "pictureCta": "絵を選択",
     "karaokeTitle": "子どもと楽しく歌う",
     "karaokeDesc": "好きな曲を選び、音楽を聴き、画面の歌詞に合わせて子どもと歌う。",
-    "karaokeCta": "楽曲ライブラリを開く"
+    "karaokeCta": "楽曲ライブラリを開く",
+    "eyebrow": "毎日楽しくベトナム語を学ぼう",
+    "selectChildLabel": "お子さまのプロフィールを選択",
+    "selectChildAria": "あそび学習ゾーンのお子さまプロフィールを選択",
+    "childOptionLabel": "{alias} · {grade}年生",
+    "calmSound": "やさしい音",
+    "soundMuted": "ミュート中",
+    "reduceMotion": "動きを減らす",
+    "reducedMotionActive": "動きを減らす：オン",
+    "onboardingGuideButton": "あそび方ガイド",
+    "mascotBadge": "ViReadフクロウのおすすめ",
+    "childProfileBadge": "プロフィール {alias} · {grade}年生",
+    "defaultGreeting": "こんにちは！きょうは絵でお話、文づくり、うた、記憶ゲームのどれであそぶ？",
+    "defaultRecommendationReason": "どのあそびも今読んでいる本とやさしくつながり、プレッシャーなくことばを覚えられます。",
+    "focusDifficultWordsLabel": "やさしく復習中のことば：",
+    "playSuggestedCta": "おすすめであそぶ",
+    "onboardingRegionAria": "あそび学習ゾーンのはじめ方ガイド",
+    "onboardingCounter": "クイックガイド ({current}/{total})",
+    "onboardingStep1Title": "1. すきなあそびコーナーをえらぼう",
+    "onboardingStep1Body": "4つのやさしいコーナー：絵でお話、文づくりシューター、たのしいカラオケ、なにをおぼえてる？",
+    "onboardingStep2Title": "2. こえでもタッチでもあそべるよ",
+    "onboardingStep2Body": "スマホでもタブレットでも押しやすい大きなボタン。声で答えても文字を選んでも大丈夫。",
+    "onboardingStep3Title": "3. プレッシャーなしで楽しく学ぼう",
+    "onboardingStep3Body": "1回10〜15分がいちばん快適。あせる制限時間はなく、AIの先生とフクロウがいつでも応援します！",
+    "onboardingNext": "つぎへ",
+    "onboardingDone": "わかったよ！",
+    "onboardingClose": "とじる",
+    "pictureZoneBadge": "おはなしの世界",
+    "todaySuggestionBadge": "きょうのおすすめ",
+    "suggestedWordsLabel": "おすすめのことば：",
+    "shooterZoneBadge": "ことばのぼうけん",
+    "karaokeZoneBadge": "おんがくステージ",
+    "karaokeChipRhythm": "リズム＆メロディ判定",
+    "karaokeChipTap": "リズムタップ",
+    "karaokeChipSlowPractice": "0.85倍速パート練習",
+    "memoryZoneBadge": "きおくたんけん",
+    "newBadge": "新着",
+    "memoryChipObserve": "絵を観察",
+    "memoryChipRemember": "くわしく思い出す",
+    "memoryChipStory": "お話のつづき",
+    "memoryTitle": "なにをおぼえてる？",
+    "memoryDesc": "自分のペースでベトナム語のイラストを見て、色や場所を思い出し、楽しいお話のつづきを想像しよう！",
+    "memoryCta": "きおくゲームをひらく",
+    "breakReminderTitle": "目のリフレッシュ：",
+    "defaultBreakReminder": "1回10〜15分くらいのペースが目にやさしく、自然に身につきます。",
+    "recommendationLoadError": "現在、学習のおすすめを読み込めません。"
   },
   "karaoke": {
     "title": "子ども向けカラオケ",
@@ -150,6 +195,62 @@
         "countdownNext": "{seconds}秒後に開始",
         "interludeNext": "音楽セグメント · 次の行を準備中",
         "outro": "最後のセグメントを聴きましょう"
+      },
+      "practiceModeGroupAria": "練習モード",
+      "headphoneRecommendation": "音程とリズムを最も正確に採点するため、ヘッドホンの使用をおすすめします！",
+      "speakerFilterHint": "スピーカー再生時は、スマートな音漏れフィルタが有効になります。",
+      "speakerBackingOn": "スピーカー伴奏：オン",
+      "speakerBackingOff": "スピーカーで伴奏を再生（ノイズ抑制）",
+      "unsupportedScoringWithRhythmHint": "このブラウザはフリー歌唱とリズムタップに対応しています。マイク採点を使うには音声認識対応ブラウザで開いてください。",
+      "micReadyNoticeDsp": "歌うときはマイクを許可してください。リズムと音程の解析は端末内のみで行われ、音声は保存されません。",
+      "rhythmTapButton": "曲に合わせてタップ（スペースキー）",
+      "rhythmTapFeedback": "{feedback} · 連続：{streak}",
+      "livePitchHz": "声の高さ：{hz} Hz",
+      "practicingSegment": "むずかしいパート {number} を練習中",
+      "practicingRateSuffix": "（{rate}倍速）",
+      "tempoSegment": "パート練習 · 0.85×",
+      "spaceHintRhythmTap": "曲の再生中にスペースキーでビートに合わせてタップできます。",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "フルコーラス",
+          "shortLabel": "ぜんぶ",
+          "description": "1曲とおして歌って、ベストスコアを記録します。"
+        },
+        "SEGMENT": {
+          "label": "苦手パート練習",
+          "shortLabel": "パート",
+          "description": "むずかしい部分を0.85倍速でくり返し練習。全曲の最高記録はそのままです。"
+        },
+        "LINE_PRACTICE": {
+          "label": "1行ずつ練習",
+          "shortLabel": "1行",
+          "description": "1行ずつ選んで、はっきりした発音と安定したリズムを練習します。"
+        },
+        "RHYTHM_TAP": {
+          "label": "リズムタップ",
+          "shortLabel": "タップ",
+          "description": "拍に合わせてタップボタンやスペースキーを押そう。マイクなしでも楽しくリズム練習できます！"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "歌唱の音楽分析",
+        "unmeasured": "未計測",
+        "points": "{score}点",
+        "statusGreat": "とても良い",
+        "statusGood": "良好",
+        "statusPractice": "もう少し練習",
+        "bestFullSong": "フル曲ベスト：{score}点",
+        "rhythmLabel": "リズム",
+        "pitchLabel": "メロディ",
+        "lyricsLabel": "歌詞",
+        "fluencyLabel": "なめらかさ",
+        "pitchBasisPrefix": "音程採点の基準：",
+        "speakerBleedNote": "スピーカーの伴奏音が少しマイクに入りました。",
+        "insufficientHint": "今回は歌声の信号が十分でなく採点できませんでした。マイクを口に近づけるかヘッドホンで歌ってみてね！",
+        "weakestSegmentTitle": "練習おすすめパート · {number}行目",
+        "retrySegmentSlow": "このパートを0.85倍速で練習",
+        "segmentReportSummary": "パート別レポート（{count}行）",
+        "segmentLineHeader": "{number}行目 ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "{number}行目 · ",
       "lineMatchedRetry": "{matched}/{evaluated}単語一致 · 再練習",
       "lineUnheardRetry": "よく聞こえませんでした · 再練習"
+    },
+    "rhythmTap": {
+      "steady": "安定したリズム！",
+      "early": "少し早め！",
+      "late": "少し遅め！",
+      "perfect": "ドンピシャ！完璧なリズム！",
+      "good": "とても惜しい・良いリズム！",
+      "slightlyFast": "ほんの少し速いよ！",
+      "slightlySlow": "ほんの少しゆっくり！"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "総合音楽採点（リズム・メロディ・歌詞）",
+        "RHYTHM_AND_LYRICS": "リズム＆歌詞採点",
+        "LYRICS_ONLY": "歌詞のみ採点",
+        "INSUFFICIENT_EVIDENCE": "音声信号が不十分",
+        "RHYTHM_TAP": "リズムタップ採点"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "お手本メロディと比較（オクターブ不問）",
+        "VOCAL_STEADINESS_AND_CONTOUR": "声の安定性とメロディライン",
+        "UNAVAILABLE": "音程未計測"
+      },
+      "gate": {
+        "silence": "まだ歌声が聞こえませんでした。マイクを少し近づけるか確認してやり直してみてね！",
+        "noiseOnly": "まわりが少しにぎやかなようです。静かな場所に移るかヘッドホンを使ってみよう！",
+        "electricalHum": "マイクにノイズ音が入っています。保護者の方にマイクやケーブルを確認してもらってね！",
+        "bleedHeadphones": "音がループしてしまいました。ヘッドホン音量を少し下げてはっきり歌ってみてね！",
+        "bleedSpeaker": "スピーカーの音楽の方が大きく聞こえています。ヘッドホンをするかマイクを近づけてね！",
+        "lowCoverage": "短い部分だけの歌唱でした。あともう少し歌うとしっかり採点できるよ！",
+        "okHeadphones": "ヘッドホンモードで声がとてもクリアに聞き取れています！",
+        "okSpeaker": "ヒント：ヘッドホンをつけると、メロディとリズムをより正確に聞き取れます！"
+      },
+      "encouragement": {
+        "insufficient": "今回は十分な音声が取れませんでした。マイクの近くではっきり歌ってみてね！",
+        "high": "すばらしい！リズムも言葉も正確で、気持ちのこもった歌い方だったよ！",
+        "good": "よくできました！リズムもメロディも上手にとれています！",
+        "medium": "いい感じ！むずかしい部分を0.85倍速でゆっくり練習してみよう！",
+        "low": "その調子！1行ずつゆっくり練習すれば、どんどん上手になるよ！"
+      },
+      "lineTips": {
+        "unclear": "この行はまだ少し不明瞭でした。0.85倍速でゆっくり練習してみよう！",
+        "great": "ばっちり！自信たっぷりでリズムも完璧な1行でした！",
+        "rhythmLate": "入りが少し遅れました。伴奏をよく聴いて少し早めに歌い出そう！",
+        "rhythmFast": "少しテンポより速くなりました。色が変わる歌詞に合わせて落ち着いて歌おう！",
+        "rhythmSteady": "リズムタップや0.85倍速でこの行を練習すると、もっと安定するよ！",
+        "pitch": "メロディをよく聴いて、音をまっすぐ伸ばすように歌ってみてね！",
+        "lyrics": "一度ゆっくり歌詞を読んでから、ひと音ずつはっきり歌ってみよう！",
+        "practiceMore": "かなり上手！0.85倍速でもう一度練習するとさらに良くなるよ！",
+        "insufficientLine": "この行がよく聞こえませんでした。もう少しマイクに近づけてみてね！"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "画面の文字に合わせてリズムタップボタンかスペースキーを押してね！",
+        "insufficientTip": "この行に合わせて一定のペースでタップしてみよう！",
+        "okGuidance": "リズムタップで曲のテンポをつかんでからマイク歌唱に挑戦できます！"
+      },
+      "lyricsOnlyFallbackGuidance": "この端末ではWeb Audio解析が有効でないため、今回は歌詞のみを採点しました。",
+      "mildSpeakerBleedGuidance": "スピーカーの伴奏が少しマイクに入りました。ヘッドホンを使うとさらに正確に採点できます！"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "行われている活動や周囲の状況を説明してください。",
       "step3Title": "色や気持ちはどうですか？",
       "step3Detail": "色、天気、または今の気持ちについての詳細を加えてみましょう。"
+    },
+    "aiTimeoutError": "AIの先生の応答に少し時間がかかっています。もう一度お試しください。",
+    "micPausedBackground": "アプリがバックグラウンドになったためマイクを安全に停止しました。入力内容はそのまま残っています！",
+    "waitingTtsCooldown": "音声の再生が終わってからマイクを開きます…",
+    "offlineNotice": "オフラインです。お話はそのまま保存されているので、接続が戻ったらすぐ再採点を押してね！",
+    "gradeHintChipsLowerTitle": "かんたんヒント（1〜2年生）",
+    "collapseGradeHints": "お話フレームのヒントを折りたたむ",
+    "expandGradeHints": "お話フレームのヒントをひらく",
+    "listenGuideButton": "ガイドをきく",
+    "gradeHintsCollapsedNote": "{grade}年生向けにヒントをたたんで自由に表現できるようにしています。いつでも「お話フレームのヒントをひらく」を押せます！",
+    "teachingModeSectionAria": "AIの先生との練習モード",
+    "teachingModeHeading": "AIの先生と学ぶモード",
+    "listenModeButton": "モード説明をきく",
+    "teachingModeGroupAria": "おはなし練習モードを選択",
+    "targetWordsProgress": "練習中のターゲット単語 ({used}/{total})",
+    "followUpSectionAria": "先生からのつぎの質問",
+    "practiceFollowUpTitle": "先生からのつづきの質問",
+    "listenQuestionButton": "質問をきく",
+    "resultModeBadge": "モード：{mode}",
+    "usedTargetWordsTitle": "上手に使えたターゲット単語",
+    "resultFollowUpTitle": "先生からのつぎのチャレンジ質問",
+    "answerFollowUpButton": "この質問にこたえる",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "よく見る",
+        "cue": "絵をよく見てみよう：だれがいて、なにがあって、どんな色が目立つかな？",
+        "audioHint": "観察モード。絵をよく見て、目立つ人や動物、ものの名前を言ってみよう。"
+      },
+      "VOCABULARY": {
+        "label": "ことば",
+        "cue": "上のおすすめ語やターゲット単語を1〜2個つかって文を作ってみよう。",
+        "audioHint": "ことばモード。上のおすすめのことばを1〜2個えらんで説明に入れてみよう。"
+      },
+      "SENTENCE": {
+        "label": "文づくり",
+        "cue": "「だれが + なにをしている + どこで」をつなげて1つの完全な文にしてみよう。",
+        "audioHint": "文づくりモード。だれがどこで何をしているか、完全な一文で話してみよう。"
+      },
+      "STORY": {
+        "label": "おはなし",
+        "cue": "2〜3つの文をつなげて、いま何が起きているかお話にしてみよう。",
+        "audioHint": "おはなしモード。2〜3文をつなげて、絵の中でどんな出来事が起きているかお話ししてみよう。"
+      },
+      "INFER": {
+        "label": "すいろん",
+        "cue": "どうしてそうしたのかな？その前やあとに何が起きそうかな？",
+        "audioHint": "すいろんモード。登場人物がどうしてそうしたのか、このあと何が起こるのか予想してみよう。"
+      },
+      "CREATE": {
+        "label": "そうぞう",
+        "cue": "楽しいセリフやワクワクする結末を自由に考えてみよう！",
+        "audioHint": "そうぞうモード。楽しいセリフやすてきな続きのお話を考えてみよう。"
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "はじめのヒント",
+      "EXPAND": "文をひろげる",
+      "PRAISE": "ほめて応援",
+      "NEXT_CHALLENGE": "つぎのチャレンジ"
+    },
+    "visualHintChips": {
+      "who": "だれ・なにがいる？",
+      "action": "なにをしている？",
+      "where": "どこ・なにいろ？"
     }
   },
   "karaokeRuntime": {

@@ -439,4 +439,72 @@ describe("SessionReadingReports", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("Lời đọc lượt đầu")).toBeInTheDocument();
   });
+
+  it("paginates additional comparisons inside details (5 per page) and windows 20+ page switcher buttons", async () => {
+    const manyComparisons: SavedReadingReport[] = Array.from(
+      { length: 7 },
+      (_, idx) => ({
+        ...report,
+        report_id: `rep-cmp-${idx + 1}`,
+        created_at: `2026-11-06T10:0${idx}:00Z`,
+        transcript: `Lời đọc lượt ${idx + 1}`,
+        summary:
+          idx === 0
+            ? { ...report.summary, assessment_version: 1 }
+            : report.summary,
+      }),
+    );
+    const extraPageReports: SavedReadingReport[] = Array.from(
+      { length: 19 },
+      (_, idx) => ({
+        ...report,
+        report_id: `rep-page-${idx + 2}`,
+        page_id: `20000000-0000-4000-8000-0000000000${String(idx + 2).padStart(2, "0")}`,
+        page_revision_id: `30000000-0000-4000-8000-0000000000${String(idx + 2).padStart(2, "0")}`,
+        created_at: `2026-11-06T11:${String(idx).padStart(2, "0")}:00Z`,
+        transcript: `Trang số ${idx + 2}`,
+      }),
+    );
+
+    comparisonApi.getSessionReports.mockResolvedValueOnce({
+      session_id: SESSION_ID,
+      total: manyComparisons.length + extraPageReports.length,
+      reports: [...manyComparisons, ...extraPageReports],
+    });
+
+    render(<SessionReadingReports sessionId={SESSION_ID} />);
+    expect(
+      await screen.findByRole("heading", { name: "Trang 7" }),
+    ).toBeInTheDocument();
+
+    // Windowed page switcher: 20 page groups render at most 7 numbered buttons (not 20)
+    const pageNav = screen.getByRole("navigation", {
+      name: "Chuyển báo cáo trang",
+    });
+    const numberedButtons = Array.from(
+      pageNav.querySelectorAll("button"),
+    ).filter((btn) => /^\d+$/.test(btn.textContent?.trim() ?? ""));
+    expect(numberedButtons.length).toBeLessThanOrEqual(7);
+    expect(pageNav).toHaveTextContent("…");
+
+    // Additional comparisons inside <details> are paginated at 5 per page
+    fireEvent.click(
+      screen.getByText("Các lượt đối chiếu khác của trang này (6)"),
+    );
+    expect(screen.getByText("Lời đọc lượt 5")).toBeInTheDocument();
+    expect(screen.queryByText("Lời đọc lượt 6")).not.toBeInTheDocument();
+
+    const cmpNav = screen.getByRole("navigation", {
+      name: "Phân trang lượt đối chiếu bổ sung",
+    });
+    expect(cmpNav).toHaveTextContent("Trang 1 / 2");
+    fireEvent.click(
+      Array.from(cmpNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText("Lời đọc lượt 6")).toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt 7")).toBeInTheDocument();
+    expect(screen.queryByText("Lời đọc lượt 5")).not.toBeInTheDocument();
+  });
 });

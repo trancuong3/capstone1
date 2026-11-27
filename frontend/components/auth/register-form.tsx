@@ -1,9 +1,9 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -28,11 +28,12 @@ export function RegisterForm({
   onEmailConfirmationRequired,
   scenario,
 }: RegisterFormProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
   const [errorKind, setErrorKind] = useState<RegisterErrorKind | null>(() => {
     if (scenario === "validation-error") return "validation";
     if (scenario === "safe-error") return "safe";
@@ -62,6 +63,7 @@ export function RegisterForm({
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
+    trigger,
   } = useForm<ParentRegistrationInput>({
     defaultValues: {
       displayName: "",
@@ -70,6 +72,25 @@ export function RegisterForm({
     },
     resolver: zodResolver(registerSchema),
   });
+  const prevLocaleRef = useRef(locale);
+  const errorsRef = useRef(errors);
+
+  useEffect(() => {
+    errorsRef.current = errors;
+  }, [errors]);
+
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) {
+      return;
+    }
+    prevLocaleRef.current = locale;
+    const activeFields = Object.keys(errorsRef.current) as Array<
+      keyof ParentRegistrationInput
+    >;
+    if (activeFields.length > 0) {
+      void trigger(activeFields);
+    }
+  }, [locale, trigger]);
 
   const onSubmit = handleSubmit(async (values) => {
     setErrorKind(null);
@@ -145,10 +166,29 @@ export function RegisterForm({
       />
       <TextField
         autoComplete="new-password"
+        endAdornment={
+          <button
+            aria-label={
+              showPassword
+                ? t("auth.passwordToggle.hide")
+                : t("auth.passwordToggle.show")
+            }
+            aria-pressed={showPassword}
+            className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            onClick={() => setShowPassword((prev) => !prev)}
+            type="button"
+          >
+            {showPassword ? (
+              <EyeOff aria-hidden="true" className="size-5" />
+            ) : (
+              <Eye aria-hidden="true" className="size-5" />
+            )}
+          </button>
+        }
         error={errors.password?.message}
         label={t("auth.fields.password")}
         placeholder={t("auth.placeholders.passwordMinLength", { min: 8 })}
-        type="password"
+        type={showPassword ? "text" : "password"}
         {...register("password")}
       />
       <Button

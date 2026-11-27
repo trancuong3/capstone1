@@ -473,4 +473,72 @@ describe("Reading history detail", () => {
     await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
     expect(screen.queryByText(bookFixture.title)).not.toBeInTheDocument();
   });
+
+  it("paginates comprehension questions (6 per page) and session events (8 per page)", async () => {
+    const user = userEvent.setup();
+    currentDetail = {
+      ...sessionDetailFixture,
+      comprehension: Array.from({ length: 8 }, (_, idx) => ({
+        question: {
+          id: `q-${idx + 1}`,
+          type: "FACTUAL" as const,
+          prompt: `Câu hỏi đọc hiểu số ${idx + 1}`,
+          page_revision_id: bookFixture.id,
+          source_span: null,
+          difficulty: "EASY",
+          answered: true,
+        },
+        answer: {
+          answer_id: `a-${idx + 1}`,
+          question_id: `q-${idx + 1}`,
+          submitted_answer: `Đáp án ${idx + 1}`,
+          is_correct: true,
+          score: 1,
+          feedback_code: null,
+        },
+      })),
+      events: Array.from({ length: 10 }, (_, idx) => ({
+        ...sessionDetailFixture.events[0],
+        id: `ev-${idx + 1}`,
+        start_ms: (idx + 1) * 1000,
+      })),
+    };
+
+    render(
+      <AppServicesProvider>
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
+      </AppServicesProvider>,
+    );
+
+    await screen.findByText("Câu hỏi đọc hiểu số 1");
+    expect(screen.getByText("Câu hỏi đọc hiểu số 6")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Câu hỏi đọc hiểu số 7"),
+    ).not.toBeInTheDocument();
+
+    const qNav = screen.getByRole("navigation", {
+      name: "Phân trang câu hỏi đọc hiểu",
+    });
+    await user.click(
+      Array.from(qNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText("Câu hỏi đọc hiểu số 7")).toBeInTheDocument();
+    expect(screen.getByText("Câu hỏi đọc hiểu số 8")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Câu hỏi đọc hiểu số 1"),
+    ).not.toBeInTheDocument();
+
+    const evNav = screen.getByRole("navigation", {
+      name: "Phân trang sự kiện trong buổi đọc",
+    });
+    expect(evNav).toHaveTextContent("Trang 1 / 2");
+    await user.click(
+      Array.from(evNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(evNav).toHaveTextContent("Trang 2 / 2");
+  });
 });

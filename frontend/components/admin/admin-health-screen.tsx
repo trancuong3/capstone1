@@ -871,6 +871,10 @@ export function AdminHealthScreen() {
   const [isClearingTts, setIsClearingTts] = useState(false);
 
   const mountedRef = useRef(true);
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const healthRequestSeqRef = useRef(0);
   const healthAbortRef = useRef<AbortController | null>(null);
   const isRefreshingRef = useRef(false);
@@ -889,76 +893,90 @@ export function AdminHealthScreen() {
     }
   }, []);
 
-  const fetchHealthAsync = useCallback(async () => {
-    clearWakeRecheckTimer();
-    const seq = ++healthRequestSeqRef.current;
-    healthAbortRef.current?.abort();
-    const controller = new AbortController();
-    healthAbortRef.current = controller;
-    isRefreshingRef.current = true;
-
-    let timedOut = false;
-    const timeoutId = globalThis.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, HEALTH_FETCH_TIMEOUT_MS);
-
-    try {
-      const nextSnapshot = await health.get(controller.signal);
-      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+  const fetchHealthAsync = useCallback(
+    async (options?: { forceFresh?: boolean }) => {
+      const forceFresh = Boolean(options?.forceFresh);
+      if (!forceFresh && isRefreshingRef.current) {
         return;
       }
-      setSnapshot(nextSnapshot);
-      setFetchError(null);
+      clearWakeRecheckTimer();
+      const seq = ++healthRequestSeqRef.current;
+      if (forceFresh) {
+        healthAbortRef.current?.abort();
+      }
+      const controller = new AbortController();
+      healthAbortRef.current = controller;
+      isRefreshingRef.current = true;
+
+      let timedOut = false;
+      const timeoutId = globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, HEALTH_FETCH_TIMEOUT_MS);
+
+      try {
+        const nextSnapshot = forceFresh
+          ? await health.get(controller.signal, { forceFresh: true })
+          : await health.get(controller.signal);
+        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+          return;
+        }
+        setSnapshot(nextSnapshot);
+        setFetchError(null);
+        setErrorDismissed(false);
+      } catch (err) {
+        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+          return;
+        }
+        if (!timedOut && controller.signal.aborted) {
+          return;
+        }
+        if (timedOut) {
+          setFetchError({
+            status: null,
+            requestId: null,
+            message: tRef.current(
+              "health.refreshTimeoutError",
+              undefined,
+              "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
+            ),
+            isTimeout: true,
+          });
+        } else if (isServiceError(err)) {
+          setFetchError({
+            status: err.status > 0 ? err.status : null,
+            requestId: err.request_id || null,
+            message: err.message || null,
+            isTimeout: false,
+          });
+        } else {
+          setFetchError({
+            status: null,
+            requestId: null,
+            message: null,
+            isTimeout: false,
+          });
+        }
+      } finally {
+        globalThis.clearTimeout(timeoutId);
+        if (mountedRef.current && seq === healthRequestSeqRef.current) {
+          isRefreshingRef.current = false;
+          setIsInitialLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    },
+    [clearWakeRecheckTimer, health],
+  );
+
+  const executeHealthFetch = useCallback(
+    async (options?: { forceFresh?: boolean }) => {
+      setIsRefreshing(true);
       setErrorDismissed(false);
-    } catch (err) {
-      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
-        return;
-      }
-      if (!timedOut && controller.signal.aborted) {
-        return;
-      }
-      if (timedOut) {
-        setFetchError({
-          status: null,
-          requestId: null,
-          message: t(
-            "health.refreshTimeoutError",
-            undefined,
-            "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
-          ),
-          isTimeout: true,
-        });
-      } else if (isServiceError(err)) {
-        setFetchError({
-          status: err.status > 0 ? err.status : null,
-          requestId: err.request_id || null,
-          message: err.message || null,
-          isTimeout: false,
-        });
-      } else {
-        setFetchError({
-          status: null,
-          requestId: null,
-          message: null,
-          isTimeout: false,
-        });
-      }
-    } finally {
-      globalThis.clearTimeout(timeoutId);
-      if (mountedRef.current && seq === healthRequestSeqRef.current) {
-        isRefreshingRef.current = false;
-        setIsInitialLoading(false);
-        setIsRefreshing(false);
-      }
-    }
-  }, [clearWakeRecheckTimer, health, t]);
-
-  const executeHealthFetch = useCallback(async () => {
-    setIsRefreshing(true);
-    setErrorDismissed(false);
-    await fetchHealthAsync();
-  }, [fetchHealthAsync]);
+      await fetchHealthAsync(options);
+    },
+    [fetchHealthAsync],
+  );
 
   const probeClientAsync = useCallback(async () => {
     const seq = ++clientProbeSeqRef.current;
@@ -1118,7 +1136,7 @@ export function AdminHealthScreen() {
   }, [autoRefreshSec, executeHealthFetch, isTabHidden]);
 
   const handleManualRecheck = useCallback(() => {
-    void executeHealthFetch();
+    void executeHealthFetch({ forceFresh: true });
   }, [executeHealthFetch]);
 
   const handleWakeOcrWorker = useCallback(async () => {
@@ -1133,7 +1151,7 @@ export function AdminHealthScreen() {
       const response = await health.wakeOcrWorker(controller.signal);
       if (!mountedRef.current) return;
       if (response.woken) {
-        const suffix = t(
+        const suffix = tRef.current(
           "health.wakeOcrRechecking",
           undefined,
           "Tự động kiểm tra lại sau vài giây…",
@@ -1149,7 +1167,7 @@ export function AdminHealthScreen() {
         wakeRecheckTimerRef.current = globalThis.setTimeout(() => {
           wakeRecheckTimerRef.current = null;
           if (mountedRef.current) {
-            void executeHealthFetch();
+            void executeHealthFetch({ forceFresh: true });
           }
         }, WAKE_RECHECK_DELAY_MS);
       } else {

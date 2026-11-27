@@ -260,7 +260,17 @@
     "referencePageAlt": "ページ {page} の参照画像",
     "scrollToCurrentWord": "読み上げ中の単語について",
     "currentWordPrefix": "現在の単語： ",
-    "overlayAria": "現在読んでいる単語の強調表示領域"
+    "overlayAria": "現在読んでいる単語の強調表示領域",
+    "readingModeSwitcherAria": "ページの表示モード",
+    "readingModeIllustrated": "イラスト付き",
+    "readingModeIllustratedTitle": "文字のない挿絵と読み上げ本文を一緒に表示します",
+    "readingModeText": "文字のみ",
+    "readingModeTextTitle": "読みやすい本文テキストに集中して表示します",
+    "readingModeOriginal": "元のページ",
+    "readingModeOriginalTitle": "比較用にスキャンした元のページ画像を表示します",
+    "illustrationAlt": "{page}ページのイラスト",
+    "originalReferenceHeading": "元のページ画像（比較用）",
+    "originalReferenceAlt": "{page}ページの元画像"
   },
   "pageContent": {
     "incorrectWordAria": "正しくありません：\"{word}\"。もう一度読んでみましょう。",
@@ -360,7 +370,8 @@
     "finish": "完了",
     "nextQuestion": "次の質問",
     "chosenCorrectFeedback": "{label}を選びましたね。{hint}",
-    "chosenWrongFeedback": "{label}を選びましたね。惜しい！本文の内容を思い出して、もう一度選んでみよう！"
+    "chosenWrongFeedback": "{label}を選びましたね。惜しい！本文の内容を思い出して、もう一度選んでみよう！",
+    "skipToReport": "スキップして結果を見る"
   },
   "automation": {
     "sectionTitle": "読書中の自動サポート",

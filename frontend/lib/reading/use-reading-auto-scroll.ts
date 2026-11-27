@@ -23,6 +23,8 @@ export interface UseReadingAutoScrollOptions {
   readonly forceFocusKey?: string | null;
   /** Center-weighted comfort band (~38% target) for retry mode. */
   readonly centerMode?: boolean;
+  /** When true (speculative interim preview), avoid jumping backward upward. */
+  readonly isPreview?: boolean;
 }
 
 export interface UseReadingAutoScrollResult {
@@ -99,6 +101,7 @@ export function useReadingAutoScroll({
   enabled = true,
   forceFocusKey = null,
   centerMode = false,
+  isPreview = false,
 }: UseReadingAutoScrollOptions): UseReadingAutoScrollResult {
   const [isDetached, setIsDetached] = useState(false);
   const isDetachedRef = useRef(false);
@@ -169,6 +172,7 @@ export function useReadingAutoScroll({
 
       const distance = Math.abs(nextTop - container.scrollTop);
       if (distance < 2) return;
+      if (isPreview && !forceInstant && nextTop < container.scrollTop) return;
 
       const instant = forceInstant || prefersReducedMotion();
       const startedAt = nowMs();
@@ -185,7 +189,7 @@ export function useReadingAutoScroll({
         startedAt + (instant ? PROGRAMMATIC_INSTANT_GUARD_MS : smoothGuardMs);
       scrollContainerTo(container, nextTop, instant ? "instant" : "smooth");
     },
-    [containerRef],
+    [containerRef, isPreview],
   );
 
   const resumeAutoFollow = useCallback(() => {

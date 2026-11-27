@@ -260,7 +260,17 @@
     "referencePageAlt": "Ảnh tham khảo trang {page}",
     "scrollToCurrentWord": "Về từ đang đọc",
     "currentWordPrefix": "Từ hiện tại: ",
-    "overlayAria": "Vùng tô sáng từ đang đọc trên trang"
+    "overlayAria": "Vùng tô sáng từ đang đọc trên trang",
+    "readingModeSwitcherAria": "Chế độ đọc trang sách",
+    "readingModeIllustrated": "Đọc có tranh",
+    "readingModeIllustratedTitle": "Xem tranh minh họa không chữ cùng văn bản đọc",
+    "readingModeText": "Đọc chữ",
+    "readingModeTextTitle": "Tập trung vào chữ in rõ nét để bé dễ đọc",
+    "readingModeOriginal": "Trang gốc đối chiếu",
+    "readingModeOriginalTitle": "Xem ảnh trang sách gốc để đối chiếu",
+    "illustrationAlt": "Tranh minh họa trang {page}",
+    "originalReferenceHeading": "Ảnh trang gốc (đối chiếu)",
+    "originalReferenceAlt": "Ảnh trang gốc trang {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Chưa chính xác: \"{word}\". Bé đọc lại từ này nhé.",
@@ -360,7 +370,8 @@
     "finish": "Hoàn thành",
     "nextQuestion": "Câu tiếp theo",
     "chosenCorrectFeedback": "Con vừa chọn {label}. {hint}",
-    "chosenWrongFeedback": "Con vừa chọn {label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!"
+    "chosenWrongFeedback": "Con vừa chọn {label}. Chưa đúng rồi, mình nhớ lại chi tiết trong bài đọc rồi chọn lại nhé!",
+    "skipToReport": "Bỏ qua và xem kết quả"
   },
   "automation": {
     "sectionTitle": "Tự động khi đọc",

@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import {
@@ -27,7 +28,9 @@ import {
   inferRegionFromVoiceId,
   lockSessionVoice,
   setVoicePolicyPreferences,
+  subscribeVoiceLock,
   subscribeVoicePolicy,
+  type VoiceProviderMode,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import {
@@ -37,6 +40,13 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
+import {
+  fetchVoiceEngineHealth,
+  getBrowserOnlineStatus,
+  getCachedVoiceEngineHealth,
+  subscribeBrowserOnlineStatus,
+  subscribeVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
   resolveVoiceGender,
@@ -132,6 +142,7 @@ function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
         ? t(ageKeys[ageKey])
         : voice.age.replaceAll("_", " ")
       : null,
+    voice.provider === "google" ? t("settings.googleProviderLabel") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -155,6 +166,21 @@ export function ReadingVoiceSettings({
     getVoicePolicyPreferences,
     getDefaultVoicePolicyPreferences,
   );
+  const voiceHealth = useSyncExternalStore(
+    subscribeVoiceEngineHealth,
+    getCachedVoiceEngineHealth,
+    () => null,
+  );
+  const activeSessionLock = useSyncExternalStore(
+    subscribeVoiceLock,
+    getActiveSessionVoiceLock,
+    () => null,
+  );
+  const isBrowserOnline = useSyncExternalStore(
+    subscribeBrowserOnlineStatus,
+    getBrowserOnlineStatus,
+    () => true,
+  );
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
   const [regionTab, setRegionTab] = useState<"all" | VoiceRegion>("all");
@@ -166,20 +192,30 @@ export function ReadingVoiceSettings({
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
+  const healthControllerRef = useRef<AbortController | null>(null);
+  const lastLoadedContextKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       loadControllerRef.current?.abort();
+      healthControllerRef.current?.abort();
     };
+  }, []);
+
+  const loadVoiceHealth = useCallback(() => {
+    healthControllerRef.current?.abort();
+    const controller = new AbortController();
+    healthControllerRef.current = controller;
+    void fetchVoiceEngineHealth(controller.signal);
   }, []);
 
   const syncPausedSessionLock = useCallback(
     (nextVoiceId?: string | null, nextSpeed?: number, modelVer?: string) => {
       const activeLock = getActiveSessionVoiceLock();
       if (!activeLock) return;
-      lockSessionVoice(activeLock.sessionId, {
+      const updatedLock = lockSessionVoice(activeLock.sessionId, {
         voiceId:
           nextVoiceId !== undefined
             ? nextVoiceId
@@ -189,6 +225,27 @@ export function ReadingVoiceSettings({
         modelVersion: modelVer,
         forceUpdate: true,
       });
+      // Explicitly resync server-side SessionVoiceLock so subsequent playback
+      // never hits 409 SESSION_VOICE_LOCKED after an intentional paused voice change.
+      if (
+        updatedLock.voiceId !== activeLock.voiceId &&
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+      ) {
+        void voiceStudio
+          .updateSessionVoiceLock({
+            sessionId: activeLock.sessionId,
+            voiceId: updatedLock.voiceId,
+          })
+          .catch(() => undefined);
+      }
+    },
+    [voiceStudio],
+  );
+
+  const buildVoiceContextKey = useCallback(
+    (healthSnap = getCachedVoiceEngineHealth()) => {
+      const currentPolicy = getVoicePolicyPreferences();
+      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}`;
     },
     [],
   );
@@ -197,11 +254,13 @@ export function ReadingVoiceSettings({
     loadControllerRef.current?.abort();
     const controller = new AbortController();
     loadControllerRef.current = controller;
+    const contextKey = buildVoiceContextKey();
     setLoadState({ status: "loading" });
     voiceStudio
       .listVoices(controller.signal)
       .then((data) => {
         if (!mountedRef.current || controller.signal.aborted) return;
+        lastLoadedContextKeyRef.current = contextKey;
         const storedVoice = getSpeechPreferences().voiceId;
         if (
           storedVoice &&
@@ -217,7 +276,7 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update, syncPausedSessionLock, t]);
+  }, [voiceStudio, update, syncPausedSessionLock, t, buildVoiceContextKey]);
 
   function change(
     value: Parameters<typeof update>[0],
@@ -244,9 +303,40 @@ export function ReadingVoiceSettings({
     );
   }
 
+  function changeProviderPolicy(
+    nextPolicy: Partial<{
+      providerMode: VoiceProviderMode;
+      allowGoogleSttFallback: boolean;
+      allowGoogleTtsFallback: boolean;
+    }>,
+  ) {
+    previewGenerationRef.current += 1;
+    onStopPreview();
+    setPreviewError(false);
+    const updated = setVoicePolicyPreferences(nextPolicy);
+    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice
+    const currentVoiceId = getSpeechPreferences().voiceId;
+    if (
+      currentVoiceId?.startsWith("google_") &&
+      (updated.providerMode !== "local_with_google_fallback" ||
+        !updated.allowGoogleTtsFallback)
+    ) {
+      update({ voiceId: null });
+      syncPausedSessionLock(null);
+    }
+    if (isOpen) {
+      loadVoices();
+    }
+  }
+
   function selectRegionTab(nextTab: "all" | VoiceRegion) {
     setRegionTab(nextTab);
     if (nextTab === "all") return;
+    // During an active locked reading session, switching region tabs ONLY filters
+    // the visible list so browsing regions never silently alters the locked voice.
+    if (getActiveSessionVoiceLock() !== null) {
+      return;
+    }
     setVoicePolicyPreferences({ region: nextTab });
     if (loadState.status === "ready") {
       const regionVoices = loadState.data.voices.filter(
@@ -273,7 +363,13 @@ export function ReadingVoiceSettings({
 
   function open() {
     setIsOpen(true);
-    if (loadState.status === "idle" || loadState.status === "error") {
+    loadVoiceHealth();
+    const currentKey = buildVoiceContextKey();
+    if (
+      loadState.status === "idle" ||
+      loadState.status === "error" ||
+      lastLoadedContextKeyRef.current !== currentKey
+    ) {
       loadVoices();
     }
   }
@@ -283,6 +379,7 @@ export function ReadingVoiceSettings({
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
+    healthControllerRef.current?.abort();
     if (loadState.status === "loading") setLoadState({ status: "idle" });
     setIsOpen(false);
   }
@@ -419,12 +516,37 @@ export function ReadingVoiceSettings({
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
             aria-live="polite"
           >
-            {selectedVoice
-              ? voiceTitle(selectedVoice)
-              : preferences.voiceId
-                ? t("settings.savedVoice")
-                : t("settings.defaultVoice")}{" "}
-            · {activeRegionLabel} · {formatSpeed(preferences.speed)}
+            <div>
+              {selectedVoice
+                ? voiceTitle(selectedVoice)
+                : preferences.voiceId
+                  ? t("settings.savedVoice")
+                  : t("settings.defaultVoice")}{" "}
+              · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
+              {policy.providerMode === "local_only"
+                ? t("settings.localOnlyMode")
+                : t("settings.localWithGoogleMode")}
+            </div>
+            {activeSessionLock || !isBrowserOnline ? (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                {activeSessionLock ? (
+                  <span
+                    data-testid="session-voice-lock-badge"
+                    className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"
+                  >
+                    {t("settings.sessionLockedBadge")}
+                  </span>
+                ) : null}
+                {!isBrowserOnline ? (
+                  <span
+                    data-testid="browser-offline-badge"
+                    className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-900"
+                  >
+                    {t("settings.offlineBrowserBadge")}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {removedVoiceNotice ? (
@@ -591,9 +713,12 @@ export function ReadingVoiceSettings({
                           ? [defaultVoiceId]
                           : []
                       : [];
+                  const isLocalWorkerOffline = voiceHealth
+                    ? !voiceHealth.local.available
+                    : loadState.status === "ready" &&
+                      loadState.data.local_worker_ready === false;
                   const isCachedOffline =
-                    loadState.status === "ready" &&
-                    loadState.data.local_worker_ready === false &&
+                    isLocalWorkerOffline &&
                     cachedVoiceIds.includes(voice.voice_id);
                   return (
                     <label
@@ -611,7 +736,7 @@ export function ReadingVoiceSettings({
                               className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
                               data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
                             >
-                              Sẵn Wi-Fi
+                              {t("settings.wifiReadyBadge")}
                             </span>
                           ) : null}
                         </span>
@@ -644,7 +769,13 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
-            loadState.data.local_worker_ready === false
+            !(
+              voiceHealth?.elevenlabs?.tts_configured ||
+              voiceHealth?.elevenlabs?.stt_configured
+            ) &&
+            (voiceHealth
+              ? !voiceHealth.local.available
+              : loadState.data.local_worker_ready === false)
               ? (() => {
                   const cachedIds =
                     loadState.data.cached_voice_ids !== undefined
@@ -661,14 +792,215 @@ export function ReadingVoiceSettings({
                       data-testid="voice-offline-cache-notice"
                     >
                       {cachedNames.length > 1
-                        ? `Một số giọng đọc đang tạm nghỉ. Hiện có sẵn âm thanh chuẩn bị trước cho: ${cachedNames.join(", ")}.`
+                        ? t("settings.offlineCacheMultiple", {
+                            voices: cachedNames.join(", "),
+                          })
                         : cachedNames.length === 1
-                          ? `Một số giọng đọc đang tạm nghỉ. Hiện có sẵn âm thanh chuẩn bị trước cho giọng ${cachedNames[0]}.`
-                          : "Giọng đọc trực tuyến hiện đang tạm nghỉ. Bé vẫn có thể luyện đọc và nghe lại sau ít phút."}
+                          ? t("settings.offlineCacheSingle", {
+                              voice: cachedNames[0],
+                            })
+                          : t("settings.offlineCacheEmpty")}
                     </p>
                   );
                 })()
               : null}
+          </section>
+
+          <section
+            aria-labelledby="voice-provider-policy-heading"
+            className="space-y-2.5 rounded-control border border-border bg-white p-3"
+          >
+            <h3
+              className="text-label font-semibold text-ink"
+              id="voice-provider-policy-heading"
+            >
+              {t("settings.parentModeTitle")}
+            </h3>
+            <VoiceEngineBadge />
+            {voiceHealth ? (
+              <div
+                data-testid="voice-health-status-pills"
+                className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold"
+              >
+                {voiceHealth.elevenlabs?.tts_configured ||
+                voiceHealth.elevenlabs?.stt_configured ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-emerald-900"
+                    data-testid="voice-health-elevenlabs-pill"
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                      aria-hidden="true"
+                    />
+                    ElevenLabs Cloud: {t("settings.localAvailable")}
+                  </span>
+                ) : null}
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
+                    voiceHealth.local.available
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                      : voiceHealth.elevenlabs?.tts_configured ||
+                          voiceHealth.elevenlabs?.stt_configured
+                        ? "border-slate-200 bg-slate-50 text-slate-700"
+                        : "border-rose-200 bg-rose-50 text-rose-900",
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "h-1.5 w-1.5 rounded-full",
+                      voiceHealth.local.available
+                        ? "bg-emerald-500"
+                        : voiceHealth.elevenlabs?.tts_configured ||
+                            voiceHealth.elevenlabs?.stt_configured
+                          ? "bg-slate-400"
+                          : "bg-rose-500",
+                    )}
+                    aria-hidden="true"
+                  />
+                  {t("settings.localWorkerLabel")}{" "}
+                  {voiceHealth.local.available
+                    ? t("settings.localAvailable")
+                    : t("settings.localUnavailable")}
+                </span>
+                {!(
+                  voiceHealth.elevenlabs?.tts_configured ||
+                  voiceHealth.elevenlabs?.stt_configured
+                ) ||
+                voiceHealth.google.stt_configured ||
+                voiceHealth.google.tts_configured ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
+                      voiceHealth.google.stt_configured ||
+                        voiceHealth.google.tts_configured
+                        ? "border-sky-200 bg-sky-50 text-sky-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        voiceHealth.google.stt_configured ||
+                          voiceHealth.google.tts_configured
+                          ? "bg-sky-500"
+                          : "bg-amber-500",
+                      )}
+                      aria-hidden="true"
+                    />
+                    Google Cloud API:{" "}
+                    {voiceHealth.google.stt_configured ||
+                    voiceHealth.google.tts_configured
+                      ? t("settings.googleConfigured")
+                      : t("settings.googleUnconfigured")}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button
+                aria-pressed={policy.providerMode === "local_only"}
+                className={cn(
+                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
+                  policy.providerMode === "local_only"
+                    ? "border-primary bg-primary text-white"
+                    : "border-border bg-cream/60 text-ink hover:border-primary",
+                )}
+                onClick={() =>
+                  changeProviderPolicy({
+                    providerMode: "local_only",
+                    allowGoogleSttFallback: false,
+                    allowGoogleTtsFallback: false,
+                  })
+                }
+                type="button"
+              >
+                {t("settings.localOnlyTitle")}
+                <span
+                  className={cn(
+                    "mt-0.5 block font-normal",
+                    policy.providerMode === "local_only"
+                      ? "text-white/90"
+                      : "text-muted",
+                  )}
+                >
+                  {t("settings.localOnlyDesc")}
+                </span>
+              </button>
+              <button
+                aria-pressed={
+                  policy.providerMode === "local_with_google_fallback"
+                }
+                className={cn(
+                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
+                  policy.providerMode === "local_with_google_fallback"
+                    ? "border-primary bg-primary text-white"
+                    : "border-border bg-cream/60 text-ink hover:border-primary",
+                )}
+                onClick={() =>
+                  changeProviderPolicy(
+                    policy.providerMode === "local_with_google_fallback"
+                      ? { providerMode: "local_with_google_fallback" }
+                      : {
+                          providerMode: "local_with_google_fallback",
+                          allowGoogleSttFallback: true,
+                          allowGoogleTtsFallback: true,
+                        },
+                  )
+                }
+                type="button"
+              >
+                {t("settings.localWithGoogleTitle")}
+                <span
+                  className={cn(
+                    "mt-0.5 block font-normal",
+                    policy.providerMode === "local_with_google_fallback"
+                      ? "text-white/90"
+                      : "text-muted",
+                  )}
+                >
+                  {t("settings.localWithGoogleDesc")}
+                </span>
+              </button>
+            </div>
+
+            {policy.providerMode === "local_with_google_fallback" ? (
+              <div className="space-y-2 rounded-lg bg-cream/70 p-2.5 text-xs">
+                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+                  <span>{t("settings.googleSttFallback")}</span>
+                  <input
+                    checked={policy.allowGoogleSttFallback}
+                    className="size-4 accent-primary"
+                    onChange={(e) =>
+                      changeProviderPolicy({
+                        allowGoogleSttFallback: e.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
+                  <span>{t("settings.googleTtsFallback")}</span>
+                  <input
+                    checked={policy.allowGoogleTtsFallback}
+                    className="size-4 accent-primary"
+                    onChange={(e) =>
+                      changeProviderPolicy({
+                        allowGoogleTtsFallback: e.target.checked,
+                      })
+                    }
+                    type="checkbox"
+                  />
+                </label>
+                {!voiceHealth ||
+                (!voiceHealth.google.stt_configured &&
+                  !voiceHealth.google.tts_configured) ? (
+                  <p className="text-[11px] leading-relaxed text-muted">
+                    {t("settings.missingGoogleKeyHint")}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </section>
 
           <ReadingAutomationSettings />

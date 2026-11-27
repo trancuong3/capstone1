@@ -161,7 +161,8 @@
       "maxRetriesReached": "תורגל שלוש פעמים",
       "uncertainLabel": "לא שמעתי היטב",
       "uncertainNote": "מתועד בנפרד, אינו נחשב כשגיאת הגייה מאומתת."
-    }
+    },
+    "entertainmentSummaryHeading": "למידה במשחק וכישורי שפה (V4.0)"
   },
   "sessions": {
     "title": "היסטוריית קריאה",
@@ -643,5 +644,26 @@
       "wantToRead": "רוצה לקרוא",
       "savedToRead": "נשמר לרשימת הקריאה"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "מסכם את התקדמות הלמידה במשחק של {childName}…",
+    "empty": "אין עדיין נתוני משחק ולמידה עבור {childName}. סיכום יופיע כאן לאחר פעילות.",
+    "observedCounterLabel": "כישורים שנצפו בבירור",
+    "estimatedCounterLabel": "כישורים בהערכה ראשונית",
+    "unknownCounterLabel": "כישורים ללא מספיק נתונים",
+    "activitiesTitle": "פעילויות משחק ולמידה ({days} ימים אחרונים)",
+    "avgScoreBadge": "ממוצע {pct}%",
+    "noScoreBadge": "אין ציון עדיין",
+    "skillsMapTitle": "מפת כישורים (ללא ניחושים כשאין מספיק נתונים)",
+    "evidenceCount": "{count} תיעודים",
+    "noPracticeYet": "הילד טרם תרגל תחום זה, ולכן הסטטוס נשמר ללא הערכה.",
+    "statusObserved": "נצפה בבירור",
+    "statusEstimated": "הערכה ראשונית",
+    "statusUnknown": "אין מספיק נתונים",
+    "practicedWordsTitle": "מילים קשות שתורגלו במשחק",
+    "practiceTimes": "{count} פעמים",
+    "karaokeWeakSegmentsTitle": "שורות שיר לתרגול איטי ב-0.85x",
+    "openSongAction": "פתח שיר",
+    "homeTipsTitle": "טיפים לליווי הורים בבית"
   }
 }

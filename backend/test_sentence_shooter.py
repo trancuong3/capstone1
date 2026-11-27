@@ -879,3 +879,320 @@ class SentenceShooterLatencyBundleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("for update of gamesessions, gamerounds", sql)
         self.assertIn("duplicate_snapshot", sql)
         self.assertNotIn("left outer join", sql)
+
+
+class SentenceShooterV4LearningModesTests(unittest.IsolatedAsyncioTestCase):
+    def make_rich_repository(
+        self,
+        text: str = (
+            "Bé đang đọc sách. "
+            "Mèo nhỏ ngủ ngon. "
+            "Lan thích xem truyện tranh! "
+            "Bạn có đi học không?"
+        ),
+        active_difficult: list[str] | None = None,
+    ):
+        repo = FakeSentenceShooterRepository()
+        repo.revision.VerifiedText = text
+        words = [
+            SimpleNamespace(
+                Id=uuid4(),
+                WordIndex=index,
+                LineIndex=0,
+                Text=token,
+                NormalizedText=normalize_token(token),
+            )
+            for index, token in enumerate(text.split())
+        ]
+        repo.rows = [(repo.book_record, repo.page, repo.revision, word) for word in words]
+        repo.difficult_words_list = list(active_difficult or [])
+        repo.evidence_records = []
+
+        async def _active_difficult_words(_child_id, *, limit=12):
+            return repo.difficult_words_list[:limit]
+
+        async def _record_learning_evidence(entries):
+            repo.evidence_records.extend(entries)
+            return len(entries)
+
+        repo.active_difficult_words = _active_difficult_words
+        repo.record_learning_evidence = _record_learning_evidence
+        return repo
+
+    async def test_word_order_mode_remains_backward_compatible_and_records_evidence(self):
+        repo = self.make_rich_repository()
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="easy",
+                total_rounds=1,
+            ),
+        )
+        self.assertEqual(session.learning_mode, "WORD_ORDER")
+        self.assertEqual(session.round.learning_mode, "WORD_ORDER")
+        self.assertEqual(session.round.prompt_slots, [])
+        game_round = repo.rounds_by_session[0]
+
+        shot = None
+        for idx, tok in enumerate(game_round.ExpectedTokenIds):
+            shot = await service.shoot(
+                PARENT_ID,
+                session.session_id,
+                game_round.Id,
+                UUID(tok),
+                uuid4(),
+                client_shot_id=f"wo-shot-{idx}",
+            )
+
+        assert shot is not None
+        self.assertTrue(shot.round_completed)
+        self.assertTrue(shot.session_completed)
+        self.assertGreater(shot.score, 0)
+        self.assertEqual(shot.client_shot_id, f"wo-shot-{len(game_round.ExpectedTokenIds) - 1}")
+        self.assertEqual([entry["skill_key"] for entry in repo.evidence_records], ["sentence_ordering"])
+
+    async def test_fill_blank_mode_creates_blanks_and_distractors_and_validates_shots(self):
+        repo = self.make_rich_repository(
+            text="Bé đang đọc sách hay mỗi buổi sáng. Mèo con chạy nhảy vui vẻ ngoài sân."
+        )
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="medium",
+                total_rounds=1,
+                learning_mode="FILL_BLANK",
+                focus_words=["sách"],
+            ),
+        )
+        self.assertEqual(session.learning_mode, "FILL_BLANK")
+        self.assertEqual(session.round.learning_mode, "FILL_BLANK")
+        self.assertEqual(session.round.token_count, 2)
+        self.assertGreater(len(session.round.tokens), session.round.token_count)
+        blanks = [slot for slot in session.round.prompt_slots if slot.is_blank]
+        fixed = [slot for slot in session.round.prompt_slots if not slot.is_blank]
+        self.assertEqual(len(blanks), 2)
+        self.assertGreater(len(fixed), 0)
+        self.assertTrue(all(slot.text is None for slot in blanks))
+        self.assertTrue(all(slot.text for slot in fixed))
+
+        game_round = repo.rounds_by_session[0]
+        expected_set = set(game_round.ExpectedTokenIds)
+        distractor_id = next(
+            UUID(tid) for tid in game_round.ShuffledTokenIds if tid not in expected_set
+        )
+        wrong = await service.shoot(
+            PARENT_ID,
+            session.session_id,
+            game_round.Id,
+            distractor_id,
+            uuid4(),
+            client_shot_id="fb-wrong",
+        )
+        self.assertFalse(wrong.is_correct)
+        self.assertEqual(wrong.next_expected_position, 0)
+        self.assertIsNone(wrong.grammar_tip)
+
+        final_shot = None
+        for idx, tid in enumerate(game_round.ExpectedTokenIds):
+            final_shot = await service.shoot(
+                PARENT_ID,
+                session.session_id,
+                game_round.Id,
+                UUID(tid),
+                uuid4(),
+                client_shot_id=f"fb-ok-{idx}",
+            )
+        assert final_shot is not None
+        self.assertTrue(final_shot.round_completed)
+        self.assertIsNotNone(final_shot.completed_sentence)
+        self.assertTrue(bool(final_shot.grammar_tip))
+        self.assertIn("sentence_cloze", [e["skill_key"] for e in repo.evidence_records])
+        self.assertIn("difficult_word_mastery", [e["skill_key"] for e in repo.evidence_records])
+
+    async def test_grammar_focus_mode_provides_vietnamese_grammar_tip_only_after_completion(self):
+        repo = self.make_rich_repository(
+            text="Lan thích xem truyện tranh! Bạn có đi học không?"
+        )
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="easy",
+                total_rounds=1,
+                learning_mode="GRAMMAR_FOCUS",
+            ),
+        )
+        self.assertEqual(session.learning_mode, "GRAMMAR_FOCUS")
+        self.assertEqual(session.round.token_count, 1)
+        self.assertGreaterEqual(len(session.round.tokens), 3)
+        self.assertNotIn("grammar_tip", session.round.model_dump())
+
+        game_round = repo.rounds_by_session[0]
+        target_id = UUID(game_round.ExpectedTokenIds[0])
+        shot = await service.shoot(
+            PARENT_ID,
+            session.session_id,
+            game_round.Id,
+            target_id,
+            uuid4(),
+            client_shot_id="gram-1",
+        )
+        self.assertTrue(shot.is_correct)
+        self.assertTrue(shot.round_completed)
+        self.assertIsNotNone(shot.grammar_tip)
+        self.assertIn("Dấu", shot.grammar_tip)
+        self.assertEqual([e["skill_key"] for e in repo.evidence_records], ["grammar_awareness"])
+
+    async def test_difficult_word_prioritization_selects_matching_sentences_and_exposes_words(self):
+        repo = self.make_rich_repository(
+            text=(
+                "Mèo nhỏ ngủ ngon. "
+                "Chim xanh hót vang. "
+                "Bé đang đọc truyện. "
+                "Nắng vàng rực rỡ."
+            ),
+            active_difficult=["truyện"],
+        )
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="easy",
+                total_rounds=1,
+                learning_mode="WORD_ORDER",
+            ),
+        )
+        self.assertEqual(session.practiced_difficult_words, ["truyện"])
+        self.assertEqual(session.round.practiced_difficult_words, ["truyện"])
+        self.assertEqual(repo.rounds_by_session[0].SentenceSnapshot, "Bé đang đọc truyện.")
+        flagged = [t.text for t in session.round.tokens if t.is_difficult_word]
+        self.assertEqual(flagged, ["truyện."])
+
+        result = await service.result(PARENT_ID, session.session_id)
+        self.assertEqual(result.practiced_difficult_words, ["truyện"])
+
+    async def test_duplicate_client_shot_id_never_double_scores_even_with_different_request_id(self):
+        repo = self.make_rich_repository(text="Bé đang đọc sách.")
+        service = SentenceShooterService(repo)
+        session = await service.create_session(
+            PARENT_ID,
+            SentenceShooterSessionCreate(
+                child_id=CHILD_ID,
+                book_id=BOOK_ID,
+                difficulty="easy",
+                total_rounds=1,
+            ),
+        )
+        game_round = repo.rounds_by_session[0]
+        first_token = UUID(game_round.ExpectedTokenIds[0])
+
+        first = await service.shoot(
+            PARENT_ID,
+            session.session_id,
+            game_round.Id,
+            first_token,
+            uuid4(),
+            client_shot_id="client-shot-dedupe-001",
+        )
+        duplicate = await service.shoot(
+            PARENT_ID,
+            session.session_id,
+            game_round.Id,
+            first_token,
+            uuid4(),
+            client_shot_id="client-shot-dedupe-001",
+        )
+        self.assertTrue(first.is_correct)
+        self.assertEqual(duplicate, first)
+        self.assertEqual(repo.sessions[0].CorrectCount, 1)
+        self.assertEqual(game_round.NextExpectedPosition, 1)
+        self.assertEqual(len(repo.attempts), 1)
+
+    def test_api_accepts_client_shot_id_without_request_id_and_preserves_legacy_contract(self):
+        repo = self.make_rich_repository(text="Bé đang đọc sách.")
+        service = SentenceShooterService(repo)
+        with patch.object(sentence_shooter_routes, "build_service", return_value=service):
+            with make_api_client() as client:
+                created = client.post(
+                    "/games/sentence-shooter/sessions",
+                    json={
+                        "child_id": str(CHILD_ID),
+                        "book_id": str(BOOK_ID),
+                        "difficulty": "easy",
+                        "total_rounds": 1,
+                        "learning_mode": "FILL_BLANK",
+                        "focus_words": ["sách"],
+                    },
+                )
+                self.assertEqual(created.status_code, 201)
+                body = created.json()
+                self.assertEqual(body["learning_mode"], "FILL_BLANK")
+                self.assertEqual(body["practiced_difficult_words"], ["sách"])
+
+                round_id = body["round"]["round_id"]
+                expected_tok = repo.rounds_by_session[0].ExpectedTokenIds[0]
+                shot_1 = client.post(
+                    f"/games/sentence-shooter/sessions/{body['session_id']}/shots",
+                    json={
+                        "round_id": round_id,
+                        "token_id": expected_tok,
+                        "client_shot_id": "retry-key-42",
+                    },
+                )
+                shot_2 = client.post(
+                    f"/games/sentence-shooter/sessions/{body['session_id']}/shots",
+                    json={
+                        "round_id": round_id,
+                        "token_id": expected_tok,
+                        "client_shot_id": "retry-key-42",
+                    },
+                )
+                self.assertEqual(shot_1.status_code, 200)
+                self.assertEqual(shot_2.status_code, 200)
+                self.assertEqual(shot_1.json(), shot_2.json())
+                self.assertEqual(repo.sessions[0].TotalStars, shot_1.json()["total_stars"])
+
+    async def test_repository_gracefully_handles_missing_v4_tables(self):
+        class BrokenTableDatabase:
+            def __init__(self):
+                self.rollbacks = 0
+
+            async def execute(self, _statement):
+                raise RuntimeError("relation does not exist")
+
+            def add(self, _row):
+                return None
+
+            async def commit(self):
+                raise RuntimeError("relation learning_skill_evidence does not exist")
+
+            async def rollback(self):
+                self.rollbacks += 1
+
+        db = BrokenTableDatabase()
+        repo = SentenceShooterRepository(db)
+        words = await repo.active_difficult_words(CHILD_ID)
+        self.assertEqual(words, [])
+        saved = await repo.record_learning_evidence(
+            [
+                {
+                    "child_id": CHILD_ID,
+                    "parent_id": PARENT_ID,
+                    "skill_key": "sentence_ordering",
+                    "source_record_id": str(uuid4()),
+                    "score_normalized": 1.0,
+                }
+            ]
+        )
+        self.assertEqual(saved, 0)
+        self.assertGreaterEqual(db.rollbacks, 2)

@@ -101,9 +101,29 @@ services:
         sync: false
       - key: CLOUDFLARE_API_TOKEN
         sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        value: "xeRzNgA5BGMAmllSnOuF"
+      - key: ELEVENLABS_MODEL_ID
+        value: "eleven_flash_v2_5"
       - key: SMTP_USERNAME
         sync: false
       - key: SMTP_APP_PASSWORD
         sync: false
       - key: SMTP_FROM_EMAIL
+        sync: false
+      - key: EMAIL_PROVIDER
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM_ADDRESS
+        sync: false
+      - key: EMAIL_FROM_NAME
+        sync: false
+      - key: PARENT_EMAIL_APP_URL
+        sync: false
+      - key: PARENT_EMAIL_CRON_SECRET
+        sync: false
+      - key: PARENT_EMAIL_WORKER_ENABLED
         sync: false

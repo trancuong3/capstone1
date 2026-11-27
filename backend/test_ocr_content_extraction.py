@@ -47,7 +47,10 @@ except ModuleNotFoundError:  # pragma: no cover - Ubuntu CI installs pinned requ
     HAS_HYPOTHESIS = False
 
 from app.api.deps import get_current_parent_id, get_db
-from app.api.routes.ocr_extraction import router as ocr_extraction_router
+from app.api.routes.ocr_extraction import (
+    router as ocr_extraction_router,
+    studio_router as ocr_extraction_studio_router,
+)
 from app.models.smart_book_studio import PageOcrExtraction
 from app.schemas.ocr_extraction import (
     CANONICAL_BLOCK_TYPES,
@@ -62,6 +65,7 @@ from app.services.ocr_content_extraction import (
     apply_block_actions,
     build_semantic_ai_prompt,
     extract_ocr_content,
+    run_stage3_semantic_filter_if_needed,
     validate_semantic_ai_decisions,
 )
 from app.services.ocr_document_boundary import (
@@ -1211,6 +1215,19 @@ class _InMemoryStudioDb:
             ),
         }
         self.extractions: dict[UUID, PageOcrExtraction] = {}
+        self.revisions: dict[UUID, Any] = {
+            REV_A_ID: SimpleNamespace(
+                Id=REV_A_ID,
+                PageId=PRIVATE_A_PAGE_ID,
+                VerificationStatus="VERIFIED",
+                OriginalOcrText="Original text",
+                DraftText="Original text",
+                VerifiedText="Original text",
+                ContentHash="",
+                ProcessingMeta={},
+            )
+        }
+        self.revision_words: dict[UUID, list[Any]] = {}
         self.committed = False
 
     def begin_nested(self):
@@ -1220,10 +1237,22 @@ class _InMemoryStudioDb:
             )
         return _FakeNestedTx()
 
-    def add(self, obj: PageOcrExtraction):
-        if obj.Id is None:
-            obj.Id = uuid4()
-        self.extractions[obj.BookPageId] = obj
+    def add(self, obj: Any):
+        if isinstance(obj, PageOcrExtraction):
+            if obj.Id is None:
+                obj.Id = uuid4()
+            self.extractions[obj.BookPageId] = obj
+            return
+        rev_id = getattr(obj, "PageRevisionId", None)
+        if rev_id is not None:
+            self.revision_words.setdefault(rev_id, []).append(obj)
+
+    async def delete(self, obj: Any):
+        rev_id = getattr(obj, "PageRevisionId", None)
+        if rev_id is not None and rev_id in self.revision_words:
+            self.revision_words[rev_id] = [
+                w for w in self.revision_words[rev_id] if w is not obj
+            ]
 
     async def flush(self):
         return None
@@ -1246,8 +1275,12 @@ class _InMemoryStudioDb:
                     return self.books[v]
             return None
         if "FROM pagerevisions" in sql:
-            if REV_A_ID in vals or PRIVATE_A_PAGE_ID in vals:
-                return SimpleNamespace(Id=REV_A_ID, PageId=PRIVATE_A_PAGE_ID)
+            for v in vals:
+                if v in self.revisions:
+                    return self.revisions[v]
+            for rev in self.revisions.values():
+                if rev.PageId in vals:
+                    return rev
             return None
         if "FROM page_ocr_extractions" in sql:
             for v in vals:
@@ -1274,7 +1307,21 @@ class _InMemoryStudioDb:
         return res
 
     async def scalars(self, query):
+        sql = str(query)
+        params = query.compile().params
+        vals = list(params.values())
         res = MagicMock()
+        if "FROM pagerevisions" in sql:
+            matched = [rev for rev in self.revisions.values() if rev.PageId in vals]
+            res.all.return_value = matched
+            return res
+        if "FROM pagerevisionwords" in sql:
+            matched_words: list[Any] = []
+            for v in vals:
+                if v in self.revision_words:
+                    matched_words.extend(self.revision_words[v])
+            res.all.return_value = matched_words
+            return res
         res.all.return_value = []
         return res
 
@@ -1283,6 +1330,7 @@ class OcrExtractionApiSecurityTests(unittest.IsolatedAsyncioTestCase):
     def _build_client(self, actor_id: UUID | None, fake_db: _InMemoryStudioDb) -> TestClient:
         app = FastAPI()
         app.include_router(ocr_extraction_router, prefix="/studio/ocr")
+        app.include_router(ocr_extraction_studio_router, prefix="/studio")
 
         async def _override_db():
             yield fake_db
@@ -1474,6 +1522,405 @@ class OcrExtractionApiSecurityTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(HTTPException) as ctx2:
             _enforce_book_ownership("parent", PARENT_A_ID, retired)  # type: ignore[arg-type]
         self.assertEqual(ctx2.exception.status_code, 404)
+
+    async def test_apply_to_draft_updates_editable_revision_and_blocks_verified_with_409(self):
+        db = _InMemoryStudioDb()
+        editable_rev_id = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        raw_words_input = build_lines_page(
+            [
+                {"text": "Chú mèo con trèo cây cau rất nhanh nhẹn.", "x": 0.12, "y": 0.25, "w": 0.72},
+                {"text": "Mèo nhìn xuống sân thấy bạn gà con đang chơi.", "x": 0.12, "y": 0.33, "w": 0.74},
+                {"text": "26", "x": 0.48, "y": 0.94, "w": 0.05},
+            ]
+        )
+        raw_full_text = "Chú mèo con trèo cây cau rất nhanh nhẹn.\nMèo nhìn xuống sân thấy bạn gà con đang chơi.\n26"
+        db.revisions[editable_rev_id] = SimpleNamespace(
+            Id=editable_rev_id,
+            PageId=CATALOG_PAGE_ID,
+            VerificationStatus="NEEDS_REVIEW",
+            OriginalOcrText=raw_full_text,
+            DraftText=raw_full_text,
+            VerifiedText=None,
+            ContentHash="orig-hash",
+            ProcessingMeta={"word_review_statuses": ["needs_review"] * len(raw_words_input)},
+        )
+        db.revision_words[editable_rev_id] = [
+            SimpleNamespace(
+                Id=uuid4(),
+                PageRevisionId=editable_rev_id,
+                WordIndex=idx,
+                LineIndex=w.line_index,
+                Text=w.text,
+                NormalizedText=w.text.lower().strip("."),
+                BoundingBox=list(w.bbox),
+                OCRConfidence=w.confidence,
+            )
+            for idx, w in enumerate(raw_words_input)
+        ]
+
+        client_admin = self._build_client(ADMIN_ID, db)
+        r_extract = client_admin.post(
+            f"/studio/ocr/pages/{CATALOG_PAGE_ID}/extract",
+            json={
+                "page_revision_id": str(editable_rev_id),
+                "words": [w.model_dump() for w in raw_words_input],
+                "include_cross_page": False,
+            },
+        )
+        self.assertEqual(r_extract.status_code, 200)
+
+        r_apply = client_admin.post(
+            f"/studio/pages/{CATALOG_PAGE_ID}/ocr-extraction/apply-to-draft",
+        )
+        self.assertEqual(r_apply.status_code, 200, r_apply.text)
+        self.assertIn("no-store", r_apply.headers.get("cache-control", ""))
+        payload = r_apply.json()
+        self.assertEqual(payload["page_id"], str(CATALOG_PAGE_ID))
+        self.assertEqual(payload["revision_id"], str(editable_rev_id))
+        self.assertEqual(payload["status"], "APPLIED")
+        self.assertNotIn("26", payload["canonical_text"])
+        self.assertEqual(payload["applied_word_count"], len(raw_words_input) - 1)
+        # Layer 1 OriginalOcrText remains immutable while Layer 2 DraftText updates cleanly
+        rev = db.revisions[editable_rev_id]
+        self.assertEqual(rev.OriginalOcrText, raw_full_text)
+        self.assertEqual(rev.DraftText, payload["canonical_text"])
+        self.assertIsNone(rev.VerifiedText)
+        # Excluded bbox (26 at y=0.94) MUST NEVER appear on kept words!
+        kept_rows = db.revision_words[editable_rev_id]
+        self.assertEqual(len(kept_rows), len(raw_words_input) - 1)
+        self.assertTrue(all(row.BoundingBox != raw_words_input[-1].bbox for row in kept_rows))
+
+        # Applying to a VERIFIED revision (REV_A_ID on PRIVATE_A_PAGE_ID) MUST return 409!
+        client_a = self._build_client(PARENT_A_ID, db)
+        r_ext_a = client_a.post(
+            f"/studio/ocr/pages/{PRIVATE_A_PAGE_ID}/extract",
+            json={
+                "words": [w.model_dump() for w in raw_words_input],
+                "include_cross_page": False,
+            },
+        )
+        self.assertEqual(r_ext_a.status_code, 200)
+        r_verified = client_a.post(
+            f"/studio/pages/{PRIVATE_A_PAGE_ID}/ocr-extraction/apply-to-draft",
+        )
+        self.assertEqual(r_verified.status_code, 409)
+        self.assertEqual(db.revisions[REV_A_ID].DraftText, "Original text")
+
+        # Parent B probing Parent A's private page gets 404 (strict IDOR guard)
+        client_b = self._build_client(PARENT_B_ID, db)
+        r_idor = client_b.post(
+            f"/studio/pages/{PRIVATE_A_PAGE_ID}/ocr-extraction/apply-to-draft",
+        )
+        self.assertEqual(r_idor.status_code, 404)
+
+    def test_three_column_xy_cut_assigns_unique_column_indices_without_collision(self):
+        words = build_lines_page(
+            [
+                # Column 0 (x = 0.04..0.28)
+                {"text": "Cột một dòng A.", "x": 0.04, "y": 0.20, "w": 0.24},
+                {"text": "Cột một dòng B.", "x": 0.04, "y": 0.26, "w": 0.24},
+                # Column 1 (x = 0.38..0.62)
+                {"text": "Cột hai dòng A.", "x": 0.38, "y": 0.20, "w": 0.24},
+                {"text": "Cột hai dòng B.", "x": 0.38, "y": 0.26, "w": 0.24},
+                # Column 2 (x = 0.72..0.96)
+                {"text": "Cột ba dòng A.", "x": 0.72, "y": 0.20, "w": 0.24},
+                {"text": "Cột ba dòng B.", "x": 0.72, "y": 0.26, "w": 0.24},
+            ]
+        )
+        res = extract_ocr_content(words, filter_mode="active")
+        self.assertEqual(res.page_kind, "MULTI_COLUMN")
+        distinct_cols = sorted({b.column_index for b in res.blocks})
+        self.assertEqual(distinct_cols, [0, 1, 2])
+        self.assertLess(res.canonical_text.index("Cột một dòng B."), res.canonical_text.index("Cột hai dòng A."))
+        self.assertLess(res.canonical_text.index("Cột hai dòng B."), res.canonical_text.index("Cột ba dòng A."))
+
+    def test_oversized_margin_digit_and_chapter_titles_never_auto_excluded(self):
+        words = build_lines_page(
+            [
+                {"text": "3", "x": 0.06, "y": 0.04, "w": 0.06, "h": 0.075},  # oversized counting/story numeral
+                {"text": "Bài 1", "x": 0.35, "y": 0.06, "w": 0.16, "h": 0.032},
+                {"text": "Chương 2 Khu rừng bí mật", "x": 0.20, "y": 0.14, "w": 0.56, "h": 0.035},
+                {"text": "10 : 2 = 5", "x": 0.15, "y": 0.45, "w": 0.24, "h": 0.028},
+                {"text": "Bé đọc bài thật to và rõ ràng mỗi sáng.", "x": 0.12, "y": 0.30, "w": 0.74, "h": 0.028},
+            ]
+        )
+        res = extract_ocr_content(words, filter_mode="active")
+        oversized = [b for b in res.blocks if b.raw_text == "3"][0]
+        self.assertEqual(oversized.decision, "REVIEW")
+        self.assertEqual(oversized.reason_code, "OVERSIZED_MARGIN_NUMBER_REVIEW")
+        self.assertIn("3", res.canonical_text)
+        self.assertIn("Bài 1", res.canonical_text)
+        self.assertIn("Chương 2 Khu rừng bí mật", res.canonical_text)
+        self.assertIn("10 : 2 = 5", res.canonical_text)
+        bai_blk = [b for b in res.blocks if b.raw_text == "Bài 1"][0]
+        chuong_blk = [b for b in res.blocks if "Chương 2" in b.raw_text][0]
+        self.assertEqual(bai_blk.block_type, "CHAPTER_TITLE")
+        self.assertEqual(bai_blk.decision, "KEEP")
+        self.assertEqual(chuong_blk.block_type, "CHAPTER_TITLE")
+        self.assertEqual(chuong_blk.decision, "KEEP")
+
+    @staticmethod
+    def _build_tilted_paragraph_words(
+        lines: list[tuple[str, float, float, float]],
+        *,
+        width: int,
+        height: int,
+        deskew_angle_deg: float,
+        word_h: float = 0.095,
+        assign_distinct_line_index: bool = True,
+    ) -> list[OcrWordInput]:
+        """Synthesize normalized word bboxes tilted matching OpenCV `deskew_angle_deg`."""
+        # A horizontal line rotated by -deskew_angle_deg in OpenCV has ink slope tan(deskew_angle_deg)
+        slope_px = math.tan(math.radians(deskew_angle_deg))
+        words: list[OcrWordInput] = []
+        cursor_idx = 0
+        for line_idx, (text, x_start, y_center_at_mid, line_w) in enumerate(lines):
+            tokens = text.split()
+            total_chars = sum(len(t) for t in tokens)
+            gap = min(0.014, line_w * 0.025)
+            usable_w = max(0.04, line_w - gap * max(0, len(tokens) - 1))
+            cx = x_start
+            for tok in tokens:
+                tw = max(0.015, usable_w * (len(tok) / float(max(1, total_chars))))
+                w_xc = cx + 0.5 * tw
+                # Compute tilted word center y in normalized coords matching pixel aspect ratio
+                dy_px = slope_px * ((w_xc - 0.5) * float(width))
+                w_yc = y_center_at_mid + (dy_px / float(height))
+                # Axis-aligned bbox around tilted word slightly expands height by |slope_px|*tw*W/H
+                eff_h = word_h + abs(slope_px) * tw * (float(width) / float(height))
+                y0 = max(0.001, min(0.995 - eff_h, w_yc - 0.5 * eff_h))
+                x0 = max(0.001, min(0.995 - tw, cx))
+                words.append(
+                    OcrWordInput(
+                        word_id=f"rot-{cursor_idx}",
+                        source_word_index=cursor_idx,
+                        line_index=line_idx if assign_distinct_line_index else 0,
+                        text=tok,
+                        bbox=[round(x0, 6), round(y0, 6), round(tw, 6), round(eff_h, 6)],
+                        confidence=0.97,
+                    )
+                )
+                cursor_idx += 1
+                cx += tw + gap
+        return words
+
+    @staticmethod
+    def _make_deskew_boundary(width: int, height: int, deskew_angle_deg: float) -> DocumentBoundaryResult:
+        ident = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+        return DocumentBoundaryResult(
+            boundary_quad_norm=[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            boundary_quad_px=[[0.0, 0.0], [float(width - 1), 0.0], [float(width - 1), float(height - 1)], [0.0, float(height - 1)]],
+            boundary_bbox_norm=[0.0, 0.0, 1.0, 1.0],
+            image_width=width,
+            image_height=height,
+            output_width=width,
+            output_height=height,
+            area_ratio=1.0,
+            confidence=0.90,
+            deskew_angle_deg=deskew_angle_deg,
+            auto_crop=False,
+            transform_matrix=ident,
+            inverse_transform_matrix=ident,
+        )
+
+    def test_tilted_lines_with_boundary_deskew_and_no_line_hints_preserve_reading_order(self):
+        """Regression #124: tilted 3-line Vietnamese paragraphs keep exact reading order without line_index hints."""
+        # Shorter line 1 above longer line 2 above longest line 3 (mirrors vi_rotated_03.png!)
+        lines = [
+            ("Trăng rằm sáng tỏ giữa trời đêm.", 0.04, 0.22, 0.68),
+            ("Bà kể chuyện ngày xưa cho cháu nghe.", 0.04, 0.45, 0.82),
+            ("Cả nhà quây quần bên mâm cơm ấm cúng.", 0.04, 0.68, 0.90),
+        ]
+        expected = " ".join(text for text, _, _, _ in lines)
+
+        for width, height, angle in [(740, 301, -2.5), (740, 301, +2.5), (800, 500, -6.0), (800, 500, +6.0)]:
+            words = self._build_tilted_paragraph_words(
+                lines,
+                width=width,
+                height=height,
+                deskew_angle_deg=angle,
+                word_h=0.095 if height == 301 else 0.055,
+                assign_distinct_line_index=False,
+            )
+            boundary = self._make_deskew_boundary(width, height, angle)
+            res = extract_ocr_content(words, boundary=boundary, filter_mode="active")
+            self.assertEqual(
+                res.canonical_text,
+                expected,
+                f"Reading order shifted for {width}x{height} angle={angle}: {res.canonical_text!r}",
+            )
+            self.assertEqual(len(res.canonical_words), len(words))
+            src_by_id = {w.word_id: w.bbox for w in words}
+            for cw in res.canonical_words:
+                self.assertEqual(cw.bbox, src_by_id[cw.word_id])
+
+    def test_tilted_lines_without_boundary_honor_collinear_line_index_hints(self):
+        """Regression #124: tilted lines with PaddleOCR line_index_hint keep 0% shift even with boundary=None."""
+        lines = [
+            ("Những bông hoa nở rực rỡ trong vườn.", 0.04, 0.22, 0.88),
+            ("Bé Lan thích đọc truyện cổ tích mỗi tối.", 0.04, 0.45, 0.86),
+            ("Đàn chim hót líu lo trên cành.", 0.04, 0.68, 0.68),
+        ]
+        expected = " ".join(text for text, _, _, _ in lines)
+
+        for width, height, angle in [(681, 301, -2.5), (800, 500, +5.5)]:
+            words = self._build_tilted_paragraph_words(
+                lines,
+                width=width,
+                height=height,
+                deskew_angle_deg=angle,
+                word_h=0.095 if height == 301 else 0.055,
+                assign_distinct_line_index=True,
+            )
+            res = extract_ocr_content(words, boundary=None, filter_mode="active")
+            self.assertEqual(
+                res.canonical_text,
+                expected,
+                f"Reading order shifted without boundary for angle={angle}: {res.canonical_text!r}",
+            )
+            self.assertEqual(len(res.canonical_words), len(words))
+
+    def test_tilted_two_column_page_preserves_xy_cut_reading_order(self):
+        """Tilted 2-column layout still splits across column gap and keeps column-first XY-cut order."""
+        width, height, angle = 900, 1200, -3.5
+        slope_px = math.tan(math.radians(angle))
+        specs = [
+            # Left column (x = 0.06..0.42)
+            ("Cột trái dòng một rất rõ.", 0.06, 0.20, 0.36, 0),
+            ("Cột trái dòng hai tiếp theo.", 0.06, 0.26, 0.36, 1),
+            ("Cột trái dòng ba kết thúc.", 0.06, 0.32, 0.36, 2),
+            # Right column (x = 0.56..0.92) — deliberately sharing line_index 0,1,2 to test gap split!
+            ("Cột phải dòng một bắt đầu.", 0.56, 0.20, 0.36, 0),
+            ("Cột phải dòng hai nối tiếp.", 0.56, 0.26, 0.36, 1),
+            ("Cột phải dòng ba cuối cùng.", 0.56, 0.32, 0.36, 2),
+        ]
+        words: list[OcrWordInput] = []
+        idx = 0
+        for text, xs, yc_mid, lw, lidx in specs:
+            toks = text.split()
+            total_c = sum(len(t) for t in toks)
+            gap = 0.008
+            usable = lw - gap * (len(toks) - 1)
+            cx = xs
+            for tok in toks:
+                tw = max(0.012, usable * (len(tok) / float(max(1, total_c))))
+                w_xc = cx + 0.5 * tw
+                w_yc = yc_mid + (slope_px * (w_xc - 0.5) * width) / height
+                eff_h = 0.026 + abs(slope_px) * tw * (width / height)
+                words.append(
+                    OcrWordInput(
+                        word_id=f"col2-{idx}",
+                        source_word_index=idx,
+                        line_index=lidx,
+                        text=tok,
+                        bbox=[round(cx, 6), round(w_yc - 0.5 * eff_h, 6), round(tw, 6), round(eff_h, 6)],
+                        confidence=0.96,
+                    )
+                )
+                idx += 1
+                cx += tw + gap
+        boundary = self._make_deskew_boundary(width, height, angle)
+        res = extract_ocr_content(words, boundary=boundary, filter_mode="active")
+        self.assertEqual(res.page_kind, "MULTI_COLUMN")
+        self.assertLess(
+            res.canonical_text.index("Cột trái dòng ba kết thúc."),
+            res.canonical_text.index("Cột phải dòng một bắt đầu."),
+        )
+
+    def test_real_rotated_fixtures_exact_geometry_zero_reading_order_shift(self):
+        """Regression #124 on actual rotated/vi_rotated_01..03.png geometry -> 0.00% reading-order shift."""
+        import json as _json
+        from pathlib import Path as _Path
+
+        rotated_dir = _Path(__file__).resolve().parent / "tests" / "fixtures" / "ocr" / "rotated"
+        if not rotated_dir.exists():
+            self.skipTest("OCR rotated fixtures directory not present")
+
+        for idx in (1, 2, 3):
+            png_path = rotated_dir / f"vi_rotated_0{idx}.png"
+            json_path = rotated_dir / f"vi_rotated_0{idx}.json"
+            if not png_path.exists() or not json_path.exists():
+                continue
+
+            img = cv2.imread(str(png_path))
+            self.assertIsNotNone(img)
+            h, w = img.shape[:2]
+            gt = _json.loads(json_path.read_text(encoding="utf-8"))
+            gt_lines = [ln.strip() for ln in gt["expected_text"].splitlines() if ln.strip()]
+            expected_flat = " ".join(gt["expected_words"])
+
+            # Run real CPU-only document boundary detection on the rotated fixture image
+            boundary = detect_document_boundary(img)
+            self.assertFalse(boundary.gutter.is_double_page)
+            self.assertLess(boundary.deskew_angle_deg, -1.0)
+
+            # Extract the 3 actual tilted text-line baselines directly from image ink contours
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (25, 3))
+            dil = cv2.dilate(binary, kernel, iterations=1)
+            cnts, _ = cv2.findContours(dil, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            line_contours = sorted(
+                [c for c in cnts if cv2.contourArea(c) >= 200],
+                key=lambda c: cv2.boundingRect(c)[1],
+            )
+            self.assertEqual(len(line_contours), len(gt_lines))
+
+            # Build real tilted word boxes along each measured ink baseline (both with & without line_index)
+            for use_hints in (True, False):
+                words: list[OcrWordInput] = []
+                w_idx = 0
+                for line_i, (cnt, line_text) in enumerate(zip(line_contours, gt_lines)):
+                    lx, ly, lw, lh = cv2.boundingRect(cnt)
+                    mask = np.zeros_like(binary)
+                    cv2.drawContours(mask, [cnt], -1, 255, -1)
+                    ys, xs = np.where((binary > 0) & (mask > 0))
+                    slope, intercept = np.polyfit(xs, ys, 1)
+
+                    toks = line_text.split()
+                    total_chars = sum(len(t) for t in toks)
+                    gap_px = 10.0
+                    usable_px = max(20.0, float(lw) - gap_px * max(0, len(toks) - 1))
+                    cx_px = float(lx)
+                    for tok in toks:
+                        tw_px = max(12.0, usable_px * (len(tok) / float(max(1, total_chars))))
+                        xc_px = cx_px + 0.5 * tw_px
+                        yc_px = float(slope * xc_px + intercept)
+                        th_px = 34.0 + abs(float(slope)) * tw_px
+                        bx = max(0.0, min(0.995, cx_px / float(w)))
+                        by = max(0.0, min(0.995, (yc_px - 0.5 * th_px) / float(h)))
+                        bw = max(0.005, min(1.0 - bx, tw_px / float(w)))
+                        bh = max(0.005, min(1.0 - by, th_px / float(h)))
+                        words.append(
+                            OcrWordInput(
+                                word_id=f"f{idx}-w{w_idx}",
+                                source_word_index=w_idx,
+                                line_index=line_i if use_hints else 0,
+                                text=tok,
+                                bbox=[round(bx, 6), round(by, 6), round(bw, 6), round(bh, 6)],
+                                confidence=0.98,
+                            )
+                        )
+                        w_idx += 1
+                        cx_px += tw_px + gap_px
+
+                # Mode A: with real boundary
+                res_with_boundary = extract_ocr_content(words, boundary=boundary, filter_mode="active")
+                self.assertEqual(
+                    res_with_boundary.canonical_text,
+                    expected_flat,
+                    f"{png_path.name} (use_hints={use_hints}, with boundary) scrambled: {res_with_boundary.canonical_text!r}",
+                )
+                self.assertEqual(len(res_with_boundary.canonical_words), len(gt["expected_words"]))
+
+                # Mode B: without boundary (when line_index hints are present, as from PaddleOCR)
+                if use_hints:
+                    res_no_boundary = extract_ocr_content(words, boundary=None, filter_mode="active")
+                    self.assertEqual(
+                        res_no_boundary.canonical_text,
+                        expected_flat,
+                        f"{png_path.name} (use_hints=True, boundary=None) scrambled: {res_no_boundary.canonical_text!r}",
+                    )
 
 
 if __name__ == "__main__":

@@ -79,7 +79,14 @@
       "american": "מבטא אמריקאי",
       "british": "מבטא בריטי"
     },
-    "googleProviderLabel": "מקוון"
+    "googleProviderLabel": "מקוון",
+    "wifiReadyBadge": "זמין במצב לא מקוון",
+    "offlineCacheMultiple": "שירות הקול המקומי אינו מקוון. אודיו מוכן מראש זמין במצב Wi-Fi עבור: {voices}; קולות אחרים דורשים הפעלת השירות המקומי או גיבוי למטה.",
+    "offlineCacheSingle": "שירות הקול המקומי אינו מקוון. אודיו מוכן מראש זמין במצב Wi-Fi עבור הקול {voice}; להאזנה לקולות נוספים הפעל את השירות המקומי או את הגיבוי למטה.",
+    "offlineCacheEmpty": "שירות הקול המקומי אינו מקוון ואין אודיו מוכן מראש במכשיר. הפעל את השירות המקומי או את הגיבוי למטה כדי לשמוע קריאה לדוגמה.",
+    "localWorkerLabel": "שירות קול מקומי:",
+    "sessionLockedBadge": "נעול למפגש קריאה זה",
+    "offlineBrowserBadge": "הדפדפן במצב לא מקוון"
   },
   "engineBadge": {
     "ariaLabel": "מצב קול: האזנה {stt}, קריאה {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "מוכן",
       "android_native": "מכשיר",
       "google_cloud": "מקוון",
-      "browser_default": "דפדפן"
+      "browser_default": "דפדפן",
+      "idle": "בודק…"
     },
     "listenPrefix": "האזנה",
-    "speakPrefix": "קריאה"
+    "speakPrefix": "קריאה",
+    "idleDetail": "{base} (בודק את מצב מנוע הקול)"
   },
   "playback": {
     "unavailable": "הקול במכשיר אינו זמין כרגע. ההורים והילד יכולים לעקוב אחר הטקסט שעל המסך וללחוץ על 'נסה שוב'.",

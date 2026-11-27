@@ -161,7 +161,8 @@
       "maxRetriesReached": "Practiced three times",
       "uncertainLabel": "Couldn't hear clearly",
       "uncertainNote": "Recorded separately, not counted as a confirmed pronunciation error."
-    }
+    },
+    "entertainmentSummaryHeading": "Play & Learn Progress & Language Skills (V4.0)"
   },
   "sessions": {
     "title": "Reading history",
@@ -643,5 +644,26 @@
       "wantToRead": "Want to read",
       "savedToRead": "Saved to reading list"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "Summarizing Play & Learn progress for {childName}…",
+    "empty": "No recent Play & Learn data for {childName} yet. Once they play Picture Storytelling, Sentence Shooter, Karaoke, or Memory Game, a calm summary appears here.",
+    "observedCounterLabel": "Clearly observed skills",
+    "estimatedCounterLabel": "Initially estimated skills",
+    "unknownCounterLabel": "Insufficient data",
+    "activitiesTitle": "Play & Learn activities (last {days} days)",
+    "avgScoreBadge": "Avg {pct}%",
+    "noScoreBadge": "No score yet",
+    "skillsMapTitle": "Skills map (never guesses when data is scarce)",
+    "evidenceCount": "{count} evidence items",
+    "noPracticeYet": "No activities practiced in this skill area yet, so status stays unassessed.",
+    "statusObserved": "Clearly observed",
+    "statusEstimated": "Initial estimate",
+    "statusUnknown": "Insufficient data",
+    "practicedWordsTitle": "Difficult words reviewed through games",
+    "practiceTimes": "{count}x",
+    "karaokeWeakSegmentsTitle": "Song lines to practice slowly at 0.85x",
+    "openSongAction": "Open song",
+    "homeTipsTitle": "Home support tips for parents"
   }
 }

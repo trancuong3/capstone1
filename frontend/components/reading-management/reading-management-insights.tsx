@@ -1,7 +1,9 @@
 "use client";
 
 import { Flame, Hourglass, CheckCircle2, CalendarDays } from "lucide-react";
+import { useState } from "react";
 
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { normalizeLocale, type SupportedLocale } from "@/lib/i18n/locales";
@@ -215,6 +217,12 @@ export function PlanInsights({ plan }: { plan: ReadingPlanDTO }) {
   return null;
 }
 
+const TODAY_ITEMS_PAGE_SIZE = 4;
+
+type TodayItem =
+  | { readonly kind: "plan"; readonly plan: ReadingPlanDTO }
+  | { readonly kind: "goal"; readonly goal: ReadingGoalDTO };
+
 interface TodaySummaryProps {
   readonly childName: string;
   readonly plans: readonly ReadingPlanDTO[];
@@ -230,6 +238,7 @@ export function TodaySummary({
   embedded = false,
 }: TodaySummaryProps) {
   const t = useTranslations("reports");
+  const [page, setPage] = useState(1);
   const formatDay = (value: string) => {
     const [year, month, day] = value.split("-").map(Number);
     const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
@@ -240,6 +249,19 @@ export function TodaySummary({
   );
   const dailyGoals = goals.filter(
     (goal) => isRunningGoal(goal) && goal.period === "DAILY",
+  );
+  const todayItems: TodayItem[] = [
+    ...todayPlans.map((plan): TodayItem => ({ kind: "plan", plan })),
+    ...dailyGoals.map((goal): TodayItem => ({ kind: "goal", goal })),
+  ];
+  const totalPages = Math.max(
+    1,
+    Math.ceil(todayItems.length / TODAY_ITEMS_PAGE_SIZE),
+  );
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const visibleItems = todayItems.slice(
+    (safePage - 1) * TODAY_ITEMS_PAGE_SIZE,
+    safePage * TODAY_ITEMS_PAGE_SIZE,
   );
   const nextPlan = plans
     .filter((plan) => plan.status === "ACTIVE" && plan.next_scheduled_date)
@@ -259,7 +281,7 @@ export function TodaySummary({
       <h2 className="text-base font-extrabold text-ink sm:text-lg">
         {t("readingManagement.todayTitle", { childName })}
       </h2>
-      {todayPlans.length === 0 && dailyGoals.length === 0 ? (
+      {todayItems.length === 0 ? (
         <p className="mt-2 text-sm text-muted">
           {nextPlan?.next_scheduled_date
             ? t("readingManagement.todayEmptyNextPlan", {
@@ -269,97 +291,111 @@ export function TodaySummary({
             : t("readingManagement.todayNoActiveItems")}
         </p>
       ) : (
-        <ul className="mt-3 grid gap-2.5 md:grid-cols-2">
-          {todayPlans.map((plan) => {
-            const minutes = plan.minutes_today ?? 0;
-            const percent = Math.min(
-              100,
-              Math.round((minutes * 100) / plan.target_minutes),
-            );
-            return (
-              <li key={plan.id} className="rounded-control bg-canvas p-3">
-                <p className="font-semibold text-ink">{plan.title}</p>
-                {plan.book_title ? (
-                  <p className="text-sm text-muted">
-                    {t("readingManagement.bookPrefix", {
-                      title: "",
-                    }).trimEnd()}{" "}
-                    <span
-                      className="viread-learning-content"
-                      dir="ltr"
-                      lang="vi"
+        <>
+          <ul className="mt-3 grid gap-2.5 md:grid-cols-2">
+            {visibleItems.map((item) => {
+              if (item.kind === "plan") {
+                const { plan } = item;
+                const minutes = plan.minutes_today ?? 0;
+                const percent = Math.min(
+                  100,
+                  Math.round((minutes * 100) / plan.target_minutes),
+                );
+                return (
+                  <li key={plan.id} className="rounded-control bg-canvas p-3">
+                    <p className="font-semibold text-ink">{plan.title}</p>
+                    {plan.book_title ? (
+                      <p className="text-sm text-muted">
+                        {t("readingManagement.bookPrefix", {
+                          title: "",
+                        }).trimEnd()}{" "}
+                        <span
+                          className="viread-learning-content"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {plan.book_title}
+                        </span>
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-label text-ink">
+                      {t("readingManagement.todayPlanMinutes", {
+                        minutes,
+                        target: plan.target_minutes,
+                      })}
+                      {minutes >= plan.target_minutes
+                        ? t("readingManagement.todayPlanMetSuffix")
+                        : ""}
+                    </p>
+                    <div
+                      role="progressbar"
+                      aria-label={t("readingManagement.todayPlanProgressAria", {
+                        title: plan.title,
+                      })}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={percent}
+                      className="mt-2 h-2 overflow-hidden rounded-full bg-white"
                     >
-                      {plan.book_title}
-                    </span>
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              }
+              const { goal } = item;
+              return (
+                <li key={goal.id} className="rounded-control bg-canvas p-3">
+                  <p className="font-semibold text-ink">
+                    {t("readingManagement.todayGoalPrefix", {
+                      value: goal.target_value,
+                      unit:
+                        goal.metric === "MINUTES"
+                          ? t("readingManagement.unitMinute")
+                          : t("readingManagement.unitSession"),
+                    })}
                   </p>
-                ) : null}
-                <p className="mt-1 text-label text-ink">
-                  {t("readingManagement.todayPlanMinutes", {
-                    minutes,
-                    target: plan.target_minutes,
-                  })}
-                  {minutes >= plan.target_minutes
-                    ? t("readingManagement.todayPlanMetSuffix")
-                    : ""}
-                </p>
-                <div
-                  role="progressbar"
-                  aria-label={t("readingManagement.todayPlanProgressAria", {
-                    title: plan.title,
-                  })}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={percent}
-                  className="mt-2 h-2 overflow-hidden rounded-full bg-white"
-                >
+                  <p className="mt-1 text-label text-ink">
+                    {goal.current_value}/{goal.target_value}
+                    {goal.progress_percent >= 100
+                      ? t("readingManagement.todayGoalMetSuffix")
+                      : ""}
+                    {(goal.streak_cycles ?? 0) > 0
+                      ? t("readingManagement.todayGoalStreakSuffix", {
+                          streak: goal.streak_cycles ?? 0,
+                        })
+                      : ""}
+                  </p>
                   <div
-                    className="h-full rounded-full bg-primary"
-                    style={{ width: `${percent}%` }}
-                  />
-                </div>
-              </li>
-            );
-          })}
-          {dailyGoals.map((goal) => (
-            <li key={goal.id} className="rounded-control bg-canvas p-3">
-              <p className="font-semibold text-ink">
-                {t("readingManagement.todayGoalPrefix", {
-                  value: goal.target_value,
-                  unit:
-                    goal.metric === "MINUTES"
-                      ? t("readingManagement.unitMinute")
-                      : t("readingManagement.unitSession"),
-                })}
-              </p>
-              <p className="mt-1 text-label text-ink">
-                {goal.current_value}/{goal.target_value}
-                {goal.progress_percent >= 100
-                  ? t("readingManagement.todayGoalMetSuffix")
-                  : ""}
-                {(goal.streak_cycles ?? 0) > 0
-                  ? t("readingManagement.todayGoalStreakSuffix", {
-                      streak: goal.streak_cycles ?? 0,
-                    })
-                  : ""}
-              </p>
-              <div
-                role="progressbar"
-                aria-label={t("readingManagement.todayGoalProgressAria", {
-                  value: goal.target_value,
-                })}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(goal.progress_percent)}
-                className="mt-2 h-2 overflow-hidden rounded-full bg-white"
-              >
-                <div
-                  className="h-full rounded-full bg-primary"
-                  style={{ width: `${goal.progress_percent}%` }}
-                />
-              </div>
-            </li>
-          ))}
-        </ul>
+                    role="progressbar"
+                    aria-label={t("readingManagement.todayGoalProgressAria", {
+                      value: goal.target_value,
+                    })}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(goal.progress_percent)}
+                    className="mt-2 h-2 overflow-hidden rounded-full bg-white"
+                  >
+                    <div
+                      className="h-full rounded-full bg-primary"
+                      style={{ width: `${goal.progress_percent}%` }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <PaginationBar
+            className="mt-3"
+            compact
+            onPageChange={setPage}
+            page={safePage}
+            pageSize={TODAY_ITEMS_PAGE_SIZE}
+            total={todayItems.length}
+          />
+        </>
       )}
     </section>
   );

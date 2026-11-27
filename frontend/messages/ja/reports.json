@@ -161,7 +161,8 @@
       "maxRetriesReached": "3回練習済み",
       "uncertainLabel": "よく聞こえませんでした",
       "uncertainNote": "個別に記録され、確定した発音エラーにはカウントされません。"
-    }
+    },
+    "entertainmentSummaryHeading": "あそび学習と言語スキルまとめ (V4.0)"
   },
   "sessions": {
     "title": "読書履歴",
@@ -643,5 +644,26 @@
       "wantToRead": "読みたい",
       "savedToRead": "読書リストに保存"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "{childName} のあそび学習の記録をまとめています…",
+    "empty": "{childName} のあそび学習記録はまだありません。ゲームであそぶとここに表示されます。",
+    "observedCounterLabel": "しっかり確認できたスキル",
+    "estimatedCounterLabel": "初期推定のスキル",
+    "unknownCounterLabel": "データ不足のスキル",
+    "activitiesTitle": "あそび学習の活動（過去{days}日間）",
+    "avgScoreBadge": "平均 {pct}%",
+    "noScoreBadge": "スコアなし",
+    "skillsMapTitle": "スキルマップ（データ不足時は推測しません）",
+    "evidenceCount": "{count}件の記録",
+    "noPracticeYet": "このスキルの練習記録がまだないため、未評価のままにしています。",
+    "statusObserved": "確認済み",
+    "statusEstimated": "初期推定",
+    "statusUnknown": "データ不足",
+    "practicedWordsTitle": "ゲームでやさしく復習した単語",
+    "practiceTimes": "{count}回",
+    "karaokeWeakSegmentsTitle": "0.85倍速でゆっくり練習したいフレーズ",
+    "openSongAction": "曲をひらく",
+    "homeTipsTitle": "おうちでできるサポートのヒント"
   }
 }

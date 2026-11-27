@@ -7,6 +7,7 @@ polling entrypoint is retained for explicitly managed runtimes only.
 """
 
 import concurrent.futures
+import gc
 import hashlib
 import json
 import logging
@@ -116,12 +117,22 @@ def build_remote_backend_state_store_factory(
 
 
 class ColabWorker:
-    ARTIFACT_FETCH_MAX_ATTEMPTS = 5
-    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
-    ARTIFACT_DOWNLOAD_WORKERS = 4
+    ARTIFACT_FETCH_MAX_ATTEMPTS = 7
+    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.5
+    ARTIFACT_DOWNLOAD_WORKERS = 2
     API_CALL_MAX_ATTEMPTS = 6
     API_CALL_RETRY_BASE_SECONDS = 2.0
-    RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+    RETRYABLE_HTTP_STATUSES = frozenset({
+        408, 429,
+        500, 502, 503, 504,
+        520, 521, 522, 523, 524, 525, 526, 527, 530,
+    })
+
+    @classmethod
+    def _is_retryable_http_status(cls, status_code: int | None) -> bool:
+        if status_code is None:
+            return True
+        return status_code in cls.RETRYABLE_HTTP_STATUSES or 500 <= int(status_code) < 600
 
     def __init__(
         self,
@@ -195,7 +206,7 @@ class ColabWorker:
                 return response.json() if response.content else {}
             except requests.HTTPError as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if status_code is not None and status_code not in self.RETRYABLE_HTTP_STATUSES:
+                if not self._is_retryable_http_status(status_code):
                     raise
                 last_error = exc
                 reason = f"http_{status_code or 'unknown'}"
@@ -229,6 +240,148 @@ class ColabWorker:
             "reason_code": reason_code, "runtime": self.runtime_data,
         })
 
+    _last_ram_breakdown: dict[str, Any] = {}
+
+    @staticmethod
+    def _parse_linux_meminfo(path: Path) -> dict[str, int]:
+        values: dict[str, int] = {}
+        try:
+            content = path.read_text(encoding="ascii", errors="ignore")
+        except OSError:
+            return values
+        for line in content.splitlines():
+            if ":" not in line:
+                continue
+            key, rest = line.split(":", 1)
+            parts = rest.strip().split()
+            if not parts or not parts[0].isdigit():
+                continue
+            amount = int(parts[0])
+            unit = parts[1].lower() if len(parts) > 1 else ""
+            if unit == "kb":
+                amount *= 1024
+            elif unit == "mb":
+                amount *= 1024 * 1024
+            values[key.strip()] = amount
+        return values
+
+    @staticmethod
+    def _parse_cgroup_stat(path: Path) -> dict[str, int]:
+        stats: dict[str, int] = {}
+        try:
+            content = path.read_text(encoding="ascii", errors="ignore")
+        except OSError:
+            return stats
+        for line in content.splitlines():
+            parts = line.strip().split()
+            if len(parts) == 2 and parts[1].isdigit():
+                stats[parts[0]] = int(parts[1])
+        return stats
+
+    @classmethod
+    def _linux_available_ram_breakdown(
+        cls,
+        *,
+        meminfo_path: Path = Path("/proc/meminfo"),
+        cgroup_v2_dir: Path = Path("/sys/fs/cgroup"),
+        cgroup_v1_dir: Path = Path("/sys/fs/cgroup/memory"),
+    ) -> tuple[int, dict[str, Any]]:
+        meminfo = cls._parse_linux_meminfo(meminfo_path)
+        if "MemAvailable" in meminfo:
+            host_available = meminfo["MemAvailable"]
+            host_source = "proc_meminfo:MemAvailable"
+        elif "MemFree" in meminfo:
+            host_available = (
+                meminfo["MemFree"]
+                + meminfo.get("Buffers", 0)
+                + meminfo.get("Cached", 0)
+                + meminfo.get("SReclaimable", 0)
+            )
+            host_source = "proc_meminfo:MemFree+Buffers+Cached+SReclaimable"
+        else:
+            host_available = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+            host_source = "sysconf:SC_AVPHYS_PAGES"
+
+        breakdown: dict[str, Any] = {
+            "host_source": host_source,
+            "host_available_bytes": host_available,
+            "mem_available_bytes": meminfo.get("MemAvailable"),
+            "mem_free_bytes": meminfo.get("MemFree"),
+            "buffers_bytes": meminfo.get("Buffers"),
+            "cached_bytes": meminfo.get("Cached"),
+            "sreclaimable_bytes": meminfo.get("SReclaimable"),
+            "cgroup_version": None,
+            "effective_available_bytes": host_available,
+        }
+
+        # Cgroup v2: memory.current includes reclaimable page cache (inactive_file)
+        # and slab_reclaimable, so subtract them before computing remaining headroom.
+        v2_max_path = cgroup_v2_dir / "memory.max"
+        v2_current_path = cgroup_v2_dir / "memory.current"
+        v2_stat_path = cgroup_v2_dir / "memory.stat"
+        v2_checked = False
+        try:
+            v2_max_raw = v2_max_path.read_text(encoding="ascii").strip()
+            v2_checked = True
+            if v2_max_raw.isdigit():
+                maximum = int(v2_max_raw)
+                current = int(v2_current_path.read_text(encoding="ascii").strip())
+                stat = cls._parse_cgroup_stat(v2_stat_path)
+                inactive_file = stat.get("inactive_file", 0)
+                slab_reclaimable = stat.get("slab_reclaimable", 0)
+                used = max(0, current - inactive_file - slab_reclaimable)
+                cgroup_available = max(0, maximum - used)
+                available = min(host_available, cgroup_available)
+                breakdown.update({
+                    "cgroup_version": "v2",
+                    "cgroup_max_bytes": maximum,
+                    "cgroup_current_bytes": current,
+                    "cgroup_inactive_file_bytes": inactive_file,
+                    "cgroup_slab_reclaimable_bytes": slab_reclaimable,
+                    "cgroup_used_bytes": used,
+                    "cgroup_available_bytes": cgroup_available,
+                    "effective_available_bytes": available,
+                })
+                return available, breakdown
+            if v2_max_raw == "max":
+                breakdown.update({
+                    "cgroup_version": "v2",
+                    "cgroup_max_bytes": None,
+                    "effective_available_bytes": host_available,
+                })
+                return host_available, breakdown
+        except (OSError, ValueError):
+            pass
+
+        if not v2_checked:
+            v1_max_path = cgroup_v1_dir / "memory.limit_in_bytes"
+            v1_current_path = cgroup_v1_dir / "memory.usage_in_bytes"
+            v1_stat_path = cgroup_v1_dir / "memory.stat"
+            try:
+                v1_max_raw = v1_max_path.read_text(encoding="ascii").strip()
+                if v1_max_raw.isdigit():
+                    maximum = int(v1_max_raw)
+                    current = int(v1_current_path.read_text(encoding="ascii").strip())
+                    stat = cls._parse_cgroup_stat(v1_stat_path)
+                    reclaimable = stat.get("total_inactive_file", stat.get("inactive_file", 0))
+                    used = max(0, current - reclaimable)
+                    cgroup_available = max(0, maximum - used)
+                    available = min(host_available, cgroup_available)
+                    breakdown.update({
+                        "cgroup_version": "v1",
+                        "cgroup_max_bytes": maximum,
+                        "cgroup_current_bytes": current,
+                        "cgroup_reclaimable_bytes": reclaimable,
+                        "cgroup_used_bytes": used,
+                        "cgroup_available_bytes": cgroup_available,
+                        "effective_available_bytes": available,
+                    })
+                    return available, breakdown
+            except (OSError, ValueError):
+                pass
+
+        return host_available, breakdown
+
     @staticmethod
     def available_ram_bytes() -> int:
         if os.name == "nt":
@@ -251,21 +404,16 @@ class ColabWorker:
             memory.dwLength = ctypes.sizeof(memory)
             if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
                 raise OSError("GlobalMemoryStatusEx failed")
-            return int(memory.ullAvailPhys)
-        available = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
-        for maximum_path, current_path in (
-            (Path("/sys/fs/cgroup/memory.max"), Path("/sys/fs/cgroup/memory.current")),
-            (Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
-             Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")),
-        ):
-            try:
-                maximum = maximum_path.read_text(encoding="ascii").strip()
-                if maximum.isdigit():
-                    current = int(current_path.read_text(encoding="ascii").strip())
-                    available = min(available, max(0, int(maximum) - current))
-                    break
-            except (OSError, ValueError):
-                continue
+            avail = int(memory.ullAvailPhys)
+            ColabWorker._last_ram_breakdown = {
+                "os": "nt",
+                "total_phys_bytes": int(memory.ullTotalPhys),
+                "avail_phys_bytes": avail,
+                "effective_available_bytes": avail,
+            }
+            return avail
+        available, breakdown = ColabWorker._linux_available_ram_breakdown()
+        ColabWorker._last_ram_breakdown = breakdown
         return available
 
     @staticmethod
@@ -285,6 +433,17 @@ class ColabWorker:
         minimum_ram_gb = int(os.getenv("VIETOCR_TRAINING_MIN_RAM_GB", "4"))
         minimum_ram = minimum_ram_gb * 1024**3
         if available_ram < minimum_ram:
+            breakdown = ColabWorker._last_ram_breakdown
+            if breakdown.get("effective_available_bytes") != available_ram:
+                breakdown = {"effective_available_bytes": available_ram}
+            logger.warning(
+                "Insufficient host RAM: available_bytes=%d (%.2f GiB) < minimum_bytes=%d (%.2f GiB); breakdown=%s",
+                available_ram,
+                available_ram / 1024**3,
+                minimum_ram,
+                minimum_ram / 1024**3,
+                breakdown,
+            )
             raise RuntimeError("COLAB_INSUFFICIENT_RAM")
         work_dir.mkdir(parents=True, exist_ok=True)
         free_disk = shutil.disk_usage(work_dir).free
@@ -398,7 +557,7 @@ class ColabWorker:
                     return
             except requests.HTTPError as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if status_code is not None and status_code not in cls.RETRYABLE_HTTP_STATUSES:
+                if not cls._is_retryable_http_status(status_code):
                     raise
                 last_error = exc
                 retry_reason = f"http_{status_code or 'unknown'}"
@@ -674,7 +833,7 @@ class ColabWorker:
                           files={"file": (chunk["name"], stream, "application/octet-stream")})
             print(f"Uploaded candidate shard {int(chunk['index']) + 1}/{total_shards}", flush=True)
         self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/complete",
-                  params={"worker_id": self.worker_id}, json={
+                  params={"worker_id": self.worker_id}, timeout=600, json={
                       "profile": candidate["profile"],
                       "parent_checkpoint_sha256": candidate["parent_checkpoint_sha256"],
                       "manifest_sha256": candidate["manifest_sha256"],
@@ -731,6 +890,80 @@ class ColabWorker:
             raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
         return artifact, destination
 
+    _ORIGINAL_WEIGHTS_URL = "https://vocr.vn/data/vietocr/vgg_transformer.pth"
+
+    def _ensure_original_checkpoint(
+        self,
+        run_dir: Path,
+        *,
+        reuse_candidates: list[Path] | None = None,
+    ) -> Path:
+        """Return verified Original weights from run_dir, shared cache, parent, or retried HTTP."""
+        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        if original.is_file():
+            if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            return original
+        shared_cache = self.work_root / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        candidates: list[Path] = [shared_cache]
+        if reuse_candidates:
+            for candidate in reuse_candidates:
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+        for candidate in candidates:
+            try:
+                if candidate.is_file() and sha256_file(candidate) == ORIGINAL_CHECKPOINT_SHA256:
+                    temporary = original.with_suffix(".tmp")
+                    shutil.copyfile(candidate, temporary)
+                    temporary.replace(original)
+                    if candidate != shared_cache and not shared_cache.is_file():
+                        shared_tmp = shared_cache.with_suffix(".tmp")
+                        try:
+                            shutil.copyfile(original, shared_tmp)
+                            shared_tmp.replace(shared_cache)
+                        except OSError:
+                            shared_tmp.unlink(missing_ok=True)
+                    return original
+            except OSError:
+                continue
+        try:
+            self.download(self._ORIGINAL_WEIGHTS_URL, shared_cache, ORIGINAL_CHECKPOINT_SHA256)
+        except Exception as exc:
+            logger.warning(
+                "Retried HTTP download of Original weights failed (%s); falling back to vietocr downloader",
+                type(exc).__name__,
+            )
+            from vietocr.tool.utils import download_weights
+
+            downloaded = Path(download_weights(self._ORIGINAL_WEIGHTS_URL, quiet=True))
+            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            shared_tmp = shared_cache.with_suffix(".tmp")
+            shared_tmp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(downloaded, shared_tmp)
+            shared_tmp.replace(shared_cache)
+        if sha256_file(shared_cache) != ORIGINAL_CHECKPOINT_SHA256:
+            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+        temporary = original.with_suffix(".tmp")
+        shutil.copyfile(shared_cache, temporary)
+        temporary.replace(original)
+        return original
+
+    @staticmethod
+    def _cleanup_finished_run_dir(run_dir: Path) -> None:
+        """Remove ephemeral images, shards, and checkpoints after a job finishes cleanly."""
+        for dirname in ("training-images", "locked-test-images", "upload-shards-8mib", "parent-shards", "dataset"):
+            shutil.rmtree(run_dir / dirname, ignore_errors=True)
+        for candidate_shards in run_dir.glob("candidate-shards-*"):
+            if candidate_shards.is_dir():
+                shutil.rmtree(candidate_shards, ignore_errors=True)
+        for filename in ("latest.pt", "candidate.pth"):
+            (run_dir / filename).unlink(missing_ok=True)
+        for pattern in ("best-*.pth", "parent-*.pth", "candidate-*.pth", "original-*.pth"):
+            for path in run_dir.glob(pattern):
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+
     def process_benchmark_only_job(self, job: dict[str, Any], run_dir: Path,
                                    progress: dict[str, Any]) -> None:
         metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
@@ -749,15 +982,7 @@ class ColabWorker:
             raise ValueError("BENCHMARK_ONLY_COHORT_LINEAGE_MISMATCH")
         receipt, _, cache = self.materialize_dataset(str(job["id"]), locked_data, locked_items,
                                                       run_dir, locked_test=True)
-        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
-        if not original.exists():
-            from vietocr.tool.utils import download_weights
-            downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
-            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
-                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-            shutil.copyfile(downloaded, original)
-        if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
-            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+        original = self._ensure_original_checkpoint(run_dir)
 
         parent = active = None
         parent_hash = active_hash = None
@@ -824,18 +1049,35 @@ class ColabWorker:
             if (self.state_store_factory and not is_benchmark_only)
             else None
         )
-        if state_store is not None:
-            state_store.restore()
         stop = threading.Event()
-        progress: dict[str, Any] = {"stage": "downloading_dataset"}
+        progress: dict[str, Any] = {
+            "stage": "restoring_resume_state" if state_store is not None else "downloading_dataset"
+        }
         heartbeat = threading.Thread(target=self.heartbeat_loop, args=(job_id, stop, progress), daemon=True)
         heartbeat.start()
+        job_finished = False
+        restore_completed = state_store is None
         try:
+            if state_store is not None:
+                try:
+                    state_store.restore()
+                    restore_completed = True
+                except Exception as restore_exc:
+                    if (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file():
+                        restore_completed = True
+                        logger.warning(
+                            "Remote resume restore skipped (%s); continuing with verified local disk state",
+                            type(restore_exc).__name__,
+                        )
+                    else:
+                        raise
+                progress["stage"] = "downloading_dataset"
             runtime = self.assert_runtime_capacity(run_dir)
             self.runtime_data = runtime
             if is_benchmark_only:
                 progress.update(stage="downloading_candidate_artifact", runtime=runtime)
                 self.process_benchmark_only_job(job, run_dir, progress)
+                job_finished = True
                 return
             # Fail fast before downloading hundreds of dataset crops and the 150MB checkpoint.
             config = metadata.get("training_config") if isinstance(metadata.get("training_config"), dict) else {}
@@ -947,6 +1189,7 @@ class ColabWorker:
                     "status": registered_result["job_status"],
                     "runtime": self.runtime_data,
                 })
+                job_finished = True
                 return
 
             # Training is complete once the immutable candidate is registered.
@@ -956,6 +1199,7 @@ class ColabWorker:
                     "worker_id": self.worker_id, "run_id": run_id, "status": "CANDIDATE",
                     "runtime": self.runtime_data,
                 })
+                job_finished = True
                 return
 
             test_job = dict(job)
@@ -967,28 +1211,25 @@ class ColabWorker:
                     "worker_id": self.worker_id, "run_id": run_id, "status": "CANDIDATE",
                     "runtime": self.runtime_data,
                 })
+                job_finished = True
                 return
-            if not test_job["locked_test_version_id"]:
-                test_job["locked_test_version_id"] = locked_data["id"]
-                test_job["locked_test_manifest_sha256"] = locked_data["version_sha256"]
             if str(locked_data["id"]) != str(test_job["locked_test_version_id"]) or locked_data["version_sha256"] != test_job["locked_test_manifest_sha256"]:
                 raise ValueError("LOCKED_TEST_VERSION_MISMATCH")
             locked_receipt, _, cache = self.materialize_dataset(job_id, locked_data, locked_items,
                                                                  run_dir, locked_test=True)
             progress["stage"] = "benchmarking"
-            original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
-            if not original.exists():
-                from vietocr.tool.utils import download_weights
-                downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
-                if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
-                    raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-                shutil.copyfile(downloaded, original)
-            if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
-                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            original = self._ensure_original_checkpoint(run_dir, reuse_candidates=[parent] if parent else None)
             report_path = run_dir / f"production-{test_job['locked_test_manifest_sha256']}-{job['parent_checkpoint_sha256']}.json"
             if report_path.exists():
                 report = json.loads(report_path.read_text(encoding="utf-8"))
             else:
+                gc.collect()
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 from .benchmark import run_locked_benchmark
                 report = run_locked_benchmark(
                     manifest_path=str(locked_receipt),
@@ -1003,7 +1244,16 @@ class ColabWorker:
                     or report["locked_manifest_sha256"] != test_job["locked_test_manifest_sha256"]):
                 raise ValueError("BENCHMARK_REPORT_HASH_MISMATCH")
             if state_store is not None:
-                state_store.sync()
+                if isinstance(state_store, RemoteBackendJobStateStore):
+                    try:
+                        state_store.sync()
+                    except Exception as sync_exc:
+                        logger.warning(
+                            "Pre-benchmark remote resume sync skipped (%s); proceeding directly to benchmark registration",
+                            type(sync_exc).__name__,
+                        )
+                else:
+                    state_store.sync()
             registered_benchmark = self.call("POST", f"{API_PREFIX}/jobs/{job_id}/benchmarks",
                       params={"worker_id": self.worker_id}, json={
                           "run_id": run_id,
@@ -1026,14 +1276,19 @@ class ColabWorker:
                 "status": "BENCHMARKED" if resolved_gate == "V2_WIN" else "QUALITY_GATE_REJECTED",
                 "runtime": self.runtime_data,
             })
+            job_finished = True
         finally:
             stop.set()
             heartbeat.join(timeout=2)
-            if state_store is not None:
+            if state_store is not None and not job_finished and (
+                restore_completed or (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file()
+            ):
                 try:
                     state_store.sync()
                 except Exception as sync_exc:
                     logger.warning("Final resume state sync failed (%s)", type(sync_exc).__name__)
+            if job_finished:
+                self._cleanup_finished_run_dir(run_dir)
 
     def run_forever(self) -> None:
         logger.info("ViRead Colab worker started; worker id=%s", self.worker_id)

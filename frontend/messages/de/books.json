@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "In Warteschlange — Wartet auf System",
     "queuedWaitingWorkerShort": "In Warteschlange — Startet automatisch",
     "reasonQueuedOffline": "Die Seite ist sicher in der Warteschlange und wird automatisch erkannt, sobald das System bereit ist.",
-    "toolCheckFailedNotice": "Bei der automatischen Prüfung ist ein technisches Problem aufgetreten.",
-    "toolCheckCheckingNotice": "Seiteninhalt wird geprüft.",
+    "toolCheckFailedNotice": "Bei der Überprüfung ist ein technisches Problem aufgetreten.",
+    "toolCheckCheckingNotice": "Automatische Prüfungen für diese Seite laufen.",
     "toolCheckReadyNotice": "Die Seite kann jetzt zum Buch hinzugefügt werden.",
-    "toolCheckRejectedNotice": "Diese Seite wurde nicht freigegeben.",
-    "toolCheckRecheckNotice": "Die Seite muss vor dem Hinzufügen erneut geprüft werden.",
+    "toolCheckRejectedNotice": "Diese Seitenversion wurde vom Admin nicht genehmigt.",
+    "toolCheckRecheckNotice": "Diese Seite muss vor dem Hinzufügen zum Buch erneut geprüft werden.",
     "toolCheckAddedNotice": "Die Seite wurde zum Buch hinzugefügt.",
     "uploadOfflineQueueButton": "Seite hochladen & in OCR-Warteschlange einreihen",
     "uploadQueuedOfflineNotice": "{total} Seite(n) ({format}) in der OCR-Warteschlange gespeichert. Texterkennung, Korrektur und Sicherheitsprüfung starten automatisch, sobald OCR wieder online ist.",
     "retriedQueuedOfflineNotice": "Wiederholungsanfrage in der OCR-Warteschlange gespeichert. Die Seite wird automatisch verarbeitet, sobald OCR wieder verfügbar ist.",
     "replacedPageImageQueuedOfflineNotice": "Bild für Seite {page} ersetzt und in die OCR-Warteschlange eingereiht. Die erneute Prüfung startet automatisch, sobald OCR wieder aktiv ist.",
-    "replacedSubmissionImageQueuedOfflineNotice": "Neues Bild ersetzt und in die OCR-Warteschlange eingereiht. Die erneute Prüfung startet automatisch, sobald OCR wieder aktiv ist."
+    "replacedSubmissionImageQueuedOfflineNotice": "Neues Bild ersetzt und in die OCR-Warteschlange eingereiht. Die erneute Prüfung startet automatisch, sobald OCR wieder aktiv ist.",
+    "toolCheckPassedNotice": "Diese Seite hat die Sicherheitsprüfung bestanden."
   },
   "ocrContribution": {
     "cardAria": "Beiträge zur Verbesserung der Texterkennung für {title}",

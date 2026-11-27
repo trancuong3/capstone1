@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Automatically switches to online mode when needed",
     "googleSttFallback": "Online speech recognition support",
     "googleTtsFallback": "Online sample voice support",
-    "missingGoogleKeyHint": "ViRead will automatically choose the best voice on your device when online mode is unavailable.",
+    "missingGoogleKeyHint": "If the server has no Google Cloud API key configured, ViRead uses browser fallback for STT and voice previews; during a locked reading session, ViRead keeps the locked voice to avoid switching mid-session.",
     "useDefaultVoice": "Use default voice",
     "preview": "Preview",
     "stopPreview": "Stop preview",
@@ -79,7 +79,14 @@
       "american": "American accent",
       "british": "British accent"
     },
-    "googleProviderLabel": "Online"
+    "googleProviderLabel": "Online",
+    "wifiReadyBadge": "Ready Offline",
+    "offlineCacheMultiple": "Local voice worker is offline. Standalone Wi-Fi mode has pre-generated audio ready for: {voices}; other voices require starting the local worker or enabling fallback below.",
+    "offlineCacheSingle": "Local voice worker is offline. Standalone Wi-Fi mode has pre-generated audio ready for {voice}; to preview other regional voices live, start the local worker or enable fallback below.",
+    "offlineCacheEmpty": "Local voice worker is offline and no pre-generated audio is cached on device. Start the local worker or enable fallback below to play sample voices.",
+    "localWorkerLabel": "Local Worker:",
+    "sessionLockedBadge": "Locked for this reading session",
+    "offlineBrowserBadge": "Browser is offline"
   },
   "engineBadge": {
     "ariaLabel": "Voice status: Listen {stt}, Speak {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "Prepared",
       "android_native": "Device",
       "google_cloud": "Online",
-      "browser_default": "Browser"
+      "browser_default": "Browser",
+      "idle": "Checking…"
     },
     "listenPrefix": "Listen",
-    "speakPrefix": "Speak"
+    "speakPrefix": "Speak",
+    "idleDetail": "{base} (Checking speech engine status)"
   },
   "playback": {
     "unavailable": "On-device voice not ready. Please follow the text on screen and tap Retry.",

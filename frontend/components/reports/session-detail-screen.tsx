@@ -47,10 +47,26 @@ export function SessionDetailScreen({
   const { childService, sessionService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DetailState>({ status: "loading" });
-  const [eventsPage, setEventsPage] = useState(1);
-  const [comprehensionPage, setComprehensionPage] = useState(1);
-  const EVENTS_PAGE_SIZE = 10;
-  const COMPREHENSION_PAGE_SIZE = 10;
+  const [eventsPageState, setEventsPageState] = useState<{
+    readonly sessionId: string;
+    readonly page: number;
+  }>({ sessionId, page: 1 });
+  const [comprehensionPageState, setComprehensionPageState] = useState<{
+    readonly sessionId: string;
+    readonly page: number;
+  }>({ sessionId, page: 1 });
+  const EVENTS_PAGE_SIZE = 8;
+  const COMPREHENSION_PAGE_SIZE = 6;
+  const rawEventsPage =
+    eventsPageState.sessionId === sessionId ? eventsPageState.page : 1;
+  const rawComprehensionPage =
+    comprehensionPageState.sessionId === sessionId
+      ? comprehensionPageState.page
+      : 1;
+  const setEventsPage = (page: number) =>
+    setEventsPageState({ sessionId, page });
+  const setComprehensionPage = (page: number) =>
+    setComprehensionPageState({ sessionId, page });
 
   useEffect(() => {
     let active = true;
@@ -162,6 +178,19 @@ export function SessionDetailScreen({
     );
 
   const { detail } = state;
+  const totalEventPages = Math.max(
+    1,
+    Math.ceil(detail.events.length / EVENTS_PAGE_SIZE),
+  );
+  const safeEventsPage = Math.min(Math.max(1, rawEventsPage), totalEventPages);
+  const totalComprehensionPages = Math.max(
+    1,
+    Math.ceil(detail.comprehension.length / COMPREHENSION_PAGE_SIZE),
+  );
+  const safeComprehensionPage = Math.min(
+    Math.max(1, rawComprehensionPage),
+    totalComprehensionPages,
+  );
   const metrics = detail.fluency_assessment?.metrics;
   const rangeIsPartial =
     detail.selected_range_pages != null &&
@@ -301,8 +330,8 @@ export function SessionDetailScreen({
           <ul className="divide-y divide-border rounded-control border border-border">
             {detail.comprehension
               .slice(
-                (comprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
-                comprehensionPage * COMPREHENSION_PAGE_SIZE,
+                (safeComprehensionPage - 1) * COMPREHENSION_PAGE_SIZE,
+                safeComprehensionPage * COMPREHENSION_PAGE_SIZE,
               )
               .map(({ answer, question }) => {
                 const answerStatusLabel = answer
@@ -363,7 +392,7 @@ export function SessionDetailScreen({
             compact
             itemLabel={t("sessions.detail.questionsPaginationItem")}
             onPageChange={setComprehensionPage}
-            page={comprehensionPage}
+            page={safeComprehensionPage}
             pageSize={COMPREHENSION_PAGE_SIZE}
             total={detail.comprehension.length}
           />
@@ -556,8 +585,8 @@ export function SessionDetailScreen({
               <>
                 <SessionEventList
                   events={detail.events.slice(
-                    (eventsPage - 1) * EVENTS_PAGE_SIZE,
-                    eventsPage * EVENTS_PAGE_SIZE,
+                    (safeEventsPage - 1) * EVENTS_PAGE_SIZE,
+                    safeEventsPage * EVENTS_PAGE_SIZE,
                   )}
                 />
                 <PaginationBar
@@ -565,7 +594,7 @@ export function SessionDetailScreen({
                   compact
                   itemLabel={t("sessions.detail.eventsPaginationItem")}
                   onPageChange={setEventsPage}
-                  page={eventsPage}
+                  page={safeEventsPage}
                   pageSize={EVENTS_PAGE_SIZE}
                   total={detail.events.length}
                 />

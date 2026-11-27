@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { installApiFixture, setRole, child, ids } from "./real-data-fixture";
+import {
+  PLAYWRIGHT_ORIGIN,
+  installApiFixture,
+  setRole,
+  child,
+  ids,
+} from "./real-data-fixture";
 import { lyricsSchema } from "../../types/karaoke";
 import {
   previewDetail,
@@ -78,9 +84,9 @@ async function fixture(
       status,
       contentType: "application/json",
       headers: {
-        "access-control-allow-origin": "http://127.0.0.1:3106",
+        "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
         "access-control-allow-headers": "authorization,content-type,accept",
-        "access-control-allow-methods": "GET,OPTIONS",
+        "access-control-allow-methods": "GET,POST,OPTIONS",
       },
       body: status === 204 ? undefined : JSON.stringify(json),
     });
@@ -91,13 +97,13 @@ async function fixture(
       const request = route.request(),
         url = new URL(request.url());
       if (request.method() === "OPTIONS") return respond(route, null, 204);
-      expect(request.method()).toBe("GET");
       expect(request.headers().authorization).toMatch(/^Bearer /);
-      expect(url.searchParams.get("child_id")).toBe(ids.child);
-      state.requests.push(url.pathname + url.search);
-      if (state.fail)
-        return respond(route, { detail: "private database token" }, 503);
       if (url.pathname === "/karaoke/songs") {
+        expect(request.method()).toBe("GET");
+        expect(url.searchParams.get("child_id")).toBe(ids.child);
+        state.requests.push(url.pathname + url.search);
+        if (state.fail)
+          return respond(route, { detail: "private database token" }, 503);
         const card = {
           song_id: songId,
           version_id: versionId,
@@ -116,6 +122,11 @@ async function fixture(
         });
       }
       if (url.pathname === `/karaoke/songs/${songId}/playback`) {
+        expect(request.method()).toBe("GET");
+        expect(url.searchParams.get("child_id")).toBe(ids.child);
+        state.requests.push(url.pathname + url.search);
+        if (state.fail)
+          return respond(route, { detail: "private database token" }, 503);
         if (
           state.conflict &&
           url.searchParams.get("expected_version_id") === versionId
@@ -131,6 +142,71 @@ async function fixture(
           version_id: state.conflict ? lineId : versionId,
           lyrics: state.lyrics,
         });
+      }
+      if (url.pathname === `/karaoke/songs/${songId}/musical-profile`) {
+        expect(request.method()).toBe("GET");
+        return respond(route, {
+          song_id: songId,
+          song_version_id: versionId,
+          bpm: 108,
+          audio_type: "VOCAL_FULL",
+          has_pitch_contour: false,
+          has_beat_grid: false,
+          source_method: "LYRICS_TIMING",
+          beat_grid_ms: [],
+          pitch_contour: [],
+          phrase_windows: [],
+          updated_at: previewDetail().audio_url_expires_at,
+        });
+      }
+      if (
+        url.pathname === "/karaoke/practice-sessions" &&
+        request.method() === "GET"
+      ) {
+        expect(url.searchParams.get("child_id")).toBe(ids.child);
+        return respond(route, {
+          child_id: ids.child,
+          song_id: songId,
+          best_full_song_score: null,
+          best_full_song_stars: 0,
+          total_sessions: 0,
+          items: [],
+          storage_ready: true,
+        });
+      }
+      if (
+        url.pathname === "/karaoke/practice-sessions" &&
+        request.method() === "POST"
+      ) {
+        const body = request.postDataJSON() as Record<string, unknown>;
+        expect(body.child_id).toBe(ids.child);
+        return respond(
+          route,
+          {
+            id: lineId,
+            child_id: ids.child,
+            song_id: songId,
+            song_version_id:
+              (body.song_version_id as string | null) ?? versionId,
+            practice_mode: body.practice_mode ?? "FULL_SONG",
+            scoring_mode: body.scoring_mode ?? "LYRICS_ONLY",
+            playback_rate: Number(body.playback_rate ?? 1),
+            headphone_mode: Boolean(body.headphone_mode),
+            overall_score: (body.overall_score as number | null) ?? null,
+            rhythm_score: (body.rhythm_score as number | null) ?? null,
+            pitch_score: (body.pitch_score as number | null) ?? null,
+            lyrics_score: (body.lyrics_score as number | null) ?? null,
+            fluency_score: (body.fluency_score as number | null) ?? null,
+            stars: Number(body.stars ?? 0),
+            segment_start_ms: (body.segment_start_ms as number | null) ?? null,
+            segment_end_ms: (body.segment_end_ms as number | null) ?? null,
+            report_payload:
+              (body.report_payload as Record<string, unknown>) ?? {},
+            created_at: previewDetail().audio_url_expires_at,
+            persisted: true,
+          },
+          201,
+        );
       }
       state.unexpected.push(request.url());
       return respond(route, {}, 404);

@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "En file d'attente — En attente du système",
     "queuedWaitingWorkerShort": "En file — Traitement automatique à la reprise",
     "reasonQueuedOffline": "La page est en file d'attente et sera reconnue automatiquement dès que le système sera prêt.",
-    "toolCheckFailedNotice": "La vérification automatique a rencontré un problème technique.",
-    "toolCheckCheckingNotice": "Vérification du contenu de la page en cours.",
+    "toolCheckFailedNotice": "Le processus de vérification a rencontré un problème technique.",
+    "toolCheckCheckingNotice": "Exécution des vérifications automatiques pour cette page.",
     "toolCheckReadyNotice": "La page est prête à être ajoutée au livre.",
-    "toolCheckRejectedNotice": "Cette page n'a pas été approuvée.",
-    "toolCheckRecheckNotice": "La page doit être revérifiée avant d'être ajoutée au livre.",
+    "toolCheckRejectedNotice": "Cette version de la page n'a pas été approuvée par l'administrateur.",
+    "toolCheckRecheckNotice": "Cette page doit être revérifiée avant d'être ajoutée au livre.",
     "toolCheckAddedNotice": "La page a été ajoutée à votre livre.",
     "uploadOfflineQueueButton": "Téléverser et mettre en file OCR",
     "uploadQueuedOfflineNotice": "{total} page(s) ({format}) enregistrée(s) dans la file OCR. La reconnaissance, la relecture et le contrôle de sécurité démarreront automatiquement au retour de l’OCR.",
     "retriedQueuedOfflineNotice": "Demande de nouvelle tentative enregistrée dans la file OCR. La page sera traitée automatiquement dès la réouverture de l’OCR.",
     "replacedPageImageQueuedOfflineNotice": "Image de la page {page} remplacée et ajoutée à la file OCR. La vérification reprendra automatiquement au retour de l’OCR.",
-    "replacedSubmissionImageQueuedOfflineNotice": "Nouvelle image remplacée et ajoutée à la file OCR. La vérification reprendra automatiquement au retour de l’OCR."
+    "replacedSubmissionImageQueuedOfflineNotice": "Nouvelle image remplacée et ajoutée à la file OCR. La vérification reprendra automatiquement au retour de l’OCR.",
+    "toolCheckPassedNotice": "Cette page a réussi le contrôle de sécurité."
   },
   "ocrContribution": {
     "cardAria": "Contribuer à l'amélioration de la reconnaissance de texte pour {title}",

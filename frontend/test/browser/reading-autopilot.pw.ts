@@ -1302,7 +1302,7 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     });
   });
 
-  test("QA-01/QA-19/QA-22: Prose reflow, Thầy giáo AI male persona, 0% overlap in-flow SentenceReinforcement with live word highlight & voice escape", async ({
+  test("QA-01/QA-22: Prose reflow, Thầy giáo AI male persona, and forward reading after coaching", async ({
     page,
   }, testInfo) => {
     mkdirSync(EVIDENCE_DIR, { recursive: true });
@@ -1344,7 +1344,7 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       .toBe(1);
     await page.waitForTimeout(450);
 
-    // Read "Nhà em có", misread "chú" -> "chu" (tone mismatch triggers Thầy giáo AI coaching), then fix "chú" -> arms SentenceReinforcement!
+    // Read "Nhà em có", misread "chú" -> "chu" (tone mismatch triggers Thầy giáo AI coaching).
     await page.evaluate(() => {
       const api = (
         window as unknown as {
@@ -1400,7 +1400,7 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
       .toBeGreaterThanOrEqual(2);
     await page.waitForTimeout(1800);
 
-    // Fix "chú" -> arms SentenceReinforcement banner in-flow!
+    // Fix "chú" and continue forward; a hard word must not force a sentence re-read.
     await page.evaluate(() => {
       const api = (
         window as unknown as {
@@ -1415,82 +1415,33 @@ test.describe("ViRead automatic reading flow (E2E)", () => {
     });
 
     const banner = page.getByTestId("sentence-reinforcement-banner");
-    await expect(banner).toBeVisible({ timeout: 6_000 });
+    await expect(banner).toHaveCount(0);
 
-    // Wait for Thầy giáo AI's sentence-reinforcement invitation TTS + mic reopen + echo guard
-    await expect
-      .poll(
-        () =>
-          page.evaluate(() =>
-            (
-              window as unknown as {
-                __autopilotSpeech: { count: () => number };
-              }
-            ).__autopilotSpeech.count(),
-          ),
-        { timeout: 10_000 },
-      )
-      .toBeGreaterThanOrEqual(3);
-    await page.waitForTimeout(1800);
-
-    // QA-19: Live per-word green highlighting inside SentenceReinforcement banner
+    // The next words remain readable immediately; no sentence-reinforcement gate interrupts the flow.
     await page.evaluate(() => {
       (
         window as unknown as {
           __autopilotSpeech: { say: (t: string) => void };
         }
-      ).__autopilotSpeech.say("Nhà em có");
+      ).__autopilotSpeech.say("mèo nhỏ");
     });
-    await expect
-      .poll(() => banner.locator('[data-reinforce-matched="true"]').count())
-      .toBeGreaterThanOrEqual(3);
-
-    // QA-19: Verify 0% bounding-box overlap between sentence-reinforcement-banner and reading-companion-bubble
-    const rects = await page.evaluate(() => {
-      const b1 = document
-        .querySelector('[data-testid="sentence-reinforcement-banner"]')
-        ?.getBoundingClientRect();
-      const b2 = document
-        .querySelector('[data-testid="reading-companion-bubble"]')
-        ?.getBoundingClientRect();
-      if (!b1 || !b2) return null;
-      const overlapX = Math.max(
-        0,
-        Math.min(b1.right, b2.right) - Math.max(b1.left, b2.left),
-      );
-      const overlapY = Math.max(
-        0,
-        Math.min(b1.bottom, b2.bottom) - Math.max(b1.top, b2.top),
-      );
-      return {
-        overlapArea: overlapX * overlapY,
-        bannerTop: b1.top,
-        bannerBottom: b1.bottom,
-        bubbleTop: b2.top,
-        bubbleBottom: b2.bottom,
-      };
-    });
-    expect(rects).not.toBeNull();
-    expect(rects!.overlapArea).toBe(0);
+    await expect(page.getByRole("button", { name: "mèo" })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
+    await expect(page.getByRole("button", { name: "nhỏ." })).toHaveAttribute(
+      "data-reading-state",
+      "correct",
+    );
 
     await assertNoHorizontalOverflow(page);
     await page.screenshot({
       path: resolve(
         EVIDENCE_DIR,
-        `qa-final-reinforce-${testInfo.project.name}.png`,
+        `qa-forward-reading-${testInfo.project.name}.png`,
       ),
       fullPage: false,
     });
-
-    // QA-19: Never-Trap voice escape ("đọc tiếp") dismisses banner cleanly without trapping child
-    await page.evaluate(() => {
-      (
-        window as unknown as {
-          __autopilotSpeech: { say: (t: string) => void };
-        }
-      ).__autopilotSpeech.say("đọc tiếp");
-    });
-    await expect(banner).not.toBeVisible({ timeout: 5_000 });
   });
 
   test("QA-02: Poetry verse breaks preserved (data-reflow-mode='poetry')", async ({

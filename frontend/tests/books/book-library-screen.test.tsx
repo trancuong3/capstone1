@@ -178,4 +178,48 @@ describe("BookLibraryScreen with real API adapters", () => {
     expect(alert).not.toHaveTextContent("Private catalog details");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
+
+  it("paginates when catalog has more than 9 books and navigates between pages", async () => {
+    const manyBooks = Array.from({ length: 12 }, (_, index) => ({
+      ...bookFixture,
+      id: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      title: `Cuốn sách số ${index + 1}`,
+    }));
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      if (url.pathname === "/reading-management/collections")
+        return Response.json([]);
+      if (url.pathname === "/books/catalog") return Response.json(manyBooks);
+      throw new Error("Unexpected isolated catalog route");
+    });
+    const user = userEvent.setup();
+    renderLibrary();
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Cuốn sách số 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Cuốn sách số 9" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "Cuốn sách số 10" }),
+    ).not.toBeInTheDocument();
+
+    const nav = screen.getByRole("navigation", { name: "Phân trang thư viện sách" });
+    expect(within(nav).getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(within(nav).getByRole("button", { name: /Sau/i }));
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "Cuốn sách số 10" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Cuốn sách số 12" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 2, name: "Cuốn sách số 1" }),
+    ).not.toBeInTheDocument();
+    expect(within(nav).getByText("Trang 2 / 2")).toBeInTheDocument();
+  });
 });

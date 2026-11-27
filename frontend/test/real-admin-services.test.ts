@@ -632,6 +632,41 @@ describe("real Admin adapters", () => {
       Response.json({ status: "ok", woken: "yes", detail: 123 }),
     );
     await expect(service.wakeOcrWorker()).rejects.toThrow();
+
+    // Concurrent non-forced get() calls coalesce into a single in-flight fetch; forceFresh aborts prior call.
+    fetchMock.mockClear();
+    let resolveSlow: ((value: Response) => void) | null = null;
+    let firstAborted = false;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      if (fetchMock.mock.calls.length === 1) {
+        init?.signal?.addEventListener("abort", () => {
+          firstAborted = true;
+        });
+        return new Promise<Response>((resolve) => {
+          resolveSlow = resolve;
+        });
+      }
+      return Promise.resolve(Response.json(richSnapshot));
+    });
+    const p1 = service.get();
+    const p2 = service.get();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    resolveSlow!(Response.json(richSnapshot));
+    await expect(Promise.all([p1, p2])).resolves.toEqual([
+      richSnapshot,
+      richSnapshot,
+    ]);
+
+    fetchMock.mockClear();
+    firstAborted = false;
+    const p3 = service.get();
+    const p3Rejected = expect(p3).rejects.toThrow();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const p4 = service.get(undefined, { forceFresh: true });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(firstAborted).toBe(true);
+    await expect(p4).resolves.toEqual(richSnapshot);
+    await p3Rejected;
   });
   it.each([401, 403, 404, 501, 503])(
     "preserves HTTP %s with a safe generic message",

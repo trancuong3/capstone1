@@ -7,7 +7,7 @@ import {
   setRole,
 } from "./real-data-fixture";
 import { installReadingExperience } from "./reading-experience-fixture";
-import { songDetail, songId } from "../karaoke-fixtures";
+import { previewDetail, songDetail, songId } from "../karaoke-fixtures";
 
 async function assertLayout(page: Page) {
   const dimensions = await page.evaluate(() => {
@@ -714,6 +714,7 @@ for (const routeGroup of ["parent", "admin"] as const) {
     test.setTimeout(360_000);
     const readingFixture = await installReadingExperience(page);
     const api = readingFixture.api;
+    api.previewStatus = 200;
     const adminSong = songDetail();
     const adminDraft = adminSong.draft!;
     await page
@@ -767,6 +768,86 @@ for (const routeGroup of ["parent", "admin"] as const) {
               : 404,
           headers: { ...headers, "content-type": "application/json" },
           body: JSON.stringify(body),
+        });
+      });
+    await page
+      .context()
+      .route("http://127.0.0.1:8000/karaoke/songs**", async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const pathname = url.pathname;
+        const headers = {
+          "access-control-allow-origin": "http://127.0.0.1:3106",
+          "access-control-allow-headers": "authorization,content-type,accept",
+          "access-control-allow-methods": "GET,OPTIONS",
+        };
+        if (request.method() === "OPTIONS")
+          return route.fulfill({ status: 204, headers });
+        if (pathname === "/karaoke/songs") {
+          return route.fulfill({
+            status: 200,
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({
+              items: [
+                {
+                  song_id: songId,
+                  version_id: adminDraft.id,
+                  title: adminDraft.title,
+                  author: adminDraft.author,
+                  duration_ms: adminDraft.duration_ms,
+                  min_grade: adminDraft.min_grade,
+                  max_grade: adminDraft.max_grade,
+                  cover_url: null,
+                },
+              ],
+              total: 1,
+              limit: 12,
+              offset: 0,
+            }),
+          });
+        }
+        if (pathname === `/karaoke/songs/${songId}/playback`) {
+          const preview = previewDetail();
+          return route.fulfill({
+            status: 200,
+            headers: { ...headers, "content-type": "application/json" },
+            body: JSON.stringify({
+              song_id: preview.song_id,
+              version_id: preview.version_id,
+              title: preview.title,
+              author: preview.author,
+              duration_ms: preview.duration_ms,
+              audio_url: "http://127.0.0.1:8000/test-track.wav",
+              audio_url_expires_at: preview.audio_url_expires_at,
+              cover_url: preview.cover_url,
+              lyrics: preview.lyrics,
+            }),
+          });
+        }
+        return route.fallback();
+      });
+    await page
+      .context()
+      .route("http://127.0.0.1:8000/test-track.wav", async (route) => {
+        const header = Buffer.alloc(44 + 1600);
+        header.write("RIFF", 0);
+        header.writeUInt32LE(36 + 1600, 4);
+        header.write("WAVE", 8);
+        header.write("fmt ", 12);
+        header.writeUInt32LE(16, 16);
+        header.writeUInt16LE(1, 20);
+        header.writeUInt16LE(1, 22);
+        header.writeUInt32LE(8000, 24);
+        header.writeUInt32LE(16000, 28);
+        header.writeUInt16LE(2, 32);
+        header.writeUInt16LE(16, 34);
+        header.write("data", 36);
+        header.writeUInt32LE(1600, 40);
+        return route.fulfill({
+          status: 200,
+          headers: { "access-control-allow-origin": "*" },
+          contentType: "audio/wav",
+          body: header,
         });
       });
     await page.setViewportSize({ width: 1440, height: 1000 });

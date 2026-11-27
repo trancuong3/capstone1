@@ -674,8 +674,13 @@ export class RealtimeAlignmentEngine {
   }
 
   /** Two consecutive spoken words found together further ahead (line jump). */
-  private findReanchor(cursor: number, first: string, second: string): number {
-    const last = Math.min(cursor + REANCHOR_WINDOW, this.bookWords.length - 2);
+  private findReanchor(
+    cursor: number,
+    first: string,
+    second: string,
+    maxWindow = REANCHOR_WINDOW,
+  ): number {
+    const last = Math.min(cursor + maxWindow, this.bookWords.length - 2);
     for (let index = cursor + 1; index <= last; index += 1) {
       if (
         this.bookWords[index].normalizedText === first &&
@@ -832,10 +837,26 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3. Tìm từ ở phía trước.
+      // 3. Tìm từ ở phía trước (áp dụng shouldDeferLookaheadMatch đồng bộ với addFinalTranscript
+      // để interim không nhảy vọt qua 20 từ chức năng tiếng Việt rồi bật ngược khi final về).
       const matchedIndex = this.findAheadFrom(cursor, token);
+      const nextTokenConfirmsSkip =
+        matchedIndex !== -1 &&
+        tokenIndex + 1 < tokens.length &&
+        matchedIndex + 1 < this.bookWords.length &&
+        this.bookWords[matchedIndex + 1].normalizedText ===
+          tokens[tokenIndex + 1];
 
-      if (matchedIndex !== -1) {
+      if (
+        matchedIndex !== -1 &&
+        (!shouldDeferLookaheadMatch(
+          token,
+          cursor,
+          matchedIndex,
+          this.bookWords.length,
+        ) ||
+          nextTokenConfirmsSkip)
+      ) {
         // Điền trạng thái nhất quán cho mọi từ bị bỏ qua trong [cursor .. matchedIndex - 1],
         // giữ nguyên các từ đã có bằng chứng đọc sai (SUBSTITUTE) trước đó.
         for (let index = cursor; index < matchedIndex; index += 1) {
@@ -853,9 +874,15 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch >= 4 từ (đồng bộ với addFinalTranscript -> findReanchor).
+      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch 4–8 từ với bằng chứng 2 từ liên tiếp
+      // (giới hạn cửa sổ ở interim để tránh nhảy cóc 18–30 từ cuối trang trước khi chốt final).
       if (tokenIndex + 1 < tokens.length) {
-        const anchor = this.findReanchor(cursor, token, tokens[tokenIndex + 1]);
+        const anchor = this.findReanchor(
+          cursor,
+          token,
+          tokens[tokenIndex + 1],
+          8,
+        );
         if (anchor !== -1) {
           for (let index = cursor; index < anchor; index += 1) {
             const existing = statusByWordId.get(this.bookWords[index].wordId);
@@ -1310,7 +1337,15 @@ export class RealtimeAlignmentEngine {
     }
 
     const ahead = this.findAhead(pending.token);
-    if (ahead !== -1) {
+    if (
+      ahead !== -1 &&
+      !shouldDeferLookaheadMatch(
+        pending.token,
+        this.currentBookIndex,
+        ahead,
+        this.bookWords.length,
+      )
+    ) {
       for (let index = this.currentBookIndex; index < ahead; index += 1) {
         this.setWordStatus(index, "DELETE");
       }

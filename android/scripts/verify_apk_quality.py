@@ -43,12 +43,22 @@ FORBIDDEN_BYTE_PATTERNS: tuple[tuple[str, bytes], ...] = (
 RunnerFn = Callable[[list[str]], tuple[int, str, str]]
 
 
+def _build_subprocess_command(
+    cmd: list[str], *, is_windows: bool | None = None
+) -> list[str]:
+    """Invoke Windows batch/cmd wrappers via cmd.exe /c to avoid [WinError 193]."""
+    win = (os.name == "nt") if is_windows is None else is_windows
+    if win and cmd and Path(cmd[0]).suffix.lower() in {".bat", ".cmd"}:
+        return ["cmd.exe", "/c", *cmd]
+    return list(cmd)
+
+
 def _default_runner(cmd: list[str]) -> tuple[int, str, str]:
     env = os.environ.copy()
     if not env.get("JAVA_HOME") and Path(r"F:\c1\tools\jdk-17\bin\java.exe").is_file():
         env["JAVA_HOME"] = r"F:\c1\tools\jdk-17"
     proc = subprocess.run(
-        cmd,
+        _build_subprocess_command(cmd),
         capture_output=True,
         text=True,
         encoding="utf-8",

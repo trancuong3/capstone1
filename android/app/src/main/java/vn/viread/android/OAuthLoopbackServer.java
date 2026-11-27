@@ -11,6 +11,7 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 /**
  * Ephemeral RFC 8252 Section 7.3 loopback OAuth 2.0 callback listener on {@code 127.0.0.1:3000}.
@@ -181,7 +182,10 @@ public final class OAuthLoopbackServer {
         }
 
         String actualNonce = extractDecodedQueryParam(rawQuery, NONCE_PARAM);
-        if (!expectedNonce.equals(actualNonce)) {
+        if (actualNonce == null
+                || !MessageDigest.isEqual(
+                        expectedNonce.getBytes(StandardCharsets.UTF_8),
+                        actualNonce.getBytes(StandardCharsets.UTF_8))) {
             writePlainResponse(
                     client.getOutputStream(),
                     "403 Forbidden",

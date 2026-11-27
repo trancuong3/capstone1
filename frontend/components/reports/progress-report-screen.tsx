@@ -5,8 +5,10 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
   type MetricCardDelta,
@@ -168,7 +170,8 @@ function ProgressReportContent({
   const [state, setState] = useState<State>({ status: "loading" });
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [showAllDifficultWords, setShowAllDifficultWords] = useState(false);
+  const [difficultWordsPage, setDifficultWordsPage] = useState(1);
+  const DIFFICULT_WORDS_PAGE_SIZE = 6;
   const alive = useRef(true);
   const paging = useRef(false);
   const selected = parseProgressPeriod(
@@ -400,11 +403,21 @@ function ProgressReportContent({
     );
 
   const { child, children, report, periods } = state;
-  const visibleDifficultWords = report?.difficult_words
-    ? showAllDifficultWords
-      ? report.difficult_words
-      : report.difficult_words.slice(0, 6)
-    : [];
+  const allDifficultWords = report?.difficult_words ?? [];
+  const totalDifficultWordPages = Math.max(
+    1,
+    Math.ceil(allDifficultWords.length / DIFFICULT_WORDS_PAGE_SIZE),
+  );
+  const safeDifficultWordsPage = Math.min(
+    Math.max(1, difficultWordsPage),
+    totalDifficultWordPages,
+  );
+  const difficultWordsStart =
+    (safeDifficultWordsPage - 1) * DIFFICULT_WORDS_PAGE_SIZE;
+  const visibleDifficultWords = allDifficultWords.slice(
+    difficultWordsStart,
+    difficultWordsStart + DIFFICULT_WORDS_PAGE_SIZE,
+  );
   const localizedMetrics = report
     ? mapReportMetrics(report).map((metric) => {
         if (metric.id === "sessions") {
@@ -763,7 +776,7 @@ function ProgressReportContent({
                     return (
                       <li
                         className="flex flex-wrap items-center justify-between gap-1.5 rounded-control border border-border bg-canvas/35 px-2.5 py-1.5"
-                        key={`${word.normalized_word}-${index}`}
+                        key={`${word.normalized_word}-${difficultWordsStart + index}`}
                       >
                         <div className="min-w-0">
                           <span
@@ -797,24 +810,15 @@ function ProgressReportContent({
                     );
                   })}
                 </ul>
-                {report.difficult_words.length > 6 ? (
-                  <Button
-                    className="mt-2 h-8 min-h-8! py-0! text-xs!"
-                    fullWidth={false}
-                    onClick={() =>
-                      setShowAllDifficultWords((current) => !current)
-                    }
-                    size="admin"
-                    type="button"
-                    variant="quiet"
-                  >
-                    {showAllDifficultWords
-                      ? t("overview.collapseList")
-                      : t("overview.viewAllWords", {
-                          count: report.difficult_words.length,
-                        })}
-                  </Button>
-                ) : null}
+                <PaginationBar
+                  ariaLabel={t("overview.difficultWordsTitle")}
+                  className="mt-2.5"
+                  compact
+                  onPageChange={setDifficultWordsPage}
+                  page={safeDifficultWordsPage}
+                  pageSize={DIFFICULT_WORDS_PAGE_SIZE}
+                  total={allDifficultWords.length}
+                />
               </>
             ) : report.availability.difficult_words === "available" ? (
               <p className="mt-2.5 text-sm text-muted">
@@ -871,6 +875,18 @@ function ProgressReportContent({
         childName={child.alias}
         showReadingAssessment={!report?.assessment}
       />
+
+      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
+        <summary className="cursor-pointer font-bold text-primary">
+          {t("overview.entertainmentSummaryHeading")}
+        </summary>
+        <div className="mt-4">
+          <EntertainmentLearningSummary
+            childId={child.id}
+            childName={child.alias}
+          />
+        </div>
+      </details>
     </section>
   );
 }

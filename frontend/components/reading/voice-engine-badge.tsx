@@ -31,12 +31,17 @@ function getTierStyles(tier: VoiceEngineTier): {
       };
     case "catalog_cache":
     case "browser_wasm":
+    case "elevenlabs_cloud":
     case "local_offline":
-    case "idle":
-    default:
       return {
         dot: "bg-emerald-500",
         chip: "border-emerald-200 bg-emerald-50/90 text-emerald-900",
+      };
+    case "idle":
+    default:
+      return {
+        dot: "bg-slate-400",
+        chip: "border-slate-200 bg-slate-50/90 text-slate-700",
       };
   }
 }
@@ -58,6 +63,9 @@ function buildTooltip(
       base,
       reason: snap.fallbackReason,
     });
+  }
+  if (snap.tier === "idle") {
+    return t("engineBadge.idleDetail", { base });
   }
   if (snap.tier === "android_native") {
     return t("engineBadge.androidDetail", { base });
@@ -88,6 +96,7 @@ function resolveShortLabel(
     case "android_native":
     case "google_cloud":
     case "browser_default":
+    case "idle":
       return t(`engineBadge.shortLabels.${snap.tier}`);
     default:
       return snap.shortLabel;

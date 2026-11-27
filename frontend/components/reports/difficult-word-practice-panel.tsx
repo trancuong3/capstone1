@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -295,6 +296,8 @@ export function DifficultWordPracticePanel({
   const [historyItems, setHistoryItems] = useState<
     readonly DifficultWordPracticeHistoryItemDTO[]
   >([]);
+  const [historyPage, setHistoryPage] = useState(1);
+  const HISTORY_PAGE_SIZE = 5;
   const [pendingSavePayload, setPendingSavePayload] =
     useState<CapturedAttemptPayload | null>(null);
   const [retryLoopPaused, setRetryLoopPaused] = useState(false);
@@ -2298,42 +2301,70 @@ export function DifficultWordPracticePanel({
               {t("practice.historyEmpty")}
             </p>
           ) : (
-            <ul className="space-y-1.5 text-xs text-[#526970]">
-              {historyItems.map((item) => (
-                <li
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-3 py-2"
-                  key={item.attempt_id}
-                >
-                  <span className="font-bold text-[#213C42]">
-                    {t("practice.attemptNumber", {
-                      number: item.attempt_number,
-                    })}
-                    {item.assessment_status
-                      ? t(ASSESSMENT_LABEL_KEYS[item.assessment_status])
-                      : t("practice.attemptInProgress")}
-                  </span>
-                  <span>
-                    {item.spoken_transcript ? (
-                      <>
-                        <span
-                          className="viread-learning-content"
-                          dir="ltr"
-                          lang="vi"
-                        >
-                          “{item.spoken_transcript}”
+            <>
+              <ul className="space-y-1.5 text-xs text-[#526970]">
+                {(() => {
+                  const totalHistoryPages = Math.max(
+                    1,
+                    Math.ceil(historyItems.length / HISTORY_PAGE_SIZE),
+                  );
+                  const safeHistoryPage = Math.min(
+                    Math.max(1, historyPage),
+                    totalHistoryPages,
+                  );
+                  return historyItems
+                    .slice(
+                      (safeHistoryPage - 1) * HISTORY_PAGE_SIZE,
+                      safeHistoryPage * HISTORY_PAGE_SIZE,
+                    )
+                    .map((item) => (
+                      <li
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-white px-3 py-2"
+                        key={item.attempt_id}
+                      >
+                        <span className="font-bold text-[#213C42]">
+                          {t("practice.attemptNumber", {
+                            number: item.attempt_number,
+                          })}
+                          {item.assessment_status
+                            ? t(ASSESSMENT_LABEL_KEYS[item.assessment_status])
+                            : t("practice.attemptInProgress")}
                         </span>
-                        {" · "}
-                      </>
-                    ) : (
-                      ""
-                    )}
-                    {formatPracticeTimestamp(
-                      item.completed_at ?? item.started_at,
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
+                        <span>
+                          {item.spoken_transcript ? (
+                            <>
+                              <span
+                                className="viread-learning-content"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                “{item.spoken_transcript}”
+                              </span>
+                              {" · "}
+                            </>
+                          ) : (
+                            ""
+                          )}
+                          {formatPracticeTimestamp(
+                            item.completed_at ?? item.started_at,
+                          )}
+                        </span>
+                      </li>
+                    ));
+                })()}
+              </ul>
+              <PaginationBar
+                className="mt-2.5"
+                compact
+                onPageChange={setHistoryPage}
+                page={Math.min(
+                  Math.max(1, historyPage),
+                  Math.max(1, Math.ceil(historyItems.length / HISTORY_PAGE_SIZE)),
+                )}
+                pageSize={HISTORY_PAGE_SIZE}
+                total={historyItems.length}
+              />
+            </>
           )}
         </div>
       </details>

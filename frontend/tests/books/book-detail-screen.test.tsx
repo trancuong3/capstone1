@@ -188,4 +188,47 @@ describe("BookDetailScreen with real API adapters", () => {
     expect(alert).not.toHaveTextContent("Private database details");
     expect(screen.getByRole("button", { name: "Thử lại" })).toBeInTheDocument();
   });
+
+  it("paginates book page thumbnails at 12 per page when a book has 15+ pages", async () => {
+    const manyPages = Array.from({ length: 15 }, (_, index) => ({
+      ...pagePreviewFixture,
+      page_id: `15000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      page_number: index + 1,
+    }));
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`)
+        return Response.json(childFixture);
+      if (path === `/books/catalog/${TEST_BOOK_ID}`)
+        return Response.json(bookFixture);
+      if (path === `/books/catalog/${TEST_BOOK_ID}/preview`)
+        return Response.json(manyPages);
+      throw new Error("Unexpected isolated book detail route");
+    });
+    const user = userEvent.setup();
+    renderDetail();
+
+    expect(
+      await screen.findByRole("button", { name: "Chọn trang 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Chọn trang 12" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Chọn trang 13" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Sau/i }));
+    expect(
+      await screen.findByRole("button", { name: "Chọn trang 13" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Chọn trang 15" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Chọn trang 1" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 2 / 2")).toBeInTheDocument();
+  });
 });

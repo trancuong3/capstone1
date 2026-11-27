@@ -59,7 +59,7 @@ class OcrCorrectionConfig:
     gemini_fallback_model: str = "gemini-3.1-flash-lite"
     groq_model: str = "qwen/qwen3.8-27b"
     cloud_timeout_seconds: int = 60
-    total_timeout_seconds: int = 7200
+    total_timeout_seconds: int = 300
     local_enabled: bool = True
     local: LocalOcrConfig = field(default_factory=LocalOcrConfig, repr=False)
 
@@ -72,7 +72,7 @@ class OcrCorrectionConfig:
         return self.cloud_enabled and self.groq_api_key is not None
 
     def local_only_copy(self) -> "OcrCorrectionConfig":
-        """Return a config with cloud providers disabled, preserving local_enabled."""
+        """Return a config with external cloud providers stripped while preserving local_enabled."""
         return OcrCorrectionConfig(
             cloud_enabled=False,
             gemini_api_key=None,
@@ -91,8 +91,8 @@ class OcrCorrectionConfig:
         """Detect whether a local Ollama daemon is expected on this runtime.
 
         Disabled automatically on Render / remote-worker web dynos unless
-        `LOCAL_OCR_ENABLED=true` is explicitly set (ignoring copied loopback
-        `LOCAL_OCR_BASE_URL` defaults).
+        `LOCAL_OCR_ENABLED=true` is explicitly set (ignoring stray loopback
+        `LOCAL_OCR_BASE_URL` values left in hosted environments).
         """
         explicit = os.getenv("LOCAL_OCR_ENABLED")
         if explicit is not None and explicit.strip() != "":
@@ -110,7 +110,6 @@ class OcrCorrectionConfig:
         if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
             return True
         return True
-
     @staticmethod
     def _resolve_cloud_enabled(
         *,

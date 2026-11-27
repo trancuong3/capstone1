@@ -475,7 +475,7 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     expect(speakMock).toHaveBeenCalledTimes(1);
   });
 
-  it("Wi-Fi-only phonics TTS tries backend precomputed phonics & cached catalog word BEFORE browser SpeechSynthesis", async () => {
+  it("Wi-Fi-only phonics TTS tries backend precomputed phonics BEFORE step-by-step browser SpeechSynthesis fallback", async () => {
     setVoicePolicyPreferences({
       providerMode: "local_with_google_fallback",
       allowGoogleTtsFallback: true,
@@ -565,9 +565,11 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
       } as never,
       {},
     );
-    // Must NOT skip Render precomputed phonics & catalog word cache!
+    // Must NOT skip Render precomputed phonics; when /phonics returns 503 and
+    // browser fallback is allowed, prefer step-by-step phonics spelling over
+    // whole-word cached synthesis.
     expect(synthesizePhonicsMock).toHaveBeenCalledTimes(1);
-    expect(synthesizeMock).toHaveBeenCalledTimes(1);
+    expect(synthesizeMock).not.toHaveBeenCalled();
     expect(speakMock).toHaveBeenCalledTimes(1);
   });
 

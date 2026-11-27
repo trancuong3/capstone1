@@ -260,7 +260,17 @@
     "referencePageAlt": "Image de référence pour la page {page}",
     "scrollToCurrentWord": "À propos du mot en cours de lecture",
     "currentWordPrefix": "Mot actuel : ",
-    "overlayAria": "Zone de mise en évidence du mot actuel"
+    "overlayAria": "Zone de mise en évidence du mot actuel",
+    "readingModeSwitcherAria": "Mode de lecture de la page",
+    "readingModeIllustrated": "Avec illustration",
+    "readingModeIllustratedTitle": "Afficher une illustration sans texte avec le texte de lecture",
+    "readingModeText": "Texte seul",
+    "readingModeTextTitle": "Se concentrer sur le texte de lecture clair",
+    "readingModeOriginal": "Page originale",
+    "readingModeOriginalTitle": "Afficher l'image originale de la page pour comparer",
+    "illustrationAlt": "Illustration de la page {page}",
+    "originalReferenceHeading": "Image originale de la page (comparaison)",
+    "originalReferenceAlt": "Image originale de la page {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Pas tout à fait : « {word} ». L'enfant, essaie de relire ce mot.",
@@ -360,7 +370,8 @@
     "finish": "Terminé",
     "nextQuestion": "Question suivante",
     "chosenCorrectFeedback": "Tu viens de choisir {label}. {hint}",
-    "chosenWrongFeedback": "Tu viens de choisir {label}. Ce n'est pas tout à fait ça, repense aux détails du texte et réessaie !"
+    "chosenWrongFeedback": "Tu viens de choisir {label}. Ce n'est pas tout à fait ça, repense aux détails du texte et réessaie !",
+    "skipToReport": "Passer et voir les résultats"
   },
   "automation": {
     "sectionTitle": "Automatique pendant la lecture",

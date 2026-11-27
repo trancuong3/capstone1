@@ -412,7 +412,7 @@
       "NO_TEXT_DETECTED": "圖片頁面 / 無文字",
       "SKIPPED": "跳過（圖片）",
       "FAILED": "錯誤",
-      "PENDING_POST_OCR": "等待上一步完成"
+      "PENDING_POST_OCR": "等待前一步完成"
     },
     "toolScopeBase": "基於書頁內容的兒童安全檢查",
     "toolScopeModality": "檢查書頁文字與圖片內容",
@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "已存佇列 — 等待系統就緒",
     "queuedWaitingWorkerShort": "已存佇列 — 就緒後自動辨識",
     "reasonQueuedOffline": "書頁已安全儲存至佇列，系統就緒後將自動辨識。",
-    "toolCheckFailedNotice": "自動檢查遇到技術問題。",
-    "toolCheckCheckingNotice": "正在檢查頁面內容。",
+    "toolCheckFailedNotice": "檢查過程遇到技術問題。",
+    "toolCheckCheckingNotice": "正在對此頁面執行自動檢查。",
     "toolCheckReadyNotice": "該頁面已準備好加入書籍。",
-    "toolCheckRejectedNotice": "此頁未通過審核。",
+    "toolCheckRejectedNotice": "此頁面版本未獲管理員核准。",
     "toolCheckRecheckNotice": "加入書籍前需要重新檢查此頁面。",
     "toolCheckAddedNotice": "頁面已加入您的書籍中。",
     "uploadOfflineQueueButton": "上傳頁面並加入 OCR 佇列",
     "uploadQueuedOfflineNotice": "已將 {total} 頁（{format}）儲存至 OCR 佇列。OCR 服務恢復後將自動執行文字辨識、校對與安全檢查。",
     "retriedQueuedOfflineNotice": "已將重試請求儲存至 OCR 佇列。OCR 服務恢復後將自動處理此頁面。",
     "replacedPageImageQueuedOfflineNotice": "已替換第 {page} 頁圖片並加入 OCR 佇列。OCR 服務恢復後將自動重新檢查。",
-    "replacedSubmissionImageQueuedOfflineNotice": "已替換新圖片並加入 OCR 佇列。OCR 服務恢復後將自動重新檢查。"
+    "replacedSubmissionImageQueuedOfflineNotice": "已替換新圖片並加入 OCR 佇列。OCR 服務恢復後將自動重新檢查。",
+    "toolCheckPassedNotice": "此頁面已通過安全檢查。"
   },
   "ocrContribution": {
     "cardAria": "為《{title}》貢獻樣本以提升文字辨識",

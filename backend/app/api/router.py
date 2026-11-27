@@ -5,6 +5,7 @@ from app.api.routes import (
     book,
     book_content_quality,
     comprehension,
+    parent_notifications,
     parent_private_book,
     profile,
     reading,
@@ -15,7 +16,9 @@ from app.api.routes import (
     voice,
 )
 from app.api.routes import (
+    adaptive_learning,
     child_progress,
+    memory_game,
     picture_description,
     sentence_shooter,
     tutor_question,
@@ -28,12 +31,17 @@ from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
 from app.api.routes import karaoke
+from app.api.routes import karaoke_practice
 from app.api.routes import karaoke_processing
+from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
 
 api_router = APIRouter()
+api_router.include_router(karaoke_simple_import.router, prefix="/karaoke", tags=["Karaoke Simple Import"])
+api_router.include_router(karaoke_practice.router, prefix="/karaoke", tags=["Karaoke Practice"])
 api_router.include_router(karaoke.router, prefix="/karaoke", tags=["Karaoke"])
 api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["Karaoke processing"])
+api_router.include_router(adaptive_learning.router, prefix="/learning", tags=["Adaptive Learning"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
 api_router.include_router(parent_private_book.router, prefix="/books", tags=["Parent Private Books"])
@@ -50,6 +58,11 @@ api_router.include_router(
     tags=["Reading Presence"],
 )
 api_router.include_router(
+    parent_notifications.router,
+    prefix="/parent-notifications",
+    tags=["Parent Notifications"],
+)
+api_router.include_router(
     sentence_shooter.router,
     prefix="/games/sentence-shooter",
     tags=["Sentence Shooter"],
@@ -58,6 +71,11 @@ api_router.include_router(
     picture_description.router,
     prefix="/games/picture-description",
     tags=["Picture Description"],
+)
+api_router.include_router(
+    memory_game.router,
+    prefix="/games/memory",
+    tags=["Memory Game"],
 )
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])
@@ -75,5 +93,6 @@ api_router.include_router(tutor_question.router, prefix="/tutor", tags=["AI Tuto
 api_router.include_router(voice_studio.router, prefix="/voice", tags=["Voice"])
 api_router.include_router(child_progress.router, prefix="/tutor", tags=["AI Tutor"])
 api_router.include_router(ocr_extraction.router, prefix="/studio/ocr", tags=["Smart Book Studio OCR"])
+api_router.include_router(ocr_extraction.studio_router, prefix="/studio", tags=["Smart Book Studio OCR"])
 api_router.include_router(book_assets.router, prefix="/studio", tags=["Smart Book Studio Assets"])
 api_router.include_router(global_tasks.router, prefix="/studio", tags=["Smart Book Studio Tasks"])

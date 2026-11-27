@@ -25,19 +25,24 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 import math
+import os
 import re
 import statistics
 import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any, Awaitable, Callable, Sequence
+from urllib.parse import urlparse
+from uuid import UUID, uuid4
 
 from app.schemas.ocr_extraction import (
     CANONICAL_BLOCK_TYPES,
     NEVER_AUTO_EXCLUDE_BLOCK_TYPES,
     PROTECTED_CONTENT_BLOCK_TYPES,
+    ApplyExtractionToDraftResponse,
     BlockAuditEvent,
     BlockDecision,
     CrossPageContextInput,
@@ -53,8 +58,11 @@ from app.schemas.ocr_extraction import (
     PageOcrExtractionResponse,
     PatchPageBlocksRequest,
 )
-from app.services.ocr_document_boundary import point_in_quad
+from app.services.ocr_document_boundary import detect_document_boundary, point_in_quad
+from app.services.ocr_text_utils import normalize_word as _canonical_normalize_word
 from app.services.smart_studio_flags import SmartStudioFlags
+
+logger = logging.getLogger(__name__)
 
 ALGORITHM_VERSION = "v2.0"
 TOTAL_LOSS_CIRCUIT_BREAKER_RATIO = 0.35
@@ -117,7 +125,8 @@ _WATERMARK_PHRASE_RE = re.compile(
 
 # Readable content classification patterns
 _CHAPTER_TITLE_RE = re.compile(
-    r"^\s*(?:Chương|Bài|Phần|Chủ\s+điểm|Tuần|Mục|Truyện\s+\d+)\s*(?:\d+|[IVXLCDM]+)?(?:\s*[:.\-–—].*)?$",
+    r"^\s*(?:Chương|Bài|Phần|Chủ\s+điểm|Tuần|Tiết|Mục|Truyện)\s+"
+    r"(?:\d+[A-Za-z]?|[IVXLCDM]+)(?:(?:\s*[:.\-–—]|\s+).*|$)",
     re.IGNORECASE,
 )
 _QUESTION_RE = re.compile(
@@ -131,7 +140,8 @@ _EXERCISE_RE = re.compile(
     re.IGNORECASE,
 )
 _MATH_EQUATION_RE = re.compile(
-    r"(?:\d+\s*[+×÷=<>]\s*\d+|\d+\s+-\s+\d+|\d+\s*[+\-×x÷]\s*\d+\s*=\s*\d+)"
+    r"(?:\d+\s*[+×÷=<>]\s*\d+|\d+\s+-\s+\d+|\d+\s+:\s+\d+|"
+    r"\d+\s*[+\-×x÷:]\s*\d+\s*=\s*\d+)"
 )
 _CAPTION_RE = re.compile(
     r"^\s*(?:Hình\s*\d+|Ảnh\s*\d+|Minh\s+họa\s*:|Tranh\s*:|Sơ\s+đồ\s*\d+)\b",
@@ -142,7 +152,9 @@ _EDU_LABEL_RE = re.compile(
     r"Giải\s+nghĩa|Mẹo\s+nhỏ|Lưu\s+ý|Kiến\s+thức\s+cần\s+nhớ)\b",
     re.IGNORECASE,
 )
-_DIALOGUE_START_RE = re.compile(r"^\s*(?:[—–]|-\s+[A-ZÀ-Ỹ]|[“\"«])")
+_DIALOGUE_START_RE = re.compile(
+    r"^\s*(?:[—–]|-\s+(?![IVXLCDM]+\s*[-–—]\s*$)[A-ZÀ-Ỹ]|[“\"«])"
+)
 _NUMBER_IN_SENTENCE_PROTECT_RE = re.compile(
     r"(?:\d+\s*(?:cm|mm|dm|km|kg|lít|ml|đồng|quả|cái|chiếc|con|bạn|em|ngày|tháng|năm|giờ|phút|tuổi|quyển|cuốn|trang\s+trại)|"
     r"(?:ngày|tháng|năm|lớp|chương|bài|câu|phần|số|lúc|có|được|mua|cho)\s+\d+)",
@@ -343,6 +355,11 @@ class _LineSegment:
     avg_h: float = 0.0
     avg_angle: float | None = None
     avg_contrast: float | None = None
+    order_x0: float = 0.0
+    order_y0: float = 0.0
+    order_x1: float = 0.0
+    order_y1: float = 0.0
+    order_yc: float = 0.0
 
     def __post_init__(self) -> None:
         self.words.sort(key=lambda w: (w.x0, w.source_word_index))
@@ -356,6 +373,11 @@ class _LineSegment:
         self.avg_angle = float(statistics.mean(angles)) if angles else None
         contrasts = [w.contrast_score for w in self.words if w.contrast_score is not None]
         self.avg_contrast = float(statistics.mean(contrasts)) if contrasts else None
+        self.order_x0 = self.x0
+        self.order_y0 = self.y0
+        self.order_x1 = self.x1
+        self.order_y1 = self.y1
+        self.order_yc = 0.5 * (self.y0 + self.y1)
 
     @property
     def w(self) -> float:
@@ -472,66 +494,363 @@ def compute_source_hash(words: Sequence[OcrWordInput]) -> str:
 # ---------------------------------------------------------------------------
 # Stage 1A — Line Segmentation, Recursive XY-Cut, Comic Z-Order & Poetry
 # ---------------------------------------------------------------------------
+# Deskewed normalized projection tuple per word_id: (dxc, dyc, dx0, dx1)
+_WordProjection = tuple[float, float, float, float]
+
+
+def _project_point_by_boundary_deskew(
+    x_norm: float,
+    y_norm: float,
+    *,
+    width: float,
+    height: float,
+    cos_a: float,
+    sin_a: float,
+) -> tuple[float, float]:
+    """Rotate normalized point (x_norm, y_norm) in pixel space matching OpenCV deskew."""
+    cx = 0.5 * width
+    cy = 0.5 * height
+    px = x_norm * width - cx
+    py = y_norm * height - cy
+    rx = cos_a * px + sin_a * py + cx
+    ry = -sin_a * px + cos_a * py + cy
+    return (rx / width, ry / height)
+
+
+def _build_boundary_deskew_projection(
+    words: list[_InternalWord],
+    *,
+    h_med: float,
+    boundary: DocumentBoundaryResult | None,
+) -> dict[str, _WordProjection] | None:
+    """Project word centers into pixel-aspect-aware deskewed coordinates when words match tilt.
+
+    Using the boundary's pixel dimensions ``(image_width, image_height)`` avoids angle
+    distortion on wide landscape strips (e.g. 681x301 rotated fixtures). A fast geometric
+    self-consistency check ensures already-horizontal word coordinates are never distorted.
+    """
+    if boundary is None or abs(float(boundary.deskew_angle_deg)) < 0.4:
+        return None
+    width = float(max(1, int(boundary.image_width)))
+    height = float(max(1, int(boundary.image_height)))
+    angle_rad = math.radians(float(boundary.deskew_angle_deg))
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+
+    proj: dict[str, _WordProjection] = {}
+    for w in words:
+        dxc, dyc = _project_point_by_boundary_deskew(
+            w.xc, w.yc, width=width, height=height, cos_a=cos_a, sin_a=sin_a
+        )
+        dx0, _ = _project_point_by_boundary_deskew(
+            w.x0, w.yc, width=width, height=height, cos_a=cos_a, sin_a=sin_a
+        )
+        dx1, _ = _project_point_by_boundary_deskew(
+            w.x1, w.yc, width=width, height=height, cos_a=cos_a, sin_a=sin_a
+        )
+        if dx0 > dx1:
+            dx0, dx1 = dx1, dx0
+        proj[w.word_id] = (dxc, dyc, dx0, dx1)
+
+    # Verify that the word cloud itself is actually tilted consistently with boundary.deskew_angle_deg
+    # (guards against synthetic callers passing already-horizontal words alongside a rotated boundary).
+    max_gap_x = max(0.14, 3.5 * h_med)
+    max_dy_band = max(1.45 * h_med, 0.055)
+    raw_diffs: list[float] = []
+    deskew_diffs: list[float] = []
+    for w in words:
+        w_dyc = proj[w.word_id][1]
+        best_pair: tuple[float, float, float] | None = None
+        for u in words:
+            if u.word_id == w.word_id:
+                continue
+            dx_center = u.xc - w.xc
+            if dx_center <= 1e-4 or dx_center > 0.45:
+                continue
+            h_gap = u.x0 - w.x1
+            if h_gap > max_gap_x or u.x0 < w.x0 - 0.01:
+                continue
+            dy_raw = abs(u.yc - w.yc)
+            dy_deskew = abs(proj[u.word_id][1] - w_dyc)
+            min_dy = min(dy_raw, dy_deskew)
+            if min_dy > max_dy_band:
+                continue
+            cost = min_dy + 0.15 * max(0.0, h_gap)
+            if best_pair is None or cost < best_pair[0]:
+                best_pair = (cost, dy_raw, dy_deskew)
+        if best_pair is not None:
+            raw_diffs.append(best_pair[1])
+            deskew_diffs.append(best_pair[2])
+
+    if not raw_diffs:
+        return None
+    med_raw = float(statistics.median(raw_diffs))
+    med_deskew = float(statistics.median(deskew_diffs))
+    if med_deskew < med_raw * 0.90:
+        return proj
+    return None
+
+
+def _validate_line_index_group(
+    group_words: list[_InternalWord],
+    *,
+    h_med: float,
+    proj_map: dict[str, _WordProjection] | None,
+) -> tuple[bool, float | None, float]:
+    """Validate that words sharing a `line_index_hint` form one monotonic, collinear baseline.
+
+    Returns ``(is_valid, fitted_raw_slope_or_none, raw_x_span)``.
+    """
+    if len(group_words) <= 1:
+        return True, None, 0.0
+
+    ordered = sorted(
+        group_words,
+        key=lambda w: (proj_map[w.word_id][2] if proj_map else w.x0, w.source_word_index),
+    )
+
+    # Guard 1: reject groups containing vertically stacked words that overlap horizontally
+    for i in range(len(ordered)):
+        a = ordered[i]
+        ay = proj_map[a.word_id][1] if proj_map else a.yc
+        ax0 = proj_map[a.word_id][2] if proj_map else a.x0
+        ax1 = proj_map[a.word_id][3] if proj_map else a.x1
+        for j in range(i + 1, len(ordered)):
+            b = ordered[j]
+            bx0 = proj_map[b.word_id][2] if proj_map else b.x0
+            if bx0 >= ax1:
+                break
+            bx1 = proj_map[b.word_id][3] if proj_map else b.x1
+            h_ov = min(ax1, bx1) - max(ax0, bx0)
+            min_w = max(1e-6, min(ax1 - ax0, bx1 - bx0))
+            by = proj_map[b.word_id][1] if proj_map else b.yc
+            if (h_ov / min_w) >= 0.45 and abs(by - ay) > max(0.60 * min(a.h, b.h), 0.48 * h_med):
+                return False, None, 0.0
+
+    # Guard 2: verify collinearity along a single bounded-tilt baseline
+    xs = [proj_map[w.word_id][0] if proj_map else w.xc for w in ordered]
+    ys = [proj_map[w.word_id][1] if proj_map else w.yc for w in ordered]
+    raw_xs = [w.xc for w in ordered]
+    raw_ys = [w.yc for w in ordered]
+    x_span = max(xs) - min(xs)
+    y_span = max(ys) - min(ys)
+    raw_x_span = max(raw_xs) - min(raw_xs)
+    avg_h = float(statistics.mean(w.h for w in ordered))
+
+    if x_span < 1e-4:
+        ok_tiny = y_span <= max(0.60 * h_med, 0.55 * avg_h)
+        return ok_tiny, None, raw_x_span
+
+    x_mean = float(statistics.mean(xs))
+    y_mean = float(statistics.mean(ys))
+    var_x = sum((x - x_mean) ** 2 for x in xs)
+    cov_xy = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+    slope = cov_xy / max(var_x, 1e-9)
+    intercept = y_mean - slope * x_mean
+
+    max_allowed_slope = 0.28 if proj_map is not None else 0.65
+    if abs(slope) > max_allowed_slope:
+        return False, None, raw_x_span
+    if y_span > max(0.95 * x_span, 1.5 * h_med):
+        return False, None, raw_x_span
+
+    resid_tol = max(0.75 * h_med, 0.65 * avg_h)
+    max_resid = max(abs(y - (slope * x + intercept)) for x, y in zip(xs, ys))
+    if max_resid > resid_tol:
+        return False, None, raw_x_span
+
+    # Extra guard for 2-word groups (where OLS residual is trivially 0)
+    if len(ordered) == 2 and abs(ys[1] - ys[0]) > max(1.20 * h_med, 0.35 * max(x_span, 0.05)):
+        return False, None, raw_x_span
+
+    # Fit raw normalized slope for optional page-level tilt inference when boundary is absent
+    raw_x_mean = float(statistics.mean(raw_xs))
+    raw_y_mean = float(statistics.mean(raw_ys))
+    raw_var_x = sum((x - raw_x_mean) ** 2 for x in raw_xs)
+    raw_slope = (
+        sum((x - raw_x_mean) * (y - raw_y_mean) for x, y in zip(raw_xs, raw_ys)) / raw_var_x
+        if raw_var_x > 1e-9
+        else 0.0
+    )
+    return True, float(raw_slope), raw_x_span
+
+
+def _make_line_segment(
+    words: list[_InternalWord],
+    *,
+    proj_map: dict[str, _WordProjection] | None,
+) -> _LineSegment:
+    seg = _LineSegment(words)
+    if proj_map is not None:
+        deskew_ordered = sorted(
+            seg.words, key=lambda w: (proj_map[w.word_id][2], w.source_word_index)
+        )
+        if [w.word_id for w in deskew_ordered] != [w.word_id for w in seg.words]:
+            seg.words = deskew_ordered
+            seg.text = " ".join(w.text for w in seg.words)
+        dycs = [proj_map[w.word_id][1] for w in seg.words]
+        dx0s = [proj_map[w.word_id][2] for w in seg.words]
+        dx1s = [proj_map[w.word_id][3] for w in seg.words]
+        seg.order_yc = float(statistics.mean(dycs))
+        seg.order_y0 = seg.order_yc - 0.5 * seg.avg_h
+        seg.order_y1 = seg.order_yc + 0.5 * seg.avg_h
+        seg.order_x0 = min(dx0s)
+        seg.order_x1 = max(dx1s)
+    return seg
+
+
+def _split_row_into_segments(
+    row: list[_InternalWord],
+    *,
+    h_med: float,
+    gutter_x: float | None,
+    proj_map: dict[str, _WordProjection] | None,
+) -> list[_LineSegment]:
+    """Split a horizontal/tilted row across wide column gaps, page gutter, or angle jumps."""
+    gap_threshold = max(0.065, 2.7 * h_med)
+    row_sorted = sorted(
+        row,
+        key=lambda w: (proj_map[w.word_id][2] if proj_map else w.x0, w.source_word_index),
+    )
+    segments: list[_LineSegment] = []
+    current: list[_InternalWord] = [row_sorted[0]]
+    for nxt in row_sorted[1:]:
+        prev = current[-1]
+        prev_x1 = proj_map[prev.word_id][3] if proj_map else prev.x1
+        nxt_x0 = proj_map[nxt.word_id][2] if proj_map else nxt.x0
+        h_gap = nxt_x0 - prev_x1
+        crosses_gutter = (
+            gutter_x is not None
+            and prev.x1 <= gutter_x + 0.01
+            and nxt.x0 >= gutter_x - 0.01
+            and h_gap > 0.012
+        )
+        angle_jump = (
+            prev.angle_deg is not None
+            and nxt.angle_deg is not None
+            and abs(prev.angle_deg - nxt.angle_deg) > 12.0
+        )
+        if h_gap > gap_threshold or crosses_gutter or angle_jump:
+            segments.append(_make_line_segment(current, proj_map=proj_map))
+            current = [nxt]
+        else:
+            current.append(nxt)
+    segments.append(_make_line_segment(current, proj_map=proj_map))
+    return segments
+
+
 def _cluster_words_into_lines(
     words: list[_InternalWord],
     *,
     h_med: float,
     gutter_x: float | None,
+    boundary: DocumentBoundaryResult | None = None,
 ) -> list[_LineSegment]:
     if not words:
         return []
-    ordered = sorted(words, key=lambda w: (w.yc, w.x0, w.source_word_index))
-    rows: list[list[_InternalWord]] = []
-    row_ycs: list[float] = []
-    row_hs: list[float] = []
 
-    for w in ordered:
-        best_row = -1
-        best_dy = float("inf")
-        for r_idx, (ryc, rh) in enumerate(zip(row_ycs, row_hs)):
-            tol = max(0.52 * min(w.h, rh), 0.35 * h_med)
-            dy = abs(w.yc - ryc)
-            if dy <= tol and dy < best_dy:
-                best_dy = dy
-                best_row = r_idx
-        if best_row >= 0:
-            rows[best_row].append(w)
-            n = len(rows[best_row])
-            row_ycs[best_row] = (row_ycs[best_row] * (n - 1) + w.yc) / n
-            row_hs[best_row] = (row_hs[best_row] * (n - 1) + w.h) / n
+    proj_map = _build_boundary_deskew_projection(words, h_med=h_med, boundary=boundary)
+
+    # Prefer validated OCR `line_index_hint` groups (e.g., PaddleOCR polygon lines) so tilted
+    # or gently curved baselines stay intact even when boundary deskew metadata is absent, while
+    # still splitting across wide column gaps / gutters to preserve multi-column XY-cut.
+    hint_buckets: dict[int, list[_InternalWord]] = {}
+    fallback_words: list[_InternalWord] = []
+    for w in words:
+        if w.line_index_hint is not None:
+            hint_buckets.setdefault(int(w.line_index_hint), []).append(w)
         else:
-            rows.append([w])
-            row_ycs.append(w.yc)
-            row_hs.append(w.h)
+            fallback_words.append(w)
 
-    # Split each horizontal row into distinct line segments across wide gaps or gutter
-    gap_threshold = max(0.065, 2.7 * h_med)
+    validated_rows: list[list[_InternalWord]] = []
+    inferred_slopes: list[float] = []
+    for hint_key in sorted(hint_buckets.keys()):
+        bucket = hint_buckets[hint_key]
+        is_valid, raw_slope, raw_x_span = _validate_line_index_group(
+            bucket, h_med=h_med, proj_map=proj_map
+        )
+        if is_valid:
+            validated_rows.append(bucket)
+            if raw_slope is not None and len(bucket) >= 3 and raw_x_span >= 0.15:
+                inferred_slopes.append(raw_slope)
+        else:
+            fallback_words.extend(bucket)
+
+    # If no boundary deskew projection was active but validated multi-word lines share a
+    # consistent non-trivial tilt slope, derive a slope-compensated projection around x=0.5
+    # so stacked tilted lines of varying lengths keep exact top-to-bottom order and gaps.
+    if proj_map is None and inferred_slopes:
+        med_slope = float(statistics.median(inferred_slopes))
+        consistent = (
+            abs(med_slope) >= 0.025
+            and (
+                len(inferred_slopes) >= 2
+                and all(
+                    abs(s - med_slope) <= max(0.08, 0.60 * abs(med_slope))
+                    for s in inferred_slopes
+                )
+            )
+        )
+        if consistent:
+            proj_map = {
+                w.word_id: (
+                    w.xc,
+                    w.yc - med_slope * (w.xc - 0.5),
+                    w.x0,
+                    w.x1,
+                )
+                for w in words
+            }
+
     segments: list[_LineSegment] = []
-    for row in rows:
-        row.sort(key=lambda w: (w.x0, w.source_word_index))
-        current: list[_InternalWord] = [row[0]]
-        for nxt in row[1:]:
-            prev = current[-1]
-            h_gap = nxt.x0 - prev.x1
-            crosses_gutter = (
-                gutter_x is not None
-                and prev.x1 <= gutter_x + 0.01
-                and nxt.x0 >= gutter_x - 0.01
-                and h_gap > 0.012
+    for row in validated_rows:
+        segments.extend(
+            _split_row_into_segments(
+                row, h_med=h_med, gutter_x=gutter_x, proj_map=proj_map
             )
-            angle_jump = (
-                prev.angle_deg is not None
-                and nxt.angle_deg is not None
-                and abs(prev.angle_deg - nxt.angle_deg) > 12.0
-            )
-            if h_gap > gap_threshold or crosses_gutter or angle_jump:
-                segments.append(_LineSegment(current))
-                current = [nxt]
-            else:
-                current.append(nxt)
-        segments.append(_LineSegment(current))
+        )
 
-    segments.sort(key=lambda s: (s.y0, s.x0))
+    if fallback_words:
+        ordered = sorted(
+            fallback_words,
+            key=lambda w: (
+                proj_map[w.word_id][1] if proj_map else w.yc,
+                proj_map[w.word_id][2] if proj_map else w.x0,
+                w.source_word_index,
+            ),
+        )
+        rows: list[list[_InternalWord]] = []
+        row_ycs: list[float] = []
+        row_hs: list[float] = []
+
+        for w in ordered:
+            wyc = proj_map[w.word_id][1] if proj_map else w.yc
+            best_row = -1
+            best_dy = float("inf")
+            for r_idx, (ryc, rh) in enumerate(zip(row_ycs, row_hs)):
+                tol = max(0.52 * min(w.h, rh), 0.35 * h_med)
+                dy = abs(wyc - ryc)
+                if dy <= tol and dy < best_dy:
+                    best_dy = dy
+                    best_row = r_idx
+            if best_row >= 0:
+                rows[best_row].append(w)
+                n = len(rows[best_row])
+                row_ycs[best_row] = (row_ycs[best_row] * (n - 1) + wyc) / n
+                row_hs[best_row] = (row_hs[best_row] * (n - 1) + w.h) / n
+            else:
+                rows.append([w])
+                row_ycs.append(wyc)
+                row_hs.append(w.h)
+
+        for row in rows:
+            segments.extend(
+                _split_row_into_segments(
+                    row, h_med=h_med, gutter_x=gutter_x, proj_map=proj_map
+                )
+            )
+
+    segments.sort(key=lambda s: (s.order_y0, s.order_x0))
     return segments
 
 
@@ -541,7 +860,13 @@ def _line_is_isolated_noise_candidate(
     boundary: DocumentBoundaryResult | None,
 ) -> bool:
     """Return True if a single line segment should NEVER merge with adjacent narrative lines."""
-    if boundary is not None and boundary.confidence >= 0.72 and boundary.area_ratio < 0.96:
+    if (
+        boundary is not None
+        and boundary.auto_crop
+        and not boundary.clips_margin_text
+        and boundary.confidence >= 0.72
+        and 0.45 <= boundary.area_ratio < 0.96
+    ):
         if not point_in_quad(seg.xc, seg.yc, boundary.boundary_quad_norm, margin=0.012):
             return True
     # Extreme side-bleed fragment
@@ -576,6 +901,7 @@ def _find_vertical_xy_cut(
     *,
     h_med: float,
     forced_gutter_x: float | None = None,
+    depth: int = 0,
 ) -> tuple[float | None, list[_LineSegment], list[_LineSegment], list[_LineSegment], list[_LineSegment]]:
     """Find a vertical column/spread split X coordinate.
 
@@ -583,6 +909,8 @@ def _find_vertical_xy_cut(
     """
     if len(segments) < 2:
         return None, [], [], [], []
+
+    min_cut_x, max_cut_x = (0.22, 0.78) if depth == 0 else (0.14, 0.86)
 
     # Candidate x-cut positions: forced gutter OR midpoints of empty horizontal intervals
     candidate_xs: list[tuple[float, float]] = []  # (cut_x, gap_width)
@@ -608,7 +936,7 @@ def _find_vertical_xy_cut(
             gap_w = gap_r - gap_l
             if gap_w >= min_gap:
                 cut_x = 0.5 * (gap_l + gap_r)
-                if 0.22 <= cut_x <= 0.78:
+                if min_cut_x <= cut_x <= max_cut_x:
                     candidate_xs.append((cut_x, gap_w))
 
     # Also probe gaps between vertically overlapping line pairs directly
@@ -617,13 +945,13 @@ def _find_vertical_xy_cut(
             sa = segments[i]
             for j in range(i + 1, len(segments)):
                 sb = segments[j]
-                if min(sa.y1, sb.y1) - max(sa.y0, sb.y0) <= 0.0:
+                if min(sa.order_y1, sb.order_y1) - max(sa.order_y0, sb.order_y0) <= 0.0:
                     continue
                 left_s, right_s = (sa, sb) if sa.x0 <= sb.x0 else (sb, sa)
                 gap_w = right_s.x0 - left_s.x1
                 if gap_w >= min_gap:
                     cut_x = 0.5 * (left_s.x1 + right_s.x0)
-                    if 0.22 <= cut_x <= 0.78:
+                    if min_cut_x <= cut_x <= max_cut_x:
                         candidate_xs.append((cut_x, gap_w))
 
     best_result: tuple[float, list[_LineSegment], list[_LineSegment], list[_LineSegment], list[_LineSegment]] | None = None
@@ -639,8 +967,8 @@ def _find_vertical_xy_cut(
             continue
 
         # Ensure left and right columns actually overlap vertically (true side-by-side columns!)
-        left_y0, left_y1 = min(s.y0 for s in left), max(s.y1 for s in left)
-        right_y0, right_y1 = min(s.y0 for s in right), max(s.y1 for s in right)
+        left_y0, left_y1 = min(s.order_y0 for s in left), max(s.order_y1 for s in left)
+        right_y0, right_y1 = min(s.order_y0 for s in right), max(s.order_y1 for s in right)
         v_overlap = min(left_y1, right_y1) - max(left_y0, right_y0)
         if v_overlap <= -0.02 and forced_gutter_x is None:
             continue
@@ -652,9 +980,9 @@ def _find_vertical_xy_cut(
         bot_span: list[_LineSegment] = []
         invalid_crossing = False
         for c_seg in crossing:
-            if c_seg.y1 <= col_top + 0.015:
+            if c_seg.order_y1 <= col_top + 0.015:
                 top_span.append(c_seg)
-            elif c_seg.y0 >= col_bot - 0.015:
+            elif c_seg.order_y0 >= col_bot - 0.015:
                 bot_span.append(c_seg)
             else:
                 invalid_crossing = True
@@ -786,7 +1114,7 @@ def _should_split_lines(
         return True
 
     # Vertical whitespace gap (Y-cut)
-    v_gap = curr.y0 - prev.y1
+    v_gap = curr.order_y0 - prev.order_y1
     gap_limit = max(1.38 * median_dy, 0.85 * h_med, 0.018)
     if v_gap > gap_limit:
         return True
@@ -800,7 +1128,11 @@ def _should_split_lines(
     if _is_all_caps_heading(prev.text) != _is_all_caps_heading(curr.text):
         return True
 
-    # Structural semantic boundary on curr line
+    # Structural semantic boundary on prev or curr line (chapter titles never merge into prose!)
+    if _CHAPTER_TITLE_RE.match(prev.text) and not _CHAPTER_TITLE_RE.match(curr.text):
+        return True
+    if bool(_MATH_EQUATION_RE.search(prev.text)) != bool(_MATH_EQUATION_RE.search(curr.text)):
+        return True
     if (
         _CHAPTER_TITLE_RE.match(curr.text)
         or _QUESTION_RE.match(curr.text)
@@ -832,11 +1164,11 @@ def _group_column_segments(
 ) -> list[_RawBlock]:
     if not segments:
         return []
-    ordered = sorted(segments, key=lambda s: (s.y0, s.x0))
+    ordered = sorted(segments, key=lambda s: (s.order_y0, s.order_x0))
     positive_gaps = [
-        ordered[i + 1].y0 - ordered[i].y1
+        ordered[i + 1].order_y0 - ordered[i].order_y1
         for i in range(len(ordered) - 1)
-        if (ordered[i + 1].y0 - ordered[i].y1) > 0.0
+        if (ordered[i + 1].order_y0 - ordered[i].order_y1) > 0.0
         and not _line_is_isolated_noise_candidate(ordered[i], boundary=boundary)
         and not _line_is_isolated_noise_candidate(ordered[i + 1], boundary=boundary)
     ]
@@ -880,6 +1212,7 @@ def _recursive_xy_cut(
             segments,
             h_med=h_med,
             forced_gutter_x=forced_gutter_x if depth == 0 else None,
+            depth=depth,
         )
         if cut_x is not None:
             result: list[_RawBlock] = []
@@ -889,27 +1222,25 @@ def _recursive_xy_cut(
                         top_span, column_index=0, h_med=h_med, boundary=boundary
                     )
                 )
-            left_col = col_counter[0]
-            col_counter[0] += 1
+            # Share mutable `col_counter` across recursive calls so 3+ column layouts
+            # receive strictly unique, monotonic column indices (0, 1, 2, ...).
             result.extend(
                 _recursive_xy_cut(
                     left,
                     h_med=h_med,
                     boundary=boundary,
                     forced_gutter_x=None,
-                    col_counter=[left_col],
+                    col_counter=col_counter,
                     depth=depth + 1,
                 )
             )
-            right_col = col_counter[0]
-            col_counter[0] += 1
             result.extend(
                 _recursive_xy_cut(
                     right,
                     h_med=h_med,
                     boundary=boundary,
                     forced_gutter_x=None,
-                    col_counter=[right_col],
+                    col_counter=col_counter,
                     depth=depth + 1,
                 )
             )
@@ -922,6 +1253,7 @@ def _recursive_xy_cut(
             return result
 
     col_idx = col_counter[0]
+    col_counter[0] += 1
     return _group_column_segments(
         segments, column_index=col_idx, h_med=h_med, boundary=boundary
     )
@@ -1002,11 +1334,14 @@ def _classify_single_block(
     reason_code = "STORY_CONTENT"
     confidence = 0.92
 
-    # 1. OUTSIDE_PAGE check (strictly outside high-confidence detected page boundary)
+    # 1. OUTSIDE_PAGE check (ONLY when boundary passed Conservative Crop Safety:
+    # auto_crop=True AND clips_margin_text=False AND verified area_ratio & confidence!)
     if (
         boundary is not None
+        and boundary.auto_crop
+        and not boundary.clips_margin_text
         and boundary.confidence >= 0.72
-        and boundary.area_ratio < 0.96
+        and 0.45 <= boundary.area_ratio < 0.96
     ):
         outside_count = sum(
             1
@@ -1131,7 +1466,24 @@ def _classify_single_block(
         parsed_num, num_kind = _parse_page_number_candidate(raw_text)
         if parsed_num is not None:
             block_type = "PAGE_NUMBER"
-            if num_kind in ("arabic", "explicit", "roman_wrapped", "roman_multi"):
+            # Guard oversized decorative story/counting/chapter numerals (e.g. giant "1", "3")
+            # and sole-block pages from silent auto-exclusion!
+            is_oversized_margin_digit = (
+                num_kind != "explicit"
+                and (
+                    raw_block.avg_line_h >= max(1.55 * page_median_h, 0.055)
+                    or raw_block.h >= 0.07
+                    or total_blocks_on_page <= 1
+                )
+            )
+            if is_oversized_margin_digit:
+                decision = "REVIEW"
+                reason_vi = (
+                    "Số cỡ lớn hoặc số đếm ở mép trang — giữ lại trong bài đọc và mời xác minh."
+                )
+                reason_code = "OVERSIZED_MARGIN_NUMBER_REVIEW"
+                confidence = 0.58
+            elif num_kind in ("arabic", "explicit", "roman_wrapped", "roman_multi"):
                 decision = "EXCLUDE"
                 reason_vi = "Số trang — không thuộc bài đọc."
                 reason_code = f"PAGE_NUMBER_{num_kind.upper()}"
@@ -1394,9 +1746,13 @@ def analyze_cross_page_patterns(
 
         band = "TOP" if yc < CROSS_PAGE_TOP_Y else "BOTTOM"
 
-        # 1. Monotonic Page Number sequence check
+        # 1. Monotonic Page Number sequence check (never override oversized story/counting digits!)
         cur_num, cur_kind = _parse_page_number_candidate(blk_copy.raw_text)
-        if cur_num is not None:
+        is_oversized_guard = (
+            blk_copy.reason_code == "OVERSIZED_MARGIN_NUMBER_REVIEW"
+            or (cur_kind != "explicit" and blk_copy.bbox[3] >= 0.07)
+        )
+        if cur_num is not None and not is_oversized_guard:
             same_band_nums = [
                 c
                 for c in all_candidates
@@ -1436,10 +1792,21 @@ def analyze_cross_page_patterns(
                 continue
 
         # 2. Running Header / Running Footer repetition check
-        # PROTECT poetry stanzas (multi-line), dialogue, questions, exercises, prose sentences > 12 words
+        # PROTECT chapter/lesson titles, poetry stanzas, dialogue, questions, exercises,
+        # math expressions, captions, educational labels, and prose sentences > 12 words
         word_count = len(blk_copy.raw_text.split())
         is_protected_refrain_or_dialogue = (
-            blk_copy.block_type in ("POEM_BODY", "DIALOGUE", "QUESTION", "EXERCISE")
+            blk_copy.block_type
+            in (
+                "CHAPTER_TITLE",
+                "POEM_BODY",
+                "DIALOGUE",
+                "QUESTION",
+                "EXERCISE",
+                "READING_CAPTION",
+                "EDUCATIONAL_LABEL",
+            )
+            or _is_hard_protected_text(blk_copy.raw_text)
             or "\n" in blk_copy.raw_text
             or _DIALOGUE_START_RE.match(blk_copy.raw_text) is not None
             or _SPOKEN_MARKER_RE.search(blk_copy.raw_text) is not None
@@ -1761,7 +2128,11 @@ def classify_page_kind(
 
     # Multi-column page
     distinct_cols = {b.column_index for b in readable}
-    if len(distinct_cols) >= 2 or (boundary is not None and boundary.gutter.is_double_page):
+    if len(distinct_cols) >= 2 or (
+        boundary is not None
+        and boundary.gutter.is_double_page
+        and boundary.gutter.split_recommended
+    ):
         return "MULTI_COLUMN"
 
     # Text-only vs Text-and-image based on vertical text coverage
@@ -1987,11 +2358,16 @@ def extract_ocr_content(
     h_med = float(statistics.median(w.h for w in internal_words))
     forced_gutter_x = (
         boundary.gutter.gutter_x_norm
-        if boundary is not None and boundary.gutter.is_double_page
+        if (
+            boundary is not None
+            and boundary.gutter.is_double_page
+            and boundary.gutter.split_recommended
+            and boundary.gutter.crossing_line_count == 0
+        )
         else None
     )
     line_segments = _cluster_words_into_lines(
-        internal_words, h_med=h_med, gutter_x=forced_gutter_x
+        internal_words, h_med=h_med, gutter_x=forced_gutter_x, boundary=boundary
     )
     raw_blocks = _recursive_xy_cut(
         line_segments,
@@ -2286,3 +2662,1073 @@ def apply_block_actions(
         }
     )
     return updated_response, stack
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 Live Router Integration (Zero Heavy ML Imports, Privacy-Safe)
+# ---------------------------------------------------------------------------
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _private_book_cloud_ai_allowed() -> bool:
+    return (os.getenv("PRIVATE_BOOK_ALLOW_CLOUD_AI") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _resolve_loopback_ollama_base_url() -> str:
+    raw = (os.getenv("LOCAL_OCR_BASE_URL") or "http://127.0.0.1:11434").strip()
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ValueError("INVALID_LOCAL_OLLAMA_URL")
+    allow_lan = (os.getenv("LOCAL_OCR_ALLOW_LAN") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if parsed.hostname not in _LOOPBACK_HOSTS and not allow_lan:
+        raise ValueError("LOCAL_OLLAMA_URL_NON_LOOPBACK")
+    return raw.rstrip("/")
+
+
+def is_stage3_semantic_provider_configured(
+    *,
+    allow_cloud: bool,
+    is_private_book: bool = False,
+) -> bool:
+    """Return True only when an eligible Stage 3 AI backend is explicitly configured."""
+    effective_cloud = bool(allow_cloud)
+    if is_private_book:
+        effective_cloud = effective_cloud and _private_book_cloud_ai_allowed()
+
+    if effective_cloud:
+        cloud_enabled = (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if cloud_enabled and (
+            (os.getenv("GEMINI_API_KEY") or "").strip()
+            or (os.getenv("GROQ_API_KEY") or "").strip()
+        ):
+            return True
+
+    local_explicit = (os.getenv("LOCAL_OCR_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    local_url_explicit = bool((os.getenv("LOCAL_OCR_BASE_URL") or "").strip())
+    return local_explicit or local_url_explicit
+
+
+async def _default_semantic_layout_provider_call(
+    provider: Any,
+    prompt: str,
+    timeout_seconds: float,
+) -> str:
+    """Invoke a routed text/JSON provider for Stage 3 layout classification (zero heavy ML)."""
+    import httpx
+
+    from app.services.ai_capability_router import (
+        AiErrorKind,
+        AiProviderCallError,
+        classify_http_error,
+    )
+
+    family = str(getattr(provider, "family", "") or "").lower()
+    model_id = str(getattr(provider, "model_id", "") or "")
+    provider_id = str(getattr(provider, "provider_id", family or "unknown"))
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(max(0.5, float(timeout_seconds))),
+        trust_env=False,
+        follow_redirects=False,
+    ) as client:
+        if family == "google":
+            api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+            if not api_key:
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.AUTH_FAILURE,
+                    code="GEMINI_API_KEY_MISSING",
+                )
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model_id}:generateContent"
+            )
+            response = await client.post(
+                url,
+                headers={"x-goog-api-key": api_key},
+                json={
+                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0,
+                        "responseMimeType": "application/json",
+                    },
+                },
+            )
+            if response.status_code != 200:
+                raise classify_http_error(
+                    provider_id=provider_id,
+                    status_code=response.status_code,
+                    body_text=response.text[:1024],
+                    retry_after_header=response.headers.get("retry-after"),
+                )
+            data = response.json()
+            candidates = data.get("candidates") if isinstance(data, dict) else None
+            parts = candidates[0]["content"]["parts"] if candidates else []
+            text_out = parts[0].get("text") if parts and isinstance(parts[0], dict) else None
+            if not isinstance(text_out, str) or not text_out.strip():
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.INVALID_OUTPUT,
+                    code="EMPTY_GEMINI_LAYOUT_RESPONSE",
+                )
+            return text_out
+
+        if family == "groq":
+            api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+            if not api_key:
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.AUTH_FAILURE,
+                    code="GROQ_API_KEY_MISSING",
+                )
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model_id,
+                    "temperature": 0,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                },
+            )
+            if response.status_code != 200:
+                raise classify_http_error(
+                    provider_id=provider_id,
+                    status_code=response.status_code,
+                    body_text=response.text[:1024],
+                    retry_after_header=response.headers.get("retry-after"),
+                )
+            data = response.json()
+            choices = data.get("choices") if isinstance(data, dict) else None
+            msg = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
+            text_out = msg.get("content") if isinstance(msg, dict) else None
+            if not isinstance(text_out, str) or not text_out.strip():
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.INVALID_OUTPUT,
+                    code="EMPTY_GROQ_LAYOUT_RESPONSE",
+                )
+            return text_out
+
+        if family == "ollama":
+            try:
+                base_url = _resolve_loopback_ollama_base_url()
+            except ValueError as exc:
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.PERMISSION_FAILURE,
+                    code=str(exc),
+                ) from None
+            response = await client.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model_id,
+                    "stream": False,
+                    "think": False,
+                    "format": "json",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "options": {"temperature": 0},
+                },
+            )
+            if response.status_code != 200:
+                raise classify_http_error(
+                    provider_id=provider_id,
+                    status_code=response.status_code,
+                    body_text=response.text[:1024],
+                    retry_after_header=response.headers.get("retry-after"),
+                )
+            data = response.json()
+            msg = data.get("message") if isinstance(data, dict) else None
+            text_out = msg.get("content") if isinstance(msg, dict) else None
+            if not isinstance(text_out, str) or not text_out.strip():
+                raise AiProviderCallError(
+                    provider_id=provider_id,
+                    kind=AiErrorKind.INVALID_OUTPUT,
+                    code="EMPTY_OLLAMA_LAYOUT_RESPONSE",
+                )
+            return text_out
+
+        raise AiProviderCallError(
+            provider_id=provider_id,
+            kind=AiErrorKind.UNSUPPORTED_CAPABILITY,
+            code="UNSUPPORTED_LAYOUT_PROVIDER_FAMILY",
+        )
+
+
+async def run_stage3_semantic_filter_if_needed(
+    extraction: PageOcrExtractionResponse,
+    *,
+    source_words: Sequence[OcrWordInput] | None = None,
+    allow_cloud: bool = False,
+    is_private_book: bool = False,
+    tenant_scope: str | None = None,
+    flags: SmartStudioFlags | None = None,
+    router: Any | None = None,
+    provider_handler: Callable[[Any, str, float], Awaitable[str | dict[str, Any]]] | None = None,
+    total_budget_seconds: float = 12.0,
+) -> PageOcrExtractionResponse:
+    """Optionally run Stage 3 Semantic AI via AiCapabilityRouter ONLY when REVIEW blocks exist.
+
+    Hard invariants:
+    - Triggers ONLY when `SMART_SEMANTIC_LAYOUT_ENABLED=true`, `filter_mode != "off"`,
+      and at least one block has `decision == "REVIEW"`.
+    - For Parent Private Books (`is_private_book=True`), forces `allow_cloud=False`
+      unless `PRIVATE_BOOK_ALLOW_CLOUD_AI=true` is explicitly set.
+    - Strictly fail-closed via `validate_semantic_ai_decisions()` + 35% Total-Loss Circuit Breaker.
+    - Pure CPU / HTTP only (zero heavy ML imports; Render 512 MiB safe).
+    """
+    active_flags = flags or SmartStudioFlags.from_environment()
+    if not active_flags.semantic_layout_enabled:
+        return extraction
+    if extraction.filter_mode == "off" or not extraction.blocks:
+        return extraction
+    if not any(b.decision == "REVIEW" for b in extraction.blocks):
+        return extraction
+
+    from app.services.ai_capability_router import (
+        AiCapability,
+        AiRoutingError,
+        build_tenant_cache_key,
+        get_default_ai_router,
+    )
+
+    effective_allow_cloud = bool(allow_cloud)
+    if is_private_book:
+        effective_allow_cloud = effective_allow_cloud and _private_book_cloud_ai_allowed()
+
+    resolved_scope = (
+        tenant_scope.strip()
+        if isinstance(tenant_scope, str) and tenant_scope.strip()
+        else (
+            f"private:{extraction.book_id or 'unknown'}"
+            if is_private_book
+            else "admin:catalog"
+        )
+    )
+    prompt = build_semantic_ai_prompt(extraction.blocks, page_kind=extraction.page_kind)
+    cache_key = build_tenant_cache_key(
+        source_hash=extraction.source_hash,
+        revision=str(extraction.page_revision_id or "draft"),
+        model_version="layout-auto",
+        prompt_version="semantic-filter-v1",
+        algorithm_version=extraction.algorithm_version,
+        policy_version="private-local" if not effective_allow_cloud else "cloud-allowed",
+        tenant_scope=resolved_scope,
+        capability=AiCapability.LAYOUT_CLASSIFICATION,
+    )
+
+    ai_router = router or get_default_ai_router()
+    started = time.perf_counter()
+
+    async def _dispatch(provider: Any, timeout_s: float) -> str | dict[str, Any]:
+        if provider_handler is not None:
+            return await provider_handler(provider, prompt, timeout_s)
+        return await _default_semantic_layout_provider_call(provider, prompt, timeout_s)
+
+    try:
+        routed = await ai_router.route_and_execute(
+            AiCapability.LAYOUT_CLASSIFICATION,
+            _dispatch,
+            total_budget_seconds=total_budget_seconds,
+            allow_cloud=effective_allow_cloud,
+            cache_key=cache_key,
+            tenant_scope=resolved_scope,
+        )
+        raw_ai_payload = routed.value
+    except AiRoutingError as exc:
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        fallback_stats = extraction.stats.model_copy(
+            update={
+                "semantic_ai_invoked": True,
+                "semantic_ai_fallback_used": True,
+                "semantic_ai_error_code": str(exc.code)[:64],
+                "semantic_ai_ms": round(elapsed_ms, 3),
+                "total_ms": round(extraction.stats.total_ms + elapsed_ms, 3),
+            }
+        )
+        return extraction.model_copy(update={"stats": fallback_stats})
+    except Exception as exc:
+        logger.warning("Stage 3 semantic layout router failed closed: %s", type(exc).__name__)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        fallback_stats = extraction.stats.model_copy(
+            update={
+                "semantic_ai_invoked": True,
+                "semantic_ai_fallback_used": True,
+                "semantic_ai_error_code": "SEMANTIC_AI_ROUTER_ERROR",
+                "semantic_ai_ms": round(elapsed_ms, 3),
+                "total_ms": round(extraction.stats.total_ms + elapsed_ms, 3),
+            }
+        )
+        return extraction.model_copy(update={"stats": fallback_stats})
+
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    ok, validated_blocks, err_code = validate_semantic_ai_decisions(
+        extraction.blocks, raw_ai_payload
+    )
+    if not ok:
+        fallback_stats = extraction.stats.model_copy(
+            update={
+                "semantic_ai_invoked": True,
+                "semantic_ai_fallback_used": True,
+                "semantic_ai_error_code": err_code or "SEMANTIC_AI_VALIDATION_FAILED",
+                "semantic_ai_ms": round(elapsed_ms, 3),
+                "total_ms": round(extraction.stats.total_ms + elapsed_ms, 3),
+            }
+        )
+        return extraction.model_copy(update={"stats": fallback_stats})
+
+    protected_blocks, cb_triggered = _apply_total_loss_circuit_breaker(validated_blocks)
+
+    word_lookup: dict[str, _InternalWord] = {}
+    if source_words is not None:
+        for iw in _prepare_internal_words(source_words):
+            word_lookup[iw.word_id] = iw
+    else:
+        for cw in extraction.canonical_words:
+            word_lookup[cw.word_id] = _InternalWord(
+                word_id=cw.word_id,
+                source_word_index=cw.source_word_index,
+                line_index_hint=cw.line_index,
+                text=cw.text,
+                bbox=list(cw.bbox),
+                confidence=cw.confidence,
+                angle_deg=None,
+                contrast_score=None,
+            )
+
+    final_blocks, canonical_text, canonical_words = _build_canonical_output(
+        protected_blocks,
+        word_lookup,
+        filter_mode=extraction.filter_mode,
+    )
+    updated_stats = _compute_stats(
+        final_blocks,
+        circuit_breaker_triggered=cb_triggered or extraction.stats.circuit_breaker_triggered,
+        fast_path_ms=extraction.stats.fast_path_ms,
+        cross_page_ms=extraction.stats.cross_page_ms,
+        semantic_ai_ms=elapsed_ms,
+        total_ms=extraction.stats.total_ms + elapsed_ms,
+        semantic_ai_invoked=True,
+        semantic_ai_fallback_used=False,
+        semantic_ai_error_code=None,
+    )
+    requires_review = bool(
+        cb_triggered
+        or any(b.decision == "REVIEW" for b in final_blocks)
+        or (
+            extraction.geometry_transform is not None
+            and extraction.geometry_transform.requires_crop_review
+        )
+    )
+    return extraction.model_copy(
+        update={
+            "blocks": final_blocks,
+            "canonical_text": canonical_text,
+            "canonical_words": canonical_words,
+            "stats": updated_stats,
+            "requires_review": requires_review,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Lightweight Zero-ML Pipeline Integration Helpers (Admin, Parent, Remote Jobs)
+# ---------------------------------------------------------------------------
+def safe_detect_document_boundary(
+    image_bytes: bytes | None,
+    word_bboxes_norm: Sequence[Sequence[float]] | None = None,
+) -> DocumentBoundaryResult | None:
+    """Run OpenCV boundary detection non-fatally; returns None on synthetic/invalid inputs."""
+    if not image_bytes:
+        return None
+    try:
+        return detect_document_boundary(image_bytes, word_bboxes_norm=word_bboxes_norm)
+    except Exception:
+        return None
+
+
+def _coerce_box_from_dict(item: dict[str, Any]) -> list[float] | None:
+    for key in ("bbox", "bounding_box", "BoundingBox"):
+        raw = item.get(key)
+        if isinstance(raw, (list, tuple)) and len(raw) == 4:
+            try:
+                vals = [float(v) for v in raw]
+                if vals[2] > 0.0 and vals[3] > 0.0:
+                    return vals
+            except (TypeError, ValueError):
+                continue
+        if isinstance(raw, dict):
+            try:
+                x = float(raw.get("x", raw.get("left", 0.0)))
+                y = float(raw.get("y", raw.get("top", 0.0)))
+                w = float(raw.get("w", raw.get("width", 0.0)))
+                h = float(raw.get("h", raw.get("height", 0.0)))
+                if w > 0.0 and h > 0.0:
+                    return [x, y, w, h]
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def ocr_words_from_dicts(raw_words: Sequence[dict[str, Any]]) -> list[OcrWordInput]:
+    """Convert raw OCR word dicts (Admin or Parent shape) to validated OcrWordInput list."""
+    inputs: list[OcrWordInput] = []
+    for idx, item in enumerate(raw_words or []):
+        if not isinstance(item, dict):
+            continue
+        text_val = normalize_nfc(str(item.get("text") or item.get("Text") or "")).strip()
+        box = _coerce_box_from_dict(item)
+        if not text_val or box is None:
+            continue
+        raw_idx = item.get("word_index", item.get("WordIndex", idx))
+        try:
+            src_idx = max(0, int(raw_idx))
+        except (TypeError, ValueError):
+            src_idx = idx
+        try:
+            line_idx = max(0, int(item.get("line_index", item.get("LineIndex", 0)) or 0))
+        except (TypeError, ValueError):
+            line_idx = 0
+        raw_conf = item.get(
+            "ocr_confidence", item.get("OCRConfidence", item.get("confidence"))
+        )
+        conf_val: float | None = None
+        if isinstance(raw_conf, (int, float)) and not isinstance(raw_conf, bool):
+            f_conf = float(raw_conf)
+            if math.isfinite(f_conf) and 0.0 <= f_conf <= 1.0:
+                conf_val = f_conf
+        wid_raw = item.get("word_id") or item.get("Id")
+        wid = str(wid_raw) if wid_raw else f"w-{idx}"
+        try:
+            inputs.append(
+                OcrWordInput(
+                    word_id=wid,
+                    source_word_index=src_idx,
+                    line_index=line_idx,
+                    text=text_val,
+                    bbox=box,
+                    confidence=conf_val,
+                )
+            )
+        except ValueError:
+            continue
+    return inputs
+
+
+def filter_word_dicts_by_extraction(
+    raw_words: Sequence[dict[str, Any]],
+    extraction: PageOcrExtractionResponse,
+) -> list[dict[str, Any]]:
+    """Filter raw word dicts to canonical kept words while preserving exact source bboxes & metadata.
+
+    Never reassigns an excluded word's bounding box to a kept word.
+    """
+    if not raw_words or not extraction.canonical_words:
+        return []
+    by_src_idx: dict[int, dict[str, Any]] = {}
+    for pos, item in enumerate(raw_words):
+        if not isinstance(item, dict):
+            continue
+        raw_idx = item.get("word_index", item.get("WordIndex", pos))
+        try:
+            src_idx = int(raw_idx)
+        except (TypeError, ValueError):
+            src_idx = pos
+        by_src_idx.setdefault(src_idx, item)
+        by_src_idx.setdefault(pos, item)
+
+    kept: list[dict[str, Any]] = []
+    seen_sources: set[int] = set()
+    for cw in extraction.canonical_words:
+        orig = by_src_idx.get(cw.source_word_index)
+        if orig is None or cw.source_word_index in seen_sources:
+            continue
+        seen_sources.add(cw.source_word_index)
+        text_nfc = normalize_nfc(str(orig.get("text") or cw.text)).strip()
+        norm = _canonical_normalize_word(text_nfc)
+        if not norm:
+            continue
+        cloned = copy.deepcopy(orig)
+        cloned["word_index"] = len(kept)
+        cloned["line_index"] = max(0, int(cw.line_index))
+        cloned["text"] = text_nfc
+        cloned["normalized_text"] = norm
+        # Keep exact original box geometry!
+        orig_box = _coerce_box_from_dict(orig) or list(cw.bbox)
+        if "bbox" in cloned:
+            cloned["bbox"] = list(orig_box)
+        if "bounding_box" in cloned:
+            cloned["bounding_box"] = list(orig_box)
+        if "bbox" not in cloned and "bounding_box" not in cloned:
+            cloned["bbox"] = list(orig_box)
+        kept.append(cloned)
+    return kept
+
+
+def build_extraction_provenance_meta(
+    extraction: PageOcrExtractionResponse,
+    source_words: Sequence[OcrWordInput],
+    *,
+    allow_cloud_ai: bool = False,
+) -> dict[str, Any]:
+    """Build compact JSON-serializable extraction provenance for OcrMetaJson / ProcessingMeta."""
+    return {
+        "source_hash": extraction.source_hash,
+        "algorithm_version": extraction.algorithm_version,
+        "filter_mode": extraction.filter_mode,
+        "page_kind": extraction.page_kind,
+        "requires_review": bool(extraction.requires_review),
+        "allow_cloud_ai": bool(allow_cloud_ai),
+        "local_ai_enforced": not bool(allow_cloud_ai),
+        "stats": extraction.stats.model_dump(mode="json"),
+        "blocks": [b.model_dump(mode="json") for b in extraction.blocks],
+        "canonical_text": extraction.canonical_text,
+        "canonical_words": [w.model_dump(mode="json") for w in extraction.canonical_words],
+        "source_words": [w.model_dump(mode="json") for w in source_words],
+        "geometry_transform": (
+            extraction.geometry_transform.model_dump(mode="json")
+            if extraction.geometry_transform is not None
+            else None
+        ),
+    }
+
+
+def hydrate_extraction_from_provenance(
+    provenance: dict[str, Any],
+    *,
+    book_id: UUID | None = None,
+    book_page_id: UUID | None = None,
+    page_revision_id: UUID | None = None,
+) -> tuple[PageOcrExtractionResponse, list[OcrWordInput]] | None:
+    """Reconstruct PageOcrExtractionResponse and source_words from stored OcrMetaJson provenance."""
+    if not isinstance(provenance, dict) or not provenance.get("source_hash"):
+        return None
+    try:
+        geometry = (
+            DocumentBoundaryResult.model_validate(provenance["geometry_transform"])
+            if isinstance(provenance.get("geometry_transform"), dict)
+            and provenance["geometry_transform"]
+            else None
+        )
+        blocks = [
+            ExtractedBlock.model_validate(item)
+            for item in (provenance.get("blocks") or [])
+            if isinstance(item, dict)
+        ]
+        canonical_words = [
+            ExtractedWord.model_validate(item)
+            for item in (provenance.get("canonical_words") or [])
+            if isinstance(item, dict)
+        ]
+        source_words = [
+            OcrWordInput.model_validate(item)
+            for item in (provenance.get("source_words") or [])
+            if isinstance(item, dict)
+        ]
+        stats = ExtractionStats.model_validate(provenance.get("stats") or {})
+        raw_mode = provenance.get("filter_mode", "active")
+        mode: FilterMode = (
+            raw_mode if raw_mode in ("off", "shadow", "active") else "active"  # type: ignore[assignment]
+        )
+        response = PageOcrExtractionResponse(
+            book_id=book_id,
+            book_page_id=book_page_id,
+            page_revision_id=page_revision_id,
+            source_hash=str(provenance["source_hash"]),
+            algorithm_version=str(provenance.get("algorithm_version") or ALGORITHM_VERSION),
+            filter_mode=mode,
+            page_kind=str(provenance.get("page_kind") or "TEXT_AND_IMAGE"),  # type: ignore[arg-type]
+            geometry_transform=geometry,
+            blocks=blocks,
+            canonical_text=str(provenance.get("canonical_text") or ""),
+            canonical_words=canonical_words,
+            stats=stats,
+            requires_review=bool(provenance.get("requires_review", False)),
+        )
+        return response, source_words
+    except Exception:
+        return None
+
+
+async def load_sibling_cross_pages_safe(
+    db: Any,
+    *,
+    book_id: UUID,
+    exclude_page_id: UUID,
+    limit: int = 30,
+) -> list[CrossPageContextInput]:
+    """Load sibling page word contexts non-fatally for cross-page repetition detection."""
+    if db is None or not hasattr(db, "scalars") or not hasattr(db, "begin_nested"):
+        return []
+    try:
+        from app.repositories.ocr_extraction_repository import OcrExtractionRepository
+
+        repo = OcrExtractionRepository(db)
+        async with db.begin_nested():
+            return await repo.load_sibling_cross_pages(
+                book_id, exclude_page_id, limit=limit
+            )
+    except Exception:
+        return []
+
+
+async def persist_extraction_savepoint_safe(
+    db: Any,
+    *,
+    book_id: UUID,
+    page_id: UUID,
+    page_revision_id: UUID | None,
+    owner_id: UUID | None,
+    extraction: PageOcrExtractionResponse,
+    source_words: list[OcrWordInput],
+) -> tuple[Any | None, bool]:
+    """Persist PageOcrExtraction inside a nested savepoint; degrades cleanly on unmigrated/mock DBs."""
+    if db is None or not hasattr(db, "begin_nested") or not hasattr(db, "add"):
+        return None, True
+    try:
+        from app.repositories.ocr_extraction_repository import OcrExtractionRepository
+
+        repo = OcrExtractionRepository(db)
+        existing_row, load_degraded = await repo.get_latest_extraction(page_id)
+        if load_degraded:
+            return None, True
+        return await repo.save_extraction(
+            book_id=book_id,
+            page_id=page_id,
+            page_revision_id=page_revision_id,
+            owner_id=owner_id,
+            extraction=extraction,
+            source_words=source_words,
+            undo_stack=[],
+            existing_row=existing_row,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Skipping PageOcrExtraction savepoint write cleanly: %s", type(exc).__name__
+        )
+        return None, True
+
+
+async def apply_page_extraction_to_revision_draft(
+    db: Any,
+    *,
+    page: Any,
+    book: Any,
+    extraction: PageOcrExtractionResponse,
+    actor_id: UUID,
+    requested_revision_id: UUID | None = None,
+) -> ApplyExtractionToDraftResponse:
+    """Apply Layer 2 canonical_text & canonical_words onto an editable PageRevision draft.
+
+    Guarantees:
+    - NEVER mutates a `VERIFIED` revision (returns HTTP 409 `REVISION_ALREADY_VERIFIED`).
+    - NEVER mutates Layer 1 `OriginalOcrText` or `VerifiedText`.
+    - Preserves exact source `BoundingBox` geometry for every kept word (never reassigning
+      excluded word bounding boxes).
+    """
+    from fastapi import HTTPException, status
+    from sqlalchemy import delete, select
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from app.models.book import PageRevision, PageRevisionWord
+    from app.repositories.ocr_extraction_repository import OcrExtractionRepository
+
+    if str(getattr(page, "LifecycleStatus", "ACTIVE") or "ACTIVE").upper() == "RETIRED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="PAGE_RETIRED",
+        )
+
+    repo = OcrExtractionRepository(db)
+    revision: PageRevision | None = None
+    if requested_revision_id is not None:
+        revision = await repo.resolve_revision_for_page(page, requested_revision_id)
+        if revision is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Page revision not found",
+            )
+    else:
+        revisions_list: list[Any] = []
+        if hasattr(db, "scalars"):
+            try:
+                revisions_list = list(
+                    (
+                        await db.scalars(
+                            select(PageRevision)
+                            .where(PageRevision.PageId == page.Id)
+                            .order_by(PageRevision.CreatedAt.desc(), PageRevision.Id.desc())
+                        )
+                    ).all()
+                )
+            except Exception:
+                revisions_list = []
+
+        if revisions_list:
+            verified_id = getattr(page, "CurrentVerifiedRevisionId", None)
+            by_rev_id = {rev.Id: rev for rev in revisions_list}
+            if (
+                extraction.page_revision_id is not None
+                and extraction.page_revision_id in by_rev_id
+            ):
+                candidate = by_rev_id[extraction.page_revision_id]
+                if (
+                    str(getattr(candidate, "VerificationStatus", "") or "").upper() != "VERIFIED"
+                    and candidate.Id != verified_id
+                ):
+                    revision = candidate
+            if revision is None:
+                latest = revisions_list[0]
+                if (
+                    str(getattr(latest, "VerificationStatus", "") or "").upper() != "VERIFIED"
+                    and latest.Id != verified_id
+                ):
+                    revision = latest
+                else:
+                    # Prefer explicit extraction revision (or latest) so 409 is raised honestly
+                    revision = (
+                        by_rev_id.get(extraction.page_revision_id)
+                        if extraction.page_revision_id is not None
+                        else None
+                    ) or latest
+        else:
+            revision = await repo.resolve_revision_for_page(
+                page, extraction.page_revision_id
+            )
+            if revision is None:
+                revision = await repo.resolve_revision_for_page(page, None)
+
+    if revision is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Page revision not found",
+        )
+
+    is_verified = (
+        str(getattr(revision, "VerificationStatus", "") or "").upper() == "VERIFIED"
+        or (
+            getattr(page, "CurrentVerifiedRevisionId", None) is not None
+            and page.CurrentVerifiedRevisionId == revision.Id
+        )
+    )
+    if is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="REVISION_ALREADY_VERIFIED",
+        )
+
+    canonical_text = normalize_nfc(extraction.canonical_text or "").strip()
+    if not canonical_text or not extraction.canonical_words:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="CANONICAL_EXTRACTION_EMPTY",
+        )
+
+    # Load existing revision word rows to preserve exact source geometry & trusted provenance
+    existing_rows: list[Any] = []
+    if hasattr(db, "scalars"):
+        try:
+            existing_rows = list(
+                (
+                    await db.scalars(
+                        select(PageRevisionWord)
+                        .where(PageRevisionWord.PageRevisionId == revision.Id)
+                        .order_by(PageRevisionWord.WordIndex.asc())
+                    )
+                ).all()
+            )
+        except Exception:
+            existing_rows = []
+
+    existing_by_id = {str(getattr(row, "Id", "")): row for row in existing_rows if getattr(row, "Id", None) is not None}
+    existing_by_src_idx = {
+        int(row.WordIndex): row
+        for row in existing_rows
+        if getattr(row, "WordIndex", None) is not None
+    }
+
+    applied_words: list[dict[str, Any]] = []
+    matched_source_indices: list[int | None] = []
+    for cw in extraction.canonical_words:
+        tok_text = normalize_nfc(cw.text).strip()
+        norm_tok = _canonical_normalize_word(tok_text)
+        if not norm_tok:
+            continue
+        source_row = existing_by_id.get(cw.word_id) or existing_by_src_idx.get(
+            int(cw.source_word_index)
+        )
+        # Preserve exact Layer 1 source bbox (never reassign from an excluded word)
+        preserved_bbox = list(cw.bbox)
+        if source_row is not None and isinstance(getattr(source_row, "BoundingBox", None), (list, tuple)) and len(source_row.BoundingBox) == 4:
+            if normalize_nfc(str(getattr(source_row, "Text", ""))).strip() == tok_text:
+                preserved_bbox = [float(v) for v in source_row.BoundingBox]
+        preserved_conf = (
+            getattr(source_row, "OCRConfidence", cw.confidence)
+            if source_row is not None
+            and normalize_nfc(str(getattr(source_row, "Text", ""))).strip() == tok_text
+            else cw.confidence
+        )
+        applied_words.append(
+            {
+                "word_index": len(applied_words),
+                "line_index": max(0, int(cw.line_index)),
+                "text": tok_text,
+                "normalized_text": norm_tok,
+                "bbox": preserved_bbox,
+                "ocr_confidence": preserved_conf,
+            }
+        )
+        matched_source_indices.append(
+            int(source_row.WordIndex)
+            if source_row is not None
+            and getattr(source_row, "WordIndex", None) is not None
+            and normalize_nfc(str(getattr(source_row, "Text", ""))).strip() == tok_text
+            else None
+        )
+
+    if not applied_words:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="CANONICAL_EXTRACTION_EMPTY",
+        )
+
+    # Sync PageRevisionWord rows cleanly without mutating OriginalOcrText or VerifiedText
+    row_payloads = [
+        {
+            "Id": uuid4(),
+            "PageRevisionId": revision.Id,
+            "WordIndex": int(w["word_index"]),
+            "LineIndex": int(w["line_index"]),
+            "Text": str(w["text"]),
+            "NormalizedText": str(w["normalized_text"]),
+            "BoundingBox": list(w["bbox"]),
+            "OCRConfidence": w["ocr_confidence"],
+        }
+        for w in applied_words
+    ]
+    if isinstance(db, AsyncSession):
+        await db.execute(
+            delete(PageRevisionWord).where(PageRevisionWord.PageRevisionId == revision.Id)
+        )
+        for start in range(0, len(row_payloads), 500):
+            await db.execute(
+                pg_insert(PageRevisionWord).values(row_payloads[start : start + 500])
+            )
+    else:
+        for old_row in existing_rows:
+            if hasattr(db, "delete"):
+                maybe_coro = db.delete(old_row)
+                if hasattr(maybe_coro, "__await__"):
+                    await maybe_coro
+        for payload_row in row_payloads:
+            if hasattr(db, "add"):
+                db.add(PageRevisionWord(**payload_row))
+
+    # Preserve aligned per-word review provenance where tokens match unchanged source rows
+    metadata = dict(getattr(revision, "ProcessingMeta", None) or {})
+    old_statuses = metadata.get("word_review_statuses") if isinstance(metadata.get("word_review_statuses"), list) else []
+    old_sources = metadata.get("word_score_sources") if isinstance(metadata.get("word_score_sources"), list) else []
+    old_evidence = metadata.get("word_evidence_v2") if isinstance(metadata.get("word_evidence_v2"), list) else []
+
+    if old_statuses or old_sources or old_evidence:
+        new_statuses: list[str] = []
+        new_sources: list[str | None] = []
+        new_evidence: list[Any] = []
+        for src_idx in matched_source_indices:
+            new_statuses.append(
+                old_statuses[src_idx]
+                if src_idx is not None and 0 <= src_idx < len(old_statuses)
+                else "needs_review"
+            )
+            new_sources.append(
+                old_sources[src_idx]
+                if src_idx is not None and 0 <= src_idx < len(old_sources)
+                else None
+            )
+            new_evidence.append(
+                old_evidence[src_idx]
+                if src_idx is not None and 0 <= src_idx < len(old_evidence)
+                else None
+            )
+        metadata["word_review_statuses"] = new_statuses
+        metadata["word_score_sources"] = new_sources
+        metadata["word_evidence_v2"] = new_evidence
+
+    metadata["smart_ocr_applied"] = {
+        "extraction_id": str(extraction.extraction_id) if extraction.extraction_id else None,
+        "source_hash": extraction.source_hash,
+        "filter_mode": extraction.filter_mode,
+        "page_kind": extraction.page_kind,
+        "applied_word_count": len(applied_words),
+        "applied_by": str(actor_id),
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    content_hash = hashlib.sha256(
+        json.dumps(
+            {"text": canonical_text, "words": applied_words},
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+    revision.DraftText = canonical_text
+    revision.ContentHash = content_hash
+    revision.ProcessingMeta = metadata
+    if hasattr(db, "flush"):
+        await db.flush()
+
+    return ApplyExtractionToDraftResponse(
+        page_id=page.Id,
+        revision_id=revision.Id,
+        applied_word_count=len(applied_words),
+        canonical_text=canonical_text,
+        status="APPLIED",
+    )
+
+
+async def persist_committed_parent_page_v2(
+    db: Any,
+    *,
+    actor_id: UUID,
+    book_id: UUID,
+    page_id: UUID,
+    revision_id: UUID,
+    submission: Any,
+    image_bytes: bytes | None = None,
+    trigger_illustration_extract: bool = True,
+) -> dict[str, Any]:
+    """Savepoint-guarded post-commit hook for Parent Private Books (zero heavy ML imports).
+
+    1. Persists `PageOcrExtraction` from `submission.OcrMetaJson['smart_ocr_extraction']`
+       (or computes fresh CPU-only extraction if not yet present).
+    2. Safely extracts clean artwork via `BookIllustrationService.extract_page_illustration`
+       on image-only or illustration-bearing pages without polluting child reading words or
+       failing the committed page.
+    """
+    outcome: dict[str, Any] = {
+        "extraction_persisted": False,
+        "illustration_status": "SKIPPED",
+    }
+    meta = dict(getattr(submission, "OcrMetaJson", None) or {})
+    provenance = meta.get("smart_ocr_extraction")
+    hydrated = (
+        hydrate_extraction_from_provenance(
+            provenance,
+            book_id=book_id,
+            book_page_id=page_id,
+            page_revision_id=revision_id,
+        )
+        if isinstance(provenance, dict)
+        else None
+    )
+    if hydrated is not None:
+        extraction, source_words = hydrated
+    else:
+        raw_words = list(getattr(submission, "OcrWordsJson", None) or [])
+        source_words = ocr_words_from_dicts(raw_words)
+        word_boxes = [w.bbox for w in source_words] if source_words else None
+        boundary = safe_detect_document_boundary(image_bytes, word_boxes)
+        page_num = int(
+            getattr(submission, "TargetPageNumber", None)
+            or getattr(submission, "SourcePageNumber", None)
+            or 1
+        )
+        extraction = extract_ocr_content(
+            source_words,
+            page_number=max(1, page_num),
+            boundary=boundary,
+            flags=SmartStudioFlags.from_environment(),
+            book_id=book_id,
+            book_page_id=page_id,
+            page_revision_id=revision_id,
+        )
+
+    saved_row, degraded = await persist_extraction_savepoint_safe(
+        db,
+        book_id=book_id,
+        page_id=page_id,
+        page_revision_id=revision_id,
+        owner_id=actor_id,
+        extraction=extraction,
+        source_words=source_words,
+    )
+    if not degraded and saved_row is not None:
+        outcome["extraction_persisted"] = True
+        try:
+            await db.commit()
+        except Exception:
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            outcome["extraction_persisted"] = False
+
+    flags = SmartStudioFlags.from_environment()
+    is_image_only = bool(getattr(submission, "IsImageOnly", False))
+    should_extract_art = (
+        trigger_illustration_extract
+        and flags.illustration_extract_enabled
+        and image_bytes is not None
+        and (
+            is_image_only
+            or extraction.page_kind in ("IMAGE_PRIMARY", "TEXT_AND_IMAGE", "COMIC")
+        )
+    )
+    if should_extract_art:
+        try:
+            from app.schemas.book_assets import PageIllustrationExtractRequest
+            from app.services.book_illustration_service import BookIllustrationService
+
+            if is_image_only:
+                # Never pollute artwork text-free check with synthetic placeholder tokens!
+                ill_word_bboxes: list[list[float]] = []
+                ill_canonical_text = ""
+            else:
+                ill_word_bboxes = [list(w.bbox) for w in extraction.canonical_words]
+                ill_canonical_text = extraction.canonical_text
+
+            res = await BookIllustrationService(db).extract_page_illustration(
+                actor_id,
+                book_id,
+                page_id,
+                PageIllustrationExtractRequest(
+                    word_bboxes=ill_word_bboxes,
+                    canonical_text=ill_canonical_text,
+                ),
+                page_image_bytes_override=image_bytes,
+            )
+            outcome["illustration_status"] = str(res.status)
+        except Exception as exc:
+            logger.warning(
+                "Non-fatal parent private book illustration extraction skipped: %s",
+                type(exc).__name__,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            outcome["illustration_status"] = "SKIPPED_ERROR"
+
+    return outcome

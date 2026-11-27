@@ -31,6 +31,7 @@ from app.services.worker_telemetry import (
 
 logger = logging.getLogger(__name__)
 READING_PRESENCE_ADVISORY_LOCK_KEY = 4201002
+DEFAULT_PRESENCE_CLAIM_LIMIT = 5
 _WORKER_KEY = "reading_presence"
 
 
@@ -55,24 +56,22 @@ async def process_due_alerts_once(
     now: datetime | None = None,
     *,
     locale: str = DEFAULT_LOCALE,
+    limit: int = DEFAULT_PRESENCE_CLAIM_LIMIT,
 ) -> int:
     now = now or datetime.now(timezone.utc)
     try:
-        async with _advisory_lock_guard(READING_PRESENCE_ADVISORY_LOCK_KEY) as acquired:
-            if not acquired:
-                logger.info("reading_presence_skipped_lock_held")
-                return 0
-            async with AsyncSessionLocal() as session:
-                service = ReadingPresenceService(ReadingPresenceRepository(session))
-                delivered = await service.deliver_due(
-                    now,
-                    recipient_resolver=get_verified_parent_email,
-                    email_sender=_sender_for_locale(locale),
-                    parent_email_unavailable=ParentEmailUnavailable,
-                    parent_lookup_failed=ParentEmailLookupFailed,
-                )
-            record_worker_success(_WORKER_KEY)
-            return delivered
+        async with AsyncSessionLocal() as session:
+            service = ReadingPresenceService(ReadingPresenceRepository(session))
+            delivered = await service.deliver_due(
+                now,
+                recipient_resolver=get_verified_parent_email,
+                email_sender=_sender_for_locale(locale),
+                parent_email_unavailable=ParentEmailUnavailable,
+                parent_lookup_failed=ParentEmailLookupFailed,
+                batch=max(1, int(limit)),
+            )
+        record_worker_success(_WORKER_KEY)
+        return delivered
     except asyncio.CancelledError:
         raise
     except Exception as error:
@@ -106,6 +105,7 @@ async def _run_scheduled_presence_delivery(*, now: datetime | None = None) -> in
                 ok=True,
                 items_processed=delivered,
                 source="presence_confirm",
+                timeout_seconds=5.0,
             )
             return delivered
         except asyncio.CancelledError:
@@ -120,6 +120,7 @@ async def _run_scheduled_presence_delivery(*, now: datetime | None = None) -> in
                 items_processed=0,
                 source="presence_confirm",
                 error_code=type(exc).__name__,
+                timeout_seconds=5.0,
             )
             log_diagnostic(
                 logger,

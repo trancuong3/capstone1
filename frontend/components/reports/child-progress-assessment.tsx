@@ -20,6 +20,7 @@ import {
 
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
@@ -422,6 +423,8 @@ export function ChildProgressAssessmentCard({
   );
 }
 
+const PRACTICE_WORDS_PAGE_SIZE = 12;
+
 function AssessmentBody({
   view,
   onRefresh,
@@ -433,8 +436,21 @@ function AssessmentBody({
 }) {
   const t = useTranslations("reports");
   const shortDate = useShortDate();
+  const [practiceWordsPage, setPracticeWordsPage] = useState(1);
   const { data } = view;
   const { score, metrics, assessment } = data;
+  const totalPracticeWordPages = Math.max(
+    1,
+    Math.ceil(assessment.practice_words.length / PRACTICE_WORDS_PAGE_SIZE),
+  );
+  const safePracticeWordsPage = Math.min(
+    Math.max(1, practiceWordsPage),
+    totalPracticeWordPages,
+  );
+  const visiblePracticeWords = assessment.practice_words.slice(
+    (safePracticeWordsPage - 1) * PRACTICE_WORDS_PAGE_SIZE,
+    safePracticeWordsPage * PRACTICE_WORDS_PAGE_SIZE,
+  );
   const actionsFor = (audience: "PARENT" | "CHILD") =>
     assessment.actions.filter((action) => action.audience === audience);
 
@@ -707,7 +723,7 @@ function AssessmentBody({
                     })}
                   </h3>
                   <ul className="flex flex-wrap gap-1.5">
-                    {assessment.practice_words.map((word) => {
+                    {visiblePracticeWords.map((word) => {
                       const detail = data.difficult_words.find(
                         (item) => item.word === word,
                       );
@@ -746,6 +762,17 @@ function AssessmentBody({
                       );
                     })}
                   </ul>
+                  <PaginationBar
+                    ariaLabel={t("overview.assessmentCard.recommendedWordsTitle", {
+                      days: data.days,
+                    })}
+                    className="mt-2"
+                    compact
+                    onPageChange={setPracticeWordsPage}
+                    page={safePracticeWordsPage}
+                    pageSize={PRACTICE_WORDS_PAGE_SIZE}
+                    total={assessment.practice_words.length}
+                  />
                 </section>
               ) : null}
             </div>

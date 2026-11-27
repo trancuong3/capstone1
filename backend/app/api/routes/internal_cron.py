@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from app.jobs import parent_book_submission_worker
+from app.jobs.parent_email_dispatcher_worker import process_engagement_emails_once
 from app.jobs.reading_presence_alert_worker import process_due_alerts_once
 from app.jobs.reading_reminder_worker import process_due_reminders_once
 from app.services.cron_dispatch_service import run_scheduled_cron_dispatch
@@ -35,7 +36,9 @@ def require_cron_dispatch_token(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Cron dispatch token is not configured on backend.",
         )
-    provided = (x_viread_cron_token or "").strip()
+    provided = (
+        x_viread_cron_token if isinstance(x_viread_cron_token, str) else ""
+    ).strip()
     if not provided:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -62,6 +65,7 @@ async def dispatch_scheduled_cron(
         run_remote_sweeps=bool(is_remote_ocr_mode() or is_heavy_workers_disabled()),
         reminders_runner=process_due_reminders_once,
         alerts_runner=process_due_alerts_once,
+        engagement_runner=process_engagement_emails_once,
         temp_cleanup_runner=parent_book_submission_worker.cleanup_expired_temp_submissions,
         parent_post_ocr_runner=parent_book_submission_worker.run_once,
     )

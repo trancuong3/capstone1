@@ -79,7 +79,14 @@
       "american": "Amerikanischer Akzent",
       "british": "Britischer Akzent"
     },
-    "googleProviderLabel": "Online"
+    "googleProviderLabel": "Online",
+    "wifiReadyBadge": "Offline bereit",
+    "offlineCacheMultiple": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus sind vorab erzeugte Stimmen bereit für: {voices}; weitere Stimmen erfordern den lokalen Worker oder den Fallback unten.",
+    "offlineCacheSingle": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus ist vorab erzeugtes Audio für {voice} verfügbar; für weitere Stimmen starten Sie bitte den lokalen Worker oder aktivieren Sie den Fallback unten.",
+    "offlineCacheEmpty": "Der lokale Sprach-Worker ist offline und es ist kein vorab erzeugtes Audio lokal gespeichert. Starten Sie den lokalen Worker oder aktivieren Sie unten den Fallback.",
+    "localWorkerLabel": "Lokaler Worker:",
+    "sessionLockedBadge": "Für diese Lesesitzung gesperrt",
+    "offlineBrowserBadge": "Browser ist offline"
   },
   "engineBadge": {
     "ariaLabel": "Sprachstatus: Hören {stt}, Sprechen {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "Vorbereitet",
       "android_native": "Gerät",
       "google_cloud": "Online",
-      "browser_default": "Browser"
+      "browser_default": "Browser",
+      "idle": "Wird geprüft…"
     },
     "listenPrefix": "Hören",
-    "speakPrefix": "Sprechen"
+    "speakPrefix": "Sprechen",
+    "idleDetail": "{base} (Status der Sprach-Engine wird geprüft)"
   },
   "playback": {
     "unavailable": "Die Gerätestimme ist noch nicht bereit. Eltern und Kind können dem Text auf dem Bildschirm folgen und auf Wiederholen tippen.",

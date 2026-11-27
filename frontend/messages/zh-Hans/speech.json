@@ -79,7 +79,14 @@
       "american": "美式口音",
       "british": "英式口音"
     },
-    "googleProviderLabel": "在线"
+    "googleProviderLabel": "在线",
+    "wifiReadyBadge": "离线可用",
+    "offlineCacheMultiple": "本地语音服务当前离线。独立 Wi-Fi 模式已为以下语音准备好预生成音频：{voices}；使用其他语音请启动本地语音服务或开启下方备用模式。",
+    "offlineCacheSingle": "本地语音服务当前离线。独立 Wi-Fi 模式已为 {voice} 准备好预生成音频；如需实时试听其他地区语音，请启动本地语音服务或开启下方备用模式。",
+    "offlineCacheEmpty": "本地语音服务当前离线，且设备上尚无预生成音频。请启动本地语音服务或开启下方备用模式以播放示例朗读。",
+    "localWorkerLabel": "本地服务:",
+    "sessionLockedBadge": "已锁定用于本次阅读",
+    "offlineBrowserBadge": "浏览器当前离线"
   },
   "engineBadge": {
     "ariaLabel": "语音状态：听读 {stt}，朗读 {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "标准",
       "android_native": "设备",
       "google_cloud": "在线",
-      "browser_default": "浏览器"
+      "browser_default": "浏览器",
+      "idle": "检测中…"
     },
     "listenPrefix": "听读",
-    "speakPrefix": "朗读"
+    "speakPrefix": "朗读",
+    "idleDetail": "{base} (正在检测语音引擎状态)"
   },
   "playback": {
     "unavailable": "设备语音尚未就绪。请家长和孩子查看屏幕文字并点击重试。",

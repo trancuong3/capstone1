@@ -2,9 +2,10 @@
 
 import { ArrowLeft, CircleHelp, Volume2 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ChildProfileDTO } from "@/types/child";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
@@ -95,6 +96,8 @@ interface ReadingLayoutProps {
   assistedWordIds?: ReadonlySet<string>;
   companionBubble?: CompanionBubbleState | null;
   isCompanionSpeaking?: boolean;
+  readingMode?: ReadingDisplayMode | null;
+  onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
   topBar?: ReactNode;
 }
@@ -104,6 +107,7 @@ export function ReadingLayout({
   unresolvedWordIds,
   uncertainWordIds,
   progressLabel,
+  audioLevel,
   bookTitle,
   book,
   child,
@@ -158,12 +162,24 @@ export function ReadingLayout({
   assistedWordIds,
   companionBubble = null,
   isCompanionSpeaking = false,
+  readingMode,
+  onReadingModeChange,
   previewSnapshot,
   topBar,
 }: ReadingLayoutProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tc = useTranslations("child");
+  const [internalReadingMode, setInternalReadingMode] =
+    useState<ReadingDisplayMode | null>(null);
+  const activeReadingMode =
+    readingMode !== undefined ? readingMode : internalReadingMode;
+  const handleReadingModeChange = onReadingModeChange ?? setInternalReadingMode;
+  const pageHasVerifiedIllustration =
+    Boolean(page.illustration_url) && page.illustration_text_free === true;
+  const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
+    activeReadingMode ??
+    (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
@@ -259,12 +275,11 @@ export function ReadingLayout({
       >
         <BookPageViewer
           title={bookTitle}
-          illustrationUrl={page.illustration_url || undefined}
-          illustrationTextFree={
-            page.illustration_url
-              ? Boolean(page.illustration_text_free)
-              : undefined
-          }
+          illustrationUrl={page.illustration_url ?? null}
+          illustrationTextFree={pageHasVerifiedIllustration}
+          initialReadingMode={resolvedInitialReadingMode}
+          readingMode={activeReadingMode}
+          onReadingModeChange={handleReadingModeChange}
           illustration={
             book && (
               <BookCover
@@ -301,12 +316,12 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
+        className="reading-dock relative -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
+            className="mx-auto mb-1 max-h-[15dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
@@ -445,27 +460,27 @@ export function ReadingLayout({
                 </span>
               </div>
             ) : isPlayingSample ? (
-              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-3 py-2 sm:px-4 sm:py-2.5">
-                <div className="flex min-w-0 basis-full items-center gap-2 min-[520px]:basis-auto min-[520px]:flex-1">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-2 rounded-card border border-border bg-white px-2.5 py-1 sm:flex-wrap sm:gap-2.5 sm:px-4 sm:py-2.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
                   <Volume2
                     aria-hidden="true"
                     className="size-4 shrink-0 text-primary"
                   />
-                  <span className="shrink-0 text-sm font-semibold text-ink">
+                  <span className="shrink-0 text-xs font-semibold text-ink sm:text-sm">
                     {t("layout.sampleBannerTitle")}
                   </span>
-                  <span className="min-w-0 truncate text-sm text-muted">
+                  <span className="hidden min-w-0 truncate text-sm text-muted sm:inline">
                     {isSamplePaused
                       ? t("layout.samplePaused")
                       : t("layout.samplePlayingPage")}
                   </span>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                   {onToggleSamplePause ? (
                     <button
                       type="button"
                       onClick={onToggleSamplePause}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {isSamplePaused
                         ? t("layout.resumeSample")
@@ -476,7 +491,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadSample}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {t("layout.stopSample")}
                     </button>
@@ -531,7 +546,7 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-2 w-full max-w-[1008px] px-1 text-sm text-muted sm:text-body">
+                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-3 py-1 text-xs text-muted sm:text-sm">
                   {t("layout.childJustReadPrefix")}{" "}
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     “{latestTranscript}”
@@ -539,7 +554,7 @@ export function ReadingLayout({
                 </p>
               ) : null
             ) : latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-2">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
                 <span className="shrink-0 text-sm font-semibold text-purple-ink">
                   {t("layout.latestRecording")}
                 </span>
@@ -575,7 +590,8 @@ export function ReadingLayout({
         ) : null}
 
         <ReadingControls
-          pauseDisabled={false}
+          audioLevel={audioLevel}
+          pauseDisabled={controlsDisabled}
           disabled={controlsDisabled}
           isListening={isMicRecording}
           isPlayingSample={isPlayingSample}

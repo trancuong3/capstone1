@@ -1,9 +1,10 @@
 """Bounded service layer for internal scheduled cron sweeps.
 
 Keeps `POST /internal/cron/dispatch` strictly within Render/Cloudflare HTTP
-budgets (<25s total) while isolating failures per subsystem, persisting durable
-DB heartbeats for every worker (even when 0 items are processed), and avoiding
-5-second cancellation loops on multi-page LLM workflows/scans.
+budgets (<45s total) while running fast DB maintenance sweeps before outbound
+HTTP/email delivery, isolating failures per subsystem, persisting durable DB
+heartbeats in 1 batch SQL UPSERT, and avoiding 5-second cancellation loops on
+multi-page LLM workflows/scans.
 """
 from __future__ import annotations
 
@@ -42,15 +43,18 @@ from app.services.remote_ocr_wakeup import (
 )
 from app.services.worker_telemetry import (
     persist_worker_heartbeat_with_factory,
+    persist_worker_heartbeats_batch_with_factory,
     record_worker_error,
     record_worker_success,
 )
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_CRON_TOTAL_BUDGET_SECONDS = 24.0
-DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS = 5.0
-REMINDERS_ALERTS_TIMEOUT_SECONDS = 6.0
+DEFAULT_CRON_TOTAL_BUDGET_SECONDS = 50.0
+DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS = 6.0
+REMINDERS_ALERTS_TIMEOUT_SECONDS = 20.0
+ENGAGEMENT_TIMEOUT_SECONDS = 12.0
+HEARTBEAT_PERSIST_TIMEOUT_SECONDS = 5.0
 DEFAULT_SWEEP_MAX_ITEMS = 5
 DEFAULT_ORPHAN_RECONCILE_LIMIT = 20
 DEFAULT_STALE_HEARTBEAT_MAX_AGE_HOURS = 24
@@ -75,6 +79,15 @@ def _accepts_kwarg(fn: Any, name: str) -> bool:
         param.kind == inspect.Parameter.VAR_KEYWORD
         for param in sig.parameters.values()
     )
+
+
+def _declares_kwarg(fn: Any, name: str) -> bool:
+    """Return True only when `name` is explicitly declared in `fn`'s signature (not **kwargs)."""
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return False
+    return name in sig.parameters
 
 
 def _should_kick_background_drain() -> bool:
@@ -104,7 +117,17 @@ async def _persist_cron_heartbeat(
         items_processed=items_processed,
         source=source,
         error_code=error_code,
-        timeout_seconds=1.5,
+        timeout_seconds=HEARTBEAT_PERSIST_TIMEOUT_SECONDS,
+    )
+
+
+async def _persist_cron_heartbeats_batch(entries: list[dict[str, Any]]) -> None:
+    if not entries:
+        return
+    await persist_worker_heartbeats_batch_with_factory(
+        AsyncSessionLocal,
+        entries,
+        timeout_seconds=HEARTBEAT_PERSIST_TIMEOUT_SECONDS,
     )
 
 
@@ -387,13 +410,19 @@ async def _sweep_viread_ocr_outbox(
     deadline: float,
 ) -> int:
     """Process up to `max_items` Flow 2 verified outbox events within remaining budget."""
+    run_once_fn = viread_ocr_outbox_worker.run_once
+    call_kwargs: dict[str, Any] = (
+        {"persist_heartbeat": False}
+        if _declares_kwarg(run_once_fn, "persist_heartbeat")
+        else {}
+    )
     swept = 0
     for _ in range(max_items):
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget <= 0.25:
             break
         did_work = await asyncio.wait_for(
-            viread_ocr_outbox_worker.run_once(),
+            run_once_fn(**call_kwargs),
             timeout=budget,
         )
         if not did_work:
@@ -422,7 +451,12 @@ async def _sweep_viread_ocr_training_maintenance() -> tuple[bool, int]:
             if not inspect.iscoroutinefunction(exec_attr):
                 return False, 0
 
-    result = await maintenance_fn()
+    call_kwargs: dict[str, Any] = (
+        {"persist_heartbeat": False}
+        if _declares_kwarg(maintenance_fn, "persist_heartbeat")
+        else {}
+    )
+    result = await maintenance_fn(**call_kwargs)
     if isinstance(result, dict):
         items = 1 if result.get("colab_activity") else 0
         return bool(result.get("ok", True)), items
@@ -460,6 +494,7 @@ async def run_scheduled_cron_dispatch(
     run_remote_sweeps: bool = False,
     reminders_runner: Callable[..., Awaitable[int]],
     alerts_runner: Callable[..., Awaitable[int]],
+    engagement_runner: Callable[..., Awaitable[int]] | None = None,
     temp_cleanup_runner: Callable[..., Awaitable[int]] | None = None,
     parent_post_ocr_runner: Callable[..., Awaitable[bool]] | None = None,
     total_budget_seconds: float = DEFAULT_CRON_TOTAL_BUDGET_SECONDS,
@@ -472,6 +507,7 @@ async def run_scheduled_cron_dispatch(
 
     reminders_delivered = 0
     presence_alerts_delivered = 0
+    engagement_emails_delivered = 0
     temp_submissions_cleaned = 0
     post_ocr_swept = 0
     ocr_leases_requeued = 0
@@ -486,65 +522,28 @@ async def run_scheduled_cron_dispatch(
     hf_space_keepwarm_pinged = False
     ocr_training_maintenance_ran = False
     sweep_errors: list[str] = []
+    pending_heartbeats: dict[str, dict[str, Any]] = {}
 
-    # Isolated reading reminders runner (6.0s cap; errors never abort presence or sweeps 1-10)
-    rem_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
-    if rem_budget > 0.25:
-        try:
-            reminders_delivered = int(
-                await asyncio.wait_for(
-                    reminders_runner(now=current),
-                    timeout=rem_budget,
-                )
-            )
-            record_worker_success("reading_reminder")
-            await _persist_cron_heartbeat(
-                "reading_reminder",
-                ok=True,
-                items_processed=reminders_delivered,
-            )
-        except Exception as exc:
-            record_worker_error("reading_reminder", exc)
-            sweep_errors.append("reading_reminder")
-            await _persist_cron_heartbeat(
-                "reading_reminder",
-                ok=False,
-                items_processed=0,
-                error_code=type(exc).__name__,
-            )
-            logger.warning(
-                "cron_reading_reminder_skipped error=%s", type(exc).__name__
-            )
+    def _queue_heartbeat(
+        worker_id: str,
+        *,
+        ok: bool,
+        items_processed: int = 0,
+        error_code: str | None = None,
+    ) -> None:
+        pending_heartbeats[worker_id] = {
+            "worker_id": worker_id,
+            "execution_mode": "cron_scheduled",
+            "ok": ok,
+            "items_processed": items_processed,
+            "source": "cron",
+            "error_code": error_code,
+        }
 
-    # Isolated reading presence alerts runner (6.0s cap)
-    alert_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
-    if alert_budget > 0.25:
-        try:
-            presence_alerts_delivered = int(
-                await asyncio.wait_for(
-                    alerts_runner(now=current),
-                    timeout=alert_budget,
-                )
-            )
-            record_worker_success("reading_presence")
-            await _persist_cron_heartbeat(
-                "reading_presence",
-                ok=True,
-                items_processed=presence_alerts_delivered,
-            )
-        except Exception as exc:
-            record_worker_error("reading_presence", exc)
-            sweep_errors.append("reading_presence")
-            await _persist_cron_heartbeat(
-                "reading_presence",
-                ok=False,
-                items_processed=0,
-                error_code=type(exc).__name__,
-            )
-            logger.warning(
-                "cron_reading_presence_skipped error=%s", type(exc).__name__
-            )
-
+    # ── Phase 1: Fast DB maintenance sweeps FIRST (idle total ~1–2s) ──────────
+    # Running lightweight DB sweeps before outbound HTTP/email steps guarantees
+    # all 5 background DB workers always record fresh heartbeats even if an
+    # external SMTP/Auth/HTTP provider is slow or temporarily failing.
     if run_remote_sweeps:
         effective_temp_cleanup = (
             temp_cleanup_runner
@@ -573,10 +572,12 @@ async def run_scheduled_cron_dispatch(
                 logger.warning("cron_ocr_lease_reap_skipped error=%s", type(exc).__name__)
 
         parent_sweep_error: str | None = None
+        parent_sweep_executed = False
 
         # 2. Reconcile orphaned parent private book submissions (cap 20)
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget > 0.25:
+            parent_sweep_executed = True
             try:
                 reconcile_res = await asyncio.wait_for(
                     reconcile_orphaned_parent_submissions(
@@ -603,6 +604,7 @@ async def run_scheduled_cron_dispatch(
         # 3. Clean expired temp parent submissions
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget > 0.25:
+            parent_sweep_executed = True
             try:
                 temp_submissions_cleaned = int(
                     await asyncio.wait_for(
@@ -621,6 +623,7 @@ async def run_scheduled_cron_dispatch(
                 budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
                 if budget <= 0.25:
                     break
+                parent_sweep_executed = True
                 did_work = await asyncio.wait_for(
                     effective_post_ocr(worker_id="cron-post-ocr-sweeper"),
                     timeout=budget,
@@ -641,15 +644,15 @@ async def run_scheduled_cron_dispatch(
         )
         if parent_sweep_error is not None:
             record_worker_error("parent_book_submission", parent_sweep_error)
-            await _persist_cron_heartbeat(
+            _queue_heartbeat(
                 "parent_book_submission",
                 ok=False,
                 items_processed=parent_items_processed,
                 error_code=parent_sweep_error,
             )
-        else:
+        elif parent_sweep_executed:
             record_worker_success("parent_book_submission")
-            await _persist_cron_heartbeat(
+            _queue_heartbeat(
                 "parent_book_submission",
                 ok=True,
                 items_processed=parent_items_processed,
@@ -664,7 +667,7 @@ async def run_scheduled_cron_dispatch(
                     now=current,
                 )
                 record_worker_success("admin_ai_workflow")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "admin_ai_workflow",
                     ok=True,
                     items_processed=admin_ai_workflows_swept,
@@ -672,7 +675,7 @@ async def run_scheduled_cron_dispatch(
             except Exception as exc:
                 record_worker_error("admin_ai_workflow", exc)
                 sweep_errors.append("admin_ai_workflow")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "admin_ai_workflow",
                     ok=False,
                     items_processed=0,
@@ -692,7 +695,7 @@ async def run_scheduled_cron_dispatch(
                     now=current,
                 )
                 record_worker_success("book_quality")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "book_quality",
                     ok=True,
                     items_processed=book_quality_scans_swept,
@@ -700,7 +703,7 @@ async def run_scheduled_cron_dispatch(
             except Exception as exc:
                 record_worker_error("book_quality", exc)
                 sweep_errors.append("book_quality")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "book_quality",
                     ok=False,
                     items_processed=0,
@@ -719,7 +722,7 @@ async def run_scheduled_cron_dispatch(
                     deadline=deadline,
                 )
                 record_worker_success("viread_ocr_outbox")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "viread_ocr_outbox",
                     ok=True,
                     items_processed=ocr_outbox_swept,
@@ -727,7 +730,7 @@ async def run_scheduled_cron_dispatch(
             except Exception as exc:
                 record_worker_error("viread_ocr_outbox", exc)
                 sweep_errors.append("viread_ocr_outbox")
-                await _persist_cron_heartbeat(
+                _queue_heartbeat(
                     "viread_ocr_outbox",
                     ok=False,
                     items_processed=0,
@@ -738,7 +741,35 @@ async def run_scheduled_cron_dispatch(
                     type(exc).__name__,
                 )
 
-        # 8. Clean expired local-scans/ temporary storage objects
+        # 8. Lightweight Flow 2 OCR training maintenance (lease expiry + Colab poll/dispatch, zero PyTorch)
+        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if budget > 0.25:
+            try:
+                ocr_training_maintenance_ran, training_items = await asyncio.wait_for(
+                    _sweep_viread_ocr_training_maintenance(),
+                    timeout=budget,
+                )
+                record_worker_success("viread_ocr_training")
+                _queue_heartbeat(
+                    "viread_ocr_training",
+                    ok=True,
+                    items_processed=training_items,
+                )
+            except Exception as exc:
+                record_worker_error("viread_ocr_training", exc)
+                sweep_errors.append("viread_ocr_training")
+                _queue_heartbeat(
+                    "viread_ocr_training",
+                    ok=False,
+                    items_processed=0,
+                    error_code=type(exc).__name__,
+                )
+                logger.warning(
+                    "cron_ocr_training_maintenance_skipped error=%s",
+                    type(exc).__name__,
+                )
+
+        # 9. Clean expired local-scans/ temporary storage objects
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget > 0.25:
             try:
@@ -755,7 +786,104 @@ async def run_scheduled_cron_dispatch(
                     type(exc).__name__,
                 )
 
-        # 9. Passive 12-hour Hugging Face Space keep-warm (prevents 48h sleep without waking DB loop)
+    # ── Phase 2: Outbound HTTP / email delivery sweeps ────────────────────────
+    # 10. Isolated reading reminders runner (15.0s cap)
+    rem_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
+    if rem_budget > 0.25:
+        try:
+            reminders_delivered = int(
+                await asyncio.wait_for(
+                    reminders_runner(now=current),
+                    timeout=rem_budget,
+                )
+            )
+            record_worker_success("reading_reminder")
+            _queue_heartbeat(
+                "reading_reminder",
+                ok=True,
+                items_processed=reminders_delivered,
+            )
+        except Exception as exc:
+            record_worker_error("reading_reminder", exc)
+            sweep_errors.append("reading_reminder")
+            _queue_heartbeat(
+                "reading_reminder",
+                ok=False,
+                items_processed=0,
+                error_code=type(exc).__name__,
+            )
+            logger.warning(
+                "cron_reading_reminder_skipped error=%s", type(exc).__name__
+            )
+
+    # 11. Isolated reading presence alerts runner (15.0s cap)
+    alert_budget = _remaining_budget(deadline, REMINDERS_ALERTS_TIMEOUT_SECONDS)
+    if alert_budget > 0.25:
+        try:
+            presence_alerts_delivered = int(
+                await asyncio.wait_for(
+                    alerts_runner(now=current),
+                    timeout=alert_budget,
+                )
+            )
+            record_worker_success("reading_presence")
+            _queue_heartbeat(
+                "reading_presence",
+                ok=True,
+                items_processed=presence_alerts_delivered,
+            )
+        except Exception as exc:
+            record_worker_error("reading_presence", exc)
+            sweep_errors.append("reading_presence")
+            _queue_heartbeat(
+                "reading_presence",
+                ok=False,
+                items_processed=0,
+                error_code=type(exc).__name__,
+            )
+            logger.warning(
+                "cron_reading_presence_skipped error=%s", type(exc).__name__
+            )
+
+    # 12. Parent engagement email dispatcher (weekly digest, inactivity, milestones)
+    if engagement_runner is not None:
+        engagement_budget = _remaining_budget(deadline, ENGAGEMENT_TIMEOUT_SECONDS)
+        if engagement_budget > 0.25:
+            try:
+                engagement_kwargs: dict[str, Any] = {"now": current}
+                if _declares_kwarg(engagement_runner, "max_seconds"):
+                    engagement_kwargs["max_seconds"] = max(
+                        1.0, min(engagement_budget - 1.0, 10.0)
+                    )
+                engagement_emails_delivered = int(
+                    await asyncio.wait_for(
+                        engagement_runner(**engagement_kwargs),
+                        timeout=engagement_budget,
+                    )
+                    or 0
+                )
+                record_worker_success("parent_email_dispatcher")
+                _queue_heartbeat(
+                    "parent_email_dispatcher",
+                    ok=True,
+                    items_processed=engagement_emails_delivered,
+                )
+            except Exception as exc:
+                record_worker_error("parent_email_dispatcher", exc)
+                sweep_errors.append("parent_email_engagement")
+                _queue_heartbeat(
+                    "parent_email_dispatcher",
+                    ok=False,
+                    items_processed=0,
+                    error_code=type(exc).__name__,
+                )
+                logger.warning(
+                    "cron_parent_email_engagement_skipped error=%s",
+                    type(exc).__name__,
+                )
+
+    # 13. Passive 12-hour Hugging Face Space keep-warm (prevents 48h sleep without waking DB loop)
+    if run_remote_sweeps:
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget > 0.25:
             try:
@@ -772,33 +900,8 @@ async def run_scheduled_cron_dispatch(
                     type(exc).__name__,
                 )
 
-        # 10. Lightweight Flow 2 OCR training maintenance (lease expiry + Colab poll/dispatch, zero PyTorch)
-        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
-        if budget > 0.25:
-            try:
-                ocr_training_maintenance_ran, training_items = await asyncio.wait_for(
-                    _sweep_viread_ocr_training_maintenance(),
-                    timeout=budget,
-                )
-                record_worker_success("viread_ocr_training")
-                await _persist_cron_heartbeat(
-                    "viread_ocr_training",
-                    ok=True,
-                    items_processed=training_items,
-                )
-            except Exception as exc:
-                record_worker_error("viread_ocr_training", exc)
-                sweep_errors.append("viread_ocr_training")
-                await _persist_cron_heartbeat(
-                    "viread_ocr_training",
-                    ok=False,
-                    items_processed=0,
-                    error_code=type(exc).__name__,
-                )
-                logger.warning(
-                    "cron_ocr_training_maintenance_skipped error=%s",
-                    type(exc).__name__,
-                )
+    # ── Phase 3: Persist all worker heartbeats in 1 single SQL UPSERT RTT ─────
+    await _persist_cron_heartbeats_batch(list(pending_heartbeats.values()))
 
         # 11. Non-blocking Smart Studio worker wake/drain for queued or stale-lease jobs
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
@@ -824,6 +927,7 @@ async def run_scheduled_cron_dispatch(
         "dispatched_at": current.isoformat(),
         "reminders_delivered": reminders_delivered,
         "presence_alerts_delivered": presence_alerts_delivered,
+        "engagement_emails_delivered": engagement_emails_delivered,
         "temp_submissions_cleaned": temp_submissions_cleaned,
         "post_ocr_swept": post_ocr_swept,
         "ocr_leases_requeued": ocr_leases_requeued,

@@ -24,6 +24,7 @@ const { replace, refresh } = vi.hoisted(() => ({
   refresh: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/register",
   useRouter: () => ({ replace, refresh }),
 }));
 vi.mock("@/lib/supabase/client", () => ({

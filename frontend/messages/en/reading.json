@@ -260,7 +260,17 @@
     "referencePageAlt": "Reference image for page {page}",
     "scrollToCurrentWord": "About the word being read",
     "currentWordPrefix": "Current word: ",
-    "overlayAria": "Current word highlight region"
+    "overlayAria": "Current word highlight region",
+    "readingModeSwitcherAria": "Book page reading mode",
+    "readingModeIllustrated": "Illustrated",
+    "readingModeIllustratedTitle": "View text-free storybook illustration alongside reading text",
+    "readingModeText": "Read text",
+    "readingModeTextTitle": "Focus on crisp reading text",
+    "readingModeOriginal": "Original page",
+    "readingModeOriginalTitle": "View original scanned book page for reference",
+    "illustrationAlt": "Illustration for page {page}",
+    "originalReferenceHeading": "Original page image (reference)",
+    "originalReferenceAlt": "Original image for page {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Not quite: \"{word}\". Let's try reading this word again.",
@@ -360,7 +370,8 @@
     "finish": "Completed",
     "nextQuestion": "Next question",
     "chosenCorrectFeedback": "You chose {label}. {hint}",
-    "chosenWrongFeedback": "You chose {label}. That's not quite right. Let's recall the details from the reading and try again!"
+    "chosenWrongFeedback": "You chose {label}. That's not quite right. Let's recall the details from the reading and try again!",
+    "skipToReport": "Skip and view results"
   },
   "automation": {
     "sectionTitle": "Automatic during reading",

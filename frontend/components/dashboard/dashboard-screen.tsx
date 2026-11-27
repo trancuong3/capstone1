@@ -18,6 +18,7 @@ import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AuthRuntimeContext } from "@/components/auth/auth-service-provider";
 import { ChildProfileCard } from "@/components/children/child-profile-card";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
@@ -36,6 +37,8 @@ import type {
   DashboardSummaryDTO,
 } from "@/types/profile";
 import { FamilyReadingDesk } from "./family-reading-desk";
+
+const DASHBOARD_CHILDREN_PAGE_SIZE = 4;
 
 type DashboardState =
   | { status: "loading" }
@@ -65,6 +68,10 @@ export function DashboardScreen() {
 
   const [requestKey, setRequestKey] = useState(0);
   const [state, setState] = useState<DashboardState>({ status: "loading" });
+  const [childPageState, setChildPageState] = useState<{
+    forSelectedId: string | null;
+    page: number;
+  }>({ forSelectedId: null, page: 1 });
   const [selectionPrompt, setSelectionPrompt] = useState(false);
   const selectionSectionRef = useRef<HTMLElement | null>(null);
   const focusRequestHandledRef = useRef(false);
@@ -226,7 +233,32 @@ export function DashboardScreen() {
 
   const isLoading = state.status === "loading";
   const children = state.status === "ready" ? state.children : [];
-  const selectedChild = children.find((child) => child.id === selectedChildId);
+  const selectedChildIndex = selectedChildId
+    ? children.findIndex((child) => child.id === selectedChildId)
+    : -1;
+  const selectedChild =
+    selectedChildIndex >= 0 ? children[selectedChildIndex] : undefined;
+  const pageSyncKey = selectedChild?.id ?? null;
+  const defaultChildrenPage =
+    selectedChildIndex >= 0
+      ? Math.floor(selectedChildIndex / DASHBOARD_CHILDREN_PAGE_SIZE) + 1
+      : 1;
+  const childrenTotalPages = Math.max(
+    1,
+    Math.ceil(children.length / DASHBOARD_CHILDREN_PAGE_SIZE),
+  );
+  const rawChildrenPage =
+    childPageState.forSelectedId === pageSyncKey
+      ? childPageState.page
+      : defaultChildrenPage;
+  const safeChildrenPage = Math.min(
+    Math.max(1, rawChildrenPage),
+    childrenTotalPages,
+  );
+  const visibleChildren = children.slice(
+    (safeChildrenPage - 1) * DASHBOARD_CHILDREN_PAGE_SIZE,
+    safeChildrenPage * DASHBOARD_CHILDREN_PAGE_SIZE,
+  );
   const latestSessionForSelected =
     state.status === "ready" && selectedChild
       ? (state.latestSessionsByChild[selectedChild.id] ?? null)
@@ -288,7 +320,7 @@ export function DashboardScreen() {
           ) : children.length ? (
             <>
               <div className="family-profile-list">
-                {children.map((child) => (
+                {visibleChildren.map((child) => (
                   <ChildProfileCard
                     key={child.id}
                     child={child}
@@ -296,12 +328,29 @@ export function DashboardScreen() {
                     onSelect={() => {
                       selectChild(child.id);
                       setValidatedSelectedChild(child);
+                      setChildPageState({
+                        forSelectedId: child.id,
+                        page: safeChildrenPage,
+                      });
                       setSelectionPrompt(false);
                       if (searchParams.toString()) replace("/dashboard");
                     }}
                   />
                 ))}
               </div>
+              <PaginationBar
+                compact
+                itemLabel={t("parent.dashboard.childProfilesTitle")}
+                onPageChange={(nextPage) =>
+                  setChildPageState({
+                    forSelectedId: pageSyncKey,
+                    page: nextPage,
+                  })
+                }
+                page={safeChildrenPage}
+                pageSize={DASHBOARD_CHILDREN_PAGE_SIZE}
+                total={children.length}
+              />
               <Link
                 href="/children/new"
                 className="family-inline-link min-h-12"

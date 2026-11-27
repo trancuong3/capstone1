@@ -865,4 +865,117 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
       screen.getByText(/2\/2 từ đã đọc đúng \(100%\)/),
     ).toBeInTheDocument();
   });
+
+  it("paginates book groups (6 per page) and word chips inside a book card (12 per page)", async () => {
+    const user = userEvent.setup();
+    const book1Words = Array.from({ length: 15 }, (_, idx) => ({
+      ...word,
+      normalized_word: `b1-w${idx + 1}`,
+      display_text: `Từ sách 1 số ${idx + 1}`,
+      difficulty_score: 20 - idx,
+      practice_status: "NOT_PRACTICED",
+      sources: [
+        {
+          book_id: "10000000-0000-4000-8000-000000000001",
+          book_title: "Cuốn sách 1",
+          book_author: "Tác giả 1",
+          min_grade: 1,
+          max_grade: 2,
+          session_id: sessionId,
+          page_number: 1,
+          context_phrase: null,
+          last_seen_at: "2026-11-18T02:00:00Z",
+        },
+      ],
+    }));
+    const extraBookWords = Array.from({ length: 7 }, (_, idx) => ({
+      ...word,
+      normalized_word: `b${idx + 2}-w1`,
+      display_text: `Từ sách ${idx + 2}`,
+      difficulty_score: 5,
+      practice_status: "NOT_PRACTICED",
+      sources: [
+        {
+          book_id: `10000000-0000-4000-8000-00000000000${idx + 2}`,
+          book_title: `Cuốn sách ${idx + 2}`,
+          book_author: `Tác giả ${idx + 2}`,
+          min_grade: 1,
+          max_grade: 2,
+          session_id: sessionId,
+          page_number: 1,
+          context_phrase: null,
+          last_seen_at: "2026-11-18T02:00:00Z",
+        },
+      ],
+    }));
+
+    fetchMock.mockImplementation(async (url: string) =>
+      url.includes("/system/difficult-words/")
+        ? Response.json([...book1Words, ...extraBookWords])
+        : readyResponse(url),
+    );
+
+    render(
+      <AppServicesProvider>
+        <DifficultWordsScreen />
+      </AppServicesProvider>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Cuốn sách 1" }),
+    ).toBeInTheDocument();
+
+    // 8 book groups -> 6 on page 1, 2 on page 2
+    expect(
+      screen.getByRole("heading", { name: "Cuốn sách 6" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Cuốn sách 7" }),
+    ).not.toBeInTheDocument();
+
+    // Book 1 has 15 words -> 12 chips on page 1, 3 on page 2
+    expect(
+      screen.getByRole("button", { name: /Từ sách 1 số 12/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Từ sách 1 số 13/ }),
+    ).not.toBeInTheDocument();
+
+    const chipsNav = screen.getByRole("navigation", {
+      name: "Danh sách từ khó sách Cuốn sách 1",
+    });
+    await user.click(
+      Array.from(chipsNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(
+      screen.getByRole("button", { name: /Từ sách 1 số 13/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Từ sách 1 số 15/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Từ sách 1 số 1 / }),
+    ).not.toBeInTheDocument();
+
+    // Navigate to page 2 of book groups
+    const booksNav = screen.getByRole("navigation", {
+      name: "Phân trang nhóm sách từ cần luyện",
+    });
+    await user.click(
+      Array.from(booksNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(
+      screen.getByRole("heading", { name: "Cuốn sách 7" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Cuốn sách 8" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Cuốn sách 1" }),
+    ).not.toBeInTheDocument();
+  });
 });

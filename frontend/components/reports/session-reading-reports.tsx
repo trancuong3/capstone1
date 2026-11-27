@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { BookPageContent } from "@/components/reading/book-page-content";
@@ -56,6 +57,41 @@ type ReportsState =
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
+const COMPARISONS_PER_PAGE = 5;
+const METRIC_WORDS_PAGE_SIZE = 24;
+
+type PageSlot = number | "ellipsis-start" | "ellipsis-end";
+
+function buildVisiblePageSlots(total: number, activeIndex: number): PageSlot[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, idx) => idx);
+  }
+  const safeActive = Math.min(Math.max(0, activeIndex), total - 1);
+  if (safeActive <= 3) {
+    return [0, 1, 2, 3, 4, "ellipsis-end", total - 1];
+  }
+  if (safeActive >= total - 4) {
+    return [
+      0,
+      "ellipsis-start",
+      total - 5,
+      total - 4,
+      total - 3,
+      total - 2,
+      total - 1,
+    ];
+  }
+  return [
+    0,
+    "ellipsis-start",
+    safeActive - 1,
+    safeActive,
+    safeActive + 1,
+    "ellipsis-end",
+    total - 1,
+  ];
+}
+
 function ReportCard({
   group,
   activeReport,
@@ -93,8 +129,49 @@ function ReportCard({
 }) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const [comparisonsPageState, setComparisonsPageState] = useState<{
+    readonly key: string;
+    readonly page: number;
+  }>({ key: group.key, page: 1 });
+  const metricScopeKey = `${activeReport.report_id}:${selectedMetric ?? ""}`;
+  const [metricWordsPageState, setMetricWordsPageState] = useState<{
+    readonly key: string;
+    readonly page: number;
+  }>({ key: metricScopeKey, page: 1 });
   const metrics = buildReportWordMetrics(activeReport);
   const activeMetric = metrics.find((metric) => metric.key === selectedMetric);
+  const rawComparisonsPage =
+    comparisonsPageState.key === group.key ? comparisonsPageState.page : 1;
+  const totalComparisonPages = Math.max(
+    1,
+    Math.ceil(group.allReports.length / COMPARISONS_PER_PAGE),
+  );
+  const safeComparisonsPage = Math.min(
+    Math.max(1, rawComparisonsPage),
+    totalComparisonPages,
+  );
+  const comparisonsStart = (safeComparisonsPage - 1) * COMPARISONS_PER_PAGE;
+  const visibleComparisons = group.allReports.slice(
+    comparisonsStart,
+    comparisonsStart + COMPARISONS_PER_PAGE,
+  );
+  const activeMetricWords = activeMetric?.words ?? [];
+  const rawMetricWordsPage =
+    metricWordsPageState.key === metricScopeKey ? metricWordsPageState.page : 1;
+  const totalMetricWordPages = Math.max(
+    1,
+    Math.ceil(activeMetricWords.length / METRIC_WORDS_PAGE_SIZE),
+  );
+  const safeMetricWordsPage = Math.min(
+    Math.max(1, rawMetricWordsPage),
+    totalMetricWordPages,
+  );
+  const metricWordsStart = (safeMetricWordsPage - 1) * METRIC_WORDS_PAGE_SIZE;
+  const visibleMetricWords = activeMetricWords.slice(
+    metricWordsStart,
+    metricWordsStart + METRIC_WORDS_PAGE_SIZE,
+  );
+  const visiblePageSlots = buildVisiblePageSlots(groups.length, activeIndex);
   const resolvedPage =
     pageEntry.status === "ready" ? pageEntry.page : undefined;
   const isPrimary = activeReport.report_id === group.primaryReport.report_id;
@@ -161,13 +238,25 @@ function ReportCard({
               {t("sessions.readingReports.prevShort")}
             </button>
             <div className="flex flex-wrap items-center gap-1">
-              {groups.map((item, idx) => {
+              {visiblePageSlots.map((slot) => {
+                if (typeof slot !== "number") {
+                  return (
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-9 min-w-7 items-center justify-center px-1 text-xs font-bold text-muted select-none"
+                      key={slot}
+                    >
+                      …
+                    </span>
+                  );
+                }
+                const item = groups[slot];
                 const cached = pageCache.get(item.key);
                 const pageNum =
                   cached?.status === "ready"
                     ? cached.page.page_number
-                    : idx + 1;
-                const isSelected = idx === activeIndex;
+                    : slot + 1;
+                const isSelected = slot === activeIndex;
                 return (
                   <button
                     aria-current={isSelected ? "page" : undefined}
@@ -181,7 +270,7 @@ function ReportCard({
                         : "border border-border bg-white text-ink hover:bg-canvas",
                     )}
                     key={item.key}
-                    onClick={() => onSelectPageIndex(idx)}
+                    onClick={() => onSelectPageIndex(slot)}
                     type="button"
                   >
                     {pageNum}
@@ -324,18 +413,36 @@ function ReportCard({
                 {activeMetric.count}
               </h4>
               {activeMetric.words.length > 0 ? (
-                <ul className="mt-2.5 flex flex-wrap gap-1.5">
-                  {activeMetric.words.map((word, index) => (
-                    <li
-                      className="viread-learning-content rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
-                      dir="ltr"
-                      key={`${word}-${index}`}
-                      lang="vi"
-                    >
-                      {word}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                    {visibleMetricWords.map((word, index) => (
+                      <li
+                        className="viread-learning-content rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
+                        dir="ltr"
+                        key={`${word}-${metricWordsStart + index}`}
+                        lang="vi"
+                      >
+                        {word}
+                      </li>
+                    ))}
+                  </ul>
+                  <PaginationBar
+                    ariaLabel={t(
+                      `sessions.readingReports.wordMetrics.${activeMetric.key}`,
+                    )}
+                    className="mt-2.5"
+                    compact
+                    onPageChange={(nextPage) =>
+                      setMetricWordsPageState({
+                        key: metricScopeKey,
+                        page: nextPage,
+                      })
+                    }
+                    page={safeMetricWordsPage}
+                    pageSize={METRIC_WORDS_PAGE_SIZE}
+                    total={activeMetricWords.length}
+                  />
+                </>
               ) : (
                 <p className="mt-1.5 text-sm text-muted">
                   {t("sessions.readingReports.noWordsInCategory")}
@@ -382,7 +489,8 @@ function ReportCard({
             {t("sessions.readingReports.otherComparisonsSubtitle")}
           </p>
           <ul className="mt-3 divide-y divide-border rounded-control border border-border bg-white">
-            {group.allReports.map((entry, idx) => {
+            {visibleComparisons.map((entry, localIdx) => {
+              const idx = comparisonsStart + localIdx;
               const selected = entry.report_id === activeReport.report_id;
               const entryImmutable = isImmutableFirstPassReport(entry);
               const entryTranscript = entry.transcript.trim();
@@ -465,6 +573,18 @@ function ReportCard({
               );
             })}
           </ul>
+          <PaginationBar
+            ariaLabel={t("sessions.readingReports.additionalPaginationAria")}
+            className="mt-3"
+            compact
+            itemLabel={t("sessions.readingReports.additionalPaginationItem")}
+            onPageChange={(nextPage) =>
+              setComparisonsPageState({ key: group.key, page: nextPage })
+            }
+            page={safeComparisonsPage}
+            pageSize={COMPARISONS_PER_PAGE}
+            total={group.allReports.length}
+          />
         </details>
       ) : null}
     </article>

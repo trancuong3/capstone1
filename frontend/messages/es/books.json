@@ -464,17 +464,18 @@
     "queuedWaitingWorkerBadge": "Guardado en cola — Esperando al sistema",
     "queuedWaitingWorkerShort": "En cola — Se procesará automáticamente",
     "reasonQueuedOffline": "La página está guardada en cola y se reconocerá automáticamente cuando el sistema esté listo.",
-    "toolCheckFailedNotice": "La comprobación automática encontró un problema técnico.",
-    "toolCheckCheckingNotice": "Comprobando el contenido de la página.",
+    "toolCheckFailedNotice": "El proceso de verificación encontró un problema técnico.",
+    "toolCheckCheckingNotice": "Ejecutando verificaciones automáticas para esta página.",
     "toolCheckReadyNotice": "La página está lista para añadirse al libro.",
-    "toolCheckRejectedNotice": "Esta página no fue aprobada.",
-    "toolCheckRecheckNotice": "La página debe volver a comprobarse antes de añadirse al libro.",
+    "toolCheckRejectedNotice": "Esta versión de la página no fue aprobada por el administrador.",
+    "toolCheckRecheckNotice": "Esta página debe volver a verificarse antes de añadirla al libro.",
     "toolCheckAddedNotice": "La página se ha añadido a tu libro.",
     "uploadOfflineQueueButton": "Subir página y añadir a la cola OCR",
     "uploadQueuedOfflineNotice": "Se guardaron {total} página(s) ({format}) en la cola OCR. El reconocimiento, la corrección y la seguridad se ejecutarán automáticamente cuando OCR vuelva a estar activo.",
     "retriedQueuedOfflineNotice": "Se guardó el reintento en la cola OCR. La página se procesará automáticamente cuando OCR vuelva a estar disponible.",
     "replacedPageImageQueuedOfflineNotice": "Se reemplazó la imagen de la página {page} y se añadió a la cola OCR. La revisión se reanudará automáticamente cuando OCR vuelva a estar activo.",
-    "replacedSubmissionImageQueuedOfflineNotice": "Se reemplazó la imagen y se añadió a la cola OCR. La revisión se reanudará automáticamente cuando OCR vuelva a estar activo."
+    "replacedSubmissionImageQueuedOfflineNotice": "Se reemplazó la imagen y se añadió a la cola OCR. La revisión se reanudará automáticamente cuando OCR vuelva a estar activo.",
+    "toolCheckPassedNotice": "Esta página superó la verificación de seguridad."
   },
   "ocrContribution": {
     "cardAria": "Contribuir con muestras para mejorar el reconocimiento de {title}",

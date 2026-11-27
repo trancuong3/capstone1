@@ -220,6 +220,20 @@ async function installVoiceAndPhonicsFixture(page: Page) {
         ],
       });
     }
+    if (path === "/voice/session-lock" && route.request().method() === "PUT") {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        session_id?: string;
+        voice_id?: string;
+      };
+      return respond(route, {
+        session_id: body.session_id ?? ids.session,
+        voice_id: body.voice_id ?? "local_north_truc_ly",
+        provider: (body.voice_id ?? "").startsWith("google_")
+          ? "google"
+          : "local",
+        locked: true,
+      });
+    }
     if (path === "/voice/text-to-speech/phonics") {
       const body = route.request().postDataJSON() as {
         steps: Array<{
@@ -308,10 +322,13 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   await localOnlyBtn.click();
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
 
+  // During an active locked reading session, clicking a region tab filters
+  // the list without silently mutating the locked voice; explicit radio click switches voice.
   await dialog.getByRole("button", { name: "Miền Trung" }).click();
-  await expect(
-    dialog.getByRole("radio", { name: /Cô Ngọc Trân/ }),
-  ).toBeChecked();
+  const centralVoiceRadio = dialog.getByRole("radio", { name: /Cô Ngọc Trân/ });
+  await expect(centralVoiceRadio).toBeVisible();
+  await centralVoiceRadio.click();
+  await expect(centralVoiceRadio).toBeChecked();
 
   await dialog.getByRole("button", { name: "Chậm" }).click();
   await expect(dialog).toContainText("0,85×");

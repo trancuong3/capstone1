@@ -161,7 +161,8 @@
       "maxRetriesReached": "已练习三次",
       "uncertainLabel": "没听清",
       "uncertainNote": "单独记录，不计入已确认的发音错误。"
-    }
+    },
+    "entertainmentSummaryHeading": "寓教于乐学习与语言技能概况 (V4.0)"
   },
   "sessions": {
     "title": "阅读历史",
@@ -643,5 +644,26 @@
       "wantToRead": "想读",
       "savedToRead": "已保存至阅读列表"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "正在汇总 {childName} 的趣味学习进度…",
+    "empty": "{childName} 暂无近期趣味学习记录。游玩看图讲故事、造句射手、卡拉OK或记忆游戏后，这里会自动显示汇总。",
+    "observedCounterLabel": "已明确观察到的技能",
+    "estimatedCounterLabel": "初步评估的技能",
+    "unknownCounterLabel": "尚待积累数据的技能",
+    "activitiesTitle": "趣味学习活动（近 {days} 天）",
+    "avgScoreBadge": "平均 {pct}%",
+    "noScoreBadge": "暂无评分",
+    "skillsMapTitle": "技能图谱（数据不足时不做主观推测）",
+    "evidenceCount": "{count} 项记录依据",
+    "noPracticeYet": "孩子尚未练习此项技能活动，因此保持未评估状态。",
+    "statusObserved": "已明确观察",
+    "statusEstimated": "初步估算",
+    "statusUnknown": "数据不足",
+    "practicedWordsTitle": "通过游戏温习的难点词",
+    "practiceTimes": "{count} 次",
+    "karaokeWeakSegmentsTitle": "建议以 0.85 倍速慢练的歌词片段",
+    "openSongAction": "打开歌曲",
+    "homeTipsTitle": "家长居家陪伴小建议"
   }
 }

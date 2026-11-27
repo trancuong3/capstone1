@@ -8,6 +8,7 @@ from .system import ProgressReport, ConsentRecord, AuditLog
 from .reading_management import ReadingGoal, ReadingPlan, ChildBookCollection, ReadingReminder, ReadingReminderOccurrence
 from app.models.reading_comparison_report import ReadingComparisonReport
 from .reading_presence import ReadingPresenceAlert, ReadingPresenceSetting
+from .parent_email_notification import ParentEmailDelivery, ParentEmailPreference
 
 from app.models.book_content_quality import (
     BookContentReport,
@@ -22,6 +23,13 @@ from app.models.book_content_quality import (
 
 from .game_session import GameAttempt, GameRound, GameSession
 from .picture_description import PictureDescriptionAttempt, PictureDescriptionSession
+from .entertainment_v4 import (
+    KaraokeMusicalProfile,
+    KaraokePracticeSession,
+    LearningSkillEvidence,
+    MemoryGameAttempt,
+    MemoryGameSession,
+)
 from .admin_ai_workflow import AdminAiWorkflow
 from .difficult_word_practice import DifficultWordPracticeAttempt
 from .ocr_inference_job import OcrInferenceJob, OcrWorkerHeartbeat

@@ -208,7 +208,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     1,
     Math.ceil(plans.length / PLANS_PAGE_SIZE),
   );
-  const safePlansPage = Math.min(plansPage, plansTotalPages);
+  const safePlansPage = Math.min(Math.max(1, plansPage), plansTotalPages);
   const visiblePlans = plans.slice(
     (safePlansPage - 1) * PLANS_PAGE_SIZE,
     safePlansPage * PLANS_PAGE_SIZE,
@@ -217,7 +217,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     1,
     Math.ceil(goals.length / GOALS_PAGE_SIZE),
   );
-  const safeGoalsPage = Math.min(goalsPage, goalsTotalPages);
+  const safeGoalsPage = Math.min(Math.max(1, goalsPage), goalsTotalPages);
   const visibleGoals = goals.slice(
     (safeGoalsPage - 1) * GOALS_PAGE_SIZE,
     safeGoalsPage * GOALS_PAGE_SIZE,
@@ -226,7 +226,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     1,
     Math.ceil(filteredCollections.length / COLLECTIONS_PAGE_SIZE),
   );
-  const safeCollectionsPage = Math.min(collectionsPage, collectionsTotalPages);
+  const safeCollectionsPage = Math.min(
+    Math.max(1, collectionsPage),
+    collectionsTotalPages,
+  );
   const visibleCollections = filteredCollections.slice(
     (safeCollectionsPage - 1) * COLLECTIONS_PAGE_SIZE,
     safeCollectionsPage * COLLECTIONS_PAGE_SIZE,
@@ -235,13 +238,16 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     1,
     Math.ceil(reminders.length / REMINDERS_PAGE_SIZE),
   );
-  const safeRemindersPage = Math.min(remindersPage, remindersTotalPages);
+  const safeRemindersPage = Math.min(
+    Math.max(1, remindersPage),
+    remindersTotalPages,
+  );
   const visibleReminders = reminders.slice(
     (safeRemindersPage - 1) * REMINDERS_PAGE_SIZE,
     safeRemindersPage * REMINDERS_PAGE_SIZE,
   );
   const dueTotalPages = Math.max(1, Math.ceil(due.length / DUE_PAGE_SIZE));
-  const safeDuePage = Math.min(duePage, dueTotalPages);
+  const safeDuePage = Math.min(Math.max(1, duePage), dueTotalPages);
   const visibleDue = due.slice(
     (safeDuePage - 1) * DUE_PAGE_SIZE,
     safeDuePage * DUE_PAGE_SIZE,
@@ -1068,6 +1074,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               })}
             </summary>
             <TodaySummary
+              key={childId}
               childName={
                 selectedChild?.alias ?? t("readingManagement.todayDefaultChild")
               }

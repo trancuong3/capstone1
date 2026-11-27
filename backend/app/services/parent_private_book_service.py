@@ -78,6 +78,7 @@ from app.services.document_rasterizer_service import (
     spool_upload_file,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
+from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_inference_job_service import (
     JOB_KIND_PARENT_SUBMISSION,
     PRIORITY_PARENT_SUBMISSION,
@@ -293,10 +294,11 @@ def _default_local_ai_enforced() -> bool:
 
 def _build_scope(raw: dict[str, Any] | None) -> ToolCheckScopeRead:
     data = raw if isinstance(raw, dict) else {}
+    default_local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
     local_enforced = (
         bool(data["local_ai_enforced"])
         if "local_ai_enforced" in data and data["local_ai_enforced"] is not None
-        else _default_local_ai_enforced()
+        else default_local_ai_enforced
     )
     return ToolCheckScopeRead(
         modality=str(data.get("modality") or "TEXT_ONLY_WITH_OCR_IMAGE_PROOFREAD"),
@@ -2736,6 +2738,26 @@ class ParentPrivateBookService:
                 except Exception:
                     pass
             raise
+
+        # Non-fatal V2 post-commit hook: persist PageOcrExtraction + extract clean artwork
+        try:
+            from app.services.ocr_content_extraction import persist_committed_parent_page_v2
+
+            await persist_committed_parent_page_v2(
+                self.db,
+                actor_id=actor_id,
+                book_id=book.Id,
+                page_id=created_page.Id,
+                revision_id=created_rev.Id,
+                submission=sub,
+                image_bytes=image_bytes,
+                trigger_illustration_extract=True,
+            )
+        except Exception:
+            logger.warning(
+                "Non-fatal Smart Book Studio V2 post-commit hook skipped for page %s",
+                created_page.Id,
+            )
 
         await self.db.refresh(sub)
         await self._refresh_after_commit(book, created_page, created_rev)

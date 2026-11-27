@@ -17,6 +17,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -216,6 +217,8 @@ function TaskProgressView({
   return null;
 }
 
+const TASKS_PAGE_SIZE = 6;
+
 export function GlobalTaskCenter({
   variant = "header-pill",
   hideOnPaths = [],
@@ -226,6 +229,11 @@ export function GlobalTaskCenter({
   const pathname = usePathname() ?? "/";
   const taskCenter = useOptionalAiTaskCenter();
   const [clockMs, setClockMs] = useState<number>(() => Date.now());
+  const scopeKey = taskCenter?.scopeKey ?? "";
+  const [tasksPageState, setTasksPageState] = useState<{
+    readonly scopeKey: string;
+    readonly page: number;
+  }>({ scopeKey, page: 1 });
 
   const isOpen = taskCenter?.isOpen ?? false;
   const activeCount = taskCenter?.activeCount ?? 0;
@@ -263,6 +271,7 @@ export function GlobalTaskCenter({
   }
 
   const {
+    actorRole,
     tasks,
     waitingReviewCount,
     failedCount,
@@ -276,6 +285,21 @@ export function GlobalTaskCenter({
     retryTask,
     cancelTask,
   } = taskCenter;
+
+  const fullTasksPageHref =
+    actorRole === "admin" ? "/admin/tasks" : "/studio/tasks";
+
+  const rawTasksPage =
+    tasksPageState.scopeKey === scopeKey ? tasksPageState.page : 1;
+  const totalTaskPages = Math.max(
+    1,
+    Math.ceil(tasks.length / TASKS_PAGE_SIZE),
+  );
+  const safeTasksPage = Math.min(Math.max(1, rawTasksPage), totalTaskPages);
+  const visibleTasks = tasks.slice(
+    (safeTasksPage - 1) * TASKS_PAGE_SIZE,
+    safeTasksPage * TASKS_PAGE_SIZE,
+  );
 
   const activeTasks = tasks.filter((item) =>
     ACTIVE_GLOBAL_TASK_STATUSES.has(item.status),
@@ -545,7 +569,7 @@ export function GlobalTaskCenter({
                   </p>
                 </div>
               ) : (
-                tasks.map((task) => {
+                visibleTasks.map((task) => {
                   const isBusy = pendingActionJobIds.has(task.id);
                   const isActive = ACTIVE_GLOBAL_TASK_STATUSES.has(task.status);
                   const elapsedText = formatElapsed(
@@ -674,6 +698,33 @@ export function GlobalTaskCenter({
                   );
                 })
               )}
+            </div>
+
+            {tasks.length > TASKS_PAGE_SIZE ? (
+              <div className="border-t border-border bg-canvas/40 px-4 py-2.5 sm:px-5">
+                <PaginationBar
+                  ariaLabel={t("taskCenter.title", undefined, "Trung tâm tác vụ AI")}
+                  compact
+                  onPageChange={(nextPage) =>
+                    setTasksPageState({ scopeKey, page: nextPage })
+                  }
+                  page={safeTasksPage}
+                  pageSize={TASKS_PAGE_SIZE}
+                  total={tasks.length}
+                />
+              </div>
+            ) : null}
+
+            <div className="border-t border-border bg-canvas/40 px-4 py-3 sm:px-5">
+              <Link
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control border border-border bg-white px-4 text-xs font-bold text-primary transition-colors hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+                data-testid="global-task-center-full-page-link"
+                href={fullTasksPageHref}
+                onClick={closePanel}
+              >
+                Mở trang quản lý tác vụ đầy đủ
+                <ExternalLink aria-hidden="true" className="size-3.5" />
+              </Link>
             </div>
           </section>
         </div>

@@ -156,7 +156,7 @@ class ReadingPresenceService:
         email_sender=send_presence_email,
         parent_email_unavailable: type[Exception] = _NeverRaised,
         parent_lookup_failed: type[Exception] = _NeverRaised,
-        batch: int = 20,
+        batch: int = 5,
     ) -> int:
         await self.repo.expire_and_recover(now, sending_stale_after=SENDING_STALE_AFTER)
         claimed = await self.repo.claim_due(
@@ -181,6 +181,9 @@ class ReadingPresenceService:
             await self._release_db()
             return 0
         delivered = 0
+        recipient_cache: dict[UUID, str] = {}
+        unavailable_parents: set[UUID] = set()
+        lookup_failed_parents: set[UUID] = set()
         for alert in snapshots:
             ctx = await self.repo.delivery_context(alert)
             # Release the read transaction before external HTTP/SMTP calls.
@@ -199,16 +202,30 @@ class ReadingPresenceService:
                     alert.Id, status="CANCELLED", now=now, cancel_reason="SESSION_ENDED"
                 )
                 continue
-            try:
-                recipient = await recipient_resolver(alert.ParentId)
-            except parent_email_unavailable:
+            if alert.ParentId in recipient_cache:
+                recipient = recipient_cache[alert.ParentId]
+            elif alert.ParentId in unavailable_parents:
                 await self.repo.finish_alert(
                     alert.Id, status="FAILED", now=now, error_code="PARENT_EMAIL_UNVERIFIED"
                 )
                 continue
-            except parent_lookup_failed:
+            elif alert.ParentId in lookup_failed_parents:
                 await self._retry_or_fail(alert, now, "PARENT_EMAIL_LOOKUP_FAILED")
                 continue
+            else:
+                try:
+                    recipient = await recipient_resolver(alert.ParentId)
+                except parent_email_unavailable:
+                    unavailable_parents.add(alert.ParentId)
+                    await self.repo.finish_alert(
+                        alert.Id, status="FAILED", now=now, error_code="PARENT_EMAIL_UNVERIFIED"
+                    )
+                    continue
+                except parent_lookup_failed:
+                    lookup_failed_parents.add(alert.ParentId)
+                    await self._retry_or_fail(alert, now, "PARENT_EMAIL_LOOKUP_FAILED")
+                    continue
+                recipient_cache[alert.ParentId] = recipient
             try:
                 await asyncio.to_thread(
                     email_sender,

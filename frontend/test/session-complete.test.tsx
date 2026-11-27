@@ -249,4 +249,60 @@ describe("SessionComplete component", () => {
       spy.mockRestore();
     }
   });
+
+  it("paginates long spoken word lists and transcripts inside spoken-words-container", async () => {
+    const user = userEvent.setup();
+    const spokenWords = Array.from({ length: 30 }, (_, idx) => `từ-${idx + 1}`);
+    const transcripts = Array.from(
+      { length: 7 },
+      (_, idx) => `Câu bé đọc số ${idx + 1}`,
+    );
+
+    render(
+      <SessionComplete
+        booksHref="/books"
+        bookId={TEST_SESSION_ID}
+        child={childFixture}
+        sessionId={TEST_SESSION_ID}
+        summary={{
+          duration_minutes: 8,
+          pages_explored: 4,
+          practiced_words: 30,
+          spoken_words: spokenWords,
+          transcripts,
+        }}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /30 từ/i }));
+
+    expect(screen.getByText("từ-1")).toBeInTheDocument();
+    expect(screen.getByText("từ-24")).toBeInTheDocument();
+    expect(screen.queryByText("từ-25")).not.toBeInTheDocument();
+
+    const wordsNav = screen.getByRole("navigation", {
+      name: "Kết quả nhận diện giọng đọc của bé",
+    });
+    await user.click(
+      Array.from(wordsNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText("từ-25")).toBeInTheDocument();
+    expect(screen.getByText("từ-30")).toBeInTheDocument();
+    expect(screen.queryByText("từ-1")).not.toBeInTheDocument();
+
+    expect(screen.getByText(/Câu bé đọc số 5/)).toBeInTheDocument();
+    expect(screen.queryByText(/Câu bé đọc số 6/)).not.toBeInTheDocument();
+    const transcriptsNav = screen.getByRole("navigation", {
+      name: "Câu nhận diện từ microphone:",
+    });
+    await user.click(
+      Array.from(transcriptsNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText(/Câu bé đọc số 6/)).toBeInTheDocument();
+    expect(screen.getByText(/Câu bé đọc số 7/)).toBeInTheDocument();
+  });
 });

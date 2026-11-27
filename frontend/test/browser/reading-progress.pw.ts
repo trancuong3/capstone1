@@ -1,5 +1,10 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { installApiFixture, ids, child } from "./real-data-fixture";
+import {
+  PLAYWRIGHT_ORIGIN,
+  installApiFixture,
+  ids,
+  child,
+} from "./real-data-fixture";
 
 const secondChild = "22222222-2222-4222-8222-222222222223";
 const period = {
@@ -44,7 +49,7 @@ async function progressFixture(page: Page) {
     await route.fulfill({
       status,
       headers: {
-        "access-control-allow-origin": "http://127.0.0.1:3106",
+        "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
         "access-control-allow-headers": "authorization,content-type,accept",
         "access-control-allow-methods": "GET,OPTIONS",
       },

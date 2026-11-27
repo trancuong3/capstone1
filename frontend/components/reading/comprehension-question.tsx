@@ -1211,14 +1211,18 @@ export function ComprehensionQuestion({
 
   return (
     <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
-      <BookChildHeader child={child} mobileLabel={t("session.mobileLabel")} />
+      <BookChildHeader
+        backHref="/dashboard"
+        child={child}
+        mobileLabel={t("session.mobileLabel")}
+      />
       <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4">
         <h1 className="text-heading font-extrabold text-ink sm:text-center">
           {t("comprehension.heading")}
         </h1>
         <div
           aria-hidden="true"
-          className="mx-auto hidden w-[392px] gap-1 sm:grid"
+          className="mx-auto grid w-full max-w-[392px] gap-1"
           style={{
             gridTemplateColumns: `repeat(${questionTotal ?? 5}, minmax(0, 1fr))`,
           }}
@@ -1226,8 +1230,8 @@ export function ComprehensionQuestion({
           {Array.from({ length: questionTotal ?? 5 }, (_, step) => (
             <span
               className={cn(
-                "h-2",
-                step < (questionPosition ?? 2) ? "bg-primary" : "bg-border",
+                "h-2 rounded-full",
+                step < (questionPosition ?? 0) ? "bg-primary" : "bg-border",
               )}
               key={step}
             />
@@ -1251,19 +1255,33 @@ export function ComprehensionQuestion({
             >
               {t("comprehension.loadErrorDesc")}
             </StatusMessage>
-            <Button
-              onClick={() => {
-                invalidateApiReadCacheByPrefix(
-                  `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
-                );
-                setLoadState({ status: "loading" });
-                setLoadKey((key) => key + 1);
-              }}
-              variant="secondary"
-            >
-              <RefreshCw aria-hidden="true" className="size-5" />
-              {t("comprehension.retry")}
-            </Button>
+            <div className="flex flex-wrap gap-3">
+              <Button
+                className="sm:w-auto"
+                onClick={() => {
+                  invalidateApiReadCacheByPrefix(
+                    `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
+                  );
+                  setLoadState({ status: "loading" });
+                  setLoadKey((key) => key + 1);
+                }}
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden="true" className="size-5" />
+                {t("comprehension.retry")}
+              </Button>
+              <Button
+                className="sm:w-auto"
+                onClick={onComplete}
+                variant="primary"
+              >
+                <ArrowRight
+                  aria-hidden="true"
+                  className="size-5 viread-rtl-flip"
+                />
+                {t("comprehension.skipToReport")}
+              </Button>
+            </div>
           </div>
         ) : (
           <>

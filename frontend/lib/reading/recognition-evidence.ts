@@ -147,3 +147,27 @@ export function hasUsablePhonicsBrowserConfidence(
     (Number.isFinite(confidence) && confidence >= 0.28 && confidence <= 1)
   );
 }
+
+/**
+ * Controlled lower confidence floor (`>= 0.28`) for children's single/short
+ * Vietnamese syllables on Chrome Web Speech API when the recognized token(s)
+ * match words within the child's immediate reading window (`[cursor - 1 .. cursor + 2]`).
+ * Never alters `hasUsableBrowserConfidence` or injects text into STT.
+ */
+export function hasUsableChildWindowBrowserConfidence(
+  spokenText: string,
+  windowWords: readonly string[],
+  confidence?: number,
+): boolean {
+  if (!hasUsablePhonicsBrowserConfidence(confidence)) return false;
+  const spoken = tokenizeVietnameseText(spokenText);
+  if (spoken.length === 0 || spoken.length > 3) return false;
+  const allowed = new Set<string>();
+  for (const w of windowWords) {
+    for (const tok of tokenizeVietnameseText(w)) {
+      allowed.add(tok);
+    }
+  }
+  if (allowed.size === 0) return false;
+  return spoken.every((tok) => allowed.has(tok));
+}

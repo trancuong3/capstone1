@@ -46,7 +46,7 @@ class LocalOcrConfig:
     base_url: str = "http://127.0.0.1:11434"
     model: str = DEFAULT_MODEL
     timeout_seconds: int = 180
-    total_timeout_seconds: int = 7200
+    total_timeout_seconds: int = 300
     num_ctx: int = 4096
     num_predict: int = 1024
     keep_alive: str = "2m"
@@ -83,7 +83,7 @@ class LocalOcrConfig:
             model=model,
             timeout_seconds=_read_int("LOCAL_OCR_TIMEOUT_SECONDS", 180, 1, 600),
             total_timeout_seconds=_read_int(
-                "LOCAL_OCR_TOTAL_TIMEOUT_SECONDS", 7200, 1, 14400
+                "LOCAL_OCR_TOTAL_TIMEOUT_SECONDS", 300, 1, 14400
             ),
             num_ctx=_read_int("LOCAL_OCR_NUM_CTX", 4096, 2048, 32768),
             num_predict=_read_int("LOCAL_OCR_NUM_PREDICT", 1024, 256, 8192),

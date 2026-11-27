@@ -260,7 +260,17 @@
     "referencePageAlt": "第 {page} 頁參考圖",
     "scrollToCurrentWord": "關於當前閱讀的詞彙",
     "currentWordPrefix": "當前詞彙：",
-    "overlayAria": "目前朗讀詞語的高亮區域"
+    "overlayAria": "目前朗讀詞語的高亮區域",
+    "readingModeSwitcherAria": "書頁閱讀模式",
+    "readingModeIllustrated": "圖文閱讀",
+    "readingModeIllustratedTitle": "同時檢視無文字插畫與清晰閱讀內文",
+    "readingModeText": "純文字閱讀",
+    "readingModeTextTitle": "專注檢視清晰排版的閱讀文字",
+    "readingModeOriginal": "原頁對照",
+    "readingModeOriginalTitle": "檢視掃描的原始書頁圖像進行對照",
+    "illustrationAlt": "第 {page} 頁插畫",
+    "originalReferenceHeading": "原始書頁圖像（對照）",
+    "originalReferenceAlt": "第 {page} 頁原始圖像"
   },
   "pageContent": {
     "incorrectWordAria": "不太準確：\"{word}\"。請再讀一次這個詞。",
@@ -360,7 +370,8 @@
     "finish": "已完成",
     "nextQuestion": "下一題",
     "chosenCorrectFeedback": "你選擇了 {label}。{hint}",
-    "chosenWrongFeedback": "你選擇了 {label}。還不太對，回想一下文章中的細節再選一次吧！"
+    "chosenWrongFeedback": "你選擇了 {label}。還不太對，回想一下文章中的細節再選一次吧！",
+    "skipToReport": "略過並查看結果"
   },
   "automation": {
     "sectionTitle": "閱讀時自動進行",

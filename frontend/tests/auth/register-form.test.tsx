@@ -16,6 +16,7 @@ const { confirmationMock, refreshMock, replaceMock } = vi.hoisted(() => ({
   replaceMock: vi.fn(),
 }));
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/register",
   useRouter: () => ({ refresh: refreshMock, replace: replaceMock }),
 }));
 const safeRegistrationError =

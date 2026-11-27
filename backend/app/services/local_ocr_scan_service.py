@@ -28,6 +28,8 @@ from fastapi import HTTPException, UploadFile
 from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
+from app.services.ocr_executor import get_ocr_executor
+
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.diagnostic_logging import log_diagnostic
 from app.models import OcrInferenceJob
@@ -75,6 +77,14 @@ def extract_text_and_boxes(image_bytes: bytes):
         raise OcrNoTextDetected(str(exc)) from exc
     except _ocr_engine.OcrEngineUnavailable as exc:
         raise OcrEngineUnavailable(str(exc)) from exc
+
+
+async def _run_local_ocr_in_executor(clean_bytes: bytes) -> dict[str, Any]:
+    """Run local OCR extraction inside the bounded single-worker OCR executor as a coroutine."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        get_ocr_executor(), extract_text_and_boxes, clean_bytes
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +510,7 @@ class LocalOcrScanService:
                 )
             else:
                 ocr_result = await asyncio.wait_for(
-                    asyncio.to_thread(extract_text_and_boxes, clean_bytes),
+                    _run_local_ocr_in_executor(clean_bytes),
                     timeout=timeout_seconds,
                 )
         except (TimeoutError, asyncio.TimeoutError) as exc:
@@ -892,7 +902,7 @@ class LocalOcrScanService:
             timeout_seconds = _resolve_scan_timeout_seconds()
             try:
                 ocr_result = await asyncio.wait_for(
-                    asyncio.to_thread(extract_text_and_boxes, clean_bytes),
+                    _run_local_ocr_in_executor(clean_bytes),
                     timeout=timeout_seconds,
                 )
                 duration_ms = int((time.perf_counter() - started_at) * 1000)

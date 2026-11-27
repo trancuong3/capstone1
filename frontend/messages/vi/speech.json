@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Tự chuyển sang chế độ trực tuyến khi cần",
     "googleSttFallback": "Hỗ trợ nhận diện giọng đọc trực tuyến",
     "googleTtsFallback": "Hỗ trợ giọng đọc mẫu trực tuyến",
-    "missingGoogleKeyHint": "ViRead sẽ tự động chọn giọng đọc phù hợp nhất trên thiết bị khi chế độ trực tuyến chưa bật.",
+    "missingGoogleKeyHint": "Khi máy chủ chưa cấu hình khóa Google Cloud API, ViRead dùng dự phòng trình duyệt cho STT và nghe thử; trong phiên đọc đã khóa, hệ thống giữ nguyên giọng đã chọn để không tự đổi giọng.",
     "useDefaultVoice": "Dùng giọng mặc định",
     "preview": "Nghe thử",
     "stopPreview": "Dừng nghe thử",
@@ -79,7 +79,14 @@
       "american": "Giọng Mỹ",
       "british": "Giọng Anh"
     },
-    "googleProviderLabel": "Trực tuyến"
+    "googleProviderLabel": "Trực tuyến",
+    "wifiReadyBadge": "Sẵn Wi-Fi",
+    "offlineCacheMultiple": "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: {voices}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.",
+    "offlineCacheSingle": "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng {voice}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.",
+    "offlineCacheEmpty": "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu.",
+    "localWorkerLabel": "Máy trạm giọng đọc:",
+    "sessionLockedBadge": "Đang khóa cho phiên đọc này",
+    "offlineBrowserBadge": "Trình duyệt đang ngoại tuyến"
   },
   "engineBadge": {
     "ariaLabel": "Nguồn giọng nói: Nghe {stt}, Đọc {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "Chuẩn",
       "android_native": "Thiết bị",
       "google_cloud": "Trực tuyến",
-      "browser_default": "Trình duyệt"
+      "browser_default": "Trình duyệt",
+      "idle": "Đang kiểm tra…"
     },
     "listenPrefix": "Nghe",
-    "speakPrefix": "Đọc"
+    "speakPrefix": "Đọc",
+    "idleDetail": "{base} (Đang kiểm tra nguồn giọng nói)"
   },
   "playback": {
     "unavailable": "Giọng đọc trên máy hiện chưa sẵn sàng. Ba mẹ và bé có thể xem chữ trên màn hình và bấm Thử lại nhé.",

@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 
 import {
   getEffectiveTeacherPersona,
+  subscribeVoiceLock,
   subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
@@ -16,9 +17,11 @@ const DEFAULT_SERVER_PERSONA: TeacherPersona = getTeacherPersona("female");
 
 function subscribeTeacherPersona(listener: () => void): () => void {
   const unsubPolicy = subscribeVoicePolicy(listener);
+  const unsubLock = subscribeVoiceLock(listener);
   const unsubSpeech = subscribeSpeechPreferences(listener);
   return () => {
     unsubPolicy();
+    unsubLock();
     unsubSpeech();
   };
 }

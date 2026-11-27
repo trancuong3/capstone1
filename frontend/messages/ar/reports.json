@@ -161,7 +161,8 @@
       "maxRetriesReached": "تمت الممارسة ثلاث مرات",
       "uncertainLabel": "لم يتم سماع الصوت بوضوح",
       "uncertainNote": "تُسجل بشكل منفصل، ولا تُحتسب كخطأ نطق مؤكد."
-    }
+    },
+    "entertainmentSummaryHeading": "التعلّم باللعب ومهارات اللغة (V4.0)"
   },
   "sessions": {
     "title": "سجل القراءة",
@@ -643,5 +644,26 @@
       "wantToRead": "أريد قراءته",
       "savedToRead": "تم الحفظ إلى قائمة القراءة"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "جارٍ تلخيص تقدّم {childName} في اللعب والتعلّم…",
+    "empty": "لا توجد بيانات لعب وتعلّم حديثة لـ {childName} بعد. ستظهر هنا تلقائيًا بعد اللعب.",
+    "observedCounterLabel": "مهارات لوحظت بوضوح",
+    "estimatedCounterLabel": "مهارات مُقدَّرة مبدئيًا",
+    "unknownCounterLabel": "مهارات تحتاج لمزيد من البيانات",
+    "activitiesTitle": "أنشطة اللعب والتعلّم (آخر {days} يومًا)",
+    "avgScoreBadge": "المتوسط {pct}%",
+    "noScoreBadge": "لا توجد نقاط بعد",
+    "skillsMapTitle": "خريطة المهارات (دون تخمين عند نقص البيانات)",
+    "evidenceCount": "{count} شواهد",
+    "noPracticeYet": "لم يتدرّب الطفل في هذا المجال بعد، لذا تبقى الحالة غير مُقيَّمة.",
+    "statusObserved": "لوحظ بوضوح",
+    "statusEstimated": "تقدير مبدئي",
+    "statusUnknown": "بيانات غير كافية",
+    "practicedWordsTitle": "كلمات صعبة روجعت عبر اللعب",
+    "practiceTimes": "{count} مرة",
+    "karaokeWeakSegmentsTitle": "مقاطع غنائية يُنصح بتدريبها ببطء 0.85x",
+    "openSongAction": "افتح الأغنية",
+    "homeTipsTitle": "نصائح للمتابعة في المنزل"
   }
 }

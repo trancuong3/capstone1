@@ -81,7 +81,7 @@ export function AdminBooksScreen() {
   const { books } = useAdminServices();
   const t = useTranslations("admin");
   const { formatNumber } = useI18n();
-  const pageSize = 30;
+  const pageSize = 10;
   const [pageNumber, setPageNumber] = useState(1);
   const [items, setItems] = useState<readonly AdminBookListItemUI[] | null>(
     null,
@@ -319,9 +319,14 @@ export function AdminBooksScreen() {
     verification === "NEEDS_REVIEW" && !eligibleOnly;
   const isEligibleKpiActive = eligibleOnly;
 
+  const totalPages = Math.max(
+    1,
+    Math.ceil((filteredItems?.length ?? 0) / pageSize),
+  );
+  const safePage = Math.min(Math.max(1, pageNumber), totalPages);
   const visibleItems = filteredItems?.slice(
-    (pageNumber - 1) * pageSize,
-    pageNumber * pageSize,
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
   );
   const showMultiPagePagination =
     filteredItems !== null && filteredItems.length > pageSize;
@@ -467,6 +472,7 @@ export function AdminBooksScreen() {
           onChange={(value) => {
             setEligibleOnly(false);
             setLifecycle(value as BookLifecycleStatus | "");
+            setPageNumber(1);
           }}
           options={[
             { value: "", label: t("common.all") },
@@ -481,6 +487,7 @@ export function AdminBooksScreen() {
           onChange={(value) => {
             setEligibleOnly(false);
             setVerification(value as PageRevisionVerificationStatus | "");
+            setPageNumber(1);
           }}
           options={[
             { value: "", label: t("common.all") },
@@ -561,7 +568,7 @@ export function AdminBooksScreen() {
             <AdminResultsPagination
               itemLabel={t("books.itemLabel")}
               onPageChange={setPageNumber}
-              page={pageNumber}
+              page={safePage}
               pageSize={pageSize}
               total={filteredItems.length}
             />
@@ -769,7 +776,7 @@ export function AdminBooksScreen() {
             <AdminResultsPagination
               itemLabel={t("books.itemLabel")}
               onPageChange={setPageNumber}
-              page={pageNumber}
+              page={safePage}
               pageSize={pageSize}
               total={filteredItems.length}
             />

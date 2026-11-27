@@ -5,6 +5,7 @@ import type {
   SentenceShooterBookDTO,
   SentenceShooterDifficulty,
   SentenceShooterHintDTO,
+  SentenceShooterLearningMode,
   SentenceShooterNextRoundDTO,
   SentenceShooterResultDTO,
   SentenceShooterSessionDTO,
@@ -22,26 +23,47 @@ const bookSchema = z.object({
 });
 
 const difficultySchema = z.enum(["easy", "medium", "challenge"]);
-const tokenSchema = z.object({ id: z.uuid(), text: z.string() });
+const learningModeSchema = z.enum([
+  "WORD_ORDER",
+  "FILL_BLANK",
+  "GRAMMAR_FOCUS",
+]);
+const tokenSchema = z.object({
+  id: z.uuid(),
+  text: z.string(),
+  is_difficult_word: z.boolean().optional(),
+});
+const promptSlotSchema = z.object({
+  position: z.number().int().min(0),
+  text: z.string().nullable(),
+  is_blank: z.boolean(),
+  is_difficult_word: z.boolean().optional(),
+});
 const roundSchema = z.object({
   round_id: z.uuid(),
   round_number: z.number().int().min(1).max(5),
-  token_count: z.number().int().min(3).max(14),
+  token_count: z.number().int().min(1).max(14),
   tokens: z.array(tokenSchema),
+  learning_mode: learningModeSchema.optional(),
+  prompt_slots: z.array(promptSlotSchema).optional(),
+  practiced_difficult_words: z.array(z.string()).optional(),
+  prompt_hint: z.string().nullable().optional(),
 });
 const sessionSchema = z.object({
   session_id: z.uuid(),
   book: bookSchema,
   difficulty: difficultySchema,
+  learning_mode: learningModeSchema.optional(),
   total_rounds: z.number().int().min(1).max(5),
   completed_rounds: z.number().int().min(0).max(5),
   total_stars: z.number().int().min(0),
+  practiced_difficult_words: z.array(z.string()).optional(),
   round: roundSchema,
 });
 const shotSchema = z.object({
   is_correct: z.boolean(),
   correct_count: z.number().int().min(0),
-  token_count: z.number().int().min(3).max(14),
+  token_count: z.number().int().min(1).max(14),
   mistakes_total: z.number().int().min(0),
   completed_rounds: z.number().int().min(0).max(5),
   total_stars: z.number().int().min(0),
@@ -49,9 +71,14 @@ const shotSchema = z.object({
   session_completed: z.boolean(),
   next_expected_position: z.number().int().min(0),
   stars_awarded: z.number().int().min(0).max(3),
+  score: z.number().int().min(0).optional(),
   completed_sentence: z.string().nullable(),
   next_round: roundSchema.nullable().optional(),
   message: z.string(),
+  client_shot_id: z.string().nullable().optional(),
+  learning_mode: learningModeSchema.optional(),
+  grammar_tip: z.string().nullable().optional(),
+  practiced_difficult_words: z.array(z.string()).optional(),
 });
 const hintSchema = z.object({
   target_token_id: z.uuid(),
@@ -69,6 +96,7 @@ const resultSchema = z.object({
   session_id: z.uuid(),
   book: bookSchema,
   difficulty: difficultySchema,
+  learning_mode: learningModeSchema.optional(),
   status: z.enum(["IN_PROGRESS", "COMPLETED", "ABANDONED"]),
   total_rounds: z.number().int().min(1).max(5),
   completed_rounds: z.number().int().min(0).max(5),
@@ -79,6 +107,7 @@ const resultSchema = z.object({
   duration_seconds: z.number().int().min(0),
   started_at: z.string(),
   completed_at: z.string().nullable(),
+  practiced_difficult_words: z.array(z.string()).optional(),
 });
 const abandonSchema = z.object({
   session_id: z.uuid(),
@@ -90,6 +119,8 @@ export interface CreateSentenceShooterSessionInput {
   readonly book_id: string;
   readonly difficulty: SentenceShooterDifficulty;
   readonly total_rounds: number;
+  readonly learning_mode?: SentenceShooterLearningMode;
+  readonly focus_words?: readonly string[];
 }
 
 export interface SentenceShooterService {
@@ -105,7 +136,12 @@ export interface SentenceShooterService {
   ): Promise<SentenceShooterSessionDTO>;
   shoot(
     sessionId: string,
-    input: { round_id: string; token_id: string; request_id: string },
+    input: {
+      round_id: string;
+      token_id: string;
+      request_id: string;
+      client_shot_id?: string;
+    },
     signal?: AbortSignal,
   ): Promise<SentenceShooterShotDTO>;
   hint(

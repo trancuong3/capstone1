@@ -22,6 +22,7 @@ const parentRoutePrefixes = [
   "/reports",
   "/karaoke",
   "/settings",
+  "/studio",
 ] as const;
 
 const authRoutePrefixes = [

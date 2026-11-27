@@ -465,16 +465,17 @@
     "queuedWaitingWorkerShort": "Đã lưu trong hàng chờ — Tự động nhận diện khi sẵn sàng",
     "reasonQueuedOffline": "Trang sách đã được lưu an toàn trong hàng chờ và sẽ tự động nhận diện ngay khi hệ thống sẵn sàng trở lại.",
     "toolCheckFailedNotice": "Quá trình kiểm tra gặp sự cố kỹ thuật.",
-    "toolCheckCheckingNotice": "Hệ thống đang kiểm tra trang sách.",
+    "toolCheckCheckingNotice": "Đang chạy kiểm tra tự động cho trang.",
     "toolCheckReadyNotice": "Trang đã sẵn sàng để thêm vào sách.",
-    "toolCheckRejectedNotice": "Trang sách này chưa được phê duyệt.",
-    "toolCheckRecheckNotice": "Trang cần kiểm tra lại trước khi thêm vào sách.",
+    "toolCheckRejectedNotice": "Phiên bản trang này chưa được Admin phê duyệt.",
+    "toolCheckRecheckNotice": "Trang cần chạy kiểm tra lại trước khi thêm vào sách.",
     "toolCheckAddedNotice": "Trang đã được thêm vào sách.",
     "uploadOfflineQueueButton": "Tải trang & đưa vào hàng chờ OCR",
     "uploadQueuedOfflineNotice": "Đã lưu {total} trang ({format}) vào hàng chờ OCR. Hệ thống sẽ tự động nhận diện chữ, rà chính tả và kiểm tra an toàn ngay khi dịch vụ OCR hoạt động trở lại.",
     "retriedQueuedOfflineNotice": "Đã lưu yêu cầu thử lại vào hàng chờ OCR. Trang sẽ tự động xử lý ngay khi dịch vụ OCR mở lại.",
     "replacedPageImageQueuedOfflineNotice": "Đã thay ảnh trang {page} và đưa vào hàng chờ OCR. Trang sẽ tự động kiểm tra lại khi dịch vụ OCR mở lại.",
-    "replacedSubmissionImageQueuedOfflineNotice": "Đã thay ảnh mới và đưa vào hàng chờ OCR. Hệ thống sẽ tự động kiểm tra lại khi dịch vụ OCR mở lại."
+    "replacedSubmissionImageQueuedOfflineNotice": "Đã thay ảnh mới và đưa vào hàng chờ OCR. Hệ thống sẽ tự động kiểm tra lại khi dịch vụ OCR mở lại.",
+    "toolCheckPassedNotice": "Trang đã vượt qua kiểm tra an toàn."
   },
   "ocrContribution": {
     "cardAria": "Đóng góp mẫu cải thiện khả năng nhận diện chữ cho {title}",

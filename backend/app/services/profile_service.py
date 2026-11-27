@@ -6,7 +6,9 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from app.api.deps import invalidate_auth_cache_for_actor
 from app.database.config import SUPABASE_AVATAR_BUCKET
+from app.database.role_cache import invalidate_cached_role
 from app.providers.supabase_auth_contact_provider import SupabaseAuthContactProvider
 from app.repositories.profile_repository import ProfileRepository
 from app.services.storage_service import (
@@ -143,6 +145,8 @@ class ProfileService:
         deleted = await self.repository.delete_by_id(profile_id)
         if not deleted:
             raise ProfileNotFoundError()
+        invalidate_cached_role(profile_id)
+        invalidate_auth_cache_for_actor(profile_id)
 
     async def update_contact_phone_for_owner(
         self,

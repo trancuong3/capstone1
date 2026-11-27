@@ -41,12 +41,16 @@ describe("SSR auth cache and proxy handoff", () => {
     const incoming = new Headers({
       "x-viread-ssr-auth": "forged.payload",
       "x-viread-role": "admin",
+      "x-email-relay-timestamp": "1795753436",
+      "x-email-relay-signature": "email-hmac-signature",
       accept: "text/html",
     });
 
     const cleaned = stripUntrustedSsrAuthHeaders(incoming);
     expect(cleaned.get("x-viread-ssr-auth")).toBeNull();
     expect(cleaned.get("x-viread-role")).toBeNull();
+    expect(cleaned.get("x-email-relay-timestamp")).toBe("1795753436");
+    expect(cleaned.get("x-email-relay-signature")).toBe("email-hmac-signature");
     expect(cleaned.get("accept")).toBe("text/html");
   });
 

@@ -13,6 +13,7 @@ from app.api.deps import get_current_parent_id, get_db
 from app.schemas.book_assets import (
     BookAssetsSummaryResponse,
     BookCoverDeleteResponse,
+    BookCoverFromPageRequest,
     BookCoverGenerateRequest,
     BookCoverGenerateResponse,
     BookPresentationAssetRead,
@@ -25,7 +26,10 @@ from app.schemas.book_assets import (
     PageIllustrationModerationRequest,
 )
 from app.services.book_cover_service import BookCoverService, MAX_COVER_UPLOAD_BYTES
-from app.services.book_illustration_service import BookIllustrationService
+from app.services.book_illustration_service import (
+    BookIllustrationService,
+    _build_default_ocr_check_fn,
+)
 from app.services.book_style_bible import BookStyleBibleService
 from app.services.rate_limiter import rate_limit
 
@@ -124,10 +128,41 @@ async def generate_book_cover(
     _rate_limited: None = Depends(rate_limit("studio_ai_generate", default_max=30, default_window=60.0)),
 ) -> BookCoverGenerateResponse:
     _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
-    return await BookCoverService(db).generate_ai_cover(
+    return await BookCoverService(
+        db,
+        ocr_check_fn=_build_default_ocr_check_fn(),
+    ).generate_ai_cover(
         actor_id,
         book_id,
         payload or BookCoverGenerateRequest(),
+    )
+
+
+@router.post(
+    "/books/{book_id}/cover/from-page",
+    response_model=BookPresentationAssetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_book_cover_from_page(
+    book_id: UUID,
+    payload: BookCoverFromPageRequest,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_assets_write", default_max=60, default_window=60.0)),
+) -> BookPresentationAssetRead:
+    _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
+    return await BookCoverService(db).extract_cover_from_page(
+        book_id,
+        payload.page_id,
+        actor_id,
+        crop_x=payload.crop_x,
+        crop_y=payload.crop_y,
+        crop_w=payload.crop_w,
+        crop_h=payload.crop_h,
+        rotation=payload.rotation,
+        apply_clahe_restore=payload.apply_clahe_restore,
+        force_replace_user_upload=payload.force_replace_user_upload,
     )
 
 
@@ -164,7 +199,10 @@ async def extract_page_illustration(
     _rate_limited: None = Depends(rate_limit("studio_assets_write", default_max=60, default_window=60.0)),
 ) -> PageIllustrationExtractResponse:
     _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
-    return await BookIllustrationService(db).extract_page_illustration(
+    return await BookIllustrationService(
+        db,
+        ocr_check_fn=_build_default_ocr_check_fn(),
+    ).extract_page_illustration(
         actor_id,
         book_id,
         page_id,
@@ -186,7 +224,10 @@ async def generate_page_illustration(
     _rate_limited: None = Depends(rate_limit("studio_ai_generate", default_max=30, default_window=60.0)),
 ) -> PageIllustrationGenerateResponse:
     _apply_headers(response, _PRIVATE_NO_STORE_HEADERS)
-    return await BookIllustrationService(db).generate_page_illustration(
+    return await BookIllustrationService(
+        db,
+        ocr_check_fn=_build_default_ocr_check_fn(),
+    ).generate_page_illustration(
         actor_id,
         book_id,
         page_id,

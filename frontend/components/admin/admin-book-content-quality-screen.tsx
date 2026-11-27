@@ -334,6 +334,56 @@ function FindingCard({
   );
 }
 
+const DRAWER_LIST_PAGE_SIZE = 5;
+const PAGE_DIAGNOSTICS_PAGE_SIZE = 8;
+
+function ScanPageFindingsList({
+  findings,
+  bookId,
+  busyKey,
+  onUpdate,
+}: {
+  findings: readonly BookQualityFindingDTO[];
+  bookId: string;
+  busyKey: string | null;
+  onUpdate: (
+    finding: BookQualityFindingDTO,
+    status: Exclude<BookQualityFindingStatus, "STALE">,
+  ) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(findings.length / DRAWER_LIST_PAGE_SIZE),
+  );
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const visibleFindings = findings.slice(
+    (safePage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safePage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  return (
+    <div className="mt-3 grid gap-2.5">
+      {visibleFindings.map((finding) => (
+        <FindingCard
+          bookId={bookId}
+          busy={busyKey === `finding:${finding.id}`}
+          finding={finding}
+          key={finding.id}
+          onUpdate={onUpdate}
+        />
+      ))}
+      <PaginationBar
+        compact
+        onPageChange={setPage}
+        page={safePage}
+        pageSize={DRAWER_LIST_PAGE_SIZE}
+        total={findings.length}
+      />
+    </div>
+  );
+}
+
 export function AdminBookContentQualityScreen({
   embedded = false,
   refreshSignal = 0,
@@ -398,6 +448,12 @@ export function AdminBookContentQualityScreen({
   const [pageDiagnosticFilter, setPageDiagnosticFilter] = useState<
     "ALL" | "ISSUES" | "UNVERIFIED" | "MEDIA_OCR"
   >("ALL");
+  const [reportHistoryPage, setReportHistoryPage] = useState(1);
+  const [reportRelatedFindingsPage, setReportRelatedFindingsPage] = useState(1);
+  const [pageDiagnosticsPage, setPageDiagnosticsPage] = useState(1);
+  const [findingGroupsPage, setFindingGroupsPage] = useState(1);
+  const [aiWorkflowsPage, setAiWorkflowsPage] = useState(1);
+  const [scanPagesPage, setScanPagesPage] = useState(1);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const reportRequestId = useRef(0);
   const bookRequestId = useRef(0);
@@ -579,6 +635,8 @@ export function AdminBookContentQualityScreen({
     try {
       const detail = await bookContentQuality.getReport(reportId);
       setSelectedReport(detail);
+      setReportHistoryPage(1);
+      setReportRelatedFindingsPage(1);
       setResolutionNote(detail.admin_resolution_note ?? "");
     } catch (error) {
       setActionError(errorMessage(error, t));
@@ -626,6 +684,11 @@ export function AdminBookContentQualityScreen({
       const detail = await bookContentQuality.getBook(bookId);
       setSelectedBook(detail);
       setSelectedScan(detail.latest_scan_detail);
+      setPageDiagnosticFilter("ALL");
+      setPageDiagnosticsPage(1);
+      setFindingGroupsPage(1);
+      setAiWorkflowsPage(1);
+      setScanPagesPage(1);
       syncRightsForm(detail);
       setBookDecisionReason("");
       setFalsePositiveCategory("");
@@ -726,6 +789,7 @@ export function AdminBookContentQualityScreen({
     setActionError(null);
     try {
       setSelectedScan(await bookContentQuality.getScan(scanId));
+      setScanPagesPage(1);
     } catch (error) {
       setActionError(errorMessage(error, t));
     } finally {
@@ -785,6 +849,90 @@ export function AdminBookContentQualityScreen({
         workflow.safety_status === "FAILED" ||
         workflow.safety_status === "STALE",
     ).length ?? 0;
+
+  const reportHistoryItems = selectedReport?.history ?? [];
+  const safeReportHistoryPage = Math.min(
+    Math.max(1, reportHistoryPage),
+    Math.max(1, Math.ceil(reportHistoryItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleReportHistory = reportHistoryItems.slice(
+    (safeReportHistoryPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeReportHistoryPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const reportRelatedFindings = selectedReport?.related_findings ?? [];
+  const safeReportRelatedFindingsPage = Math.min(
+    Math.max(1, reportRelatedFindingsPage),
+    Math.max(
+      1,
+      Math.ceil(reportRelatedFindings.length / DRAWER_LIST_PAGE_SIZE),
+    ),
+  );
+  const visibleReportRelatedFindings = reportRelatedFindings.slice(
+    (safeReportRelatedFindingsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeReportRelatedFindingsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const filteredPageDiagnostics = (selectedBook?.page_diagnostics ?? []).filter(
+    (item) => {
+      if (pageDiagnosticFilter === "ALL") return true;
+      if (pageDiagnosticFilter === "ISSUES") {
+        return item.codes.some((code) => code !== "OK");
+      }
+      if (pageDiagnosticFilter === "UNVERIFIED") {
+        return item.codes.includes("UNVERIFIED_PAGE");
+      }
+      return item.codes.some((code) =>
+        [
+          "MISSING_IMAGE",
+          "EMPTY_OCR",
+          "OCR_ERROR",
+          "IMAGE_ONLY_PAGE",
+        ].includes(code),
+      );
+    },
+  );
+  const safePageDiagnosticsPage = Math.min(
+    Math.max(1, pageDiagnosticsPage),
+    Math.max(
+      1,
+      Math.ceil(filteredPageDiagnostics.length / PAGE_DIAGNOSTICS_PAGE_SIZE),
+    ),
+  );
+  const visiblePageDiagnostics = filteredPageDiagnostics.slice(
+    (safePageDiagnosticsPage - 1) * PAGE_DIAGNOSTICS_PAGE_SIZE,
+    safePageDiagnosticsPage * PAGE_DIAGNOSTICS_PAGE_SIZE,
+  );
+
+  const findingGroupItems = selectedBook?.assessment.finding_groups ?? [];
+  const safeFindingGroupsPage = Math.min(
+    Math.max(1, findingGroupsPage),
+    Math.max(1, Math.ceil(findingGroupItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleFindingGroups = findingGroupItems.slice(
+    (safeFindingGroupsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeFindingGroupsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const aiWorkflowItems = selectedBook?.ai_workflows ?? [];
+  const safeAiWorkflowsPage = Math.min(
+    Math.max(1, aiWorkflowsPage),
+    Math.max(1, Math.ceil(aiWorkflowItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleAiWorkflows = aiWorkflowItems.slice(
+    (safeAiWorkflowsPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeAiWorkflowsPage * DRAWER_LIST_PAGE_SIZE,
+  );
+
+  const scanPageItems = selectedScan?.pages ?? [];
+  const safeScanPagesPage = Math.min(
+    Math.max(1, scanPagesPage),
+    Math.max(1, Math.ceil(scanPageItems.length / DRAWER_LIST_PAGE_SIZE)),
+  );
+  const visibleScanPages = scanPageItems.slice(
+    (safeScanPagesPage - 1) * DRAWER_LIST_PAGE_SIZE,
+    safeScanPagesPage * DRAWER_LIST_PAGE_SIZE,
+  );
 
   const hasReportFilters = Boolean(
     search.trim() ||
@@ -1771,7 +1919,7 @@ export function AdminBookContentQualityScreen({
                     {t("contentQuality.reports.historyHeading")}
                   </h3>
                   <ol className="mt-2.5 space-y-3 border-s-2 border-border ps-3.5">
-                    {selectedReport.history.map((item, index) => (
+                    {visibleReportHistory.map((item, index) => (
                       <li key={`${item.created_at}-${index}`}>
                         <p className="text-xs font-bold text-ink">
                           {item.from_status
@@ -1790,6 +1938,14 @@ export function AdminBookContentQualityScreen({
                       </li>
                     ))}
                   </ol>
+                  <PaginationBar
+                    className="mt-3"
+                    compact
+                    onPageChange={setReportHistoryPage}
+                    page={safeReportHistoryPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={reportHistoryItems.length}
+                  />
                 </div>
 
                 <div className="rounded-xl border border-border bg-white p-4">
@@ -1798,7 +1954,7 @@ export function AdminBookContentQualityScreen({
                   </h3>
                   {selectedReport.related_findings.length ? (
                     <div className="mt-2.5 grid gap-2">
-                      {selectedReport.related_findings.map((finding) => (
+                      {visibleReportRelatedFindings.map((finding) => (
                         <div
                           className="rounded-control border border-border bg-surface-subtle/60 p-3"
                           key={finding.id}
@@ -1824,6 +1980,14 @@ export function AdminBookContentQualityScreen({
                           </p>
                         </div>
                       ))}
+                      <PaginationBar
+                        className="mt-1"
+                        compact
+                        onPageChange={setReportRelatedFindingsPage}
+                        page={safeReportRelatedFindingsPage}
+                        pageSize={DRAWER_LIST_PAGE_SIZE}
+                        total={reportRelatedFindings.length}
+                      />
                     </div>
                   ) : (
                     <p className="mt-2 text-xs text-muted">
@@ -2402,7 +2566,10 @@ export function AdminBookContentQualityScreen({
                               : "border-border bg-surface-subtle text-ink hover:border-primary/40",
                           )}
                           key={value}
-                          onClick={() => setPageDiagnosticFilter(value)}
+                          onClick={() => {
+                            setPageDiagnosticFilter(value);
+                            setPageDiagnosticsPage(1);
+                          }}
                           type="button"
                         >
                           {t(
@@ -2412,26 +2579,8 @@ export function AdminBookContentQualityScreen({
                       ))}
                     </div>
                   </div>
-                  <ul className="mt-3 grid max-h-64 gap-2 overflow-y-auto">
-                    {selectedBook.page_diagnostics
-                      .filter((item) => {
-                        if (pageDiagnosticFilter === "ALL") return true;
-                        if (pageDiagnosticFilter === "ISSUES") {
-                          return item.codes.some((code) => code !== "OK");
-                        }
-                        if (pageDiagnosticFilter === "UNVERIFIED") {
-                          return item.codes.includes("UNVERIFIED_PAGE");
-                        }
-                        return item.codes.some((code) =>
-                          [
-                            "MISSING_IMAGE",
-                            "EMPTY_OCR",
-                            "OCR_ERROR",
-                            "IMAGE_ONLY_PAGE",
-                          ].includes(code),
-                        );
-                      })
-                      .map((item, idx) => (
+                  <ul className="mt-3 grid gap-2">
+                    {visiblePageDiagnostics.map((item, idx) => (
                         <li
                           className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
                           key={`${item.page_number}:${item.page_id ?? idx}`}
@@ -2472,6 +2621,14 @@ export function AdminBookContentQualityScreen({
                         </li>
                       ))}
                   </ul>
+                  <PaginationBar
+                    className="mt-3"
+                    compact
+                    onPageChange={setPageDiagnosticsPage}
+                    page={safePageDiagnosticsPage}
+                    pageSize={PAGE_DIAGNOSTICS_PAGE_SIZE}
+                    total={filteredPageDiagnostics.length}
+                  />
                 </section>
               ) : null}
 
@@ -2481,7 +2638,7 @@ export function AdminBookContentQualityScreen({
                   <h4 className="text-sm font-extrabold text-ink">
                     {t("contentQuality.bookDetail.childSafetySummaryHeading")}
                   </h4>
-                  {selectedBook.assessment.finding_groups.map((group) => (
+                  {visibleFindingGroups.map((group) => (
                     <article
                       className="rounded-xl border border-border bg-white p-3.5"
                       key={`${group.category}:${group.severity}`}
@@ -2526,6 +2683,13 @@ export function AdminBookContentQualityScreen({
                       ))}
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setFindingGroupsPage}
+                    page={safeFindingGroupsPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={findingGroupItems.length}
+                  />
                 </div>
               ) : null}
 
@@ -2752,7 +2916,7 @@ export function AdminBookContentQualityScreen({
               ) : null}
               {selectedBook.ai_workflows.length ? (
                 <div className="mt-3 grid gap-3">
-                  {selectedBook.ai_workflows.map((workflow) => (
+                  {visibleAiWorkflows.map((workflow) => (
                     <article
                       className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
                       key={workflow.workflow_id}
@@ -2951,6 +3115,13 @@ export function AdminBookContentQualityScreen({
                       </details>
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setAiWorkflowsPage}
+                    page={safeAiWorkflowsPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={aiWorkflowItems.length}
+                  />
                 </div>
               ) : (
                 <p className="mt-2 text-xs text-muted">
@@ -3017,7 +3188,7 @@ export function AdminBookContentQualityScreen({
                 ) : null}
 
                 <div className="mt-3.5 grid gap-3">
-                  {selectedScan.pages.map((page) => (
+                  {visibleScanPages.map((page) => (
                     <article
                       className="rounded-xl border border-border bg-surface-subtle/40 p-3.5"
                       key={page.id}
@@ -3085,17 +3256,12 @@ export function AdminBookContentQualityScreen({
                         </div>
                       </div>
                       {page.findings.length ? (
-                        <div className="mt-3 grid gap-2.5">
-                          {page.findings.map((finding) => (
-                            <FindingCard
-                              bookId={selectedBook.book_id}
-                              busy={busyKey === `finding:${finding.id}`}
-                              finding={finding}
-                              key={finding.id}
-                              onUpdate={updateFinding}
-                            />
-                          ))}
-                        </div>
+                        <ScanPageFindingsList
+                          bookId={selectedBook.book_id}
+                          busyKey={busyKey}
+                          findings={page.findings}
+                          onUpdate={updateFinding}
+                        />
                       ) : (
                         <p className="mt-2 text-xs text-muted">
                           {page.status === "COMPLETED"
@@ -3105,6 +3271,13 @@ export function AdminBookContentQualityScreen({
                       )}
                     </article>
                   ))}
+                  <PaginationBar
+                    compact
+                    onPageChange={setScanPagesPage}
+                    page={safeScanPagesPage}
+                    pageSize={DRAWER_LIST_PAGE_SIZE}
+                    total={scanPageItems.length}
+                  />
                 </div>
               </section>
             ) : null}

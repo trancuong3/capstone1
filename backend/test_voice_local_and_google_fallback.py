@@ -1024,6 +1024,275 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         self.assertAlmostEqual(g_tx.words[0]["logprob"], math.log(0.9), places=6)
         self.assertIsNone(g_tx.words[1]["logprob"])
 
+    def test_elevenlabs_serves_tts_timed_phonics_and_stt_when_local_offline(self) -> None:
+        from app.providers.elevenlabs_voice_provider import (
+            ElevenLabsVoiceProvider,
+            SynthesizedAudio,
+            Transcription,
+        )
+
+        down_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        down_local.get_health = AsyncMock(  # type: ignore[method-assign]
+            return_value={"configured": False, "available": False, "stt_ready": False, "tts_ready": False}
+        )
+        down_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_timed = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_STT_UNAVAILABLE")
+        )
+
+        fake_mp3 = b"\xff\xfb\x90\x00" + (b"\x00" * 3996)  # 4000 bytes => 0.25s at 128kbps
+        el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+        el.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=SynthesizedAudio(
+                content=fake_mp3,
+                content_type="audio/mpeg",
+                resolved_voice_id="xeRzNgA5BGMAmllSnOuF",
+                used_fallback_voice=False,
+            )
+        )
+        el.transcribe = AsyncMock(  # type: ignore[method-assign]
+            return_value=Transcription(
+                text="bộ lông của miu",
+                language_code="vie",
+                language_probability=0.98,
+                words=[{"text": "bộ", "start": 0.0, "end": 0.2}],
+            )
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="", tts_api_key="")
+        orch = VoiceOrchestrator(
+            local_provider=down_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+
+        with _make_app(orch) as client:
+            status_resp = client.get("/voice/status")
+            self.assertEqual(status_resp.status_code, 200)
+            status_json = status_resp.json()
+            self.assertTrue(status_json["elevenlabs"]["configured"])
+            self.assertTrue(status_json["elevenlabs"]["tts_configured"])
+            self.assertTrue(status_json["elevenlabs"]["stt_configured"])
+
+            # TTS works with session_id when parent opted into cloud fallback & gender matches
+            tts_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Chị Dua đang bận ôn thi vào lớp mấy?",
+                    "session_id": "sess_el_1",
+                    "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            self.assertEqual(tts_resp.status_code, 200)
+            self.assertEqual(tts_resp.headers["x-voice-provider"], "elevenlabs")
+            self.assertEqual(tts_resp.headers["x-voice-fallback"], "0")
+
+            # Strict gender consistency: requesting a MALE voice must NEVER silently switch to FEMALE ElevenLabs!
+            male_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Thầy đọc mẫu cho con nghe nhé.",
+                    "voice_id": "local_north_thien_minh",
+                    "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            self.assertEqual(male_resp.status_code, 503)
+
+            # Strict offline-first: local_only mode must NEVER call ElevenLabs Online
+            local_only_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Chào con.",
+                    "speed": 0.9,
+                    "provider_mode": "local_only",
+                    "allow_google_tts": False,
+                },
+            )
+            self.assertEqual(local_only_resp.status_code, 503)
+
+            # Timed TTS works
+            timed_resp = client.post(
+                "/voice/text-to-speech/timed",
+                json={
+                    "words": ["Bộ", "lông", "của", "Miu"],
+                    "session_id": "sess_el_1",
+                    "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            self.assertEqual(timed_resp.status_code, 200)
+            timed_json = timed_resp.json()
+            self.assertEqual(timed_json["provider"], "elevenlabs")
+            self.assertEqual(len(timed_json["words"]), 4)
+
+            # Phonics synthesizes EVERY spelling step (not just the whole word!)
+            phonics_resp = client.post(
+                "/voice/text-to-speech/phonics",
+                json={
+                    "steps": [
+                        {"id": "rhyme", "spoken_text": "ô, tờ, ốt.", "pause_after_ms": 250},
+                        {"id": "onset", "spoken_text": "mờ, ốt.", "pause_after_ms": 250},
+                        {"id": "tone", "spoken_text": "sắc, mốt.", "pause_after_ms": 250},
+                        {"id": "whole", "spoken_text": "mốt.", "pause_after_ms": 250},
+                    ],
+                    "session_id": "sess_el_1",
+                    "speed": 0.85,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            self.assertEqual(phonics_resp.status_code, 200)
+            phonics_json = phonics_resp.json()
+            self.assertEqual(phonics_json["provider"], "elevenlabs")
+            self.assertEqual(len(phonics_json["step_timings"]), 4)
+            self.assertGreater(phonics_json["duration_seconds"], 0.5)
+
+            # STT works via ElevenLabs Scribe v2 when opted-in
+            stt_resp = client.post(
+                "/voice/speech-to-text",
+                data={
+                    "language_code": "vi",
+                    "session_id": "sess_el_1",
+                    "turn_id": "t1",
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_stt": "true",
+                },
+                files={"file": ("clip.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 64, "audio/webm")},
+            )
+            self.assertEqual(stt_resp.status_code, 200)
+            self.assertEqual(stt_resp.headers["x-voice-provider"], "elevenlabs")
+            self.assertEqual(stt_resp.json()["text"], "bộ lông của miu")
+
+    def test_transient_local_busy_retries_offline_without_switching_to_online(self) -> None:
+        from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
+
+        flaky_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        flaky_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                LocalVoiceTechnicalError(503, "VOICE_WORKER_BUSY"),
+                LocalSynthesizedAudio(
+                    content=_make_pcm_wav(),
+                    content_type="audio/wav",
+                    resolved_voice_id="local_north_truc_ly",
+                    region="north",
+                    model_version="vieneu-v3-turbo-onnx-fp32-3.8.5",
+                ),
+            ]
+        )
+        flaky_local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=[
+                LocalVoiceTechnicalError(503, "LOCAL_STT_BUSY"),
+                LocalTranscription(
+                    text="con mèo",
+                    language_code="vi",
+                    language_probability=0.95,
+                    words=[{"text": "con", "start": 0.0, "end": 0.2}],
+                    provider="local",
+                ),
+            ]
+        )
+        el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+        el.synthesize = AsyncMock()  # type: ignore[method-assign]
+        el.transcribe = AsyncMock()  # type: ignore[method-assign]
+        google = GoogleCloudVoiceProvider(stt_api_key="k", tts_api_key="k")
+        google.synthesize = AsyncMock()  # type: ignore[method-assign]
+        google.transcribe = AsyncMock()  # type: ignore[method-assign]
+
+        orch = VoiceOrchestrator(
+            local_provider=flaky_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+        with _make_app(orch) as client:
+            tts_resp = client.post(
+                "/voice/text-to-speech",
+                json={"text": "con mèo", "voice_id": "local_north_truc_ly", "speed": 1.0},
+            )
+            stt_resp = client.post(
+                "/voice/speech-to-text",
+                data={"language_code": "vi"},
+                files={"file": ("clip.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 64, "audio/webm")},
+            )
+
+        self.assertEqual(tts_resp.status_code, 200)
+        self.assertEqual(tts_resp.headers["x-voice-provider"], "local")
+        self.assertEqual(stt_resp.status_code, 200)
+        self.assertEqual(stt_resp.headers["x-voice-provider"], "local")
+        el.synthesize.assert_not_called()
+        el.transcribe.assert_not_called()
+        google.synthesize.assert_not_called()
+        google.transcribe.assert_not_called()
+
+    def test_get_status_reports_elevenlabs_configuration_and_cooldown(self) -> None:
+        import asyncio
+        from unittest.mock import MagicMock
+        from app.providers.elevenlabs_voice_provider import (
+            ElevenLabsVoiceProvider,
+            VoiceProviderError,
+        )
+
+        async def _scenario() -> None:
+            el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+            el.synthesize = AsyncMock(  # type: ignore[method-assign]
+                side_effect=VoiceProviderError(
+                    status_code=429,
+                    code="ELEVENLABS_QUOTA_EXCEEDED",
+                )
+            )
+            local = MagicMock(spec=LocalVoiceProvider)
+            local.is_configured = False
+            local.base_url = ""
+            local.get_health = AsyncMock(
+                return_value={
+                    "configured": False,
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNCONFIGURED",
+                }
+            )
+            local.synthesize = AsyncMock(
+                side_effect=LocalVoiceTechnicalError(503, "LOCAL_VOICE_UNCONFIGURED")
+            )
+            google = GoogleCloudVoiceProvider(stt_api_key="", tts_api_key="")
+            orch = VoiceOrchestrator(
+                local_provider=local,
+                google_provider=google,
+                elevenlabs_provider=el,
+            )
+            status_before = await orch.get_status()
+            self.assertTrue(status_before["elevenlabs"]["configured"])
+            self.assertFalse(status_before["elevenlabs"]["tts_cooldown"])
+            self.assertFalse(status_before["elevenlabs"]["stt_cooldown"])
+
+            with self.assertRaises(VoiceProviderError):
+                await orch.synthesize(
+                    text="xin chào",
+                    speed=1.0,
+                    policy=VoicePolicyContext(
+                        provider_mode="local_with_google_fallback",
+                        allow_google_tts=True,
+                    ),
+                )
+
+            status_after = await orch.get_status()
+            self.assertTrue(status_after["elevenlabs"]["configured"])
+            self.assertTrue(status_after["elevenlabs"]["tts_cooldown"])
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

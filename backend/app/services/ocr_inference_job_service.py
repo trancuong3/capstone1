@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 import difflib
 import hashlib
 import json
@@ -25,6 +26,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, OcrInferenceJob, OcrWorkerHeartbeat, PageRevision, ParentBookPageSubmission
 from app.repositories.ocr_inference_job_repository import ACTIVE_JOB_STATUSES, OcrInferenceJobRepository
 from app.services import storage_service
+from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_text_utils import (  # noqa: F401
     align_ocr_tokens,
     normalize_text_tokens,
@@ -294,6 +296,64 @@ def clear_active_model_manifest_cache() -> None:
     _ACTIVE_MODEL_MANIFEST_CACHE = None
 
 
+async def _run_model_reload_wakeup(reason: str, bypass_coalesce: bool) -> bool:
+    await asyncio.sleep(0)
+    try:
+        from app.services.remote_ocr_wakeup import send_remote_ocr_wakeup
+
+        return await send_remote_ocr_wakeup(
+            reason=reason,
+            job_id=None,
+            bypass_coalesce=bypass_coalesce,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Best-effort remote OCR model-reload wakeup failed (%s): %s",
+            reason,
+            type(exc).__name__,
+        )
+        return False
+
+
+def trigger_remote_ocr_model_reload_wakeup(
+    *,
+    reason: str = "active_model_promoted",
+    bypass_coalesce: bool = True,
+) -> asyncio.Task[Any] | None:
+    """Best-effort non-blocking remote OCR wakeup after active VietOCR promotion/rollback.
+
+    Clears the active-model manifest RAM cache (and cached remote health snapshot) and,
+    when a remote OCR worker URL is configured, schedules a non-blocking `POST /wakeup`
+    so Quiet-Standby / Scale-to-Zero workers immediately resync the newly active model.
+    Never blocks or raises on caller paths.
+    """
+    clear_active_model_manifest_cache()
+    try:
+        from app.services import remote_ocr_wakeup
+
+        remote_ocr_wakeup._HEALTH_CACHE = None
+        if not remote_ocr_wakeup.is_remote_worker_wakeup_configured():
+            return None
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            _run_model_reload_wakeup(reason=reason, bypass_coalesce=bypass_coalesce),
+            name="remote_ocr_model_reload_wakeup",
+        )
+        remote_ocr_wakeup._WAKEUP_TASKS.add(task)
+        task.add_done_callback(remote_ocr_wakeup._WAKEUP_TASKS.discard)
+        return task
+    except RuntimeError:
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Could not schedule remote OCR model-reload wakeup: %s",
+            type(exc).__name__,
+        )
+        return None
+
+
 def _session_in_transaction(db: Any) -> bool:
     """Return True if `db` already had an open transaction before a read helper ran."""
     in_tx = getattr(db, "in_transaction", None)
@@ -449,7 +509,6 @@ async def run_parent_submission_post_ocr(
         content_hash as safety_content_hash,
     )
     from app.services.ocr_ai.config import OcrCorrectionConfig
-    from app.services.ocr_ai.exceptions import OcrConfigurationError
     from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator, OcrOrchestrationError
 
     local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
@@ -470,10 +529,15 @@ async def run_parent_submission_post_ocr(
         snapshot_storage_path = row.SourceStoragePath
         snapshot_ocr_text = str(row.OcrText or "")
         snapshot_ocr_words = list(row.OcrWordsJson or [])
+        snapshot_ocr_meta = dict(row.OcrMetaJson or {}) if isinstance(row.OcrMetaJson, dict) else {}
         snapshot_is_image_only = bool(row.IsImageOnly)
         snapshot_proofread_status = str(row.ProofreadStatus)
         snapshot_tool_status = str(row.ToolCheckStatus)
         snapshot_candidate_text = str(row.CandidateText or "")
+        snapshot_candidate_words = list(row.CandidateWordsJson or [])
+        snapshot_committed_page_id = getattr(row, "CommittedPageId", None)
+        snapshot_committed_revision_id = getattr(row, "CommittedRevisionId", None)
+        snapshot_owner_parent_id = getattr(row, "OwnerParentId", None)
         snapshot_source_type = str(getattr(row, "SourceType", "") or "")
         snapshot_source_note = str(row.SourceNote or "")
         snapshot_page_num = int(
@@ -489,6 +553,62 @@ async def run_parent_submission_post_ocr(
                 )
             except Exception:
                 committed_texts = []
+
+    # Lightweight CPU-only V2 content extraction (0 ML imports, <1s) when not yet recorded
+    computed_smart_extraction_meta: dict[str, Any] | None = None
+    computed_smart_extraction_obj: Any | None = None
+    computed_smart_source_words: list[Any] = []
+    proofread_input_text = snapshot_candidate_text or snapshot_ocr_text
+    proofread_input_words = snapshot_candidate_words or snapshot_ocr_words
+    if (
+        not snapshot_is_image_only
+        and snapshot_ocr_words
+        and not isinstance(snapshot_ocr_meta.get("smart_ocr_extraction"), dict)
+    ):
+        try:
+            from app.services.ocr_content_extraction import (
+                build_extraction_provenance_meta,
+                extract_ocr_content,
+                filter_word_dicts_by_extraction,
+                ocr_words_from_dicts,
+            )
+            from app.services.smart_studio_flags import SmartStudioFlags
+
+            computed_smart_source_words = ocr_words_from_dicts(snapshot_ocr_words)
+            if computed_smart_source_words:
+                computed_smart_extraction_obj = extract_ocr_content(
+                    computed_smart_source_words,
+                    page_number=max(1, snapshot_page_num),
+                    flags=SmartStudioFlags.from_environment(),
+                    book_id=snapshot_book_id,
+                    book_page_id=snapshot_committed_page_id,
+                    page_revision_id=snapshot_committed_revision_id,
+                )
+                computed_smart_extraction_meta = build_extraction_provenance_meta(
+                    computed_smart_extraction_obj,
+                    computed_smart_source_words,
+                    allow_cloud_ai=not local_ai_enforced,
+                )
+                if (
+                    computed_smart_extraction_obj.filter_mode == "active"
+                    and computed_smart_extraction_obj.stats.exclude_blocks > 0
+                    and computed_smart_extraction_obj.canonical_text.strip()
+                    and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
+                ):
+                    filtered_post_words = filter_word_dicts_by_extraction(
+                        snapshot_ocr_words, computed_smart_extraction_obj
+                    )
+                    if filtered_post_words:
+                        proofread_input_text = normalize_private_book_text(
+                            computed_smart_extraction_obj.canonical_text
+                        )
+                        proofread_input_words = filtered_post_words
+        except Exception as exc:
+            logger.warning(
+                "Non-fatal post-OCR CPU extraction skipped for submission %s: %s",
+                submission_id,
+                type(exc).__name__,
+            )
 
     # Stage 2: AI proofreading (privacy-safe local default; respects PRIVATE_BOOK_ALLOW_CLOUD_AI)
     if (
@@ -511,12 +631,12 @@ async def run_parent_submission_post_ocr(
             # word_boxes always match len(plan.tokens) 1-to-1 with zero WORD_BOX_MISMATCH.
             tokens = [
                 t
-                for t in _WHITESPACE_RE.split(normalize_private_book_text(snapshot_ocr_text))
+                for t in _WHITESPACE_RE.split(normalize_private_book_text(proofread_input_text))
                 if t and normalize_word(t)
             ]
             filtered_ocr_words = [
                 w
-                for w in snapshot_ocr_words
+                for w in proofread_input_words
                 if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
             ]
             word_boxes: list[tuple[float, float, float, float]] = []
@@ -555,7 +675,7 @@ async def run_parent_submission_post_ocr(
             async def _invoke_proofread() -> str:
                 uncertain_set.clear()
                 return await orchestrator.correct(
-                    snapshot_ocr_text,
+                    proofread_input_text,
                     image_bytes,
                     word_boxes,
                     on_provider_event=_on_event,
@@ -569,11 +689,11 @@ async def run_parent_submission_post_ocr(
                 raise OcrOrchestrationError("EMPTY_PROOFREAD_OUTPUT")
             proofread_hash = safety_content_hash(proofread_text)
             suggestions = build_proofread_suggestions(
-                snapshot_ocr_words or snapshot_ocr_text,
+                proofread_input_words or proofread_input_text,
                 proofread_text,
                 uncertain_set,
             )
-            aligned_words = align_edited_text_to_words(proofread_text, snapshot_ocr_words)
+            aligned_words = align_edited_text_to_words(proofread_text, proofread_input_words)
             new_candidate_hash = compute_candidate_hash(
                 proofread_text,
                 source_sha256=snapshot_source_sha256,
@@ -612,6 +732,10 @@ async def run_parent_submission_post_ocr(
                 return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
 
             now = datetime.now(timezone.utc)
+            if computed_smart_extraction_meta is not None:
+                updated_ocr_meta = dict(locked.OcrMetaJson or {}) if isinstance(locked.OcrMetaJson, dict) else {}
+                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                locked.OcrMetaJson = updated_ocr_meta
             locked.ProofreadStatus = "COMPLETED"
             locked.ProofreadText = proofread_text
             locked.ProofreadHash = proofread_hash
@@ -627,6 +751,22 @@ async def run_parent_submission_post_ocr(
             )
             locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
             locked.UpdatedAt = now
+            if (
+                computed_smart_extraction_obj is not None
+                and snapshot_book_id is not None
+                and snapshot_committed_page_id is not None
+            ):
+                from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
+
+                await persist_extraction_savepoint_safe(
+                    db,
+                    book_id=snapshot_book_id,
+                    page_id=snapshot_committed_page_id,
+                    page_revision_id=snapshot_committed_revision_id,
+                    owner_id=snapshot_owner_parent_id,
+                    extraction=computed_smart_extraction_obj,
+                    source_words=computed_smart_source_words,
+                )
             await db.commit()
 
             snapshot_candidate_text = proofread_text
@@ -765,6 +905,19 @@ async def run_parent_submission_post_ocr(
                 return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
 
             now = datetime.now(timezone.utc)
+            if computed_smart_extraction_meta is not None and not isinstance(
+                (locked.OcrMetaJson or {}).get("smart_ocr_extraction")
+                if isinstance(locked.OcrMetaJson, dict)
+                else None,
+                dict,
+            ):
+                updated_ocr_meta = (
+                    dict(locked.OcrMetaJson or {})
+                    if isinstance(locked.OcrMetaJson, dict)
+                    else {}
+                )
+                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                locked.OcrMetaJson = updated_ocr_meta
             locked.ToolCheckStatus = tool_check_status
             locked.ToolCheckInputHash = snapshot_candidate_hash
             locked.ToolCheckSuitability = suitability
@@ -1069,6 +1222,63 @@ class OcrInferenceJobService:
                 "", source_sha256=sub.SourceSha256, is_image_only=True
             )
         else:
+            # Lightweight CPU-only V2 content extraction (0 ML imports, <1s, savepoint-guarded)
+            candidate_text = clean_full_text
+            candidate_words = normalized_words
+            parent_extraction_obj: Any | None = None
+            parent_source_words: list[Any] = []
+            try:
+                from app.services.ocr_content_extraction import (
+                    build_extraction_provenance_meta,
+                    extract_ocr_content,
+                    filter_word_dicts_by_extraction,
+                    ocr_words_from_dicts,
+                )
+                from app.services.smart_studio_flags import SmartStudioFlags
+
+                parent_source_words = ocr_words_from_dicts(normalized_words)
+                if parent_source_words:
+                    page_num = max(
+                        1,
+                        int(
+                            getattr(sub, "TargetPageNumber", None)
+                            or getattr(sub, "SourcePageNumber", None)
+                            or 1
+                        ),
+                    )
+                    parent_extraction_obj = extract_ocr_content(
+                        parent_source_words,
+                        page_number=page_num,
+                        flags=SmartStudioFlags.from_environment(),
+                        book_id=sub.BookId,
+                        book_page_id=getattr(sub, "CommittedPageId", None),
+                        page_revision_id=getattr(sub, "CommittedRevisionId", None),
+                    )
+                    merged_meta["smart_ocr_extraction"] = build_extraction_provenance_meta(
+                        parent_extraction_obj,
+                        parent_source_words,
+                        allow_cloud_ai=False,
+                    )
+                    sub.OcrMetaJson = merged_meta
+                    if (
+                        parent_extraction_obj.filter_mode == "active"
+                        and parent_extraction_obj.stats.exclude_blocks > 0
+                        and parent_extraction_obj.canonical_text.strip()
+                    ):
+                        filtered_parent_words = filter_word_dicts_by_extraction(
+                            normalized_words, parent_extraction_obj
+                        )
+                        if filtered_parent_words:
+                            candidate_text = normalize_private_book_text(
+                                parent_extraction_obj.canonical_text
+                            )
+                            candidate_words = filtered_parent_words
+            except Exception as exc:
+                logger.warning(
+                    "Non-fatal CPU extraction skipped in _apply_parent_submission_ocr_result: %s",
+                    type(exc).__name__,
+                )
+
             sub.OcrStatus = "COMPLETED"
             sub.IsImageOnly = False
             sub.OcrText = clean_full_text
@@ -1077,11 +1287,28 @@ class OcrInferenceJobService:
                 " ".join(unicodedata.normalize("NFC", clean_full_text).split()).encode("utf-8")
             ).hexdigest()
             sub.ProofreadStatus = "PENDING"
-            sub.CandidateText = clean_full_text
-            sub.CandidateWordsJson = normalized_words
+            sub.CandidateText = candidate_text
+            sub.CandidateWordsJson = candidate_words
             sub.CandidateHash = compute_candidate_hash(
-                clean_full_text, source_sha256=sub.SourceSha256, is_image_only=False
+                candidate_text, source_sha256=sub.SourceSha256, is_image_only=False
             )
+            committed_page_id = getattr(sub, "CommittedPageId", None)
+            if (
+                parent_extraction_obj is not None
+                and sub.BookId is not None
+                and committed_page_id is not None
+            ):
+                from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
+
+                await persist_extraction_savepoint_safe(
+                    self.db,
+                    book_id=sub.BookId,
+                    page_id=committed_page_id,
+                    page_revision_id=getattr(sub, "CommittedRevisionId", None),
+                    owner_id=getattr(sub, "OwnerParentId", None),
+                    extraction=parent_extraction_obj,
+                    source_words=parent_source_words,
+                )
 
         sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
         sub.UpdatedAt = now
@@ -1631,7 +1858,10 @@ class OcrInferenceJobService:
         job_image_path = job.ImagePath
         job_image_bucket = job.ImageBucket
         job_worker = job.WorkerId or worker_id
-        job_expected_profile = (job.ProcessingMeta or {}).get("expected_model_profile")
+        job_proc_meta = job.ProcessingMeta or {}
+        job_expected_profile = job_proc_meta.get("expected_model_profile")
+        job_active_profile = job_proc_meta.get("active_model_profile")
+        job_active_sha = job_proc_meta.get("active_model_sha256")
 
         # Commit DB transaction BEFORE calling Supabase Storage signed URL API so row locks
         # and ConcurrencyLimitedAsyncSession permits are never held across network I/O.
@@ -1673,6 +1903,8 @@ class OcrInferenceJobService:
             "source_fallback_path": fallback_path,
             "refresh_url_path": f"/internal/ocr-jobs/{job_id}/refresh-source-url",
             "expected_model_profile": job_expected_profile,
+            "active_model_profile": job_active_profile,
+            "active_model_sha256": job_active_sha,
         }
 
     async def _require_active_claim(
@@ -2061,11 +2293,42 @@ class OcrInferenceJobService:
         eff_config_sha = proc_meta.get("active_config_sha256")
         eff_pipeline = str(proc_meta.get("pipeline_version") or OCR_PIPELINE_VERSION)
 
+        local_scan_extraction_summary: dict[str, Any] | None = None
+        if job.JobKind == JOB_KIND_LOCAL_SCAN and not no_text_detected and normalized_words:
+            try:
+                from app.services.ocr_content_extraction import (
+                    extract_ocr_content,
+                    ocr_words_from_dicts,
+                )
+                from app.services.smart_studio_flags import SmartStudioFlags
+
+                scan_words = ocr_words_from_dicts(normalized_words)
+                if scan_words:
+                    scan_ext = extract_ocr_content(
+                        scan_words,
+                        page_number=1,
+                        flags=SmartStudioFlags.from_environment(),
+                    )
+                    local_scan_extraction_summary = {
+                        "filter_mode": scan_ext.filter_mode,
+                        "page_kind": scan_ext.page_kind,
+                        "canonical_text": scan_ext.canonical_text,
+                        "requires_review": bool(scan_ext.requires_review),
+                        "exclude_blocks": scan_ext.stats.exclude_blocks,
+                    }
+            except Exception:
+                local_scan_extraction_summary = None
+
         job.ResultPayload = {
             "full_text": clean_full_text,
             "words": normalized_words,
             "ocr_meta": dict(ocr_meta or {}),
             "no_text_detected": bool(no_text_detected),
+            **(
+                {"smart_ocr_extraction": local_scan_extraction_summary}
+                if local_scan_extraction_summary is not None
+                else {}
+            ),
             "cache_key": {
                 "image_sha256": job.ImageSha256,
                 "active_model_profile": eff_profile,
@@ -2239,14 +2502,29 @@ class OcrInferenceJobService:
             "next_retry_at": job.NextRetryAt.isoformat() if job.NextRetryAt else None,
         }
 
+    async def _build_drive_artifact_router(self) -> Any:
+        from app.services.viread_drive_connection_service import VireadDriveConnectionService
+
+        try:
+            return await VireadDriveConnectionService(self.db).build_artifact_router()
+        except TypeError as exc:
+            # Legacy unit tests may pass a synchronous MagicMock() as `db` and patch
+            # `get_runtime_artifact_router()`. Never swallow real DB or Drive errors.
+            if "can't be used in 'await' expression" not in str(exc):
+                raise
+            from app.services.training_storage.router import get_runtime_artifact_router
+
+            return get_runtime_artifact_router()
+
     async def get_active_model_manifest(self) -> dict[str, Any]:
         global _ACTIVE_MODEL_MANIFEST_CACHE
         import copy as _copy
         import time as _time
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
 
         was_in_tx = _session_in_transaction(self.db)
         pointer = await self.repo.get_active_model_pointer()
-        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
 
         profile = str((pointer or {}).get("profile") or "ORIGINAL")
         checkpoint_sha = str(
@@ -2265,6 +2543,7 @@ class OcrInferenceJobService:
             "shards": [],
         }
         if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return base
 
         cache_key = (profile, checkpoint_sha, str(storage_path))
@@ -2274,16 +2553,50 @@ class OcrInferenceJobService:
             and _ACTIVE_MODEL_MANIFEST_CACHE[1] == cache_key
             and now_mono < _ACTIVE_MODEL_MANIFEST_CACHE[0]
         ):
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return _copy.deepcopy(_ACTIVE_MODEL_MANIFEST_CACHE[2])
 
-        try:
-            manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
-            manifest = json.loads(manifest_bytes.decode("utf-8"))
-        except Exception as exc:
-            logger.warning("Failed reading active VietOCR manifest: %s", type(exc).__name__)
-            return base
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                # Release DB read transaction BEFORE any Google Drive network I/O.
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
 
-        from app.services.training_storage.references import is_gdrive_ref
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("Active VietOCR manifest must be a JSON object")
+        except TrainingStorageError as exc:
+            logger.warning(
+                "Failed reading active VietOCR manifest from Drive (%s): %s",
+                exc.code,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Active VietOCR manifest unavailable from storage ({exc.code}).",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Failed reading active VietOCR manifest (%s): %s",
+                "gdrive" if is_gdrive_ref(storage_ref) else "storage",
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Active VietOCR manifest unavailable from storage.",
+            ) from exc
 
         local_dir = (os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip()
         can_sign_storage = not local_dir and APP_ENVIRONMENT != "test"
@@ -2341,37 +2654,233 @@ class OcrInferenceJobService:
             return get_runtime_artifact_router().get(ref)
         return storage_service.download_object(ref)
 
-    async def get_active_model_artifact_bytes(
-        self, *, kind: str, shard_index: int | None = None
-    ) -> tuple[bytes, str]:
-        was_in_tx = _session_in_transaction(self.db)
-        pointer = await self.repo.get_active_model_pointer()
-        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
-        storage_path = (pointer or {}).get("storage_path")
-        if not storage_path:
-            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
-        manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-
+    @staticmethod
+    def _resolve_manifest_artifact_target(
+        manifest: dict[str, Any],
+        *,
+        kind: str,
+        shard_index: int | None = None,
+    ) -> tuple[str, str, int | None, str]:
         if kind == "config":
             config_info = manifest.get("config") or {}
             ref = config_info.get("storage_path")
             expected_sha = str(config_info.get("sha256") or "").lower()
+            expected_bytes = config_info.get("bytes")
             if not ref:
                 raise HTTPException(status_code=404, detail="Active VietOCR config not present.")
-        elif kind == "shard":
+            return (
+                str(ref),
+                expected_sha,
+                int(expected_bytes) if isinstance(expected_bytes, int) and expected_bytes >= 0 else None,
+                "application/x-yaml",
+            )
+        if kind == "shard":
             chunks = manifest.get("chunks") or []
             if shard_index is None or shard_index < 0 or shard_index >= len(chunks):
                 raise HTTPException(status_code=404, detail="Shard index out of range.")
             chunk = chunks[shard_index]
+            if not isinstance(chunk, dict):
+                raise HTTPException(status_code=404, detail="Shard entry is invalid.")
             ref = chunk.get("path") or chunk.get("storage_path")
             expected_sha = str(chunk.get("sha256") or "").lower()
+            expected_bytes = chunk.get("bytes")
             if not ref:
                 raise HTTPException(status_code=404, detail="Shard storage path missing.")
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported artifact kind.")
+            return (
+                str(ref),
+                expected_sha,
+                int(expected_bytes) if isinstance(expected_bytes, int) and expected_bytes >= 0 else None,
+                "application/octet-stream",
+            )
+        raise HTTPException(status_code=400, detail="Unsupported artifact kind.")
 
-        payload = await asyncio.to_thread(self._download_model_ref, str(ref))
+    async def open_active_model_artifact_stream(
+        self,
+        *,
+        kind: str,
+        shard_index: int | None = None,
+    ) -> tuple[Iterator[bytes], str, dict[str, str]]:
+        """Stream active VietOCR checkpoint shards/config without buffering ~40 MiB Drive files in RAM."""
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
+
+        was_in_tx = _session_in_transaction(self.db)
+        pointer = await self.repo.get_active_model_pointer()
+        storage_path = (pointer or {}).get("storage_path")
+        if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
+
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                # Release DB read transaction BEFORE any Drive metadata/download/streaming I/O.
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("Active VietOCR manifest must be a JSON object")
+        except TrainingStorageError as exc:
+            raise HTTPException(
+                status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Active VietOCR manifest unavailable ({exc.code}).",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Active VietOCR manifest unavailable from storage.",
+            ) from exc
+
+        ref, expected_sha, expected_bytes, media_type = self._resolve_manifest_artifact_target(
+            manifest,
+            kind=kind,
+            shard_index=shard_index,
+        )
+
+        if is_gdrive_ref(ref):
+            if artifact_router is None:
+                tx_before_lazy = _session_in_transaction(self.db)
+                try:
+                    artifact_router = await self._build_drive_artifact_router()
+                finally:
+                    await _release_clean_self_opened_transaction(self.db, was_in_tx=tx_before_lazy)
+            try:
+                if hasattr(artifact_router, "open_stream_with_metadata"):
+                    meta, chunk_iterator = await asyncio.to_thread(
+                        artifact_router.open_stream_with_metadata,
+                        ref,
+                        expected_sha256=expected_sha or None,
+                    )
+                else:
+                    meta = await asyncio.to_thread(artifact_router.get_metadata, ref)
+                    if getattr(meta, "trashed", False):
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Requested active VietOCR artifact is unavailable.",
+                        )
+                    chunk_iterator = artifact_router.open_stream(
+                        ref,
+                        expected_sha256=expected_sha or None,
+                        preloaded_meta=meta,
+                    )
+            except TrainingStorageError as exc:
+                raise HTTPException(
+                    status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=exc.code,
+                ) from exc
+            if getattr(meta, "trashed", False):
+                raise HTTPException(
+                    status_code=404,
+                    detail="Requested active VietOCR artifact is unavailable.",
+                )
+
+            headers: dict[str, str] = {
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            }
+            resolved_sha = expected_sha or str(getattr(meta, "sha256", "") or "").lower()
+            if resolved_sha:
+                headers["X-Content-Sha256"] = resolved_sha
+            resolved_size = getattr(meta, "size_bytes", None)
+            if resolved_size is None:
+                resolved_size = expected_bytes
+            if resolved_size is not None:
+                headers["Content-Length"] = str(int(resolved_size))
+            return chunk_iterator, media_type, headers
+
+        # Supabase / legacy non-Drive path: preserve checksum verification and chunked response.
+        payload = await asyncio.to_thread(self._download_model_ref, ref)
+        actual_sha = hashlib.sha256(payload).hexdigest()
+        if expected_sha and actual_sha != expected_sha:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Artifact SHA-256 verification failed on backend.",
+            )
+
+        def _chunk_iter() -> Iterator[bytes]:
+            chunk_size = 65536
+            view = memoryview(payload)
+            for offset in range(0, len(view), chunk_size):
+                yield bytes(view[offset : offset + chunk_size])
+
+        headers = {
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-Sha256": actual_sha,
+            "Content-Length": str(len(payload)),
+        }
+        return _chunk_iter(), media_type, headers
+
+    async def get_active_model_artifact_bytes(
+        self, *, kind: str, shard_index: int | None = None
+    ) -> tuple[bytes, str]:
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
+
+        was_in_tx = _session_in_transaction(self.db)
+        pointer = await self.repo.get_active_model_pointer()
+        storage_path = (pointer or {}).get("storage_path")
+        if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
+
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except TrainingStorageError as exc:
+            raise HTTPException(
+                status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=exc.code,
+            ) from exc
+
+        ref, expected_sha, _expected_bytes, _media_type = self._resolve_manifest_artifact_target(
+            manifest,
+            kind=kind,
+            shard_index=shard_index,
+        )
+
+        if is_gdrive_ref(ref):
+            if artifact_router is None:
+                tx_before_lazy = _session_in_transaction(self.db)
+                try:
+                    artifact_router = await self._build_drive_artifact_router()
+                finally:
+                    await _release_clean_self_opened_transaction(self.db, was_in_tx=tx_before_lazy)
+            try:
+                payload = await asyncio.to_thread(artifact_router.get, ref)
+            except TrainingStorageError as exc:
+                raise HTTPException(
+                    status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=exc.code,
+                ) from exc
+        else:
+            payload = await asyncio.to_thread(self._download_model_ref, ref)
+
         actual_sha = hashlib.sha256(payload).hexdigest()
         if expected_sha and actual_sha != expected_sha:
             raise HTTPException(

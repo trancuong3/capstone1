@@ -208,53 +208,99 @@ export async function getWasmModelCacheStatus(): Promise<WasmModelCacheStatus> {
           tx.onerror = () =>
             finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ERROR"));
           const store = tx.objectStore(IDB_STORE);
-          let cachedFiles = 0;
-          let cachedBytes = 0;
-          let pending = MODEL_FILE_SPECS.length;
-          for (const spec of MODEL_FILE_SPECS) {
-            const getReq = store.get(`${SHERPA_WASM_MODEL_ID}/${spec.name}`);
-            getReq.onsuccess = () => {
-              const rec = getReq.result as
-                { byteLength?: number; buffer?: ArrayBuffer } | undefined;
-              const rawLen = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
-              const len =
-                typeof rawLen === "number" &&
-                Number.isFinite(rawLen) &&
-                rawLen > 0
-                  ? rawLen
-                  : 0;
-              if (len === spec.expectedBytes) {
-                cachedFiles += 1;
-                cachedBytes += len;
+          const checkLegacyEntries = () => {
+            let cachedFiles = 0;
+            let cachedBytes = 0;
+            let pending = MODEL_FILE_SPECS.length;
+            for (const spec of MODEL_FILE_SPECS) {
+              const getReq = store.get(`${SHERPA_WASM_MODEL_ID}/${spec.name}`);
+              getReq.onsuccess = () => {
+                const rec = getReq.result as
+                  { byteLength?: number; buffer?: ArrayBuffer } | undefined;
+                const rawLen = rec?.buffer?.byteLength ?? rec?.byteLength ?? 0;
+                const len =
+                  typeof rawLen === "number" &&
+                  Number.isFinite(rawLen) &&
+                  rawLen > 0
+                    ? rawLen
+                    : 0;
+                if (len === spec.expectedBytes) {
+                  cachedFiles += 1;
+                  cachedBytes += len;
+                }
+                pending -= 1;
+                if (pending === 0) {
+                  finish({
+                    ready: cachedFiles === MODEL_FILE_SPECS.length,
+                    cachedFiles,
+                    expectedFiles: MODEL_FILE_SPECS.length,
+                    cachedBytes,
+                    totalBytes: SHERPA_WASM_MODEL_BYTES,
+                    supported: true,
+                    error: null,
+                  });
+                }
+              };
+              getReq.onerror = () => {
+                pending -= 1;
+                if (pending === 0) {
+                  finish({
+                    ready: cachedFiles === MODEL_FILE_SPECS.length,
+                    cachedFiles,
+                    expectedFiles: MODEL_FILE_SPECS.length,
+                    cachedBytes,
+                    totalBytes: SHERPA_WASM_MODEL_BYTES,
+                    supported: true,
+                    error: null,
+                  });
+                }
+              };
+            }
+          };
+
+          // Fast metadata-only path: read tiny ~500-byte verified manifest instead of
+          // loading 33.92 MB of model ArrayBuffers onto the main UI thread!
+          const manifestReq = store.get(`${SHERPA_WASM_MODEL_ID}/__manifest__`);
+          manifestReq.onsuccess = () => {
+            const manifest = manifestReq.result as
+              | {
+                  files?: Record<
+                    string,
+                    { byteLength?: number; verified?: boolean }
+                  >;
+                }
+              | undefined;
+            if (manifest?.files && typeof manifest.files === "object") {
+              let cachedFiles = 0;
+              let cachedBytes = 0;
+              for (const spec of MODEL_FILE_SPECS) {
+                const entry = manifest.files[spec.name];
+                if (
+                  entry?.verified &&
+                  typeof entry.byteLength === "number" &&
+                  Number.isFinite(entry.byteLength) &&
+                  entry.byteLength === spec.expectedBytes
+                ) {
+                  cachedFiles += 1;
+                  cachedBytes += entry.byteLength;
+                }
               }
-              pending -= 1;
-              if (pending === 0) {
-                finish({
-                  ready: cachedFiles === MODEL_FILE_SPECS.length,
-                  cachedFiles,
-                  expectedFiles: MODEL_FILE_SPECS.length,
-                  cachedBytes,
-                  totalBytes: SHERPA_WASM_MODEL_BYTES,
-                  supported: true,
-                  error: null,
-                });
-              }
-            };
-            getReq.onerror = () => {
-              pending -= 1;
-              if (pending === 0) {
-                finish({
-                  ready: cachedFiles === MODEL_FILE_SPECS.length,
-                  cachedFiles,
-                  expectedFiles: MODEL_FILE_SPECS.length,
-                  cachedBytes,
-                  totalBytes: SHERPA_WASM_MODEL_BYTES,
-                  supported: true,
-                  error: null,
-                });
-              }
-            };
-          }
+              finish({
+                ready: cachedFiles === MODEL_FILE_SPECS.length,
+                cachedFiles,
+                expectedFiles: MODEL_FILE_SPECS.length,
+                cachedBytes,
+                totalBytes: SHERPA_WASM_MODEL_BYTES,
+                supported: true,
+                error: null,
+              });
+              return;
+            }
+            checkLegacyEntries();
+          };
+          manifestReq.onerror = () => {
+            checkLegacyEntries();
+          };
         } catch {
           finish(emptyWasmCacheStatus(false, "INDEXEDDB_TRANSACTION_ERROR"));
         }
@@ -543,11 +589,16 @@ interface PendingJob {
 export class BrowserWasmSttClient {
   private worker: Worker | null = null;
   private readyPromise: Promise<void> | null = null;
+  private ready = false;
   private reqCounter = 0;
   private readonly pending = new Map<string, PendingJob>();
   private readonly progressListeners = new Set<
     (event: WasmSttProgressEvent) => void
   >();
+
+  isReady(): boolean {
+    return this.ready && this.worker !== null;
+  }
 
   subscribeProgress(
     listener: (event: WasmSttProgressEvent) => void,
@@ -623,6 +674,7 @@ export class BrowserWasmSttClient {
       if (this.worker === worker) {
         this.worker = null;
       }
+      this.ready = false;
       this.readyPromise = null;
       this.failAllPending(failure);
     };
@@ -673,6 +725,7 @@ export class BrowserWasmSttClient {
         }
         if (payload.type === "init" && this.worker === worker) {
           this.worker = null;
+          this.ready = false;
           this.readyPromise = null;
           try {
             worker.postMessage({ type: "dispose", id: "init_timeout_dispose" });
@@ -710,16 +763,18 @@ export class BrowserWasmSttClient {
       : null;
     try {
       if (!this.readyPromise) {
+        this.ready = false;
         // Keep shared init independent of individual caller aborts so a TTS pause
         // never cancels an in-flight 34MB model download for the next utterance.
-        this.readyPromise = this.postRequest<void>(
-          { type: "init" },
-          [],
-          90_000,
-        ).catch((err) => {
-          this.readyPromise = null;
-          throw err;
-        });
+        this.readyPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
+          .then(() => {
+            this.ready = true;
+          })
+          .catch((err) => {
+            this.ready = false;
+            this.readyPromise = null;
+            throw err;
+          });
       }
       await raceWithSignalAndTimeout(this.readyPromise, {
         signal,
@@ -735,18 +790,21 @@ export class BrowserWasmSttClient {
     options: {
       signal?: AbortSignal;
       timeoutMs?: number;
+      initTimeoutMs?: number;
       sampleRate?: number;
       voicedDurationMs?: number;
       onProgress?: (event: WasmSttProgressEvent) => void;
     } = {},
   ): Promise<BrowserWasmDecodeResult> {
-    const totalTimeoutMs = options.timeoutMs ?? 15_000;
-    const deadline = Date.now() + totalTimeoutMs;
+    const decodeTimeoutMs = options.timeoutMs ?? 15_000;
+    // Separate cold model init/download budget from per-utterance decode timeout
+    // so a 4s interim timeout never aborts/trips fallback during initial WASM startup!
+    const initTimeoutMs =
+      options.initTimeoutMs ?? Math.max(decodeTimeoutMs, 60_000);
     await this.init(options.signal, {
-      timeoutMs: totalTimeoutMs,
+      timeoutMs: initTimeoutMs,
       onProgress: options.onProgress,
     });
-    const remainingMs = Math.max(100, deadline - Date.now());
     const copy = new Float32Array(samples16k);
     return this.postRequest<BrowserWasmDecodeResult>(
       {
@@ -759,7 +817,7 @@ export class BrowserWasmSttClient {
           : {}),
       },
       [copy.buffer],
-      remainingMs,
+      decodeTimeoutMs,
       options.signal,
     );
   }
@@ -792,7 +850,9 @@ export class BrowserWasmSttClient {
   dispose(): void {
     const worker = this.worker;
     this.worker = null;
+    this.ready = false;
     this.readyPromise = null;
+    this.ready = false;
     this.failAllPending(new DOMException("Disposed", "AbortError"));
     if (worker) {
       try {

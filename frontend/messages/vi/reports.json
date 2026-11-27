@@ -161,7 +161,8 @@
       "maxRetriesReached": "Đã luyện đủ ba lần",
       "uncertainLabel": "Chưa nghe rõ",
       "uncertainNote": "Ghi nhận riêng, không tính là lỗi phát âm đã xác nhận."
-    }
+    },
+    "entertainmentSummaryHeading": "Học tập qua Giải trí & Kỹ năng ngôn ngữ (V4.0)"
   },
   "sessions": {
     "title": "Lịch sử đọc",
@@ -643,5 +644,26 @@
       "wantToRead": "Muốn đọc",
       "savedToRead": "Đã lưu đọc"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "Đang tổng hợp tiến độ Học mà Chơi cho {childName}…",
+    "empty": "Chưa có dữ liệu Học mà Chơi gần đây cho {childName}. Khi bé chơi Kể chuyện tranh, Xạ thủ ghép câu, Karaoke hoặc Bé nhớ được gì?, tổng hợp sẽ tự động xuất hiện tại đây.",
+    "observedCounterLabel": "Kỹ năng đã quan sát rõ",
+    "estimatedCounterLabel": "Kỹ năng ước lượng bước đầu",
+    "unknownCounterLabel": "Chưa đủ dữ liệu",
+    "activitiesTitle": "Hoạt động Học mà Chơi ({days} ngày qua)",
+    "avgScoreBadge": "TB {pct}%",
+    "noScoreBadge": "Chưa có điểm",
+    "skillsMapTitle": "Bản đồ kỹ năng (không suy đoán khi thiếu dữ liệu)",
+    "evidenceCount": "{count} bằng chứng",
+    "noPracticeYet": "Bé chưa luyện hoạt động thuộc nhóm kỹ năng này nên hệ thống giữ nguyên trạng thái chưa đánh giá.",
+    "statusObserved": "Đã quan sát rõ",
+    "statusEstimated": "Ước lượng bước đầu",
+    "statusUnknown": "Chưa đủ dữ liệu",
+    "practicedWordsTitle": "Từ khó đã được ôn nhẹ qua trò chơi",
+    "practiceTimes": "{count} lần",
+    "karaokeWeakSegmentsTitle": "Đoạn hát bé nên luyện chậm 0.85x thêm",
+    "openSongAction": "Mở bài hát",
+    "homeTipsTitle": "Gợi ý đồng hành tại nhà cho ba mẹ"
   }
 }

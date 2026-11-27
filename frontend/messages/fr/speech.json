@@ -79,7 +79,14 @@
       "american": "Accent américain",
       "british": "Accent britannique"
     },
-    "googleProviderLabel": "En ligne"
+    "googleProviderLabel": "En ligne",
+    "wifiReadyBadge": "Prêt hors ligne",
+    "offlineCacheMultiple": "Le service vocal local est hors ligne. L’audio pré-généré en mode Wi-Fi autonome est prêt pour : {voices} ; les autres voix nécessitent de démarrer le service local ou d’activer le secours ci-dessous.",
+    "offlineCacheSingle": "Le service vocal local est hors ligne. L’audio pré-généré en mode Wi-Fi autonome est prêt pour {voice} ; pour écouter d’autres voix régionales, démarrez le service local ou activez le secours ci-dessous.",
+    "offlineCacheEmpty": "Le service vocal local est hors ligne et aucun audio pré-généré n’est disponible localement. Démarrez le service local ou activez le secours ci-dessous pour écouter un exemple.",
+    "localWorkerLabel": "Service local :",
+    "sessionLockedBadge": "Verrouillée pour cette séance de lecture",
+    "offlineBrowserBadge": "Navigateur hors ligne"
   },
   "engineBadge": {
     "ariaLabel": "État vocal : Écoute {stt}, Lecture {tts}",
@@ -96,10 +103,12 @@
       "catalog_cache": "Préparée",
       "android_native": "Appareil",
       "google_cloud": "En ligne",
-      "browser_default": "Navigateur"
+      "browser_default": "Navigateur",
+      "idle": "Vérification…"
     },
     "listenPrefix": "Écoute",
-    "speakPrefix": "Lecture"
+    "speakPrefix": "Lecture",
+    "idleDetail": "{base} (Vérification du moteur vocal)"
   },
   "playback": {
     "unavailable": "La voix sur l'appareil n'est pas prête. Vous pouvez suivre le texte à l'écran et appuyer sur Réessayer.",

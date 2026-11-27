@@ -935,6 +935,7 @@ export function createAdminPageService(options?: {
             z.object({
               book_id: z.uuid(),
               page_number: z.number().int().positive(),
+              text_preview: z.string().nullable().optional(),
               processing: adminProcessingSchema,
             }),
           )
