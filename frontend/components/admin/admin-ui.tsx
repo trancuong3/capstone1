@@ -3,9 +3,13 @@
 import { ChevronDown, ChevronRight, Search, X } from "lucide-react";
 import Link from "next/link";
 import {
+  Children,
+  isValidElement,
   useEffect,
   useId,
+  useMemo,
   useRef,
+  useState,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
@@ -534,20 +538,92 @@ export interface AdminSelectProps extends Omit<
   readonly options?: readonly AdminSelectOption[];
 }
 
+function extractNodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(extractNodeText).join("");
+  }
+  if (isValidElement<{ readonly children?: ReactNode }>(node)) {
+    return extractNodeText(node.props.children);
+  }
+  return "";
+}
+
+function extractOptionsFromChildren(children: ReactNode): AdminSelectOption[] {
+  const result: AdminSelectOption[] = [];
+  for (const child of Children.toArray(children)) {
+    if (
+      !isValidElement<{
+        readonly value?: string | number;
+        readonly children?: ReactNode;
+      }>(child)
+    ) {
+      continue;
+    }
+    if (child.type === "option") {
+      const label = extractNodeText(child.props.children).trim();
+      const optionValue =
+        child.props.value !== undefined ? String(child.props.value) : label;
+      result.push({ value: optionValue, label: label || optionValue });
+    } else if (child.props.children !== undefined) {
+      result.push(...extractOptionsFromChildren(child.props.children));
+    }
+  }
+  return result;
+}
+
+function resolveSelectedLabel(
+  items: readonly AdminSelectOption[],
+  currentValue: unknown,
+): string {
+  if (items.length === 0) return "";
+  if (currentValue !== undefined && currentValue !== null) {
+    const target = String(currentValue);
+    const match = items.find((item) => item.value === target);
+    if (match) return match.label;
+  }
+  return items[0]?.label ?? "";
+}
+
 export function AdminSelect({
   children,
   className,
   containerClassName,
+  defaultValue,
   hideLabel = false,
   id,
   label,
   onChange,
   options,
   style,
+  value,
   ...props
 }: AdminSelectProps) {
   const generatedId = useId();
   const selectId = id ?? generatedId;
+
+  const optionItems = useMemo(
+    () =>
+      options
+        ? options.map((option) => ({
+            value: option.value,
+            label: option.label,
+          }))
+        : extractOptionsFromChildren(children),
+    [children, options],
+  );
+
+  const isControlled = value !== undefined;
+  const [uncontrolledValue, setUncontrolledValue] = useState<
+    string | undefined
+  >(() => (defaultValue !== undefined ? String(defaultValue) : undefined));
+
+  const activeValue = isControlled
+    ? value
+    : (uncontrolledValue ?? optionItems[0]?.value);
+  const selectedLabel = resolveSelectedLabel(optionItems, activeValue);
 
   return (
     <div className={cn("flex min-w-0 flex-col gap-1", containerClassName)}>
@@ -557,20 +633,36 @@ export function AdminSelect({
       >
         {label}
       </label>
-      <div className="relative flex items-center">
+      <div
+        className={cn(
+          "relative flex h-10 min-h-10 w-full items-center rounded-control border border-border bg-white text-ink transition-colors has-[select:focus-visible]:border-primary has-[select:focus-visible]:outline-3 has-[select:focus-visible]:outline-offset-2 has-[select:focus-visible]:outline-primary has-[select:disabled]:cursor-not-allowed has-[select:disabled]:bg-surface-subtle has-[select:disabled]:text-muted",
+          className,
+        )}
+        data-admin-select-control="true"
+        style={style}
+      >
+        <span
+          aria-hidden="true"
+          className="pointer-events-none min-w-0 flex-1 truncate pe-9 ps-3 text-sm font-medium leading-normal"
+          data-admin-select-value="true"
+        >
+          {selectedLabel}
+        </span>
+        <ChevronDown
+          aria-hidden="true"
+          className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-muted"
+        />
         <select
-          className={cn(
-            "h-10 min-h-10 w-full appearance-none [-webkit-appearance:none] [-moz-appearance:none] rounded-control border border-border bg-white bg-none py-0 pe-9 ps-3 text-sm font-medium leading-normal text-ink transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted",
-            className,
-          )}
+          className="absolute inset-0 h-full w-full cursor-pointer appearance-none opacity-0 disabled:cursor-not-allowed"
+          defaultValue={defaultValue}
           id={selectId}
-          onChange={(event) => onChange?.(event.target.value)}
-          style={{
-            appearance: "none",
-            WebkitAppearance: "none",
-            MozAppearance: "none",
-            ...style,
+          onChange={(event) => {
+            if (!isControlled) {
+              setUncontrolledValue(event.target.value);
+            }
+            onChange?.(event.target.value);
           }}
+          value={value}
           {...props}
         >
           {options
@@ -585,10 +677,6 @@ export function AdminSelect({
               ))
             : children}
         </select>
-        <ChevronDown
-          aria-hidden="true"
-          className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-muted"
-        />
       </div>
     </div>
   );

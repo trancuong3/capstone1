@@ -530,7 +530,8 @@ describe("admin components", () => {
     expect(badge).toHaveClass("overflow-hidden");
   });
 
-  it("renders AdminSelect with native arrow suppression and a single custom chevron", () => {
+  it("renders AdminSelect with a single custom chevron and keeps the native select overlaid invisibly", async () => {
+    const user = userEvent.setup();
     const { container } = render(
       <AdminSelect
         label="Trạng thái lọc"
@@ -539,20 +540,38 @@ describe("admin components", () => {
           { value: "ACTIVE", label: "Hoạt động" },
         ]}
         style={{ minWidth: "160px" }}
-        value=""
+        defaultValue=""
       />,
     );
 
     const select = screen.getByLabelText("Trạng thái lọc");
-    expect(select).toHaveClass(
-      "appearance-none",
-      "[-webkit-appearance:none]",
-      "[-moz-appearance:none]",
-      "bg-none",
-      "leading-normal",
+    expect(select).toHaveClass("opacity-0", "appearance-none");
+
+    const control = container.querySelector(
+      '[data-admin-select-control="true"]',
     );
-    expect(select.style.appearance).toBe("none");
-    expect(select.style.minWidth).toBe("160px");
+    expect(control).not.toBeNull();
+    expect((control as HTMLElement).style.minWidth).toBe("160px");
+
+    const valueDisplay = container.querySelector(
+      '[data-admin-select-value="true"]',
+    );
+    expect(valueDisplay).toHaveTextContent("Tất cả");
+
+    await user.selectOptions(select, "ACTIVE");
+    expect(valueDisplay).toHaveTextContent("Hoạt động");
+
+    const childrenSelect = render(
+      <AdminSelect label="Chế độ con" value="NEEDS_REVIEW">
+        <option value="">Tất cả chế độ</option>
+        <option value="NEEDS_REVIEW">Cần kiểm tra</option>
+      </AdminSelect>,
+    );
+    expect(
+      childrenSelect.container.querySelector(
+        '[data-admin-select-value="true"]',
+      ),
+    ).toHaveTextContent("Cần kiểm tra");
 
     const icons = container.querySelectorAll('svg[aria-hidden="true"]');
     expect(icons).toHaveLength(1);

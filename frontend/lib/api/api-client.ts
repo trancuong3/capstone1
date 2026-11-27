@@ -543,23 +543,17 @@ async function safeBackendMessage(response: Response): Promise<string> {
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
 
-/** Only public DTOs validated by the supplied schema can reach a component. */
-export interface RequestApiOptions {
-  readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-  readonly body?: unknown;
-  readonly bypassCache?: boolean;
-  readonly cacheTtlMs?: number;
-  readonly timeoutMs?: number;
-}
+const COLD_START_RETRY_STATUSES = new Set([502, 504]);
+const COLD_START_RETRY_DELAY_MS = 600;
 
-const TRANSIENT_GET_RETRY_STATUSES = new Set([502, 504]);
-const TRANSIENT_GET_RETRY_DELAYS_MS = [400, 900] as const;
-
-async function isRetryableGatewayColdStartResponse(
+async function isRetryableColdStartResponse(
   response: Response,
 ): Promise<boolean> {
-  if (!TRANSIENT_GET_RETRY_STATUSES.has(response.status)) {
+  if (!COLD_START_RETRY_STATUSES.has(response.status)) {
     return false;
+  }
+  if (response.status === 502) {
+    return true;
   }
   const contentType = (
     response.headers.get("content-type") ?? ""
@@ -575,17 +569,17 @@ async function isRetryableGatewayColdStartResponse(
         return false;
       }
     } catch {
-      // Malformed JSON on 502/504 may be a truncated proxy error; allow retry.
+      // Malformed JSON on 504 may be a truncated proxy error; allow retry.
     }
   }
   return true;
 }
 
-async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
-    throw new DOMException("Aborted", "AbortError");
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
   }
-  await new Promise<void>((resolve, reject) => {
+  return new Promise((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
       reject(new DOMException("Aborted", "AbortError"));
@@ -596,6 +590,15 @@ async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
     }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+/** Only public DTOs validated by the supplied schema can reach a component. */
+export interface RequestApiOptions {
+  readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  readonly body?: unknown;
+  readonly bypassCache?: boolean;
+  readonly cacheTtlMs?: number;
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -653,8 +656,8 @@ export async function requestApi<T>(
         : isFormDataBody
           ? DEFAULT_UPLOAD_TIMEOUT_MS
           : DEFAULT_REQUEST_TIMEOUT_MS;
-    const maxAttempts =
-      method === "GET" ? TRANSIENT_GET_RETRY_DELAYS_MS.length + 1 : 1;
+    const canColdStartRetry = method === "GET";
+    const maxAttempts = canColdStartRetry ? 2 : 1;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const timeoutController = fetchSignal ? null : new AbortController();
@@ -690,21 +693,22 @@ export async function requestApi<T>(
         }
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
+        if (attempt === 0 && canColdStartRetry && !timedOut) {
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+          continue;
+        }
         throw failure(0, "", true);
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
 
       if (
-        method === "GET" &&
-        attempt < TRANSIENT_GET_RETRY_DELAYS_MS.length &&
+        attempt === 0 &&
+        canColdStartRetry &&
         !fetchSignal?.aborted &&
-        (await isRetryableGatewayColdStartResponse(response))
+        (await isRetryableColdStartResponse(response))
       ) {
-        await sleepWithAbort(
-          TRANSIENT_GET_RETRY_DELAYS_MS[attempt],
-          fetchSignal,
-        );
+        await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
         continue;
       }
       break;

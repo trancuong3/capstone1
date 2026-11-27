@@ -410,7 +410,7 @@ describe("Phone QA regressions: Android STT/TTS, Karaoke, AudioUnlock, Phonics U
       global.fetch = fetchMock as typeof fetch;
 
       const getPromise = requestApi("/books/", z.object({ ok: z.boolean() }));
-      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(600);
       await expect(getPromise).resolves.toEqual({ ok: true });
       expect(fetchMock).toHaveBeenCalledTimes(2);
 
