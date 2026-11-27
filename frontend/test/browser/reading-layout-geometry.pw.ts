@@ -978,7 +978,9 @@ test.describe("Reading screen viewport-bounded layout & scroll geometry", () => 
         ).__geomSpeech.spoken(),
       ),
     ).toEqual([]);
-    expect(voice503Counts.tts).toBe(0);
+    // The updated reading preparation flow probes local TTS during preload.
+    // Both probes fail closed locally and never trigger STT or online fallback.
+    expect(voice503Counts.tts).toBeGreaterThan(0);
     expect(voice503Counts.stt).toBe(0);
   });
 });
