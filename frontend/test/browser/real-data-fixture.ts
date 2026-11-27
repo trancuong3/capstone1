@@ -1281,10 +1281,21 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         google_tts_available: false,
         voices: FIXTURE_LOCAL_VOICES,
       });
-    if (request.method() === "GET" && path === "/studio/tasks")
+    if (
+      request.method() === "GET" &&
+      (path === "/studio/tasks" ||
+        path === "/studio/parent/tasks" ||
+        path === "/studio/admin/tasks")
+    ) {
+      const portal =
+        path === "/studio/admin/tasks" ||
+        url.searchParams.get("portal") === "admin"
+          ? "admin"
+          : "parent";
       return respond(route, {
         actor_id: ids.parent,
-        actor_role: "parent",
+        actor_role: portal,
+        portal,
         active_count: 0,
         waiting_review_count: 0,
         failed_count: 0,
@@ -1293,6 +1304,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         recommended_poll_ms: null,
         tasks: [],
       });
+    }
     if (
       request.method() === "GET" &&
       /^\/studio\/books\/[^/]+\/assets$/.test(path)

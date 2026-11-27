@@ -2862,9 +2862,14 @@ class OcrInferenceJobService:
             )
         return payload, actual_sha
 
-    async def get_job_status_payload(self, job_id: UUID) -> dict[str, Any]:
+    async def get_job_status_payload(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if str(job.Status or "").upper() == "QUEUED":
             from app.services.remote_ocr_wakeup import (
@@ -2879,8 +2884,16 @@ class OcrInferenceJobService:
         worker_online = await self.has_online_worker()
         return self.serialize_job(job, worker_online=worker_online)
 
-    async def list_book_jobs_payload(self, book_id: UUID, *, limit: int = 200) -> list[dict[str, Any]]:
+    async def list_book_jobs_payload(
+        self,
+        book_id: UUID,
+        *,
+        limit: int = 200,
+        admin_only: bool = False,
+    ) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_book(book_id, limit=limit)
+        if admin_only:
+            rows = [row for row in rows if row.JobKind in ADMIN_JOB_KINDS]
         queued_row = next(
             (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
             None,
@@ -2898,9 +2911,16 @@ class OcrInferenceJobService:
         worker_online = await self.has_online_worker()
         return [self.serialize_job(row, worker_online=worker_online) for row in rows]
 
-    async def retry_job(self, job_id: UUID) -> dict[str, Any]:
+    async def retry_job(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status in ACTIVE_JOB_STATUSES:
             serialized_active = self.serialize_job(job)
@@ -2956,9 +2976,17 @@ class OcrInferenceJobService:
         except Exception:
             pass
 
-    async def cancel_job(self, job_id: UUID, *, reason: str = "ADMIN_CANCELLED") -> dict[str, Any]:
+    async def cancel_job(
+        self,
+        job_id: UUID,
+        *,
+        reason: str = "ADMIN_CANCELLED",
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status not in ("SUCCEEDED", "CANCELLED"):
             now = datetime.now(timezone.utc)
@@ -2980,11 +3008,24 @@ class OcrInferenceJobService:
         *,
         worker_online: bool | None = None,
     ) -> dict[str, Any]:
+        from app.services.ai_task_progress import (
+            compute_ocr_job_progress,
+            extract_ocr_worker_phase,
+        )
+
+        worker_phase = extract_ocr_worker_phase(getattr(job, "ProcessingMeta", None))
+        progress_pct, _progress_mode = compute_ocr_job_progress(
+            status=job.Status,
+            worker_phase=worker_phase,
+            worker_online=worker_online,
+        )
         payload: dict[str, Any] = {
             "id": str(job.Id),
             "job_kind": job.JobKind,
             "status": job.Status,
-            "priority": int(job.Priority),
+            "worker_phase": worker_phase,
+            "progress_pct": progress_pct,
+            "priority": int(job.Priority or 50),
             "book_id": str(job.BookId) if job.BookId else None,
             "page_id": str(job.PageId) if job.PageId else None,
             "revision_id": str(job.RevisionId) if job.RevisionId else None,

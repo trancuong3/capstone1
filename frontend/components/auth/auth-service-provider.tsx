@@ -15,6 +15,13 @@ import {
   type AuthService,
 } from "@/lib/api/auth-service";
 import { dispatchI18nAuthSync } from "@/components/i18n/i18n-provider";
+import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import {
+  broadcastActorSwitch,
+  clearGlobalTasksMemoryCache,
+} from "@/lib/api/global-tasks-service";
+import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
+import { clearStoredScanJobIds } from "@/lib/cache/scan-job-storage";
 import { clearPersistedSelectedChild } from "@/lib/cache/selected-child-storage";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { createSupabaseAuthService } from "@/lib/supabase/auth-service";
@@ -86,8 +93,16 @@ export function AuthServiceProvider({
 
       const nextUserId = session?.user?.id ?? null;
       if (event === "SIGNED_OUT" || !nextUserId) {
+        const hadPreviousUser = lastUserIdRef.current !== null;
         clearUserCache();
         clearPersistedSelectedChild();
+        clearStoredScanJobIds();
+        clearGlobalTasksMemoryCache();
+        clearPrivateMediaMemoryCache();
+        resetApiReadCacheForActorSwitch();
+        if (hadPreviousUser || event === "SIGNED_OUT") {
+          broadcastActorSwitch();
+        }
         lastUserIdRef.current = null;
         if (event === "SIGNED_OUT") {
           dispatchI18nAuthSync({ userId: null, preferredLocale: null });
@@ -98,6 +113,11 @@ export function AuthServiceProvider({
       ) {
         clearUserCache(lastUserIdRef.current);
         clearPersistedSelectedChild(nextUserId);
+        clearStoredScanJobIds(nextUserId);
+        clearGlobalTasksMemoryCache();
+        clearPrivateMediaMemoryCache();
+        resetApiReadCacheForActorSwitch();
+        broadcastActorSwitch();
         lastUserIdRef.current = nextUserId;
       } else {
         lastUserIdRef.current = nextUserId;

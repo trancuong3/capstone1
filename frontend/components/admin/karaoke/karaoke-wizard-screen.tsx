@@ -20,10 +20,12 @@ import {
 } from "@/components/admin/karaoke/song-metadata-form";
 import { KaraokeProcessingStatus } from "@/components/admin/karaoke/karaoke-processing-status";
 import { KaraokeReviewPanel } from "@/components/admin/karaoke/karaoke-review-panel";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { KaraokeWizardController } from "@/lib/karaoke/wizard-controller";
 import { suggestRepeatedLyrics } from "@/lib/karaoke/wizard-lyrics";
@@ -40,6 +42,7 @@ export function KaraokeWizardScreen({
 }) {
   const service = useAdminKaraoke();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatNumber } = useI18n();
   const router = useRouter();
   const [controller] = useState(
@@ -50,6 +53,15 @@ export function KaraokeWizardScreen({
     controller.getSnapshot,
     controller.getSnapshot,
   );
+  const wizardBusyProgress = useAiProgress({
+    active: Boolean(view.busy),
+    expectedDurationMs: 18_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.uploading") },
+      { atPct: 35, label: tCommon("aiProgress.processingKaraoke") },
+      { atPct: 75, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
   const [switchError, setSwitchError] = useState("");
   const [confirmRequest, setConfirmRequest] =
     useState<KaraokeConfirmRequest | null>(null);
@@ -592,6 +604,21 @@ export function KaraokeWizardScreen({
                     {t("karaoke.wizard.advancedEditLink")}
                   </Button>
                 </div>
+                {view.busy ? (
+                  <AiProgressBar
+                    active
+                    elapsedSeconds={wizardBusyProgress.elapsedSeconds}
+                    label={
+                      typeof view.busy === "string"
+                        ? view.busy
+                        : (wizardBusyProgress.stageLabel ??
+                          tCommon("aiProgress.processingKaraoke"))
+                    }
+                    percent={wizardBusyProgress.percent}
+                    size="sm"
+                    testId="karaoke-wizard-busy-progress"
+                  />
+                ) : null}
                 <p
                   role="status"
                   aria-live="polite"

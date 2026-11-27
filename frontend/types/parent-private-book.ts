@@ -177,6 +177,7 @@ export const parentPageSubmissionSchema = z.object({
   optimistic_lock_version: z.number().int().positive(),
   workflow_status: submissionWorkflowStatusSchema,
   workflow_status_label: z.string(),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
   ocr_status: z.string(),
   ocr_text: z.string().nullable(),
   ocr_error_code: z.string().nullable(),

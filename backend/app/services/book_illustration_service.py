@@ -1016,6 +1016,16 @@ class BookIllustrationService:
                 bucket=bucket,
             )
 
+        managed_by_worker = existing_job_id is not None and existing_lease_token is not None
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self.cover_service._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="ILLUSTRATION_EXTRACT",
+                completed=1,
+                total=3,
+            )
+
         extraction = await asyncio.to_thread(
             extract_clean_illustration_from_bytes,
             source_bytes,
@@ -1041,6 +1051,15 @@ class BookIllustrationService:
                 ),
             )
 
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self.cover_service._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="TEXT_FREE_VERIFY",
+                completed=2,
+                total=3,
+            )
+
         scope = f"private/{owner_id}" if private_book else "catalog"
         storage_path = _validate_relative_storage_path(
             f"studio/illustrations/{scope}/{resolved_book_id}/{resolved_page_id}/{extraction.asset_hash[:16]}_{uuid4().hex[:8]}.webp"
@@ -1057,7 +1076,6 @@ class BookIllustrationService:
         is_verified = extraction.verification.text_free_verified
         moderation_status = "APPROVED" if is_verified else "REJECTED"
         source_type = "ENHANCED_CROP" if extraction.restored_with_clahe else "ORIGINAL_CROP"
-        managed_by_worker = existing_job_id is not None and existing_lease_token is not None
 
         try:
             if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
@@ -1128,9 +1146,9 @@ class BookIllustrationService:
                     checkpoint_data={"asset_id": str(asset.Id)} if is_verified else None,
                     next_status="SUCCEEDED" if is_verified else "FAILED",
                     result_ref={"asset_id": str(asset.Id)} if is_verified else None,
-                    progress_completed=1 if is_verified else None,
-                    progress_total=1 if is_verified else None,
-                    progress_unit="trang" if is_verified else None,
+                    progress_completed=3 if is_verified else None,
+                    progress_total=3 if is_verified else None,
+                    progress_unit="bước" if is_verified else None,
                     error_code=None if is_verified else extraction.status,
                     error_message_vi=(
                         None
@@ -1370,7 +1388,15 @@ class BookIllustrationService:
         if existing_job_id is not None:
             job = await self.repo.get_studio_job(existing_job_id)
             effective_job_id: UUID | None = existing_job_id
-            if managed_by_worker and callable(getattr(self.db, "rollback", None)):
+            if managed_by_worker and existing_lease_token is not None:
+                await self.cover_service._advance_worker_progress(
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    stage="STYLE_BIBLE",
+                    completed=1,
+                    total=4,
+                )
+            elif managed_by_worker and callable(getattr(self.db, "rollback", None)):
                 await self.db.rollback()
         else:
             if payload.idempotency_key and payload.idempotency_key.strip():
@@ -1429,6 +1455,9 @@ class BookIllustrationService:
             if job is not None:
                 now_start = datetime.now(timezone.utc)
                 job.LeaseExpiresAt = now_start + timedelta(seconds=90)
+                job.ProgressCompleted = 1
+                job.ProgressTotal = 4
+                job.ProgressUnit = "bước"
                 job.UpdatedAt = now_start
             await self.db.commit()
             effective_job_id = job.Id if job is not None else None
@@ -1488,12 +1517,44 @@ class BookIllustrationService:
                 message_vi="Nhà cung cấp tạo ảnh AI tạm thời không khả dụng.",
             )
 
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self.cover_service._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="IMAGE_GENERATING",
+                completed=2,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "TEXT_FREE_VERIFY"
+            job.ProgressCompleted = 2
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
+
         webp_bytes, out_w, out_h, asset_hash, verification = await asyncio.to_thread(
             _encode_and_verify_ai_illustration,
             raw_bytes,
             canonical_text=canonical_text,
             ocr_check_fn=self._ocr_check_fn,
         )
+
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self.cover_service._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="TEXT_FREE_VERIFY",
+                completed=3,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "SAVING"
+            job.ProgressCompleted = 3
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
 
         # Revision fencing: verify page's verified revision did not advance while AI image generated!
         latest_page = await self.repo.get_page(resolved_book_id, resolved_page_id)
@@ -1604,8 +1665,8 @@ class BookIllustrationService:
                     }
                     if is_verified
                     else None,
-                    progress_completed=2 if is_verified else None,
-                    progress_total=2 if is_verified else None,
+                    progress_completed=4 if is_verified else None,
+                    progress_total=4 if is_verified else None,
                     progress_unit="bước" if is_verified else None,
                     error_code=None if is_verified else "REJECTED_CONTAINS_TEXT",
                     error_message_vi=(
@@ -1630,6 +1691,10 @@ class BookIllustrationService:
                     now_done = datetime.now(timezone.utc)
                     job.Status = "SUCCEEDED" if is_verified else "FAILED"
                     job.Stage = "COMPLETED" if is_verified else "REJECTED_CONTAINS_TEXT"
+                    if is_verified:
+                        job.ProgressCompleted = 4
+                        job.ProgressTotal = 4
+                        job.ProgressUnit = "bước"
                     job.CompletedAt = now_done
                     job.UpdatedAt = now_done
                     job.LeaseExpiresAt = None

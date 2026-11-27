@@ -128,6 +128,7 @@ class SimpleProcessingStatusRead(Contract):
     job_id: UUID | None = None
     job_status: ProcessingStatus | None = None
     job_stage: ProcessingStage | None = None
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     can_apply: bool = False
     review_required: bool = False
     reviewed: bool = False
