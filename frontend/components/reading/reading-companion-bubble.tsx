@@ -147,7 +147,12 @@ export function ReadingCompanionBubble({
         <MoodIcon mood={state.mood} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className={cn("truncate text-[11px] font-extrabold sm:text-xs", theme.titleColor)}>
+        <p
+          className={cn(
+            "truncate text-[11px] font-extrabold sm:text-xs",
+            theme.titleColor,
+          )}
+        >
           {displayTitle}
         </p>
         <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-base">
