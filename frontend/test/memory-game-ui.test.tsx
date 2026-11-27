@@ -503,6 +503,9 @@ describe("MemoryGameScreen", () => {
       expect(screen.getByTestId("observe-stage")).toBeInTheDocument(),
     );
     expect(screen.getByTestId("memory-scene-svg")).toBeInTheDocument();
+    // The observe UI can commit just before its passive effect queues the SVG paint frame.
+    // Wait for that frame while real timers are still active so CI scheduling cannot race the test.
+    await waitFor(() => expect(pendingRafs.length).toBeGreaterThan(0));
 
     // Freeze timers now to verify countdown does NOT tick before sceneReady fires
     vi.useFakeTimers();
