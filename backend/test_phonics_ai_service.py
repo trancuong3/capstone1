@@ -44,45 +44,45 @@ class PhonicsAiServiceTests(unittest.TestCase):
                 )
                 ai_json = {
                     "supported": True,
-                    "focus_syllable": "tr�?ng",
+                    "focus_syllable": "trường",
                     "onset_written": "tr",
-                    "onset_spoken": "tr?",
-                    "rhyme_written": "�?ng",
-                    "rhyme_untoned": "��ng",
-                    "rhyme_nucleus": "��",
+                    "onset_spoken": "trờ",
+                    "rhyme_written": "ường",
+                    "rhyme_untoned": "ương",
+                    "rhyme_nucleus": "ươ",
                     "rhyme_coda": "ng",
-                    "rhyme_spoken": "��ng",
+                    "rhyme_spoken": "ương",
                     "tone_key": "huyen",
                     "steps": [
                         {
                             "id": "rhyme_build",
                             "kind": "rhyme_build",
-                            "display_text": "� � � � ng? ? ��ng",
-                            "spoken_text": "� + � + ng? ? ��ng",
+                            "display_text": "ư · ơ · ngờ → ương",
+                            "spoken_text": "ư + ơ + ngờ → ương",
                             "highlight_part": "rhyme",
                             "pause_after_ms": 420,
                         },
                         {
                             "id": "onset_blend",
                             "kind": "onset_blend",
-                            "display_text": "tr? + ��ng",
-                            "spoken_text": "tr?, ��ng.",
+                            "display_text": "trờ + ương",
+                            "spoken_text": "trờ, ương.",
                             "highlight_part": "onset_and_rhyme",
                             "pause_after_ms": 420,
                         },
                         {
                             "id": "tone_blend",
                             "kind": "tone_blend",
-                            "display_text": "huy?n ? tr�?ng",
-                            "spoken_text": "huy?n, tr�?ng.",
+                            "display_text": "huyền → trường",
+                            "spoken_text": "huyền, trường.",
                             "highlight_part": "tone_and_syllable",
                             "pause_after_ms": 450,
                         },
                         {
                             "id": "whole_syllable",
                             "kind": "whole_syllable",
-                            "display_text": "tr�?ng",
-                            "spoken_text": "tr�?ng.",
+                            "display_text": "trường",
+                            "spoken_text": "trường.",
                             "highlight_part": "whole_syllable",
                             "pause_after_ms": 500,
                         },
@@ -105,18 +105,18 @@ class PhonicsAiServiceTests(unittest.TestCase):
 
             transport = httpx.MockTransport(handler)
             first = asyncio.run(
-                analyze_phonics_with_ai("TR�?NG", transport=transport)
+                analyze_phonics_with_ai("TRƯỜNG", transport=transport)
             )
             self.assertTrue(first.supported)
             self.assertEqual(first.source, "ai")
-            self.assertEqual(first.focus_syllable, "tr�?ng")
+            self.assertEqual(first.focus_syllable, "trường")
             self.assertEqual(len(first.steps), 4)
             self.assertNotIn("+", first.steps[0].spoken_text)
-            self.assertNotIn("?", first.steps[0].spoken_text)
+            self.assertNotIn("→", first.steps[0].spoken_text)
             self.assertEqual(calls, 1)
 
             second = asyncio.run(
-                analyze_phonics_with_ai("tr�?ng", transport=transport)
+                analyze_phonics_with_ai("trường", transport=transport)
             )
             self.assertTrue(second.supported)
             self.assertEqual(calls, 1)
@@ -152,4 +152,3 @@ class PhonicsAiServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
