@@ -627,6 +627,8 @@ class OcrRuntimeManager:
         self._standby_mode: str = "active_polling"
         self._wakeup_count: int = 0
         self._last_wakeup_reason: str | None = None
+        self._pending_model_resync: bool = False
+        self._last_model_sync_check_monotonic: float = 0.0
         self._active_job_id: str | None = None
         self._active_job_count: int = 0
         self._last_error: str | None = None
@@ -655,11 +657,29 @@ class OcrRuntimeManager:
         with self._state_lock:
             return self._draining
 
+    @property
+    def loaded_model_sha256(self) -> str:
+        with self._state_lock:
+            return self._model_sha256
+
+    def mark_model_resync_needed(self) -> None:
+        with self._state_lock:
+            self._pending_model_resync = True
+
+    def needs_model_resync(self) -> bool:
+        with self._state_lock:
+            return self._pending_model_resync
+
+    def clear_model_resync_needed(self) -> None:
+        with self._state_lock:
+            self._pending_model_resync = False
+
     def try_begin_drain_or_mark_pending(self, *, reason: str) -> tuple[bool, int, str]:
         """Atomically acquire single-flight drain ownership or mark a pending redrain."""
         with self._state_lock:
             self._wakeup_count += 1
             self._last_wakeup_reason = str(reason)[:64]
+            self._pending_model_resync = True
             wake_count = self._wakeup_count
             if self._draining:
                 self._pending_redrain = True
@@ -750,6 +770,7 @@ class OcrRuntimeManager:
             )
             self._standby_mode = "burst_awake"
             self._wakeup_count += 1
+            self._pending_model_resync = True
             if reason:
                 self._last_wakeup_reason = str(reason)[:64]
             wake_count = self._wakeup_count
@@ -1072,6 +1093,7 @@ class OcrRuntimeManager:
             with self._state_lock:
                 self._model_profile = loaded_profile
                 self._model_sha256 = loaded_sha
+                self._pending_model_resync = False
                 self._engines["paddleocr"].loaded = (
                     getattr(ocr_engine, "_paddle_engine", None) is not None
                     or warmup_map.get("paddleocr") == "loaded"
@@ -1098,17 +1120,30 @@ class OcrRuntimeManager:
         manifest_fetcher: Callable[[], dict[str, Any]],
         artifact_fetcher: Callable[[str, int | None], bytes],
         direct_url_fetcher: Callable[[str], bytes | None] | None = None,
+        force: bool = False,
+        min_interval_seconds: float | None = None,
     ) -> bool:
         """Check backend active VietOCR pointer and hot-reload when Admin promotes/rolls back."""
+        now_mono = time.monotonic()
+        if not force and min_interval_seconds is not None:
+            with self._state_lock:
+                last_check = self._last_model_sync_check_monotonic
+            if last_check > 0.0 and (now_mono - last_check) < max(0.0, float(min_interval_seconds)):
+                return False
+
         manifest = manifest_fetcher() or {}
+        with self._state_lock:
+            self._last_model_sync_check_monotonic = time.monotonic()
+            current_profile = self._model_profile
+            current_sha = self._model_sha256
+
         desired_profile = str(manifest.get("profile") or "ORIGINAL")
         desired_sha = str(
             manifest.get("checkpoint_sha256") or ORIGINAL_VIETOCR_SHA256
         ).lower()
-        with self._state_lock:
-            current_profile = self._model_profile
-            current_sha = self._model_sha256
         if desired_sha == current_sha and desired_profile == current_profile:
+            with self._state_lock:
+                self._pending_model_resync = False
             return False
 
         logger.info(
@@ -1126,6 +1161,8 @@ class OcrRuntimeManager:
                 direct_url_fetcher=direct_url_fetcher,
             )
             if self._ocr_engine_mod is None:
+                with self._state_lock:
+                    self._pending_model_resync = False
                 return True
             ocr_engine = self._ocr_engine_mod
             self._install_local_artifact_resolver(ocr_engine)
@@ -1159,6 +1196,7 @@ class OcrRuntimeManager:
             with self._state_lock:
                 self._model_profile = loaded_profile
                 self._model_sha256 = loaded_sha
+                self._pending_model_resync = False
                 self._engines["paddleocr"].loaded = (
                     getattr(ocr_engine, "_paddle_engine", None) is not None
                     or warmup_map.get("paddleocr") == "loaded"

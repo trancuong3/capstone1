@@ -642,3 +642,188 @@ def test_run_training_saves_step0_baseline_so_worse_steps_preserve_parent(tmp_pa
     )
     assert res2["best_step"] == 1
     assert res2["best_validation_loss"] == pytest.approx(0.12)
+    assert res["step0_validation_loss"] == pytest.approx(0.25)
+    assert res["improved_over_parent"] is False
+    assert res["early_stopped"] is False
+    assert res["early_stopping_patience"] == 0
+    assert res2["step0_validation_loss"] == pytest.approx(0.50)
+    assert res2["improved_over_parent"] is True
+    assert res2["early_stopped"] is False
+
+    manifest_better = json.loads(
+        (Path(res2["candidate_path"]).with_name(f"{Path(res2['candidate_path']).stem}.manifest.json")).read_text(encoding="utf-8")
+    )
+    assert manifest_better["best_step"] == 1
+    assert manifest_better["step0_validation_loss"] == pytest.approx(0.50)
+    assert manifest_better["best_validation_loss"] == pytest.approx(0.12)
+    assert manifest_better["improved_over_parent"] is True
+
+    # Opt-in early stopping stops cleanly after N non-improving evals while keeping best checkpoint
+    monkeypatch.setenv("VIETOCR_EARLY_STOPPING_PATIENCE", "2")
+    val_losses[:] = [0.50, 0.20, 0.30, 0.35, 0.40, 0.45, 0.50]
+    res_es = train_mod.run_training(
+        profile="FLOW2_ADMIN_VERIFIED",
+        manifest_path=str(manifest_path),
+        output_dir=str(tmp_path / "run_early_stop"),
+        parent_checkpoint=str(parent_path),
+        total_steps=6,
+        dataset_receipt_path=str(receipt_path),
+        dataset_version_sha256=receipt_sha,
+        batch_size=2,
+        freeze_epochs=1,
+        use_fp16=False,
+    )
+    assert res_es["steps"] == 3
+    assert res_es["best_step"] == 1
+    assert res_es["step0_validation_loss"] == pytest.approx(0.50)
+    assert res_es["best_validation_loss"] == pytest.approx(0.20)
+    assert res_es["improved_over_parent"] is True
+    assert res_es["early_stopped"] is True
+    assert res_es["early_stopping_patience"] == 2
+
+
+def test_paired_group_bootstrap_bit_parity_and_speed():
+    import math
+    import random
+    import time
+    from ai.vietocr_v2.metrics import aggregate_error, paired_group_bootstrap
+
+    def naive_paired_group_bootstrap(lines, *, metric, replicates, seed, baseline="original"):
+        groups = {}
+        for line in lines:
+            groups.setdefault(line.group_id, []).append(line)
+        base_errors, total_units = aggregate_error(lines, baseline, metric)
+        candidate_errors, _ = aggregate_error(lines, "candidate", metric)
+        base_score = base_errors / total_units
+        candidate_score = candidate_errors / total_units
+        names = sorted(groups)
+        rng = random.Random(seed)
+        deltas = []
+        for _ in range(replicates):
+            sampled_names = [names[rng.randrange(len(names))] for _ in names]
+            sampled = [line for name in sampled_names for line in groups[name]]
+            original_n, units = aggregate_error(sampled, baseline, metric)
+            candidate_n, _ = aggregate_error(sampled, "candidate", metric)
+            if units:
+                deltas.append(candidate_n / units - original_n / units)
+        deltas.sort()
+        lo = max(0, math.floor(0.025 * (len(deltas) - 1)))
+        hi = min(len(deltas) - 1, math.ceil(0.975 * (len(deltas) - 1)))
+        return {
+            "base_errors": base_errors,
+            "candidate_errors": candidate_errors,
+            "total_units": total_units,
+            "delta": candidate_score - base_score,
+            "ci": [deltas[lo], deltas[hi]],
+        }
+
+    # 1. Bit-for-bit parity against naive resampling on Vietnamese diacritics & punctuation
+    small_lines = [
+        PairedLine(
+            group_id=f"book-{i % 8:02d}",
+            reference=f"Tiếng Việt có dấu, câu số {i}.",
+            original=f"Tieng Viet co dau, cau so {i}." if i % 2 == 0 else f"Tiếng Việt có dấu, câu số {i}.",
+            candidate=f"Tiếng Việt có dấu, câu số {i}." if i % 5 != 0 else f"Tiếng Việt có dấu câu số {i}",
+            sample_id=f"s-{i}",
+            parent=f"Tiếng Việt có dấu, câu số {i}." if i % 3 != 0 else f"Tiếng Việt co dấu, câu số {i}.",
+            active=f"Tiếng Việt có dấu, câu số {i}." if i % 4 != 0 else f"Tieng Việt có dấu, câu số {i}.",
+        )
+        for i in range(40)
+    ]
+    for metric in ("cer", "wer"):
+        for baseline in ("original", "parent", "active"):
+            fast = paired_group_bootstrap(small_lines, metric=metric, replicates=150, seed=20261112, baseline=baseline)
+            ref = naive_paired_group_bootstrap(small_lines, metric=metric, replicates=150, seed=20261112, baseline=baseline)
+            assert fast[f"{baseline}_error_count"] == ref["base_errors"]
+            assert fast["candidate_error_count"] == ref["candidate_errors"]
+            assert fast["reference_unit_count"] == ref["total_units"]
+            assert fast[f"delta_candidate_minus_{baseline}"] == ref["delta"]
+            assert fast[f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"] == ref["ci"]
+
+    # 2. Speed test: 375 lines x 36 groups x 5,000 replicates x 6 metrics must run in < 1.0s
+    lines_375 = [
+        PairedLine(
+            group_id=f"book-{i % 36:02d}",
+            reference=f"Bé tập đọc bài số {i}: nắng vàng rực rỡ trên cánh đồng.",
+            original=f"Be tap doc bai so {i}: nang vang ruc ro tren canh dong." if i % 4 == 0
+                     else f"Bé tập đọc bài số {i}: nắng vàng rực rỡ trên cánh đồng.",
+            candidate=f"Bé tập đọc bài số {i}: nắng vàng rực rỡ trên cánh đồng." if i % 15 != 0
+                      else f"Bé tập đọc bài số {i}: nắng vàng rực rở trên cánh đồng.",
+            sample_id=f"sample-{i:04d}",
+            parent=f"Bé tập đọc bài số {i}: nắng vàng rực rỡ trên cánh đồng." if i % 10 != 0
+                   else f"Bé tập đọc bài số {i}: nắng vàng rục rỡ trên cánh đồng.",
+            active=f"Bé tập đọc bài số {i}: nắng vàng rực rỡ trên cánh đồng." if i % 10 != 0
+                   else f"Bé tập đọc bài số {i}: nắng vàng rục rỡ trên cánh đồng.",
+        )
+        for i in range(375)
+    ]
+    started = time.perf_counter()
+    full_metrics = benchmark_metrics(lines_375, replicates=5_000, seed=20261112)
+    elapsed = time.perf_counter() - started
+    assert full_metrics["sample_count"] == 375
+    assert full_metrics["group_count"] == 36
+    assert set(full_metrics.keys()) >= {"cer", "wer", "parent_cer", "parent_wer", "active_cer", "active_wer"}
+    assert elapsed < 1.0, f"375x36x5000x6 bootstrap took {elapsed:.3f}s (expected < 1.0s)"
+
+
+def test_evaluate_gate_reports_failing_checks_without_breaking_v2_win():
+    # V2_WIN preserves existing keys and does not add failing_checks
+    win = evaluate_gate(_metrics("win"), paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert win["status"] == "V2_WIN"
+    assert win["promotion_allowed"] is True
+    assert win["requires_human_approval"] is True
+    assert "failing_checks" not in win
+
+    # NO_SIGNIFICANT_DIFFERENCE pinpoints exact failing (baseline, metric) pairs
+    mixed = _metrics("win")
+    mixed["parent_cer"] = {
+        "parent_rate": 0.12,
+        "candidate_rate": 0.10,
+        "delta_candidate_minus_parent": -0.02,
+        "paired_cluster_bootstrap_95ci_candidate_minus_parent": [-0.03, -0.01],
+    }
+    mixed["parent_wer"] = {
+        "parent_rate": 0.21,
+        "candidate_rate": 0.20,
+        "delta_candidate_minus_parent": -0.01,
+        "paired_cluster_bootstrap_95ci_candidate_minus_parent": [-0.02, 0.002],
+    }
+    mixed["active_cer"] = {
+        "active_rate": 0.10,
+        "candidate_rate": 0.10,
+        "delta_candidate_minus_active": 0.0,
+        "paired_cluster_bootstrap_95ci_candidate_minus_active": [0.0, 0.0],
+    }
+    mixed["active_wer"] = {
+        "active_rate": 0.20,
+        "candidate_rate": 0.20,
+        "delta_candidate_minus_active": 0.0,
+        "paired_cluster_bootstrap_95ci_candidate_minus_active": [0.0, 0.0],
+    }
+    neutral = evaluate_gate(mixed, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert neutral["status"] == "NO_SIGNIFICANT_DIFFERENCE"
+    assert neutral["promotion_allowed"] is False
+    assert neutral["failing_checks"] == [
+        {"baseline": "parent", "metric": "wer", "delta": -0.01, "ci95": [-0.02, 0.002]},
+        {"baseline": "active", "metric": "cer", "delta": 0.0, "ci95": [0.0, 0.0]},
+        {"baseline": "active", "metric": "wer", "delta": 0.0, "ci95": [0.0, 0.0]},
+    ]
+
+    # ORIGINAL_WIN (non-regression exceeded) reports regressing checks
+    reg = _metrics("win")
+    reg["wer"]["delta_candidate_minus_original"] = 0.02
+    reg_res = evaluate_gate(reg, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert reg_res["status"] == "ORIGINAL_WIN"
+    assert reg_res["failing_checks"] == [
+        {"baseline": "original", "metric": "wer", "delta": 0.02, "ci95": [-0.02, -0.01]},
+    ]
+
+    # INSUFFICIENT_EVIDENCE and EVALUATION_FAILED include empty failing_checks list
+    small = _metrics("win")
+    small["sample_count"] = 5
+    insuff = evaluate_gate(small, paired_manifest_hash="h", expected_locked_manifest_hash="h")
+    assert insuff["status"] == "INSUFFICIENT_EVIDENCE"
+    assert insuff["failing_checks"] == []
+    mismatch = evaluate_gate(_metrics("win"), paired_manifest_hash="a", expected_locked_manifest_hash="b")
+    assert mismatch["status"] == "EVALUATION_FAILED"
+    assert mismatch["failing_checks"] == []

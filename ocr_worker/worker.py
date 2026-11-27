@@ -327,6 +327,36 @@ class BackendOcrClient:
         return self._post_idempotent_with_retry(f"/internal/ocr-jobs/{job_id}/fail", payload)
 
 
+def ensure_active_model_resynced(
+    client: BackendOcrClient,
+    runtime: OcrRuntimeManager,
+    *,
+    job: dict[str, Any] | None = None,
+    force: bool = False,
+) -> bool:
+    """Force-check and hot-reload the active VietOCR model on wakeup or model-SHA mismatch."""
+    expected_model_sha = ""
+    if isinstance(job, dict):
+        expected_model_sha = str(
+            job.get("expected_model_sha256")
+            or job.get("active_model_sha256")
+            or ""
+        ).strip().lower()
+    loaded_model_sha = str(getattr(runtime, "loaded_model_sha256", "") or "").strip().lower()
+    sha_mismatch = len(expected_model_sha) == 64 and expected_model_sha != loaded_model_sha
+    needs_resync = bool(force or runtime.needs_model_resync() or sha_mismatch)
+    if not needs_resync:
+        return False
+    resynced = runtime.maybe_resync_active_model(
+        manifest_fetcher=client.get_active_model,
+        artifact_fetcher=client.download_model_artifact,
+        direct_url_fetcher=client.download_direct_url,
+        force=True,
+    )
+    runtime.clear_model_resync_needed()
+    return resynced
+
+
 def process_claimed_job(
     client: BackendOcrClient,
     runtime: OcrRuntimeManager,
@@ -368,6 +398,20 @@ def process_claimed_job(
     hb_thread.start()
 
     try:
+        try:
+            resynced = ensure_active_model_resynced(client, runtime, job=job, force=False)
+            if resynced:
+                try:
+                    client.send_worker_heartbeat(runtime.heartbeat_payload())
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning(
+                "Pre-job active-model resync failed for job %s (%s); continuing with loaded model.",
+                job_id,
+                type(exc).__name__,
+            )
+
         image_bytes = client.download_job_source(job, worker_id=worker_id)
         if abort_event.is_set():
             return {"outcome": "aborted_mid_job", "job_id": job_id}
@@ -545,6 +589,15 @@ def drain_queue_synchronously(
                     direct_url_fetcher=client.download_direct_url,
                     run_smoke_inference=True,
                 )
+                runtime.clear_model_resync_needed()
+            else:
+                try:
+                    ensure_active_model_resynced(client, runtime, force=True)
+                except Exception as exc:
+                    logger.warning(
+                        "Wakeup active-model resync failed during drain (%s); continuing with loaded model.",
+                        type(exc).__name__,
+                    )
             try:
                 client.send_worker_heartbeat(runtime.heartbeat_payload())
             except Exception:
@@ -790,6 +843,7 @@ def run_worker_forever(
                 if woken:
                     warmup_recovery_attempts = 0
                     last_activity_at = time.monotonic()
+                    runtime.mark_model_resync_needed()
                 continue
 
             if runtime.is_draining():
@@ -816,14 +870,18 @@ def run_worker_forever(
                                 run_smoke_inference=True,
                             )
                             last_model_check = time.monotonic()
-                        elif (now - last_model_check) >= model_sync_seconds:
-                            last_model_check = now
+                            runtime.clear_model_resync_needed()
+                        elif runtime.needs_model_resync() or (now - last_model_check) >= model_sync_seconds:
+                            forced_resync = runtime.needs_model_resync()
                             resynced = runtime.maybe_resync_active_model(
                                 manifest_fetcher=client.get_active_model,
                                 artifact_fetcher=client.download_model_artifact,
                                 direct_url_fetcher=client.download_direct_url,
+                                force=forced_resync,
                             )
-                            if resynced:
+                            last_model_check = time.monotonic()
+                            runtime.clear_model_resync_needed()
+                            if resynced or forced_resync:
                                 try:
                                     client.send_worker_heartbeat(runtime.heartbeat_payload())
                                     last_hb = time.monotonic()

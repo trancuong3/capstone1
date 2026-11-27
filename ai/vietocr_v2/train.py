@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import random
 import re
@@ -17,6 +18,8 @@ from .contracts import (
     ORIGINAL_CHECKPOINT_SHA256, ORIGINAL_MODEL_FAMILY, ORIGINAL_VOCAB_SHA256,
     canonical_sha256, load_jsonl, sha256_file,
 )
+
+logger = logging.getLogger("viread.vietocr.train")
 
 # The two public profiles follow the product flow numbering. The source_flow values
 # remain legacy database identifiers so existing Admin VERIFIED rows stay readable.
@@ -574,9 +577,17 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     trainer.optimizer = optimizer
     trainer.scheduler = scheduler
     stage = "freeze_vgg"
+    step0_validation_loss: float | None = None
     best_validation_loss: float | None = None
     best_step = 0
     best_model_sha256: str | None = None
+    raw_patience = os.getenv("VIETOCR_EARLY_STOPPING_PATIENCE", "0").strip()
+    try:
+        early_stopping_patience = max(0, int(raw_patience)) if raw_patience else 0
+    except ValueError:
+        early_stopping_patience = 0
+    evals_without_improvement = 0
+    early_stopped = False
     # Colab defaults to resume so reruns keep working, but a new run folder
     # must still start from the selected parent checkpoint.
     resume = _should_resume(resume, checkpoint_path, run_dir)
@@ -603,6 +614,10 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         if saved.get("scaler_state"):
             scaler.load_state_dict(saved["scaler_state"])
         validation_loss = saved.get("validation_loss")
+        stored_step0_loss = saved.get("step0_validation_loss")
+        if stored_step0_loss is not None:
+            step0_validation_loss = float(stored_step0_loss)
+        evals_without_improvement = max(0, int(saved.get("evals_without_improvement") or 0))
         stored_best_loss = saved.get("best_validation_loss")
         stored_best_step = saved.get("best_step")
         stored_best_sha = saved.get("best_model_sha256")
@@ -624,6 +639,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
             best_validation_loss = float(stored_best_loss)
             best_step = int(stored_best_step or 0)
             best_model_sha256 = stored_best_sha
+            if step0_validation_loss is None and best_step == 0:
+                step0_validation_loss = best_validation_loss
             # Restore the latest-step weights after validating the saved best payload.
             trainer.model.load_state_dict(saved["model_state"], strict=True)
         else:
@@ -634,6 +651,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                 raise ValueError("resumed model validation loss is non-finite")
             best_validation_loss = validation_loss
             best_step = trainer.iter
+            if step0_validation_loss is None and best_step == 0:
+                step0_validation_loss = best_validation_loss
             best_model_path, best_model_sha256 = _store_best_model(torch, trainer.model, run_dir)
         _restore_rng(torch, saved["rng_state"])
     elif checkpoint_path.exists() or any(run_dir.glob("best-*.pth")):
@@ -647,6 +666,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         validation_loss = float(trainer.validate())
         if not __import__("math").isfinite(validation_loss):
             raise ValueError("initial parent model validation loss is non-finite")
+        step0_validation_loss = validation_loss
         best_validation_loss = validation_loss
         best_step = 0
         best_model_path, best_model_sha256 = _store_best_model(torch, trainer.model, run_dir)
@@ -692,6 +712,11 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                 best_model_path, best_model_sha256 = _store_best_model(torch, trainer.model, run_dir)
                 best_validation_loss = validation_loss
                 best_step = step
+                evals_without_improvement = 0
+            else:
+                evals_without_improvement += 1
+                if early_stopping_patience > 0 and evals_without_improvement >= early_stopping_patience:
+                    early_stopped = True
         if step % 100 == 0 or step == total_steps or validated:
             state = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "step": step,
                      "stage": stage,
@@ -699,7 +724,9 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                      "local_manifest_sha256": sha256_file(manifest),
                      "config_sha256": effective_config_sha, "architecture_sha256": architecture_sha,
                      "vocabulary_sha256": ORIGINAL_VOCAB_SHA256, "validation_loss": validation_loss,
+                     "step0_validation_loss": step0_validation_loss,
                      "best_validation_loss": best_validation_loss, "best_step": best_step,
+                     "evals_without_improvement": evals_without_improvement,
                      "best_model_sha256": best_model_sha256,
                      "best_model_filename": best_model_path.name if best_model_path else None,
                      "model_state": trainer.model.state_dict(), "optimizer_state": trainer.optimizer.state_dict(),
@@ -712,20 +739,50 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         if (progress_callback is not None
                 and (step % progress_interval_steps == 0 or validated or step == total_steps)):
             progress_callback(step, total_steps)
+        if early_stopped:
+            logger.info(
+                "Early stopping triggered at step %d/%d after %d evals without improvement "
+                "(best_step=%d, best_validation_loss=%.6f)",
+                step,
+                total_steps,
+                evals_without_improvement,
+                best_step,
+                best_validation_loss if best_validation_loss is not None else float("nan"),
+            )
+            break
     if (best_model_path is None or not best_model_path.is_file()
             or best_model_sha256 != sha256_file(best_model_path)):
         raise ValueError("no intact best validation checkpoint is available")
     best_model = torch.load(best_model_path, map_location=cfg["device"], weights_only=True)
     trainer.model.load_state_dict(best_model, strict=True)
     torch.save(trainer.model.state_dict(), candidate_path)
+    improved_over_parent = bool(
+        best_step > 0
+        and (
+            step0_validation_loss is None
+            or (best_validation_loss is not None and best_validation_loss < step0_validation_loss)
+        )
+    )
+    if not improved_over_parent:
+        logger.warning(
+            "Candidate training did not beat step-0 parent validation loss "
+            "(best_step=%d, step0_validation_loss=%s, best_validation_loss=%s); "
+            "exported weights remain identical to parent checkpoint",
+            best_step,
+            step0_validation_loss,
+            best_validation_loss,
+        )
     result = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "parent_checkpoint_sha256": parent_hash,
               "checkpoint_sha256": sha256_file(candidate_path), "config_sha256": candidate_config_sha,
               "effective_config_sha256": effective_config_sha,
               "architecture_sha256": architecture_sha, "vocabulary_sha256": ORIGINAL_VOCAB_SHA256,
               "manifest_sha256": dataset_version_sha256.lower(), "local_manifest_sha256": sha256_file(manifest),
               "dataset_receipt_sha256": sha256_file(dataset_receipt_path), "steps": step, "candidate_path": str(candidate_path),
-              "validation_loss": validation_loss, "best_validation_loss": best_validation_loss,
-              "best_step": best_step, "best_model_sha256": best_model_sha256,
+              "validation_loss": validation_loss, "step0_validation_loss": step0_validation_loss,
+              "best_validation_loss": best_validation_loss, "best_step": best_step,
+              "improved_over_parent": improved_over_parent,
+              "early_stopped": early_stopped, "early_stopping_patience": early_stopping_patience,
+              "best_model_sha256": best_model_sha256,
               "best_model_filename": best_model_path.name,
               "device": cfg["device"], "fp16": amp_enabled,
               "freeze_steps": freeze_steps, "batch_size": batch_size,
