@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import and_, exists, or_, select, update
+from sqlalchemy import and_, case, exists, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -102,6 +102,53 @@ class ReadingManagementRepository:
             ReadingSession.EndedAt >= starts_at,
             ReadingSession.EndedAt < ends_at,
         ))))
+
+    async def children_read_in_windows(
+        self,
+        windows: list[tuple[UUID, datetime, datetime]],
+    ) -> set[tuple[UUID, datetime, datetime]]:
+        """Batch-check which (child_id, starts_at, ends_at) windows have a completed session in 1 query."""
+        unique_windows = list(dict.fromkeys(windows))
+        if not unique_windows:
+            return set()
+        if len(unique_windows) == 1:
+            child_id, starts_at, ends_at = unique_windows[0]
+            if await self.child_read_between(child_id, starts_at, ends_at):
+                return {(child_id, starts_at, ends_at)}
+            return set()
+
+        child_ids = list({w[0] for w in unique_windows})
+        min_start = min(w[1] for w in unique_windows)
+        max_end = max(w[2] for w in unique_windows)
+        result = await self.db.execute(
+            select(ReadingSession.ChildId, ReadingSession.EndedAt).where(
+                ReadingSession.ChildId.in_(child_ids),
+                ReadingSession.State.in_(("COMPLETED", "FINISHED")),
+                ReadingSession.StartedAt.is_not(None),
+                ReadingSession.EndedAt.is_not(None),
+                ReadingSession.EndedAt >= ReadingSession.StartedAt,
+                ReadingSession.EndedAt >= min_start,
+                ReadingSession.EndedAt < max_end,
+            )
+        )
+        ended_by_child: dict[UUID, list[datetime]] = {}
+        for cid, ended_at in result.all():
+            if ended_at is None:
+                continue
+            ended_by_child.setdefault(cid, []).append(ended_at)
+
+        matched: set[tuple[UUID, datetime, datetime]] = set()
+        for child_id, starts_at, ends_at in unique_windows:
+            for ended_at in ended_by_child.get(child_id, ()):
+                comparable_end = (
+                    ended_at.replace(tzinfo=timezone.utc)
+                    if ended_at.tzinfo is None and starts_at.tzinfo is not None
+                    else ended_at
+                )
+                if starts_at <= comparable_end < ends_at:
+                    matched.add((child_id, starts_at, ends_at))
+                    break
+        return matched
 
     @staticmethod
     def mark_read_acknowledged(occurrence: ReadingReminderOccurrence, now: datetime) -> None:
@@ -220,53 +267,80 @@ class ReadingManagementRepository:
         await self.db.commit()
 
     async def create_due_occurrences_for_worker(self, now: datetime) -> int:
-        created = 0
+        rows_to_insert: list[dict[str, object]] = []
+        seen_keys: set[tuple[UUID, object]] = set()
         for reminder in await self.active_reminders_for_worker():
-            local_now = now.astimezone(ZoneInfo(reminder.Timezone))
+            try:
+                local_now = now.astimezone(ZoneInfo(reminder.Timezone))
+            except (ZoneInfoNotFoundError, ValueError):
+                continue
             if local_now.weekday() not in reminder.Weekdays:
                 continue
+            local_date = local_now.date()
             scheduled_for = local_schedule_to_utc(
-                local_now.date(), reminder.RemindAt, reminder.Timezone
+                local_date, reminder.RemindAt, reminder.Timezone
             )
             if scheduled_for is None or scheduled_for > now:
                 continue
-            statement = (
-                insert(ReadingReminderOccurrence)
-                .values(
-                    ReminderId=reminder.Id,
-                    ScheduledLocalDate=local_now.date(),
-                    ScheduledFor=scheduled_for,
-                    Status="PENDING",
-                    EmailStatus="PENDING" if reminder.EmailEnabled else "NOT_REQUESTED",
-                )
-                .on_conflict_do_nothing(
-                    index_elements=["reminderid", "scheduledlocaldate"]
-                )
+            dedupe = (reminder.Id, local_date)
+            if dedupe in seen_keys:
+                continue
+            seen_keys.add(dedupe)
+            rows_to_insert.append(
+                {
+                    "ReminderId": reminder.Id,
+                    "ScheduledLocalDate": local_date,
+                    "ScheduledFor": scheduled_for,
+                    "Status": "PENDING",
+                    "EmailStatus": "PENDING" if reminder.EmailEnabled else "NOT_REQUESTED",
+                }
             )
-            result = await self.db.execute(statement)
-            created += max(0, result.rowcount or 0)
+        if not rows_to_insert:
+            return 0
+        statement = (
+            insert(ReadingReminderOccurrence)
+            .values(rows_to_insert)
+            .on_conflict_do_nothing(
+                index_elements=["reminderid", "scheduledlocaldate"]
+            )
+        )
+        result = await self.db.execute(statement)
         await self.db.commit()
-        return created
+        return max(0, int(result.rowcount or 0))
 
     async def claim_due_email_occurrences(
         self,
         now: datetime,
         *,
-        limit: int = 50,
+        limit: int = 5,
         max_attempts: int = 5,
         stale_after: timedelta = timedelta(minutes=15),
     ) -> list[tuple[ReadingReminderOccurrence, ReadingReminder, ChildProfile]]:
         stale_before = now - stale_after
-        await self.db.execute(
-            update(ReadingReminderOccurrence)
-            .where(
-                ReadingReminderOccurrence.EmailStatus == "SENDING",
-                ReadingReminderOccurrence.EmailAttempts >= max_attempts,
-                ReadingReminderOccurrence.EmailLastAttemptAt <= stale_before,
-            )
-            .values(EmailStatus="FAILED", EmailErrorCode="DELIVERY_RETRY_LIMIT")
+        stale_cutoff = now - timedelta(hours=STALE_REMINDER_HOURS)
+        retry_limit_cond = and_(
+            ReadingReminderOccurrence.EmailStatus == "SENDING",
+            ReadingReminderOccurrence.EmailAttempts >= max_attempts,
+            ReadingReminderOccurrence.EmailLastAttemptAt <= stale_before,
         )
-        await self.db.commit()
+        expired_cond = and_(
+            ReadingReminderOccurrence.EmailStatus.in_(("PENDING", "RETRY", "SENDING")),
+            ReadingReminderOccurrence.ScheduledFor < stale_cutoff,
+        )
+        cleanup_res = await self.db.execute(
+            update(ReadingReminderOccurrence)
+            .where(or_(retry_limit_cond, expired_cond))
+            .values(
+                EmailStatus="FAILED",
+                EmailErrorCode=case(
+                    (retry_limit_cond, "DELIVERY_RETRY_LIMIT"),
+                    else_="REMINDER_EXPIRED",
+                ),
+                EmailNextAttemptAt=None,
+            )
+        )
+        if (cleanup_res.rowcount or 0) > 0:
+            await self.db.commit()
         retryable = or_(
             ReadingReminderOccurrence.EmailStatus == "PENDING",
             and_(
@@ -278,7 +352,6 @@ class ReadingManagementRepository:
                 ReadingReminderOccurrence.EmailLastAttemptAt <= stale_before,
             ),
         )
-        stale_cutoff = now - timedelta(hours=STALE_REMINDER_HOURS)
         statement = (
             select(ReadingReminderOccurrence, ReadingReminder, ChildProfile)
             .join(
@@ -307,10 +380,17 @@ class ReadingManagementRepository:
         )
         result = await self.db.execute(statement)
         rows = list(result.all())
+        if not rows:
+            await self.db.rollback()
+            return []
+        windows = [
+            (child.Id, *local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone))
+            for occurrence, reminder, child in rows
+        ]
+        read_windows = await self.children_read_in_windows(windows)
         to_send = []
-        for occurrence, reminder, child in rows:
-            day_start, day_end = local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone)
-            if await self.child_read_between(child.Id, day_start, day_end):
+        for (occurrence, reminder, child), window in zip(rows, windows):
+            if window in read_windows:
                 # No "time to read" email when the child already read that day.
                 self.mark_read_acknowledged(occurrence, now)
                 continue
@@ -320,8 +400,7 @@ class ReadingManagementRepository:
             occurrence.EmailNextAttemptAt = None
             occurrence.EmailErrorCode = None
             to_send.append((occurrence, reminder, child))
-        if rows:
-            await self.db.commit()
+        await self.db.commit()
         return to_send
 
     async def update_email_delivery(
@@ -333,15 +412,23 @@ class ReadingManagementRepository:
         error_code: str | None = None,
         next_attempt_at: datetime | None = None,
     ) -> None:
-        occurrence = await self.db.get(ReadingReminderOccurrence, occurrence_id)
-        if occurrence is None:
-            return
-        occurrence.EmailStatus = status
-        occurrence.EmailErrorCode = error_code
-        occurrence.EmailNextAttemptAt = next_attempt_at
+        values: dict[str, object] = {
+            "EmailStatus": status,
+            "EmailErrorCode": error_code,
+            "EmailNextAttemptAt": next_attempt_at,
+        }
         if status == "SENT":
-            occurrence.EmailSentAt = now
-        await self.save(occurrence)
+            values["EmailSentAt"] = now
+        try:
+            await self.db.execute(
+                update(ReadingReminderOccurrence)
+                .where(ReadingReminderOccurrence.Id == occurrence_id)
+                .values(**values)
+            )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
 
     async def reminder(self, reminder_id: UUID, child_id: UUID) -> ReadingReminder | None:
         return await self.db.scalar(select(ReadingReminder).where(
@@ -352,20 +439,38 @@ class ReadingManagementRepository:
             .where(ReadingReminder.Id == reminder_id, ChildProfile.ParentId == actor_id, ReadingReminder.DeletedAt.is_(None)))
 
     async def due_occurrences(self, child_id: UUID, now: datetime) -> list[tuple[ReadingReminderOccurrence, ReadingReminder]]:
+        rows_to_insert: list[dict[str, object]] = []
+        seen_keys: set[tuple[UUID, object]] = set()
         for reminder in await self.reminders(child_id):
-            local_now = now.astimezone(ZoneInfo(reminder.Timezone))
+            try:
+                local_now = now.astimezone(ZoneInfo(reminder.Timezone))
+            except (ZoneInfoNotFoundError, ValueError):
+                continue
             if not reminder.IsActive or local_now.weekday() not in reminder.Weekdays or local_now.time().replace(tzinfo=None) < reminder.RemindAt:
                 continue
-            scheduled_for = local_schedule_to_utc(local_now.date(), reminder.RemindAt, reminder.Timezone)
+            local_date = local_now.date()
+            scheduled_for = local_schedule_to_utc(local_date, reminder.RemindAt, reminder.Timezone)
             if scheduled_for is None:
                 continue
-            statement = insert(ReadingReminderOccurrence).values(
-                ReminderId=reminder.Id, ScheduledLocalDate=local_now.date(),
-                ScheduledFor=scheduled_for, Status="PENDING",
-                EmailStatus="PENDING" if reminder.EmailEnabled else "NOT_REQUESTED",
-            ).on_conflict_do_nothing(index_elements=["reminderid", "scheduledlocaldate"])
+            dedupe = (reminder.Id, local_date)
+            if dedupe in seen_keys:
+                continue
+            seen_keys.add(dedupe)
+            rows_to_insert.append(
+                {
+                    "ReminderId": reminder.Id,
+                    "ScheduledLocalDate": local_date,
+                    "ScheduledFor": scheduled_for,
+                    "Status": "PENDING",
+                    "EmailStatus": "PENDING" if reminder.EmailEnabled else "NOT_REQUESTED",
+                }
+            )
+        if rows_to_insert:
+            statement = insert(ReadingReminderOccurrence).values(rows_to_insert).on_conflict_do_nothing(
+                index_elements=["reminderid", "scheduledlocaldate"]
+            )
             await self.db.execute(statement)
-        await self.db.commit()
+            await self.db.commit()
         result = await self.db.execute(select(ReadingReminderOccurrence, ReadingReminder)
             .join(ReadingReminder, ReadingReminder.Id == ReadingReminderOccurrence.ReminderId)
             .where(ReadingReminder.ChildId == child_id, ReadingReminder.DeletedAt.is_(None),
@@ -374,11 +479,18 @@ class ReadingManagementRepository:
                    # Older unacknowledged reminders are missed ones; don't pile them up.
                    ReadingReminderOccurrence.ScheduledFor >= now - timedelta(hours=STALE_REMINDER_HOURS))
             .order_by(ReadingReminderOccurrence.ScheduledFor, ReadingReminderOccurrence.Id))
+        raw_rows = [(row[0], row[1]) for row in result.all()]
+        if not raw_rows:
+            return []
+        windows = [
+            (child_id, *local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone))
+            for occurrence, reminder in raw_rows
+        ]
+        read_windows = await self.children_read_in_windows(windows)
         due: list[tuple[ReadingReminderOccurrence, ReadingReminder]] = []
         changed = False
-        for occurrence, reminder in ((row[0], row[1]) for row in result.all()):
-            day_start, day_end = local_day_bounds(occurrence.ScheduledLocalDate, reminder.Timezone)
-            if await self.child_read_between(child_id, day_start, day_end):
+        for (occurrence, reminder), window in zip(raw_rows, windows):
+            if window in read_windows:
                 self.mark_read_acknowledged(occurrence, now)
                 changed = True
             else:

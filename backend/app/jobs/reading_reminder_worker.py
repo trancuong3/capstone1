@@ -9,8 +9,6 @@ import signal
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import text
-
 from app.database.config import (
     READING_REMINDER_MAX_ATTEMPTS,
     READING_REMINDER_POLL_SECONDS,
@@ -32,6 +30,7 @@ from app.services.worker_telemetry import record_worker_error, record_worker_suc
 
 logger = logging.getLogger(__name__)
 READING_REMINDER_ADVISORY_LOCK_KEY = 4201001
+DEFAULT_REMINDER_CLAIM_LIMIT = 5
 _WORKER_KEY = "reading_reminder"
 
 
@@ -46,42 +45,14 @@ class ParentEmailLookupFailed(Exception):
 
 
 @asynccontextmanager
-async def _advisory_lock_guard(lock_key: int):
-    """Acquire a PostgreSQL session advisory lock so overlapping cron/worker ticks never race."""
-    try:
-        async with AsyncSessionLocal() as lock_session:
-            dialect = getattr(getattr(lock_session, "bind", None), "dialect", None)
-            dialect_name = getattr(dialect, "name", None)
-            if dialect_name and dialect_name != "postgresql":
-                yield True
-                return
-            result = await lock_session.execute(
-                text("SELECT pg_try_advisory_lock(:key)"),
-                {"key": lock_key},
-            )
-            acquired = bool(result.scalar())
-            if not acquired:
-                yield False
-                return
-            try:
-                yield True
-            finally:
-                try:
-                    await lock_session.execute(
-                        text("SELECT pg_advisory_unlock(:key)"),
-                        {"key": lock_key},
-                    )
-                except Exception:
-                    pass
-    except Exception:
-        # In unit tests where AsyncSessionLocal is patched/unbacked by Postgres,
-        # let callers test process_due_* directly without failing on advisory lock.
-        if getattr(AsyncSessionLocal, "__name__", "") != "sessionmaker" and not hasattr(
-            AsyncSessionLocal, "kw"
-        ):
-            yield True
-            return
-        raise
+async def _advisory_lock_guard(_lock_key: int):
+    """Deprecated no-op shim retained only for legacy test monkeypatch compatibility.
+
+    Supavisor transaction pooler (port 6543) does not support session-level
+    pg_try_advisory_lock safely; concurrency isolation is enforced atomically
+    via FOR UPDATE SKIP LOCKED + ON CONFLICT DO NOTHING on a single DB session.
+    """
+    yield True
 
 
 async def get_verified_parent_email(parent_id: UUID) -> str:
@@ -179,6 +150,13 @@ async def deliver_claimed_occurrences(
     ]
     delivered = 0
     supports_locale = _sender_accepts_locale(email_sender)
+    # Memoize parent email & locale lookups per sweep so multiple reminders for the
+    # same parent never trigger redundant Supabase Auth Admin HTTP calls.
+    recipient_cache: dict[UUID, str] = {}
+    unavailable_cache: dict[UUID, str] = {}
+    lookup_failed_parents: set[UUID] = set()
+    locale_cache: dict[UUID, str | None] = {}
+
     for (
         occurrence_id,
         attempts,
@@ -191,7 +169,23 @@ async def deliver_claimed_occurrences(
     ) in claim_snapshots:
         await _release_repository_db(repository)
         try:
-            recipient = await recipient_resolver(parent_id)
+            if parent_id in recipient_cache:
+                recipient = recipient_cache[parent_id]
+            elif parent_id in unavailable_cache:
+                raise ParentEmailUnavailable(unavailable_cache[parent_id])
+            elif parent_id in lookup_failed_parents:
+                raise ParentEmailLookupFailed()
+            else:
+                try:
+                    recipient = await recipient_resolver(parent_id)
+                except ParentEmailUnavailable as error:
+                    unavailable_cache[parent_id] = error.code
+                    raise
+                except ParentEmailLookupFailed:
+                    lookup_failed_parents.add(parent_id)
+                    raise
+                recipient_cache[parent_id] = recipient
+
             send_kwargs: dict[str, object] = {
                 "recipient": recipient,
                 "child_alias": child_alias,
@@ -203,11 +197,16 @@ async def deliver_claimed_occurrences(
             if supports_locale:
                 claim_locale = explicit_locale
                 if locale_resolver is not None:
-                    raw_locale = locale_resolver(parent_id)
-                    if inspect.isawaitable(raw_locale):
-                        raw_locale = await raw_locale
-                    if raw_locale:
-                        claim_locale = resolve_supported_locale(raw_locale)
+                    if parent_id not in locale_cache:
+                        raw_locale = locale_resolver(parent_id)
+                        if inspect.isawaitable(raw_locale):
+                            raw_locale = await raw_locale
+                        locale_cache[parent_id] = (
+                            resolve_supported_locale(raw_locale) if raw_locale else None
+                        )
+                    cached_locale = locale_cache[parent_id]
+                    if cached_locale:
+                        claim_locale = cached_locale
                 send_kwargs["locale"] = claim_locale
             await asyncio.to_thread(email_sender, **send_kwargs)
         except ParentEmailUnavailable as error:
@@ -272,22 +271,28 @@ async def deliver_claimed_occurrences(
     return delivered
 
 
-async def process_due_reminders_once(now: datetime | None = None) -> int:
+async def process_due_reminders_once(
+    now: datetime | None = None,
+    *,
+    limit: int = DEFAULT_REMINDER_CLAIM_LIMIT,
+) -> int:
     now = now or datetime.now(timezone.utc)
     try:
-        async with _advisory_lock_guard(READING_REMINDER_ADVISORY_LOCK_KEY) as acquired:
-            if not acquired:
-                logger.info("reading_reminder_skipped_lock_held")
-                return 0
-            async with AsyncSessionLocal() as session:
-                repository = ReadingManagementRepository(session)
-                await repository.create_due_occurrences_for_worker(now)
-                claims = await repository.claim_due_email_occurrences(
-                    now, max_attempts=READING_REMINDER_MAX_ATTEMPTS
-                )
-                delivered = await deliver_claimed_occurrences(repository, claims, now)
-            record_worker_success(_WORKER_KEY)
-            return delivered
+        async with AsyncSessionLocal() as session:
+            repository = ReadingManagementRepository(session)
+            await repository.create_due_occurrences_for_worker(now)
+            claims = await repository.claim_due_email_occurrences(
+                now,
+                limit=max(1, int(limit)),
+                max_attempts=READING_REMINDER_MAX_ATTEMPTS,
+            )
+            delivered = (
+                await deliver_claimed_occurrences(repository, claims, now)
+                if claims
+                else 0
+            )
+        record_worker_success(_WORKER_KEY)
+        return delivered
     except asyncio.CancelledError:
         raise
     except Exception as error:

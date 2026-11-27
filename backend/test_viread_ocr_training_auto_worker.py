@@ -176,6 +176,28 @@ class TrainingReconciliationTests(unittest.IsolatedAsyncioTestCase):
         exhausted_update = session.calls[2][0]
         self.assertIn("evaluation_status", exhausted_update)
         self.assertIn("BENCHMARK_ONLY", exhausted_update)
+        self.assertIn("lease_expires_at IS NULL", session.calls[1][0])
+        self.assertIn("lease_expires_at IS NULL", exhausted_update)
+
+    async def test_run_maintenance_once_can_defer_heartbeat_persistence_to_cron_batch(self):
+        from unittest.mock import AsyncMock
+        from app.jobs import viread_ocr_training_auto_worker as worker
+
+        with (
+            patch.object(worker, "_expire_exhausted_jobs", new=AsyncMock()) as expire_mock,
+            patch.object(
+                worker, "_dispatch_or_poll_colab_once", new=AsyncMock(return_value=False)
+            ) as colab_mock,
+            patch.object(
+                worker, "persist_worker_heartbeat_with_factory", new=AsyncMock()
+            ) as persist_mock,
+        ):
+            res = await worker.run_maintenance_once(persist_heartbeat=False)
+
+        self.assertEqual(res, {"ok": True, "colab_activity": False})
+        expire_mock.assert_awaited_once()
+        colab_mock.assert_awaited_once()
+        persist_mock.assert_not_awaited()
 
 
 if __name__ == "__main__":

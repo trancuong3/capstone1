@@ -618,7 +618,8 @@ async def _expire_exhausted_jobs() -> None:
                 worker_id=NULL, lease_expires_at=NULL,
                 last_error_code=COALESCE(last_error_code, 'COLAB_WORKER_LEASE_EXPIRED'), updated_at=now()
             WHERE target='COLAB' AND status='COLAB_RUNNING'
-              AND lease_expires_at < now()
+              AND (lease_expires_at < now()
+                   OR (lease_expires_at IS NULL AND updated_at < now() - interval '30 minutes'))
               AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts < :max_attempts)
                    OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts < :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
@@ -636,7 +637,8 @@ async def _expire_exhausted_jobs() -> None:
                     ELSE '{}'::jsonb END,
                 updated_at=now()
             WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING')
-              AND lease_expires_at < now()
+              AND (lease_expires_at < now()
+                   OR (lease_expires_at IS NULL AND updated_at < now() - interval '30 minutes'))
               AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts >= :max_attempts)
                    OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts >= :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
@@ -1476,6 +1478,7 @@ async def run_maintenance_once(
     *,
     source: str = "cron",
     execution_mode: str = "cron_scheduled",
+    persist_heartbeat: bool = True,
 ) -> dict[str, Any]:
     """Lightweight cron maintenance pass: expire stale leases & poll/dispatch Colab jobs.
 
@@ -1486,14 +1489,16 @@ async def run_maintenance_once(
         await _expire_exhausted_jobs()
         colab_activity = bool(await _dispatch_or_poll_colab_once())
         record_worker_success("viread_ocr_training")
-        await persist_worker_heartbeat_with_factory(
-            AsyncSessionLocal,
-            "viread_ocr_training",
-            execution_mode=execution_mode,
-            ok=True,
-            items_processed=1 if colab_activity else 0,
-            source=source,
-        )
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_training",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=1 if colab_activity else 0,
+                source=source,
+                timeout_seconds=5.0,
+            )
         return {
             "ok": True,
             "colab_activity": colab_activity,
@@ -1502,15 +1507,17 @@ async def run_maintenance_once(
         raise
     except Exception as exc:
         record_worker_error("viread_ocr_training", exc)
-        await persist_worker_heartbeat_with_factory(
-            AsyncSessionLocal,
-            "viread_ocr_training",
-            execution_mode=execution_mode,
-            ok=False,
-            items_processed=0,
-            source=source,
-            error_code=type(exc).__name__,
-        )
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_training",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+                timeout_seconds=5.0,
+            )
         raise
 
 

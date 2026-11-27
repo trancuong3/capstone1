@@ -146,6 +146,175 @@ class ReadingReminderWorkerTests(unittest.TestCase):
         self.assertEqual(repo.updates[0][1]["error_code"], "SMTP_UNAVAILABLE")
         self.assertEqual(repo.updates[0][1]["next_attempt_at"], datetime(2026, 11, 4, 12, 1, tzinfo=timezone.utc))
 
+    def test_deliver_claimed_occurrences_memoizes_parent_email_lookup_per_sweep(self):
+        repo = FakeRepository()
+        parent_id = UUID("22222222-2222-4222-8222-222222222222")
+        lookup_calls = []
+        sent = []
+
+        async def recipient(pid):
+            lookup_calls.append(pid)
+            return "parent@example.com"
+
+        def sender(**kwargs):
+            sent.append(kwargs)
+
+        claims = []
+        for idx in range(3):
+            occ, rem, child = claim()
+            occ.Id = UUID(f"11111111-1111-4111-8111-11111111111{idx}")
+            child.ParentId = parent_id
+            claims.append((occ, rem, child))
+
+        delivered = asyncio.run(
+            deliver_claimed_occurrences(
+                repo,
+                claims,
+                datetime(2026, 11, 4, 12, tzinfo=timezone.utc),
+                recipient_resolver=recipient,
+                email_sender=sender,
+            )
+        )
+        self.assertEqual(delivered, 3)
+        self.assertEqual(len(sent), 3)
+        self.assertEqual(len(lookup_calls), 1, "Same parent must be looked up only once per sweep")
+
+    def test_deliver_claimed_occurrences_memoizes_unverified_parent_per_sweep(self):
+        repo = FakeRepository()
+        lookup_calls = 0
+
+        async def recipient(_pid):
+            nonlocal lookup_calls
+            lookup_calls += 1
+            raise ParentEmailUnavailable("PARENT_EMAIL_UNVERIFIED")
+
+        claims = [claim(), claim()]
+        delivered = asyncio.run(
+            deliver_claimed_occurrences(
+                repo,
+                claims,
+                datetime(2026, 11, 4, 12, tzinfo=timezone.utc),
+                recipient_resolver=recipient,
+                email_sender=lambda **_kw: None,
+            )
+        )
+        self.assertEqual(delivered, 0)
+        self.assertEqual(lookup_calls, 1)
+        self.assertEqual(len(repo.updates), 2)
+        self.assertTrue(all(u[1]["error_code"] == "PARENT_EMAIL_UNVERIFIED" for u in repo.updates))
+
+    def test_create_due_occurrences_batches_into_single_insert_statement(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.repositories.reading_management_repository import ReadingManagementRepository
+
+        now = datetime(2026, 11, 4, 13, 0, tzinfo=timezone.utc)  # 20:00 VN (Wed = 2)
+        reminders = [
+            SimpleNamespace(
+                Id=UUID(f"33333333-3333-4333-8333-33333333333{i}"),
+                RemindAt=time(19, 0 + i),
+                Weekdays=[2],
+                Timezone="Asia/Ho_Chi_Minh",
+                EmailEnabled=True,
+                IsActive=True,
+                DeletedAt=None,
+            )
+            for i in range(4)
+        ]
+
+        executed_statements = []
+        fake_db = MagicMock()
+
+        async def _fake_execute(stmt):
+            executed_statements.append(stmt)
+            return SimpleNamespace(rowcount=4)
+
+        fake_db.execute = AsyncMock(side_effect=_fake_execute)
+        fake_db.commit = AsyncMock()
+
+        repo = ReadingManagementRepository(fake_db)
+        with patch.object(
+            repo, "active_reminders_for_worker", new=AsyncMock(return_value=reminders)
+        ):
+            created = asyncio.run(repo.create_due_occurrences_for_worker(now))
+
+        self.assertEqual(created, 4)
+        self.assertEqual(len(executed_statements), 1, "Must execute 1 multi-row batch INSERT")
+        fake_db.commit.assert_awaited_once()
+
+    def test_children_read_in_windows_batches_multiple_windows_into_one_query(self):
+        from unittest.mock import AsyncMock, MagicMock
+        from app.repositories.reading_management_repository import ReadingManagementRepository
+
+        child_a = UUID("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+        child_b = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+        day_start = datetime(2026, 11, 3, 17, 0, tzinfo=timezone.utc)
+        day_end = datetime(2026, 11, 4, 17, 0, tzinfo=timezone.utc)
+
+        fake_db = MagicMock()
+        fake_db.execute = AsyncMock(
+            return_value=SimpleNamespace(
+                all=lambda: [(child_a, datetime(2026, 11, 4, 10, 0, tzinfo=timezone.utc))]
+            )
+        )
+        repo = ReadingManagementRepository(fake_db)
+        matched = asyncio.run(
+            repo.children_read_in_windows(
+                [(child_a, day_start, day_end), (child_b, day_start, day_end)]
+            )
+        )
+        self.assertEqual(matched, {(child_a, day_start, day_end)})
+        fake_db.execute.assert_awaited_once()
+
+    def test_presence_service_memoizes_recipient_lookup_across_alerts(self):
+        from datetime import timedelta
+        from unittest.mock import AsyncMock, MagicMock
+        from app.services.reading_presence_service import PresenceLimits, ReadingPresenceService
+
+        now = datetime(2026, 11, 4, 12, 0, tzinfo=timezone.utc)
+        parent_id = UUID("22222222-2222-4222-8222-222222222222")
+        alerts = [
+            SimpleNamespace(
+                Id=UUID(f"44444444-4444-4444-8444-44444444444{i}"),
+                SessionId=UUID(f"55555555-5555-4555-8555-55555555555{i}"),
+                ChildId=UUID(f"66666666-6666-4666-8666-66666666666{i}"),
+                ParentId=parent_id,
+                ExpiresAt=now + timedelta(minutes=5),
+                Attempts=1,
+            )
+            for i in range(2)
+        ]
+        repo = MagicMock()
+        repo.db = MagicMock(rollback=AsyncMock())
+        repo.expire_and_recover = AsyncMock()
+        repo.claim_due = AsyncMock(return_value=alerts)
+        repo.delivery_context = AsyncMock(
+            return_value=SimpleNamespace(
+                session_state="LISTENING", child_alias="Bé An", email_enabled=True
+            )
+        )
+        repo.finish_alert = AsyncMock()
+
+        lookup_count = 0
+
+        async def _resolve(_pid):
+            nonlocal lookup_count
+            lookup_count += 1
+            return "parent@example.com"
+
+        sent = []
+        service = ReadingPresenceService(repo, PresenceLimits())
+        delivered = asyncio.run(
+            service.deliver_due(
+                now,
+                recipient_resolver=_resolve,
+                email_sender=lambda **kw: sent.append(kw),
+            )
+        )
+        self.assertEqual(delivered, 2)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(lookup_count, 1)
+        self.assertEqual(repo.claim_due.await_args.kwargs.get("limit"), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -34,8 +34,17 @@ from app.repositories.parent_email_notification_repository import (
 from app.services.parent_email_notification_service import (
     ParentEmailNotificationService,
 )
+from app.services.worker_telemetry import (
+    persist_worker_heartbeats_batch_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 logger = logging.getLogger(__name__)
+_WORKER_KEY = "parent_email_dispatcher"
+DEFAULT_ENGAGEMENT_MAX_EMAILS = 5
+DEFAULT_ENGAGEMENT_MAX_SECONDS = 10.0
+DISPATCH_SUBTASK_TIMEOUT_SECONDS = 15.0
 
 
 def _worker_ready() -> tuple[bool, str]:
@@ -43,19 +52,30 @@ def _worker_ready() -> tuple[bool, str]:
     return ready, provider if ready else reason
 
 
-async def process_engagement_emails_once(now: datetime | None = None) -> int:
+async def process_engagement_emails_once(
+    now: datetime | None = None,
+    *,
+    max_emails: int | None = DEFAULT_ENGAGEMENT_MAX_EMAILS,
+    max_seconds: float | None = DEFAULT_ENGAGEMENT_MAX_SECONDS,
+) -> int:
     now = now or datetime.now(timezone.utc)
     async with AsyncSessionLocal() as session:
         service = ParentEmailNotificationService(
             ParentEmailNotificationRepository(session)
         )
-        return await service.dispatch_engagement_emails(now)
+        return await service.dispatch_engagement_emails(
+            now,
+            max_emails=max_emails,
+            max_seconds=max_seconds,
+        )
 
 
 async def dispatch_all_once(
     now: datetime | None = None,
     *,
     scope: str = "all",
+    source: str = "cron",
+    execution_mode: str = "cron_scheduled",
 ) -> dict[str, object]:
     now = now or datetime.now(timezone.utc)
     ready, provider_or_reason = _worker_ready()
@@ -80,10 +100,43 @@ async def dispatch_all_once(
         )
         return result
 
+    pending_heartbeats: list[dict[str, object]] = []
+    presence_error: BaseException | None = None
+    reminders_error: BaseException | None = None
+    engagement_error: BaseException | None = None
+
     if scope in ("all", "presence"):
         try:
-            result["presence_sent"] = await process_due_alerts_once(now)
+            presence_sent = int(
+                await asyncio.wait_for(
+                    process_due_alerts_once(now),
+                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+                )
+            )
+            result["presence_sent"] = presence_sent
+            record_worker_success("reading_presence")
+            pending_heartbeats.append(
+                {
+                    "worker_id": "reading_presence",
+                    "execution_mode": execution_mode,
+                    "ok": True,
+                    "items_processed": presence_sent,
+                    "source": source,
+                }
+            )
         except Exception as error:
+            presence_error = error
+            record_worker_error("reading_presence", error)
+            pending_heartbeats.append(
+                {
+                    "worker_id": "reading_presence",
+                    "execution_mode": execution_mode,
+                    "ok": False,
+                    "items_processed": 0,
+                    "source": source,
+                    "error_code": type(error).__name__,
+                }
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -94,8 +147,36 @@ async def dispatch_all_once(
 
     if scope in ("all", "reminders"):
         try:
-            result["reminders_sent"] = await process_due_reminders_once(now)
+            reminders_sent = int(
+                await asyncio.wait_for(
+                    process_due_reminders_once(now),
+                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+                )
+            )
+            result["reminders_sent"] = reminders_sent
+            record_worker_success("reading_reminder")
+            pending_heartbeats.append(
+                {
+                    "worker_id": "reading_reminder",
+                    "execution_mode": execution_mode,
+                    "ok": True,
+                    "items_processed": reminders_sent,
+                    "source": source,
+                }
+            )
         except Exception as error:
+            reminders_error = error
+            record_worker_error("reading_reminder", error)
+            pending_heartbeats.append(
+                {
+                    "worker_id": "reading_reminder",
+                    "execution_mode": execution_mode,
+                    "ok": False,
+                    "items_processed": 0,
+                    "source": source,
+                    "error_code": type(error).__name__,
+                }
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -106,8 +187,15 @@ async def dispatch_all_once(
 
     if scope in ("all", "engagement"):
         try:
-            result["engagement_sent"] = await process_engagement_emails_once(now)
+            engagement_sent = int(
+                await asyncio.wait_for(
+                    process_engagement_emails_once(now),
+                    timeout=DISPATCH_SUBTASK_TIMEOUT_SECONDS,
+                )
+            )
+            result["engagement_sent"] = engagement_sent
         except Exception as error:
+            engagement_error = error
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -115,6 +203,46 @@ async def dispatch_all_once(
                 stage="engagement_dispatch",
                 exception=error,
             )
+
+    dispatcher_error = (
+        engagement_error
+        if scope in ("all", "engagement")
+        else (presence_error if scope == "presence" else reminders_error)
+    )
+    total_sent = (
+        int(result["presence_sent"])  # type: ignore[arg-type]
+        + int(result["reminders_sent"])  # type: ignore[arg-type]
+        + int(result["engagement_sent"])  # type: ignore[arg-type]
+    )
+    if dispatcher_error is None:
+        record_worker_success(_WORKER_KEY)
+        pending_heartbeats.append(
+            {
+                "worker_id": _WORKER_KEY,
+                "execution_mode": execution_mode,
+                "ok": True,
+                "items_processed": total_sent,
+                "source": source,
+            }
+        )
+    else:
+        record_worker_error(_WORKER_KEY, dispatcher_error)
+        pending_heartbeats.append(
+            {
+                "worker_id": _WORKER_KEY,
+                "execution_mode": execution_mode,
+                "ok": False,
+                "items_processed": 0,
+                "source": source,
+                "error_code": type(dispatcher_error).__name__,
+            }
+        )
+
+    await persist_worker_heartbeats_batch_with_factory(
+        AsyncSessionLocal,
+        pending_heartbeats,
+        timeout_seconds=5.0,
+    )
 
     return result
 
@@ -182,9 +310,11 @@ async def run_worker(stop_event: asyncio.Event) -> None:
             last_engagement = mono
             try:
                 await process_engagement_emails_once(now)
+                record_worker_success(_WORKER_KEY)
             except asyncio.CancelledError:
                 raise
             except Exception as error:
+                record_worker_error(_WORKER_KEY, error)
                 log_diagnostic(
                     logger,
                     logging.WARNING,
