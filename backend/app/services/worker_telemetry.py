@@ -305,6 +305,145 @@ async def read_persisted_worker_heartbeats(
     return {}
 
 
+def _upsert_heartbeat_batch_sql(table_name: str, row_count: int) -> str:
+    value_clauses = ",\n            ".join(
+        f"""(
+            :worker_key_{idx},
+            :execution_mode_{idx},
+            :last_run_at_{idx},
+            :last_success_at_{idx},
+            :last_error_at_{idx},
+            :last_error_code_{idx},
+            :last_items_processed_{idx},
+            :last_source_{idx},
+            :updated_at_{idx}
+        )"""
+        for idx in range(row_count)
+    )
+    return f"""
+        INSERT INTO {table_name} (
+            worker_key,
+            execution_mode,
+            last_run_at,
+            last_success_at,
+            last_error_at,
+            last_error_code,
+            last_items_processed,
+            last_source,
+            updated_at
+        )
+        VALUES
+            {value_clauses}
+        ON CONFLICT (worker_key) DO UPDATE SET
+            execution_mode = EXCLUDED.execution_mode,
+            last_run_at = EXCLUDED.last_run_at,
+            last_success_at = COALESCE(
+                EXCLUDED.last_success_at,
+                system_worker_heartbeats.last_success_at
+            ),
+            last_error_at = COALESCE(
+                EXCLUDED.last_error_at,
+                system_worker_heartbeats.last_error_at
+            ),
+            last_error_code = EXCLUDED.last_error_code,
+            last_items_processed = EXCLUDED.last_items_processed,
+            last_source = EXCLUDED.last_source,
+            updated_at = EXCLUDED.updated_at
+    """
+
+
+async def persist_worker_heartbeats_batch(
+    db: AsyncSession,
+    entries: list[dict[str, Any]],
+) -> None:
+    """Persist multiple worker heartbeats in 1 single SQL UPSERT RTT (fail-safe no-op)."""
+    if db is None or not entries:
+        return
+    execute_fn = getattr(db, "execute", None)
+    if not callable(execute_fn):
+        return
+
+    default_now = datetime.now(timezone.utc)
+    # Deduplicate by worker_key (keeping latest) because Postgres rejects duplicate
+    # conflict keys inside a single INSERT ... ON CONFLICT DO UPDATE statement.
+    deduped: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        raw_worker_id = entry.get("worker_id") or entry.get("worker_key")
+        if not raw_worker_id:
+            continue
+        safe_worker_key = _safe_token(str(raw_worker_id), default="unknown_worker")
+        ok = bool(entry.get("ok", True))
+        raw_at = entry.get("at")
+        if isinstance(raw_at, datetime):
+            entry_now = (
+                raw_at.replace(tzinfo=timezone.utc)
+                if raw_at.tzinfo is None
+                else raw_at.astimezone(timezone.utc)
+            )
+        else:
+            entry_now = default_now
+        deduped[safe_worker_key] = {
+            "worker_key": safe_worker_key,
+            "execution_mode": _safe_token(
+                str(entry.get("execution_mode") or "cron_scheduled"),
+                default="cron_scheduled",
+            ),
+            "ok": ok,
+            "at": entry_now,
+            "error_code": (
+                None
+                if ok
+                else _safe_error_label(entry.get("error_code") or "UNKNOWN_ERROR")
+            ),
+            "items_processed": max(0, int(entry.get("items_processed") or 0)),
+            "source": _safe_token(
+                str(entry.get("source") or "cron"), default="cron"
+            ),
+        }
+
+    normalized = list(deduped.values())
+    if not normalized:
+        return
+
+    is_sqlite = _is_sqlite_session(db)
+    tables = (
+        ("system_worker_heartbeats",)
+        if is_sqlite
+        else ("public.system_worker_heartbeats", "system_worker_heartbeats")
+    )
+
+    for table_name in tables:
+        use_iso_params = is_sqlite or table_name == "system_worker_heartbeats"
+        params: dict[str, Any] = {}
+        for idx, item in enumerate(normalized):
+            ts_val: Any = item["at"].isoformat() if use_iso_params else item["at"]
+            ok = item["ok"]
+            params[f"worker_key_{idx}"] = item["worker_key"]
+            params[f"execution_mode_{idx}"] = item["execution_mode"]
+            params[f"last_run_at_{idx}"] = ts_val
+            params[f"last_success_at_{idx}"] = ts_val if ok else None
+            params[f"last_error_at_{idx}"] = None if ok else ts_val
+            params[f"last_error_code_{idx}"] = item["error_code"]
+            params[f"last_items_processed_{idx}"] = item["items_processed"]
+            params[f"last_source_{idx}"] = item["source"]
+            params[f"updated_at_{idx}"] = ts_val
+
+        try:
+            sql = _upsert_heartbeat_batch_sql(table_name, len(normalized))
+            res = execute_fn(text(sql), params)
+            if inspect.isawaitable(res):
+                await res
+            commit_fn = getattr(db, "commit", None)
+            if callable(commit_fn):
+                await _maybe_await(commit_fn())
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await _safe_rollback(db)
+            continue
+
+
 async def persist_worker_heartbeat_with_factory(
     session_factory: Any,
     worker_id: str,
@@ -314,7 +453,7 @@ async def persist_worker_heartbeat_with_factory(
     items_processed: int = 0,
     source: str = "cron",
     error_code: str | None = None,
-    timeout_seconds: float = 2.0,
+    timeout_seconds: float = 5.0,
 ) -> None:
     """Best-effort bounded helper opening a short-lived session to persist a heartbeat."""
     if not callable(session_factory):
@@ -335,6 +474,31 @@ async def persist_worker_heartbeat_with_factory(
                 source=source,
                 error_code=error_code,
             )
+
+    try:
+        await asyncio.wait_for(_write(), timeout=max(0.2, float(timeout_seconds)))
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
+
+
+async def persist_worker_heartbeats_batch_with_factory(
+    session_factory: Any,
+    entries: list[dict[str, Any]],
+    *,
+    timeout_seconds: float = 5.0,
+) -> None:
+    """Best-effort bounded helper persisting multiple heartbeats in 1 session & 1 SQL RTT."""
+    if not callable(session_factory) or not entries:
+        return
+
+    async def _write() -> None:
+        async with session_factory() as hb_db:
+            exec_attr = getattr(hb_db, "execute", None)
+            if not callable(exec_attr) or not inspect.iscoroutinefunction(exec_attr):
+                return
+            await persist_worker_heartbeats_batch(hb_db, entries)
 
     try:
         await asyncio.wait_for(_write(), timeout=max(0.2, float(timeout_seconds)))

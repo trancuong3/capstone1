@@ -1,4 +1,5 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
@@ -1668,6 +1669,68 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("mounts cleanly under React StrictMode with a single un-aborted health request", async () => {
+    let healthCallCount = 0;
+    let abortedCount = 0;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/system/admin/health")) {
+        healthCallCount += 1;
+        init?.signal?.addEventListener("abort", () => {
+          abortedCount += 1;
+        });
+        return Promise.resolve(
+          Response.json({
+            overall_status: "HEALTHY",
+            checked_at: timestamp,
+            services: [
+              {
+                id: "api",
+                label: "FastAPI",
+                status: "HEALTHY",
+                detail_status: "healthy",
+                operational_state: "Healthy",
+                checked_at: timestamp,
+                safe_message: "API OK",
+                service_group: "core",
+                execution_mode: "always_on",
+                criticality: "core",
+              },
+              {
+                id: "database",
+                label: "Database",
+                status: "HEALTHY",
+                detail_status: "healthy",
+                operational_state: "Healthy",
+                checked_at: timestamp,
+                safe_message: "DB OK",
+                service_group: "core",
+                execution_mode: "always_on",
+                criticality: "core",
+              },
+            ],
+            audio_cache: null,
+            audio_cache_error: null,
+          }),
+        );
+      }
+      return Promise.resolve(Response.json({}));
+    });
+
+    render(
+      <StrictMode>
+        <AdminServicesProvider>
+          <AdminHealthScreen />
+        </AdminServicesProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Database" })).toBeInTheDocument();
+    });
+    expect(healthCallCount).toBe(1);
+    expect(abortedCount).toBe(0);
   });
 });
 

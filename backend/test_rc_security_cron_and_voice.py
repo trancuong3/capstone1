@@ -92,22 +92,43 @@ class InternalCronDispatchAndWorkersTests(unittest.TestCase):
         rem_mock.assert_awaited_once()
         alert_mock.assert_awaited_once()
 
-    def test_presence_alert_worker_once_and_advisory_lock_skip(self):
+    def test_presence_alert_worker_once_uses_single_session_and_bounded_batch(self):
         from contextlib import asynccontextmanager
 
-        @asynccontextmanager
-        async def _no_lock(_key: int):
-            yield False
+        session_entries = 0
 
-        with patch.object(
-            reading_presence_alert_worker,
-            "_advisory_lock_guard",
-            side_effect=_no_lock,
+        @asynccontextmanager
+        async def _single_session():
+            nonlocal session_entries
+            session_entries += 1
+            yield MagicMock()
+
+        deliver_mock = AsyncMock(return_value=2)
+        fake_service = MagicMock(deliver_due=deliver_mock)
+
+        with (
+            patch.object(
+                reading_presence_alert_worker,
+                "AsyncSessionLocal",
+                side_effect=_single_session,
+            ),
+            patch.object(
+                reading_presence_alert_worker,
+                "ReadingPresenceRepository",
+                return_value=MagicMock(),
+            ),
+            patch.object(
+                reading_presence_alert_worker,
+                "ReadingPresenceService",
+                return_value=fake_service,
+            ),
         ):
             delivered = asyncio.run(
                 reading_presence_alert_worker.process_due_alerts_once()
             )
-        self.assertEqual(delivered, 0)
+        self.assertEqual(delivered, 2)
+        self.assertEqual(session_entries, 1, "Must open strictly 1 DB session (no advisory lock session)")
+        self.assertEqual(deliver_mock.await_args.kwargs.get("batch"), 5)
 
         with (
             patch.object(reading_presence_alert_worker, "validate_worker_configuration"),

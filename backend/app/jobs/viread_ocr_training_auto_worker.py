@@ -117,6 +117,83 @@ def _work_root() -> Path:
     return Path(configured) if configured else Path(tempfile.gettempdir())
 
 
+def _read_proc_meminfo(meminfo_path: Path) -> dict[str, int]:
+    values: dict[str, int] = {}
+    try:
+        for line in meminfo_path.read_text(encoding="ascii", errors="ignore").splitlines():
+            if ":" not in line:
+                continue
+            key, rest = line.split(":", 1)
+            parts = rest.strip().split()
+            if parts and parts[0].isdigit():
+                values[key.strip()] = int(parts[0]) * 1024
+    except OSError:
+        return {}
+    return values
+
+
+def _read_cgroup_stat(stat_path: Path) -> dict[str, int]:
+    values: dict[str, int] = {}
+    try:
+        for line in stat_path.read_text(encoding="ascii", errors="ignore").splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[1].isdigit():
+                values[parts[0]] = int(parts[1])
+    except OSError:
+        return {}
+    return values
+
+
+def _available_ram_bytes_linux(
+    *,
+    meminfo_path: Path = Path("/proc/meminfo"),
+    cgroup_root: Path = Path("/sys/fs/cgroup"),
+) -> int:
+    meminfo = _read_proc_meminfo(meminfo_path)
+    if "MemAvailable" in meminfo:
+        available = meminfo["MemAvailable"]
+    elif any(k in meminfo for k in ("MemFree", "Buffers", "Cached", "SReclaimable")):
+        available = sum(
+            meminfo.get(k, 0) for k in ("MemFree", "Buffers", "Cached", "SReclaimable")
+        )
+    else:
+        available = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+
+    # Cgroup v2
+    v2_max = cgroup_root / "memory.max"
+    v2_cur = cgroup_root / "memory.current"
+    v2_stat = cgroup_root / "memory.stat"
+    cgroup_applied = False
+    try:
+        maximum = v2_max.read_text(encoding="ascii").strip()
+        if maximum.isdigit():
+            current = int(v2_cur.read_text(encoding="ascii").strip())
+            stat = _read_cgroup_stat(v2_stat)
+            reclaimable = stat.get("inactive_file", 0) + stat.get("slab_reclaimable", 0)
+            used = max(0, current - reclaimable)
+            available = min(available, max(0, int(maximum) - used))
+            cgroup_applied = True
+    except (OSError, ValueError):
+        pass
+
+    # Cgroup v1 fallback
+    if not cgroup_applied:
+        v1_max = cgroup_root / "memory" / "memory.limit_in_bytes"
+        v1_cur = cgroup_root / "memory" / "memory.usage_in_bytes"
+        v1_stat = cgroup_root / "memory" / "memory.stat"
+        try:
+            maximum = v1_max.read_text(encoding="ascii").strip()
+            if maximum.isdigit():
+                current = int(v1_cur.read_text(encoding="ascii").strip())
+                stat = _read_cgroup_stat(v1_stat)
+                reclaimable = stat.get("total_inactive_file", stat.get("inactive_file", 0))
+                used = max(0, current - reclaimable)
+                available = min(available, max(0, int(maximum) - used))
+        except (OSError, ValueError):
+            pass
+    return available
+
+
 def _available_ram_bytes() -> int:
     if os.name == "nt":
         import ctypes
@@ -133,21 +210,11 @@ def _available_ram_bytes() -> int:
         if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(memory)):
             raise OSError("GlobalMemoryStatusEx failed")
         return int(memory.ullAvailPhys)
-    available = int(os.sysconf("SC_AVPHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
-    for maximum_path, current_path in (
-        (Path("/sys/fs/cgroup/memory.max"), Path("/sys/fs/cgroup/memory.current")),
-        (Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
-         Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")),
-    ):
-        try:
-            maximum = maximum_path.read_text(encoding="ascii").strip()
-            if maximum.isdigit():
-                current = int(current_path.read_text(encoding="ascii").strip())
-                available = min(available, max(0, int(maximum) - current))
-                break
-        except (OSError, ValueError):
-            continue
-    return available
+    return _available_ram_bytes_linux()
+
+
+def available_ram_bytes() -> int:
+    return _available_ram_bytes()
 
 
 def local_training_capacity() -> tuple[bool, dict[str, Any]]:
@@ -229,31 +296,73 @@ def next_job_generation(latest_generation: int | None, disposition: str | None) 
     return None
 
 
-async def _ensure_automatic_locked_test() -> dict[str, Any] | None:
+async def _ensure_automatic_locked_test(actor_id: UUID | None = None) -> dict[str, Any] | None:
     """Create/use a sealed test only from real, verified holdout samples."""
     async with AsyncSessionLocal() as db:
-        actor = await db.execute(text("""
-            SELECT actor_id FROM public.viread_ocr_outbox
-            WHERE status='DONE' AND actor_id IS NOT NULL
-            ORDER BY updated_at DESC LIMIT 1
-        """))
-        actor_id = actor.scalar_one_or_none()
-        if actor_id is None:
+        effective_actor_id = actor_id
+        if effective_actor_id is None:
+            actor = await db.execute(text("""
+                SELECT actor_id FROM public.viread_ocr_outbox
+                WHERE status='DONE' AND actor_id IS NOT NULL
+                ORDER BY updated_at DESC LIMIT 1
+            """))
+            effective_actor_id = actor.scalar_one_or_none()
+        if effective_actor_id is None:
             actor = await db.execute(text("""
                 SELECT created_by FROM public.viread_ocr_dataset_versions
                 WHERE source_flow IN ('FLOW2_EXTERNAL_TRDG','FLOW2_EXTERNAL','FLOW1_VERIFIED')
                   AND created_by IS NOT NULL
                 ORDER BY created_at DESC LIMIT 1
             """))
-            actor_id = actor.scalar_one_or_none()
-        if actor_id is None:
+            effective_actor_id = actor.scalar_one_or_none()
+        if effective_actor_id is None:
+            admin_row = await db.execute(text("""
+                SELECT id FROM public.profiles
+                WHERE lower(COALESCE(to_jsonb(profiles)->>'role', '')) = 'admin'
+                ORDER BY id LIMIT 1
+            """))
+            effective_actor_id = admin_row.scalar_one_or_none()
+        if effective_actor_id is None:
             await db.commit()
             return None
-        readiness = await VireadOcrTrainingService(db).ensure_locked_test(UUID(str(actor_id)))
+        readiness = await VireadOcrTrainingService(db).ensure_locked_test(UUID(str(effective_actor_id)))
         if (readiness.get("status") != "READY" or not readiness.get("version_id")
                 or not readiness.get("manifest_sha256")):
             return None
         return readiness
+
+
+async def _resolve_unconsumed_locked_test(
+    db,
+    locked_test: dict[str, Any] | None,
+) -> tuple[str | None, str | None]:
+    """Return `(version_id, manifest_sha256)` only when `locked_test` is READY and still unconsumed."""
+    if not isinstance(locked_test, dict) or locked_test.get("status") != "READY":
+        return None, None
+    version_id = locked_test.get("version_id")
+    manifest_sha = locked_test.get("manifest_sha256")
+    if not version_id or not manifest_sha:
+        return None, None
+    check = await db.execute(text("""
+        SELECT locked.id
+        FROM public.viread_ocr_dataset_versions locked
+        WHERE locked.id = CAST(:locked_test_id AS uuid)
+          AND locked.version_sha256 = :locked_test_sha
+          AND locked.source_flow = 'LOCKED_TEST'
+          AND locked.is_locked_test = TRUE
+          AND NOT EXISTS (
+              SELECT 1 FROM public.viread_ocr_benchmarks b
+              WHERE b.locked_test_version_id = locked.id
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM public.viread_ocr_evaluation_cohorts c
+              JOIN public.viread_ocr_benchmarks b ON b.evaluation_cohort_id = c.id
+              WHERE c.dataset_version_id = locked.id
+          )
+    """), {"locked_test_id": str(version_id), "locked_test_sha": str(manifest_sha)})
+    if check.scalar_one_or_none() is None:
+        return None, None
+    return str(version_id), str(manifest_sha)
 
 
 def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str]:
@@ -386,16 +495,21 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
         training_config, config_sha = await asyncio.to_thread(
             _training_config, "FLOW1_EXTERNAL_TRDG", repo_root
         )
+        locked_test_id, locked_test_sha = await _resolve_unconsumed_locked_test(db, locked_test)
+        evaluation_status = (
+            "LOCKED_TEST_PINNED" if (locked_test_id and locked_test_sha) else "WAITING_FOR_HOLDOUT"
+        )
         prior = await db.execute(text("""
             SELECT generation, metadata->>'candidate_disposition' AS disposition
             FROM public.viread_ocr_training_jobs
             WHERE profile='FLOW1_EXTERNAL_TRDG' AND dataset_version_id=:dataset_id
               AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
               AND parent_checkpoint_sha256=:parent_sha
-              AND locked_test_version_id IS NULL
+              AND locked_test_version_id IS NOT DISTINCT FROM CAST(:locked_test_id AS uuid)
             ORDER BY generation DESC LIMIT 1 FOR UPDATE
         """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
-              "config_sha": config_sha, "parent_sha": parent_sha})
+              "config_sha": config_sha, "parent_sha": parent_sha,
+              "locked_test_id": locked_test_id})
         prior_row = prior.mappings().first()
         generation = next_job_generation(
             int(prior_row["generation"]) if prior_row else None,
@@ -410,19 +524,21 @@ async def _schedule_ready_flow1(locked_test: dict[str, Any] | None = None) -> in
                  locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW1_EXTERNAL_TRDG', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
-                    NULL, NULL, :generation,
+                    CAST(:locked_test_id AS uuid), :locked_test_sha, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
             ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": selected["dataset_version_id"], "manifest_sha": selected["version_sha256"],
-              "config_sha": config_sha, "parent_sha": parent_sha, "target": target, "status": initial_status,
+              "config_sha": config_sha, "parent_sha": parent_sha,
+              "locked_test_id": locked_test_id, "locked_test_sha": locked_test_sha,
+              "target": target, "status": initial_status,
               "generation": generation,
               "actor_id": selected["created_by"], "metadata": json.dumps({
                   "hardware": hardware, "train_count": counts["FLOW2_EXTERNAL_train"] + counts["FLOW2_TRDG_train"],
                   "validation_count": counts["FLOW2_EXTERNAL_validation"] + counts["FLOW2_TRDG_validation"],
                   "components": {key: value for key, value in counts.items() if not key.endswith(("_train", "_validation"))},
                   "training_config": training_config,
-                  "evaluation_status": "WAITING_FOR_HOLDOUT"})})
+                  "evaluation_status": evaluation_status})})
         await db.commit()
         return 1 if inserted.scalar_one_or_none() else 0
 
@@ -502,16 +618,21 @@ async def _schedule_ready_flow2_detailed(
         training_config, config_sha = await asyncio.to_thread(
             _training_config, "FLOW2_ADMIN_VERIFIED", repo_root
         )
+        locked_test_id, locked_test_sha = await _resolve_unconsumed_locked_test(db, locked_test)
+        evaluation_status = (
+            "LOCKED_TEST_PINNED" if (locked_test_id and locked_test_sha) else "WAITING_FOR_HOLDOUT"
+        )
         prior = await db.execute(text("""
             SELECT generation, metadata->>'candidate_disposition' AS disposition
             FROM public.viread_ocr_training_jobs
             WHERE profile='FLOW2_ADMIN_VERIFIED' AND dataset_version_id=:dataset_id
               AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
               AND parent_checkpoint_sha256=:parent_sha
-              AND locked_test_version_id IS NULL
+              AND locked_test_version_id IS NOT DISTINCT FROM CAST(:locked_test_id AS uuid)
             ORDER BY generation DESC LIMIT 1 FOR UPDATE
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha,
-              "config_sha": config_sha, "parent_sha": parent_sha})
+              "config_sha": config_sha, "parent_sha": parent_sha,
+              "locked_test_id": locked_test_id})
         prior_row = prior.mappings().first()
         generation = next_job_generation(
             int(prior_row["generation"]) if prior_row else None,
@@ -535,18 +656,20 @@ async def _schedule_ready_flow2_detailed(
                  locked_test_version_id, locked_test_manifest_sha256, generation,
                  target, status, created_by, metadata)
             VALUES ('FLOW2_ADMIN_VERIFIED', :dataset_id, :manifest_sha, :config_sha, :parent_sha,
-                    NULL, NULL, :generation,
+                    CAST(:locked_test_id AS uuid), :locked_test_sha, :generation,
                     :target, :status, :actor_id, CAST(:metadata AS jsonb))
             ON CONFLICT DO NOTHING
             RETURNING id
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha, "config_sha": config_sha,
-              "parent_sha": parent_sha, "target": target, "status": initial_status,
+              "parent_sha": parent_sha,
+              "locked_test_id": locked_test_id, "locked_test_sha": locked_test_sha,
+              "target": target, "status": initial_status,
               "generation": generation,
               "actor_id": effective_actor_id, "metadata": json.dumps({"hardware": hardware,
                                                                       "train_count": counts["train_count"],
                                                                       "validation_count": counts["validation_count"],
                                                                       "training_config": training_config,
-                                                                      "evaluation_status": "WAITING_FOR_HOLDOUT"})})
+                                                                      "evaluation_status": evaluation_status})})
         new_job_id = inserted.scalar_one_or_none()
         await db.commit()
         return {
@@ -559,6 +682,9 @@ async def _schedule_ready_flow2_detailed(
             "manifest_sha256": manifest_sha,
             "config_sha256": config_sha,
             "parent_checkpoint_sha256": parent_sha,
+            "locked_test_version_id": locked_test_id,
+            "locked_test_manifest_sha256": locked_test_sha,
+            "evaluation_status": evaluation_status,
             "generation": generation,
             "train_count": int(counts["train_count"]),
             "validation_count": int(counts["validation_count"]),
@@ -577,12 +703,12 @@ async def _schedule_ready_flow2(
 async def trigger_flow2_schedule_once(actor_id: UUID | None = None) -> dict[str, Any]:
     """On-demand trigger for Flow 2 snapshot & job scheduling (works when background pollers are off)."""
     await _expire_exhausted_jobs()
-    result = await _schedule_ready_flow2_detailed(actor_id=actor_id)
     try:
-        locked_test = await _ensure_automatic_locked_test()
+        locked_test = await _ensure_automatic_locked_test(actor_id=actor_id)
     except Exception as exc:
         logger.debug("Automatic locked test check skipped during manual Flow 2 trigger: %s", type(exc).__name__)
         locked_test = None
+    result = await _schedule_ready_flow2_detailed(locked_test, actor_id=actor_id)
     return {
         **result,
         "locked_test_ready": bool(locked_test and locked_test.get("status") == "READY"),
@@ -618,7 +744,8 @@ async def _expire_exhausted_jobs() -> None:
                 worker_id=NULL, lease_expires_at=NULL,
                 last_error_code=COALESCE(last_error_code, 'COLAB_WORKER_LEASE_EXPIRED'), updated_at=now()
             WHERE target='COLAB' AND status='COLAB_RUNNING'
-              AND lease_expires_at < now()
+              AND (lease_expires_at < now()
+                   OR (lease_expires_at IS NULL AND updated_at < now() - interval '30 minutes'))
               AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts < :max_attempts)
                    OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts < :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
@@ -636,7 +763,8 @@ async def _expire_exhausted_jobs() -> None:
                     ELSE '{}'::jsonb END,
                 updated_at=now()
             WHERE status IN ('LOCAL_RUNNING','COLAB_RUNNING')
-              AND lease_expires_at < now()
+              AND (lease_expires_at < now()
+                   OR (lease_expires_at IS NULL AND updated_at < now() - interval '30 minutes'))
               AND ((metadata->>'operation'='BENCHMARK_ONLY' AND evaluation_attempts >= :max_attempts)
                    OR (COALESCE(metadata->>'operation','TRAIN') <> 'BENCHMARK_ONLY' AND attempts >= :max_attempts))
         """), {"max_attempts": MAX_ATTEMPTS})
@@ -1476,6 +1604,7 @@ async def run_maintenance_once(
     *,
     source: str = "cron",
     execution_mode: str = "cron_scheduled",
+    persist_heartbeat: bool = True,
 ) -> dict[str, Any]:
     """Lightweight cron maintenance pass: expire stale leases & poll/dispatch Colab jobs.
 
@@ -1486,14 +1615,16 @@ async def run_maintenance_once(
         await _expire_exhausted_jobs()
         colab_activity = bool(await _dispatch_or_poll_colab_once())
         record_worker_success("viread_ocr_training")
-        await persist_worker_heartbeat_with_factory(
-            AsyncSessionLocal,
-            "viread_ocr_training",
-            execution_mode=execution_mode,
-            ok=True,
-            items_processed=1 if colab_activity else 0,
-            source=source,
-        )
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_training",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=1 if colab_activity else 0,
+                source=source,
+                timeout_seconds=5.0,
+            )
         return {
             "ok": True,
             "colab_activity": colab_activity,
@@ -1502,15 +1633,17 @@ async def run_maintenance_once(
         raise
     except Exception as exc:
         record_worker_error("viread_ocr_training", exc)
-        await persist_worker_heartbeat_with_factory(
-            AsyncSessionLocal,
-            "viread_ocr_training",
-            execution_mode=execution_mode,
-            ok=False,
-            items_processed=0,
-            source=source,
-            error_code=type(exc).__name__,
-        )
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                AsyncSessionLocal,
+                "viread_ocr_training",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+                timeout_seconds=5.0,
+            )
         raise
 
 
@@ -1527,15 +1660,16 @@ async def run_worker(stop: asyncio.Event, *, poll_seconds: int = 60) -> None:
                 await _expire_exhausted_jobs()
 
             if data_changed:
-                await _schedule_ready_flow1()
-                await _schedule_ready_flow2()
+                locked_test: dict[str, Any] | None = None
                 try:
-                    await _ensure_automatic_locked_test()
+                    locked_test = await _ensure_automatic_locked_test()
                 except asyncio.CancelledError:
                     raise
                 except Exception as evaluation_error:
                     log_diagnostic(logger, logging.WARNING, event="viread_training_evaluation_snapshot_deferred",
                                    stage="automatic_locked_test_snapshot", exception=evaluation_error)
+                await _schedule_ready_flow1(locked_test)
+                await _schedule_ready_flow2(locked_test)
                 last_schedule_token = await _pipeline_change_token()
 
             if has_active_jobs or data_changed:

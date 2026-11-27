@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -44,9 +45,11 @@ from app.services.viread_drive_connection_service import VireadDriveConnectionSe
 from app.services.viread_ocr_training_service import (
     MAX_SHARD_BYTES,
     VireadOcrTrainingService,
+    _is_flow2_profile,
 )
 from app.services.storage_service import create_signed_image_url
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _WORKER_ID_PATTERN = r"^[A-Za-z0-9_.:-]+$"
@@ -1404,18 +1407,11 @@ async def benchmark_viread_colab_job(
             payload.locked_test_manifest_sha256 != job["locked_test_manifest_sha256"]):
         await db.rollback()
         raise HTTPException(status_code=422, detail="Benchmark dataset or run differs from the immutable job selection")
-    result = await service.benchmark(UUID(str(job["created_by"])), payload)
-    await db.execute(text("""
-        UPDATE public.viread_ocr_training_jobs SET progress=CAST(:progress AS jsonb),
-            metadata=metadata || CAST(:metadata AS jsonb), updated_at=now()
-        WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
-    """), {"id": job_id, "worker_id": worker_id,
-          "progress": json.dumps({"stage": "benchmarked", "gate_status": result["gate_status"]}),
-          "metadata": json.dumps({"evaluation_status": "COMPLETED",
-                                  "evaluation_gate_status": result["gate_status"],
-                                  "evaluation_type": result["evaluation_type"]})})
+    actor_id = UUID(str(job["created_by"]))
+    # Release the FOR UPDATE lease row before CPU paired bootstrap and Drive upload.
+    # service.benchmark() re-locks the job in Phase 3 and commits all updates atomically.
     await db.commit()
-    return result
+    return await service.benchmark(actor_id, payload, job_id=job_id, worker_id=worker_id)
 
 
 @router.post("/admin/viread-training/worker/jobs/{job_id}/heartbeat")
@@ -1462,6 +1458,7 @@ async def finish_viread_colab_training_job(
             status_code=422,
             detail="Worker result does not match the registered training job",
         )
+    latest_benchmark = None
     if payload.status in {"CANDIDATE", "BENCHMARKED", "QUALITY_GATE_REJECTED"}:
         run = await service.repo.one("""
             SELECT id, status, profile, dataset_version_id, manifest_sha256,
@@ -1478,13 +1475,13 @@ async def finish_viread_colab_training_job(
             await db.rollback()
             raise HTTPException(status_code=422, detail="Worker result does not match the registered training job")
         if payload.status in {"BENCHMARKED", "QUALITY_GATE_REJECTED"}:
-            benchmark = await service.repo.one("""
-                SELECT gate_status FROM public.viread_ocr_benchmarks
+            latest_benchmark = await service.repo.one("""
+                SELECT id, gate_status, evaluation_type FROM public.viread_ocr_benchmarks
                 WHERE run_id=:run_id ORDER BY created_at DESC LIMIT 1
             """, {"run_id": verified_run_id})
             expected_gate = "V2_WIN" if payload.status == "BENCHMARKED" else None
-            if not benchmark or (expected_gate and benchmark["gate_status"] != expected_gate) or (
-                payload.status == "QUALITY_GATE_REJECTED" and benchmark["gate_status"] == "V2_WIN"
+            if not latest_benchmark or (expected_gate and latest_benchmark["gate_status"] != expected_gate) or (
+                payload.status == "QUALITY_GATE_REJECTED" and latest_benchmark["gate_status"] == "V2_WIN"
             ):
                 await db.rollback()
                 raise HTTPException(status_code=422, detail="Training result does not match its registered quality gate")
@@ -1528,7 +1525,46 @@ async def finish_viread_colab_training_job(
             "worker_id": payload.worker_id, "runtime": runtime,
         })})
     await service.repo.commit()
-    return {"job_id": job_id, "status": new_status, "run_id": verified_run_id}
+
+    auto_promoted = False
+    auto_promote_decision_id = None
+    if (
+        os.getenv("VIREAD_FLOW2_AUTO_PROMOTE_ON_V2_WIN", "false").strip().lower() == "true"
+        and payload.status == "BENCHMARKED"
+        and new_status == "BENCHMARKED"
+        and verified_run_id is not None
+        and _is_flow2_profile(job.get("profile"))
+        and latest_benchmark is not None
+        and latest_benchmark.get("id") is not None
+        and latest_benchmark.get("evaluation_type") == "PRODUCTION"
+        and latest_benchmark.get("gate_status") == "V2_WIN"
+    ):
+        try:
+            decision = await service.decide(
+                UUID(str(job["created_by"])),
+                ModelDecisionRequest(
+                    action="APPROVE",
+                    run_id=UUID(str(verified_run_id)),
+                    benchmark_id=UUID(str(latest_benchmark["id"])),
+                    reason="Auto-promoted after passing Production Locked Test quality gate (V2_WIN).",
+                ),
+            )
+            auto_promoted = True
+            auto_promote_decision_id = decision.get("decision_id")
+        except Exception as exc:
+            logger.warning(
+                "Opt-in Flow 2 auto-promotion skipped/failed for job %s run %s: %s",
+                job_id,
+                verified_run_id,
+                exc,
+            )
+
+    return {
+        "job_id": job_id,
+        "status": new_status,
+        "run_id": verified_run_id,
+        **({"auto_promoted": True, "decision_id": auto_promote_decision_id} if auto_promoted else {}),
+    }
 
 
 @router.get("/admin/viread-training/worker/jobs/{job_id}/resume-state")

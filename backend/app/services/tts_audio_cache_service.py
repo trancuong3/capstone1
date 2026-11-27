@@ -40,12 +40,14 @@ _SCOPE_CACHE_CATALOG_TTL_SECONDS = 60.0
 _SCOPE_CACHE_PRIVATE_TTL_SECONDS = 15.0
 _SCOPE_CACHE_MAX_ENTRIES = 1024
 _DAILY_USAGE_CACHE_TTL_SECONDS = 15.0
+_SUMMARY_CACHE_TTL_SECONDS = 15.0
 _AUDIO_RAM_LRU_MAX_BYTES = 32 * 1024 * 1024  # 32 MiB bounded server RAM LRU
 _AUDIO_RAM_LRU_MAX_ITEM_BYTES = 4 * 1024 * 1024  # Never pin >4 MiB single clip
 
 _CACHE_STATE_LOCK = threading.Lock()
 _SCOPE_TARGET_CACHE: "OrderedDict[tuple[Any, ...], tuple[float, Any]]" = OrderedDict()
 _DAILY_USAGE_CACHE: dict[tuple[int, date], tuple[float, dict[str, int]]] = {}
+_SUMMARY_CACHE: dict[tuple[int, int, int, date], tuple[float, dict[str, Any]]] = {}
 _AUDIO_RAM_LRU: "OrderedDict[tuple[str, str], tuple[bytes, str]]" = OrderedDict()
 _AUDIO_RAM_LRU_BYTES = 0
 
@@ -78,6 +80,78 @@ def _reset_day_if_needed_locked(today: date) -> None:
         _RUNTIME_METRICS["quota_exhausted"] = False
 
 
+def invalidate_tts_cache_summary_cache() -> None:
+    """Clear the 15s RAM TTL summary cache when cache entries change."""
+    with _CACHE_STATE_LOCK:
+        _SUMMARY_CACHE.clear()
+
+
+def is_tts_cache_runtime_quota_exhausted() -> bool:
+    today = datetime.now(timezone.utc).date()
+    with _METRICS_LOCK:
+        _reset_day_if_needed_locked(today)
+        return bool(_RUNTIME_METRICS["quota_exhausted"])
+
+
+def get_cached_tts_audio_cache_summary(
+    db: AsyncSession | None,
+    *,
+    max_bytes: int | None = None,
+    daily_limit: int | None = None,
+    bypass_cache: bool = False,
+) -> dict[str, Any] | None:
+    if bypass_cache:
+        return None
+    bind_id = _db_bind_cache_key(db)
+    if bind_id == 0:
+        return None
+    resolved_max = get_tts_cache_max_bytes() if max_bytes is None else int(max_bytes)
+    resolved_daily = (
+        get_tts_cache_daily_egress_limit_bytes()
+        if daily_limit is None
+        else int(daily_limit)
+    )
+    today = datetime.now(timezone.utc).date()
+    key = (bind_id, resolved_max, resolved_daily, today)
+    now_mono = time.monotonic()
+    with _CACHE_STATE_LOCK:
+        entry = _SUMMARY_CACHE.get(key)
+        if entry is None or entry[0] <= now_mono:
+            if entry is not None:
+                _SUMMARY_CACHE.pop(key, None)
+            return None
+        payload = dict(entry[1])
+    if is_tts_cache_runtime_quota_exhausted():
+        payload["quota_exhausted"] = True
+    return payload
+
+
+def set_cached_tts_audio_cache_summary(
+    db: AsyncSession | None,
+    summary: dict[str, Any],
+    *,
+    max_bytes: int | None = None,
+    daily_limit: int | None = None,
+) -> None:
+    bind_id = _db_bind_cache_key(db)
+    if bind_id == 0:
+        return
+    resolved_max = get_tts_cache_max_bytes() if max_bytes is None else int(max_bytes)
+    resolved_daily = (
+        get_tts_cache_daily_egress_limit_bytes()
+        if daily_limit is None
+        else int(daily_limit)
+    )
+    today = datetime.now(timezone.utc).date()
+    key = (bind_id, resolved_max, resolved_daily, today)
+    now_mono = time.monotonic()
+    with _CACHE_STATE_LOCK:
+        expired = [k for k, (exp, _) in _SUMMARY_CACHE.items() if exp <= now_mono]
+        for k in expired:
+            _SUMMARY_CACHE.pop(k, None)
+        _SUMMARY_CACHE[key] = (now_mono + _SUMMARY_CACHE_TTL_SECONDS, dict(summary))
+
+
 def clear_tts_cache_runtime_metrics() -> None:
     global _AUDIO_RAM_LRU_BYTES
     with _METRICS_LOCK:
@@ -89,6 +163,7 @@ def clear_tts_cache_runtime_metrics() -> None:
     with _CACHE_STATE_LOCK:
         _SCOPE_TARGET_CACHE.clear()
         _DAILY_USAGE_CACHE.clear()
+        _SUMMARY_CACHE.clear()
         _AUDIO_RAM_LRU.clear()
         _AUDIO_RAM_LRU_BYTES = 0
 
@@ -1653,6 +1728,7 @@ class TtsAudioCacheService:
                 owner_parent_id=target.owner_parent_id,
             )
             await self.db.commit()
+            invalidate_tts_cache_summary_cache()
         except Exception as exc:
             await self._safe_rollback()
             still_owned = await _storage_path_owned_by_active_row(bucket, storage_path)
@@ -1823,6 +1899,8 @@ class TtsAudioCacheService:
             )
             return 0 if commit else []
 
+        if stale_objects:
+            invalidate_tts_cache_summary_cache()
         _scope_cache_invalidate(
             book_id=book_id,
             page_id=page_id,
@@ -1835,24 +1913,31 @@ class TtsAudioCacheService:
         await delete_stale_tts_objects(stale_objects)
         return len(stale_objects)
 
-    async def get_summary(self) -> dict[str, Any]:
+    async def get_summary(self, *, bypass_cache: bool = False) -> dict[str, Any]:
         max_bytes = get_tts_cache_max_bytes()
         daily_limit = get_tts_cache_daily_egress_limit_bytes()
         if self.repo is not None:
+            use_summary_cache = isinstance(self.repo, TtsAudioCacheRepository) and self.db is not None
+            if use_summary_cache:
+                cached = get_cached_tts_audio_cache_summary(
+                    self.db,
+                    max_bytes=max_bytes,
+                    daily_limit=daily_limit,
+                    bypass_cache=bypass_cache,
+                )
+                if cached is not None:
+                    return cached
             try:
                 summary = await self.repo.get_summary()
                 hits = int(summary["hit_count"])
                 misses = int(summary["miss_count"])
                 total_reqs = hits + misses
                 daily_egress = int(summary["daily_egress_bytes"])
-                today = datetime.now(timezone.utc).date()
-                with _METRICS_LOCK:
-                    _reset_day_if_needed_locked(today)
-                    runtime_quota = bool(_RUNTIME_METRICS["quota_exhausted"])
+                runtime_quota = is_tts_cache_runtime_quota_exhausted()
                 quota_exhausted = runtime_quota or (
                     daily_limit > 0 and daily_egress >= daily_limit
                 )
-                return {
+                result = {
                     "entry_count": int(summary["entry_count"]),
                     "storage_used_bytes": int(summary["storage_used_bytes"]),
                     "storage_quota_bytes": max_bytes,
@@ -1861,6 +1946,14 @@ class TtsAudioCacheService:
                     "cache_hit_ratio": round(hits / total_reqs, 4) if total_reqs > 0 else None,
                     "quota_exhausted": quota_exhausted,
                 }
+                if use_summary_cache:
+                    set_cached_tts_audio_cache_summary(
+                        self.db,
+                        result,
+                        max_bytes=max_bytes,
+                        daily_limit=daily_limit,
+                    )
+                return result
             except SQLAlchemyError:
                 await self._safe_rollback()
 
@@ -1895,6 +1988,7 @@ async def delete_stale_tts_objects(stale_objects: list[tuple[str, str]]) -> None
     """Delete invalidated TTS cache objects from Storage AFTER the caller commits DB."""
     if not stale_objects:
         return
+    invalidate_tts_cache_summary_cache()
     _audio_ram_lru_evict(stale_objects)
     sem = asyncio.Semaphore(4)
 

@@ -1155,6 +1155,64 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             # CRITICAL: ElevenLabs fallback audio must NEVER be stored under local_* cache keys!
             mock_store_cache.assert_not_called()
 
+    def test_get_status_reports_elevenlabs_configuration_and_cooldown(self) -> None:
+        import asyncio
+        from unittest.mock import MagicMock
+        from app.providers.elevenlabs_voice_provider import (
+            ElevenLabsVoiceProvider,
+            VoiceProviderError,
+        )
+
+        async def _scenario() -> None:
+            el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+            el.synthesize = AsyncMock(  # type: ignore[method-assign]
+                side_effect=VoiceProviderError(
+                    status_code=429,
+                    code="ELEVENLABS_QUOTA_EXCEEDED",
+                )
+            )
+            local = MagicMock(spec=LocalVoiceProvider)
+            local.is_configured = False
+            local.base_url = ""
+            local.get_health = AsyncMock(
+                return_value={
+                    "configured": False,
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNCONFIGURED",
+                }
+            )
+            local.synthesize = AsyncMock(
+                side_effect=LocalVoiceTechnicalError(503, "LOCAL_VOICE_UNCONFIGURED")
+            )
+            google = GoogleCloudVoiceProvider(stt_api_key="", tts_api_key="")
+            orch = VoiceOrchestrator(
+                local_provider=local,
+                google_provider=google,
+                elevenlabs_provider=el,
+            )
+            status_before = await orch.get_status()
+            self.assertTrue(status_before["elevenlabs"]["configured"])
+            self.assertFalse(status_before["elevenlabs"]["tts_cooldown"])
+            self.assertFalse(status_before["elevenlabs"]["stt_cooldown"])
+
+            with self.assertRaises(VoiceProviderError):
+                await orch.synthesize(
+                    text="xin chào",
+                    speed=1.0,
+                    policy=VoicePolicyContext(
+                        provider_mode="local_with_google_fallback",
+                        allow_google_tts=True,
+                    ),
+                )
+
+            status_after = await orch.get_status()
+            self.assertTrue(status_after["elevenlabs"]["configured"])
+            self.assertTrue(status_after["elevenlabs"]["tts_cooldown"])
+
+        asyncio.run(_scenario())
+
 
 if __name__ == "__main__":
     unittest.main()

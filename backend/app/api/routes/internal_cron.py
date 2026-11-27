@@ -36,7 +36,9 @@ def require_cron_dispatch_token(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Cron dispatch token is not configured on backend.",
         )
-    provided = (x_viread_cron_token or "").strip()
+    provided = (
+        x_viread_cron_token if isinstance(x_viread_cron_token, str) else ""
+    ).strip()
     if not provided:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
