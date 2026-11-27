@@ -539,7 +539,8 @@ describe("Unified voice & speed sync across guidance, reading, phonics, comprehe
               word_sample?: boolean;
             },
           );
-          return new Response(new Blob(["RIFFwav"], { type: "audio/wav" }), {
+          // Use bytes across the Node Response and jsdom Blob boundary.
+          return new Response(new Uint8Array([82, 73, 70, 70, 119, 97, 118]), {
             status: 200,
             headers: { "Content-Type": "audio/wav" },
           });
