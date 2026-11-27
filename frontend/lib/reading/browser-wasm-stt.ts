@@ -763,6 +763,7 @@ export class BrowserWasmSttClient {
       : null;
     try {
       if (!this.readyPromise) {
+        this.ready = false;
         // Keep shared init independent of individual caller aborts so a TTS pause
         // never cancels an in-flight 34MB model download for the next utterance.
         this.readyPromise = this.postRequest<void>({ type: "init" }, [], 90_000)
@@ -851,6 +852,7 @@ export class BrowserWasmSttClient {
     this.worker = null;
     this.ready = false;
     this.readyPromise = null;
+    this.ready = false;
     this.failAllPending(new DOMException("Disposed", "AbortError"));
     if (worker) {
       try {

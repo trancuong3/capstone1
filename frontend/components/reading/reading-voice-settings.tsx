@@ -736,7 +736,7 @@ export function ReadingVoiceSettings({
                               className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
                               data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
                             >
-                              Sẵn Wi-Fi
+                              {t("settings.wifiReadyBadge")}
                             </span>
                           ) : null}
                         </span>
@@ -769,6 +769,10 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
+            !(
+              voiceHealth?.elevenlabs?.tts_configured ||
+              voiceHealth?.elevenlabs?.stt_configured
+            ) &&
             (voiceHealth
               ? !voiceHealth.local.available
               : loadState.data.local_worker_ready === false)
@@ -788,10 +792,14 @@ export function ReadingVoiceSettings({
                       data-testid="voice-offline-cache-notice"
                     >
                       {cachedNames.length > 1
-                        ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                        ? t("settings.offlineCacheMultiple", {
+                            voices: cachedNames.join(", "),
+                          })
                         : cachedNames.length === 1
-                          ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng ${cachedNames[0]}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
-                          : "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu."}
+                          ? t("settings.offlineCacheSingle", {
+                              voice: cachedNames[0],
+                            })
+                          : t("settings.offlineCacheEmpty")}
                     </p>
                   );
                 })()
@@ -814,12 +822,28 @@ export function ReadingVoiceSettings({
                 data-testid="voice-health-status-pills"
                 className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold"
               >
+                {voiceHealth.elevenlabs?.tts_configured ||
+                voiceHealth.elevenlabs?.stt_configured ? (
+                  <span
+                    className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-emerald-900"
+                    data-testid="voice-health-elevenlabs-pill"
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full bg-emerald-500"
+                      aria-hidden="true"
+                    />
+                    ElevenLabs Cloud: {t("settings.localAvailable")}
+                  </span>
+                ) : null}
                 <span
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
                     voiceHealth.local.available
                       ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-rose-200 bg-rose-50 text-rose-900",
+                      : voiceHealth.elevenlabs?.tts_configured ||
+                          voiceHealth.elevenlabs?.stt_configured
+                        ? "border-slate-200 bg-slate-50 text-slate-700"
+                        : "border-rose-200 bg-rose-50 text-rose-900",
                   )}
                 >
                   <span
@@ -827,40 +851,50 @@ export function ReadingVoiceSettings({
                       "h-1.5 w-1.5 rounded-full",
                       voiceHealth.local.available
                         ? "bg-emerald-500"
-                        : "bg-rose-500",
+                        : voiceHealth.elevenlabs?.tts_configured ||
+                            voiceHealth.elevenlabs?.stt_configured
+                          ? "bg-slate-400"
+                          : "bg-rose-500",
                     )}
                     aria-hidden="true"
                   />
-                  Local Worker:{" "}
+                  {t("settings.localWorkerLabel")}{" "}
                   {voiceHealth.local.available
                     ? t("settings.localAvailable")
                     : t("settings.localUnavailable")}
                 </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
-                    voiceHealth.google.stt_configured ||
-                      voiceHealth.google.tts_configured
-                      ? "border-sky-200 bg-sky-50 text-sky-900"
-                      : "border-amber-200 bg-amber-50 text-amber-900",
-                  )}
-                >
+                {!(
+                  voiceHealth.elevenlabs?.tts_configured ||
+                  voiceHealth.elevenlabs?.stt_configured
+                ) ||
+                voiceHealth.google.stt_configured ||
+                voiceHealth.google.tts_configured ? (
                   <span
                     className={cn(
-                      "h-1.5 w-1.5 rounded-full",
+                      "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
                       voiceHealth.google.stt_configured ||
                         voiceHealth.google.tts_configured
-                        ? "bg-sky-500"
-                        : "bg-amber-500",
+                        ? "border-sky-200 bg-sky-50 text-sky-900"
+                        : "border-amber-200 bg-amber-50 text-amber-900",
                     )}
-                    aria-hidden="true"
-                  />
-                  Google Cloud API:{" "}
-                  {voiceHealth.google.stt_configured ||
-                  voiceHealth.google.tts_configured
-                    ? t("settings.googleConfigured")
-                    : t("settings.googleUnconfigured")}
-                </span>
+                  >
+                    <span
+                      className={cn(
+                        "h-1.5 w-1.5 rounded-full",
+                        voiceHealth.google.stt_configured ||
+                          voiceHealth.google.tts_configured
+                          ? "bg-sky-500"
+                          : "bg-amber-500",
+                      )}
+                      aria-hidden="true"
+                    />
+                    Google Cloud API:{" "}
+                    {voiceHealth.google.stt_configured ||
+                    voiceHealth.google.tts_configured
+                      ? t("settings.googleConfigured")
+                      : t("settings.googleUnconfigured")}
+                  </span>
+                ) : null}
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

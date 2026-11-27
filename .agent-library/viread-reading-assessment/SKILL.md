@@ -39,6 +39,11 @@ ViRead evaluates Vietnamese children's oral reading both in real time (word-by-w
      - `INSERT` (inserted extra word)
      - Plus `hesitations` (long inter-word pauses) and `repeated_words`.
    - `reading_assessment.py` (`assessment_version == 1`) computes first-pass (`initial_assessment`: `CORRECT`, `MISPRONUNCIATION`, `OMISSION`, `UNCERTAIN`) vs practice (`WORD_RETRY` events) metrics. Never mutate historical assessment snapshots in place or infer assessment counts from UI colors.
+4. **Session & Voice Reliability Invariants**:
+   - **SessionVoiceLock Privacy Contract**: Enforce strict `local_only` mode (never invoke Google/Web Speech). Preserve `409 SESSION_VOICE_LOCKED` unless `X-Voice-Lock-Update: 1` is sent and `LOCAL_TTS_UNAVAILABLE` blocking; allow `LOCAL_VOICE_UNCONFIGURED` cascade inside locked sessions only when parents opted into `local_with_google_fallback` + `allowGoogleTtsFallback`.
+   - **Browser/Android Playback Safety**: Detect `DOMException`-based `AbortError` and `NotAllowedError` via `.name` check (not `instanceof Error` alone, which fails in jsdom) and preserve rapid Pause-to-Resume state in `playAndroidNativeSpeech` (`tts-playback.ts`).
+   - **Recorder Race Guard**: Always check `pendingStopRef.current` before `isRecordingRef.current` in `useSpeechRecorder.start()` so a pending `stop()` transition never hangs or drops the next recording turn.
+   - **UI Modal Exclusivity**: Keep `TutorMessage` inside the single exclusive modal conditional chain in `reading-screen.tsx` so two `z-50` dialogs cannot stack during simultaneous TTS/connection errors.
 
 ## 3. Targeted Verification
 

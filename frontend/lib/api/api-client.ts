@@ -540,12 +540,16 @@ async function safeBackendMessage(response: Response): Promise<string> {
   return tApiError("errors.generic");
 }
 
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
+
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
   readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly body?: unknown;
   readonly bypassCache?: boolean;
   readonly cacheTtlMs?: number;
+  readonly timeoutMs?: number;
 }
 
 /**
@@ -595,19 +599,50 @@ export async function requestApi<T>(
         : isFormDataBody
           ? requestOptions.body
           : JSON.stringify(requestOptions.body);
+    const effectiveTimeoutMs =
+      typeof requestOptions.timeoutMs === "number" &&
+      Number.isFinite(requestOptions.timeoutMs) &&
+      requestOptions.timeoutMs > 0
+        ? requestOptions.timeoutMs
+        : isFormDataBody
+          ? DEFAULT_UPLOAD_TIMEOUT_MS
+          : DEFAULT_REQUEST_TIMEOUT_MS;
+    const timeoutController = fetchSignal ? null : new AbortController();
+    let timedOut = false;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+
     try {
-      response = await fetch(`${getApiBaseUrl()}${path}`, {
+      const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
         method,
         headers,
         ...(body !== undefined ? { body: body as BodyInit } : {}),
         cache: "no-store",
         credentials: "omit",
         redirect: "error",
-        signal: fetchSignal,
+        signal: effectiveSignal,
       });
+
+      if (timeoutController) {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          timeoutController.abort();
+        }, effectiveTimeoutMs);
+        response = await fetchPromise;
+      } else {
+        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            timedOut = true;
+            reject(failure(0, "", true));
+          }, effectiveTimeoutMs);
+        });
+        response = await Promise.race([fetchPromise, timeoutPromise]);
+      }
     } catch (error) {
-      if (fetchSignal?.aborted) throw error;
+      if (fetchSignal?.aborted && !timedOut) throw error;
       throw failure(0, "", true);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     }
 
     const requestId = response.headers.get("x-request-id") ?? "";

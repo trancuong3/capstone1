@@ -370,7 +370,8 @@
     "finish": "הושלם",
     "nextQuestion": "השאלה הבאה",
     "chosenCorrectFeedback": "בחרת ב-{label}. {hint}",
-    "chosenWrongFeedback": "בחרת ב-{label}. לא מדויק. בואו ניזכר בפרטים מטקסט הקריאה וננסה שוב!"
+    "chosenWrongFeedback": "בחרת ב-{label}. לא מדויק. בואו ניזכר בפרטים מטקסט הקריאה וננסה שוב!",
+    "skipToReport": "דלג והצג תוצאות"
   },
   "automation": {
     "sectionTitle": "אוטומטי בזמן קריאה",

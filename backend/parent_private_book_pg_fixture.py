@@ -683,7 +683,14 @@ class DisposablePrivateBookDatabase:
 
     def setup(self) -> None:
         # 1. Create fresh disposable database
-        admin_conn = psycopg2.connect(self.admin_url)
+        try:
+            admin_conn = psycopg2.connect(self.admin_url)
+        except (psycopg2.OperationalError, OSError) as exc:
+            import unittest
+
+            raise unittest.SkipTest(
+                "Local PostgreSQL is unreachable; skipping disposable DB tests"
+            ) from exc
         admin_conn.autocommit = True
         try:
             with admin_conn.cursor() as cur:

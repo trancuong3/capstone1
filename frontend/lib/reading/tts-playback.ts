@@ -33,6 +33,7 @@ import type {
   SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
 import {
+  approveSessionVoiceSwitch,
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
@@ -206,7 +207,12 @@ function unavailable(): Error {
 }
 
 function isAbort(error: unknown): boolean {
-  return error instanceof Error && error.name === "AbortError";
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
 }
 
 function getLockedVoiceUnavailableNotice(): string {
@@ -226,7 +232,12 @@ function getBrowserFallbackVoiceNotice(): string {
 }
 
 function isNotAllowedError(error: unknown): boolean {
-  return error instanceof Error && error.name === "NotAllowedError";
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: unknown }).name === "NotAllowedError"
+  );
 }
 
 function canReuseUnlockedMobileAudio(): boolean {
@@ -265,16 +276,67 @@ function canUseBrowserSpeechSynthesis(): boolean {
   );
 }
 
+function isLocalVoiceUnconfiguredError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const rec = error as {
+    code?: unknown;
+    providerCode?: unknown;
+    provider_code?: unknown;
+    message?: unknown;
+  };
+  const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${String(rec.message ?? "")}`;
+  return combined.includes("LOCAL_VOICE_UNCONFIGURED");
+}
+
+function isLocalVoiceUnconfiguredHealth(): boolean {
+  const health = getFreshVoiceEngineHealth();
+  if (!health) return false;
+  return (
+    health.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED" ||
+    health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+  );
+}
+
 function canUseAllowedDeviceFallbackTts(
   voiceOrOp?: Operation | ResolvedOperationVoice,
+  error?: unknown,
 ): boolean {
   // Enforce SessionVoiceLock ("Một buổi, một giọng"):
-  // never silently jump to OS/Android/browser voice mid-session.
+  // never silently jump to OS/Android/browser voice mid-session unless parent
+  // opted into `local_with_google_fallback` + `allowGoogleTtsFallback` and the
+  // local worker is unconfigured (LOCAL_VOICE_UNCONFIGURED).
   const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
   const isSessionLocked = voice?.bypassSessionLock
     ? false
     : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
-  if (isSessionLocked) {
+  const isTransientBusyError = (err: unknown): boolean => {
+    if (!err) return false;
+    const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
+    const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${err instanceof Error ? err.message : String(err)}`;
+    return /VOICE_WORKER_BUSY|LOCAL_VOICE_BUSY|LOCAL_TTS_BUSY|LOCAL_STT_BUSY/i.test(
+      combined,
+    );
+  };
+  const isTechnicalServerOutage = (err: unknown): boolean => {
+    if (!err) return false;
+    if (isTransientBusyError(err)) return false;
+    if (isLocalVoiceUnconfiguredError(err)) return true;
+    const status =
+      typeof err === "object" && "status" in err
+        ? Number((err as { status?: unknown }).status)
+        : NaN;
+    if (status === 502 || status === 503 || status === 504 || status === 429) {
+      return true;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return /502|503|504|429|timeout|network|failed to fetch|unavailable|offline/i.test(
+      msg,
+    );
+  };
+  const optedInUnconfiguredFallback =
+    canUseGoogleTtsFallback() &&
+    (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
+  if (isSessionLocked && !optedInUnconfiguredFallback) {
     return false;
   }
   // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
@@ -303,6 +365,7 @@ function shouldSkipBackendTtsForVoice(
   }
   const health = getFreshVoiceEngineHealth();
   if (!health) return false;
+  if (health.elevenlabs?.tts_configured) return false;
   return (
     (!health.local.available || !health.local.tts_ready) &&
     (!health.google.tts_configured || health.google.tts_cooldown)
@@ -404,9 +467,19 @@ async function fetchPrecomputedCatalogAudio(
   }
 }
 
-function shouldRetryBackendWithGoogleTts(operation: Operation): boolean {
-  // Block explicit mid-session google_* retry whenever a SessionVoiceLock is active on Local!
-  if (operation.voice.sessionId) {
+function shouldRetryBackendWithGoogleTts(
+  operation: Operation,
+  error?: unknown,
+): boolean {
+  // Block explicit mid-session google_* retry on locked local worker outages
+  // unless parent opted in and the local worker is unconfigured.
+  const isSessionLocked = Boolean(
+    operation.voice.sessionId ?? getActiveSessionVoiceLock(),
+  );
+  if (
+    isSessionLocked &&
+    !(isLocalVoiceUnconfiguredError(error) || isLocalVoiceUnconfiguredHealth())
+  ) {
     return false;
   }
   if (!canUseGoogleTtsFallback() || operation.voice.provider !== "local") {
@@ -977,6 +1050,11 @@ export class TtsPlayback {
     let sawRange = false;
     let lastWordIdx = -1;
     let approxTimer: number | null = null;
+    let emittedStart = false;
+    let pauseRequested = false;
+    let nextCharOffset = 0;
+    let sliceBaseOffset = 0;
+    let totalElapsedSec = 0;
     const startedAt = Date.now();
 
     const clearTimers = () => {
@@ -1004,6 +1082,7 @@ export class TtsPlayback {
 
     const media: ActiveMedia = {
       pause: () => {
+        pauseRequested = true;
         stopAndroidNativeTts();
       },
       resume: async () => undefined,
@@ -1011,52 +1090,100 @@ export class TtsPlayback {
     this.media = media;
 
     try {
-      const elapsedSec = await speakWithAndroidNativeTts(text, {
-        rate: operation.voice.speed,
-        pitch: 1.0,
-        signal: operation.controller.signal,
-        onStart: () => {
-          if (this.current !== operation || operation.controller.signal.aborted)
-            return;
-          this.onState("playing");
-          options.onStart?.(estimatedDuration);
-          if (options.words?.length && options.onWord) {
-            emitWord(0);
-            let approxIdx = 0;
-            approxTimer = window.setInterval(() => {
+      while (
+        !operation.controller.signal.aborted &&
+        this.current === operation
+      ) {
+        await this.waitIfPaused(operation);
+        this.ensure(operation);
+        const remainingRaw = text.slice(nextCharOffset);
+        const remainingSlice = remainingRaw.trimStart();
+        if (!remainingSlice) break;
+        sliceBaseOffset = text.length - remainingSlice.length;
+        pauseRequested = false;
+        const startWordIdx = Math.max(0, lastWordIdx);
+        let approxIdx = startWordIdx;
+
+        try {
+          const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
+            rate: operation.voice.speed,
+            pitch: 1.0,
+            signal: operation.controller.signal,
+            onStart: () => {
               if (
                 this.current !== operation ||
-                operation.controller.signal.aborted ||
-                operation.paused ||
-                sawRange
-              ) {
+                operation.controller.signal.aborted
+              )
                 return;
+              this.onState("playing");
+              if (!emittedStart) {
+                emittedStart = true;
+                options.onStart?.(estimatedDuration);
               }
-              approxIdx += 1;
-              if (approxIdx < options.words!.length) {
+              if (
+                options.words?.length &&
+                options.onWord &&
+                approxTimer === null
+              ) {
                 emitWord(approxIdx);
-                const elapsedNow = (Date.now() - startedAt) / 1000;
-                options.onTime?.(
-                  Math.min(estimatedDuration, elapsedNow),
-                  estimatedDuration,
-                );
-              } else {
-                clearTimers();
+                approxTimer = window.setInterval(() => {
+                  if (
+                    this.current !== operation ||
+                    operation.controller.signal.aborted ||
+                    operation.paused ||
+                    sawRange
+                  ) {
+                    return;
+                  }
+                  approxIdx += 1;
+                  if (approxIdx < options.words!.length) {
+                    emitWord(approxIdx);
+                    const approxOffset = charOffsets[approxIdx];
+                    if (typeof approxOffset === "number") {
+                      nextCharOffset = Math.max(nextCharOffset, approxOffset);
+                    }
+                    const elapsedNow = (Date.now() - startedAt) / 1000;
+                    options.onTime?.(
+                      Math.min(estimatedDuration, elapsedNow),
+                      estimatedDuration,
+                    );
+                  } else {
+                    clearTimers();
+                  }
+                }, msPerWord);
               }
-            }, msPerWord);
+            },
+            onRangeStart: (start) => {
+              if (
+                this.current !== operation ||
+                operation.controller.signal.aborted
+              )
+                return;
+              const globalOffset = sliceBaseOffset + Math.max(0, start);
+              nextCharOffset = Math.max(nextCharOffset, globalOffset);
+              if (options.words?.length) {
+                sawRange = true;
+                clearTimers();
+                emitWord(findWordIndexForCharOffset(charOffsets, globalOffset));
+              }
+            },
+          });
+          totalElapsedSec += elapsedSec;
+          break;
+        } catch (err) {
+          clearTimers();
+          if (
+            pauseRequested &&
+            !operation.controller.signal.aborted &&
+            this.current === operation &&
+            isAbort(err)
+          ) {
+            continue;
           }
-        },
-        onRangeStart: (start) => {
-          if (this.current !== operation || operation.controller.signal.aborted)
-            return;
-          if (options.words?.length) {
-            sawRange = true;
-            clearTimers();
-            emitWord(findWordIndexForCharOffset(charOffsets, start));
-          }
-        },
-      });
-      return elapsedSec;
+          throw err;
+        }
+      }
+      return totalElapsedSec;
     } finally {
       clearTimers();
       if (this.media === media) this.media = null;
@@ -1155,8 +1282,12 @@ export class TtsPlayback {
       let speakDispatched = false;
       let sawBoundary = false;
       let lastWordIdx = -1;
+      let lastBoundaryCharIndex = 0;
+      let currentOffsetBase = 0;
+      let retriedFromPausedHang = false;
       let approxTimer: number | null = null;
       let speakDelayTimer: number | null = null;
+      let resumeFallbackTimer: number | null = null;
       let watchdogTimer: number | null = null;
       let activeElapsedMs = 0;
       let lastWatchdogTickAt = Date.now();
@@ -1172,6 +1303,10 @@ export class TtsPlayback {
           window.clearTimeout(speakDelayTimer);
           speakDelayTimer = null;
         }
+        if (resumeFallbackTimer !== null) {
+          window.clearTimeout(resumeFallbackTimer);
+          resumeFallbackTimer = null;
+        }
         if (watchdogTimer !== null) {
           window.clearInterval(watchdogTimer);
           watchdogTimer = null;
@@ -1181,16 +1316,22 @@ export class TtsPlayback {
       const active = () =>
         !settled && this.current === operation && !signal.aborted;
 
+      let activeUtterance = new SpeechSynthesisUtterance(text);
+
+      const detachUtterance = (u: SpeechSynthesisUtterance) => {
+        u.onstart = null;
+        u.onend = null;
+        u.onerror = null;
+        u.onboundary = null;
+      };
+
       const finish = (error?: unknown) => {
         if (settled) return;
         settled = true;
         clearTimers();
         signal.removeEventListener("abort", onAbort);
         if (this.media === media) this.media = null;
-        utterance.onstart = null;
-        utterance.onend = null;
-        utterance.onerror = null;
-        utterance.onboundary = null;
+        detachUtterance(activeUtterance);
         if (error) {
           reject(error);
         } else {
@@ -1237,13 +1378,66 @@ export class TtsPlayback {
         }
       };
 
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "vi-VN";
-      utterance.rate = operation.voice.speed;
-      utterance.voice = resolvedVoice;
+      const wireUtterance = (
+        u: SpeechSynthesisUtterance,
+        baseOffset: number,
+      ) => {
+        u.lang = "vi-VN";
+        u.rate = operation.voice.speed;
+        u.voice = resolvedVoice;
+        u.onstart = () => {
+          ensureStarted();
+        };
+        u.onboundary = (event) => {
+          if (!active()) return;
+          ensureStarted();
+          if (typeof event.charIndex === "number") {
+            const globalCharIndex = baseOffset + Math.max(0, event.charIndex);
+            lastBoundaryCharIndex = Math.max(
+              lastBoundaryCharIndex,
+              globalCharIndex,
+            );
+            if (options.words?.length) {
+              sawBoundary = true;
+              if (approxTimer !== null) {
+                window.clearInterval(approxTimer);
+                approxTimer = null;
+              }
+              emitWord(
+                findWordIndexForCharOffset(charOffsets, globalCharIndex),
+              );
+            }
+          }
+        };
+        u.onend = () => {
+          if (!active()) return;
+          ensureStarted();
+          finish();
+        };
+        u.onerror = (event) => {
+          if (!active()) return;
+          const errName =
+            (event as { error?: string } | undefined)?.error ?? "";
+          if (
+            signal.aborted ||
+            errName === "canceled" ||
+            errName === "interrupted"
+          ) {
+            finish(stopped());
+          } else {
+            finish(unavailable());
+          }
+        };
+      };
+
+      wireUtterance(activeUtterance, 0);
 
       const media: ActiveMedia = {
         pause: () => {
+          if (resumeFallbackTimer !== null) {
+            window.clearTimeout(resumeFallbackTimer);
+            resumeFallbackTimer = null;
+          }
           try {
             synth.pause?.();
           } catch {
@@ -1252,10 +1446,53 @@ export class TtsPlayback {
         },
         resume: async () => {
           lastWatchdogTickAt = Date.now();
+          if (resumeFallbackTimer !== null) {
+            window.clearTimeout(resumeFallbackTimer);
+            resumeFallbackTimer = null;
+          }
           try {
             synth.resume?.();
           } catch {
             // Ignore browser resume error
+          }
+          if (!retriedFromPausedHang) {
+            const offsetAtResume = lastBoundaryCharIndex;
+            resumeFallbackTimer = window.setTimeout(() => {
+              resumeFallbackTimer = null;
+              if (
+                !active() ||
+                operation.paused ||
+                retriedFromPausedHang ||
+                lastBoundaryCharIndex >= text.length
+              ) {
+                return;
+              }
+              const stillStuckPaused =
+                Boolean((synth as { paused?: boolean }).paused) &&
+                lastBoundaryCharIndex === offsetAtResume;
+              if (!stillStuckPaused) return;
+              const restRaw = text.slice(offsetAtResume);
+              const restTrimmed = restRaw.trimStart();
+              if (!restTrimmed) {
+                finish();
+                return;
+              }
+              retriedFromPausedHang = true;
+              currentOffsetBase = text.length - restTrimmed.length;
+              detachUtterance(activeUtterance);
+              try {
+                synth.cancel?.();
+              } catch {
+                // Ignore cancel error
+              }
+              activeUtterance = new SpeechSynthesisUtterance(restTrimmed);
+              wireUtterance(activeUtterance, currentOffsetBase);
+              try {
+                synth.speak(activeUtterance);
+              } catch {
+                finish(unavailable());
+              }
+            }, 1_200);
           }
         },
       };
@@ -1271,46 +1508,12 @@ export class TtsPlayback {
       };
       signal.addEventListener("abort", onAbort, { once: true });
 
-      utterance.onstart = () => {
-        ensureStarted();
-      };
-      utterance.onboundary = (event) => {
-        if (!active()) return;
-        ensureStarted();
-        if (options.words?.length && typeof event.charIndex === "number") {
-          sawBoundary = true;
-          if (approxTimer !== null) {
-            window.clearInterval(approxTimer);
-            approxTimer = null;
-          }
-          emitWord(findWordIndexForCharOffset(charOffsets, event.charIndex));
-        }
-      };
-      utterance.onend = () => {
-        if (!active()) return;
-        ensureStarted();
-        finish();
-      };
-      utterance.onerror = (event) => {
-        if (!active()) return;
-        const errName = (event as { error?: string } | undefined)?.error ?? "";
-        if (
-          signal.aborted ||
-          errName === "canceled" ||
-          errName === "interrupted"
-        ) {
-          finish(stopped());
-        } else {
-          finish(unavailable());
-        }
-      };
-
       const dispatchSpeak = () => {
         if (!active()) return;
         speakDispatched = true;
         lastWatchdogTickAt = Date.now();
         try {
-          synth.speak(utterance);
+          synth.speak(activeUtterance);
           // If voice was paused right before speak, respect pause state
           if (operation.paused) {
             synth.pause?.();
@@ -1758,7 +1961,10 @@ export class TtsPlayback {
           } catch (error) {
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (shouldRetryBackendWithGoogleTts(operation)) {
+            if (shouldRetryBackendWithGoogleTts(operation, error)) {
+              if (operation.voice.sessionId) {
+                approveSessionVoiceSwitch(operation.voice.sessionId);
+              }
               const googleVoiceId = mapLocalVoiceToGoogleBackup(
                 operation.voice.requestedVoiceId,
                 operation.voice.region,
@@ -1863,7 +2069,7 @@ export class TtsPlayback {
             nextPrefetch = null;
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (canUseAllowedDeviceFallbackTts(operation)) {
+            if (canUseAllowedDeviceFallbackTts(operation, error)) {
               useBrowserFallback = true;
               recordActualUtterance({
                 provider: isAndroidNativeSpeechAvailable()
@@ -2301,7 +2507,10 @@ export class TtsPlayback {
               this.ensure(operation);
               if (isAbort(error)) throw error;
               if (canUseGoogleTtsFallback()) {
-                if (shouldRetryBackendWithGoogleTts(operation)) {
+                if (shouldRetryBackendWithGoogleTts(operation, error)) {
+                  if (operation.voice.sessionId) {
+                    approveSessionVoiceSwitch(operation.voice.sessionId);
+                  }
                   const googleVoiceId = mapLocalVoiceToGoogleBackup(
                     operation.voice.requestedVoiceId,
                     operation.voice.region,
@@ -2332,11 +2541,11 @@ export class TtsPlayback {
                 }
               }
               if (!synthesized) {
-                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                  await playPhonicsViaBrowser();
                   return;
                 }
-                if (canUseAllowedDeviceFallbackTts(operation)) {
-                  await playPhonicsViaBrowser();
+                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
                   return;
                 }
                 this.setFallbackNotice(getLockedVoiceUnavailableNotice());
@@ -2509,7 +2718,7 @@ export class TtsPlayback {
             } catch (error) {
               this.ensure(operation);
               if (isAbort(error)) throw error;
-              if (canUseAllowedDeviceFallbackTts(operation)) {
+              if (canUseAllowedDeviceFallbackTts(operation, error)) {
                 options.onStepChange?.(step.index, step);
                 elapsed += await this.playDeviceFallbackSpeech(
                   operation,
@@ -2727,7 +2936,10 @@ export class TtsPlayback {
           } catch (synthError) {
             this.ensure(operation);
             if (isAbort(synthError)) throw synthError;
-            if (shouldRetryBackendWithGoogleTts(operation)) {
+            if (shouldRetryBackendWithGoogleTts(operation, synthError)) {
+              if (operation.voice.sessionId) {
+                approveSessionVoiceSwitch(operation.voice.sessionId);
+              }
               const googleVoiceId = mapLocalVoiceToGoogleBackup(
                 operation.voice.requestedVoiceId,
                 operation.voice.region,
@@ -2946,7 +3158,7 @@ export class TtsPlayback {
             }
             if (
               (!synthesizedTimedOk || !fallback) &&
-              canUseAllowedDeviceFallbackTts(operation)
+              canUseAllowedDeviceFallbackTts(operation, error)
             ) {
               useBrowserFallback = true;
               elapsed += await this.playDeviceFallbackSpeech(
@@ -3109,6 +3321,9 @@ export class TtsPlayback {
       let settled = false;
       let lastIndex = -1;
       let validated = !timeline;
+      let lastObservedAudioTime = audio.currentTime;
+      let lastProgressAt = Date.now();
+      let stallWatchdogTimer: number | null = null;
       const absolute = timeline?.map((word) => ({
         ...word,
         start: word.start + offset,
@@ -3120,6 +3335,10 @@ export class TtsPlayback {
       const finish = (error?: unknown) => {
         if (settled) return;
         settled = true;
+        if (stallWatchdogTimer !== null) {
+          window.clearInterval(stallWatchdogTimer);
+          stallWatchdogTimer = null;
+        }
         const duration = Number.isFinite(audio.duration)
           ? audio.duration
           : (timeline?.at(-1)?.end ?? 0);
@@ -3130,6 +3349,8 @@ export class TtsPlayback {
           audio.onerror =
           audio.ontimeupdate =
           audio.onloadedmetadata =
+          audio.onstalled =
+          audio.onwaiting =
             null;
         audio.pause();
         audio.src = "";
@@ -3199,9 +3420,16 @@ export class TtsPlayback {
         }
         validated = true;
       };
+      const recordAudioProgress = () => {
+        if (audio.currentTime > lastObservedAudioTime + 0.005) {
+          lastObservedAudioTime = audio.currentTime;
+          lastProgressAt = Date.now();
+        }
+      };
       const tick = () => {
         if (!active() || operation.paused || audio.paused || audio.ended)
           return;
+        recordAudioProgress();
         validate();
         if (!active()) return;
         if (absolute && validated) {
@@ -3220,8 +3448,10 @@ export class TtsPlayback {
       };
       const begin = async () => {
         try {
+          lastProgressAt = Date.now();
           applyPlaybackRate(audio);
           await audio.play();
+          lastProgressAt = Date.now();
           applyPlaybackRate(audio);
           if (!active()) {
             audio.pause();
@@ -3235,6 +3465,23 @@ export class TtsPlayback {
           }
           this.onState("playing");
           onStart(audio.duration);
+          if (stallWatchdogTimer === null) {
+            stallWatchdogTimer = window.setInterval(() => {
+              if (!active()) return;
+              if (operation.paused || audio.paused || audio.ended) {
+                lastProgressAt = Date.now();
+                return;
+              }
+              if (audio.currentTime > lastObservedAudioTime + 0.005) {
+                lastObservedAudioTime = audio.currentTime;
+                lastProgressAt = Date.now();
+                return;
+              }
+              if (Date.now() - lastProgressAt >= 12_000) {
+                fail();
+              }
+            }, 1_500);
+          }
           this.cancelFrame();
           this.frame = requestAnimationFrame(tick);
         } catch (error) {
@@ -3278,8 +3525,19 @@ export class TtsPlayback {
       };
       audio.ontimeupdate = () => {
         if (active()) {
+          recordAudioProgress();
           this.cancelFrame();
           tick();
+        }
+      };
+      audio.onstalled = () => {
+        if (active()) {
+          recordAudioProgress();
+        }
+      };
+      audio.onwaiting = () => {
+        if (active()) {
+          recordAudioProgress();
         }
       };
       audio.onended = () => {

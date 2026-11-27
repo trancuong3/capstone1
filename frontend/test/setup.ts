@@ -8,12 +8,19 @@ import { resetAllApiCachesForTests } from "@/lib/api/read-cache";
 vi.mock("next/link", async () => {
   const { createElement } = await import("react");
   return {
-    default: ({ href, children, ...props }: Record<string, unknown>) =>
-      createElement(
+    default: ({
+      href,
+      children,
+      prefetch: _prefetch,
+      ...props
+    }: Record<string, unknown>) => {
+      void _prefetch;
+      return createElement(
         "a",
         { ...props, href: String(href ?? "") },
         children as import("react").ReactNode,
-      ),
+      );
+    },
   };
 });
 

@@ -106,6 +106,7 @@ export function ReadingLayout({
   unresolvedWordIds,
   uncertainWordIds,
   progressLabel,
+  audioLevel,
   bookTitle,
   book,
   child,
@@ -183,10 +184,7 @@ export function ReadingLayout({
     isPlayingSample ||
     isReadingWord ||
     (isMicRecording &&
-      (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
-    Boolean(latestTranscript);
-  const hasDockedFeedbackPanel =
-    retryMode || Boolean(sentenceReinforcementPanel) || Boolean(phonicsPanel);
+      (isCurrentWordMispronounced || Boolean(latestTranscript)));
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
@@ -318,12 +316,7 @@ export function ReadingLayout({
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            data-feedback-overlay={hasDockedFeedbackPanel ? undefined : "true"}
-            className={
-              hasDockedFeedbackPanel
-                ? "mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
-                : "pointer-events-none absolute inset-x-0 bottom-full z-20 mx-auto max-h-[20dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain px-3 pb-1.5 sm:max-h-[24dvh] sm:px-6 sm:pb-2 [&>*]:pointer-events-auto [&>*]:shadow-sm"
-            }
+            className="mx-auto mb-1 max-h-[15dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
@@ -462,27 +455,27 @@ export function ReadingLayout({
                 </span>
               </div>
             ) : isPlayingSample ? (
-              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-3 py-2 sm:px-4 sm:py-2.5">
-                <div className="flex min-w-0 basis-full items-center gap-2 min-[520px]:basis-auto min-[520px]:flex-1">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-2 rounded-card border border-border bg-white px-2.5 py-1 sm:flex-wrap sm:gap-2.5 sm:px-4 sm:py-2.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
                   <Volume2
                     aria-hidden="true"
                     className="size-4 shrink-0 text-primary"
                   />
-                  <span className="shrink-0 text-sm font-semibold text-ink">
+                  <span className="shrink-0 text-xs font-semibold text-ink sm:text-sm">
                     {t("layout.sampleBannerTitle")}
                   </span>
-                  <span className="min-w-0 truncate text-sm text-muted">
+                  <span className="hidden min-w-0 truncate text-sm text-muted sm:inline">
                     {isSamplePaused
                       ? t("layout.samplePaused")
                       : t("layout.samplePlayingPage")}
                   </span>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                   {onToggleSamplePause ? (
                     <button
                       type="button"
                       onClick={onToggleSamplePause}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {isSamplePaused
                         ? t("layout.resumeSample")
@@ -493,7 +486,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadSample}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {t("layout.stopSample")}
                     </button>
@@ -548,26 +541,13 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-2 w-full max-w-[1008px] rounded-control border border-border/80 bg-white/95 px-3 py-1.5 text-sm text-muted backdrop-blur-xs sm:text-body">
+                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-3 py-1 text-xs text-muted sm:text-sm">
                   {t("layout.childJustReadPrefix")}{" "}
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     “{latestTranscript}”
                   </span>
                 </p>
               ) : null
-            ) : latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-2">
-                <span className="shrink-0 text-sm font-semibold text-purple-ink">
-                  {t("layout.latestRecording")}
-                </span>
-                <p
-                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
-                  dir="ltr"
-                  lang="vi"
-                >
-                  &ldquo;{latestTranscript}&rdquo;
-                </p>
-              </div>
             ) : null}
 
             {sentenceReinforcementPanel ? (
@@ -592,7 +572,8 @@ export function ReadingLayout({
         ) : null}
 
         <ReadingControls
-          pauseDisabled={false}
+          audioLevel={audioLevel}
+          pauseDisabled={controlsDisabled}
           disabled={controlsDisabled}
           isListening={isMicRecording}
           isPlayingSample={isPlayingSample}

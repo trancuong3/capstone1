@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils/cn";
 
 interface SiteFooterProps {
   readonly className?: string;
-  readonly variant?: "public" | "admin" | "parent";
+  readonly variant?: "public" | "admin" | "admin-login" | "parent";
 }
 
 const linkClass =
@@ -19,7 +19,8 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
   const tCommon = useTranslations("common");
   const tNav = useTranslations("navigation");
   const isParent = variant === "parent";
-  const isAdmin = variant === "admin";
+  const isAdminLogin = variant === "admin-login";
+  const isAdmin = variant === "admin" || isAdminLogin;
 
   const parentLinks = [
     { href: "/dashboard", label: tNav("parent.dashboard") },
@@ -45,7 +46,16 @@ export function SiteFooter({ className, variant = "public" }: SiteFooterProps) {
               ? tNav("footer.logoDashboardAria")
               : tNav("footer.logoHomeAria")
           }
-          href={isParent ? "/dashboard" : isAdmin ? "/admin/parents" : "/login"}
+          href={
+            isParent
+              ? "/dashboard"
+              : isAdminLogin
+                ? "/admin/login"
+                : isAdmin
+                  ? "/admin/parents"
+                  : "/login"
+          }
+          prefetch={isAdminLogin ? false : undefined}
         />
         {isParent ? (
           <div className="grid gap-6 md:grid-cols-3 md:gap-8">

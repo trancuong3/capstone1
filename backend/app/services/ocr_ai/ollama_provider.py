@@ -30,6 +30,23 @@ class OllamaOcrProvider:
         self._config = config
         self.model = config.model
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                base_url=self._config.base_url + "/",
+                timeout=httpx.Timeout(self._config.timeout_seconds),
+                trust_env=False,
+                follow_redirects=False,
+                transport=self._transport,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     def _build_payload(
         self,
@@ -80,37 +97,37 @@ class OllamaOcrProvider:
         # by the orchestrator and is never written to a public path.
         image_b64 = base64.b64encode(image_bytes).decode("ascii")
         try:
-            async with httpx.AsyncClient(
-                base_url=self._config.base_url + "/",
-                timeout=httpx.Timeout(self._config.timeout_seconds),
-                trust_env=False,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
+            client = self._get_client()
+            response = await client.post(
+                "api/chat",
+                json=self._build_payload(
+                    chunk=chunk,
+                    image_b64=image_b64,
+                    use_json_fallback=False,
+                ),
+            )
+            if response.status_code in (400, 422):
                 response = await client.post(
                     "api/chat",
                     json=self._build_payload(
                         chunk=chunk,
                         image_b64=image_b64,
-                        use_json_fallback=False,
+                        use_json_fallback=True,
                     ),
                 )
-                if response.status_code in (400, 422):
-                    response = await client.post(
-                        "api/chat",
-                        json=self._build_payload(
-                            chunk=chunk,
-                            image_b64=image_b64,
-                            use_json_fallback=True,
-                        ),
-                    )
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
-                provider=self.name, code="PROVIDER_TIMEOUT", status_code=504
+                provider=self.name,
+                code="PROVIDER_TIMEOUT",
+                status_code=504,
+                disables_family=True,
             ) from exc
         except httpx.RequestError as exc:
             raise OcrProviderError(
-                provider=self.name, code="PROVIDER_NETWORK", status_code=503
+                provider=self.name,
+                code="PROVIDER_NETWORK",
+                status_code=503,
+                disables_family=True,
             ) from exc
         if response.status_code != 200:
             raise OcrProviderError(

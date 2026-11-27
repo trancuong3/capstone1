@@ -280,9 +280,13 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     private long lastRmsEmitElapsedMs;
     private boolean activeSttReceivedResults;
     private boolean activeSttUsedCloudFallback;
+    private int activeSttBusyRetries;
+    private Runnable sttBusyRetryRunnable;
     private boolean onDeviceViUnsupported;
     private Runnable sttStopFallbackRunnable;
     private long lastSttStopElapsedMs = -1L;
+    private static final int MAX_STT_BUSY_RETRIES = 2;
+    private static final long STT_BUSY_RETRY_DELAY_MS = 220L;
 
     private boolean destroyed;
 
@@ -809,6 +813,11 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         stopTtsInternal(null, null, "preempted_by_stt");
 
         // Cancel any previous active or permission-waiting STT cleanly
+        if (sttBusyRetryRunnable != null) {
+            scheduler.removeCallbacks(sttBusyRetryRunnable);
+            sttBusyRetryRunnable = null;
+        }
+        activeSttBusyRetries = 0;
         cancelPendingPermissionStt("superseded");
         cancelAndCleanupSttOnMain("superseded", true);
 
@@ -1006,6 +1015,25 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             public void onError(int errorCode) {
                 scheduler.post(() -> {
                     if (!isCurrentStt(request)) return;
+                    if (errorCode == SpeechRecognizer.ERROR_RECOGNIZER_BUSY
+                            && !activeSttReceivedResults
+                            && activeSttBusyRetries < MAX_STT_BUSY_RETRIES) {
+                        activeSttBusyRetries += 1;
+                        boolean keepCloudFallback = activeSttUsedCloudFallback;
+                        destroyActiveSttSessionOnly();
+                        if (sttBusyRetryRunnable != null) {
+                            scheduler.removeCallbacks(sttBusyRetryRunnable);
+                        }
+                        sttBusyRetryRunnable = () -> {
+                            sttBusyRetryRunnable = null;
+                            if (destroyed || request.generation != sttSeq) {
+                                return;
+                            }
+                            beginSttSessionOnMain(request, keepCloudFallback);
+                        };
+                        scheduler.postDelayed(sttBusyRetryRunnable, STT_BUSY_RETRY_DELAY_MS);
+                        return;
+                    }
                     boolean wasOnDevice = activeSttSession != null && activeSttSession.isOnDevice();
                     if (wasOnDevice
                             && !activeSttReceivedResults

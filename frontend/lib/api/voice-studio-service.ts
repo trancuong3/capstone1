@@ -15,6 +15,7 @@ import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
 } from "@/lib/reading/session-voice-lock";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
@@ -353,6 +354,9 @@ export function createVoiceStudioService(): VoiceStudioService {
           method: "POST",
           headers: {
             Accept: getPreferredJsonTtsAcceptHeader(options.audioFormat),
+            ...(hasPendingSessionVoiceSwitch(activeLock?.sessionId)
+              ? { "X-Voice-Lock-Update": "1" }
+              : {}),
           },
           body: JSON.stringify({
             words,

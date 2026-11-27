@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { createVoiceStudioService } from "@/lib/api/voice-studio-service";
 import type { SupportedPhonicsLessonPlan } from "@/lib/reading/phonics-lesson";
-import { subscribeVoicePolicy } from "@/lib/reading/session-voice-lock";
+import { subscribeVoicePolicyPreferences } from "@/lib/reading/session-voice-lock";
 import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   TtsPlayback,
@@ -114,7 +114,9 @@ export function useSpeechPlayer(): SpeechPlayer {
     const unsubSpeech = subscribeSpeechPreferences(
       player.handlePreferencesChange,
     );
-    const unsubPolicy = subscribeVoicePolicy(player.handlePreferencesChange);
+    const unsubPolicy = subscribeVoicePolicyPreferences(
+      player.handlePreferencesChange,
+    );
     const onAndroidBackground = () => {
       player.stop();
     };

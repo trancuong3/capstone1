@@ -454,6 +454,7 @@ export function ChildProfileScreen({
               setIsDeleteModalOpen(false);
             }
           }}
+          role="alertdialog"
           title={t("parent.children.deleteModalTitle")}
         >
           <div className="flex flex-col gap-6">
@@ -483,7 +484,7 @@ export function ChildProfileScreen({
               <Button
                 isLoading={isDeleting}
                 onClick={() => void handleDelete()}
-                variant="primary"
+                variant="destructive"
               >
                 {t("parent.children.deleteConfirmAction")}
               </Button>

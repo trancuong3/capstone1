@@ -8,6 +8,7 @@ interface ViReadLogoProps {
   readonly className?: string;
   readonly compact?: boolean;
   readonly href?: string;
+  readonly prefetch?: boolean;
   readonly size?: "sm" | "md";
 }
 
@@ -17,6 +18,7 @@ export function ViReadLogo({
   className,
   compact = false,
   href = "/dashboard",
+  prefetch,
   size = "md",
 }: ViReadLogoProps) {
   const isSmall = size === "sm";
@@ -30,6 +32,7 @@ export function ViReadLogo({
         className,
       )}
       href={href}
+      prefetch={prefetch}
     >
       <span
         className={cn(

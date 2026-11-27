@@ -28,7 +28,7 @@ export function BookChildHeader({
     <header
       className={cn(
         "catalog-header flex min-h-16 w-full items-center justify-between gap-2 rounded-card bg-white p-3 sm:min-h-24 sm:gap-8 sm:px-8",
-        fullBleedDesktop && "sm:-mx-8 sm:-mt-8 sm:px-10",
+        fullBleedDesktop && "sm:-mx-8 sm:-mt-8 sm:w-auto sm:px-10",
       )}
     >
       <span className="sm:hidden">

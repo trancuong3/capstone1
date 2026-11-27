@@ -370,7 +370,8 @@
     "finish": "完了",
     "nextQuestion": "次の質問",
     "chosenCorrectFeedback": "{label}を選びましたね。{hint}",
-    "chosenWrongFeedback": "{label}を選びましたね。惜しい！本文の内容を思い出して、もう一度選んでみよう！"
+    "chosenWrongFeedback": "{label}を選びましたね。惜しい！本文の内容を思い出して、もう一度選んでみよう！",
+    "skipToReport": "スキップして結果を見る"
   },
   "automation": {
     "sectionTitle": "読書中の自動サポート",

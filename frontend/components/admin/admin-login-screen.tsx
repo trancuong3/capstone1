@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -28,6 +28,8 @@ export function AdminLoginScreen({
 }) {
   const { auth } = useAdminServices();
   const t = useTranslations("admin");
+  const tAuth = useTranslations("auth");
+  const [showPassword, setShowPassword] = useState(false);
   const { refresh, replace } = useRouter();
   const emailId = useId();
   const passwordId = useId();
@@ -138,7 +140,7 @@ export function AdminLoginScreen({
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-1.5">
+            <div className="relative flex flex-col gap-1.5">
               <label
                 className="text-xs font-bold text-ink"
                 htmlFor={passwordId}
@@ -154,11 +156,29 @@ export function AdminLoginScreen({
                 className={cn(
                   "h-11 w-full rounded-control border bg-white px-3.5 text-sm text-ink outline-none placeholder:text-muted/70 transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted",
                   errors.password ? "border-danger" : "border-border",
+                  "pe-12",
                 )}
                 id={passwordId}
-                type="password"
+                type={showPassword ? "text" : "password"}
                 {...register("password")}
               />
+              <button
+                aria-label={
+                  showPassword
+                    ? tAuth("passwordToggle.hide")
+                    : tAuth("passwordToggle.show")
+                }
+                aria-pressed={showPassword}
+                className="absolute end-2 top-7 inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+                onClick={() => setShowPassword((prev) => !prev)}
+                type="button"
+              >
+                {showPassword ? (
+                  <EyeOff aria-hidden className="size-5" />
+                ) : (
+                  <Eye aria-hidden className="size-5" />
+                )}
+              </button>
               {errors.password?.message ? (
                 <p
                   className="text-xs font-semibold text-danger"
@@ -185,7 +205,7 @@ export function AdminLoginScreen({
           </p>
         </Card>
       </main>
-      <SiteFooter variant="admin" />
+      <SiteFooter variant="admin-login" />
     </div>
   );
 }

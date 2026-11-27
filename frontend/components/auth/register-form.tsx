@@ -1,7 +1,7 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -33,6 +33,7 @@ export function RegisterForm({
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
   const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
   const [errorKind, setErrorKind] = useState<RegisterErrorKind | null>(() => {
     if (scenario === "validation-error") return "validation";
     if (scenario === "safe-error") return "safe";
@@ -145,10 +146,29 @@ export function RegisterForm({
       />
       <TextField
         autoComplete="new-password"
+        endAdornment={
+          <button
+            aria-label={
+              showPassword
+                ? t("auth.passwordToggle.hide")
+                : t("auth.passwordToggle.show")
+            }
+            aria-pressed={showPassword}
+            className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            onClick={() => setShowPassword((prev) => !prev)}
+            type="button"
+          >
+            {showPassword ? (
+              <EyeOff aria-hidden="true" className="size-5" />
+            ) : (
+              <Eye aria-hidden="true" className="size-5" />
+            )}
+          </button>
+        }
         error={errors.password?.message}
         label={t("auth.fields.password")}
         placeholder={t("auth.placeholders.passwordMinLength", { min: 8 })}
-        type="password"
+        type={showPassword ? "text" : "password"}
         {...register("password")}
       />
       <Button
