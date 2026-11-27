@@ -3,6 +3,7 @@ package vn.viread.android;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.Intent;
@@ -870,6 +871,14 @@ public final class ViReadNativeSpeechBridgeTest {
         assertFalse(h.bridge.hasActiveSttForTest());
         assertEquals("stt_error", h.events.get(0).getString("type"));
         assertEquals("stt_end", h.events.get(1).getString("type"));
+
+        // 6. Subsequent startStt with preferOnDevice=true skips SODA once error 13 was seen during stop
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-after-stop-err13\",\"lang\":\"vi-VN\",\"preferOnDevice\":true}");
+        assertEquals(sessionsBeforeStop + 1, h.sttFactory.createdSessions.size());
+        assertFalse(
+                "onDeviceViUnsupported must latch even when error 13 arrives after stopStt",
+                h.sttFactory.latest().onDevice);
     }
 
     @Test
@@ -880,7 +889,12 @@ public final class ViReadNativeSpeechBridgeTest {
                 "vi-vn-x-gft-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
         Voice maleOffline = new Voice(
                 "vi-vn-x-vid-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
-        Set<Voice> voices = new HashSet<>(Arrays.asList(femaleOffline, maleOffline));
+        Voice genericAlias = new Voice(
+                "vi-VN-language", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        assertNull(
+                "Generic -language alias must not falsely match 'lan' as female",
+                ViReadNativeSpeechBridge.detectVietnameseVoiceGender(genericAlias));
+        Set<Voice> voices = new HashSet<>(Arrays.asList(femaleOffline, maleOffline, genericAlias));
 
         assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceForGender(voices, "male"));
         assertTrue(ViReadNativeSpeechBridge.hasUsableVietnameseVoiceForGender(voices, "female"));

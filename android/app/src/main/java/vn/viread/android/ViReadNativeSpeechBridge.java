@@ -1203,6 +1203,9 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                         return;
                     }
                     boolean wasOnDevice = activeSttSession != null && activeSttSession.isOnDevice();
+                    if (wasOnDevice && isOnDeviceLanguageFallbackError(errorCode)) {
+                        onDeviceViUnsupported = true;
+                    }
                     if (!activeSttStopping
                             && wasOnDevice
                             && !activeSttReceivedResults
@@ -1548,6 +1551,19 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         return detectVietnameseVoiceGender(voice);
     }
 
+    private static boolean hasVoiceToken(String lowered, String token) {
+        int start = 0;
+        while (true) {
+            int idx = lowered.indexOf(token, start);
+            if (idx < 0) return false;
+            boolean leftOk = idx == 0 || !Character.isLetterOrDigit(lowered.charAt(idx - 1));
+            int end = idx + token.length();
+            boolean rightOk = end == lowered.length() || !Character.isLetterOrDigit(lowered.charAt(end));
+            if (leftOk && rightOk) return true;
+            start = idx + 1;
+        }
+    }
+
     @Nullable
     static String detectVietnameseVoiceGender(@Nullable Voice voice) {
         if (voice == null) return null;
@@ -1568,13 +1584,20 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         String name = voice.getName();
         if (name == null) return null;
         String lowered = name.toLowerCase(Locale.ROOT);
+        if (lowered.endsWith("-language")) {
+            return null;
+        }
         if (lowered.contains("female")
                 || lowered.contains("hoaimy")
                 || lowered.contains("trucly")
                 || lowered.contains("truc_ly")
                 || lowered.contains("minh_chau")
-                || lowered.contains("linh")
-                || lowered.contains("lan")
+                || lowered.contains("ngoc_linh")
+                || lowered.contains("ngoc_tran")
+                || lowered.contains("thuc_doan")
+                || lowered.contains("my_duyen")
+                || hasVoiceToken(lowered, "linh")
+                || hasVoiceToken(lowered, "lan")
                 || lowered.contains("-gft-")
                 || lowered.contains("x-gft")
                 || lowered.contains("-vic-")
@@ -1589,8 +1612,10 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 || lowered.contains("namminh")
                 || lowered.contains("thien_minh")
                 || lowered.contains("quoc_bao")
-                || lowered.contains("minh")
-                || lowered.contains("son")
+                || lowered.contains("quang_son")
+                || lowered.contains("thai_son")
+                || hasVoiceToken(lowered, "minh")
+                || hasVoiceToken(lowered, "son")
                 || lowered.contains("-vid-")
                 || lowered.contains("x-vid")
                 || lowered.contains("-vif-")
@@ -1627,6 +1652,10 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             Locale locale = voice.getLocale();
             if (locale != null && "VN".equalsIgnoreCase(locale.getCountry())) {
                 score += 200;
+            }
+            String voiceName = voice.getName();
+            if (voiceName != null && voiceName.toLowerCase(Locale.ROOT).endsWith("-language")) {
+                score -= 200;
             }
             if (normalizedGender != null) {
                 String detected = detectVietnameseVoiceGender(voice);
