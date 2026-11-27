@@ -27,6 +27,7 @@ import {
   DEFAULT_USER_CACHE_TTL_MS,
   PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
+  sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
 import type { ChildProfileDTO } from "@/types/child";
@@ -111,11 +112,12 @@ export function DashboardScreen() {
 
         const cacheOwnerId = userId ?? summary.profile?.id ?? null;
         if (cacheOwnerId) {
-          writeUserCache(cacheOwnerId, "dashboard-summary", summary, {
-            persist: "local",
+          const cacheableSummary = sanitizeDashboardSummaryForCache(summary);
+          writeUserCache(cacheOwnerId, "dashboard-summary", cacheableSummary, {
+            persist: "session",
           });
-          writeUserCache(cacheOwnerId, "children", summary.children, {
-            persist: "local",
+          writeUserCache(cacheOwnerId, "children", cacheableSummary.children, {
+            persist: "session",
           });
         }
 

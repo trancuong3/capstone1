@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Prioriza local, con respaldo automático en línea",
     "googleSttFallback": "Respaldo de Google para reconocimiento de voz (STT)",
     "googleTtsFallback": "Respaldo de Google para pronunciación (TTS)",
-    "missingGoogleKeyHint": "Si la clave de API de Google Cloud no está configurada en backend/.env, ViRead usará automáticamente Google/Navegador en línea como respaldo.",
+    "missingGoogleKeyHint": "Si la clave de API de Google Cloud no está configurada en el servidor, ViRead usará automáticamente Google/Navegador en línea como respaldo.",
     "useDefaultVoice": "Usar voz predeterminada",
     "preview": "Vista previa",
     "stopPreview": "Detener vista previa",
@@ -79,7 +79,9 @@
       "american": "Acento estadounidense",
       "british": "Acento británico"
     },
-    "googleProviderLabel": "Respaldo de Google"
+    "googleProviderLabel": "Respaldo de Google",
+    "sessionLockedBadge": "Bloqueada para esta sesión de lectura",
+    "offlineBrowserBadge": "El navegador está sin conexión"
   },
   "engineBadge": {
     "ariaLabel": "Fuente de voz: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "Caché estándar",
       "android_native": "Android (vi-VN)",
       "google_cloud": "En línea (Google API)",
-      "browser_default": "En línea (Google/Navegador)"
-    }
+      "browser_default": "En línea (Google/Navegador)",
+      "idle": "Comprobando…"
+    },
+    "idleDetail": "{base} (Comprobando el estado del motor de voz)"
   },
   "playback": {
     "unavailable": "La voz en el dispositivo no está lista. Los padres y el niño pueden seguir el texto en pantalla y pulsar Reintentar.",

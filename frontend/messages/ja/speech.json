@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "ローカル優先、オンラインバックアップへ自動切り替え",
     "googleSttFallback": "音声認識 (STT) のGoogleバックアップ",
     "googleTtsFallback": "読み上げ (TTS) のGoogleバックアップ",
-    "missingGoogleKeyHint": "backend/.envにGoogle Cloud APIキーが設定されていない場合、ViReadは自動的にGoogle/ブラウザオンラインをフォールバックとして使用します。",
+    "missingGoogleKeyHint": "サーバーにGoogle Cloud APIキーが設定されていない場合、ViReadは自動的にGoogle/ブラウザオンラインをフォールバックとして使用します。",
     "useDefaultVoice": "デフォルトの音声を使用",
     "preview": "試聴",
     "stopPreview": "試聴を停止",
@@ -79,7 +79,9 @@
       "american": "アメリカ英語アクセント",
       "british": "イギリス英語アクセント"
     },
-    "googleProviderLabel": "Googleフォールバック"
+    "googleProviderLabel": "Googleフォールバック",
+    "sessionLockedBadge": "この読書セッションで固定中",
+    "offlineBrowserBadge": "ブラウザはオフラインです"
   },
   "engineBadge": {
     "ariaLabel": "音声ソース: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "標準キャッシュ",
       "android_native": "Android (vi-VN)",
       "google_cloud": "オンライン (Google API)",
-      "browser_default": "オンライン (Google/ブラウザ)"
-    }
+      "browser_default": "オンライン (Google/ブラウザ)",
+      "idle": "確認中…"
+    },
+    "idleDetail": "{base} (音声エンジンの状態を確認中)"
   },
   "playback": {
     "unavailable": "デバイス上の音声が準備できていません。画面のテキストを確認し、「再試行」をタップしてください。",

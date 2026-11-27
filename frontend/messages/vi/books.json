@@ -321,7 +321,7 @@
     "overviewAria": "Tổng quan nhanh trạng thái các trang",
     "overviewChipTitle": "Trang nguồn {page}: {status}",
     "workerFailuresSummary": "Có {count} trang gặp lỗi OCR/AI (dịch vụ kiểm tra có thể đang bận hoặc tạm ngắt). Các trang đạt chuẩn hoặc chờ Admin bên cạnh không bị ảnh hưởng — hãy bấm «Thử lại kiểm tra» ở từng trang bị lỗi.",
-    "windowsOcrQueueWaiting": "Đang chờ máy chủ OCR Windows bật (hàng đợi an toàn — {count} trang đã được lưu an toàn và sẽ tự động nhận diện ngay khi máy chủ OCR hoạt động).",
+    "windowsOcrQueueWaiting": "Đã lưu trong hàng chờ OCR ({count} trang) — Đang chờ máy chủ OCR Windows bật lại. Hệ thống sẽ tự động nhận diện ngay khi máy chủ hoạt động trở lại.",
     "ocrRunningStatus": "Đang nhận diện OCR {running} trang",
     "ocrQueuedSuffix": " ({count} trang đang xếp hàng tiếp theo)",
     "ocrOtherPagesStillVisible": ". Các trang đã kiểm tra xong vẫn hiển thị đầy đủ để bạn thao tác ngay.",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "Phạm vi Tool Check:",
     "toolCheckFlaggedNotice": "Tool Check phát hiện {count} điểm cần người lớn xem xét.",
     "toolCheckAdminNotice": "Trang cần Admin xem xét trước khi thêm vào sách.",
+    "toolCheckFailedNotice": "Quá trình kiểm tra gặp sự cố kỹ thuật.",
+    "toolCheckPassedNotice": "Trang đã vượt qua kiểm tra an toàn.",
+    "toolCheckCheckingNotice": "Đang chạy kiểm tra tự động cho trang.",
+    "toolCheckRejectedNotice": "Phiên bản trang này chưa được Admin phê duyệt.",
+    "toolCheckRecheckNotice": "Trang cần chạy kiểm tra lại trước khi thêm vào sách.",
     "previewTextLabel": "Nội dung dự kiến thêm vào sách:",
     "proofreadSectionTitle": "Đề xuất chính tả ({count})",
     "uncertainWordsSuffix": " · {count} từ cần chú ý",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "Phân trang các trang đã thêm vào sách",
     "statusLabels": {
       "PENDING": "Đang xếp hàng chờ OCR",
+      "PENDING_POST_OCR": "Chờ bước trước hoàn tất",
       "RUNNING": "Đang nhận diện OCR",
       "COMPLETED": "Hoàn tất",
       "PASSED": "Đạt",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "Đã hủy bản tải lên đang chờ.",
     "cancelSubmissionErrorFallback": "Không thể hủy trang này.",
     "pageNumberHeading": "Trang {page}",
-    "pageItemLabel": "trang"
+    "pageItemLabel": "trang",
+    "workerOfflineUploadNotice": "Máy chủ OCR đang tạm tắt — Ba mẹ vẫn có thể tải ảnh hoặc PDF/DOCX lên để lưu sẵn trong hàng chờ; hệ thống sẽ tự động nhận diện ngay khi máy chủ bật lại.",
+    "queuedWaitingWorkerBadge": "Đã lưu trong hàng chờ OCR — Đang chờ máy chủ bật lại",
+    "queuedWaitingWorkerShort": "Đã lưu trong hàng chờ OCR — Tự động nhận diện khi máy chủ bật lại",
+    "reasonQueuedOffline": "Trang sách đã được lưu an toàn trong hàng chờ OCR và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại."
   },
   "ocrContribution": {
     "cardAria": "Đóng góp mẫu để cải thiện OCR ViRead cho {title}",

@@ -1,11 +1,24 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminBookForm } from "@/components/admin/admin-book-form";
-import { Button } from "@/components/common/button";
 import { AdminBooksScreen } from "@/components/admin/admin-books-screen";
 import { AdminLayout } from "@/components/admin/admin-layout";
 import { AdminLoginScreen } from "@/components/admin/admin-login-screen";
+import {
+  AdminBadge,
+  AdminDrawer,
+  AdminKpiCard,
+  AdminKpiGrid,
+  AdminLoading,
+  AdminPageHeader,
+  AdminSearchInput,
+  AdminSelect,
+  AdminStatusBadge,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
+import { Button, ButtonLink } from "@/components/common/button";
 import { AdminAuthError } from "@/lib/api/admin-auth-service";
 import {
   adminBookListItemFixture,
@@ -67,6 +80,9 @@ describe("admin components", () => {
     );
     const user = userEvent.setup();
     render(withAdminFixture(<AdminLoginScreen scenario="default" />, services));
+    const emailInput = screen.getByLabelText("Email quản trị");
+    expect(emailInput).toHaveValue("");
+    await user.type(emailInput, "admin@example.com");
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -89,6 +105,10 @@ describe("admin components", () => {
         services,
       ),
     );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     await waitFor(() =>
@@ -105,6 +125,10 @@ describe("admin components", () => {
         services,
       ),
     );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
+    );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
     await waitFor(() =>
@@ -118,6 +142,10 @@ describe("admin components", () => {
         <AdminLoginScreen nextPath="//evil.example/admin" scenario="default" />,
         services,
       ),
+    );
+    await user.type(
+      screen.getByLabelText("Email quản trị"),
+      "admin@example.com",
     );
     await user.type(screen.getByLabelText("Mật khẩu"), "matkhau123");
     await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
@@ -307,5 +335,177 @@ describe("admin components", () => {
     });
     expect(services.books.create).not.toHaveBeenCalled();
     expect(services.books.update).not.toHaveBeenCalled();
+  });
+
+  it("defaults buttons inside AdminLayout to compact admin size with w-auto and supports outline variants", () => {
+    const services = createAdminServiceFixture();
+    render(
+      withAdminFixture(
+        <AdminLayout>
+          <Button variant="outline">Chỉnh sửa</Button>
+          <Button variant="destructive-outline">Xóa mục</Button>
+          <Button fullWidth>Lưu tất cả</Button>
+          <ButtonLink href="/admin/books/new">Tạo mới</ButtonLink>
+        </AdminLayout>,
+        services,
+      ),
+    );
+
+    const outlineBtn = screen.getByRole("button", { name: "Chỉnh sửa" });
+    expect(outlineBtn.className).toContain("min-h-10");
+    expect(outlineBtn.className).toContain("w-auto");
+    expect(outlineBtn.className).toContain("border-border");
+    expect(outlineBtn.className).not.toContain("w-full");
+
+    const destructiveOutlineBtn = screen.getByRole("button", {
+      name: "Xóa mục",
+    });
+    expect(destructiveOutlineBtn.className).toContain("border-danger/30");
+    expect(destructiveOutlineBtn.className).toContain("text-danger");
+
+    const fullWidthBtn = screen.getByRole("button", { name: "Lưu tất cả" });
+    expect(fullWidthBtn.className).toContain("w-full");
+
+    const linkBtn = screen.getByRole("link", { name: "Tạo mới" });
+    expect(linkBtn.className).toContain("min-h-10");
+    expect(linkBtn.className).toContain("w-auto");
+
+    // Grouped desktop navigation sections in AdminLayout
+    const desktopNav = screen.getByRole("navigation", {
+      name: "Điều hướng quản trị",
+    });
+    expect(within(desktopNav).getByText("Nội dung")).toBeInTheDocument();
+    expect(within(desktopNav).getByText("Người dùng")).toBeInTheDocument();
+    expect(within(desktopNav).getByText("Hệ thống & AI")).toBeInTheDocument();
+  });
+
+  it("renders Admin UI primitives with accessible controls, interactive KPIs, and Escape-closable drawer", async () => {
+    const user = userEvent.setup();
+    const onKpiClick = vi.fn();
+    const onSearchChange = vi.fn();
+    const onSelectChange = vi.fn();
+    const onDrawerClose = vi.fn();
+
+    render(
+      <div>
+        <AdminPageHeader
+          actions={<Button size="admin">Thêm</Button>}
+          breadcrumbs={[
+            { label: "Kho sách", href: "/admin/books" },
+            { label: "Chi tiết" },
+          ]}
+          description="Mô tả ngắn"
+          eyebrow="Quản trị nội dung"
+          title="Tiêu đề trang"
+        />
+        <AdminBadge dot tone="info">
+          Đang đồng bộ
+        </AdminBadge>
+        <AdminStatusBadge label="Chế độ chờ" tone="neutral" />
+        <AdminKpiGrid ariaLabel="Chỉ số chính" columns={2}>
+          <AdminKpiCard
+            active
+            label="Tổng sách"
+            onClick={onKpiClick}
+            testId="kpi-total"
+            tone="info"
+            value={42}
+          />
+          <AdminKpiCard label="Cần duyệt" tone="warning" value={5} />
+        </AdminKpiGrid>
+        <AdminToolbar ariaLabel="Bộ lọc">
+          <AdminSearchInput
+            label="Tìm kiếm"
+            onChange={onSearchChange}
+            placeholder="Nhập từ khóa…"
+            value="mèo"
+          />
+          <AdminSelect
+            label="Trạng thái"
+            onChange={onSelectChange}
+            options={[
+              { value: "", label: "Tất cả" },
+              { value: "ACTIVE", label: "Hoạt động" },
+            ]}
+            value=""
+          />
+        </AdminToolbar>
+        <AdminLoading label="Đang nạp…" variant="skeleton" />
+        <AdminDrawer
+          description="Chi tiết tác vụ"
+          footer={<Button size="admin">Đóng lại</Button>}
+          isOpen
+          onClose={onDrawerClose}
+          title="Ngăn kéo chi tiết"
+        >
+          <p>Nội dung ngăn kéo</p>
+        </AdminDrawer>
+      </div>,
+    );
+
+    expect(screen.getByRole("link", { name: "Kho sách" })).toHaveAttribute(
+      "href",
+      "/admin/books",
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Tiêu đề trang" })
+        .className,
+    ).toContain("text-2xl");
+    expect(screen.getByText("Đang đồng bộ")).toBeInTheDocument();
+    expect(screen.getByText("Chế độ chờ")).toBeInTheDocument();
+
+    const kpiButton = screen.getByTestId("kpi-total");
+    expect(kpiButton).toHaveAttribute("aria-pressed", "true");
+    await user.click(kpiButton);
+    expect(onKpiClick).toHaveBeenCalledOnce();
+
+    await user.click(
+      screen.getByRole("button", { name: "Xóa từ khóa tìm kiếm" }),
+    );
+    expect(onSearchChange).toHaveBeenCalledWith("");
+
+    await user.selectOptions(screen.getByLabelText("Trạng thái"), "ACTIVE");
+    expect(onSelectChange).toHaveBeenCalledWith("ACTIVE");
+
+    const drawer = screen.getByRole("dialog", { name: "Ngăn kéo chi tiết" });
+    expect(drawer).toHaveAttribute("aria-modal", "true");
+    expect(drawer.className).toContain("border-s");
+
+    await user.keyboard("{Escape}");
+    expect(onDrawerClose).toHaveBeenCalledOnce();
+  });
+
+  it("keeps focus inside AdminDrawer inputs when parent re-renders with an inline onClose handler", async () => {
+    const user = userEvent.setup();
+    const onFinalClose = vi.fn();
+
+    function ControlledDrawerHarness() {
+      const [note, setNote] = useState("");
+      return (
+        <AdminDrawer
+          isOpen
+          onClose={() => onFinalClose(note)}
+          title="Ghi chú kiểm duyệt"
+        >
+          <label htmlFor="drawer-note">Ghi chú</label>
+          <input
+            id="drawer-note"
+            onChange={(event) => setNote(event.target.value)}
+            value={note}
+          />
+        </AdminDrawer>
+      );
+    }
+
+    render(<ControlledDrawerHarness />);
+    const noteInput = screen.getByLabelText("Ghi chú");
+    await user.click(noteInput);
+    await user.type(noteInput, "abc");
+
+    expect(noteInput).toHaveValue("abc");
+    expect(noteInput).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    expect(onFinalClose).toHaveBeenCalledWith("abc");
   });
 });

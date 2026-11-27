@@ -220,7 +220,7 @@ def _normalize_upload_image(raw_bytes: bytes) -> tuple[bytes, str]:
             return buffer.getvalue(), "image/jpeg"
     except HTTPException:
         raise
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="INVALID_IMAGE",
@@ -233,6 +233,11 @@ def _normalize_mime_type(image_bytes: bytes, declared_mime: str | None = None) -
         with Image.open(BytesIO(image_bytes)) as img:
             fmt = (img.format or "").upper()
             width, height = img.size
+            if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="INVALID_IMAGE",
+                )
             if width <= MAX_AI_DIMENSION and height <= MAX_AI_DIMENSION and fmt in {"JPEG", "PNG"}:
                 mime = "image/png" if fmt == "PNG" else "image/jpeg"
                 return image_bytes, mime
@@ -244,6 +249,13 @@ def _normalize_mime_type(image_bytes: bytes, declared_mime: str | None = None) -
             buffer = BytesIO()
             oriented.save(buffer, format="JPEG", quality=86, optimize=True)
             return buffer.getvalue(), "image/jpeg"
+    except HTTPException:
+        raise
+    except Image.DecompressionBombError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="INVALID_IMAGE",
+        ) from exc
     except (UnidentifiedImageError, OSError, ValueError):
         if declared_mime in {"image/jpeg", "image/png", "image/webp"}:
             return image_bytes, declared_mime
@@ -317,9 +329,9 @@ class PictureDescriptionService:
             spec = SAMPLE_BY_KEY.get(session.SampleKey or "")
             if spec is None:
                 raise HTTPException(status_code=404, detail="Resource not found")
-            return _load_sample_bytes(spec), "image/jpeg"
+            return await asyncio.to_thread(_load_sample_bytes, spec), "image/jpeg"
         raw = await asyncio.to_thread(self._download_fn, session.ImagePath)
-        return _normalize_mime_type(raw, session.ImageMimeType)
+        return await asyncio.to_thread(_normalize_mime_type, raw, session.ImageMimeType)
 
     def _ai_config(self) -> PictureDescriptionAiConfig | None:
         cfg = getattr(self.ai_client, "config", None)
@@ -605,7 +617,7 @@ class PictureDescriptionService:
             resolved_sample_key = spec.sample_key
             context_hint = f"{spec.title}: {spec.description}"
             if refresh_ai_guide:
-                image_bytes = _load_sample_bytes(spec)
+                image_bytes = await asyncio.to_thread(_load_sample_bytes, spec)
 
         elif source_type == "BOOK_PAGE":
             if book_page_id is None:
@@ -628,7 +640,7 @@ class PictureDescriptionService:
             storage_path = candidate.ImagePath
             context_hint = f"Trang {candidate.PageNumber} của sách {candidate.BookTitle}"
             raw_bytes = await asyncio.to_thread(self._download_fn, storage_path)
-            image_bytes, image_mime = _normalize_mime_type(raw_bytes)
+            image_bytes, image_mime = await asyncio.to_thread(_normalize_mime_type, raw_bytes)
 
         elif source_type == "CUSTOM_UPLOAD":
             await self.repository.db.rollback()
@@ -637,7 +649,7 @@ class PictureDescriptionService:
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="IMAGE_FILE_REQUIRED",
                 )
-            image_bytes, image_mime = _normalize_upload_image(upload_bytes)
+            image_bytes, image_mime = await asyncio.to_thread(_normalize_upload_image, upload_bytes)
             storage_path = f"picture-descriptions/{actor_id}/{session_id}.jpg"
         else:
             await self.repository.db.rollback()

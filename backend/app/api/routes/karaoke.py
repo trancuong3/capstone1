@@ -1,4 +1,5 @@
 """HTTP karaoke endpoints; SQL and publication rules live in lower layers."""
+import logging
 from typing import Literal
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api.deps import get_current_parent_id, get_db
+from app.diagnostic_logging import log_diagnostic
 from app.repositories.karaoke_repository import ConcurrentKaraokeUpdate, KaraokeRepository
 from app.schemas.karaoke import (
     AdminDetail, AdminList, DraftPreview, DraftRequest, DraftWrite, Playback,
@@ -14,6 +16,7 @@ from app.schemas.karaoke import (
 )
 from app.services.karaoke_service import KaraokeService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -23,7 +26,24 @@ async def get_karaoke_service(db=Depends(get_db)):
     except (IntegrityError, ConcurrentKaraokeUpdate):
         await db.rollback()
         raise HTTPException(409, "Karaoke data changed; reload and try again") from None
-    except (SQLAlchemyError, ValidationError, ValueError):
+    except (ValidationError, ValueError) as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="karaoke_validation_or_value_error",
+            stage="service_response",
+            exception=exc,
+        )
+        await db.rollback()
+        raise HTTPException(503, "Karaoke data is temporarily unavailable") from None
+    except SQLAlchemyError as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="karaoke_database_error",
+            stage="database",
+            exception=exc,
+        )
         await db.rollback()
         raise HTTPException(503, "Karaoke data is temporarily unavailable") from None
 

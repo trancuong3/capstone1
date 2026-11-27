@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy import select
 from typing import List
 from uuid import UUID
@@ -553,10 +553,15 @@ async def upload_current_parent_avatar(
     repository = ProfileRepository(db)
     service = AvatarService(repository, ChildProfileRepository(db))
     try:
+        avatar_bytes = await file.read(MAX_AVATAR_BYTES + 1)
+        content_type = file.content_type
+    finally:
+        await file.close()
+    try:
         await service.upload_parent_avatar(
             current_parent_id,
-            await file.read(MAX_AVATAR_BYTES + 1),
-            file.content_type,
+            avatar_bytes,
+            content_type,
         )
         profile = await ProfileService(repository).get_current_profile(
             current_parent_id
@@ -612,11 +617,16 @@ async def upload_child_avatar(
     child_repository = ChildProfileRepository(db)
     service = AvatarService(ProfileRepository(db), child_repository)
     try:
+        avatar_bytes = await file.read(MAX_AVATAR_BYTES + 1)
+        content_type = file.content_type
+    finally:
+        await file.close()
+    try:
         await service.upload_child_avatar(
             current_parent_id,
             child_id,
-            await file.read(MAX_AVATAR_BYTES + 1),
-            file.content_type,
+            avatar_bytes,
+            content_type,
         )
         child = await ChildProfileService(child_repository).get_child(
             child_id,
@@ -722,6 +732,8 @@ async def get_admin_parent_directory(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={"code": "FORBIDDEN", "message": "Admin access required"},
         ) from error
+    except (OperationalError, InterfaceError):
+        raise
     except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
@@ -758,6 +770,8 @@ async def get_admin_parent_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
         ) from error
+    except (OperationalError, InterfaceError):
+        raise
     except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
@@ -789,6 +803,8 @@ def _parent_detail_response(result):
 
 
 def _parent_admin_error_response(error: Exception):
+    if isinstance(error, (OperationalError, InterfaceError)):
+        raise error
     if isinstance(error, SQLAlchemyError):
         return HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -851,6 +867,8 @@ async def create_admin_parent(
         AdminParentConsistencyError,
     ) as error:
         raise _parent_admin_error_response(error) from error
+    except (OperationalError, InterfaceError):
+        raise
     except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
@@ -889,6 +907,8 @@ async def update_admin_parent(
         AdminParentConsistencyError,
     ) as error:
         raise _parent_admin_error_response(error) from error
+    except (OperationalError, InterfaceError):
+        raise
     except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 
@@ -1071,6 +1091,8 @@ async def deactivate_admin_parent(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "RESOURCE_NOT_FOUND", "message": "Parent not found"},
         ) from error
+    except (OperationalError, InterfaceError):
+        raise
     except SQLAlchemyError as error:
         raise _parent_admin_error_response(error) from error
 

@@ -400,10 +400,13 @@ export function KaraokeSimpleUploadScreen({
       if (document.hidden) pauseAudioOnHide();
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("viread:android-background", pauseAudioOnHide);
+    document.addEventListener("viread:android-background", pauseAudioOnHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("viread:android-background", pauseAudioOnHide);
+      document.removeEventListener(
+        "viread:android-background",
+        pauseAudioOnHide,
+      );
     };
   }, []);
 

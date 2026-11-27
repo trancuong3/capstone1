@@ -43,15 +43,26 @@ def build_presence_message(
     while) and nothing else: no book text, transcript, image, location or
     conclusion about the child's safety.
     """
-    sender = from_email or SMTP_FROM_EMAIL or "viread@localhost"
-    domain = sender.rpartition("@")[2] or "viread.local"
+    from app.database import config as settings
+    from app.providers.parent_email_transport import extract_sender_email_and_domain
+
+    raw_sender = (
+        from_email
+        or SMTP_FROM_EMAIL
+        or settings.EMAIL_FROM_ADDRESS
+        or "viread@localhost"
+    )
+    formatted_from, _clean_email, domain = extract_sender_email_and_domain(
+        raw_sender,
+        default_name=settings.EMAIL_FROM_NAME,
+    )
     rendered = render_reading_presence_email(
         locale=locale,
         child_alias=child_alias,
         app_url=READING_REMINDER_APP_URL,
     )
     message = EmailMessage()
-    message["From"] = sender
+    message["From"] = formatted_from
     message["To"] = recipient
     message["Subject"] = rendered.subject
     message["Message-ID"] = f"<reading-presence-{alert_id}@{domain}>"
@@ -76,17 +87,31 @@ def send_presence_email(
     alert_id: UUID,
     locale: str = DEFAULT_LOCALE,
 ) -> None:
+    from app.database import config as settings
+    from app.providers.parent_email_transport import (
+        EmailTransportRetryable,
+        active_email_provider,
+        send_email_message,
+    )
+
     message = build_presence_message(
         recipient=recipient,
         child_alias=child_alias,
         alert_id=alert_id,
         locale=locale,
     )
-    if READING_PRESENCE_MAIL_SINK_DIR:
-        _write_to_sink(message, READING_PRESENCE_MAIL_SINK_DIR)
+    sink_dir = READING_PRESENCE_MAIL_SINK_DIR or settings.PARENT_EMAIL_MAIL_SINK_DIR
+    if sink_dir:
+        _write_to_sink(message, sink_dir)
         return
     if not email_delivery_is_configured():
         raise EmailDeliveryNotConfigured()
+    if active_email_provider() == "resend":
+        try:
+            send_email_message(message)
+        except EmailTransportRetryable as error:
+            raise PresenceEmailRetryable() from error
+        return
     context = ssl.create_default_context()
     try:
         if SMTP_PORT == 465:
@@ -95,7 +120,7 @@ def send_presence_email(
             )
         else:
             client = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=SMTP_SEND_TIMEOUT_SECONDS)
-    except (smtplib.SMTPConnectError, ConnectionError, socket.gaierror, TimeoutError) as error:
+    except (smtplib.SMTPConnectError, ConnectionError, socket.gaierror, TimeoutError, ssl.SSLError, OSError) as error:
         raise PresenceEmailRetryable() from error
     with client:
         try:
@@ -104,7 +129,7 @@ def send_presence_email(
                 client.starttls(context=context)
                 client.ehlo()
             client.login(SMTP_USERNAME, SMTP_APP_PASSWORD)
-        except (smtplib.SMTPException, ConnectionError, TimeoutError) as error:
+        except (smtplib.SMTPException, ConnectionError, TimeoutError, ssl.SSLError, OSError) as error:
             # Nothing was sent yet: login/negotiation happens before DATA.
             raise PresenceEmailRetryable() from error
         client.send_message(message)

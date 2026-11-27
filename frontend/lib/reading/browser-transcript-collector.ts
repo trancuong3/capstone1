@@ -8,6 +8,13 @@ export interface SegmentAudioQualityMeta {
   readonly speechDurationMs: number;
 }
 
+export interface SegmentWordTimingMeta {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+  readonly type?: string;
+}
+
 export interface SegmentResultMeta {
   readonly epoch?: number;
   readonly sessionId?: string | null;

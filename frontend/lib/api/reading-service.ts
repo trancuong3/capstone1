@@ -123,6 +123,12 @@ const wordDtoSchema = z.object({
   line_index: z.number().int().nonnegative().optional(),
 });
 
+const wordTimingDtoSchema = z.object({
+  index: z.number().int().nonnegative(),
+  start: z.number().nonnegative(),
+  end: z.number().nonnegative(),
+});
+
 export const readingPageDtoSchema = z.object({
   page_id: z.guid(),
   page_revision_id: z.guid(),
@@ -131,6 +137,10 @@ export const readingPageDtoSchema = z.object({
   width: z.number(),
   height: z.number(),
   image_url: z.string().nullable().optional(),
+  tts_audio_url: z.string().nullable().optional(),
+  tts_word_timings: z.array(wordTimingDtoSchema).nullable().optional(),
+  tts_voice_id: z.string().nullable().optional(),
+  tts_cached_speed: z.number().positive().nullable().optional(),
   image_overlay_safe: z.boolean().optional(),
   illustration_url: z.string().nullable().optional(),
   illustration_text_free: z.boolean().optional(),
@@ -224,6 +234,8 @@ const practiceStateSchema = z
       )
     );
   });
+
+const MAX_RETRY_EVENT_MS = 2_147_483_647;
 
 export function createReadingService(): ReadingService {
   return {
@@ -350,11 +362,22 @@ export function createReadingService(): ReadingService {
       };
     },
     async createRetryEvent(input: CreateRetryEventInput): Promise<void> {
-      const startMs = Math.min(32767, Math.max(0, Math.floor(input.startMs)));
+      const rawStartMs = Number.isFinite(input.startMs)
+        ? Math.floor(input.startMs)
+        : 0;
+      const startMs = Math.min(MAX_RETRY_EVENT_MS, Math.max(0, rawStartMs));
       const endMs =
         input.endMs === null
           ? null
-          : Math.min(32767, Math.max(startMs, Math.floor(input.endMs)));
+          : Math.min(
+              MAX_RETRY_EVENT_MS,
+              Math.max(
+                startMs,
+                Number.isFinite(input.endMs)
+                  ? Math.floor(input.endMs)
+                  : startMs,
+              ),
+            );
 
       await withRequestDeadline(
         (signal) =>

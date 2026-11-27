@@ -139,7 +139,38 @@ public class OAuthLoopbackBridgeTest {
             assertNotNull("Expected Chrome Custom Tab / VIEW intent for OAuth", started);
             assertEquals(Intent.ACTION_VIEW, started.getAction());
             assertEquals(oauthUri, started.getData());
+            assertTrue(
+                    "Loopback listener must be active while waiting on Custom Tab",
+                    activity.isOAuthLoopbackRunningForTest());
+
+            // Simulate user dismissing/cancelling Chrome Custom Tab and returning to MainActivity
+            controller.pause().stop().resume();
+            assertFalse(
+                    "Returning to MainActivity without OAuth callback must stop loopback server",
+                    activity.isOAuthLoopbackRunningForTest());
         }
+    }
+
+    @Test
+    public void stripNonceParam_allowlistsOnlySafeCodeErrorAndRelativeNextParams() {
+        assertEquals(
+                "?code=pkce_123&next=%2Fprofile",
+                OAuthLoopbackServer.stripNonceParam(
+                        "viread_nonce=secret_nonce_123456&code=pkce_123&next=%2Fprofile&evil=https://bad.test&state=ignored"));
+        assertEquals(
+                "?error=access_denied",
+                OAuthLoopbackServer.stripNonceParam(
+                        "viread_nonce=secret_nonce_123456&error=access_denied&next=https://evil.test"));
+        assertEquals(
+                "",
+                OAuthLoopbackServer.stripNonceParam(
+                        "viread_nonce=secret_nonce_123456&next=%2F%2Fevil.test&foo=bar"));
+    }
+
+    @Test
+    public void backendHealthWarmup_skipsHardcodedRenderUrlInLanAcceptanceMode() {
+        assertTrue(MainActivity.shouldRunBackendHealthWarmup(false));
+        assertFalse(MainActivity.shouldRunBackendHealthWarmup(true));
     }
 
     private static HttpURLConnection openNoRedirect(String url) throws Exception {

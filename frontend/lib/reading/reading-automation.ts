@@ -908,12 +908,7 @@ export function reduce(
           needsPractice: needs,
           cursor: Math.max(next.cursor, index),
           stuckWordId: event.wordId,
-          pendingErrorCheckAt:
-            at +
-            Math.max(
-              state.config.selfCorrectWindowMs,
-              Math.round(state.paceMs * 0.8),
-            ),
+          pendingErrorCheckAt: at + state.config.selfCorrectWindowMs,
           phase: "evidence",
           lingerUntil: at + state.config.evidenceLingerMs,
         };
@@ -1134,24 +1129,34 @@ export function reduce(
         effects.push({ type: "STOP_AUDIO" });
       }
       effects.push({ type: "SHOW", message: "wait-extended" });
-      return {
-        state: {
-          ...state,
-          phase:
-            state.phase === "hinting" || state.phase === "modeling"
-              ? "listening"
-              : state.phase,
-          modelGen: state.modelGen + 1,
-          modeling: null,
-          pendingErrorCheckAt: null,
-          lingerUntil: null,
-          waitUntilAt: at + extendMs,
-          lastEvidenceAt: at,
-          silenceReminders: 0,
-          silencePauseOffered: false,
-        },
-        effects,
+      let next: AutomationState = {
+        ...state,
+        phase:
+          state.phase === "hinting" || state.phase === "modeling"
+            ? "listening"
+            : state.phase,
+        modelGen: state.modelGen + 1,
+        modeling: null,
+        pendingErrorCheckAt: null,
+        lingerUntil: null,
+        waitUntilAt: at + extendMs,
+        lastEvidenceAt: at,
+        silenceReminders: 0,
+        silencePauseOffered: false,
+        resumeListenAt:
+          wasModeling && !state.permissionMissing && !state.offline
+            ? at + state.config.resumeAfterModelMs
+            : state.resumeListenAt,
       };
+      if (
+        !wasModeling &&
+        !next.listening &&
+        !next.permissionMissing &&
+        !next.offline
+      ) {
+        next = startListeningEffect(next, at, effects);
+      }
+      return { state: next, effects };
     }
 
     case "TRY_MORE_REQUESTED": {
@@ -1366,7 +1371,13 @@ function tick(inputState: AutomationState, at: number): ReduceResult {
       !isPageDone(state)
     ) {
       state = startListeningEffect(state, at, effects);
-      state = { ...state, phase: "awaiting-retry" };
+      state = {
+        ...state,
+        phase:
+          state.waitUntilAt !== null && at < state.waitUntilAt
+            ? "listening"
+            : "awaiting-retry",
+      };
     } else {
       state = { ...state, resumeListenAt: null };
     }

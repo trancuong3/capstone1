@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "“{theme}”主题插画，包含 {count} 处细节",
       "svgTitle": "{theme} 插画"
-    }
+    },
+    "mobileLabel": "记忆角"
   }
 }

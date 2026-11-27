@@ -451,9 +451,9 @@
     "restartFromScratch": "Recommencer (nouvel essai)",
     "micUnavailable": "Impossible d'accéder au micro sur cet appareil. Vous pouvez taper votre description dans la zone ci-dessous.",
     "micListening": "Écoute de la description de l'image...",
-    "transcribingSpeech": "Conversion de la voix via ElevenLabs...",
+    "transcribingSpeech": "Conversion de la voix en texte...",
     "unclearVoice": "Je n'ai pas bien entendu. Veuillez appuyer sur le micro pour réessayer ou taper votre réponse !",
-    "transcribedElevenLabs": "Voix convertie via ElevenLabs ! Vous pouvez réécouter ou modifier avant de soumettre pour correction.",
+    "transcribedElevenLabs": "Voix convertie en texte ! Vous pouvez réécouter ou modifier avant de soumettre pour correction.",
     "transcribedBrowser": "Histoire enregistrée ! Vous pouvez réécouter ou modifier avant de soumettre pour correction.",
     "emptySubmissionError": "Veuillez parler ou écrire au moins une phrase décrivant l'image.",
     "sources": {

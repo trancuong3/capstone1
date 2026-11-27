@@ -23,10 +23,12 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   getActiveSessionVoiceLock,
+  getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
   lockSessionVoice,
   setVoicePolicyPreferences,
+  subscribeVoiceLock,
   subscribeVoicePolicy,
   type VoiceProviderMode,
   type VoiceRegion,
@@ -40,7 +42,10 @@ import {
 } from "@/lib/reading/speech-preferences";
 import {
   fetchVoiceEngineHealth,
-  type VoiceEngineHealthSnapshot,
+  getBrowserOnlineStatus,
+  getCachedVoiceEngineHealth,
+  subscribeBrowserOnlineStatus,
+  subscribeVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
@@ -159,7 +164,22 @@ export function ReadingVoiceSettings({
   const policy = useSyncExternalStore(
     subscribeVoicePolicy,
     getVoicePolicyPreferences,
-    getVoicePolicyPreferences,
+    getDefaultVoicePolicyPreferences,
+  );
+  const voiceHealth = useSyncExternalStore(
+    subscribeVoiceEngineHealth,
+    getCachedVoiceEngineHealth,
+    () => null,
+  );
+  const activeSessionLock = useSyncExternalStore(
+    subscribeVoiceLock,
+    getActiveSessionVoiceLock,
+    () => null,
+  );
+  const isBrowserOnline = useSyncExternalStore(
+    subscribeBrowserOnlineStatus,
+    getBrowserOnlineStatus,
+    () => true,
   );
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
@@ -168,13 +188,12 @@ export function ReadingVoiceSettings({
   const [removedVoiceNotice, setRemovedVoiceNotice] = useState<string | null>(
     null,
   );
-  const [voiceHealth, setVoiceHealth] =
-    useState<VoiceEngineHealthSnapshot | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
   const healthControllerRef = useRef<AbortController | null>(null);
+  const lastLoadedContextKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -189,19 +208,14 @@ export function ReadingVoiceSettings({
     healthControllerRef.current?.abort();
     const controller = new AbortController();
     healthControllerRef.current = controller;
-    void fetchVoiceEngineHealth(controller.signal).then((snapshot) => {
-      if (!mountedRef.current || controller.signal.aborted) return;
-      if (snapshot) {
-        setVoiceHealth(snapshot);
-      }
-    });
+    void fetchVoiceEngineHealth(controller.signal);
   }, []);
 
   const syncPausedSessionLock = useCallback(
     (nextVoiceId?: string | null, nextSpeed?: number, modelVer?: string) => {
       const activeLock = getActiveSessionVoiceLock();
       if (!activeLock) return;
-      lockSessionVoice(activeLock.sessionId, {
+      const updatedLock = lockSessionVoice(activeLock.sessionId, {
         voiceId:
           nextVoiceId !== undefined
             ? nextVoiceId
@@ -211,6 +225,27 @@ export function ReadingVoiceSettings({
         modelVersion: modelVer,
         forceUpdate: true,
       });
+      // Explicitly resync server-side SessionVoiceLock so subsequent playback
+      // never hits 409 SESSION_VOICE_LOCKED after an intentional paused voice change.
+      if (
+        updatedLock.voiceId !== activeLock.voiceId &&
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+      ) {
+        void voiceStudio
+          .updateSessionVoiceLock({
+            sessionId: activeLock.sessionId,
+            voiceId: updatedLock.voiceId,
+          })
+          .catch(() => undefined);
+      }
+    },
+    [voiceStudio],
+  );
+
+  const buildVoiceContextKey = useCallback(
+    (healthSnap = getCachedVoiceEngineHealth()) => {
+      const currentPolicy = getVoicePolicyPreferences();
+      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}`;
     },
     [],
   );
@@ -219,11 +254,13 @@ export function ReadingVoiceSettings({
     loadControllerRef.current?.abort();
     const controller = new AbortController();
     loadControllerRef.current = controller;
+    const contextKey = buildVoiceContextKey();
     setLoadState({ status: "loading" });
     voiceStudio
       .listVoices(controller.signal)
       .then((data) => {
         if (!mountedRef.current || controller.signal.aborted) return;
+        lastLoadedContextKeyRef.current = contextKey;
         const storedVoice = getSpeechPreferences().voiceId;
         if (
           storedVoice &&
@@ -239,7 +276,7 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [voiceStudio, update, syncPausedSessionLock, t]);
+  }, [voiceStudio, update, syncPausedSessionLock, t, buildVoiceContextKey]);
 
   function change(
     value: Parameters<typeof update>[0],
@@ -295,6 +332,11 @@ export function ReadingVoiceSettings({
   function selectRegionTab(nextTab: "all" | VoiceRegion) {
     setRegionTab(nextTab);
     if (nextTab === "all") return;
+    // During an active locked reading session, switching region tabs ONLY filters
+    // the visible list so browsing regions never silently alters the locked voice.
+    if (getActiveSessionVoiceLock() !== null) {
+      return;
+    }
     setVoicePolicyPreferences({ region: nextTab });
     if (loadState.status === "ready") {
       const regionVoices = loadState.data.voices.filter(
@@ -322,7 +364,12 @@ export function ReadingVoiceSettings({
   function open() {
     setIsOpen(true);
     loadVoiceHealth();
-    if (loadState.status === "idle" || loadState.status === "error") {
+    const currentKey = buildVoiceContextKey();
+    if (
+      loadState.status === "idle" ||
+      loadState.status === "error" ||
+      lastLoadedContextKeyRef.current !== currentKey
+    ) {
       loadVoices();
     }
   }
@@ -469,15 +516,37 @@ export function ReadingVoiceSettings({
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
             aria-live="polite"
           >
-            {selectedVoice
-              ? voiceTitle(selectedVoice)
-              : preferences.voiceId
-                ? t("settings.savedVoice")
-                : t("settings.defaultVoice")}{" "}
-            · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
-            {policy.providerMode === "local_only"
-              ? t("settings.localOnlyMode")
-              : t("settings.localWithGoogleMode")}
+            <div>
+              {selectedVoice
+                ? voiceTitle(selectedVoice)
+                : preferences.voiceId
+                  ? t("settings.savedVoice")
+                  : t("settings.defaultVoice")}{" "}
+              · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
+              {policy.providerMode === "local_only"
+                ? t("settings.localOnlyMode")
+                : t("settings.localWithGoogleMode")}
+            </div>
+            {activeSessionLock || !isBrowserOnline ? (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                {activeSessionLock ? (
+                  <span
+                    data-testid="session-voice-lock-badge"
+                    className="inline-flex items-center rounded-full border border-primary/20 bg-white/80 px-2 py-0.5 text-primary"
+                  >
+                    {t("settings.sessionLockedBadge")}
+                  </span>
+                ) : null}
+                {!isBrowserOnline ? (
+                  <span
+                    data-testid="browser-offline-badge"
+                    className="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-900"
+                  >
+                    {t("settings.offlineBrowserBadge")}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           {removedVoiceNotice ? (
@@ -637,14 +706,19 @@ export function ReadingVoiceSettings({
                 {filteredVoices.map((voice) => {
                   const selected = voice.voice_id === selectedVoiceId;
                   const cachedVoiceIds =
-                    loadState.status === "ready" &&
-                    loadState.data.cached_voice_ids &&
-                    loadState.data.cached_voice_ids.length > 0
-                      ? loadState.data.cached_voice_ids
-                      : [defaultVoiceId];
+                    loadState.status === "ready"
+                      ? loadState.data.cached_voice_ids !== undefined
+                        ? loadState.data.cached_voice_ids
+                        : defaultVoiceId
+                          ? [defaultVoiceId]
+                          : []
+                      : [];
+                  const isLocalWorkerOffline = voiceHealth
+                    ? !voiceHealth.local.available
+                    : loadState.status === "ready" &&
+                      loadState.data.local_worker_ready === false;
                   const isCachedOffline =
-                    loadState.status === "ready" &&
-                    loadState.data.local_worker_ready === false &&
+                    isLocalWorkerOffline &&
                     cachedVoiceIds.includes(voice.voice_id);
                   return (
                     <label
@@ -695,13 +769,16 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
-            loadState.data.local_worker_ready === false
+            (voiceHealth
+              ? !voiceHealth.local.available
+              : loadState.data.local_worker_ready === false)
               ? (() => {
                   const cachedIds =
-                    loadState.data.cached_voice_ids &&
-                    loadState.data.cached_voice_ids.length > 0
+                    loadState.data.cached_voice_ids !== undefined
                       ? loadState.data.cached_voice_ids
-                      : [];
+                      : defaultVoiceId
+                        ? [defaultVoiceId]
+                        : [];
                   const cachedNames = loadState.data.voices
                     .filter((v) => cachedIds.includes(v.voice_id))
                     .map((v) => voiceTitle(v));
@@ -712,7 +789,9 @@ export function ReadingVoiceSettings({
                     >
                       {cachedNames.length > 1
                         ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
-                        : "Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng mặc định; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới."}
+                        : cachedNames.length === 1
+                          ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng ${cachedNames[0]}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                          : "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu."}
                     </p>
                   );
                 })()

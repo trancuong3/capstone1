@@ -26,6 +26,7 @@ import {
   createBookAssetsService,
   type BookAssetsService,
 } from "@/lib/api/book-assets-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { cn } from "@/lib/utils/cn";
@@ -103,6 +104,14 @@ export function BookCoverStudio({
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const [summary, setSummary] = useState<BookAssetsSummaryDTO | null>(null);
   const [loadedBookId, setLoadedBookId] = useState<string | null>(null);
@@ -151,7 +160,11 @@ export function BookCoverStudio({
 
   useEffect(() => {
     return () => {
-      if (stagedPreviewUrl && typeof URL.revokeObjectURL === "function") {
+      if (
+        stagedPreviewUrl &&
+        typeof URL !== "undefined" &&
+        typeof URL.revokeObjectURL === "function"
+      ) {
         URL.revokeObjectURL(stagedPreviewUrl);
       }
     };
@@ -159,12 +172,7 @@ export function BookCoverStudio({
 
   const clearStagedFile = useCallback(() => {
     setStagedFile(null);
-    setStagedPreviewUrl((prev) => {
-      if (prev && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(prev);
-      }
-      return null;
-    });
+    setStagedPreviewUrl(null);
     setRotation(0);
     setCropPreset("FULL");
   }, []);
@@ -178,22 +186,19 @@ export function BookCoverStudio({
 
       try {
         const prepared = await preprocessScanImage(file, { maxLongEdge: 2048 });
+        if (!mountedRef.current) return;
         const readyFile = prepared.file;
         const previewUrl =
           typeof URL !== "undefined" &&
           typeof URL.createObjectURL === "function"
             ? URL.createObjectURL(readyFile)
             : null;
-        setStagedPreviewUrl((prev) => {
-          if (prev && typeof URL.revokeObjectURL === "function") {
-            URL.revokeObjectURL(prev);
-          }
-          return previewUrl;
-        });
+        setStagedPreviewUrl(previewUrl);
         setStagedFile(readyFile);
         setRotation(0);
         setCropPreset("FULL");
       } catch {
+        if (!mountedRef.current) return;
         setNotice({
           tone: "error",
           message:
@@ -226,6 +231,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(saved);
+      emitStudioTasksChanged();
       clearStagedFile();
       setNotice({
         tone: "info",
@@ -265,6 +271,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(null);
+      emitStudioTasksChanged();
       setNotice({
         tone: "info",
         title: "Đã gỡ ảnh bìa",
@@ -288,6 +295,7 @@ export function BookCoverStudio({
       const res = await service.generateAiCover(bookId, {
         prompt_hint: aiPromptHint.trim() || null,
       });
+      emitStudioTasksChanged();
       if (res.status === "SUCCEEDED" && res.cover) {
         setSummary((prev) =>
           prev
@@ -313,7 +321,11 @@ export function BookCoverStudio({
               ? "Tạm hết hạn mức tạo ảnh AI"
               : res.status === "SUPERSEDED_BY_USER_UPLOAD"
                 ? "Đang giữ ảnh bìa người dùng tải lên"
-                : "Chưa có nhà cung cấp tạo ảnh AI",
+                : res.status === "REJECTED_CONTAINS_TEXT"
+                  ? "Ảnh bìa AI bị chặn do phát hiện ký tự"
+                  : res.status === "QUEUED"
+                    ? "Đã xếp hàng tạo bìa AI"
+                    : "Chưa có nhà cung cấp tạo ảnh AI",
           message: res.message_vi,
         });
       }

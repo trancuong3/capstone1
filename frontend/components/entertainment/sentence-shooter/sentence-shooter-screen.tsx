@@ -454,7 +454,6 @@ export function SentenceShooterScreen({
   const calmSoundRef = useRef(calmSound);
   const roundRef = useRef(round);
   const shootErrorRef = useRef(shootError);
-
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
@@ -1157,30 +1156,32 @@ export function SentenceShooterScreen({
           child={child}
           mobileLabel={t("sentenceShooter.mobilePlayZoneLabel")}
         />
-        <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-4 py-2">
+        <header className="flex flex-col gap-2.5 rounded-card border border-border bg-white px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4 lg:py-2.5">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1
-                className="viread-learning-content truncate text-lg font-extrabold text-ink"
-                dir="ltr"
-                lang="vi"
-              >
-                {session.book.title}
-              </h1>
-              <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
+            <h1
+              className="viread-learning-content break-words text-lg leading-snug font-extrabold text-ink sm:truncate"
+              dir="ltr"
+              lang="vi"
+            >
+              {session.book.title}
+            </h1>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="inline-flex shrink-0 items-center whitespace-nowrap rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
                 {t(LEARNING_MODE_LABEL_KEYS[activeLearningMode])}
               </span>
               {activePracticedWords.length > 0 ? (
                 <span
-                  className="inline-flex items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning"
+                  className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning"
                   data-testid="difficult-word-badge"
                 >
-                  <Sparkles aria-hidden="true" className="size-3.5" />
+                  <Sparkles aria-hidden="true" className="size-3.5 shrink-0" />
                   {activeLearningMode === "WORD_ORDER" || roundComplete ? (
                     <>
-                      {t("sentenceShooter.difficultWordReviewPrefix")}{" "}
+                      <span>
+                        {t("sentenceShooter.difficultWordReviewPrefix")}
+                      </span>
                       <span
-                        className="viread-learning-content"
+                        className="viread-learning-content break-words"
                         dir="ltr"
                         lang="vi"
                       >
@@ -1188,89 +1189,91 @@ export function SentenceShooterScreen({
                       </span>
                     </>
                   ) : (
-                    t("sentenceShooter.difficultWordActiveHint")
+                    <span>{t("sentenceShooter.difficultWordActiveHint")}</span>
                   )}
                 </span>
               ) : null}
+              <span className="text-sm font-bold text-muted">
+                {t("sentenceShooter.roundProgress", {
+                  current: round.round_number,
+                  total: session.total_rounds,
+                })}
+              </span>
             </div>
-            <p className="mt-1 text-sm font-bold text-muted">
-              {t("sentenceShooter.roundProgress", {
-                current: round.round_number,
-                total: session.total_rounds,
-              })}
-            </p>
           </div>
-          <div
-            className="flex items-center gap-3"
-            role="group"
-            aria-label={t("sentenceShooter.placedAria", {
-              placed: placedTokens.length,
-              total: round.token_count,
-            })}
-          >
-            <div className="h-3 w-24 overflow-hidden rounded-full bg-sky sm:w-36">
-              <div
-                className="h-full rounded-full bg-primary transition-[width]"
-                style={{
-                  width: `${(optimisticPreviewCount / round.token_count) * 100}%`,
-                }}
-              />
-            </div>
-            <span
-              aria-label={t("sentenceShooter.starsAria", {
-                count: session.total_stars,
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-2 lg:shrink-0 lg:border-t-0 lg:pt-0">
+            <div
+              className="flex flex-wrap items-center gap-2.5 sm:gap-3"
+              role="group"
+              aria-label={t("sentenceShooter.placedAria", {
+                placed: placedTokens.length,
+                total: round.token_count,
               })}
-              className="inline-flex items-center gap-1 font-extrabold text-warning"
             >
-              <span aria-hidden="true">★</span>
-              {session.total_stars}
-            </span>
-            {sessionScore > 0 ? (
+              <div className="h-3 w-24 overflow-hidden rounded-full bg-sky sm:w-36">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width]"
+                  style={{
+                    width: `${(optimisticPreviewCount / round.token_count) * 100}%`,
+                  }}
+                />
+              </div>
               <span
-                className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-success-ink"
-                data-testid="session-score"
+                aria-label={t("sentenceShooter.starsAria", {
+                  count: session.total_stars,
+                })}
+                className="inline-flex shrink-0 items-center gap-1 font-extrabold text-warning"
               >
-                {t("sentenceShooter.scoreBadge", { score: sessionScore })}
+                <span aria-hidden="true">★</span>
+                {session.total_stars}
               </span>
-            ) : null}
-          </div>
-          <div className="flex gap-2">
-            <button
-              aria-label={
-                soundEnabled
-                  ? t("sentenceShooter.muteSoundAria")
-                  : t("sentenceShooter.enableSoundAria")
-              }
-              aria-pressed={soundEnabled}
-              className="flex size-11 items-center justify-center rounded-control bg-sky text-primary hover:bg-border"
-              onClick={() => setCalmSound(!soundEnabled)}
-              type="button"
-            >
-              {soundEnabled ? (
-                <Volume2 aria-hidden="true" className="size-5" />
-              ) : (
-                <VolumeX aria-hidden="true" className="size-5" />
-              )}
-            </button>
-            <button
-              aria-label={t("sentenceShooter.pauseAria")}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
-              onClick={() => setIsPaused(true)}
-              type="button"
-            >
-              <Pause aria-hidden="true" className="size-5" />
-              <span className="hidden sm:inline">
-                {t("sentenceShooter.pause")}
-              </span>
-            </button>
-            <button
-              className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
-              disabled={isExiting}
-              onClick={() => void exitGame()}
-              type="button"
-            >
-              {t("sentenceShooter.exit")}
-            </button>
+              {sessionScore > 0 ? (
+                <span
+                  className="shrink-0 whitespace-nowrap rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-success-ink"
+                  data-testid="session-score"
+                >
+                  {t("sentenceShooter.scoreBadge", { score: sessionScore })}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                aria-label={
+                  soundEnabled
+                    ? t("sentenceShooter.muteSoundAria")
+                    : t("sentenceShooter.enableSoundAria")
+                }
+                aria-pressed={soundEnabled}
+                className="flex size-11 items-center justify-center rounded-control bg-sky text-primary hover:bg-border"
+                onClick={() => setCalmSound(!soundEnabled)}
+                type="button"
+              >
+                {soundEnabled ? (
+                  <Volume2 aria-hidden="true" className="size-5" />
+                ) : (
+                  <VolumeX aria-hidden="true" className="size-5" />
+                )}
+              </button>
+              <button
+                aria-label={t("sentenceShooter.pauseAria")}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
+                onClick={() => setIsPaused(true)}
+                type="button"
+              >
+                <Pause aria-hidden="true" className="size-5" />
+                <span className="hidden sm:inline">
+                  {t("sentenceShooter.pause")}
+                </span>
+              </button>
+              <button
+                className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
+                disabled={isExiting}
+                onClick={() => void exitGame()}
+                type="button"
+              >
+                {t("sentenceShooter.exit")}
+              </button>
+            </div>
           </div>
         </header>
 

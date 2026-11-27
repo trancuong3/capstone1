@@ -6,7 +6,8 @@
     - Zero Azure Container Registry cost ($0.00): pulls directly from ghcr.io/trancuong3/viread-ocr-worker:latest.
     - Zero Log Analytics cost ($0.00): creates Container Apps Environment with --logs-destination none.
     - Scale-to-zero (minReplicas=0, maxReplicas=1, 2.0 vCPU / 4.0Gi RAM, cooldownPeriod=30, pollingInterval=15).
-    - Automatically probes candidate regions to bypass Azure for Students RequestDisallowedByPolicy errors.
+    - Automatically probes candidate regions (cleaning up empty failed RGs) to bypass Azure for Students RequestDisallowedByPolicy errors.
+    - Uses ARM JSON Merge Patch (az rest --method PATCH) so cooldownPeriod=30 never strips Container App secrets.
     - Never prints or logs secrets; wipes plaintext secrets from memory on exit.
 #>
 [CmdletBinding()]
@@ -29,6 +30,9 @@ param(
     [string]$RegistryServer = 'ghcr.io',
     [string]$RegistryUsername = '',
     [string]$CheckpointCdnUrl = '',
+    [switch]$UseEnvWorkerToken,
+    [int]$HealthProbeAttempts = 24,
+    [int]$HealthProbeIntervalSeconds = 5,
     [switch]$DryRun
 )
 
@@ -37,6 +41,25 @@ $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $FLOW1_SHA256 = '200edce460606275481dda19c50b7763620a112ddc66a8378982bddc013114a6'
+$REGION_RETRY_PATTERN = 'RequestDisallowedByPolicy|PolicyViolation|LocationNotAvailable|SubscriptionIsNotAllowed|InvalidResourceGroupLocation|DisallowedProvider|SkuNotAvailable|QuotaExceeded|MaxNumberOfRegionalEnvironments|RegionDoesNotAllow|Capacity|NotSupported|NotAvailable|ProvisioningDisabled'
+$CandidateRegions = @(
+    $CandidateRegions |
+        ForEach-Object { $_ -split ',' } |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+)
+
+$script:SensitiveValues = New-Object System.Collections.Generic.List[string]
+
+function Protect-ErrorText([string]$Text) {
+    $clean = if ($null -eq $Text) { '' } else { $Text }
+    foreach ($secret in $script:SensitiveValues) {
+        if (-not [string]::IsNullOrEmpty($secret) -and $secret.Length -ge 8) {
+            $clean = $clean.Replace($secret, '***REDACTED***')
+        }
+    }
+    return $clean.Trim()
+}
 
 function Read-SecretPlainText([string]$PromptText) {
     $sec = Read-Host $PromptText -AsSecureString
@@ -66,14 +89,89 @@ function New-CryptoHexToken([int]$ByteLength = 24) {
     }
 }
 
+function Write-Utf8NoBomFile([string]$FilePath, [string]$Content) {
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [IO.File]::WriteAllText($FilePath, $Content, $utf8NoBom)
+}
+
+function Invoke-AzResult([string[]]$AzArgs) {
+    $errFile = [IO.Path]::GetTempFileName()
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $stdoutLines = & az @AzArgs 2> $errFile
+        $exitCode = if ($null -ne $LASTEXITCODE) { [int]$LASTEXITCODE } else { 0 }
+        $stdoutText = ($stdoutLines | Out-String).Trim()
+        $stderrText = if (Test-Path -LiteralPath $errFile) {
+            ([IO.File]::ReadAllText($errFile)).Trim()
+        } else {
+            ''
+        }
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            Stdout   = $stdoutText
+            Stderr   = $stderrText
+        }
+    } finally {
+        $ErrorActionPreference = $prevEap
+        Remove-Item -LiteralPath $errFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-AzChecked([string[]]$AzArgs, [string]$FailureContext) {
+    $res = Invoke-AzResult -AzArgs $AzArgs
+    if ($res.ExitCode -ne 0) {
+        $detail = if (-not [string]::IsNullOrWhiteSpace($res.Stderr)) { $res.Stderr } else { $res.Stdout }
+        $safeDetail = Protect-ErrorText -Text $detail
+        throw "$FailureContext (exit $($res.ExitCode)): $safeDetail"
+    }
+    return $res.Stdout
+}
+
+function Invoke-AzJson([string[]]$AzArgs, [string]$FailureContext = 'Azure CLI failed') {
+    $stdout = Invoke-AzChecked -AzArgs $AzArgs -FailureContext $FailureContext
+    if ([string]::IsNullOrWhiteSpace($stdout)) {
+        return $null
+    }
+    return ($stdout | ConvertFrom-Json)
+}
+
+function Remove-ResourceGroupIfEmpty([string]$RgName) {
+    $listRes = Invoke-AzResult @('resource', 'list', '--resource-group', $RgName, '-o', 'json')
+    if ($listRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($listRes.Stdout)) {
+        return
+    }
+    try {
+        $parsed = $listRes.Stdout | ConvertFrom-Json
+        $itemCount = if ($null -eq $parsed) {
+            0
+        } elseif ($parsed -is [System.Collections.ICollection]) {
+            $parsed.Count
+        } else {
+            1
+        }
+        if ($itemCount -eq 0) {
+            $null = Invoke-AzResult @('group', 'delete', '--name', $RgName, '--yes', '--only-show-errors')
+        }
+    } catch {
+        # Keep non-empty or unparsable RG untouched.
+    }
+}
+
 function Test-GhcrAnonymousPull([string]$ImageRef) {
     if (-not $ImageRef.ToLowerInvariant().StartsWith('ghcr.io/')) {
         return $true
     }
     $withoutHost = $ImageRef.Substring(8)
-    $parts = $withoutHost.Split(':')
-    $repoPath = $parts[0]
-    $tag = if ($parts.Length -gt 1 -and $parts[1]) { $parts[1] } else { 'latest' }
+    $atIdx = $withoutHost.IndexOf('@')
+    if ($atIdx -gt 0) {
+        $repoPath = $withoutHost.Substring(0, $atIdx)
+        $tag = $withoutHost.Substring($atIdx + 1)
+    } else {
+        $parts = $withoutHost.Split(':')
+        $repoPath = $parts[0]
+        $tag = if ($parts.Length -gt 1 -and $parts[1]) { $parts[1] } else { 'latest' }
+    }
     try {
         $tokResp = Invoke-RestMethod -Method Get -Uri "https://ghcr.io/token?scope=repository:${repoPath}:pull" -TimeoutSec 10
         if (-not $tokResp -or -not $tokResp.token) {
@@ -88,19 +186,6 @@ function Test-GhcrAnonymousPull([string]$ImageRef) {
     } catch {
         return $false
     }
-}
-
-function Invoke-AzJson([string[]]$AzArgs) {
-    $raw = & az @AzArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        $errText = ($raw | Out-String).Trim()
-        throw "Azure CLI failed: $errText"
-    }
-    $joined = ($raw | Out-String).Trim()
-    if ([string]::IsNullOrWhiteSpace($joined)) {
-        return $null
-    }
-    return ($joined | ConvertFrom-Json)
 }
 
 $workerToken = $null
@@ -128,56 +213,57 @@ try {
     }
 
     Write-Host '[1/6] Kiem tra dang nhap Azure CLI va dang ky Microsoft.App...' -ForegroundColor Cyan
-    & az config set extension.use_dynamic_install=yes_without_prompt --only-show-errors | Out-Null
-    & az extension add --name containerapp --upgrade --only-show-errors | Out-Null
+    $null = Invoke-AzResult @('config', 'set', 'extension.use_dynamic_install=yes_without_prompt', '--only-show-errors')
+    $null = Invoke-AzResult @('extension', 'add', '--name', 'containerapp', '--upgrade', '--only-show-errors')
 
-    $account = $null
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $acctOut = & az account show -o json 2>$null
-    $acctCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevEap
-    if ($acctCode -eq 0 -and -not [string]::IsNullOrWhiteSpace(($acctOut | Out-String))) {
-        $account = ($acctOut | Out-String) | ConvertFrom-Json
+    $acctRes = Invoke-AzResult @('account', 'show', '-o', 'json')
+    if ($acctRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($acctRes.Stdout)) {
+        $account = $acctRes.Stdout | ConvertFrom-Json
     } else {
         Write-Host 'Mo trinh duyet de dang nhap tai khoan Azure for Students (.edu.vn)...' -ForegroundColor Yellow
-        & az login --only-show-errors | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Dang nhap Azure that bai.'
-        }
-        $account = Invoke-AzJson @('account', 'show', '-o', 'json')
+        $null = Invoke-AzChecked -AzArgs @('login', '--only-show-errors') -FailureContext 'Dang nhap Azure that bai'
+        $account = Invoke-AzJson -AzArgs @('account', 'show', '-o', 'json') -FailureContext 'Khong doc duoc thong tin tai khoan Azure'
     }
 
     if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
-        & az account set --subscription $SubscriptionId --only-show-errors
-        if ($LASTEXITCODE -ne 0) {
-            throw "Khong the chon subscription $SubscriptionId"
-        }
-        $account = Invoke-AzJson @('account', 'show', '-o', 'json')
+        $null = Invoke-AzChecked -AzArgs @('account', 'set', '--subscription', $SubscriptionId, '--only-show-errors') -FailureContext "Khong the chon subscription $SubscriptionId"
+        $account = Invoke-AzJson -AzArgs @('account', 'show', '-o', 'json') -FailureContext 'Khong doc duoc thong tin subscription'
     }
     Write-Host "Dang dung Azure Subscription: $($account.name) ($($account.id))" -ForegroundColor Green
 
-    & az provider register --namespace Microsoft.App --wait --only-show-errors | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Khong the dang ky namespace Microsoft.App tren subscription nay.'
-    }
+    $null = Invoke-AzChecked -AzArgs @('provider', 'register', '--namespace', 'Microsoft.App', '--wait', '--only-show-errors') -FailureContext 'Khong the dang ky namespace Microsoft.App tren subscription nay'
 
     Write-Host '[2/6] Cau hinh bao mat VIREAD_OCR_WORKER_TOKEN (KHONG dung lai token cu da lo)...' -ForegroundColor Cyan
-    Write-Host 'Luu y: Nhan Enter de tu dong sinh ma 48 ky tu moi tinh va chep thang vao Clipboard!' -ForegroundColor Yellow
-    $enteredToken = Read-SecretPlainText 'Dan VIREAD_OCR_WORKER_TOKEN (>=32 ky tu) hoac nhan Enter de tu sinh ma moi'
     $tokenCopiedToClipboard = $false
-    if ([string]::IsNullOrWhiteSpace($enteredToken)) {
-        $workerToken = New-CryptoHexToken -ByteLength 24
-        Set-Clipboard -Value $workerToken
-        $tokenCopiedToClipboard = $true
-        Write-Host 'Da sinh VIREAD_OCR_WORKER_TOKEN moi (48 ky tu) va chep vao Clipboard (khong in ra man hinh).' -ForegroundColor Green
-    } else {
-        if ($enteredToken.Length -lt 32) {
-            throw 'VIREAD_OCR_WORKER_TOKEN phai co it nhat 32 ky tu.'
+    if ($UseEnvWorkerToken) {
+        $envTok = if ($null -ne $env:VIREAD_OCR_WORKER_TOKEN) { $env:VIREAD_OCR_WORKER_TOKEN.Trim() } else { '' }
+        if ($envTok.Length -lt 32) {
+            throw 'Bien moi truong VIREAD_OCR_WORKER_TOKEN phai co it nhat 32 ky tu khi dung -UseEnvWorkerToken.'
         }
-        $workerToken = $enteredToken
+        $workerToken = $envTok
+        $envTok = $null
+    } else {
+        Write-Host 'Luu y: Nhan Enter de tu dong sinh ma 48 ky tu moi tinh va chep thang vao Clipboard!' -ForegroundColor Yellow
+        $enteredToken = Read-SecretPlainText 'Dan VIREAD_OCR_WORKER_TOKEN (>=32 ky tu) hoac nhan Enter de tu sinh ma moi'
+        if ([string]::IsNullOrWhiteSpace($enteredToken)) {
+            $workerToken = New-CryptoHexToken -ByteLength 24
+            try {
+                Set-Clipboard -Value $workerToken
+                $tokenCopiedToClipboard = $true
+                Write-Host 'Da sinh VIREAD_OCR_WORKER_TOKEN moi (48 ky tu) va chep vao Clipboard (khong in ra man hinh).' -ForegroundColor Green
+            } catch {
+                $workerToken = $null
+                throw 'Khong the truy cap Clipboard cua Windows; hay tu tao token >=32 ky tu va dan truc tiep khi duoc hoi.'
+            }
+        } else {
+            if ($enteredToken.Length -lt 32) {
+                throw 'VIREAD_OCR_WORKER_TOKEN phai co it nhat 32 ky tu.'
+            }
+            $workerToken = $enteredToken
+        }
+        $enteredToken = $null
     }
-    $enteredToken = $null
+    [void]$script:SensitiveValues.Add($workerToken)
 
     $needRegistryAuth = (-not [string]::IsNullOrWhiteSpace($RegistryUsername))
     if (-not $needRegistryAuth) {
@@ -194,67 +280,69 @@ try {
         if ([string]::IsNullOrWhiteSpace($RegistryUsername)) {
             throw 'Can nhap GitHub username khi pull image GHCR private.'
         }
-        $registryPassword = Read-SecretPlainText 'Dan GitHub Classic PAT (quyen read:packages)'
+        if ($UseEnvWorkerToken -and -not [string]::IsNullOrWhiteSpace($env:GHCR_READ_TOKEN)) {
+            $registryPassword = $env:GHCR_READ_TOKEN.Trim()
+        } else {
+            $registryPassword = Read-SecretPlainText 'Dan GitHub Classic PAT (quyen read:packages)'
+        }
         if ([string]::IsNullOrWhiteSpace($registryPassword)) {
             throw 'Chua nhap GitHub PAT (read:packages).'
         }
+        [void]$script:SensitiveValues.Add($registryPassword)
     }
 
     Write-Host '[3/6] Khoi tao Resource Group va Container Apps Environment (tu dong tim region hop le)...' -ForegroundColor Cyan
     $selectedRegion = $null
 
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $existingEnvJson = & az containerapp env show --name $EnvironmentName --resource-group $ResourceGroupName -o json 2>$null
-    $existingEnvCode = $LASTEXITCODE
-    $ErrorActionPreference = $prevEap
-
-    if ($existingEnvCode -eq 0 -and -not [string]::IsNullOrWhiteSpace(($existingEnvJson | Out-String))) {
-        $existingEnv = ($existingEnvJson | Out-String) | ConvertFrom-Json
+    $existingEnvRes = Invoke-AzResult @('containerapp', 'env', 'show', '--name', $EnvironmentName, '--resource-group', $ResourceGroupName, '-o', 'json')
+    if ($existingEnvRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingEnvRes.Stdout)) {
+        $existingEnv = $existingEnvRes.Stdout | ConvertFrom-Json
         $selectedRegion = $existingEnv.location
         Write-Host "Tai su dung Container Apps Environment '$EnvironmentName' tai region '$selectedRegion'." -ForegroundColor Green
     } else {
         foreach ($region in $CandidateRegions) {
             Write-Host "  -> Thu region '$region'..." -ForegroundColor Gray
-            $prevEap = $ErrorActionPreference
-            $ErrorActionPreference = 'Continue'
 
-            $rgExists = (& az group exists --name $ResourceGroupName 2>$null | Out-String).Trim()
-            $rgOk = $true
-            if ($rgExists -ne 'true') {
-                $rgOut = & az group create --name $ResourceGroupName --location $region --only-show-errors 2>&1
-                if ($LASTEXITCODE -ne 0) {
-                    $rgOk = $false
-                    $rgErr = ($rgOut | Out-String).Trim()
-                    Write-Host "     Region '$region' bi tu choi khi tao Resource Group ($($rgErr.Split("`n")[0]))." -ForegroundColor DarkYellow
+            $rgShowRes = Invoke-AzResult @('group', 'show', '--name', $ResourceGroupName, '-o', 'json')
+            if ($rgShowRes.ExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($rgShowRes.Stdout)) {
+                $existingRg = $rgShowRes.Stdout | ConvertFrom-Json
+                if ($existingRg.location -and $existingRg.location.ToLowerInvariant() -ne $region.ToLowerInvariant()) {
+                    Remove-ResourceGroupIfEmpty -RgName $ResourceGroupName
+                    $rgShowRes = Invoke-AzResult @('group', 'show', '--name', $ResourceGroupName, '-o', 'json')
                 }
             }
 
-            if ($rgOk) {
-                $envOut = & az containerapp env create `
-                    --name $EnvironmentName `
-                    --resource-group $ResourceGroupName `
-                    --location $region `
-                    --logs-destination none `
-                    --only-show-errors 2>&1
-                $envCode = $LASTEXITCODE
-                $ErrorActionPreference = $prevEap
-
-                if ($envCode -eq 0) {
-                    $selectedRegion = $region
-                    Write-Host "Da tao Container Apps Environment '$EnvironmentName' tai '$selectedRegion' (logs=none, 0 VND)." -ForegroundColor Green
-                    break
-                } else {
-                    $envErr = ($envOut | Out-String).Trim()
-                    if ($envErr -match 'RequestDisallowedByPolicy|LocationNotAvailable|SubscriptionIsNotAllowed|InvalidResourceGroupLocation|DisallowedProvider') {
-                        Write-Host "     Azure for Students Policy chan region '$region'; tu dong thu region tiep theo..." -ForegroundColor DarkYellow
-                        continue
-                    }
-                    throw "Loi tao Container Apps Environment tai '$region': $envErr"
+            if ($rgShowRes.ExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($rgShowRes.Stdout)) {
+                $rgCreateRes = Invoke-AzResult @('group', 'create', '--name', $ResourceGroupName, '--location', $region, '--only-show-errors')
+                if ($rgCreateRes.ExitCode -ne 0) {
+                    $rgErr = Protect-ErrorText -Text ("$($rgCreateRes.Stderr)`n$($rgCreateRes.Stdout)")
+                    $firstLine = ($rgErr -split '\r?\n')[0]
+                    Write-Host "     Region '$region' bi tu choi khi tao Resource Group ($firstLine)." -ForegroundColor DarkYellow
+                    continue
                 }
-            } else {
-                $ErrorActionPreference = $prevEap
             }
+
+            $envRes = Invoke-AzResult @(
+                'containerapp', 'env', 'create',
+                '--name', $EnvironmentName,
+                '--resource-group', $ResourceGroupName,
+                '--location', $region,
+                '--logs-destination', 'none',
+                '--only-show-errors'
+            )
+            if ($envRes.ExitCode -eq 0) {
+                $selectedRegion = $region
+                Write-Host "Da tao Container Apps Environment '$EnvironmentName' tai '$selectedRegion' (logs=none, 0 VND)." -ForegroundColor Green
+                break
+            }
+
+            $envErr = Protect-ErrorText -Text ("$($envRes.Stderr)`n$($envRes.Stdout)")
+            if ($envErr -match $REGION_RETRY_PATTERN) {
+                Write-Host "     Azure for Students Policy/Capacity chan region '$region'; don RG rong va thu region tiep theo..." -ForegroundColor DarkYellow
+                Remove-ResourceGroupIfEmpty -RgName $ResourceGroupName
+                continue
+            }
+            throw "Loi tao Container Apps Environment tai '$region': $envErr"
         }
     }
 
@@ -276,11 +364,8 @@ try {
         $envPairs += "VIREAD_OCR_CHECKPOINT_CDN_URL=$($CheckpointCdnUrl.Trim())"
     }
 
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & az containerapp show --name $AppName --resource-group $ResourceGroupName -o none 2>$null
-    $appExists = ($LASTEXITCODE -eq 0)
-    $ErrorActionPreference = $prevEap
+    $appShowRes = Invoke-AzResult @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroupName, '-o', 'none')
+    $appExists = ($appShowRes.ExitCode -eq 0)
 
     if (-not $appExists) {
         $createArgs = @(
@@ -310,31 +395,26 @@ try {
             )
         }
 
-        & az @createArgs | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Tao Container App '$AppName' that bai."
-        }
+        $null = Invoke-AzChecked -AzArgs $createArgs -FailureContext "Tao Container App '$AppName' that bai"
     } else {
         if ($needRegistryAuth) {
-            & az containerapp registry set `
-                --name $AppName `
-                --resource-group $ResourceGroupName `
-                --server $RegistryServer `
-                --username $RegistryUsername `
-                --password $registryPassword `
-                --only-show-errors | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw 'Cap nhat thong tin dang nhap GHCR tren Container App that bai.'
-            }
+            $null = Invoke-AzChecked -AzArgs @(
+                'containerapp', 'registry', 'set',
+                '--name', $AppName,
+                '--resource-group', $ResourceGroupName,
+                '--server', $RegistryServer,
+                '--username', $RegistryUsername,
+                '--password', $registryPassword,
+                '--only-show-errors'
+            ) -FailureContext 'Cap nhat thong tin dang nhap GHCR tren Container App that bai'
         }
-        & az containerapp secret set `
-            --name $AppName `
-            --resource-group $ResourceGroupName `
-            --secrets "ocr-worker-token=$workerToken" `
-            --only-show-errors | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw 'Cap nhat secret ocr-worker-token that bai.'
-        }
+        $null = Invoke-AzChecked -AzArgs @(
+            'containerapp', 'secret', 'set',
+            '--name', $AppName,
+            '--resource-group', $ResourceGroupName,
+            '--secrets', "ocr-worker-token=$workerToken",
+            '--only-show-errors'
+        ) -FailureContext 'Cap nhat secret ocr-worker-token that bai'
 
         $updateArgs = @(
             'containerapp', 'update',
@@ -351,47 +431,59 @@ try {
             '--set-env-vars'
         ) + $envPairs + @('--only-show-errors')
 
-        & az @updateArgs | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Cap nhat Container App '$AppName' that bai."
-        }
+        $null = Invoke-AzChecked -AzArgs $updateArgs -FailureContext "Cap nhat Container App '$AppName' that bai"
     }
 
-    Write-Host '[5/6] Ap dung cooldownPeriod=30s & pollingInterval=15s (tiet kiem toi da GiB-s mien phi)...' -ForegroundColor Cyan
-    $prevEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & az resource update `
-        --resource-group $ResourceGroupName `
-        --name $AppName `
-        --resource-type 'Microsoft.App/containerApps' `
-        --set properties.template.scale.cooldownPeriod=30 properties.template.scale.pollingInterval=15 `
-        --only-show-errors 2>$null | Out-Null
-    $ErrorActionPreference = $prevEap
+    Write-Host '[5/6] Ap dung cooldownPeriod=30s & pollingInterval=15s qua ARM PATCH (giu nguyen secrets & ingress)...' -ForegroundColor Cyan
+    $patchFile = [IO.Path]::GetTempFileName()
+    try {
+        $patchJson = '{"properties":{"template":{"scale":{"minReplicas":0,"maxReplicas":1,"cooldownPeriod":30,"pollingInterval":15}}}}'
+        Write-Utf8NoBomFile -FilePath $patchFile -Content $patchJson
+        $appResourceUri = "/subscriptions/$($account.id)/resourceGroups/$ResourceGroupName/providers/Microsoft.App/containerApps/${AppName}?api-version=2024-03-01"
+        $null = Invoke-AzChecked -AzArgs @(
+            'rest',
+            '--method', 'PATCH',
+            '--uri', $appResourceUri,
+            '--headers', 'Content-Type=application/json',
+            '--body', "@$patchFile",
+            '--only-show-errors'
+        ) -FailureContext 'Cap nhat cooldownPeriod=30s va pollingInterval=15s that bai'
+    } finally {
+        Remove-Item -LiteralPath $patchFile -Force -ErrorAction SilentlyContinue
+    }
 
-    $appInfo = Invoke-AzJson @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroupName, '-o', 'json')
+    $appInfo = Invoke-AzJson -AzArgs @('containerapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroupName, '-o', 'json') -FailureContext 'Khong doc duoc trang thai Container App'
     $fqdn = $appInfo.properties.configuration.ingress.fqdn
     if ([string]::IsNullOrWhiteSpace($fqdn)) {
         throw 'Khong lay duoc FQDN cua Container App.'
     }
+    $actualCooldown = $appInfo.properties.template.scale.cooldownPeriod
+    $actualPolling = $appInfo.properties.template.scale.pollingInterval
+    Write-Host "Da xac nhan scale-to-zero: cooldownPeriod=${actualCooldown}s | pollingInterval=${actualPolling}s" -ForegroundColor Green
     $workerUrl = "https://$fqdn"
 
-    Write-Host "[6/6] Kiem tra khoi dong & GET $workerUrl/health (cho toi da 120 giay lan dau)..." -ForegroundColor Cyan
-    $readyVerified = $false
-    for ($attempt = 1; $attempt -le 24; $attempt++) {
-        try {
-            $health = Invoke-RestMethod -Method Get -Uri "$workerUrl/health" -TimeoutSec 15
-            if ($null -ne $health -and $health.ready -eq $true) {
-                $readyVerified = $true
-                Write-Host "Worker READY! worker_id=$($health.worker_id) | model=$($health.model.profile) | standby=$($health.standby_mode)" -ForegroundColor Green
-                break
+    if ($HealthProbeAttempts -gt 0) {
+        $maxWaitSec = $HealthProbeAttempts * [Math]::Max(1, $HealthProbeIntervalSeconds)
+        Write-Host "[6/6] Kiem tra khoi dong & GET $workerUrl/health (cho toi da $maxWaitSec giay lan dau)..." -ForegroundColor Cyan
+        $readyVerified = $false
+        for ($attempt = 1; $attempt -le $HealthProbeAttempts; $attempt++) {
+            try {
+                $health = Invoke-RestMethod -Method Get -Uri "$workerUrl/health" -TimeoutSec 15
+                if ($null -ne $health -and $health.ready -eq $true) {
+                    $readyVerified = $true
+                    Write-Host "Worker READY! worker_id=$($health.worker_id) | model=$($health.model.profile) | standby=$($health.standby_mode)" -ForegroundColor Green
+                    break
+                }
+            } catch {
+                # Cold boot in progress
             }
-        } catch {
-            # Cold boot in progress
+            if ($attempt -lt $HealthProbeAttempts -and $HealthProbeIntervalSeconds -gt 0) {
+                Start-Sleep -Seconds $HealthProbeIntervalSeconds
+            }
         }
-        Start-Sleep -Seconds 5
-    }
-    if (-not $readyVerified) {
-        Write-Host "Canh bao: Container dang tiep tuc tai image lan dau; kiem tra lai sau 1 phut tai $workerUrl/health" -ForegroundColor Yellow
+        if (-not $readyVerified) {
+            Write-Host "Canh bao: Container dang tiep tuc tai image lan dau; kiem tra lai sau 1 phut tai $workerUrl/health" -ForegroundColor Yellow
+        }
     }
 
     Write-Host ''
@@ -415,4 +507,5 @@ try {
 } finally {
     $workerToken = $null
     $registryPassword = $null
+    $script:SensitiveValues.Clear()
 }

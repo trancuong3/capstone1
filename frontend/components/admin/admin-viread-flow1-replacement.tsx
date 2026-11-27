@@ -930,32 +930,32 @@ export function AdminVireadFlow1Replacement({
   ]);
 
   return (
-    <div className="rounded-control border-2 border-primary/20 bg-gradient-to-b from-sky/20 to-white p-5">
+    <div className="rounded-xl border border-primary/25 bg-white p-5 shadow-2xs">
       <div className="flex items-center justify-between gap-2 border-b border-border/80 pb-3">
         <div>
-          <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-black text-primary-hover">
+          <span className="inline-block rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary-hover">
             {t("training.flow1.badgeEyebrow")}
           </span>
-          <h3 className="mt-1 text-lg font-black text-ink">
+          <h3 className="mt-1.5 text-lg font-extrabold text-ink">
             {t("training.flow1.heading")}
           </h3>
         </div>
-        <UploadCloud className="size-6 text-primary" />
+        <UploadCloud aria-hidden className="size-6 shrink-0 text-primary" />
       </div>
 
-      <p className="mt-2 text-sm text-muted">
+      <p className="mt-2.5 text-sm text-muted">
         {t("training.flow1.description")}
       </p>
 
       {successNotice ? (
-        <div className="mt-4 rounded-control border border-emerald-200 bg-emerald-50 p-4">
+        <div className="mt-4 rounded-control border border-emerald-200 bg-success-surface p-4">
           <div className="flex items-start gap-3">
             <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-700" />
             <div>
-              <p className="font-extrabold text-emerald-900">
+              <p className="font-extrabold text-success-ink">
                 {t("training.flow1.successTitle")}
               </p>
-              <p className="mt-1 text-sm text-emerald-800">
+              <p className="mt-1 text-sm text-success-ink">
                 {t("training.flow1.activeVersionLabel")}{" "}
                 <span className="font-bold">{successNotice.versionLabel}</span>.
               </p>
@@ -990,7 +990,7 @@ export function AdminVireadFlow1Replacement({
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".pth,.pt"
-              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
+              className="block w-full cursor-pointer rounded-control border border-dashed border-border bg-surface-subtle/60 px-3 py-2 text-sm text-muted transition-colors hover:border-primary/50 hover:bg-sky/20 file:me-3 file:cursor-pointer file:rounded-control file:border file:border-border file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink hover:file:bg-sky/40 focus-visible:outline-2 focus-visible:outline-primary"
               disabled={uploading}
               id="viread-weights-file"
               onChange={handleWeightsChange}
@@ -1026,7 +1026,7 @@ export function AdminVireadFlow1Replacement({
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".yml,.yaml"
-              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-slate-100 file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-ink hover:file:bg-slate-200 focus-visible:outline-none"
+              className="block w-full cursor-pointer rounded-control border border-dashed border-border bg-surface-subtle/60 px-3 py-2 text-sm text-muted transition-colors hover:border-primary/50 hover:bg-sky/20 file:me-3 file:cursor-pointer file:rounded-control file:border file:border-border file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink hover:file:bg-sky/40 focus-visible:outline-2 focus-visible:outline-primary"
               disabled={uploading}
               id="viread-config-file"
               onChange={handleConfigChange}
@@ -1062,7 +1062,7 @@ export function AdminVireadFlow1Replacement({
           <div className="mt-1.5 flex items-center gap-3">
             <input
               accept=".json"
-              className="block w-full text-sm text-muted file:me-4 file:rounded-control file:border-0 file:bg-sky file:px-4 file:py-2.5 file:text-sm file:font-bold file:text-primary-hover hover:file:bg-border focus-visible:outline-none"
+              className="block w-full cursor-pointer rounded-control border border-dashed border-border bg-surface-subtle/60 px-3 py-2 text-sm text-muted transition-colors hover:border-primary/50 hover:bg-sky/20 file:me-3 file:cursor-pointer file:rounded-control file:border file:border-border file:bg-white file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-ink hover:file:bg-sky/40 focus-visible:outline-2 focus-visible:outline-primary"
               disabled={uploading}
               id="viread-comparison-file"
               onChange={(e) => void handleComparisonChange(e)}
@@ -1072,7 +1072,7 @@ export function AdminVireadFlow1Replacement({
           {previewMetrics ? (
             <div className="mt-2">
               {previewMetrics.isValid ? (
-                <div className="rounded-control border border-emerald-200 bg-emerald-50 p-2.5 text-xs text-emerald-800">
+                <div className="rounded-control border border-emerald-200 bg-success-surface p-2.5 text-xs text-success-ink">
                   <p className="flex items-center gap-1 font-bold">
                     <CheckCircle2 className="size-3.5 text-emerald-600" />
                     {t("training.flow1.verifiedReliabilityHeading")}
@@ -1093,9 +1093,9 @@ export function AdminVireadFlow1Replacement({
                   ) : null}
                 </div>
               ) : (
-                <div className="rounded-control border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800">
+                <div className="rounded-control border border-danger/25 bg-danger-surface p-2.5 text-xs text-danger">
                   <p className="flex items-center gap-1 font-bold">
-                    <AlertCircle className="size-3.5 text-rose-600" />
+                    <AlertCircle className="size-3.5 text-danger" />
                     {t("training.flow1.failedReliabilityHeading")}
                   </p>
                   <p className="mt-0.5">{previewMetrics.errorMsg}</p>
@@ -1121,7 +1121,7 @@ export function AdminVireadFlow1Replacement({
             </span>
           </label>
           <input
-            className="mt-1.5 w-full rounded-control border border-border px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-primary"
+            className="mt-1.5 h-11 w-full rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:border-primary focus-visible:outline-2 focus-visible:outline-primary"
             disabled={uploading}
             id="viread-model-version"
             maxLength={120}
@@ -1133,10 +1133,10 @@ export function AdminVireadFlow1Replacement({
 
         {/* 5. Progress bar & Submit button */}
         {uploading ? (
-          <div className="rounded-control border border-primary/30 bg-white p-4">
+          <div className="rounded-control border border-primary/25 bg-white p-4">
             <div className="flex justify-between text-xs font-bold text-primary-hover">
               <span>{progressStatus}</span>
-              <span>{progressPercent}%</span>
+              <span className="tabular-nums">{progressPercent}%</span>
             </div>
             <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-sky">
               <div
@@ -1147,22 +1147,25 @@ export function AdminVireadFlow1Replacement({
           </div>
         ) : null}
 
-        <Button
-          className="mt-2"
-          disabled={
-            !weightsFile ||
-            !comparisonFile ||
-            uploading ||
-            Boolean(previewMetrics && !previewMetrics.isValid)
-          }
-          onClick={() => void handleUploadAndReplace()}
-          variant="primary"
-        >
-          <ArrowUpRight className="size-5" />
-          {uploading
-            ? t("training.flow1.uploadingBtn")
-            : t("training.flow1.submitBtn")}
-        </Button>
+        <div className="pt-1">
+          <Button
+            disabled={
+              !weightsFile ||
+              !comparisonFile ||
+              uploading ||
+              Boolean(previewMetrics && !previewMetrics.isValid)
+            }
+            fullWidth={false}
+            onClick={() => void handleUploadAndReplace()}
+            size="admin"
+            variant="primary"
+          >
+            <ArrowUpRight className="size-4" />
+            {uploading
+              ? t("training.flow1.uploadingBtn")
+              : t("training.flow1.submitBtn")}
+          </Button>
+        </div>
       </div>
     </div>
   );

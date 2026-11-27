@@ -86,14 +86,23 @@ def run_active_viread_model_worker(stop_event: threading.Event):
 
     return _run_worker(stop_event)
 from app.services.admin_ocr_jobs import admin_ocr_correction_jobs
-from app.jobs.book_quality_worker import run_worker as run_book_quality_worker
+from app.jobs.book_quality_worker import (
+    run_worker as run_book_quality_worker,
+    shutdown_scheduled_book_quality_scans,
+)
 from app.jobs.admin_ai_workflow_worker import (
     run_worker as run_admin_ai_workflow_worker,
     shutdown_scheduled_admin_ai_workflows,
 )
+from app.services.global_tasks_service import shutdown_scheduled_smart_studio_tasks
 from app.services.remote_ocr_wakeup import shutdown_remote_ocr_wakeup_tasks
 from app.jobs.parent_book_submission_worker import run_worker as run_parent_book_submission_worker
-from app.jobs.viread_ocr_outbox_worker import run_worker as run_viread_ocr_outbox_worker
+from app.jobs.parent_email_dispatcher_worker import run_worker as run_parent_email_dispatcher_worker
+from app.jobs.reading_presence_alert_worker import shutdown_scheduled_presence_tasks
+from app.jobs.viread_ocr_outbox_worker import (
+    run_worker as run_viread_ocr_outbox_worker,
+    shutdown_scheduled_outbox_tasks,
+)
 from app.jobs.viread_ocr_training_auto_worker import run_worker as run_viread_ocr_training_auto_worker
 
 logger = logging.getLogger(__name__)
@@ -342,7 +351,10 @@ async def lifespan(_app: FastAPI):
     smart_studio_worker_enabled = (
         smart_studio_override
         if smart_studio_override is not None
-        else (not heavy_workers_disabled)
+        else (
+            not heavy_workers_disabled
+            and _optional_bool_env("VIREAD_SMART_STUDIO_WORKER_ENABLED") is not False
+        )
     )
 
     warmup_enabled = (
@@ -384,6 +396,8 @@ async def lifespan(_app: FastAPI):
     admin_ai_workflow_task = None
     stop_parent_book_worker = asyncio.Event()
     parent_book_task = None
+    stop_parent_email_worker = asyncio.Event()
+    parent_email_task = None
     worker_startup_delay = _background_worker_startup_delay_seconds()
     if APP_ENVIRONMENT != "test" and lightweight_workers_enabled and not worker_disabled:
         book_quality_task = asyncio.create_task(
@@ -415,6 +429,21 @@ async def lifespan(_app: FastAPI):
                 worker_startup_delay,
             ),
             name="parent_book_submission_worker",
+        )
+    parent_email_worker_override = _optional_bool_env("PARENT_EMAIL_WORKER_ENABLED")
+    parent_email_worker_enabled = (
+        parent_email_worker_override
+        if parent_email_worker_override is not None
+        else lightweight_workers_enabled
+    )
+    if APP_ENVIRONMENT != "test" and parent_email_worker_enabled:
+        parent_email_task = asyncio.create_task(
+            _run_worker_with_startup_delay(
+                run_parent_email_dispatcher_worker,
+                stop_parent_email_worker,
+                worker_startup_delay,
+            ),
+            name="parent_email_dispatcher_worker",
         )
     ocr_outbox_enabled = os.getenv(
         "VIREAD_OCR_OUTBOX_WORKER_ENABLED", "true"
@@ -502,6 +531,7 @@ async def lifespan(_app: FastAPI):
             "book_quality": book_quality_task,
             "admin_ai_workflow": admin_ai_workflow_task,
             "parent_book_submission": parent_book_task,
+            "parent_email_dispatcher": parent_email_task,
             "smart_studio": smart_studio_worker_task,
             "local_voice_bootstrap": local_voice_bootstrap_task,
             "active_model_registry": active_model_worker,
@@ -523,6 +553,7 @@ async def lifespan(_app: FastAPI):
         stop_book_quality_worker.set()
         stop_admin_ai_workflow.set()
         stop_parent_book_worker.set()
+        stop_parent_email_worker.set()
         stop_smart_studio_worker.set()
         if startup_db_probe_task is not None and not startup_db_probe_task.done():
             startup_db_probe_task.cancel()
@@ -536,6 +567,7 @@ async def lifespan(_app: FastAPI):
             book_quality_task,
             admin_ai_workflow_task,
             parent_book_task,
+            parent_email_task,
         )
         try:
             # Book quality worker releases its lease on cancellation; an interrupted
@@ -545,6 +577,10 @@ async def lifespan(_app: FastAPI):
                 shutdown_post_ocr_tasks(),
                 shutdown_remote_ocr_wakeup_tasks(),
                 shutdown_scheduled_admin_ai_workflows(),
+                shutdown_scheduled_book_quality_scans(),
+                shutdown_scheduled_outbox_tasks(),
+                shutdown_scheduled_presence_tasks(),
+                shutdown_scheduled_smart_studio_tasks(),
                 _shutdown_worker_task(
                     startup_db_probe_task,
                     asyncio.Event(),
@@ -567,6 +603,7 @@ async def lifespan(_app: FastAPI):
                     admin_ai_workflow_task, stop_admin_ai_workflow
                 ),
                 _shutdown_worker_task(parent_book_task, stop_parent_book_worker),
+                _shutdown_worker_task(parent_email_task, stop_parent_email_worker),
             )
         except asyncio.CancelledError:
             for worker_task in worker_tasks:
@@ -587,6 +624,27 @@ async def lifespan(_app: FastAPI):
         try:
             await admin_ocr_correction_jobs.shutdown()
         except asyncio.CancelledError:
+            pass
+
+        try:
+            from app.api.routes.voice_studio import shutdown_cached_public_voice_ids_task
+
+            await shutdown_cached_public_voice_ids_task()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            from app.api.routes.voice import close_default_voice_orchestrators
+
+            await close_default_voice_orchestrators()
+        except (asyncio.CancelledError, Exception):
+            pass
+
+        try:
+            from app.services.storage_service import aclose_storage_http_clients
+
+            await aclose_storage_http_clients()
+        except (asyncio.CancelledError, Exception):
             pass
 
         try:
@@ -906,7 +964,10 @@ async def get_health(request: Request) -> dict[str, object]:
         "book_quality": _task_runtime_state(workers.get("book_quality")),
         "admin_ai_workflow": _task_runtime_state(workers.get("admin_ai_workflow")),
         "parent_book_submission": _task_runtime_state(workers.get("parent_book_submission")),
+        "parent_email_dispatcher": _task_runtime_state(workers.get("parent_email_dispatcher")),
         "smart_studio": _task_runtime_state(workers.get("smart_studio")),
+        "smart_studio_worker": _task_runtime_state(workers.get("smart_studio")),
+        "local_voice_bootstrap": _task_runtime_state(workers.get("local_voice_bootstrap")),
         "active_model_registry": (
             "disabled"
             if active_model_thread is None

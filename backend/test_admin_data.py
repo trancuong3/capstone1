@@ -324,7 +324,7 @@ class AdminSystemTests(unittest.IsolatedAsyncioTestCase):
                 probe_stt=AsyncMock(return_value=("HEALTHY", "ok")),
             )
             result = await AdminSystemService(repo, voice).health()
-            self.assertEqual(result.overall_status, "DEGRADED")
+            self.assertEqual(result.overall_status, "UNAVAILABLE")
             self.assertEqual(result.services[1].status, "UNAVAILABLE")
             self.assertNotIn("private", result.model_dump_json())
 

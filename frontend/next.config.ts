@@ -79,7 +79,7 @@ function buildContentSecurityPolicy(): string {
     connectSources.add("ws://localhost:*");
   }
 
-  // Local development serves page images and audio from the configured API.
+  // Local development serves page images and audio from the configured loopback API.
   // Never allow arbitrary HTTP origins or relax the production media policy.
   const localMediaOrigin =
     isDev &&
@@ -87,6 +87,14 @@ function buildContentSecurityPolicy(): string {
     /^http:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/.test(apiOrigin)
       ? ` ${apiOrigin}`
       : "";
+
+  const formActionSources = new Set<string>([
+    "'self'",
+    "https://*.supabase.co",
+  ]);
+  if (supabaseOrigin) {
+    formActionSources.add(supabaseOrigin);
+  }
 
   const directives = [
     "default-src 'self'",
@@ -99,7 +107,7 @@ function buildContentSecurityPolicy(): string {
     `connect-src ${Array.from(connectSources).join(" ")}`,
     "object-src 'none'",
     "base-uri 'self'",
-    "form-action 'self' https://*.supabase.co",
+    `form-action ${Array.from(formActionSources).join(" ")}`,
     "frame-ancestors 'none'",
   ];
 
@@ -107,12 +115,28 @@ function buildContentSecurityPolicy(): string {
 }
 
 const turbopackRoot = resolveTurbopackRoot();
+const isPlaywrightDev =
+  process.env.NODE_ENV === "development" &&
+  process.env.PLAYWRIGHT_AUTH_FIXTURES === "1";
 
 const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  ...(isPlaywrightDev
+    ? {
+        onDemandEntries: {
+          maxInactiveAge: 60 * 60 * 1000,
+          pagesBufferLength: 100,
+        },
+        experimental: {
+          devMemoryThresholdRestart: false,
+          serverComponentsHmrCache: false,
+          webpackMemoryOptimizations: true,
+        },
+      }
+    : {}),
   ...(turbopackRoot ? { turbopack: { root: turbopackRoot } } : {}),
   async headers() {
     return [

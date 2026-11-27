@@ -308,9 +308,12 @@ test("upgrades a draft to syllables, marks/undoes, saves/reloads and previews be
     page.locator('[data-testid="karaoke-active-line"] [data-state="active"]'),
   ).toHaveCount(1);
   await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Xuất bản bài hát", exact: true })
+    .click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Xác nhận xuất bản", exact: true })
     .click();
   await expect(
     page.getByText("Đã xuất bản bài hát.", { exact: true }),
@@ -379,12 +382,15 @@ test("v2 export reimports losslessly and validation focuses a syllable on anothe
   expect(JSON.parse(Buffer.concat(chunks).toString("utf8"))).toEqual(
     state.data.draft!.lyrics,
   );
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByLabel("File lời bài hát").setInputFiles({
     name: "roundtrip-v2.json",
     mimeType: "application/json",
     buffer: Buffer.concat(chunks),
   });
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Thay thế lời", exact: true })
+    .click();
   await expect(
     page.getByText("Đã nhập lời. Hãy kiểm tra và căn thời gian từng dòng.", {
       exact: true,
@@ -410,7 +416,6 @@ test("imports UTF-8 LRC as editable suggested timing and saves it", async ({
   await expect(page.getByLabel("Lời dòng 1", { exact: true })).toHaveValue(
     "Em vui đến trường",
   );
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByLabel("File lời bài hát").setInputFiles({
     name: "example.lrc",
     mimeType: "text/plain",
@@ -419,6 +424,10 @@ test("imports UTF-8 LRC as editable suggested timing and saves it", async ({
       "utf8",
     ),
   });
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Thay thế lời", exact: true })
+    .click();
   await expect(page.getByLabel("Lời dòng 1", { exact: true })).toHaveValue(
     "Bé hát vui",
   );
@@ -494,8 +503,11 @@ test("save, validate and listen using native audio before explicit publication",
     "Em vui đến trường",
   );
   await page.getByRole("button", { name: "Tạm dừng", exact: true }).click();
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Xuất bản bài hát" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Xác nhận xuất bản", exact: true })
+    .click();
   await expect(
     page.getByText("Đã xuất bản bài hát.", { exact: true }),
   ).toBeVisible();
@@ -518,8 +530,11 @@ test("keeps unsaved text on conflict and requires reload approval", async ({
   await expect(page.getByLabel("Tên bài hát", { exact: true })).toHaveValue(
     "Nội dung chưa được lưu",
   );
-  page.once("dialog", (dialog) => dialog.dismiss());
   await page.getByRole("button", { name: "Tải lại từ máy chủ" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Hủy", exact: true })
+    .click();
   await expect(page.getByLabel("Tên bài hát", { exact: true })).toHaveValue(
     "Nội dung chưa được lưu",
   );
@@ -581,12 +596,15 @@ test("an interrupted upload preserves the saved draft and shows a retryable erro
       (route) => route.abort("internetdisconnected"),
     );
   await page.goto(`/admin/karaoke/${songId}/edit`);
-  page.once("dialog", (dialog) => dialog.accept());
   await page.getByLabel("File nhạc MP3").setInputFiles({
     name: "interrupted.mp3",
     mimeType: "audio/mpeg",
     buffer: Buffer.from("isolated upload request, never sent to Storage"),
   });
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Thay nhạc", exact: true })
+    .click();
   await expect(page.getByRole("main").getByRole("alert")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Thay nhạc MP3", exact: true }),

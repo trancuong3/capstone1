@@ -321,7 +321,7 @@
     "overviewAria": "頁面狀態快速總覽",
     "overviewChipTitle": "來源頁面 {page}：{status}",
     "workerFailuresSummary": "有 {count} 頁發生 OCR/AI 錯誤（檢查服務可能繁忙或暫時離線）。就緒或等待管理員審核的頁面不受影響 — 請點擊特定錯誤頁面上的「重試檢查」。",
-    "windowsOcrQueueWaiting": "正在等待 Windows OCR 伺服器啟動（安全佇列 — {count} 頁已安全儲存，伺服器一恢復運作將自動辨識）。",
+    "windowsOcrQueueWaiting": "已儲存至 OCR 佇列（{count} 頁）— 正在等待 OCR 伺服器重新上線。伺服器恢復後將自動開始辨識。",
     "ocrRunningStatus": "正在進行 OCR 辨識 {running} 頁",
     "ocrQueuedSuffix": "（另有 {count} 頁正在排隊）",
     "ocrOtherPagesStillVisible": "。已完成的頁面仍會完全顯示，供您立即操作。",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "安全工具檢查範圍：",
     "toolCheckFlaggedNotice": "安全工具檢查發現 {count} 項需成人審視。",
     "toolCheckAdminNotice": "頁面需管理員審視後方可加入書籍。",
+    "toolCheckFailedNotice": "檢查過程遇到技術問題。",
+    "toolCheckPassedNotice": "此頁面已通過安全檢查。",
+    "toolCheckCheckingNotice": "正在對此頁面執行自動檢查。",
+    "toolCheckRejectedNotice": "此頁面版本未獲管理員核准。",
+    "toolCheckRecheckNotice": "加入書籍前需要重新檢查此頁面。",
     "previewTextLabel": "預計加入書籍的內容：",
     "proofreadSectionTitle": "拼寫建議 ({count})",
     "uncertainWordsSuffix": " · {count} 個需注意的字詞",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "分頁顯示已加入書本的頁面",
     "statusLabels": {
       "PENDING": "排隊等待 OCR",
+      "PENDING_POST_OCR": "等待前一步完成",
       "RUNNING": "OCR 進行中",
       "COMPLETED": "完成",
       "PASSED": "通過",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "已取消待處理的上傳。",
     "cancelSubmissionErrorFallback": "無法取消此頁面。",
     "pageNumberHeading": "第 {page} 頁",
-    "pageItemLabel": "頁"
+    "pageItemLabel": "頁",
+    "workerOfflineUploadNotice": "OCR 伺服器目前暫時離線 — 您仍可上傳圖片或 PDF/DOCX 儲存至佇列；伺服器重新啟動後將自動辨識。",
+    "queuedWaitingWorkerBadge": "已儲存至 OCR 佇列 — 等待伺服器上線",
+    "queuedWaitingWorkerShort": "已儲存至 OCR 佇列 — 上線後自動辨識",
+    "reasonQueuedOffline": "該書頁已安全儲存在 OCR 佇列中，OCR 伺服器重新上線後將自動開始辨識。"
   },
   "ocrContribution": {
     "cardAria": "貢獻樣本以改善 {title} 的 ViRead OCR",

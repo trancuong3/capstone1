@@ -91,6 +91,12 @@ export interface ReadingPageWordDTO {
   readonly line_index?: number;
 }
 
+export interface ReadingPageWordTimingDTO {
+  readonly index: number;
+  readonly start: number;
+  readonly end: number;
+}
+
 export interface ReadingPageDTO {
   readonly page_id: UUID;
   readonly page_revision_id: UUID;
@@ -99,6 +105,12 @@ export interface ReadingPageDTO {
   readonly width: number;
   readonly height: number;
   readonly image_url?: string | null;
+  /** Precomputed public CDN MP3 URL strictly for verified public catalog pages. */
+  readonly tts_audio_url?: string | null;
+  /** Optional precomputed word timings matching `words` for instant Tier-1 synced playback. */
+  readonly tts_word_timings?: readonly ReadingPageWordTimingDTO[] | null;
+  readonly tts_voice_id?: string | null;
+  readonly tts_cached_speed?: number | null;
   /** Missing/false means use OCR text; coordinates alone do not prove alignment. */
   readonly image_overlay_safe?: boolean;
   readonly illustration_url?: string | null;

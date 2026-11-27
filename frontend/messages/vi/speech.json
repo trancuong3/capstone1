@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "Ưu tiên local, bật tự động chuyển Online dự phòng",
     "googleSttFallback": "Dự phòng Google cho Nhận diện giọng nói (STT)",
     "googleTtsFallback": "Dự phòng Google cho Đọc mẫu (TTS)",
-    "missingGoogleKeyHint": "Khi máy chưa cấu hình khóa Google Cloud API trong backend/.env, ViRead sẽ tự động dùng Google/Trình duyệt Online làm dự phòng.",
+    "missingGoogleKeyHint": "Khi máy chủ chưa cấu hình khóa Google Cloud API, ViRead dùng dự phòng trình duyệt cho STT và nghe thử; trong phiên đọc đã khóa, hệ thống giữ nguyên giọng đã chọn để không tự đổi giọng.",
     "useDefaultVoice": "Dùng giọng mặc định",
     "preview": "Nghe thử",
     "stopPreview": "Dừng nghe thử",
@@ -79,7 +79,9 @@
       "american": "Giọng Mỹ",
       "british": "Giọng Anh"
     },
-    "googleProviderLabel": "Google dự phòng"
+    "googleProviderLabel": "Google dự phòng",
+    "sessionLockedBadge": "Đang khóa cho phiên đọc này",
+    "offlineBrowserBadge": "Trình duyệt đang ngoại tuyến"
   },
   "engineBadge": {
     "ariaLabel": "Nguồn giọng nói: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "Cache chuẩn",
       "android_native": "Android (vi-VN)",
       "google_cloud": "Online (Google API)",
-      "browser_default": "Online (Google/Trình duyệt)"
-    }
+      "browser_default": "Online (Google/Trình duyệt)",
+      "idle": "Đang kiểm tra…"
+    },
+    "idleDetail": "{base} (Đang kiểm tra nguồn giọng nói)"
   },
   "playback": {
     "unavailable": "Giọng đọc trên máy hiện chưa sẵn sàng. Ba mẹ và bé có thể xem chữ trên màn hình và bấm Thử lại nhé.",

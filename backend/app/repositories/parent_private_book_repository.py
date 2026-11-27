@@ -68,7 +68,7 @@ class ParentPrivateBookRepository:
             is_private_book_owned_by(owner_parent_id),
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
     async def get_private_book(self, book_id: UUID, *, lock: bool = False) -> Book | None:
@@ -77,7 +77,7 @@ class ParentPrivateBookRepository:
             Book.VisibilityScope == VISIBILITY_PARENT_PRIVATE,
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
     async def list_owned_private_books(
@@ -164,7 +164,7 @@ class ParentPrivateBookRepository:
             .order_by(BookPage.PageNumber.asc(), BookPage.Id.asc())
         )
         if lock:
-            query = query.with_for_update(of=BookPage)
+            query = query.with_for_update(of=BookPage).execution_options(populate_existing=True)
         result = await self.db.execute(query)
         return [(row[0], row[1]) for row in result.all()]
 
@@ -187,7 +187,7 @@ class ParentPrivateBookRepository:
             )
         )
         if lock:
-            query = query.with_for_update(of=BookPage)
+            query = query.with_for_update(of=BookPage).execution_options(populate_existing=True)
         result = await self.db.execute(query)
         row = result.one_or_none()
         return (row[0], row[1]) if row is not None else None
@@ -257,7 +257,7 @@ class ParentPrivateBookRepository:
             ParentBookPageSubmission.Id.asc(),
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -274,7 +274,7 @@ class ParentPrivateBookRepository:
             .limit(1)
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
     async def list_submissions_for_books(
@@ -323,8 +323,15 @@ class ParentPrivateBookRepository:
             ParentBookPageSubmission.OwnerParentId == owner_parent_id,
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
+
+    async def get_submission_book_id(self, submission_id: UUID) -> UUID | None:
+        return await self.db.scalar(
+            select(ParentBookPageSubmission.BookId).where(
+                ParentBookPageSubmission.Id == submission_id
+            )
+        )
 
     async def get_submission(
         self, submission_id: UUID, *, lock: bool = False
@@ -333,7 +340,7 @@ class ParentPrivateBookRepository:
             ParentBookPageSubmission.Id == submission_id
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
     async def add_submissions(self, rows: list[ParentBookPageSubmission]) -> None:
@@ -370,6 +377,7 @@ class ParentPrivateBookRepository:
             .where(*filters)
             .order_by(ParentBookPageSubmission.CreatedAt.asc(), ParentBookPageSubmission.Id.asc())
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
             .limit(1)
         )
         if row is None:
@@ -408,7 +416,7 @@ class ParentPrivateBookRepository:
             ParentBookModerationRequest.Status == "PENDING_ADMIN",
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         return await self.db.scalar(query)
 
     async def get_matching_approved_request(

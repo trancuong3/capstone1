@@ -3,14 +3,15 @@
 import { LoaderCircle, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useSyncExternalStore } from "react";
+
+import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
-import { useAdminServices } from "@/hooks/use-admin-services";
 import {
   markAiPageRevisionSkipped,
   useSkippedAiPageIds,
 } from "@/hooks/use-admin-ai-batch-skipped-pages";
+import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -55,6 +56,7 @@ interface BatchSession {
   readonly progress: BatchProgress | null;
   readonly processing: boolean;
   readonly notice: BatchNotice | null;
+  readonly completedRunId: number;
 }
 
 const emptyBatchSession: BatchSession = {
@@ -62,10 +64,27 @@ const emptyBatchSession: BatchSession = {
   progress: null,
   processing: false,
   notice: null,
+  completedRunId: 0,
 };
 const batchSessions = new Map<string, BatchSession>();
 const batchListeners = new Map<string, Set<() => void>>();
 const batchControllers = new Map<string, AbortController>();
+
+export function clearAdminBookAiBatchSessions(): void {
+  const affectedBookIds = new Set<string>([
+    ...batchSessions.keys(),
+    ...batchControllers.keys(),
+    ...batchListeners.keys(),
+  ]);
+  for (const controller of batchControllers.values()) {
+    controller.abort();
+  }
+  batchControllers.clear();
+  batchSessions.clear();
+  for (const bookId of affectedBookIds) {
+    batchListeners.get(bookId)?.forEach((listener) => listener());
+  }
+}
 
 function getBatchSession(bookId: string) {
   return batchSessions.get(bookId) ?? emptyBatchSession;
@@ -167,10 +186,12 @@ function preparePage(
 
 export function AdminBookAiBatchReview({
   bookId,
+  collapsed = false,
   items,
   onCompleted,
 }: {
   bookId: string;
+  collapsed?: boolean;
   items: readonly AdminPageListItemUI[];
   onCompleted: () => void;
 }) {
@@ -182,17 +203,37 @@ export function AdminBookAiBatchReview({
     () => getBatchSession(bookId),
     () => emptyBatchSession,
   );
-  const { results, progress, processing, notice } = session;
-  const mountedRef = useRef(false);
+  const { results, progress, processing, notice, completedRunId } = session;
+  const onCompletedRef = useRef(onCompleted);
+  const lastCompletedRunRef = useRef({
+    bookId,
+    runId: completedRunId,
+  });
 
   useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
+    onCompletedRef.current = onCompleted;
+  }, [onCompleted]);
+
+  useEffect(() => {
+    if (lastCompletedRunRef.current.bookId !== bookId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      return;
+    }
+    if (completedRunId < lastCompletedRunRef.current.runId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      return;
+    }
+    if (!processing && completedRunId > lastCompletedRunRef.current.runId) {
+      lastCompletedRunRef.current = { bookId, runId: completedRunId };
+      onCompletedRef.current();
+    }
+  }, [bookId, completedRunId, processing]);
 
   const skippedPageIds = useSkippedAiPageIds(bookId);
+
+  if (collapsed && !processing && results.length === 0 && !notice) {
+    return null;
+  }
 
   const waitingPages = items
     .filter(
@@ -228,6 +269,9 @@ export function AdminBookAiBatchReview({
     )
       return;
     const controller = new AbortController();
+    const isActiveController = () =>
+      batchControllers.get(bookId) === controller;
+    const nextRunId = getBatchSession(bookId).completedRunId + 1;
     batchControllers.set(bookId, controller);
     updateBatchSession(bookId, (current) => ({
       ...current,
@@ -238,6 +282,7 @@ export function AdminBookAiBatchReview({
     let completed: BatchPageResult[] = [];
 
     for (const [index, item] of waitingPages.entries()) {
+      if (!isActiveController() || controller.signal.aborted) break;
       const pageId = item.processing.page_id;
       const revisionId = item.processing.page_revision_id;
       updateBatchSession(bookId, (current) => ({
@@ -250,12 +295,13 @@ export function AdminBookAiBatchReview({
           totalChunks: 0,
         },
       }));
-      if (controller.signal.aborted) break;
+      if (!isActiveController() || controller.signal.aborted) break;
 
       let draftSaved = false;
       let detail: AdminPageRevisionDetailDTO | null = null;
       try {
         detail = await ocr.getRevision(pageId, revisionId);
+        if (!isActiveController() || controller.signal.aborted) break;
         if (
           detail.page_id !== pageId ||
           detail.page_revision_id !== revisionId ||
@@ -273,7 +319,7 @@ export function AdminBookAiBatchReview({
           originalText,
           detail.words,
           (workflowProgress) => {
-            if (controller.signal.aborted) return;
+            if (!isActiveController() || controller.signal.aborted) return;
             updateBatchSession(bookId, (current) => ({
               ...current,
               progress: {
@@ -287,7 +333,7 @@ export function AdminBookAiBatchReview({
           },
           controller.signal,
         );
-        if (controller.signal.aborted) break;
+        if (!isActiveController() || controller.signal.aborted) break;
         if (workflow.status === "FAILED" || !workflow.proofread_text) {
           throw new Error(
             t("books.aiBatch.errors.workflowIncomplete", {
@@ -307,6 +353,7 @@ export function AdminBookAiBatchReview({
           prepared.request.corrected_text,
           prepared.request.words,
         );
+        if (!isActiveController()) break;
         draftSaved = true;
         markAiPageRevisionSkipped(bookId, revisionId);
         if (
@@ -336,9 +383,8 @@ export function AdminBookAiBatchReview({
           ...current,
           results: [...completed],
         }));
-        if (mountedRef.current) onCompleted();
       } catch (cause) {
-        if (controller.signal.aborted) break;
+        if (!isActiveController() || controller.signal.aborted) break;
         const previousResult = completed.find(
           (result) => result.pageId === pageId,
         );
@@ -379,41 +425,33 @@ export function AdminBookAiBatchReview({
           completed = [...completed, failedResult];
         }
       }
+      if (!isActiveController()) break;
       updateBatchSession(bookId, (current) => ({
         ...current,
         results: [...completed],
       }));
     }
 
-    if (batchControllers.get(bookId) === controller)
-      batchControllers.delete(bookId);
-    updateBatchSession(bookId, (current) => ({
-      ...current,
-      progress: null,
-      processing: false,
-    }));
+    if (!isActiveController()) return;
+    batchControllers.delete(bookId);
+
+    let finalNotice: BatchNotice;
     if (controller.signal.aborted) {
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: "warning",
-          title: t("books.aiBatch.stoppedTitle"),
-          message: t("books.aiBatch.stoppedMessage", {
-            verified: formatNumber(
-              completed.filter((item) => item.status === "verified").length,
-            ),
-          }),
-        },
-      }));
+      finalNotice = {
+        tone: "warning",
+        title: t("books.aiBatch.stoppedTitle"),
+        message: t("books.aiBatch.stoppedMessage", {
+          verified: formatNumber(
+            completed.filter((item) => item.status === "verified").length,
+          ),
+        }),
+      };
     } else if (completed.length === 0) {
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: "info",
-          title: t("books.aiBatch.noneTitle"),
-          message: t("books.aiBatch.noneMessage"),
-        },
-      }));
+      finalNotice = {
+        tone: "info",
+        title: t("books.aiBatch.noneTitle"),
+        message: t("books.aiBatch.noneMessage"),
+      };
     } else {
       const verifiedCount = completed.filter(
         (item) => item.status === "verified",
@@ -424,20 +462,23 @@ export function AdminBookAiBatchReview({
       const failedCount = completed.filter(
         (item) => item.status === "failed",
       ).length;
-      updateBatchSession(bookId, (current) => ({
-        ...current,
-        notice: {
-          tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
-          title: t("books.aiBatch.doneTitle"),
-          message: t("books.aiBatch.doneMessage", {
-            verified: formatNumber(verifiedCount),
-            saved: formatNumber(savedCount),
-            failed: formatNumber(failedCount),
-          }),
-        },
-      }));
+      finalNotice = {
+        tone: failedCount > 0 || savedCount > 0 ? "warning" : "success",
+        title: t("books.aiBatch.doneTitle"),
+        message: t("books.aiBatch.doneMessage", {
+          verified: formatNumber(verifiedCount),
+          saved: formatNumber(savedCount),
+          failed: formatNumber(failedCount),
+        }),
+      };
     }
-    if (mountedRef.current) onCompleted();
+    updateBatchSession(bookId, (current) => ({
+      ...current,
+      progress: null,
+      processing: false,
+      notice: finalNotice,
+      completedRunId: nextRunId,
+    }));
   }
 
   function stopReview() {
@@ -445,170 +486,41 @@ export function AdminBookAiBatchReview({
   }
 
   return (
-    <Card className="mb-6 bg-white">
-      <div className="grid gap-4">
-        <div>
-          <h2 className="flex items-center gap-2 text-xl font-black">
-            <Sparkles aria-hidden className="size-5 text-primary" />
+    <div className="space-y-3 rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <h2 className="flex items-center gap-2 text-base font-extrabold text-ink">
+            <Sparkles
+              aria-hidden="true"
+              className="size-4 shrink-0 text-primary"
+            />
             {t("books.aiBatch.heading")}
           </h2>
-          <p className="mt-2 text-sm leading-6 text-muted">
+          <p className="text-xs leading-relaxed text-muted">
             {t("books.aiBatch.description")}
           </p>
         </div>
 
-        {notice ? (
-          <StatusMessage tone={notice.tone} title={notice.title}>
-            {notice.message}
-          </StatusMessage>
-        ) : null}
-
-        {progress ? (
-          <div
-            aria-live="polite"
-            className="rounded-control border border-border bg-sky/40 p-4"
-            role="status"
-          >
-            <div className="flex items-center gap-3">
-              <LoaderCircle
-                aria-hidden
-                className="size-6 shrink-0 animate-spin text-primary"
-              />
-              <div className="min-w-0">
-                <p className="font-bold text-ink">
-                  {t("books.aiBatch.progressLine", {
-                    pageNumber: formatNumber(progress.pageNumber),
-                    current: formatNumber(progress.current),
-                    total: formatNumber(progress.total),
-                  })}
-                </p>
-                <p className="mt-1 text-sm text-muted">
-                  {t("books.aiBatch.progressVerifiedSuffix", {
-                    count: formatNumber(
-                      results.filter((item) => item.status === "verified")
-                        .length,
-                    ),
-                  })}{" "}
-                  {progress.totalChunks > 0
-                    ? t("books.aiBatch.progressChunkLine", {
-                        completed: formatNumber(progress.completedChunks),
-                        total: formatNumber(progress.totalChunks),
-                      })
-                    : t("books.aiBatch.progressPreparingLine")}
-                  {t("books.aiBatch.progressKeepOpenHint")}
-                </p>
-                <div
-                  aria-hidden
-                  className="mt-3 h-2 overflow-hidden rounded-full bg-white"
-                >
-                  <div
-                    className="h-full rounded-full bg-primary transition-all duration-500"
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {results.length > 0 ? (
-          <div
-            className="grid gap-2"
-            aria-label={t("books.aiBatch.resultsAria")}
-          >
-            <p className="text-sm font-bold text-ink">
-              {t("books.aiBatch.resultsSummary", {
-                verified: formatNumber(verifiedResults.length),
-                saved: formatNumber(savedResults.length),
-                failed: formatNumber(failedResults.length),
-              })}
-            </p>
-            <ul className="grid max-h-72 gap-2 overflow-y-auto rounded-control border border-border p-3">
-              {results.map((result) => (
-                <li
-                  className="grid gap-2 border-b border-border py-2 text-sm last:border-b-0"
-                  key={`${result.pageId}:${result.revisionId}`}
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <span className="font-bold">
-                      {t("books.aiBatch.pageLabel", {
-                        pageNumber: formatNumber(result.pageNumber),
-                      })}
-                    </span>
-                    <span
-                      className={
-                        result.adminReviewRequired
-                          ? "text-red-700"
-                          : result.status === "failed"
-                            ? "text-danger"
-                            : result.status === "verified"
-                              ? "text-success-ink"
-                              : "text-warning"
-                      }
-                    >
-                      {result.message}
-                    </span>
-                  </div>
-                  {result.status !== "verified" ? (
-                    <Link
-                      className="w-fit font-bold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
-                      href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
-                    >
-                      {t("books.aiBatch.openPageForVerify")}
-                    </Link>
-                  ) : null}
-                  {result.request?.proofread_audit.suggestions.length ? (
-                    <details className="rounded-control bg-sky/30 p-3">
-                      <summary className="cursor-pointer font-semibold text-primary">
-                        {t("books.aiBatch.viewChanges", {
-                          changes: formatNumber(result.changes),
-                          pageNumber: formatNumber(result.pageNumber),
-                        })}
-                      </summary>
-                      <ul className="mt-2 grid gap-1">
-                        {result.request.proofread_audit.suggestions.map(
-                          (suggestion) => (
-                            <li key={suggestion.word_index}>
-                              {t("books.aiBatch.wordChangeLabel", {
-                                wordIndex: suggestion.word_index + 1,
-                              })}{" "}
-                              <span
-                                className="viread-learning-content"
-                                dir="ltr"
-                                lang="vi"
-                              >
-                                “{suggestion.original}” → “{suggestion.proposed}
-                                ”
-                              </span>
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    </details>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        <div className="flex flex-wrap gap-3">
+        <div className="shrink-0">
           {processing ? (
             <Button
-              className="sm:w-auto"
               onClick={stopReview}
-              variant="secondary"
+              size="admin"
+              type="button"
+              variant="outline"
             >
-              <X aria-hidden className="size-4" />{" "}
+              <X aria-hidden="true" className="size-4 shrink-0" />
               {t("books.aiBatch.stopButton")}
             </Button>
           ) : (
             <Button
-              className="sm:w-auto"
               disabled={waitingPages.length === 0}
               onClick={() => void reviewAllPages()}
+              size="admin"
+              type="button"
+              variant="primary"
             >
-              <Sparkles aria-hidden className="size-4" />
+              <Sparkles aria-hidden="true" className="size-4 shrink-0" />
               {waitingPages.length > 0
                 ? results.length > 0
                   ? t("books.aiBatch.runButtonContinue", {
@@ -626,6 +538,167 @@ export function AdminBookAiBatchReview({
           )}
         </div>
       </div>
-    </Card>
+
+      {notice ? (
+        <StatusMessage title={notice.title} tone={notice.tone}>
+          {notice.message}
+        </StatusMessage>
+      ) : null}
+
+      {progress ? (
+        <div
+          aria-live="polite"
+          className="rounded-lg border border-primary/20 bg-sky/35 p-3.5"
+          role="status"
+        >
+          <div className="flex items-center gap-3">
+            <LoaderCircle
+              aria-hidden="true"
+              className="size-5 shrink-0 animate-spin text-primary"
+            />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-ink">
+                {t("books.aiBatch.progressLine", {
+                  pageNumber: formatNumber(progress.pageNumber),
+                  current: formatNumber(progress.current),
+                  total: formatNumber(progress.total),
+                })}
+              </p>
+              <p className="mt-0.5 text-xs text-muted">
+                {t("books.aiBatch.progressVerifiedSuffix", {
+                  count: formatNumber(
+                    results.filter((item) => item.status === "verified").length,
+                  ),
+                })}{" "}
+                {progress.totalChunks > 0
+                  ? t("books.aiBatch.progressChunkLine", {
+                      completed: formatNumber(progress.completedChunks),
+                      total: formatNumber(progress.totalChunks),
+                    })
+                  : t("books.aiBatch.progressPreparingLine")}
+                {t("books.aiBatch.progressKeepOpenHint")}
+              </p>
+              <div
+                aria-hidden="true"
+                className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white"
+              >
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {results.length > 0 ? (
+        <div aria-label={t("books.aiBatch.resultsAria")} className="space-y-2">
+          <p className="text-xs font-bold text-ink">
+            {t("books.aiBatch.resultsSummary", {
+              verified: formatNumber(verifiedResults.length),
+              saved: formatNumber(savedResults.length),
+              failed: formatNumber(failedResults.length),
+            })}
+          </p>
+          <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-lg border border-border px-3">
+            {results.map((result) => (
+              <li
+                className="space-y-1.5 py-2.5 text-xs"
+                key={`${result.pageId}:${result.revisionId}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-ink">
+                      {t("books.aiBatch.pageLabel", {
+                        pageNumber: formatNumber(result.pageNumber),
+                      })}
+                    </span>
+                    <AdminBadge
+                      tone={
+                        result.status === "failed"
+                          ? "danger"
+                          : result.status === "verified"
+                            ? "success"
+                            : "warning"
+                      }
+                    >
+                      {result.changes > 0
+                        ? `${formatNumber(result.changes)} Δ`
+                        : result.status === "failed"
+                          ? t(
+                              "books.aiBatch.statusBadges.failed",
+                              undefined,
+                              "Cần kiểm tra",
+                            )
+                          : result.status === "verified"
+                            ? t(
+                                "books.aiBatch.statusBadges.verified",
+                                undefined,
+                                "Đã xác minh",
+                              )
+                            : t(
+                                "books.aiBatch.statusBadges.saved",
+                                undefined,
+                                "Đã lưu nháp",
+                              )}
+                    </AdminBadge>
+                  </div>
+                  {result.status !== "verified" ? (
+                    <Link
+                      className="font-bold text-primary underline focus-visible:outline-2 focus-visible:outline-primary"
+                      href={`/admin/books/${encodeURIComponent(bookId)}/pages/${encodeURIComponent(result.pageId)}`}
+                    >
+                      {t("books.aiBatch.openPageForVerify")}
+                    </Link>
+                  ) : null}
+                </div>
+                <p
+                  className={
+                    result.adminReviewRequired
+                      ? "text-danger"
+                      : result.status === "failed"
+                        ? "text-danger"
+                        : result.status === "verified"
+                          ? "text-success-ink"
+                          : "text-warning"
+                  }
+                >
+                  {result.message}
+                </p>
+                {result.request?.proofread_audit.suggestions.length ? (
+                  <details className="rounded-lg bg-surface-subtle p-2.5">
+                    <summary className="cursor-pointer font-semibold text-primary">
+                      {t("books.aiBatch.viewChanges", {
+                        changes: formatNumber(result.changes),
+                        pageNumber: formatNumber(result.pageNumber),
+                      })}
+                    </summary>
+                    <ul className="mt-2 space-y-1">
+                      {result.request.proofread_audit.suggestions.map(
+                        (suggestion) => (
+                          <li key={suggestion.word_index}>
+                            {t("books.aiBatch.wordChangeLabel", {
+                              wordIndex: suggestion.word_index + 1,
+                            })}{" "}
+                            <span
+                              className="viread-learning-content"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              “{suggestion.original}” → “{suggestion.proposed}”
+                            </span>
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  </details>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
   );
 }

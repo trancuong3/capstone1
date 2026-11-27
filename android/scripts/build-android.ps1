@@ -48,21 +48,23 @@ $gradleCmd = if (Get-Command gradle -ErrorAction SilentlyContinue) {
 }
 $env:GRADLE_USER_HOME = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $ToolsRoot "gradle-home" }
 
-Write-Host "[1/3] Running Python preflight check..."
+Write-Host "[1/4] Running Python preflight check..."
 python (Join-Path $PSScriptRoot "verify_frontend.py")
 if ($LASTEXITCODE -ne 0) { throw "HTTPS Next.js frontend verification failed; no APK created." }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Push-Location $root
 try {
-    Write-Host "[2/3] Running Gradle unit tests, lint, and assembleDebug..."
+    Write-Host "[2/4] Running Gradle unit tests, lint, and assembleDebug..."
     $gradleArgs = @(
         "--no-daemon",
         "-PvireadUrl=$FrontendUrl"
     )
     if ($env:VIREAD_LAN_MODE -eq "1") {
         $gradleArgs += "-PvireadLanMode=1"
-        $gradleArgs += "-PvireadLanCaCert=$($env:VIREAD_LAN_CA_CERT)"
+        if ($env:VIREAD_LAN_CA_CERT) {
+            $gradleArgs += "-PvireadLanCaCert=$($env:VIREAD_LAN_CA_CERT)"
+        }
     } else {
         $gradleArgs += "-PvireadLanMode=0"
     }

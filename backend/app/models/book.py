@@ -17,7 +17,7 @@ class Book(Base):
     LifecycleStatus = Column("lifecyclestatus", String, nullable=False)
     CreatedBy = Column("createdby", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"))
     VisibilityScope = Column("visibility_scope", String, nullable=False, default="CATALOG", server_default=text("'CATALOG'"))
-    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="RESTRICT"), nullable=True)
+    OwnerParentId = Column("owner_parent_id", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="CASCADE"), nullable=True)
     ModerationStatus = Column("moderation_status", String, nullable=False, default="ACTIVE", server_default=text("'ACTIVE'"))
     SuspendedAt = Column("suspended_at", DateTime(timezone=True), nullable=True)
     SuspendedBy = Column("suspended_by", UUID(as_uuid=True), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True)

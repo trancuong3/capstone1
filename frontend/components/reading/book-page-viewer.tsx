@@ -42,6 +42,8 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustrationUrl?: string | null;
   illustrationTextFree?: boolean;
   initialReadingMode?: ReadingDisplayMode;
+  readingMode?: ReadingDisplayMode | null;
+  onReadingModeChange?: (mode: ReadingDisplayMode) => void;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
@@ -153,7 +155,9 @@ const MemoOverlayWordButton = memo(function OverlayWordButton({
 function isSafeIllustrationUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   const trimmed = url.trim();
-  if (!trimmed) return null;
+  if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/\\")) {
+    return null;
+  }
   if (
     trimmed.startsWith("/") ||
     trimmed.startsWith("blob:") ||
@@ -202,6 +206,8 @@ function PageSurface(
     illustrationUrl,
     illustrationTextFree,
     initialReadingMode,
+    readingMode,
+    onReadingModeChange,
   } = props;
   const rootRef = useRef<HTMLDivElement>(null);
   const overlayNodesRef = useRef(new Map<string, HTMLButtonElement>());
@@ -238,12 +244,23 @@ function PageSurface(
   const activeImageUrl = refreshedImageUrl ?? page.image_url;
   const isPrivateSource = isPrivateApiMediaUrl(activeImageUrl);
 
-  // V2 3-mode Storybook Reading state (preserves legacy behavior when V2 props omitted)
-  const safeIllustrationUrl = isSafeIllustrationUrl(illustrationUrl);
+  // V2 3-mode Storybook Reading state: switcher is always available on rendered pages.
+  const resolvedIllustrationProp =
+    illustrationUrl !== undefined ? illustrationUrl : page.illustration_url;
+  const resolvedIllustrationTextFree =
+    illustrationTextFree !== undefined
+      ? illustrationTextFree
+      : Boolean(page.illustration_text_free);
+  const safeIllustrationUrl = isSafeIllustrationUrl(resolvedIllustrationProp);
   const hasVerifiedIllustration =
-    Boolean(safeIllustrationUrl) && illustrationTextFree === true;
-  const isV2ModeEnabled =
-    illustrationUrl !== undefined || initialReadingMode !== undefined;
+    Boolean(safeIllustrationUrl) && resolvedIllustrationTextFree === true;
+  const hasUnverifiedIllustration =
+    Boolean(safeIllustrationUrl) && resolvedIllustrationTextFree !== true;
+  const isV2Explicit =
+    (readingMode !== undefined && readingMode !== null) ||
+    initialReadingMode !== undefined ||
+    hasVerifiedIllustration ||
+    hasUnverifiedIllustration;
   const illustrationNeedsAuth =
     hasVerifiedIllustration &&
     isStudioAuthenticatedMediaUrl(safeIllustrationUrl);
@@ -258,16 +275,30 @@ function PageSurface(
   >(null);
 
   const defaultV2Mode: ReadingDisplayMode =
-    initialReadingMode === "ORIGINAL"
+    readingMode === "ORIGINAL" || initialReadingMode === "ORIGINAL"
       ? "ORIGINAL"
-      : initialReadingMode === "TEXT"
+      : readingMode === "TEXT" || initialReadingMode === "TEXT"
         ? "TEXT"
         : hasVerifiedIllustration
           ? "ILLUSTRATED"
-          : "TEXT";
+          : isV2Explicit
+            ? "TEXT"
+            : activeImageUrl
+              ? "ORIGINAL"
+              : "TEXT";
 
   const [selectedReadingMode, setSelectedReadingMode] =
     useState<ReadingDisplayMode>(defaultV2Mode);
+  const [hasUserSelectedMode, setHasUserSelectedMode] = useState(false);
+
+  const handleSelectReadingMode = useCallback(
+    (nextMode: ReadingDisplayMode) => {
+      setHasUserSelectedMode(true);
+      setSelectedReadingMode(nextMode);
+      onReadingModeChange?.(nextMode);
+    },
+    [onReadingModeChange],
+  );
 
   useEffect(() => {
     if (!illustrationNeedsAuth || !safeIllustrationUrl) {
@@ -328,15 +359,19 @@ function PageSurface(
 
   const canShowIllustratedMode = hasVerifiedIllustration && !illustrationFailed;
 
-  const effectiveReadingMode: ReadingDisplayMode =
-    selectedReadingMode === "ILLUSTRATED" && !canShowIllustratedMode
-      ? "TEXT"
-      : selectedReadingMode === "ORIGINAL" && !activeImageUrl
-        ? "TEXT"
-        : selectedReadingMode;
+  const requestedReadingMode: ReadingDisplayMode =
+    readingMode !== undefined && readingMode !== null
+      ? readingMode
+      : selectedReadingMode;
 
-  const shouldLoadOriginalSource =
-    !isV2ModeEnabled || effectiveReadingMode === "ORIGINAL";
+  const effectiveReadingMode: ReadingDisplayMode =
+    requestedReadingMode === "ILLUSTRATED" && !canShowIllustratedMode
+      ? "TEXT"
+      : requestedReadingMode === "ORIGINAL" && !activeImageUrl
+        ? "TEXT"
+        : requestedReadingMode;
+
+  const shouldLoadOriginalSource = effectiveReadingMode === "ORIGINAL";
 
   useEffect(() => {
     if (!shouldLoadOriginalSource || !isPrivateSource || !activeImageUrl) {
@@ -471,13 +506,12 @@ function PageSurface(
     : source && image !== "failed"
       ? "image-reference"
       : "text";
-  const renderMode = isV2ModeEnabled
-    ? effectiveReadingMode === "ILLUSTRATED"
+  const renderMode =
+    effectiveReadingMode === "ILLUSTRATED"
       ? "illustrated"
       : effectiveReadingMode === "TEXT"
         ? "text"
-        : legacyMode
-    : legacyMode;
+        : legacyMode;
 
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
@@ -523,7 +557,7 @@ function PageSurface(
       data-page-id={page.page_id}
       data-page-revision-id={page.page_revision_id}
       data-render-mode={renderMode}
-      data-reading-mode={isV2ModeEnabled ? effectiveReadingMode : undefined}
+      data-reading-mode={effectiveReadingMode}
       data-image-status={
         image === "failed"
           ? "failed"
@@ -546,64 +580,65 @@ function PageSurface(
           >
             {props.title ?? t("pageViewer.defaultBookTitle")}
           </h1>
-          {isV2ModeEnabled ? (
-            <div
-              aria-label="Chế độ đọc trang sách"
-              className="mt-2 inline-flex flex-wrap items-center gap-1.5"
-              data-testid="reading-mode-switcher"
-              role="tablist"
-            >
-              {canShowIllustratedMode ? (
-                <button
-                  aria-selected={effectiveReadingMode === "ILLUSTRATED"}
-                  className={cn(
-                    "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
-                    effectiveReadingMode === "ILLUSTRATED"
-                      ? "border-primary bg-primary text-white shadow-xs"
-                      : "border-border bg-white text-ink hover:bg-canvas",
-                  )}
-                  onClick={() => setSelectedReadingMode("ILLUSTRATED")}
-                  role="tab"
-                  type="button"
-                >
-                  <ImageIcon aria-hidden="true" className="size-3.5" />
-                  Minh họa
-                </button>
-              ) : null}
+          <div
+            aria-label={t("pageViewer.readingModeSwitcherAria")}
+            className="mt-2 inline-flex flex-wrap items-center gap-1.5"
+            data-testid="reading-mode-switcher"
+            role="tablist"
+          >
+            {canShowIllustratedMode ? (
               <button
-                aria-selected={effectiveReadingMode === "TEXT"}
+                aria-selected={effectiveReadingMode === "ILLUSTRATED"}
                 className={cn(
-                  "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
-                  effectiveReadingMode === "TEXT"
+                  "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  effectiveReadingMode === "ILLUSTRATED"
                     ? "border-primary bg-primary text-white shadow-xs"
                     : "border-border bg-white text-ink hover:bg-canvas",
                 )}
-                onClick={() => setSelectedReadingMode("TEXT")}
+                onClick={() => handleSelectReadingMode("ILLUSTRATED")}
                 role="tab"
+                title={t("pageViewer.readingModeIllustratedTitle")}
                 type="button"
               >
-                <BookOpen aria-hidden="true" className="size-3.5" />
-                Đọc chữ
+                <ImageIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                {t("pageViewer.readingModeIllustrated")}
               </button>
-              {activeImageUrl ? (
-                <button
-                  aria-selected={effectiveReadingMode === "ORIGINAL"}
-                  className={cn(
-                    "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
-                    effectiveReadingMode === "ORIGINAL"
-                      ? "border-primary bg-primary text-white shadow-xs"
-                      : "border-border bg-white text-ink hover:bg-canvas",
-                  )}
-                  onClick={() => setSelectedReadingMode("ORIGINAL")}
-                  role="tab"
-                  type="button"
-                >
-                  <Eye aria-hidden="true" className="size-3.5" />
-                  Trang gốc đối chiếu
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+            ) : null}
+            <button
+              aria-selected={effectiveReadingMode === "TEXT"}
+              className={cn(
+                "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                effectiveReadingMode === "TEXT"
+                  ? "border-primary bg-primary text-white shadow-xs"
+                  : "border-border bg-white text-ink hover:bg-canvas",
+              )}
+              onClick={() => handleSelectReadingMode("TEXT")}
+              role="tab"
+              title={t("pageViewer.readingModeTextTitle")}
+              type="button"
+            >
+              <BookOpen aria-hidden="true" className="size-3.5 shrink-0" />
+              {t("pageViewer.readingModeText")}
+            </button>
+            {activeImageUrl ? (
+              <button
+                aria-selected={effectiveReadingMode === "ORIGINAL"}
+                className={cn(
+                  "inline-flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                  effectiveReadingMode === "ORIGINAL"
+                    ? "border-primary bg-primary text-white shadow-xs"
+                    : "border-border bg-white text-ink hover:bg-canvas",
+                )}
+                onClick={() => handleSelectReadingMode("ORIGINAL")}
+                role="tab"
+                title={t("pageViewer.readingModeOriginalTitle")}
+                type="button"
+              >
+                <Eye aria-hidden="true" className="size-3.5 shrink-0" />
+                {t("pageViewer.readingModeOriginal")}
+              </button>
+            ) : null}
+          </div>
         </div>
         {props.illustration}
       </header>
@@ -637,7 +672,7 @@ function PageSurface(
           />
         ) : null}
 
-        {isV2ModeEnabled && effectiveReadingMode === "ILLUSTRATED" ? (
+        {effectiveReadingMode === "ILLUSTRATED" ? (
           <div className="flex flex-col gap-4" data-reading-panel="illustrated">
             {resolvedIllustrationSrc ? (
               <figure
@@ -646,7 +681,9 @@ function PageSurface(
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  alt={`Tranh minh họa trang ${page.page_number}`}
+                  alt={t("pageViewer.illustrationAlt", {
+                    page: formatNumber(page.page_number),
+                  })}
                   className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
                   onError={() => {
                     if (illustrationNeedsAuth && safeIllustrationUrl) {
@@ -676,7 +713,7 @@ function PageSurface(
               scrollContainerRef={rootRef}
             />
           </div>
-        ) : isV2ModeEnabled && effectiveReadingMode === "TEXT" ? (
+        ) : effectiveReadingMode === "TEXT" ? (
           <BookPageContent
             {...props}
             onWordClick={handleSelectWord}
@@ -734,17 +771,20 @@ function PageSurface(
         ) : (
           <>
             {source && image !== "failed" ? (
-              isV2ModeEnabled && effectiveReadingMode === "ORIGINAL" ? (
+              (isV2Explicit || hasUserSelectedMode) &&
+              effectiveReadingMode === "ORIGINAL" ? (
                 <div
                   className="mb-3 rounded-control border border-border bg-white/80 p-2"
                   data-testid="original-page-reference-panel"
                 >
                   <p className="mb-1.5 text-xs font-semibold text-muted">
-                    Ảnh trang gốc (đối chiếu)
+                    {t("pageViewer.originalReferenceHeading")}
                   </p>
                   <Image
                     src={source}
-                    alt={`Ảnh trang gốc trang ${page.page_number}`}
+                    alt={t("pageViewer.originalReferenceAlt", {
+                      page: formatNumber(page.page_number),
+                    })}
                     width={Math.max(1, page.width)}
                     height={Math.max(1, page.height)}
                     unoptimized

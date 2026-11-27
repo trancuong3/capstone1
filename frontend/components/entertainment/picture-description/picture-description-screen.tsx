@@ -415,6 +415,9 @@ export function PictureDescriptionScreen() {
     null,
   );
 
+  const mountedRef = useRef(true);
+  const sessionEpochRef = useRef(0);
+  const sessionIdRef = useRef<string | null>(null);
   const isRecordingVoiceRef = useRef(false);
   const isTtsPlayingRef = useRef(false);
   const lastTtsEndAtRef = useRef(0);
@@ -434,6 +437,7 @@ export function PictureDescriptionScreen() {
     new BrowserTranscriptCollector(),
   );
   const requestControllerRef = useRef<AbortController | null>(null);
+  const sttControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const unmountActionsRef = useRef({
     cancelRecorder: recorder.cancel,
@@ -441,6 +445,10 @@ export function PictureDescriptionScreen() {
   });
 
   const childId = childState.status === "ready" ? childState.child.id : null;
+
+  useEffect(() => {
+    sessionIdRef.current = session?.session_id ?? null;
+  }, [session?.session_id]);
 
   useEffect(() => {
     if (!uploadPreviewUrl) return;
@@ -465,12 +473,18 @@ export function PictureDescriptionScreen() {
 
   const abortActiveVoiceCapture = useCallback(
     (options?: { preserveDraft?: boolean }) => {
+      sessionEpochRef.current += 1;
       micArmTokenRef.current += 1;
       clearMicCooldown();
       const wasActive =
-        isRecordingVoiceRef.current || browserRecognitionRef.current !== null;
+        isRecordingVoiceRef.current ||
+        browserRecognitionRef.current !== null ||
+        sttControllerRef.current !== null;
       isRecordingVoiceRef.current = false;
       setIsRecordingVoice(false);
+      setIsTranscribing(false);
+      sttControllerRef.current?.abort();
+      sttControllerRef.current = null;
 
       const pendingLive = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveTranscriptRef.current,
@@ -481,6 +495,7 @@ export function PictureDescriptionScreen() {
         // Ignore browser recognition abort errors.
       }
       browserRecognitionRef.current = null;
+      collectorRef.current.reset();
       if (wasActive) {
         unmountActionsRef.current.cancelRecorder();
       }
@@ -529,6 +544,7 @@ export function PictureDescriptionScreen() {
   }, [micPausedBackgroundText]);
 
   useEffect(() => {
+    mountedRef.current = true;
     const suspendMediaOnBackground = () => {
       stopSpeechPlayback();
       const interruptedMic = abortActiveVoiceCapture({ preserveDraft: true });
@@ -552,6 +568,8 @@ export function PictureDescriptionScreen() {
       );
     }
     return () => {
+      mountedRef.current = false;
+      sessionEpochRef.current += 1;
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", onVisibilityChange);
         document.removeEventListener(
@@ -564,10 +582,12 @@ export function PictureDescriptionScreen() {
       isRecordingVoiceRef.current = false;
       isTtsPlayingRef.current = false;
       requestControllerRef.current?.abort();
+      sttControllerRef.current?.abort();
+      sttControllerRef.current = null;
       try {
         browserRecognitionRef.current?.abort();
       } catch {
-        // Ignore cleanup abort errors.
+        // Ignore browser recognition abort errors on unmount.
       }
       browserRecognitionRef.current = null;
       unmountActionsRef.current.stopSpeech();
@@ -683,6 +703,7 @@ export function PictureDescriptionScreen() {
     (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
       abortActiveVoiceCapture({ preserveDraft: false });
+      sessionIdRef.current = loaded.session_id;
       const newestAttempt = loaded.attempts[0] ?? null;
       const initialMode =
         loaded.teaching_mode ?? loaded.guide.teaching_mode ?? "OBSERVE";
@@ -880,6 +901,7 @@ export function PictureDescriptionScreen() {
 
   const startVoiceRecording = async () => {
     if (isRecordingVoice || isTranscribing || isEvaluating) return;
+    const captureEpoch = sessionEpochRef.current;
 
     // G10 Anti-Self-Capture: Immediately cancel any active TTS playback before arming mic.
     const browserSpeaking =
@@ -918,6 +940,8 @@ export function PictureDescriptionScreen() {
         }, cooldownRemainingMs);
       });
       if (
+        !mountedRef.current ||
+        sessionEpochRef.current !== captureEpoch ||
         micArmTokenRef.current !== armToken ||
         isTtsPlayingRef.current ||
         (typeof document !== "undefined" && document.hidden)
@@ -929,13 +953,21 @@ export function PictureDescriptionScreen() {
     try {
       await recorder.start();
     } catch {
+      if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+        return;
+      }
       isRecordingVoiceRef.current = false;
       setIsRecordingVoice(false);
       setVoiceMessage(t("pictureDescription.micUnavailable"));
       return;
     }
 
-    if (micArmTokenRef.current !== armToken || isTtsPlayingRef.current) {
+    if (
+      !mountedRef.current ||
+      sessionEpochRef.current !== captureEpoch ||
+      micArmTokenRef.current !== armToken ||
+      isTtsPlayingRef.current
+    ) {
       recorder.cancel();
       return;
     }
@@ -962,6 +994,8 @@ export function PictureDescriptionScreen() {
             "speechSynthesis" in window &&
             Boolean(window.speechSynthesis.speaking);
           if (
+            !mountedRef.current ||
+            sessionEpochRef.current !== captureEpoch ||
             !isRecordingVoiceRef.current ||
             isTtsPlayingRef.current ||
             synthesisSpeaking
@@ -976,6 +1010,8 @@ export function PictureDescriptionScreen() {
         recognition.onend = () => {
           collectorRef.current.completeRecognitionCycle();
           if (
+            mountedRef.current &&
+            sessionEpochRef.current === captureEpoch &&
             isRecordingVoiceRef.current &&
             !isTtsPlayingRef.current &&
             !recognitionFailed &&
@@ -1001,10 +1037,16 @@ export function PictureDescriptionScreen() {
 
   const stopVoiceRecording = async () => {
     if (!isRecordingVoice) return;
+    const captureEpoch = sessionEpochRef.current;
+    const activeSessionId = session?.session_id ?? null;
     isRecordingVoiceRef.current = false;
     setIsRecordingVoice(false);
     setIsTranscribing(true);
     setVoiceMessage(t("pictureDescription.transcribingSpeech"));
+
+    sttControllerRef.current?.abort();
+    const sttController = new AbortController();
+    sttControllerRef.current = sttController;
 
     const liveSnapshot = liveTranscriptRef.current || liveTranscript;
     try {
@@ -1013,12 +1055,19 @@ export function PictureDescriptionScreen() {
       // Ignore browser recognition stop errors.
     }
 
+    const isStaleCapture = () =>
+      !mountedRef.current ||
+      sttController.signal.aborted ||
+      sessionEpochRef.current !== captureEpoch ||
+      sessionIdRef.current !== activeSessionId;
+
     try {
       const audioBlob = await recorder.stop();
+      if (isStaleCapture()) return;
       const browserFallback = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveSnapshot,
       );
-      let elevenLabsText: string | null = null;
+      let sttTranscript: string | null = null;
 
       if (audioBlob && audioBlob.size > 0) {
         const keyterms = session
@@ -1030,14 +1079,18 @@ export function PictureDescriptionScreen() {
           const sttResult = await speechService.transcribe(audioBlob, {
             languageCode: "vi",
             keyterms,
+            signal: sttController.signal,
           });
-          elevenLabsText = sttResult.text?.trim() || null;
+          if (isStaleCapture()) return;
+          sttTranscript = sttResult.text?.trim() || null;
         } catch {
-          elevenLabsText = null;
+          if (isStaleCapture()) return;
+          sttTranscript = null;
         }
       }
 
-      const finalTranscript = elevenLabsText || browserFallback || null;
+      if (isStaleCapture()) return;
+      const finalTranscript = sttTranscript || browserFallback || null;
       if (!finalTranscript) {
         setVoiceMessage(t("pictureDescription.unclearVoice"));
         return;
@@ -1049,15 +1102,20 @@ export function PictureDescriptionScreen() {
       });
       setInputMode("VOICE");
       setVoiceMessage(
-        elevenLabsText
+        sttTranscript
           ? t("pictureDescription.transcribedElevenLabs")
           : t("pictureDescription.transcribedBrowser"),
       );
     } finally {
-      setIsTranscribing(false);
-      liveTranscriptRef.current = "";
-      setLiveTranscript("");
-      browserRecognitionRef.current = null;
+      if (sttControllerRef.current === sttController) {
+        sttControllerRef.current = null;
+      }
+      if (mountedRef.current && sessionEpochRef.current === captureEpoch) {
+        setIsTranscribing(false);
+        liveTranscriptRef.current = "";
+        setLiveTranscript("");
+        browserRecognitionRef.current = null;
+      }
     }
   };
 
@@ -1286,6 +1344,7 @@ export function PictureDescriptionScreen() {
               onClick={() => {
                 stopSpeechPlayback();
                 abortActiveVoiceCapture({ preserveDraft: false });
+                sessionIdRef.current = null;
                 setShowHints(false);
                 setShowSampleSentences(false);
                 setActiveFollowUpQuestion(null);
@@ -2227,7 +2286,7 @@ export function PictureDescriptionScreen() {
                   </section>
                 ) : null}
 
-                {/* Child Input Area (Mic + Realtime Text + ElevenLabs TTS + Textarea) */}
+                {/* Child Input Area (Mic + Realtime Text + ViRead Vietnamese TTS + Textarea) */}
                 <section className="rounded-card border border-border bg-white p-5 shadow-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-lg font-extrabold text-ink">

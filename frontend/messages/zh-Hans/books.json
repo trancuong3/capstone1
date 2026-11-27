@@ -321,7 +321,7 @@
     "overviewAria": "页面状态快速概览",
     "overviewChipTitle": "源页面 {page}：{status}",
     "workerFailuresSummary": "{count} 个页面遇到 OCR/AI 错误（检查服务可能繁忙或暂时离线）。已就绪或待管理员审核的页面不受影响——请在具体错误页面上点击“重试检查”。",
-    "windowsOcrQueueWaiting": "正在等待 Windows OCR 服务器启动（安全队列——{count} 个页面已安全保存，服务器激活后将自动识别）。",
+    "windowsOcrQueueWaiting": "已保存至 OCR 队列（{count} 页）— 正在等待 OCR 服务器重新上线。服务器恢复后将自动开始识别。",
     "ocrRunningStatus": "正在 OCR 识别 {running} 个页面",
     "ocrQueuedSuffix": "（{count} 个页面正在排队）",
     "ocrOtherPagesStillVisible": "。已检查完成的页面仍完整显示，以便您立即操作。",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "安全工具检查范围：",
     "toolCheckFlaggedNotice": "安全工具检查发现 {count} 项需要成人审核的内容。",
     "toolCheckAdminNotice": "该页面在添加到书籍前需要管理员审核。",
+    "toolCheckFailedNotice": "检查过程遇到技术故障。",
+    "toolCheckPassedNotice": "此页面已通过安全检查。",
+    "toolCheckCheckingNotice": "正在对此页面运行自动检查。",
+    "toolCheckRejectedNotice": "此页面版本未获管理员批准。",
+    "toolCheckRecheckNotice": "添加到书籍前需要重新检查此页面。",
     "previewTextLabel": "拟添加到书籍的内容：",
     "proofreadSectionTitle": "拼写建议 ({count})",
     "uncertainWordsSuffix": " · {count} 个需注意的词",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "对已添加到书中的页面进行分页",
     "statusLabels": {
       "PENDING": "等待 OCR 处理",
+      "PENDING_POST_OCR": "等待上一步完成",
       "RUNNING": "正在进行 OCR 识别",
       "COMPLETED": "完成",
       "PASSED": "通过",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "已取消待处理的上传。",
     "cancelSubmissionErrorFallback": "无法取消此页面。",
     "pageNumberHeading": "第 {page} 页",
-    "pageItemLabel": "页"
+    "pageItemLabel": "页",
+    "workerOfflineUploadNotice": "OCR 服务器当前暂时离线 — 您仍可上传图片或 PDF/DOCX 保存到队列中；服务器重新启动后将自动识别。",
+    "queuedWaitingWorkerBadge": "已保存至 OCR 队列 — 等待服务器上线",
+    "queuedWaitingWorkerShort": "已保存至 OCR 队列 — 上线后自动识别",
+    "reasonQueuedOffline": "该书页已安全保存在 OCR 队列中，OCR 服务器重新上线后将自动开始识别。"
   },
   "ocrContribution": {
     "cardAria": "贡献样本以改进 {title} 的 ViRead OCR",

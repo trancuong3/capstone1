@@ -3,7 +3,7 @@
 import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
 
 import { useTranslations } from "@/hooks/use-i18n";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   adaptTextToTeacherPersona,
   getTeacherPersona,
@@ -99,10 +99,9 @@ export function ReadingCompanionBubble({
   gender,
 }: ReadingCompanionBubbleProps) {
   const t = useTranslations("reading");
+  const activePersona = useTeacherPersona();
   const theme = MOOD_STYLES[state.mood];
-  const persona = gender
-    ? getTeacherPersona(gender)
-    : getEffectiveTeacherPersona();
+  const persona = gender ? getTeacherPersona(gender) : activePersona;
   const localizedPersonaTitle = t(
     persona.gender === "male"
       ? "companion.teacherMaleTitle"

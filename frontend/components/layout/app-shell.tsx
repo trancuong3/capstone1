@@ -47,11 +47,13 @@ import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { clearGlobalTasksMemoryCache } from "@/lib/api/global-tasks-service";
+import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
 import {
   clearUserCache,
   DEFAULT_USER_CACHE_TTL_MS,
   PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
+  sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
@@ -100,8 +102,44 @@ const navigationItemsConfig = [
   },
 ] as const;
 
+function normalizeRoutePath(pathname: string): string {
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    return pathname.replace(/\/+$/, "");
+  }
+  return pathname;
+}
+
 function routeIsActive(pathname: string, href: string): boolean {
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const normalized = normalizeRoutePath(pathname);
+  return normalized === href || normalized.startsWith(`${href}/`);
+}
+
+export function isAppShellNavItemActive(
+  pathname: string,
+  href: string,
+): boolean {
+  const normalized = normalizeRoutePath(pathname);
+  if (href === "/entertainment") {
+    return (
+      routeIsActive(normalized, "/entertainment") ||
+      routeIsActive(normalized, "/karaoke")
+    );
+  }
+  if (href === "/reports") {
+    return (
+      routeIsActive(normalized, "/reports") &&
+      !routeIsActive(normalized, "/reports/difficult-words")
+    );
+  }
+  return (
+    routeIsActive(normalized, href) &&
+    !navigationItemsConfig.some(
+      (other) =>
+        other.href !== href &&
+        other.href.startsWith(`${href}/`) &&
+        routeIsActive(normalized, other.href),
+    )
+  );
 }
 
 export function AppShell({ children }: AppShellProps) {
@@ -228,11 +266,12 @@ export function AppShell({ children }: AppShellProps) {
           setCachedSummary(summary);
           const ownerId = userId ?? summary.profile?.id ?? null;
           if (ownerId) {
-            writeUserCache(ownerId, "dashboard-summary", summary, {
-              persist: "local",
+            const cacheableSummary = sanitizeDashboardSummaryForCache(summary);
+            writeUserCache(ownerId, "dashboard-summary", cacheableSummary, {
+              persist: "session",
             });
-            writeUserCache(ownerId, "children", summary.children, {
-              persist: "local",
+            writeUserCache(ownerId, "children", cacheableSummary.children, {
+              persist: "session",
             });
           }
           return;
@@ -349,6 +388,7 @@ export function AppShell({ children }: AppShellProps) {
     clearGlobalTasksMemoryCache();
     const prevId = previousUserIdRef.current;
     if (prevId !== undefined && prevId !== user?.id) {
+      resetApiReadCacheForActorSwitch();
       clearUserCache(prevId);
       if (!user?.id) {
         clearUserCache();
@@ -366,6 +406,7 @@ export function AppShell({ children }: AppShellProps) {
     try {
       clearPrivateMediaMemoryCache();
       clearGlobalTasksMemoryCache();
+      resetApiReadCacheForActorSwitch();
       clearUserCache();
       await authService.signOut();
       dispatchI18nAuthSync({ userId: null, preferredLocale: null });
@@ -441,7 +482,9 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const autoSyncStudioTasks =
-    pathname.startsWith("/my-books") || pathname.startsWith("/book-scanner");
+    pathname.startsWith("/my-books") ||
+    pathname.startsWith("/book-scanner") ||
+    pathname.startsWith("/studio/tasks");
 
   return (
     <AiTaskCenterProvider
@@ -598,16 +641,10 @@ export function AppShell({ children }: AppShellProps) {
                   <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
                     {navigationItemsConfig.map(
                       ({ href, icon: Icon, labelKey }) => {
-                        const isActive =
-                          (routeIsActive(pathname, href) &&
-                            !navigationItemsConfig.some(
-                              (other) =>
-                                other.href.length > href.length &&
-                                routeIsActive(pathname, other.href),
-                            )) ||
-                          (href === "/entertainment" &&
-                            (pathname === "/karaoke" ||
-                              pathname.startsWith("/karaoke/")));
+                        const isActive = isAppShellNavItemActive(
+                          pathname,
+                          href,
+                        );
 
                         return (
                           <Link

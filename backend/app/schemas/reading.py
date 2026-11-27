@@ -35,6 +35,13 @@ class ReadingPageWordDTO(BaseModel):
     # Default keeps responses compatible with legacy rows and test fixtures.
     line_index: int = Field(default=0, ge=0)
 
+
+class ReadingPageWordTimingDTO(BaseModel):
+    index: int = Field(ge=0)
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(ge=0, allow_inf_nan=False)
+
+
 class ReadingPageDTO(BaseModel):
     page_id: UUID
     page_revision_id: UUID
@@ -46,6 +53,10 @@ class ReadingPageDTO(BaseModel):
     image_url: Optional[str] = None
     # Deterministic public precomputed TTS MP3 URL strictly for verified public catalog pages.
     tts_audio_url: Optional[str] = None
+    # Optional precomputed word timings & voice metadata for instant Tier-1 synced playback.
+    tts_word_timings: Optional[list[ReadingPageWordTimingDTO]] = None
+    tts_voice_id: Optional[str] = None
+    tts_cached_speed: Optional[float] = None
     # Legacy or edited geometry has no measured, content-bound proof.
     image_overlay_safe: bool = False
     illustration_url: Optional[str] = None
@@ -145,6 +156,8 @@ class FluencyAssessmentBase(BaseModel):
 
 class FluencyAssessmentCreate(FluencyAssessmentBase):
     SessionId: UUID
+    Score: Optional[float] = Field(None, allow_inf_nan=False)
+    Uncertainty: Optional[float] = Field(None, ge=0, le=1, allow_inf_nan=False)
 
 class FluencyAssessmentResponse(FluencyAssessmentBase):
     Id: UUID
@@ -325,10 +338,14 @@ class SessionDetailRead(HistorySessionSummaryRead):
     report_id: UUID | None
 
 
+MAX_COMPARE_TRANSCRIPT_CHARS = 10_000
+MAX_COMPARE_WORDS = 2_000
+
+
 class WordTimestamp(BaseModel):
-    text: str
-    start: float = Field(..., ge=0)
-    end: float = Field(..., ge=0)
+    text: str = Field(..., max_length=120)
+    start: float = Field(..., ge=0, allow_inf_nan=False)
+    end: float = Field(..., ge=0, allow_inf_nan=False)
 
 
 class InitialWordAssessment(BaseModel):
@@ -366,8 +383,8 @@ class ReadingPracticeStateRead(BaseModel):
 
 
 class CompareReadingRequest(BaseModel):
-    transcript: str = Field(..., min_length=1)
-    words: list[WordTimestamp] | None = None
+    transcript: str = Field(..., min_length=1, max_length=MAX_COMPARE_TRANSCRIPT_CHARS)
+    words: list[WordTimestamp] | None = Field(default=None, max_length=MAX_COMPARE_WORDS)
     # New clients bind each transcript to the immutable page snapshot they read.
     # Both fields remain optional for backward compatibility with legacy callers.
     page_id: UUID | None = None
@@ -484,9 +501,16 @@ class LocalOcrPageScanJobRead(BaseModel):
     worker_online: bool
     created_at: datetime
     updated_at: datetime
+    file_name: str | None = None
+    queue_position: int | None = Field(default=None, ge=1)
     error_code: str | None = None
     error_message: str | None = None
     result: LocalOcrPageScanRead | None = None
+
+
+class LocalOcrPageScanJobListRead(BaseModel):
+    worker_online: bool
+    jobs: list[LocalOcrPageScanJobRead]
 
 
 

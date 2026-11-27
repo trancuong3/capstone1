@@ -451,9 +451,9 @@
     "restartFromScratch": "Kể lại từ đầu (lượt mới)",
     "micUnavailable": "Không mở được micro trên thiết bị này. Bé có thể gõ câu mô tả vào ô bên dưới nhé.",
     "micListening": "Đang lắng nghe bé nói mô tả bức tranh...",
-    "transcribingSpeech": "Đang chuyển giọng nói của bé bằng ElevenLabs...",
+    "transcribingSpeech": "Đang chuyển giọng nói tiếng Việt của bé thành chữ...",
     "unclearVoice": "Cô chưa nghe rõ tiếng bé nói. Bé hãy bấm micro nói lại hoặc gõ chữ nhé!",
-    "transcribedElevenLabs": "Đã chuyển giọng nói bằng ElevenLabs! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé.",
+    "transcribedElevenLabs": "Đã chuyển giọng nói tiếng Việt thành chữ! Bé có thể bấm Nghe lại hoặc sửa trước khi gửi chấm bài nhé.",
     "transcribedBrowser": "Đã ghi lại lời kể của bé! Bé có thể đọc lại hoặc sửa trước khi gửi chấm bài nhé.",
     "emptySubmissionError": "Bé hãy nói hoặc viết ít nhất 1 câu mô tả bức tranh nhé.",
     "sources": {

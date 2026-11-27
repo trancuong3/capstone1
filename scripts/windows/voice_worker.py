@@ -764,7 +764,7 @@ def make_cache_key(
             "voice_id": voice_id,
             "model_version": model_version,
             "precision": precision,
-            "norm_v": 5,
+            "norm_v": 8,
             "speed": normalize_speed(speed),
             "mode": mode,
             "payload": unicodedata.normalize("NFC", payload),
@@ -1429,6 +1429,8 @@ def synthesize_single_utterance_sync(
         payload=text_nfc,
         precision=precision,
     )
+    quiz_choice_match = _QUIZ_CHOICE_LABEL_RE.match(text_nfc)
+    is_quiz_choice = bool(quiz_choice_match)
     base_hit = _base_wav_cache_get(base_key)
     if base_hit is not None:
         base_wav, sr = base_hit
@@ -1438,8 +1440,6 @@ def synthesize_single_utterance_sync(
             or text_nfc
         )
         spoken_input = ensure_tts_terminal_punctuation(normalized_text)
-        quiz_choice_match = _QUIZ_CHOICE_LABEL_RE.match(text_nfc)
-        is_quiz_choice = bool(quiz_choice_match)
         should_guard = word_sample or syllable_estimate <= 8 or is_quiz_choice
 
         def _infer_base_once(
@@ -1556,8 +1556,8 @@ def synthesize_single_utterance_sync(
     padded = pad_edges(
         stretched,
         sr,
-        lead_ms=90 if use_crisp_temp else 70,
-        tail_ms=220 if use_crisp_temp else 160,
+        lead_ms=90 if (use_crisp_temp or is_quiz_choice) else 70,
+        tail_ms=220 if (use_crisp_temp or is_quiz_choice) else 160,
     )
     duration_s = round(float(len(padded) / sr), 3)
     wav_bytes = encode_wav_bytes(padded, sr)
@@ -2579,30 +2579,49 @@ class _WsSttSession:
         self.decode_event = asyncio.Event()
         self.stopped: bool = False
 
-    def _build_quality(self) -> dict[str, Any]:
-        active_samples = (
-            self.voiced_samples
-            if self.voiced_samples > 0
-            else max(0, self.seg_total_samples - self.silence_samples - self.leading_silence_samples)
-        )
-        active_ms = round(max(0.0, active_samples / _WS_TARGET_SR * 1000.0))
-        denom = max(1, self.voiced_samples if self.voiced_samples > 0 else self.seg_total_samples)
-        energy = self.sum_sq if self.voiced_samples > 0 else self.total_sum_sq
-        rms = float(np.sqrt(energy / denom))
-        overall_clip_ratio = self.clipped_samples / float(max(1, self.checked_samples))
-        sustained_window_clip = bool(
+    def _is_sustained_clipping(self) -> bool:
+        if self.clipped_samples < _WS_CLIP_MIN_SAMPLES:
+            return False
+        overall_ratio = self.clipped_samples / float(max(1, self.checked_samples))
+        if overall_ratio >= _WS_CLIP_SUSTAINED_RATIO:
+            return True
+        if (
             len(self.recent_clip_ratios) >= 2
             and (sum(self.recent_clip_ratios) / float(len(self.recent_clip_ratios)))
             >= _WS_CLIP_WINDOW_RATIO
+        ):
+            return True
+        if len(self.recent_clip_ratios) >= 3:
+            high_chunks = sum(
+                1 for r in self.recent_clip_ratios[-_WS_CLIP_WINDOW_CHUNKS:] if r >= 0.10
+            )
+            if high_chunks >= 3:
+                return True
+        return False
+
+    def _build_quality(self) -> dict[str, Any]:
+        # Compute RMS strictly over voiced speech samples so pre-roll and trailing silence
+        # never dilute quiet child voices into false LOW_VOLUME rejections.
+        non_silence_samples = max(
+            0,
+            self.seg_total_samples
+            - self.pre_roll_samples
+            - self.leading_silence_samples
+            - self.silence_samples,
         )
-        is_sustained_clipping = (
-            self.clipped_samples >= _WS_CLIP_MIN_SAMPLES
-            and (overall_clip_ratio >= _WS_CLIP_SUSTAINED_RATIO or sustained_window_clip)
-        )
+        if self.voiced_samples > 0:
+            active_samples = max(self.voiced_samples, non_silence_samples)
+            rms = float(np.sqrt(self.sum_sq / self.voiced_samples))
+        else:
+            active_samples = 0
+            denom = max(1, self.seg_total_samples - self.pre_roll_samples)
+            rms = float(np.sqrt(self.total_sum_sq / denom))
+        active_ms = round(max(0.0, active_samples / _WS_TARGET_SR * 1000.0))
+        overall_clip_ratio = self.clipped_samples / float(max(1, self.checked_samples))
         status = "OK"
         if active_ms < 80:
             status = "AUDIO_TOO_SHORT"
-        elif is_sustained_clipping:
+        elif self._is_sustained_clipping():
             status = "CLIPPING"
         elif rms < 0.002 and self.peak < 0.01:
             status = "LOW_VOLUME"
@@ -2610,6 +2629,7 @@ class _WsSttSession:
             "status": status,
             "rms": round(rms, 5),
             "peak": round(float(self.peak), 4),
+            "clipped_ratio": round(overall_clip_ratio, 5),
             "speech_duration_ms": active_ms,
         }
 
@@ -2752,6 +2772,9 @@ class _WsSttSession:
                     self.peak = peak
                     self.voiced_samples = int(chunk.size)
                 else:
+                    # In vad_mode="client", initial chunks may be client pre-roll/quiet lead-in:
+                    # keep adapting noise_floor instead of freezing it, and do not count unvoiced
+                    # samples toward voiced RMS/duration.
                     self.noise_floor = min(
                         0.0055, max(0.0009, self.noise_floor * 0.95 + rms * 0.05)
                     )
@@ -2797,9 +2820,9 @@ class _WsSttSession:
                 self.peak = peak
 
         # Single source of truth for VAD:
-        # - vad_mode == "server": auto-flush after 420ms silence.
-        # - vad_mode == "client": client drives flushes explicitly via {type:"flush", turn_id};
-        #   server never prematurely auto-flushes at 420ms (only hard-caps at 18s).
+        # - vad_mode == "server" (standalone WS clients): auto-flush after _WS_SILENCE_FLUSH_SAMPLES (420ms).
+        # - vad_mode == "client" (LocalSegmentSpeechRecognition): client owns turn boundaries via
+        #   explicit {type: "flush", turn_id} / "stop" frames (server only hard-caps at 18s).
         if self.vad_mode != "client":
             if (
                 self.silence_samples >= _WS_SILENCE_FLUSH_SAMPLES
@@ -2868,6 +2891,7 @@ async def stt_stream(websocket: WebSocket) -> None:
                 max_step_decode_ms = 0.0
                 _txt = ""
 
+                _txt = ""
                 if full_tail.size == 0:
                     final_words = committed
                 else:

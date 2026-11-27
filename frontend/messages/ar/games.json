@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "لوحة {theme} وتضم {count} تفاصيل",
       "svgTitle": "لوحة {theme}"
-    }
+    },
+    "mobileLabel": "ركن الذاكرة"
   }
 }

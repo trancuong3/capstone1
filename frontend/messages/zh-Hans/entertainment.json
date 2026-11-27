@@ -451,9 +451,9 @@
     "restartFromScratch": "从头开始讲述（新尝试）",
     "micUnavailable": "无法在此设备上打开麦克风。您可以将描述输入到下方的框中。",
     "micListening": "正在聆听孩子对图片的描述...",
-    "transcribingSpeech": "正在通过 ElevenLabs 转换语音...",
+    "transcribingSpeech": "正在将语音转换为文字...",
     "unclearVoice": "没听清孩子的声音。请点击麦克风重试或输入文字！",
-    "transcribedElevenLabs": "已通过 ElevenLabs 转换语音！您可以再次收听或在提交评分前进行修改。",
+    "transcribedElevenLabs": "已将语音转换为文字！您可以再次收听或在提交评分前进行修改。",
     "transcribedBrowser": "已记录孩子的讲述！您可以再次收听或在提交评分前进行修改。",
     "emptySubmissionError": "请至少说出或写出一个句子来描述图片。",
     "sources": {

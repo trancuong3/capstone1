@@ -7,12 +7,13 @@ import base64
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_db, require_active_profile_id
 from app.api.routes.voice import (
     _accepts_db_kwarg,
+    _accepts_kwarg,
     _extract_audio_accept,
     _tts_cache_headers,
     get_voice_orchestrator,
@@ -37,10 +38,14 @@ from app.services.voice_orchestrator import VoicePolicyContext
 
 router = APIRouter()
 
-
 def clear_cached_public_voice_ids_cache() -> None:
     """Clear the in-memory cache of precomputed public TTS voice IDs."""
     TtsAudioCacheService.clear_cached_public_voice_ids_cache()
+
+
+async def shutdown_cached_public_voice_ids_task() -> None:
+    """Cancel and await any pending background voice-ID refresh task on shutdown."""
+    await TtsAudioCacheService.shutdown_cached_public_voice_ids_task()
 
 
 async def refresh_cached_public_voice_ids(*, timeout: float = 6.0) -> list[str]:
@@ -122,6 +127,7 @@ async def timed_text_to_speech(
     payload: TimedSpeechRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     actor_id: UUID = Depends(require_active_profile_id),
     db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
@@ -151,6 +157,8 @@ async def timed_text_to_speech(
     }
     if _accepts_db_kwarg(orchestrator.synthesize_timed):
         timed_kwargs["db"] = db
+    if _accepts_kwarg(orchestrator.synthesize_timed, "background_tasks"):
+        timed_kwargs["background_tasks"] = background_tasks
     try:
         speech = await orchestrator.synthesize_timed(**timed_kwargs)
     except VoiceProviderError as error:
@@ -158,6 +166,9 @@ async def timed_text_to_speech(
 
     for h_name, h_val in _tts_cache_headers(speech).items():
         response.headers[h_name] = h_val
+    fallback_reason = getattr(speech, "fallback_reason", None)
+    if getattr(speech, "used_fallback_voice", False) and fallback_reason:
+        response.headers["X-Voice-Fallback-Reason"] = str(fallback_reason)
 
     return TimedSpeechRead(
         audio_base64=base64.b64encode(speech.audio).decode("ascii"),

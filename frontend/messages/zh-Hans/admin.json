@@ -15,7 +15,13 @@
     "auditLogsTitle": "审计日志",
     "healthTitle": "运行状态",
     "protectedLoadingAria": "正在加载管理区域",
-    "protectedLoadingStatus": "正在加载管理数据..."
+    "protectedLoadingStatus": "正在加载管理数据...",
+    "bookDetailTitle": "图书详情",
+    "karaokeEditTitle": "编辑歌曲",
+    "karaokeNewTitle": "新建歌曲",
+    "karaokeTitle": "歌曲管理",
+    "ocrReviewTitle": "书页 OCR 复核",
+    "vireadTrainingTitle": "OCR 训练"
   },
   "layout": {
     "skipToContent": "跳过导航，前往管理内容",
@@ -35,7 +41,12 @@
     },
     "signOut": "退出登录",
     "signingOut": "正在退出…",
-    "signOutError": "当前无法登出。请重试。"
+    "signOutError": "当前无法登出。请重试。",
+    "groups": {
+      "content": "内容",
+      "systemAi": "系统与 AI",
+      "users": "用户"
+    }
   },
   "login": {
     "areaLabel": "管理后台",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "登录会话无效",
     "yes": "是",
     "no": "否",
-    "notYet": "尚未"
+    "notYet": "尚未",
+    "breadcrumbAria": "面包屑导航",
+    "clearSearch": "清除搜索"
   },
   "auditLogs": {
     "title": "审计日志",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "查看元数据详情 ({count} 字符)",
     "loadMoreError": "无法加载更多日志。之前的记录保持不变。",
     "retryLoadMore": "重试加载",
-    "loadMore": "加载更多"
+    "loadMore": "加载更多",
+    "clearFilters": "清除筛选",
+    "columns": {
+      "action": "操作",
+      "metadata": "元数据",
+      "resource": "资源",
+      "timestamp": "时间"
+    },
+    "drawerTitleFallback": "事件详情",
+    "eventIdLabel": "事件 ID",
+    "filterActionPlaceholder": "例如：book.read、parent.update…",
+    "filterAria": "审计日志筛选器",
+    "filterResourcePlaceholder": "例如：book、parent、song…",
+    "inspectBtn": "详情",
+    "inspectEventAria": "查看事件 {action} 详情",
+    "tableAria": "审计日志表格"
   },
   "health": {
     "title": "运行状态",
@@ -137,7 +165,14 @@
       "healthy": "已验证",
       "failed": "遇到错误",
       "unknown": "未验证",
-      "disabled": "未运行"
+      "disabled": "未运行",
+      "cached": "预生成缓存",
+      "client_side": "浏览器端运行",
+      "cloud_ready": "云端就绪",
+      "local_only": "仅本地",
+      "remote_delegated": "远程委托",
+      "scheduled": "定时计划",
+      "standby": "待命"
     },
     "queueDepthLabel": "队列",
     "queueDepthValue": "{count, plural, =0 {0 个任务} other {# 个任务}}",
@@ -186,8 +221,87 @@
       "Queued": "已排队",
       "Quota exhausted": "超出限额",
       "Unsupported": "不支持",
-      "Unknown": "未知"
-    }
+      "Unknown": "未知",
+      "Local only": "仅本地",
+      "Scheduled": "定时运行",
+      "Standby": "待命"
+    },
+    "actionHintLabel": "处理建议",
+    "audioCacheErrorDetail": "诊断代码：{code}",
+    "audioCacheErrorTitle": "无法加载预生成 TTS 缓存指标",
+    "audioCachePercentUsed": "已用 {percent}",
+    "audioCacheUnlimited": "无限制",
+    "audioCacheUsageAria": "{label} 使用率：{percent}%",
+    "autoRefresh30s": "30秒",
+    "autoRefresh60s": "60秒",
+    "autoRefreshActive": "每 {seconds} 秒自动刷新",
+    "autoRefreshLabel": "自动刷新",
+    "autoRefreshOff": "关闭",
+    "autoRefreshPaused": "标签页隐藏时暂停自动刷新",
+    "clearTtsCache": "清除 TTS 缓存",
+    "clearTtsCacheError": "暂时无法清除浏览器 TTS 缓存。",
+    "clearTtsCacheSuccess": "已清除浏览器 TTS 缓存。",
+    "clearWasmCache": "清除 STT 模型缓存",
+    "clearWasmCacheError": "暂时无法清除 STT 模型缓存。",
+    "clearWasmCacheSuccess": "已清除浏览器 STT 模型缓存。",
+    "clearingCache": "正在清除…",
+    "deviceProbeError": "无法完整检测当前设备能力。",
+    "dismissErrorAria": "关闭错误提示",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "请求 ID：{requestId}",
+    "filterAria": "按状态筛选服务",
+    "filteredEmpty": "没有符合此状态筛选条件的服务。",
+    "filters": {
+      "all": "全部",
+      "attention": "需要关注",
+      "healthy": "正常",
+      "local_only": "仅本地",
+      "standby": "待命"
+    },
+    "groups": {
+      "core": "核心基础设施",
+      "coreDesc": "支撑平台运行的核心 API、数据库与对象存储。",
+      "localOnlyWorkers": "仅本地 / 远程委托 / 配置停用",
+      "localOnlyWorkersToggleHint": "{count} 项",
+      "ocr": "OCR 管线与 AI 引擎",
+      "ocrDesc": "远程 OCR 工作节点、4 个文字识别引擎及 AI 校对。",
+      "voice": "语音与音频缓存",
+      "voiceDesc": "文本转语音（TTS）、语音识别（STT）与预生成音频缓存。",
+      "workers": "后台任务与定时作业",
+      "workersDesc": "定时任务、审核队列及阅读事件处理节点。"
+    },
+    "kpiAria": "服务状态指标",
+    "kpiTotalDetail": "/ {total} 项服务",
+    "ocrEnginesSubheading": "OCR 识别引擎",
+    "probeDevice": "检测设备",
+    "probingDevice": "正在检测设备…",
+    "refreshTimeoutError": "健康检查请求在 15 秒后超时。",
+    "refreshWarningBody": "当前保留最近一次检查快照，请重试。",
+    "refreshWarningTitle": "无法刷新最新状态",
+    "refreshing": "正在刷新…",
+    "resetFilter": "显示全部服务",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "PWA 应用",
+    "sttInsecureContextWarning": "当前连接不是安全的 HTTPS 环境；麦克风及部分浏览器 API 可能受限。",
+    "sttMicNeedsHttps": "使用麦克风需要 HTTPS",
+    "sttMicNoMediaDevices": "不支持 getUserMedia",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "IndexedDB 读取错误 ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB 不可用，无法在本地存储 STT 模型或 TTS 缓存。",
+    "summaryAllHealthy": "全部 {healthy} 项服务均运行正常。",
+    "summaryAria": "系统运行状态概览",
+    "summaryAttentionSegment": "{count} 项需关注",
+    "summaryHealthySegment": "{count} 项正常",
+    "summaryLocalOnlySegment": "{count} 项仅本地",
+    "summaryStandbySegment": "{count} 项待命",
+    "ttsCacheBrowserEmpty": "空（0 项）",
+    "ttsCacheBrowserError": "缓存错误 ({code})",
+    "ttsCacheBrowserHitsMisses": "命中：{hits} · 未命中：{misses}",
+    "wakeOcrError": "无法发送唤醒 OCR 工作节点的指令，请重试。",
+    "wakeOcrRechecking": "几秒后自动重新检查…",
+    "wakeOcrWorker": "唤醒 OCR 节点",
+    "wakingOcrWorker": "正在唤醒…"
   },
   "parents": {
     "title": "家长管理",
@@ -264,7 +378,8 @@
       "childGrade": "{grade} 年级",
       "authNotConfigured": "由于后端未配置 Supabase Auth 访问权限，无法加载电子邮件和电话号码。",
       "authNotFound": "未找到与此档案关联的 Supabase Auth 账户。档案和儿童信息仍会显示。",
-      "authUnavailable": "目前无法从 Supabase Auth 加载联系信息。请检查配置或尝试重新加载。"
+      "authUnavailable": "目前无法从 Supabase Auth 加载联系信息。请检查配置或尝试重新加载。",
+      "parentIdLabel": "家长 ID"
     },
     "modal": {
       "createTitle": "添加家长",
@@ -301,6 +416,16 @@
         "genericUpdate": "此时无法更新账户。请重试。",
         "fallback": "此时无法更新账户。已输入的数据已保留。"
       }
+    },
+    "copiedId": "已复制",
+    "copyId": "复制 ID",
+    "copyIdAria": "复制 ID {id}",
+    "directoryAria": "家长账号列表",
+    "overviewAria": "家长概览",
+    "searchToolbarAria": "搜索家长",
+    "tableHeaders": {
+      "actions": "操作",
+      "parent": "家长"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "最高年级必须是 1 到 5 之间的整数。",
         "maxRange": "最高年级必须在 1 到 5 之间。",
         "gradeOrder": "最低年级不得高于最高年级。"
-      }
+      },
+      "authorPlaceholder": "例如：夏尔·佩罗",
+      "livePreviewDesc": "未上传自定义封面时，ViRead 会根据书名、作者和年级范围自动生成清晰的文字封面。",
+      "livePreviewHeading": "封面预览",
+      "livePreviewTitleFallback": "新书标题",
+      "namePlaceholder": "例如：穿靴子的猫（内部目录名称）",
+      "titlePlaceholder": "例如：穿靴子的猫"
     },
     "detail": {
       "eyebrow": "书籍详情",
@@ -454,7 +585,26 @@
       "notFoundTitle": "未找到书籍",
       "loadErrorTitle": "无法加载书籍",
       "notFoundDesc": "书籍 ID 不属于当前管理数据。",
-      "genericErrorDesc": "请稍后再试。"
+      "genericErrorDesc": "请稍后再试。",
+      "ocrQueueOfflineBanner": "已将 {count} 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
+      "ocrQueueOnlineBanner": "正在为 {count} 页执行 OCR…",
+      "ocrQueueOfflineHint": "任务已持久保存；即使刷新页面，OCR 服务器上线后也会自动更新页面列表。",
+      "ocrQueueOnlineHint": "正在自动更新各页 OCR 进度。",
+      "ocrQueueCheckNow": "立即检查",
+      "queuedNewPageBadge": "新书页 #{index} · 已保存至 OCR 队列",
+      "pageQueuedOfflineBadge": "已保存至 OCR 队列 — 等待服务器上线",
+      "pageQueuedOnlineBadge": "正在重新执行 OCR…",
+      "copiedId": "已复制",
+      "copyIdAria": "复制图书 ID",
+      "openOcrShort": "打开 OCR 复核",
+      "publishRuleToggle": "儿童图书馆发布规则",
+      "statNeedsReview": "待复核",
+      "statProcessing": "处理中",
+      "statTotalPages": "总页数",
+      "statVerified": "已核验",
+      "summaryStripAria": "图书摘要",
+      "toggleAiBatchBtn": "运行 AI 批量复核",
+      "toggleUploadBtn": "上传书页"
     },
     "editor": {
       "loading": "正在加载书籍元数据…",
@@ -490,7 +640,14 @@
       "cannotRetireTitle": "无法停用书籍",
       "safetyBlocked": "Child Safety 尚未允许将此书加入图书馆。请完成 OCR VERIFIED 并确认所有页面的 Safety 与 Candidate 一致；若存在 HIGH 或 NOT_RECOMMENDED 结果，则仍会被拦截。",
       "invalidMetadata": "当前元数据无效。请在表单中修正标题和年级范围，并在激活前保存。",
-      "genericToggleError": "请求未确认。请检查 ADMIN 权限或后端连接并重试。"
+      "genericToggleError": "请求未确认。请检查 ADMIN 权限或后端连接并重试。",
+      "closeCoverStudio": "关闭封面工作室",
+      "coverDesc": "更新图书封面（上传、3:4 裁剪、旋转或 AI 生成封面），不会更改阅读书页或已核验版本。",
+      "coverHeading": "图书封面",
+      "dangerZoneActiveDesc": "停用后图书将从家长书库隐藏，但所有书页、修订版本和阅读记录都会保留。",
+      "dangerZoneHeading": "图书生命周期",
+      "dangerZoneRetiredDesc": "该图书目前已停用。待元数据和 OCR 书页满足要求后可重新启用。",
+      "openCoverStudio": "打开封面工作室"
     },
     "uploader": {
       "heading": "上传页面图像或文档并运行 OCR",
@@ -517,7 +674,14 @@
         "imageUnreadable": "无法在浏览器中读取图片尺寸。",
         "noValidFiles": "没有可上传的有效文件。请检查格式、大小和图片尺寸。",
         "someInvalidFiles": "部分文件无效，未进行上传。有效文件正在处理中。"
-      }
+      },
+      "workerOfflineTitle": "OCR 处理服务当前离线",
+      "workerOfflineBody": "您现在仍可上传图片或 PDF/DOCX：书页将持久保存到队列中，待 OCR 服务器重新上线后自动处理。",
+      "workerUnreachableTitle": "无法验证 OCR 服务状态",
+      "workerUnreachableBody": "后端正在启动或网络较慢。您可重新检查，或直接上传并保存到 OCR 队列。",
+      "recheckWorkerBtn": "重新检查 OCR 连接",
+      "workerOfflineDesc": "您现在仍可上传图片或 PDF/DOCX 文件：系统将安全排队，并在 OCR 服务上线后自动执行识别。",
+      "workerUnreachableDesc": "后端可能正在启动或网络较慢。您可以重新检查连接，或先上传文件加入 OCR 队列。"
     },
     "imagePreview": {
       "hideButton": "隐藏第 {pageNumber} 页图片",
@@ -574,8 +738,25 @@
         "savedNoChanges": "AI未建议修改并执行了文本安全扫描。等待ADMIN检查图片、使用权限及人工验证。",
         "savedPrefix": "AI草稿已保存，等待ADMIN人工验证：{detail}",
         "failedKeepReview": "AI处理失败；页面保持NEEDS_REVIEW状态（未自动标记为VERIFIED）。{detail}"
+      },
+      "statusBadges": {
+        "failed": "需要复核",
+        "saved": "已保存草稿",
+        "verified": "已核验"
       }
-    }
+    },
+    "emptyFilteredDesc": "请尝试修改关键词或重置筛选条件以查看全部书库。",
+    "filterToolbarAria": "书库筛选条件",
+    "kpi": {
+      "activeBooks": "启用中图书",
+      "childLibraryEligible": "符合儿童书库条件",
+      "needsReview": "需要 OCR 复核",
+      "needsReviewDetail": "{count} 页待复核",
+      "total": "图书总数"
+    },
+    "listAria": "管理端图书列表",
+    "resetFilters": "重置",
+    "searchPlaceholder": "按书名、标题或作者搜索…"
   },
   "metadataQuality": {
     "title": "书籍数据质量",
@@ -607,7 +788,8 @@
       "invalidGradeRange": "年级范围无效",
       "invalidGradeRangeDetail": "超出年级 1–5 范围或最低年级大于最高年级",
       "duplicateGroups": "可能的重复项",
-      "duplicateGroupsDetail": "{count} 本书在候选组中"
+      "duplicateGroupsDetail": "{count} 本书在候选组中",
+      "missingMetadataSummary": "缺少作者：{missingAuthor} · 年级无效：{invalidGrade}"
     },
     "issuesHeading": "需要审阅的图书",
     "duplicateNote": "在去除首尾空格且不区分大小写后，依据标题和作者识别重复项。",
@@ -649,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "活跃",
       "RETIRED": "已停止"
-    }
+    },
+    "searchPlaceholder": "按标题或作者搜索…"
   },
   "contentQuality": {
     "eyebrow": "书籍质量管理",
@@ -667,7 +850,9 @@
       "RESOLVED": "已解决",
       "REJECTED": "已拒绝",
       "REPORTED_BOOKS": "已报告书籍",
-      "REPORTED_PAGES": "已报告页面"
+      "REPORTED_PAGES": "已报告页面",
+      "reportedScope": "被举报图书",
+      "reportedScopeDetail": "被举报页数：{pages} · 已驳回：{rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "图书信息错误",
@@ -846,7 +1031,14 @@
       "scanning": "正在扫描…",
       "scanWholeBook": "扫描全书",
       "paginationAria": "书籍分页质量检查",
-      "itemLabel": "本书"
+      "itemLabel": "本书",
+      "kpiApprovedDetail": "就绪：{ready} · 管理员批准：{approved} · 自动发布：{published}",
+      "kpiApprovedGroup": "符合条件 / 已批准",
+      "kpiAria": "图书审批与安全概览",
+      "kpiCopyrightDetail": "安全与版权双项：{both}",
+      "kpiProcessingDetail": "扫描中：{processing} · 过期：{stale} · 扫描失败：{failed}",
+      "kpiProcessingGroup": "处理中 / 需重扫",
+      "statusBreakdownToggle": "查看按状态的详细分布（{count} 组）"
     },
     "bookDetail": {
       "subheading": "书籍质量、AI 历史、发现及管理员审核",
@@ -974,7 +1166,12 @@
       "checkAndFixPage": "检查并编辑页面",
       "rescanPage": "重新扫描此页面",
       "noFindingThisScan": "此检查中没有发现。",
-      "noScanResultYet": "页面暂无检查结果；请查看上方的状态和原因。"
+      "noScanResultYet": "页面暂无检查结果；请查看上方的状态和原因。",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} 页存在告警",
+      "compactMetricsToggle": "查看详细 AI 指标、工作流与评估哈希",
+      "compactOcrDetail": "有效哈希：{valid}/{total} · 未扫描：{unscanned}",
+      "compactPipelineDetail": "已过期：{stale} · 处理中：{processing}",
+      "compactSafetyDetail": "校对：{proofreading}"
     }
   },
   "userBooks": {
@@ -1072,7 +1269,8 @@
       "suspendedBook": "私有图书已暂停。",
       "rejected": "此页面版本已被拒绝。",
       "suspendedWithTitle": "私有图书“{title}”已暂停。拥有该书的家庭无法立即阅读。"
-    }
+    },
+    "kpiAria": "用户图书审核队列概览"
   },
   "flow2": {
     "filters": {
@@ -1246,7 +1444,8 @@
       "reuploadCreated": "已为此页面运行新图片的 OCR。新版本正在等待审核；用于阅读的图片和内容仅在验证后切换到新版本。",
       "reuploadError": "无法加载新图片或运行 OCR。当前数据已保留；请检查 Storage、Tesseract 5.x、vie.traineddata 后重试。",
       "aiRejectedAll": "已忽略 AI 建议。当前草稿保持不变。",
-      "wordDeleteSyncError": "删除单词后无法同步文本。请在保存前检查内容和单词列表。"
+      "wordDeleteSyncError": "删除单词后无法同步文本。请在保存前检查内容和单词列表。",
+      "wordAddSyncError": "添加词语后无法同步文本。请在保存前检查内容与词语列表。"
     },
     "newWordPlaceholder": "新单词",
     "loading": "正在加载图片和修订版本…",
@@ -1424,7 +1623,9 @@
       "providerUnavailable": "不可用",
       "providerChecking": "正在检查",
       "noProviderEvents": "无提供商事件。",
-      "safetyDisclaimer": "AI 结果不能保证内容绝对安全。对于 AI 工作流，只有在管理员确认当前候选内容的安全后，才能保存为 VERIFIED。"
+      "safetyDisclaimer": "AI 结果不能保证内容绝对安全。对于 AI 工作流，只有在管理员确认当前候选内容的安全后，才能保存为 VERIFIED。",
+      "emptyDesc": "点击下方操作栏中的“确认并运行 AI”以自动校对拼写并扫描儿童安全内容。",
+      "emptyTitle": "此修订版暂无 AI 安全扫描结果"
     },
     "tabs": {
       "words": "检查单词和位置",
@@ -1552,12 +1753,91 @@
       "noWords": "此修订版中尚无词。",
       "addWord": "添加词",
       "deleteWord": "删除词",
-      "finishReview": "完成审核"
+      "finishReview": "完成审核",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "OCR 处理历史记录",
       "subtitle": "{title} · 第 {pageNumber} 页 · 修订版 R{revisionNo}",
       "mobileCardAria": "选择修订版 {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "接受清晰文本块",
+      "blockCardAria": "{typeLabel} 文本块",
+      "circuitBreakerDesc": "预计排除的文本占比超过整页 35%，系统已自动保留这些文本块并移至“待核验”供人工检查。",
+      "circuitBreakerTitle": "已触发防内容丢失保护",
+      "cropReviewTitle": "已保留原图边界以避免裁切文字",
+      "decisions": {
+        "EXCLUDE": "已排除",
+        "KEEP": "保留",
+        "REVIEW": "待核验"
+      },
+      "editBtn": "编辑文字",
+      "editLabel": "编辑文本块内容",
+      "emptyClean": "尚未保留任何纯净正文块。",
+      "emptyExcluded": "本页没有被排除的噪点或页码。",
+      "emptyReview": "本页已无需要进一步核验的文本块。",
+      "excludeBtn": "排除",
+      "geometryMeta": "估计倾斜角：{angle}° · 页面占比：{area}% · {gutterReason}",
+      "heading": "智能 OCR 提取内容复核",
+      "headingWithPage": "智能 OCR 提取内容复核 — 第 {pageNumber} 页",
+      "keepBtn": "保留",
+      "loaderDesc": "自动将正文与页码、页眉及冗余文字分离（绝不会自动删除正文内容）。",
+      "loaderError": "无法对该页执行智能文本块分类。",
+      "loaderOpenBtn": "打开智能文本块分类",
+      "loaderReextractBtn": "重新分析文本块",
+      "manualOverrideBadge": "已手动编辑",
+      "noImageFallback": "未附带原图 — 仍完整显示已分析的 {count} 个文本块。",
+      "notices": {
+        "acceptClearAll": "已确认全部 {confirmed} 个清晰文本块。",
+        "acceptClearRemoteRemaining": "已接受清晰文本块。仍有 {remaining} 个文本块需要人工核验。",
+        "acceptClearWithRemaining": "已确认 {confirmed} 个清晰文本块。仍有 {remaining} 个文本块需要您人工核验。",
+        "editSaved": "已更新文本块内容并保留在阅读正文中。",
+        "emptyEditError": "保存编辑时文本块内容不能为空。",
+        "excluded": "已将该文本块从阅读正文中排除。",
+        "humanEditReason": "用户编辑了该文本块内容。",
+        "humanExcludeReason": "用户选择排除该文本块。",
+        "humanKeepReason": "用户选择保留该文本块。",
+        "humanRestoreReason": "已将该文本块恢复到阅读正文中。",
+        "kept": "已将该文本块保留在阅读正文中。",
+        "nothingToUndo": "没有可撤销的操作。",
+        "restored": "已将该文本块恢复到阅读正文中。",
+        "saved": "已保存内容块更改。",
+        "undone": "已撤销最近一次操作。",
+        "updateFailed": "无法更新该文本块的判定，请重试。",
+        "updated": "已更新内容块状态。"
+      },
+      "originalImageAlt": "书页原图",
+      "originalImageAltWithPage": "第 {pageNumber} 页原图",
+      "overlayAria": "提取文本区域叠加层",
+      "previewEmpty": "筛选后暂无可供阅读的文本。",
+      "previewHeading": "儿童阅读正文",
+      "previewReviewNotice": "为避免遗漏正文，当前预览包含 {count} 个待核验文本块。",
+      "readingOrderMeta": "阅读顺序 #{order} · 置信度 {confidence}%",
+      "reasonPrefix": "原因：",
+      "restoreBtn": "恢复",
+      "reviewBanner": "为防止遗漏文字，以下文本块暂保留在预览中。请为每个文本块选择“保留”或“排除”。",
+      "saveEditBtn": "保存编辑",
+      "shadowModeDesc": "去噪判定仅记录用于对比，暂不更改正式阅读文本。",
+      "shadowModeTitle": "正在对比模式（Shadow）下运行",
+      "summaryLine": "页面类型：{pageKind} · 保留 {retention}% 字符（保留 {keep}、排除 {excluded}、待核验 {review}）",
+      "tabs": {
+        "clean": "纯净内容",
+        "excluded": "已排除",
+        "original": "原图",
+        "preview": "阅读预览",
+        "review": "待核验"
+      },
+      "tabsAria": "OCR 提取视图模式",
+      "undoBtn": "撤销"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "OCR 复核工作区",
+      "draft": "文本与复核",
+      "history": "修订历史",
+      "safety": "AI 安全",
+      "smartBlocks": "智能分块 V2",
+      "words": "词与边界框"
     }
   },
   "training": {
@@ -1706,7 +1986,15 @@
       "closeDriftSuccess": "已关闭配置错误的任务。运行记录和 checkpoint 已保留，候选模型尚未进行基准测试/批准；系统可能会根据正确锁定的配置创建新任务。",
       "closeDriftFailed": "无法关闭此候选模型；状态或血缘关系可能已更改。",
       "closeUnbenchmarkedSuccess": "已关闭未进行基准测试的候选模型；运行记录和 checkpoint 已保留。一旦有足够的独立 VERIFIED 留存数据，系统将自动生成 Locked Test 和替代任务。",
-      "closeUnbenchmarkedFailed": "无法关闭候选模型。Worker 可能仍在运行，候选模型已有基准测试结果，或血缘关系已更改。"
+      "closeUnbenchmarkedFailed": "无法关闭候选模型。Worker 可能仍在运行，候选模型已有基准测试结果，或血缘关系已更改。",
+      "flow2AlreadyTrained": "当前 Flow 2 数据集和配置已有先前的训练结果。请添加新的 VERIFIED 样本或评估现有候选模型。",
+      "flow2NoEligibleSamples": "尚无符合条件的纯净 Flow 2 样本可创建快照。",
+      "flow2Paused": "Flow 2 已暂停（VIREAD_FLOW2_INGESTION_PAUSED=true）。",
+      "flow2ScheduleBlocked": "无法将 Flow 2 加入队列（{reason}）。",
+      "flow2Scheduled": "已创建 Flow 2 快照（{train} 训练 / {validation} 验证）并排队任务 {jobId}（{status}）。",
+      "flow2TrainValRequired": "快照当前包含 {train} 条训练和 {validation} 条验证数据；需同时具备两个分组才能排队 Colab。",
+      "flow2TriggerFailed": "创建快照或排队 Flow 2 训练失败。",
+      "flow2UnresolvedJob": "队列中已有未完成的训练任务，未创建新任务。"
     },
     "flow1": {
       "badgeEyebrow": "流 1 新建 · 直接模型替换",
@@ -1874,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "Apps Script Web 应用正在阻止匿名访问。请在 script.google.com 中重新部署，并将选项设置为“谁有权访问：任何人 (Anyone)”（仍受 HMAC-SHA256 签名保护）。",
         "BRIDGE_SECRET_MISMATCH": "Apps Script Bridge 签名不匹配，或者 script.google.com 的脚本属性中缺少 VIREAD_BRIDGE_SECRET。",
         "DRIVE_SCOPE_MISMATCH": "OAuth 权限范围不正确，至少需要 drive.file 权限。请重新连接并授予应用特定的文件夹权限。",
-        "genericCode": "错误代码：{code}。请检查 Google Drive 连接或点击“检查连接与存储空间”。"
+        "genericCode": "错误代码：{code}。请检查 Google Drive 连接或点击“检查连接与存储空间”。",
+        "DESKTOP_REQUIRES_WINDOWS": "Linux 服务器不支持本地挂载 Google Drive for Desktop。请通过 Apps Script Bridge 连接。",
+        "DESKTOP_UNAVAILABLE_CLOUD": "云服务器（Render）无法访问个人电脑上的 Google Drive for Desktop（G:\\）。请切换为 Apps Script Bridge。",
+        "ENCRYPTION_KEY_MISSING": "服务器缺少环境变量 VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY（至少 32 个字符）。"
       },
       "notices": {
         "redirectingOauth": "正在重定向至 Google OAuth 2.0 认证页面（仅请求最小的 drive.file 权限）…",
@@ -1895,8 +2186,37 @@
         "disconnectConfirm": "断开 Google Drive 与流 2 的连接？保存在 Drive 上的原始书籍数据和文件不会被删除；新的发件箱项目将安全等待（不会同步到 Supabase）。",
         "disconnected": "已安全断开 Google Drive 连接并从后端删除了刷新令牌。",
         "disconnectFailed": "此时无法断开 Google Drive 连接。"
-      }
-    }
+      },
+      "desktopCloudWarningMid": "（仅可在本地 Windows G:\\ 盘读取）。若需云端后端（Render）与 Google Colab 读写 Drive，请切换至",
+      "desktopCloudWarningPrefix": "当前连接使用",
+      "disconnectModalConfirm": "断开连接",
+      "disconnectModalTitle": "断开 Google Drive 连接？"
+    },
+    "colabGuideAnd": "和",
+    "colabGuideMid1": "，选择 Runtime",
+    "colabGuideMid2": "，启用 2 个 Colab Secrets",
+    "colabGuidePrefix": "打开笔记本",
+    "colabGuideSuffix": "，然后点击",
+    "colabGuideTitle": "Colab 免费 T4 GPU 运行指南（0 VND）",
+    "driveUnavailableDesc": "后端未返回 Flow 2 的 Google Drive 连接状态。",
+    "driveUnavailableTitle": "尚未配置 Google Drive",
+    "errors": {
+      "loadFailed": "无法加载训练状态。请检查管理员权限与 VietOCR V2 数据库迁移。",
+      "serviceUnavailable": "VietOCR 训练管理服务不可用。"
+    },
+    "kpiGridAria": "OCR 训练指标",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "Flow 1 模型替换",
+      "flow2": "Flow 2 训练与评估",
+      "overview": "概览与运行时"
+    },
+    "tabsAria": "OCR 训练分区",
+    "triggerFlow2Btn": "创建快照并排队 Flow 2 训练",
+    "workerExecutionModeLabel": "运行模式：",
+    "workerWebHeavyDisabled": "已关闭（请使用下方触发按钮）",
+    "workerWebHeavyEnabled": "已开启",
+    "workerWebHeavyLabel": "Web 后台工作节点："
   },
   "karaoke": {
     "library": {
@@ -1936,7 +2256,11 @@
         "DRAFT": "草稿",
         "PUBLISHED": "可见",
         "HIDDEN": "已隐藏"
-      }
+      },
+      "emptyTitle": "暂无歌曲",
+      "filterAria": "歌曲库筛选器",
+      "hasCoverBadge": "有封面",
+      "searchPlaceholder": "输入歌曲名或作者…"
     },
     "workspace": {
       "retryLoad": "尝试重新加载",
@@ -2499,6 +2823,24 @@
         "minOneLyricLine": "请至少输入 1 行有效歌词。",
         "reviewFingerprintMissing": "缺少处理审核指纹标识。"
       }
+    },
+    "confirm": {
+      "continueAction": "继续",
+      "editLyricsTitle": "编辑已打轴的歌词？",
+      "expandRepeatsAction": "确认展开",
+      "expandRepeatsTitle": "展开重复标记？",
+      "leaveAction": "离开页面",
+      "leaveTitle": "离开当前页面？",
+      "publishAction": "确认发布",
+      "publishTitle": "发布歌曲？",
+      "reloadAction": "重新加载已保存版本",
+      "reloadTitle": "从服务器重新加载？",
+      "replaceAudioAction": "替换音频",
+      "replaceAudioTitle": "替换 MP3 音频文件？",
+      "replaceLyricsAction": "替换歌词",
+      "replaceLyricsTitle": "替换当前全部歌词？",
+      "resplitAction": "确认重新拆分",
+      "resplitTitle": "重新拆分此行音节？"
     }
   },
   "pageUploadRuntime": {
@@ -2519,5 +2861,44 @@
     "reloadAfterUploadFailed": "上传后无法重新加载页面列表。数据可能已保存；请刷新页面确认。",
     "reprocessIncomplete": "重新执行页面 OCR 的任务尚未完成，请重试。",
     "reprocessQueuedWindows": "页面已加入队列等待 Windows OCR 服务器重新处理。完成后请刷新查看。"
+  },
+  "qualityHub": {
+    "description": "在统一界面中检查目录元数据、处理家长举报、审批图书安全并审核用户私有图书。",
+    "eyebrow": "质量运维",
+    "tabs": {
+      "approval": "审批与图书安全",
+      "metadata": "图书元数据",
+      "reports": "用户举报",
+      "userBooks": "用户图书与 Flow 2"
+    },
+    "tabsAria": "图书质量管理分区"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "正在后台处理…",
+    "closeAria": "关闭 AI 任务中心",
+    "defaultBookLabel": "图书",
+    "elapsedHours": "{hours} 小时",
+    "elapsedHoursMinutes": "{hours} 小时 {minutes} 分钟",
+    "elapsedMinutes": "{minutes} 分钟",
+    "elapsedMinutesSeconds": "{minutes} 分钟 {seconds} 秒",
+    "elapsedRunning": "已运行 {elapsed}",
+    "elapsedSeconds": "{seconds} 秒",
+    "emptyDescription": "当您上传书页、提取 OCR 或生成封面时，实时进度会显示在此处。",
+    "emptyTitle": "暂无 AI 任务",
+    "openAria": "打开 AI 任务中心",
+    "pageSeparator": " • 第 {pageNumber} 页",
+    "pillFailed": "失败任务 ({count})",
+    "pillIdle": "AI 任务",
+    "pillRunning": "AI 运行中 ({count})",
+    "pillWaitingReview": "待核验 ({count})",
+    "processingAria": "正在处理 {title}",
+    "progressAria": "{title} 进度",
+    "refreshAria": "刷新任务列表",
+    "stagePrefix": "阶段：{stage}",
+    "subtitle": "即使切换页面，后台任务仍会安全持续运行。",
+    "title": "AI 任务中心",
+    "viewResultAction": "查看结果",
+    "workerOfflineBanner": "等待 AI 工作节点重新连接。任务已持久化保存并会自动继续。",
+    "pillWaitingForWorker": "OCR 队列 ({count})"
   }
 }

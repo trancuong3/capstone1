@@ -321,7 +321,7 @@
     "overviewAria": "ページステータスのクイック概要",
     "overviewChipTitle": "ソースページ {page}: {status}",
     "workerFailuresSummary": "{count} ページで OCR/AI エラーが発生しました（サービスが混雑中または一時的にオフラインの可能性があります）。準備完了または管理者レビュー待ちのページは影響を受けません — エラーが出たページで「チェックを再試行」をクリックしてください。",
-    "windowsOcrQueueWaiting": "Windows OCR サーバー起動待ち（安全キュー — {count} ページが安全に保存され、サーバーが稼働次第自動で認識されます）。",
+    "windowsOcrQueueWaiting": "OCR待機キューに保存しました（{count}ページ）— サーバーの再起動を待っています。OCRサーバーが復旧すると自動的に認識が始まります。",
     "ocrRunningStatus": "OCR 処理中 {running} ページ",
     "ocrQueuedSuffix": " （{count} ページがキューに追加されています）",
     "ocrOtherPagesStillVisible": "。完了したページはすぐに操作できるように引き続き表示されます。",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "ツールチェックの対象範囲：",
     "toolCheckFlaggedNotice": "ツールチェックにより、大人の確認が必要な項目が {count} 件見つかりました。",
     "toolCheckAdminNotice": "本に追加する前に、管理者の確認が必要なページです。",
+    "toolCheckFailedNotice": "検証プロセスで技術的な問題が発生しました。",
+    "toolCheckPassedNotice": "このページは安全チェックを通過しました。",
+    "toolCheckCheckingNotice": "このページの自動チェックを実行しています。",
+    "toolCheckRejectedNotice": "このページバージョンは管理者に承認されませんでした。",
+    "toolCheckRecheckNotice": "本に追加する前にこのページを再チェックする必要があります。",
     "previewTextLabel": "本に追加予定の内容：",
     "proofreadSectionTitle": "スペルの提案 ({count})",
     "uncertainWordsSuffix": " · 注意が必要な単語 {count} 個",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "ブックに追加されたページのページネーション",
     "statusLabels": {
       "PENDING": "OCR処理待ち",
+      "PENDING_POST_OCR": "前のステップの完了待ち",
       "RUNNING": "OCR実行中",
       "COMPLETED": "完了",
       "PASSED": "合格",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "保留中のアップロードをキャンセルしました。",
     "cancelSubmissionErrorFallback": "このページをキャンセルできません。",
     "pageNumberHeading": "{page}ページ",
-    "pageItemLabel": "ページ"
+    "pageItemLabel": "ページ",
+    "workerOfflineUploadNotice": "OCRサーバーは一時的にオフラインです — 画像やPDF/DOCXを引き続きアップロードしてキューに保存でき、サーバー復旧後に自動認識されます。",
+    "queuedWaitingWorkerBadge": "OCR待機キューに保存済み — サーバー起動待ち",
+    "queuedWaitingWorkerShort": "OCR待機キューに保存済み — 起動後に自動認識",
+    "reasonQueuedOffline": "このページはOCR待機キューに安全に保存されており、OCRサーバーが再起動すると自動的に認識されます。"
   },
   "ocrContribution": {
     "cardAria": "{title} の ViRead OCR 向上にサンプルを共有する",

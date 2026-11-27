@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "Illustration of {theme} with {count} details",
       "svgTitle": "{theme} illustration"
-    }
+    },
+    "mobileLabel": "Memory Corner"
   }
 }

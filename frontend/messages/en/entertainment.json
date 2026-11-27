@@ -451,9 +451,9 @@
     "restartFromScratch": "Start over (new attempt)",
     "micUnavailable": "Microphone access denied. You can type your description in the box below.",
     "micListening": "Listening to your description...",
-    "transcribingSpeech": "Converting your voice via ElevenLabs...",
+    "transcribingSpeech": "Converting your Vietnamese voice into text...",
     "unclearVoice": "I couldn't hear you clearly. Please tap the microphone to try again or type your response!",
-    "transcribedElevenLabs": "Voice converted via ElevenLabs! You can listen again or edit before submitting.",
+    "transcribedElevenLabs": "Vietnamese speech converted to text! You can listen again or edit before submitting.",
     "transcribedBrowser": "Story recorded! You can listen again or edit before submitting.",
     "emptySubmissionError": "Please speak or write at least one sentence describing the picture.",
     "sources": {

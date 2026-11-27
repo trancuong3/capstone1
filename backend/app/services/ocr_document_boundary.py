@@ -87,16 +87,16 @@ def _decode_image_to_bgr(image_input: bytes | np.ndarray | Image.Image) -> np.nd
             raise ValueError("Image payload exceeds 12 MiB limit")
         if not _has_supported_image_magic(raw):
             raise ValueError("Unsupported image format: only JPEG, PNG, and WEBP are allowed")
-        prev_max_pixels = Image.MAX_IMAGE_PIXELS
-        Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
         try:
             with Image.open(io.BytesIO(raw)) as pil_img:
-                if int(pil_img.width) * int(pil_img.height) > _MAX_IMAGE_PIXELS:
+                width, height = pil_img.size
+                if width <= 0 or height <= 0 or int(width) * int(height) > _MAX_IMAGE_PIXELS:
                     raise ValueError("Image exceeds 25MP decompression limit")
+                pil_img.load()
                 transposed = ImageOps.exif_transpose(pil_img).convert("RGB")
                 rgb = np.asarray(transposed, dtype=np.uint8)
-        finally:
-            Image.MAX_IMAGE_PIXELS = prev_max_pixels
+        except Image.DecompressionBombError as exc:
+            raise ValueError("Image exceeds 25MP decompression limit") from exc
         return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
     raise TypeError(f"Unsupported image input type: {type(image_input).__name__}")
@@ -446,12 +446,13 @@ def detect_double_page_gutter(
     if x_end - x_start < 6:
         return GutterDetectionResult()
 
-    # Vertical luminance projection (spine shadow produces a deep dark minimum valley)
+    # Vertical background-paper luminance projection (70th percentile ignores dark text strokes
+    # so dense black letters on a single white page never look like a dark spine shadow!)
     crop_v = gray[int(h * 0.08) : int(h * 0.92), :]
-    col_means = np.mean(crop_v.astype(np.float32), axis=0)
+    col_bg = np.percentile(crop_v.astype(np.float32), 70, axis=0)
     smooth_k = max(5, (w // 80) | 1)
     kernel = np.ones(smooth_k, dtype=np.float32) / float(smooth_k)
-    smooth_lum = np.convolve(col_means, kernel, mode="same")
+    smooth_lum = np.convolve(col_bg, kernel, mode="same")
 
     band_lum = smooth_lum[x_start:x_end]
     min_rel_idx = int(np.argmin(band_lum))
@@ -459,33 +460,68 @@ def detect_double_page_gutter(
     gutter_x_norm = float(gutter_px) / float(w)
     valley_lum = float(band_lum[min_rel_idx])
 
-    # Compare valley luminance against surrounding left/right paper flanks
+    # Compare valley luminance against BOTH left and right paper flanks (min, not average!)
+    # so monotonic uneven-light gradients never trigger false valleys.
     flank_left = smooth_lum[max(0, x_start - w // 10) : max(1, gutter_px - max(6, w // 25))]
     flank_right = smooth_lum[min(w - 1, gutter_px + max(6, w // 25)) : min(w, x_end + w // 10)]
     left_paper = float(np.percentile(flank_left, 75)) if flank_left.size else float(np.median(smooth_lum))
     right_paper = float(np.percentile(flank_right, 75)) if flank_right.size else float(np.median(smooth_lum))
-    flank_paper = 0.5 * (left_paper + right_paper)
+    flank_paper = min(left_paper, right_paper)
     shadow_depth = max(0.0, flank_paper - valley_lum)
+
+    # Verify the spine shadow runs vertically across BOTH top and bottom halves of the spread
+    # (filters out localized/diagonal cast shadows on single pages)
+    mid_v = crop_v.shape[0] // 2
+    if shadow_depth > 0.0 and mid_v >= 8:
+        half_win = max(2, smooth_k // 2)
+        g_l = max(0, gutter_px - half_win)
+        g_r = min(w, gutter_px + half_win + 1)
+        top_val = float(np.percentile(crop_v[:mid_v, g_l:g_r], 70))
+        bot_val = float(np.percentile(crop_v[mid_v:, g_l:g_r], 70))
+        top_depth = max(0.0, flank_paper - top_val)
+        bot_depth = max(0.0, flank_paper - bot_val)
+        shadow_depth = min(shadow_depth, top_depth, bot_depth)
+
+    # Fast, lighting-invariant vertical stroke-transition projection (`|dI/dy| > 22`):
+    # A genuine open book spine crease is vertically smooth (`valley_v_edge ~= 0.0`),
+    # whereas horizontal text lines crossing through a cast shadow produce strong
+    # row-to-row luminance transitions (`valley_v_edge >= 0.03`).
+    v_edge_map = (np.abs(np.diff(crop_v.astype(np.int16), axis=0)) > 22).astype(np.float32)
+    ink_proj = np.mean(v_edge_map, axis=0)
+    smooth_ink = np.convolve(ink_proj, kernel, mode="same")
+    left_has_ink = bool(np.mean(ink_proj[:x_start]) > 0.005)
+    right_has_ink = bool(np.mean(ink_proj[x_end:]) > 0.005)
+
+    # If horizontal text strokes cross directly through the dark valley, it is a cast shadow
+    # over single-page text rather than an open book spine gutter!
+    valley_win_l = max(0, gutter_px - max(2, smooth_k // 2))
+    valley_win_r = min(w, gutter_px + max(2, smooth_k // 2) + 1)
+    valley_text_ink = float(np.mean(ink_proj[valley_win_l:valley_win_r]))
+    if valley_text_ink > 0.012:
+        shadow_depth = 0.0
+
     shadow_score = min(1.0, shadow_depth / 45.0)
 
-    # Also compute vertical ink whitespace valley (clean white gutter between two pages)
-    binary_ink = (crop_v < max(60.0, flank_paper - 35.0)).astype(np.float32)
-    ink_proj = np.mean(binary_ink, axis=0)
-    smooth_ink = np.convolve(ink_proj, kernel, mode="same")
-    left_has_ink = bool(np.mean(ink_proj[:x_start]) > 0.008)
-    right_has_ink = bool(np.mean(ink_proj[x_end:]) > 0.008)
-
     band_ink = smooth_ink[x_start:x_end]
+    raw_band_ink = ink_proj[x_start:x_end]
     ink_min_idx = int(np.argmin(band_ink))
     ink_valley_val = float(band_ink[ink_min_idx])
     white_gutter_score = 0.0
-    if left_has_ink and right_has_ink and ink_valley_val < 0.004:
-        # Check continuous white strip width around ink_min_idx
-        gutter_strip_width = int(np.sum(band_ink < 0.005))
-        if gutter_strip_width >= max(6, int(w * 0.025)):
-            white_gutter_score = min(1.0, gutter_strip_width / max(1.0, w * 0.06))
+    if left_has_ink and right_has_ink and ink_valley_val < 0.003 and float(raw_band_ink[ink_min_idx]) < 0.002:
+        # Measure the TRUE contiguous empty vertical strip centered on ink_min_idx
+        # (never sum scattered inter-word spaces across a single-page paragraph!)
+        left_ptr = ink_min_idx
+        while left_ptr > 0 and float(raw_band_ink[left_ptr - 1]) < 0.002:
+            left_ptr -= 1
+        right_ptr = ink_min_idx
+        while right_ptr + 1 < len(raw_band_ink) and float(raw_band_ink[right_ptr + 1]) < 0.002:
+            right_ptr += 1
+        contiguous_gutter_width = right_ptr - left_ptr + 1
+        min_white_gutter_px = max(12, int(w * 0.055))
+        if contiguous_gutter_width >= min_white_gutter_px:
+            white_gutter_score = min(1.0, contiguous_gutter_width / max(1.0, w * 0.09))
             if shadow_score < 0.35:
-                gutter_px = x_start + ink_min_idx
+                gutter_px = x_start + ((left_ptr + right_ptr) // 2)
                 gutter_x_norm = float(gutter_px) / float(w)
 
     # Count OCR boxes crossing the detected gutter
@@ -505,20 +541,31 @@ def detect_double_page_gutter(
             else:
                 right_word_count += 1
 
-    # Aspect ratio & centering bonus
+    # Aspect ratio & centering bonus (require genuine spine shadow OR wide contiguous empty gutter)
     center_closeness = max(0.0, 1.0 - abs(gutter_x_norm - 0.5) / 0.22)
-    aspect_bonus = 0.28 if aspect_ratio >= GUTTER_MIN_ASPECT_RATIO else 0.0
+    aspect_bonus = 0.28 if GUTTER_MIN_ASPECT_RATIO <= aspect_ratio <= 2.8 else 0.0
     valley_strength = max(shadow_score, 0.85 * white_gutter_score)
     confidence = min(1.0, aspect_bonus + 0.57 * valley_strength + 0.15 * center_closeness)
     if aspect_ratio < 1.12 and shadow_score < 0.65:
         confidence *= 0.45
+    if valley_strength < 0.35:
+        # Without a genuine dark spine shadow or wide contiguous vertical whitespace gutter,
+        # wide single-page strips must NEVER trigger double-page spread detection.
+        confidence *= 0.50
 
     has_two_sides = (left_has_ink and right_has_ink) or (
         left_word_count >= 1 and right_word_count >= 1
     )
+    has_genuine_valley = shadow_score >= 0.48 or (
+        white_gutter_score >= 0.50 and crossing_lines == 0
+    )
     is_double_page = bool(
-        (aspect_ratio >= GUTTER_MIN_ASPECT_RATIO and confidence >= 0.55)
-        or (shadow_score >= 0.72 and has_two_sides and aspect_ratio >= 1.12)
+        has_two_sides
+        and has_genuine_valley
+        and (
+            (aspect_ratio >= GUTTER_MIN_ASPECT_RATIO and confidence >= 0.60)
+            or (shadow_score >= 0.72 and aspect_ratio >= 1.12)
+        )
     )
     split_recommended = bool(
         is_double_page

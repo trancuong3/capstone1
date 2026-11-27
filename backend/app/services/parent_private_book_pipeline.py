@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -49,6 +50,16 @@ from app.services.ocr_engine import (
     extract_text_and_boxes,
     normalize_word,
 )
+from app.services.ocr_content_extraction import (
+    build_extraction_provenance_meta,
+    extract_ocr_content,
+    filter_word_dicts_by_extraction,
+    is_stage3_semantic_provider_configured,
+    ocr_words_from_dicts,
+    persist_committed_parent_page_v2,
+    run_stage3_semantic_filter_if_needed,
+    safe_detect_document_boundary,
+)
 from app.services.parent_private_book_post_ocr import (
     build_empty_text_findings,
     build_image_only_findings,
@@ -62,32 +73,50 @@ from app.services.parent_private_book_post_ocr import (
     normalize_private_book_text as _normalize_text,
     should_auto_accept_spelling,
 )
+from app.services.smart_studio_flags import SmartStudioFlags
 from app.services.storage_service import download_object
+
+finalize_committed_private_book_page_v2 = persist_committed_parent_page_v2
 
 logger = logging.getLogger(__name__)
 
 
 def _valid_box(raw: object) -> list[float] | None:
-    vals: list[float] | None = None
+    raw_vals: list[object] | None = None
     if isinstance(raw, (list, tuple)) and len(raw) == 4:
-        try:
-            vals = [float(v) for v in raw]
-        except (TypeError, ValueError):
-            return None
+        raw_vals = list(raw)
     elif isinstance(raw, dict):
-        try:
-            vals = [
-                float(raw["x"]),
-                float(raw["y"]),
-                float(raw.get("w", raw.get("width", 0.0))),
-                float(raw.get("h", raw.get("height", 0.0))),
-            ]
-        except (KeyError, TypeError, ValueError):
+        if "x" not in raw or "y" not in raw:
             return None
-    if vals is not None:
-        x, y, w, h = vals
-        if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0 and w > 0.0 and h > 0.0 and x + w <= 1.001 and y + h <= 1.001:
-            return [round(x, 6), round(y, 6), round(min(w, 1.0 - x), 6), round(min(h, 1.0 - y), 6)]
+        raw_vals = [
+            raw["x"],
+            raw["y"],
+            raw.get("w", raw.get("width", 0.0)),
+            raw.get("h", raw.get("height", 0.0)),
+        ]
+    if raw_vals is None or any(isinstance(v, bool) for v in raw_vals):
+        return None
+    try:
+        vals = [float(v) for v in raw_vals]
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in vals):
+        return None
+    x, y, w, h = vals
+    if (
+        0.0 <= x < 1.0
+        and 0.0 <= y < 1.0
+        and w > 0.0
+        and h > 0.0
+        and x + w <= 1.001
+        and y + h <= 1.001
+    ):
+        rx = round(x, 6)
+        ry = round(y, 6)
+        rw = round(min(w, 1.0 - rx), 6)
+        rh = round(min(h, 1.0 - ry), 6)
+        if rx < 1.0 and ry < 1.0 and rw > 0.0 and rh > 0.0:
+            return [rx, ry, rw, rh]
     return None
 
 
@@ -111,15 +140,18 @@ def align_edited_text_to_words(
     tokens_with_lines: list[tuple[int, str]] = []
     for line_idx, line in enumerate(lines):
         for tok in line.split():
-            cleaned = tok.strip()
-            if cleaned and normalize_word(cleaned):
-                tokens_with_lines.append((line_idx, cleaned))
+            tok_clean = tok.strip()
+            if tok_clean and normalize_word(tok_clean):
+                tokens_with_lines.append((line_idx, tok_clean))
     if not tokens_with_lines:
         return []
 
     valid_base: list[tuple[dict[str, Any], list[float]]] = []
     for w in base_words:
         if not isinstance(w, dict):
+            continue
+        raw_tok = str(w.get("text") or w.get("Text") or "").strip()
+        if raw_tok and not normalize_word(raw_tok):
             continue
         box = _item_box(w)
         if box is not None:
@@ -190,8 +222,30 @@ def build_proofread_suggestions(
     proofread_text: str,
     uncertain_indices: set[int],
 ) -> list[dict[str, Any]]:
-    """Compute word-level spelling/diacritic diff between OCR and proofread output."""
-    return _shared_build_proofread_suggestions(ocr_words, proofread_text, uncertain_indices)
+    """Compute word-level spelling/diacritic diff aligned with normalize_word tokens."""
+    uncertain_set = {int(i) for i in (uncertain_indices or ())}
+    normalized_ocr: list[tuple[int, str]] = []
+    for idx, word in enumerate(ocr_words):
+        if not isinstance(word, dict):
+            continue
+        original = str(word.get("text") or "").strip()
+        if original and normalize_word(original):
+            normalized_ocr.append((idx, original))
+    proof_tokens = [
+        tok for tok in _normalize_text(proofread_text).split() if normalize_word(tok)
+    ]
+    suggestions: list[dict[str, Any]] = []
+    for pos, (word_idx, original) in enumerate(normalized_ocr):
+        suggested = proof_tokens[pos] if pos < len(proof_tokens) else original
+        is_uncertain = pos in uncertain_set or word_idx in uncertain_set
+        if original != suggested or is_uncertain:
+            suggestions.append({
+                "word_index": word_idx,
+                "original": original,
+                "suggested": suggested,
+                "uncertain": is_uncertain,
+            })
+    return suggestions
 
 
 def _extract_ocr_words_and_text(raw_result: Any) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
@@ -207,7 +261,10 @@ def _extract_ocr_words_and_text(raw_result: Any) -> tuple[str, list[dict[str, An
     elif isinstance(raw_result, dict):
         text_value = str(raw_result.get("text") or "")
         raw_words = list(raw_result.get("words") or [])
-        raw_meta = dict(raw_result.get("meta") or {})
+        meta_candidate = raw_result.get("metadata")
+        if not isinstance(meta_candidate, dict):
+            meta_candidate = raw_result.get("meta")
+        raw_meta = dict(meta_candidate) if isinstance(meta_candidate, dict) else {}
     else:
         raise ValueError("Unexpected OCR return shape")
 
@@ -225,15 +282,21 @@ def _extract_ocr_words_and_text(raw_result: Any) -> tuple[str, list[dict[str, An
             )
             line_idx = int(getattr(item, "line_index", getattr(item, "LineIndex", 0)) or 0)
             conf = getattr(item, "ocr_confidence", getattr(item, "OCRConfidence", getattr(item, "confidence", None)))
-        if not tok or box is None:
+        normalized_tok = normalize_word(tok) if tok else ""
+        if not tok or not normalized_tok or box is None:
             continue
+        conf_val = (
+            float(conf)
+            if isinstance(conf, (int, float)) and not isinstance(conf, bool) and math.isfinite(float(conf))
+            else None
+        )
         words.append({
             "word_index": len(words),
             "line_index": max(0, line_idx),
             "text": unicodedata.normalize("NFC", tok),
-            "normalized_text": normalize_word(tok) or tok.lower(),
+            "normalized_text": normalized_tok,
             "bounding_box": box,
-            "ocr_confidence": float(conf) if isinstance(conf, (int, float)) else None,
+            "ocr_confidence": conf_val,
         })
 
     normalized_text = _normalize_text(str(text_value or ""))
@@ -334,6 +397,7 @@ async def process_submission_stages(
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
+                expected_worker_id=worker_id,
                 stage="OCR",
                 error_code="SOURCE_IMAGE_UNAVAILABLE",
             )
@@ -358,6 +422,7 @@ async def process_submission_stages(
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
+                expected_worker_id=worker_id,
                 stage="OCR",
                 error_code="OCR_ENGINE_UNAVAILABLE",
             )
@@ -375,9 +440,51 @@ async def process_submission_stages(
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
+                expected_worker_id=worker_id,
                 stage="OCR",
                 error_code="OCR_PROCESSING_FAILED",
             )
+
+        # Stage 1B: Smart Book Studio V2 boundary + 20-class extraction (strict local-only privacy default)
+        allow_cloud_ai = not local_ai_enforced
+        studio_flags = SmartStudioFlags.from_environment()
+        raw_word_boxes = [
+            w["bounding_box"]
+            for w in extracted_words
+            if isinstance(w, dict) and _valid_box(w.get("bounding_box")) is not None
+        ]
+        boundary_result = await asyncio.to_thread(
+            safe_detect_document_boundary, image_bytes, raw_word_boxes or None
+        )
+        source_word_inputs = ocr_words_from_dicts(extracted_words)
+        smart_extraction = extract_ocr_content(
+            source_word_inputs,
+            page_number=max(1, candidate_page_num),
+            boundary=boundary_result,
+            flags=studio_flags,
+            book_id=book_id,
+        )
+        if (
+            studio_flags.semantic_layout_enabled
+            and smart_extraction.filter_mode != "off"
+            and any(b.decision == "REVIEW" for b in smart_extraction.blocks)
+            and is_stage3_semantic_provider_configured(
+                allow_cloud=allow_cloud_ai, is_private_book=True
+            )
+        ):
+            smart_extraction = await run_stage3_semantic_filter_if_needed(
+                smart_extraction,
+                source_words=source_word_inputs,
+                allow_cloud=allow_cloud_ai,
+                is_private_book=True,
+                tenant_scope=f"parent:{book_id}",
+                flags=studio_flags,
+            )
+        extracted_meta["smart_ocr_extraction"] = build_extraction_provenance_meta(
+            smart_extraction,
+            source_word_inputs,
+            allow_cloud_ai=allow_cloud_ai,
+        )
 
         # Persist Stage 1 atomically with stale-version & lease check
         locked = await repo.get_submission(submission_id, lock=True)
@@ -390,6 +497,7 @@ async def process_submission_stages(
         now = datetime.now(timezone.utc)
         if not extracted_text or not extracted_words:
             # Blank or image-only page: NEVER mark safe; escalate to Admin visual review.
+            extracted_meta["smart_ocr_extraction"]["artwork_candidate"] = True
             locked.OcrStatus = "NO_TEXT_DETECTED"
             locked.OcrText = ""
             locked.OcrWordsJson = []
@@ -441,6 +549,20 @@ async def process_submission_stages(
             await db.refresh(locked)
             return locked
 
+        # Layer 2 clean candidate (only excludes high-confidence noise in active mode;
+        # shadow/off or 0 exclusions keep exact raw OCR text & words!)
+        stage1_candidate_text = extracted_text
+        stage1_candidate_words = extracted_words
+        if (
+            smart_extraction.filter_mode == "active"
+            and smart_extraction.stats.exclude_blocks > 0
+            and smart_extraction.canonical_text.strip()
+        ):
+            filtered_words = filter_word_dicts_by_extraction(extracted_words, smart_extraction)
+            if filtered_words:
+                stage1_candidate_text = _normalize_text(smart_extraction.canonical_text)
+                stage1_candidate_words = filtered_words
+
         locked.OcrStatus = "COMPLETED"
         locked.OcrText = extracted_text
         locked.OcrWordsJson = extracted_words
@@ -448,17 +570,17 @@ async def process_submission_stages(
         locked.OcrHash = safety_content_hash(extracted_text)
         locked.OcrErrorCode = None
         locked.IsImageOnly = False
-        locked.CandidateText = extracted_text
-        locked.CandidateWordsJson = extracted_words
-        locked.CandidateHash = compute_candidate_hash(extracted_text, source_sha256=captured_sha)
+        locked.CandidateText = stage1_candidate_text
+        locked.CandidateWordsJson = stage1_candidate_words
+        locked.CandidateHash = compute_candidate_hash(stage1_candidate_text, source_sha256=captured_sha)
         locked.UpdatedAt = now
         await db.commit()
         await db.refresh(locked)
 
         ocr_status = "COMPLETED"
-        ocr_text = extracted_text
-        ocr_words = extracted_words
-        candidate_text = extracted_text
+        ocr_text = stage1_candidate_text
+        ocr_words = stage1_candidate_words
+        candidate_text = stage1_candidate_text
         candidate_hash = locked.CandidateHash
         is_image_only = False
         await db.rollback()
@@ -484,6 +606,7 @@ async def process_submission_stages(
                     submission_id,
                     expected_version=captured_version,
                     expected_sha=captured_sha,
+                    expected_worker_id=worker_id,
                     stage="PROOFREADING",
                     error_code="SOURCE_IMAGE_UNAVAILABLE",
                 )
@@ -497,6 +620,8 @@ async def process_submission_stages(
         uncertain_global: set[int] = set()
 
         def on_event(evt: dict[str, Any]) -> None:
+            if evt.get("status") == "started":
+                return
             provider_events.append({
                 "provider": str(evt.get("provider") or "unknown"),
                 "model": evt.get("model"),
@@ -534,6 +659,7 @@ async def process_submission_stages(
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
+                expected_worker_id=worker_id,
                 stage="PROOFREADING",
                 error_code=str(code)[:80],
                 provider_events=provider_events,
@@ -552,6 +678,7 @@ async def process_submission_stages(
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
+                expected_worker_id=worker_id,
                 stage="PROOFREADING",
                 error_code="PROOFREAD_UNEXPECTED_ERROR",
                 provider_events=provider_events,
@@ -598,6 +725,31 @@ async def process_submission_stages(
     # STAGE 3: TOOL CHECK (Deterministic Rules + Child Safety + Rights Basis)
     # Runs on EXACT candidate_text (post-proofreading or post-parent-edit).
     # ------------------------------------------------------------------
+    if is_image_only or ocr_status == "NO_TEXT_DETECTED":
+        effective_hash = candidate_hash or compute_candidate_hash(
+            "", source_sha256=captured_sha, is_image_only=True
+        )
+        return await _persist_tool_check_result(
+            db,
+            submission_id,
+            expected_version=captured_version,
+            expected_sha=captured_sha,
+            expected_candidate_hash=candidate_hash,
+            effective_candidate_hash=effective_hash,
+            expected_worker_id=worker_id,
+            workflow_id=uuid4(),
+            suitability="REVIEW_REQUIRED",
+            findings=build_image_only_findings(captured_sha),
+            provider_events=[],
+            scope=build_tool_check_scope(
+                chunks_checked=0,
+                total_chunks=0,
+                requires_admin_visual_review=True,
+                local_ai_enforced=local_ai_enforced,
+            ),
+            policy_blocked=False,
+        )
+
     if not is_image_only and ocr_status == "COMPLETED" and proofread_status in ("COMPLETED", "SKIPPED") and tool_check_status in ("PENDING", "RUNNING", "FAILED"):
         text_to_check = _normalize_text(candidate_text or "")
         expected_candidate_hash = candidate_hash or compute_candidate_hash(
@@ -612,6 +764,7 @@ async def process_submission_stages(
                 expected_version=captured_version,
                 expected_sha=captured_sha,
                 expected_candidate_hash=expected_candidate_hash,
+                expected_worker_id=worker_id,
                 workflow_id=workflow_id,
                 suitability="REVIEW_REQUIRED",
                 findings=[{
@@ -685,15 +838,16 @@ async def process_submission_stages(
             )
             safety_result = await safety_orchestrator.analyze(text_to_check)
         except ChildSafetyError as exc:
-            safety_events = _compact_provider_events(exc.provider_events)
+            safety_events = _compact_provider_events(list(getattr(exc, "provider_events", None) or []))
             return await _persist_stage_failure(
                 db,
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
                 expected_candidate_hash=expected_candidate_hash,
+                expected_worker_id=worker_id,
                 stage="TOOL_CHECK",
-                error_code=str(exc.code or "CHILD_SAFETY_FAILED")[:80],
+                error_code=str(getattr(exc, "code", None) or "CHILD_SAFETY_FAILED")[:80],
                 provider_events=safety_events,
                 workflow_id=workflow_id,
             )
@@ -704,8 +858,9 @@ async def process_submission_stages(
                 expected_version=captured_version,
                 expected_sha=captured_sha,
                 expected_candidate_hash=expected_candidate_hash,
+                expected_worker_id=worker_id,
                 stage="TOOL_CHECK",
-                error_code=str(exc.code or "TOOL_CHECK_CONFIG_INVALID")[:80],
+                error_code=str(getattr(exc, "code", None) or "TOOL_CHECK_CONFIG_INVALID")[:80],
                 workflow_id=workflow_id,
             )
         except Exception as exc:
@@ -723,6 +878,7 @@ async def process_submission_stages(
                 expected_version=captured_version,
                 expected_sha=captured_sha,
                 expected_candidate_hash=expected_candidate_hash,
+                expected_worker_id=worker_id,
                 stage="TOOL_CHECK",
                 error_code="TOOL_CHECK_UNEXPECTED_ERROR",
                 workflow_id=workflow_id,
@@ -736,14 +892,40 @@ async def process_submission_stages(
             for evt in safety_events
             if evt.get("availability") is True
         })
-        total_chunks = max(1, len(successful_chunks))
-        if not successful_chunks:
+        all_event_chunks = {
+            int(evt.get("chunk_id", 0))
+            for evt in safety_events
+            if evt.get("chunk_id") is not None
+        }
+        raw_chunks_total = safety_result.get("chunks_total")
+        if isinstance(raw_chunks_total, int) and not isinstance(raw_chunks_total, bool):
+            total_chunks = raw_chunks_total
+        else:
+            total_chunks = max(len(all_event_chunks), len(successful_chunks), 1)
+        raw_chunks_completed = safety_result.get("chunks_completed")
+        raw_all_completed = safety_result.get("all_chunks_completed")
+        all_chunks_flag_ok = (
+            raw_all_completed is True if raw_all_completed is not None else True
+        )
+        completed_count_ok = (
+            raw_chunks_completed >= total_chunks
+            if isinstance(raw_chunks_completed, int) and not isinstance(raw_chunks_completed, bool)
+            else True
+        )
+        covers_all_chunks = bool(
+            all_chunks_flag_ok
+            and completed_count_ok
+            and total_chunks > 0
+            and len(successful_chunks) >= total_chunks
+        )
+        if not covers_all_chunks:
             return await _persist_stage_failure(
                 db,
                 submission_id,
                 expected_version=captured_version,
                 expected_sha=captured_sha,
                 expected_candidate_hash=expected_candidate_hash,
+                expected_worker_id=worker_id,
                 stage="TOOL_CHECK",
                 error_code="INCOMPLETE_CHUNK_COVERAGE",
                 provider_events=safety_events,
@@ -781,7 +963,7 @@ async def process_submission_stages(
 
         scope = {
             "modality": "TEXT_ONLY_WITH_OCR_IMAGE_PROOFREAD",
-            "covers_all_chunks": True,
+            "covers_all_chunks": covers_all_chunks,
             "chunks_checked": len(successful_chunks),
             "total_chunks": total_chunks,
             "image_visual_safety_checked": False,
@@ -905,7 +1087,8 @@ async def _persist_tool_check_result(
     *,
     expected_version: int,
     expected_sha: str,
-    expected_candidate_hash: str,
+    expected_candidate_hash: str | None,
+    effective_candidate_hash: str | None = None,
     expected_worker_id: str | None = None,
     workflow_id: UUID,
     suitability: str,
@@ -927,7 +1110,10 @@ async def _persist_tool_check_result(
         return locked
 
     now = datetime.now(timezone.utc)
-    locked.ToolCheckInputHash = expected_candidate_hash
+    final_candidate_hash = effective_candidate_hash or expected_candidate_hash or locked.CandidateHash
+    if final_candidate_hash and not locked.CandidateHash:
+        locked.CandidateHash = final_candidate_hash
+    locked.ToolCheckInputHash = final_candidate_hash
     locked.ToolCheckSuitability = suitability
     locked.ToolCheckFindingsJson = findings
     locked.ToolCheckProviderEventsJson = provider_events

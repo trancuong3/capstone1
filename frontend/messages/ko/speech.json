@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "로컬 우선, 온라인 자동 전환 활성화",
     "googleSttFallback": "음성 인식(STT)을 위한 Google 대체 사용",
     "googleTtsFallback": "발음(TTS)을 위한 Google 대체 사용",
-    "missingGoogleKeyHint": "backend/.env에 Google Cloud API 키가 설정되지 않은 경우, ViRead는 자동으로 Google/브라우저 온라인을 대체 수단으로 사용합니다.",
+    "missingGoogleKeyHint": "서버에 Google Cloud API 키가 설정되지 않은 경우, ViRead는 자동으로 Google/브라우저 온라인을 대체 수단으로 사용합니다.",
     "useDefaultVoice": "기본 음성 사용",
     "preview": "미리듣기",
     "stopPreview": "미리듣기 중지",
@@ -79,7 +79,9 @@
       "american": "미국 억양",
       "british": "영국 억양"
     },
-    "googleProviderLabel": "Google 대체"
+    "googleProviderLabel": "Google 대체",
+    "sessionLockedBadge": "이 읽기 세션에 고정됨",
+    "offlineBrowserBadge": "브라우저가 오프라인 상태입니다"
   },
   "engineBadge": {
     "ariaLabel": "음성 소스: STT {stt}, TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "표준 캐시",
       "android_native": "Android (vi-VN)",
       "google_cloud": "온라인 (Google API)",
-      "browser_default": "온라인 (Google/브라우저)"
-    }
+      "browser_default": "온라인 (Google/브라우저)",
+      "idle": "확인 중…"
+    },
+    "idleDetail": "{base} (음성 엔진 상태 확인 중)"
   },
   "playback": {
     "unavailable": "기기 내 음성을 사용할 수 없습니다. 화면의 텍스트를 확인하고 다시 시도하세요.",

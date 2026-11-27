@@ -159,12 +159,14 @@ function SimpleWorkspace({
       <StatusMessage tone="error">
         {error}
         <Button
-          variant="quiet"
-          className="mt-3 sm:w-auto"
+          className="mt-3"
+          fullWidth={false}
           onClick={() => {
             setError("");
             setReload((n) => n + 1);
           }}
+          size="admin"
+          variant="outline"
         >
           {t("karaoke.workspace.retryLoad")}
         </Button>
@@ -174,21 +176,32 @@ function SimpleWorkspace({
     return <AdminLoading label={t("karaoke.workspace.loadingCapabilities")} />;
   if (loaded.detail && !loaded.detail.draft)
     return (
-      <Card>
-        <h1 className="text-2xl font-extrabold">
+      <Card className="bg-white p-5">
+        <h1 className="text-xl font-extrabold text-ink">
           {t("karaoke.workspace.publishedTitle")}
         </h1>
-        <p>{t("karaoke.workspace.publishedDesc")}</p>
-        <Button
-          disabled={creating}
-          isLoading={creating}
-          onClick={() => void createDraft()}
-        >
-          {t("karaoke.workspace.createDraftToEdit")}
-        </Button>
-        <ButtonLink href="/admin/karaoke" variant="quiet">
-          {t("karaoke.workspace.backToList")}
-        </ButtonLink>
+        <p className="text-sm text-muted">
+          {t("karaoke.workspace.publishedDesc")}
+        </p>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            disabled={creating}
+            fullWidth={false}
+            isLoading={creating}
+            onClick={() => void createDraft()}
+            size="admin"
+          >
+            {t("karaoke.workspace.createDraftToEdit")}
+          </Button>
+          <ButtonLink
+            fullWidth={false}
+            href="/admin/karaoke"
+            size="admin"
+            variant="outline"
+          >
+            {t("karaoke.workspace.backToList")}
+          </ButtonLink>
+        </div>
       </Card>
     );
 

@@ -199,7 +199,7 @@ export function EntertainmentLearningSummary({
               >
                 <div className="min-w-0">
                   <p
-                    className="viread-learning-content truncate text-sm font-bold text-ink"
+                    className="viread-learning-content break-words leading-snug text-sm font-bold text-ink"
                     dir="ltr"
                     lang="vi"
                   >

@@ -23,9 +23,9 @@ from .contracts import (
 PROFILES = {
     "FLOW1_EXTERNAL_TRDG": {"flows": {"FLOW2_EXTERNAL", "FLOW2_TRDG"}, "learning_rate": 1e-4, "weight_decay": 5e-4, "image_aug": True,
                              "sample_volume_limits": {"FLOW2_EXTERNAL": (500, 1_000), "FLOW2_TRDG": (20_000, 50_000)}},
-    "FLOW2_ADMIN_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 1e-4, "weight_decay": 1e-4, "image_aug": False},
+    "FLOW2_ADMIN_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 100},
     # Read/resume compatibility for runs created before the public flow names were corrected.
-    "FLOW1_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 1e-4, "weight_decay": 1e-4, "image_aug": False},
+    "FLOW1_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 100},
     "FLOW2_EXTERNAL_TRDG": {"flows": {"FLOW2_EXTERNAL", "FLOW2_TRDG"}, "learning_rate": 1e-4, "weight_decay": 5e-4, "image_aug": True},
 }
 
@@ -85,7 +85,8 @@ def _profile_config(profile: str, config: dict[str, Any], data_root: Path, train
     cfg["cnn"]["pretrained"] = False
     cfg["dataset"].update({"name": f"viread_v2_{profile.lower()}_{dataset_version_sha256[:12]}", "data_root": str(data_root),
                           "train_annotation": str(train_tsv), "valid_annotation": str(valid_tsv)})
-    cfg["trainer"].update({"iters": steps, "batch_size": batch_size, "print_every": 50, "valid_every": 500,
+    cfg["trainer"].update({"iters": steps, "batch_size": batch_size, "print_every": 50,
+                           "valid_every": int(PROFILES[profile].get("valid_every", 500)),
                            "checkpoint": str(run_dir / "latest.pt"), "export": str(run_dir / "candidate.pth"),
                            "metrics": None, "log": None})
     cfg["aug"]["image_aug"] = PROFILES[profile]["image_aug"]
@@ -401,6 +402,8 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     """
     from importlib.metadata import version as package_version
 
+    import warnings
+
     import numpy as np
 
     if not hasattr(np, "sctypes"):
@@ -411,8 +414,12 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
             "complex": [np.complex64, np.complex128, np.clongdouble],
             "others": [np.bool_, np.object_, np.str_, np.bytes_, np.void],
         }
-    if not hasattr(np, "complex"):
-        np.complex = complex
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", FutureWarning)
+        if not hasattr(np, "complex"):
+            np.complex = complex
+        if not hasattr(np, "bool"):
+            np.bool = bool
 
     import cv2
     import torch
@@ -520,7 +527,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                           total_steps, batch_size, seed, dataset_version_sha256)
     amp_enabled = bool(use_fp16 and cfg["device"] == "cuda")
     effective_config_sha = canonical_sha256({"architecture_sha256": architecture_sha, "profile": profile,
-                                  "optimizer": cfg["optimizer"], "trainer": {"steps": total_steps, "batch_size": batch_size},
+                                  "optimizer": cfg["optimizer"], "trainer": {"steps": total_steps, "batch_size": batch_size,
+                                  "valid_every": int(cfg["trainer"]["valid_every"])},
                                   "freeze_epochs": freeze_epochs, "freeze_encoder_lr": 1e-5,
                                   "full_model_lr": 1e-5, "fp16": amp_enabled,
                                   "scheduler": "CosineAnnealingLR",
@@ -634,7 +642,14 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     iterator = iter(trainer.train_gen)
     step = trainer.iter
     if not resume:
-        validation_loss = None
+        # Evaluate the untouched parent at step=0 so best-checkpoint selection
+        # never exports weights worse on validation loss than the parent.
+        validation_loss = float(trainer.validate())
+        if not __import__("math").isfinite(validation_loss):
+            raise ValueError("initial parent model validation loss is non-finite")
+        best_validation_loss = validation_loss
+        best_step = 0
+        best_model_path, best_model_sha256 = _store_best_model(torch, trainer.model, run_dir)
     while step < total_steps:
         if step >= freeze_steps and stage == "freeze_vgg":
             for parameter in cnn_parameters:

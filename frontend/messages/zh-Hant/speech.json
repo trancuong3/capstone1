@@ -50,7 +50,7 @@
     "localWithGoogleDesc": "優先使用本機，自動啟用線上備援",
     "googleSttFallback": "語音辨識 (STT) 的 Google 備援",
     "googleTtsFallback": "語音朗讀 (TTS) 的 Google 備援",
-    "missingGoogleKeyHint": "當後端 backend/.env 中未設定 Google Cloud API 金鑰時，ViRead 將自動使用 Google/線上瀏覽器作為備援。",
+    "missingGoogleKeyHint": "當伺服器未設定 Google Cloud API 金鑰時，ViRead 將自動使用 Google/線上瀏覽器作為備援。",
     "useDefaultVoice": "使用預設語音",
     "preview": "試聽",
     "stopPreview": "停止試聽",
@@ -79,7 +79,9 @@
       "american": "美式口音",
       "british": "英式口音"
     },
-    "googleProviderLabel": "Google 備用"
+    "googleProviderLabel": "Google 備用",
+    "sessionLockedBadge": "已鎖定用於本次閱讀",
+    "offlineBrowserBadge": "瀏覽器目前離線"
   },
   "engineBadge": {
     "ariaLabel": "語音來源：STT {stt}，TTS {tts}",
@@ -96,8 +98,10 @@
       "catalog_cache": "標準快取",
       "android_native": "Android (vi-VN)",
       "google_cloud": "線上 (Google API)",
-      "browser_default": "線上 (Google/瀏覽器)"
-    }
+      "browser_default": "線上 (Google/瀏覽器)",
+      "idle": "檢測中…"
+    },
+    "idleDetail": "{base} (正在檢測語音引擎狀態)"
   },
   "playback": {
     "unavailable": "裝置端語音尚未就緒。請家長和寶貝查看螢幕上的文字，然後點擊「重試」。",

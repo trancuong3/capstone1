@@ -608,8 +608,13 @@ def drain_queue_synchronously(
     finally:
         if is_scale_to_zero_enabled():
             runtime.clear_burst_window()
-            runtime.set_standby_mode("scale_to_zero")
-        elif is_quiet_standby_enabled() and time.monotonic() >= runtime.burst_until_monotonic():
+            if not runtime.is_draining():
+                runtime.set_standby_mode("scale_to_zero")
+        elif (
+            is_quiet_standby_enabled()
+            and not runtime.is_draining()
+            and time.monotonic() >= runtime.burst_until_monotonic()
+        ):
             runtime.set_standby_mode("quiet_standby")
 
 
@@ -724,15 +729,16 @@ def run_worker_forever(
     signal.signal(signal.SIGINT, _handle_stop)
     signal.signal(signal.SIGTERM, _handle_stop)
 
-    if use_scale_to_zero:
-        runtime.set_standby_mode("scale_to_zero")
-    elif use_quiet_standby:
-        if client is not None:
-            runtime.extend_burst_window(resolved_burst_seconds)
+    if not runtime.is_draining():
+        if use_scale_to_zero:
+            runtime.set_standby_mode("scale_to_zero")
+        elif use_quiet_standby:
+            if client is not None:
+                runtime.extend_burst_window(resolved_burst_seconds)
+            else:
+                runtime.set_standby_mode("quiet_standby")
         else:
-            runtime.set_standby_mode("quiet_standby")
-    else:
-        runtime.set_standby_mode("active_polling")
+            runtime.set_standby_mode("active_polling")
 
     logger.info(
         "ViRead Remote OCR Worker started (worker_id=%s, bind=http://%s:%s, cpu_threads=%s, connected=%s, quiet_standby=%s, scale_to_zero=%s)",

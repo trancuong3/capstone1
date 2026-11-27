@@ -451,9 +451,9 @@
     "restartFromScratch": "Empezar de nuevo (nuevo intento)",
     "micUnavailable": "Acceso al micrófono denegado. Puedes escribir tu descripción en el cuadro de abajo.",
     "micListening": "Escuchando tu descripción...",
-    "transcribingSpeech": "Convirtiendo tu voz mediante ElevenLabs...",
+    "transcribingSpeech": "Convirtiendo tu voz en texto...",
     "unclearVoice": "No pude escucharte claramente. ¡Por favor, toca el micrófono para intentarlo de nuevo o escribe tu respuesta!",
-    "transcribedElevenLabs": "¡Voz convertida mediante ElevenLabs! Puedes volver a escuchar o editar antes de enviar para su calificación.",
+    "transcribedElevenLabs": "¡Voz convertida en texto! Puedes volver a escuchar o editar antes de enviar para su calificación.",
     "transcribedBrowser": "¡Historia grabada! Puedes volver a leer o editar antes de enviar para su calificación.",
     "emptySubmissionError": "Por favor, habla o escribe al menos una oración describiendo la imagen.",
     "sources": {

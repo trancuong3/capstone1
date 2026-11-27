@@ -13,6 +13,8 @@ import {
 
 export type RealtimeWordStatus = "MATCH" | "SUBSTITUTE" | "DELETE" | "REPEATED";
 
+const FILLER_WORDS = new Set(["ờ", "ừm", "ầm", "hừm", "ưm", "ơ", "à"]);
+
 export interface RealtimeWordState {
   wordId: string;
   wordIndex: number;
@@ -453,9 +455,21 @@ export class RealtimeAlignmentEngine {
     return this.isOffTopic(tokenizeRealtimeText(text));
   }
 
+  private isTokenNearCursor(token: string): boolean {
+    const start = Math.max(0, this.currentBookIndex - 2);
+    const end = Math.min(this.bookWords.length, this.currentBookIndex + 6);
+    for (let i = start; i < end; i += 1) {
+      if (this.bookWords[i].normalizedText === token) return true;
+    }
+    return false;
+  }
+
   private isOffTopic(tokens: readonly string[]): boolean {
-    if (tokens.length < 3) return false;
-    return this.alignedTokenCount(tokens) / tokens.length < 0.5;
+    const contentTokens = tokens.filter(
+      (token) => !FILLER_WORDS.has(token) || this.isTokenNearCursor(token),
+    );
+    if (contentTokens.length < 3) return false;
+    return this.alignedTokenCount(contentTokens) / contentTokens.length < 0.5;
   }
 
   private getPhonicsWindowTargets(cursor: number): string[] {
@@ -818,16 +832,31 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3. Tìm từ ở phía trước.
+      // 3. Tìm từ ở phía trước (áp dụng shouldDeferLookaheadMatch đồng bộ với addFinalTranscript
+      // để interim không nhảy vọt qua 20 từ chức năng tiếng Việt rồi bật ngược khi final về).
       const matchedIndex = this.findAheadFrom(cursor, token);
+      const nextTokenConfirmsSkip =
+        matchedIndex !== -1 &&
+        tokenIndex + 1 < tokens.length &&
+        matchedIndex + 1 < this.bookWords.length &&
+        this.bookWords[matchedIndex + 1].normalizedText ===
+          tokens[tokenIndex + 1];
 
-      if (matchedIndex !== -1) {
-        // Kiểm tra từ hiện tại đã được nhận diện là đọc sai trước đó chưa.
-        const previousStatus = statusByWordId.get(currentWord.wordId);
-
-        if (previousStatus?.status !== "SUBSTITUTE") {
-          // Chưa có bằng chứng đọc sai: đánh dấu từ bị bỏ qua.
-          for (let index = cursor; index < matchedIndex; index += 1) {
+      if (
+        matchedIndex !== -1 &&
+        (!shouldDeferLookaheadMatch(
+          token,
+          cursor,
+          matchedIndex,
+          this.bookWords.length,
+        ) ||
+          nextTokenConfirmsSkip)
+      ) {
+        // Điền trạng thái nhất quán cho mọi từ bị bỏ qua trong [cursor .. matchedIndex - 1],
+        // giữ nguyên các từ đã có bằng chứng đọc sai (SUBSTITUTE) trước đó.
+        for (let index = cursor; index < matchedIndex; index += 1) {
+          const existing = statusByWordId.get(this.bookWords[index].wordId);
+          if (existing?.status !== "SUBSTITUTE") {
             setPreviewStatus(index, "DELETE");
           }
         }
@@ -838,6 +867,27 @@ export class RealtimeAlignmentEngine {
         cursor = matchedIndex + 1;
         targetIndex = cursor < this.bookWords.length ? cursor : matchedIndex;
         continue;
+      }
+
+      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch >= 4 từ (đồng bộ với addFinalTranscript -> findReanchor).
+      if (tokenIndex + 1 < tokens.length) {
+        const anchor = this.findReanchor(cursor, token, tokens[tokenIndex + 1]);
+        if (anchor !== -1) {
+          for (let index = cursor; index < anchor; index += 1) {
+            const existing = statusByWordId.get(this.bookWords[index].wordId);
+            if (existing?.status !== "SUBSTITUTE") {
+              setPreviewStatus(index, "DELETE");
+            }
+          }
+          setPreviewStatus(anchor, "MATCH");
+          setPreviewStatus(anchor + 1, "MATCH");
+          previewSpelling = false;
+
+          cursor = anchor + 2;
+          targetIndex = cursor < this.bookWords.length ? cursor : anchor + 1;
+          tokenIndex += 1;
+          continue;
+        }
       }
 
       // 4. Từ không khớp ở cuối interim: có thể bé đang ghép vần hoặc sắp tự sửa

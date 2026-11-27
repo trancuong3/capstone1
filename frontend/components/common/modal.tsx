@@ -63,6 +63,11 @@ export function Modal({
   const tA11y = useTranslations("accessibility");
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -79,17 +84,29 @@ export function Modal({
     };
   }, [isOpen]);
 
+  useEffect(() => {
+    if (!isOpen || !closeOnEscape) {
+      return;
+    }
+
+    function handleDocumentKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        onCloseRef.current();
+      }
+    }
+
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [closeOnEscape, isOpen]);
+
   if (!isOpen) {
     return null;
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    if (event.key === "Escape" && closeOnEscape) {
-      event.stopPropagation();
-      onClose();
-      return;
-    }
-
     if (event.key !== "Tab" || !dialogRef.current) {
       return;
     }

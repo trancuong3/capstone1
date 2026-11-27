@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from uuid import UUID
 
@@ -14,15 +15,24 @@ from app.policies.book_access import is_book_private
 from app.repositories.ocr_extraction_repository import OcrExtractionRepository
 from app.schemas.ocr_extraction import (
     AnalyzeBlocksRequest,
+    ApplyExtractionToDraftRequest,
+    ApplyExtractionToDraftResponse,
     DocumentBoundaryResult,
     PageExtractRequest,
     PageOcrExtractionResponse,
     PatchPageBlocksRequest,
 )
-from app.services.ocr_content_extraction import apply_block_actions, extract_ocr_content
+from app.services.ocr_content_extraction import (
+    apply_block_actions,
+    apply_page_extraction_to_revision_draft,
+    extract_ocr_content,
+    run_stage3_semantic_filter_if_needed,
+)
 from app.services.ocr_document_boundary import detect_document_boundary
+from app.services.rate_limiter import rate_limit
 
 router = APIRouter()
+studio_router = APIRouter()
 
 _MAX_INLINE_IMAGE_BYTES = 10 * 1024 * 1024  # 10 MiB safety limit
 _PRIVATE_NO_STORE_HEADERS = {
@@ -117,6 +127,7 @@ async def analyze_ocr_blocks(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_ocr_extract", default_max=60, default_window=60.0)),
 ) -> PageOcrExtractionResponse:
     repo = OcrExtractionRepository(db)
     role = await _authorize_actor_role(repo, actor_id)
@@ -135,32 +146,51 @@ async def analyze_ocr_blocks(
         _enforce_book_ownership(role, actor_id, book)
 
     _apply_private_headers(response, book)
+    resolved_book_id = book.Id if book is not None else payload.book_id
+    resolved_book_title = payload.book_title or (book.Title if book is not None else None)
+    resolved_book_author = payload.book_author or (book.Author if book is not None else None)
+    private_book = bool(book is not None and is_book_private(book))
+
+    if callable(getattr(db, "rollback", None)):
+        await db.rollback()
 
     boundary: DocumentBoundaryResult | None = payload.boundary
     if boundary is None and payload.image_base64:
-        img_bytes = _decode_inline_image(payload.image_base64)
+        img_bytes = await asyncio.to_thread(_decode_inline_image, payload.image_base64)
         word_boxes = [w.bbox for w in payload.words] if payload.words else None
         try:
-            boundary = detect_document_boundary(img_bytes, word_bboxes_norm=word_boxes)
+            boundary = await asyncio.to_thread(
+                detect_document_boundary, img_bytes, word_bboxes_norm=word_boxes
+            )
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="INVALID_IMAGE",
             ) from None
 
-    return extract_ocr_content(
+    result = await asyncio.to_thread(
+        extract_ocr_content,
         payload.words,
         page_number=payload.page_number,
-        book_title=payload.book_title or (book.Title if book is not None else None),
-        book_author=payload.book_author or (book.Author if book is not None else None),
+        book_title=resolved_book_title,
+        book_author=resolved_book_author,
         cross_pages=payload.cross_pages,
         boundary=boundary,
         target_spread_side=payload.target_spread_side,
         filter_mode=payload.filter_mode,
         semantic_ai_json=payload.semantic_ai_json,
-        book_id=book.Id if book is not None else payload.book_id,
+        book_id=resolved_book_id,
         book_page_id=payload.page_id,
     )
+    if payload.run_semantic_ai and payload.semantic_ai_json is None:
+        result = await run_stage3_semantic_filter_if_needed(
+            result,
+            source_words=payload.words,
+            allow_cloud=not private_book,
+            is_private_book=private_book,
+            tenant_scope=f"parent:{actor_id}" if private_book else "admin:catalog",
+        )
+    return result
 
 
 @router.post("/pages/{page_id}/extract", response_model=PageOcrExtractionResponse)
@@ -170,10 +200,19 @@ async def extract_page_ocr(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_ocr_extract", default_max=60, default_window=60.0)),
 ) -> PageOcrExtractionResponse:
     repo = OcrExtractionRepository(db)
     _, page, book = await _load_authorized_page(repo, actor_id, page_id)
     _apply_private_headers(response, book)
+
+    resolved_book_id = book.Id
+    resolved_page_id = page.Id
+    resolved_page_number = max(1, int(page.PageNumber or 1))
+    resolved_book_title = book.Title
+    resolved_book_author = book.Author
+    private_book = is_book_private(book)
+    owner_id = book.OwnerParentId if private_book else None
 
     revision = await repo.resolve_revision_for_page(page, payload.page_revision_id)
     if payload.page_revision_id is not None and revision is None:
@@ -181,50 +220,64 @@ async def extract_page_ocr(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Page revision not found",
         )
+    resolved_revision_id = revision.Id if revision is not None else None
 
     words = payload.words
     if words is None:
-        words = await repo.load_revision_words(revision.Id) if revision is not None else []
+        words = await repo.load_revision_words(resolved_revision_id) if resolved_revision_id is not None else []
 
     cross_pages = payload.cross_pages
     if cross_pages is None and payload.include_cross_page:
-        cross_pages = await repo.load_sibling_cross_pages(book.Id, page.Id)
+        cross_pages = await repo.load_sibling_cross_pages(resolved_book_id, resolved_page_id)
+
+    if callable(getattr(db, "rollback", None)):
+        await db.rollback()
 
     boundary: DocumentBoundaryResult | None = payload.boundary
     if boundary is None and payload.image_base64:
-        img_bytes = _decode_inline_image(payload.image_base64)
+        img_bytes = await asyncio.to_thread(_decode_inline_image, payload.image_base64)
         word_boxes = [w.bbox for w in words] if words else None
         try:
-            boundary = detect_document_boundary(img_bytes, word_bboxes_norm=word_boxes)
+            boundary = await asyncio.to_thread(
+                detect_document_boundary, img_bytes, word_bboxes_norm=word_boxes
+            )
         except Exception:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="INVALID_IMAGE",
             ) from None
 
-    result = extract_ocr_content(
+    result = await asyncio.to_thread(
+        extract_ocr_content,
         words,
-        page_number=max(1, int(page.PageNumber or 1)),
-        book_title=book.Title,
-        book_author=book.Author,
+        page_number=resolved_page_number,
+        book_title=resolved_book_title,
+        book_author=resolved_book_author,
         cross_pages=cross_pages or [],
         boundary=boundary,
         filter_mode=payload.filter_mode,
         semantic_ai_json=payload.semantic_ai_json,
-        book_id=book.Id,
-        book_page_id=page.Id,
-        page_revision_id=revision.Id if revision is not None else None,
+        book_id=resolved_book_id,
+        book_page_id=resolved_page_id,
+        page_revision_id=resolved_revision_id,
     )
+    if payload.run_semantic_ai and payload.semantic_ai_json is None:
+        result = await run_stage3_semantic_filter_if_needed(
+            result,
+            source_words=list(words),
+            allow_cloud=not private_book,
+            is_private_book=private_book,
+            tenant_scope=f"parent:{actor_id}" if private_book else "admin:catalog",
+        )
 
-    owner_id = book.OwnerParentId if is_book_private(book) else None
-    existing_row, load_degraded = await repo.get_latest_extraction(page.Id)
+    existing_row, load_degraded = await repo.get_latest_extraction(resolved_page_id)
     if load_degraded:
         return result.model_copy(update={"persisted": False, "storage_degraded": True})
 
     saved_row, save_degraded = await repo.save_extraction(
-        book_id=book.Id,
-        page_id=page.Id,
-        page_revision_id=revision.Id if revision is not None else None,
+        book_id=resolved_book_id,
+        page_id=resolved_page_id,
+        page_revision_id=resolved_revision_id,
         owner_id=owner_id,
         extraction=result,
         source_words=list(words),
@@ -252,6 +305,7 @@ async def get_page_extraction(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_ocr_read", default_max=180, default_window=60.0)),
 ) -> PageOcrExtractionResponse:
     repo = OcrExtractionRepository(db)
     _, page, book = await _load_authorized_page(repo, actor_id, page_id)
@@ -279,6 +333,7 @@ async def patch_page_blocks(
     response: Response,
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
+    _rate_limited: None = Depends(rate_limit("studio_ocr_extract", default_max=120, default_window=60.0)),
 ) -> PageOcrExtractionResponse:
     repo = OcrExtractionRepository(db)
     _, page, book = await _load_authorized_page(repo, actor_id, page_id)
@@ -342,3 +397,45 @@ async def patch_page_blocks(
             "updated_at": saved_row.UpdatedAt,
         }
     )
+
+
+@studio_router.post(
+    "/pages/{page_id}/ocr-extraction/apply-to-draft",
+    response_model=ApplyExtractionToDraftResponse,
+)
+async def apply_page_ocr_extraction_to_draft(
+    page_id: UUID,
+    response: Response,
+    payload: ApplyExtractionToDraftRequest | None = None,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+) -> ApplyExtractionToDraftResponse:
+    """Apply accepted Layer 2 canonical_text & canonical_words onto an editable PageRevision draft."""
+    repo = OcrExtractionRepository(db)
+    _, page, book = await _load_authorized_page(repo, actor_id, page_id)
+    for key, value in _PRIVATE_NO_STORE_HEADERS.items():
+        response.headers[key] = value
+
+    row, degraded = await repo.get_latest_extraction(page.Id)
+    if degraded:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="EXTRACTION_STORAGE_UNMIGRATED",
+        )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="EXTRACTION_NOT_FOUND",
+        )
+
+    extraction, _source_words, _undo_stack = repo.row_to_response(row)
+    applied = await apply_page_extraction_to_revision_draft(
+        db,
+        page=page,
+        book=book,
+        extraction=extraction,
+        actor_id=actor_id,
+        requested_revision_id=payload.page_revision_id if payload is not None else None,
+    )
+    await db.commit()
+    return applied

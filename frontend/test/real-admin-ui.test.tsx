@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
@@ -1180,14 +1180,14 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
     expect(
       screen.getByTestId("operational-state-ocr_worker"),
-    ).toHaveTextContent("Queued");
+    ).toHaveTextContent("Đang xếp hàng");
     expect(screen.getByTestId("admin-audio-cache-summary")).toBeInTheDocument();
     expect(screen.getByText("14")).toBeInTheDocument();
     expect(screen.getByText("75%")).toBeInTheDocument();
     expect(
       await screen.findByTestId("admin-client-device-capabilities"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Client Device Capabilities")).toBeInTheDocument();
+    expect(screen.getByText("Năng lực thiết bị hiện tại")).toBeInTheDocument();
   });
   it("health error is safe and recheck recovers", async () => {
     const user = userEvent.setup();
@@ -1202,11 +1202,472 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     await screen.findByText(
       "Không thể lấy trạng thái an toàn. Vui lòng thử lại.",
     );
+    expect(screen.queryByText("secret sql")).not.toBeInTheDocument();
+    // Group 5 device diagnostics remain decoupled and visible even when backend fails.
+    expect(
+      await screen.findByTestId("admin-client-device-capabilities"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Kiểm tra thiết bị" }),
+    ).toBeInTheDocument();
+
     fetchMock.mockImplementation(async (url: string) => readyResponse(url));
     await user.click(screen.getByRole("button", { name: "Kiểm tra lại" }));
     expect(
       await screen.findByRole("heading", { name: "Database" }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps previous health snapshot on refresh failure, shows HTTP status/request_id, and aborts in-flight re-clicks", async () => {
+    const user = userEvent.setup();
+    render(
+      <AdminServicesProvider>
+        <AdminHealthScreen />
+      </AdminServicesProvider>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Database" }),
+    ).toBeInTheDocument();
+
+    // Refresh fails with 503 + x-request-id: prior snapshot must stay visible!
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "secret sql" }), {
+        status: 503,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "req-health-503",
+        },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Kiểm tra lại" }));
+
+    const warning = await screen.findByTestId("health-refresh-warning");
+    expect(warning).toHaveTextContent("Mã HTTP 503");
+    expect(warning).toHaveTextContent("req-health-503");
+    expect(screen.queryByText("secret sql")).not.toBeInTheDocument();
+    // Prior snapshot remains intact!
+    expect(
+      screen.getByRole("heading", { name: "Database" }),
+    ).toBeInTheDocument();
+
+    // Dismiss the warning banner cleanly.
+    await user.click(
+      screen.getByRole("button", { name: "Đóng thông báo lỗi" }),
+    );
+    expect(
+      screen.queryByTestId("health-refresh-warning"),
+    ).not.toBeInTheDocument();
+
+    // Clicking recheck while a prior request is in-flight aborts the first AbortSignal.
+    let firstSignal: AbortSignal | undefined;
+    let callCount = 0;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/system/admin/health")) {
+        callCount += 1;
+        if (callCount === 1) {
+          firstSignal = init?.signal ?? undefined;
+          return new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          });
+        }
+        return readyResponse(String(url));
+      }
+      return readyResponse(String(url));
+    });
+
+    const recheckBtn = screen.getByRole("button", { name: "Kiểm tra lại" });
+    await user.click(recheckBtn);
+    await waitFor(() => expect(callCount).toBe(1));
+    expect(recheckBtn).toBeEnabled();
+
+    await user.click(recheckBtn);
+    await waitFor(() => expect(callCount).toBe(2));
+    expect(firstSignal?.aborted).toBe(true);
+    expect(
+      screen.getByRole("heading", { name: "Database" }),
+    ).toBeInTheDocument();
+  });
+
+  it("groups 5 logical health sections, supports KPI filtering, collapsible local-only group, audio cache bars/error, and OCR worker wakeup", async () => {
+    const user = userEvent.setup();
+    let wakeupCalls = 0;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url);
+      if (
+        target.endsWith("/system/admin/health/ocr-worker/wakeup") &&
+        init?.method === "POST"
+      ) {
+        wakeupCalls += 1;
+        return Response.json({
+          status: "woken",
+          woken: true,
+          detail: "Đã gửi lệnh đánh thức OCR worker từ xa thành công.",
+        });
+      }
+      if (target.endsWith("/system/admin/health")) {
+        return Response.json({
+          overall_status: "HEALTHY",
+          checked_at: timestamp,
+          services: [
+            {
+              id: "api",
+              label: "FastAPI",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "healthy",
+              checked_at: timestamp,
+              safe_message: "API đã phản hồi yêu cầu kiểm tra.",
+              service_group: "core",
+              execution_mode: "always_on",
+              criticality: "core",
+              queue_depth: null,
+              oldest_pending_job_age_seconds: null,
+              last_success_at: null,
+              last_error: null,
+            },
+            {
+              id: "database",
+              label: "Database",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "healthy",
+              checked_at: timestamp,
+              safe_message: "Database đã phản hồi truy vấn đọc.",
+              service_group: "core",
+              execution_mode: "always_on",
+              criticality: "core",
+            },
+            {
+              id: "storage",
+              label: "Supabase Storage",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "healthy",
+              checked_at: timestamp,
+              safe_message: "Storage phản hồi kiểm tra bucket.",
+              service_group: "core",
+              execution_mode: "always_on",
+              criticality: "core",
+            },
+            {
+              id: "tts",
+              label: "Text-to-Speech (TTS)",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "cached",
+              checked_at: timestamp,
+              safe_message: "Phục vụ từ bộ nhớ đệm TTS dựng sẵn.",
+              service_group: "voice",
+              execution_mode: "precomputed_cache",
+              criticality: "important",
+            },
+            {
+              id: "stt",
+              label: "Speech-to-Text (STT)",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "client_side",
+              checked_at: timestamp,
+              safe_message: "Nhận diện giọng nói WASM trên trình duyệt.",
+              service_group: "voice",
+              execution_mode: "browser_wasm",
+              criticality: "important",
+            },
+            {
+              id: "ocr_worker",
+              label: "OCR worker",
+              status: "DEGRADED",
+              operational_state: "Standby",
+              detail_status: "standby",
+              checked_at: timestamp,
+              safe_message: "OCR worker từ xa đang ngủ (hàng đợi trống).",
+              service_group: "ocr",
+              execution_mode: "remote_worker",
+              criticality: "important",
+              action_hint: "Bấm nút Đánh thức OCR worker để khởi động trước.",
+              can_wake: true,
+              queue_depth: 0,
+              last_success_at: timestamp,
+            },
+            {
+              id: "paddleocr",
+              label: "PaddleOCR",
+              status: "DEGRADED",
+              operational_state: "Standby",
+              detail_status: "standby",
+              checked_at: timestamp,
+              safe_message: "Đang chờ OCR worker.",
+              service_group: "ocr",
+              execution_mode: "remote_worker",
+            },
+            {
+              id: "vietocr",
+              label: "VietOCR",
+              status: "DEGRADED",
+              operational_state: "Standby",
+              detail_status: "standby",
+              checked_at: timestamp,
+              safe_message: "Đang chờ OCR worker.",
+              service_group: "ocr",
+              execution_mode: "remote_worker",
+            },
+            {
+              id: "local_ocr",
+              label: "AI OCR cục bộ",
+              status: "HEALTHY",
+              operational_state: "Healthy",
+              detail_status: "cloud_ready",
+              checked_at: timestamp,
+              safe_message: "AI hậu kiểm OCR chạy trên Gemini.",
+              service_group: "ocr",
+              execution_mode: "cloud_ai",
+            },
+            {
+              id: "book_quality",
+              label: "Book quality worker",
+              status: "HEALTHY",
+              operational_state: "Scheduled",
+              detail_status: "scheduled",
+              checked_at: timestamp,
+              safe_message: "Cron worker hoạt động bình thường.",
+              service_group: "workers",
+              execution_mode: "cron_scheduled",
+              queue_depth: 0,
+              last_success_at: timestamp,
+            },
+            {
+              id: "active_model_registry",
+              label: "Active model registry",
+              status: "HEALTHY",
+              operational_state: "Standby",
+              detail_status: "remote_delegated",
+              checked_at: timestamp,
+              safe_message: "Đồng bộ model do remote worker tự quản lý.",
+              service_group: "workers",
+              execution_mode: "remote_delegated",
+              criticality: "optional",
+            },
+            {
+              id: "local_trainer_process",
+              label: "Local trainer process",
+              status: "HEALTHY",
+              operational_state: "Local only",
+              detail_status: "local_only",
+              checked_at: timestamp,
+              safe_message: "Chỉ dùng trên máy GPU dev.",
+              service_group: "workers",
+              execution_mode: "local_only",
+              criticality: "optional",
+            },
+            {
+              id: "karaoke_processing",
+              label: "Karaoke processing worker",
+              status: "HEALTHY",
+              operational_state: "Local only",
+              detail_status: "local_only",
+              checked_at: timestamp,
+              safe_message: "Tính năng tùy chọn cục bộ.",
+              service_group: "workers",
+              execution_mode: "disabled_opt_in",
+              criticality: "optional",
+            },
+          ],
+          audio_cache: {
+            entry_count: 1904,
+            storage_used_bytes: 1.5 * 1024 * 1024 * 1024,
+            storage_quota_bytes: 2 * 1024 * 1024 * 1024,
+            daily_egress_bytes: 0,
+            daily_egress_limit_bytes: 0,
+            cache_hit_ratio: 0.72,
+            quota_exhausted: false,
+          },
+          audio_cache_error: "AUDIO_CACHE_PROBE_TIMEOUT",
+        });
+      }
+      return readyResponse(target);
+    });
+
+    const { container } = render(
+      <AdminServicesProvider>
+        <AdminHealthScreen />
+      </AdminServicesProvider>,
+    );
+
+    // Core infrastructure expanded with semantic <h3> headings and zero boilerplate worker metrics.
+    expect(
+      await screen.findByRole("heading", { level: 3, name: "Database" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("worker-metrics-api")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("worker-metrics-database"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Không áp dụng")).not.toBeInTheDocument();
+
+    // No invalid rounded-pill utility anywhere.
+    expect(container.querySelector(".rounded-pill")).toBeNull();
+
+    // Audio cache renders GB formatting, explicit 0 egress limit, progress bar, and error warning.
+    const cachePanel = screen.getByTestId("admin-audio-cache-summary");
+    expect(cachePanel).toHaveTextContent(/GB/);
+    expect(cachePanel).toHaveTextContent("0 B / 0 B");
+    expect(within(cachePanel).getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "75",
+    );
+    expect(screen.getByTestId("admin-audio-cache-error")).toHaveTextContent(
+      "AUDIO_CACHE_PROBE_TIMEOUT",
+    );
+
+    // Group 4B (local-only / remote-delegated) is collapsed by default when healthy.
+    expect(
+      screen.queryByRole("heading", { name: "Local trainer process" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("health-group-local-only")).toHaveTextContent(
+      "3 mục",
+    );
+
+    // Filtering by "Chỉ cục bộ" auto-expands Group 4B and hides core services.
+    await user.click(screen.getByTestId("health-kpi-local-only"));
+    expect(
+      screen.getByRole("heading", { name: "Local trainer process" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Karaoke processing worker" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Database" }),
+    ).not.toBeInTheDocument();
+
+    // Reset filter to All and test OCR worker wakeup CTA.
+    await user.click(screen.getByTestId("health-filter-all"));
+    const wakeBtn = screen.getByRole("button", {
+      name: "Đánh thức OCR worker",
+    });
+    await user.click(wakeBtn);
+    await waitFor(() => expect(wakeupCalls).toBe(1));
+    expect(await screen.findByTestId("ocr-wakeup-notice")).toHaveTextContent(
+      "Đã gửi lệnh đánh thức OCR worker từ xa thành công.",
+    );
+  });
+
+  it("updates microphone permission live via perm.onchange and supports auto-refresh pausing when tab is hidden", async () => {
+    const user = userEvent.setup();
+    const fakePermStatus: {
+      state: PermissionState;
+      onchange: ((this: PermissionStatus, ev: Event) => unknown) | null;
+    } = {
+      state: "prompt",
+      onchange: null,
+    };
+    const originalPermissions = navigator.permissions;
+    Object.defineProperty(navigator, "permissions", {
+      configurable: true,
+      value: {
+        query: vi.fn().mockResolvedValue(fakePermStatus),
+      },
+    });
+    const originalHiddenDescriptor = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      "hidden",
+    );
+
+    try {
+      render(
+        <AdminServicesProvider>
+          <AdminHealthScreen />
+        </AdminServicesProvider>,
+      );
+      expect(
+        await screen.findByRole("heading", { name: "Database" }),
+      ).toBeInTheDocument();
+
+      const devicePanel = await screen.findByTestId(
+        "admin-client-device-capabilities",
+      );
+      expect(within(devicePanel).getByText("Chưa hỏi")).toBeInTheDocument();
+
+      // Simulate browser permission state change via live onchange listener.
+      act(() => {
+        fakePermStatus.state = "granted";
+        fakePermStatus.onchange?.call(
+          fakePermStatus as unknown as PermissionStatus,
+          new Event("change"),
+        );
+      });
+      expect(
+        await within(devicePanel).findByText("Đã cấp quyền"),
+      ).toBeInTheDocument();
+
+      // Enable 30s auto-refresh and verify hidden tab pauses it.
+      await user.click(screen.getByRole("button", { name: "30s" }));
+      expect(screen.getByText("Tự làm mới mỗi 30s")).toBeInTheDocument();
+
+      act(() => {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => true,
+        });
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      expect(
+        await screen.findByText("Tự làm mới tạm dừng khi ẩn tab"),
+      ).toBeInTheDocument();
+    } finally {
+      Object.defineProperty(navigator, "permissions", {
+        configurable: true,
+        value: originalPermissions,
+      });
+      if (originalHiddenDescriptor) {
+        Object.defineProperty(
+          Document.prototype,
+          "hidden",
+          originalHiddenDescriptor,
+        );
+      } else {
+        Object.defineProperty(document, "hidden", {
+          configurable: true,
+          get: () => false,
+        });
+      }
+    }
+  });
+
+  it("aborts a hung health fetch after 15s timeout while keeping recheck clickable", async () => {
+    vi.useFakeTimers();
+    try {
+      let capturedSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+        capturedSignal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        });
+      });
+
+      render(
+        <AdminServicesProvider>
+          <AdminHealthScreen />
+        </AdminServicesProvider>,
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(15_000);
+      });
+
+      expect(capturedSignal?.aborted).toBe(true);
+      expect(
+        screen.getByText("Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây."),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Kiểm tra lại" }),
+      ).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

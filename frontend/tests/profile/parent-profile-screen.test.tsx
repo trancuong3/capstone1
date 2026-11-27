@@ -349,9 +349,11 @@ describe("ParentProfileScreen", () => {
         .querySelector("img"),
     ).toHaveAttribute("src", "blob:parent-preview");
     await user.click(screen.getByRole("button", { name: "Lưu thay đổi" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "safe storage failure",
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.",
     );
+    expect(alert).not.toHaveTextContent("safe storage failure");
 
     await user.click(screen.getByRole("button", { name: "Hủy" }));
     expect(

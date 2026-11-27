@@ -6,7 +6,10 @@ import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
 } from "@/lib/api/browser-auth";
-import { clearApiReadCache, runCoalescedApiGet } from "@/lib/api/read-cache";
+import {
+  invalidateApiReadCache,
+  runCoalescedApiGet,
+} from "@/lib/api/read-cache";
 import { translateMessage } from "@/lib/i18n/formatter";
 import {
   DEFAULT_LOCALE,
@@ -362,6 +365,28 @@ const safeBackendMessageKeys: Record<string, string> = {
 };
 
 const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
+  BOOK_BLOCKED_BY_CHILD_SAFETY:
+    "Sách này hiện bị chặn theo chính sách an toàn trẻ em nên chưa thể mở đọc.",
+  CONTENT_NOT_READY:
+    "Nội dung sách chưa sẵn sàng để đọc. Vui lòng thử lại sau khi hoàn tất xử lý.",
+  READING_RANGE_NOT_CONTIGUOUS:
+    "Khoảng trang đọc cần liên tiếp và bắt đầu từ trang có số nhỏ hơn hoặc bằng trang kết thúc.",
+  INVALID_BOOK_METADATA:
+    "Thông tin mô tả sách chưa hợp lệ. Vui lòng kiểm tra lại và thử lưu lại.",
+  PARENT_CONFLICT:
+    "Thông tin tài khoản phụ huynh bị xung đột hoặc đã tồn tại. Vui lòng tải lại trang và kiểm tra lại.",
+  AUTH_PROVIDER_UNAVAILABLE:
+    "Dịch vụ xác thực đang tạm thời gián đoạn. Vui lòng thử lại sau ít phút.",
+  DATABASE_OPERATION_FAILED:
+    "Hệ thống dữ liệu đang gặp sự cố tạm thời. Vui lòng thử lại sau.",
+  PARENT_AUTH_OPERATION_FAILED:
+    "Không thể hoàn tất thao tác xác thực tài khoản phụ huynh lúc này. Vui lòng thử lại sau.",
+  PROCESSING_UNAVAILABLE:
+    "Dịch vụ xử lý tài liệu và OCR đang tạm thời không khả dụng. Vui lòng thử lại sau.",
+  PROVIDER_NOT_CONFIGURED:
+    "Dịch vụ tích hợp trên máy chủ chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.",
+  REVISION_CONFLICT:
+    "Phiên bản nội dung đã thay đổi trước đó. Hãy tải lại trang để cập nhật bản mới nhất.",
   DRIVE_QUOTA_EXCEEDED:
     "Dung lượng Google Drive miễn phí sắp chạm ngưỡng an toàn. Hãy dọn Thùng rác Drive hoặc xóa snapshot/run cũ trước khi tiếp tục.",
   DRIVE_ACCOUNT_EMAIL_MISMATCH:
@@ -475,38 +500,38 @@ function failure(
   });
 }
 
+function resolveSafeMessageText(rawCodeOrText: string): string {
+  const key = safeBackendMessageKeys[rawCodeOrText];
+  if (key) return tApiError(key);
+  const directFlow2 = safeFlow2BackendMessages[rawCodeOrText];
+  if (directFlow2) return directFlow2;
+  const matchedCode = SAFE_BACKEND_PREFIX_CODES.find(
+    (code) => rawCodeOrText === code || rawCodeOrText.startsWith(`${code}:`),
+  );
+  return matchedCode
+    ? (safeFlow2BackendMessages[matchedCode] ?? tApiError("errors.generic"))
+    : tApiError("errors.generic");
+}
+
 async function safeBackendMessage(response: Response): Promise<string> {
   try {
     const payload: unknown = await response.clone().json();
-    if (
-      typeof payload === "object" &&
-      payload !== null &&
-      "detail" in payload
-    ) {
-      if (typeof payload.detail === "string") {
-        const key = safeBackendMessageKeys[payload.detail];
-        if (key) return tApiError(key);
-        const directFlow2 = safeFlow2BackendMessages[payload.detail];
-        if (directFlow2) return directFlow2;
-        const matchedCode = SAFE_BACKEND_PREFIX_CODES.find(
-          (code) =>
-            payload.detail === code ||
-            (typeof payload.detail === "string" &&
-              payload.detail.startsWith(`${code}:`)),
-        );
-        return matchedCode
-          ? (safeFlow2BackendMessages[matchedCode] ??
-              tApiError("errors.generic"))
-          : tApiError("errors.generic");
+    if (typeof payload === "object" && payload !== null) {
+      if ("detail" in payload) {
+        if (typeof payload.detail === "string") {
+          return resolveSafeMessageText(payload.detail);
+        }
+        if (
+          typeof payload.detail === "object" &&
+          payload.detail !== null &&
+          "code" in payload.detail &&
+          typeof payload.detail.code === "string"
+        ) {
+          return resolveSafeMessageText(payload.detail.code);
+        }
       }
-      if (
-        typeof payload.detail === "object" &&
-        payload.detail !== null &&
-        "code" in payload.detail &&
-        typeof payload.detail.code === "string"
-      ) {
-        const key = safeBackendMessageKeys[payload.detail.code];
-        return key ? tApiError(key) : tApiError("errors.generic");
+      if ("code" in payload && typeof payload.code === "string") {
+        return resolveSafeMessageText(payload.code);
       }
     }
   } catch {
@@ -589,7 +614,7 @@ export async function requestApi<T>(
     if (!response.ok) {
       if (response.status === 401) {
         invalidateBrowserTokenCache();
-        clearApiReadCache();
+        invalidateApiReadCache();
       }
       const backendMessage = await safeBackendMessage(response);
       const messageWithCorrelation =
@@ -627,11 +652,11 @@ export async function requestApi<T>(
   };
 
   if (method !== "GET") {
-    clearApiReadCache();
+    invalidateApiReadCache();
     try {
       return await executeFetch(signal);
     } finally {
-      clearApiReadCache();
+      invalidateApiReadCache();
     }
   }
 

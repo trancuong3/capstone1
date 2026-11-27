@@ -571,10 +571,41 @@ class ParentBookSubmissionPipelineTests(unittest.IsolatedAsyncioTestCase):
             ollama_base = priv_cfg.local.base_url.rstrip("/")
             live_ollama_available = False
             try:
-                async with httpx.AsyncClient(timeout=2.0) as http:
+                async with httpx.AsyncClient(
+                    timeout=5.0, trust_env=False, follow_redirects=False
+                ) as http:
                     tags = await http.get(ollama_base + "/api/tags")
-                    live_ollama_available = tags.status_code == 200
-            except httpx.RequestError:
+                    if tags.status_code == 200:
+                        tags_payload = tags.json()
+                        installed_models = {
+                            str(m.get("name") or "")
+                            for m in (tags_payload.get("models") or [])
+                            if isinstance(m, dict)
+                        }
+                        target_model = priv_cfg.local.model
+                        model_present = any(
+                            name == target_model
+                            or name.split(":", 1)[0] == target_model.split(":", 1)[0]
+                            for name in installed_models
+                        )
+                        if model_present:
+                            chat_probe = await http.post(
+                                ollama_base + "/api/chat",
+                                json={
+                                    "model": target_model,
+                                    "stream": False,
+                                    "think": False,
+                                    "messages": [{"role": "user", "content": "ping"}],
+                                    "options": {"num_predict": 1},
+                                },
+                            )
+                            if chat_probe.status_code == 200:
+                                chat_payload = chat_probe.json()
+                                msg = chat_payload.get("message") if isinstance(chat_payload, dict) else None
+                                live_ollama_available = isinstance(msg, dict) and isinstance(
+                                    msg.get("content"), str
+                                )
+            except (httpx.RequestError, httpx.TimeoutException, ValueError, KeyError):
                 live_ollama_available = False
 
             captured_local_urls: list[str] = []

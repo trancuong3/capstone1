@@ -34,7 +34,7 @@ export default defineConfig({
     trace: "off",
   },
   webServer: {
-    command: `npm run dev -- --webpack --hostname 127.0.0.1 --port ${playwrightPort}`,
+    command: `npm run dev -- --webpack --disable-source-maps --hostname 127.0.0.1 --port ${playwrightPort}`,
     url: playwrightOrigin,
     reuseExistingServer: false,
     timeout: 120_000,

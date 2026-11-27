@@ -321,7 +321,7 @@
     "overviewAria": "סקירה מהירה של מצב הדפים",
     "overviewChipTitle": "דף מקור {page}: {status}",
     "workerFailuresSummary": "{count} דפים נתקל בטעויות OCR/AI (השירות עשוי להיות עסוק או לא זמין זמנית). דפים מוכנים או בממתין לביקורת מנהל אינם מושפעים — לחץ \"נסה שוב\" בדפים עם שגיאות.",
-    "windowsOcrQueueWaiting": "ממתין להפעלת שרת OCR Windows (תור בטוח — {count} דפים נשמרו בטוח ויתקבלו אוטומטית כאשר השרת פעיל).",
+    "windowsOcrQueueWaiting": "נשמר בתור ה-OCR ({count} עמודים) — ממתין לחזרת שרת ה-OCR לפעולה. הזיהוי יתחיל אוטומטית ברגע שיתחבר מחדש.",
     "ocrRunningStatus": "מזהה OCR {running} דפים",
     "ocrQueuedSuffix": " ({count} דפים בתור הבא)",
     "ocrOtherPagesStillVisible": ". דפים שהושלמו עדיין נראים במלואם לפעולה מיידית.",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "היקף בדיקת כלים:",
     "toolCheckFlaggedNotice": "בדיקת הכלים מצאה {count} פריטים הדורשים בדיקת מבוגר.",
     "toolCheckAdminNotice": "הדף דורש בדיקת מנהל לפני הוספה לספר.",
+    "toolCheckFailedNotice": "תהליך הבדיקה נתקל בתקלה טכנית.",
+    "toolCheckPassedNotice": "הדף עבר את בדיקת הבטיחות בהצלחה.",
+    "toolCheckCheckingNotice": "מריץ בדיקות אוטומטיות עבור דף זה.",
+    "toolCheckRejectedNotice": "גרסת דף זו לא אושרה על ידי המנהל.",
+    "toolCheckRecheckNotice": "יש לבדוק מחדש דף זה לפני הוספתו לספר.",
     "previewTextLabel": "תוכן מיועד להוספה לספר:",
     "proofreadSectionTitle": "הצעות איות ({count})",
     "uncertainWordsSuffix": " · {count} מילים לתשומת לב",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "חלוקה לעמודים של עמודים שנוספו לספר",
     "statusLabels": {
       "PENDING": "בתור ל-OCR",
+      "PENDING_POST_OCR": "ממתין להשלמת השלב הקודם",
       "RUNNING": "מריץ OCR",
       "COMPLETED": "בוצע",
       "PASSED": "עבר",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "ההעלאה הממתינה בוטלה.",
     "cancelSubmissionErrorFallback": "לא ניתן לבטל עמוד זה.",
     "pageNumberHeading": "דף {page}",
-    "pageItemLabel": "עמודים"
+    "pageItemLabel": "עמודים",
+    "workerOfflineUploadNotice": "שרת ה-OCR כבוי זמנית — עדיין ניתן להעלות תמונות או קבצי PDF/DOCX כדי לשמור אותם בתור; הזיהוי יתחיל אוטומטית ברגע שהשרת יחזור לפעול.",
+    "queuedWaitingWorkerBadge": "נשמר בתור OCR — ממתין לשרת",
+    "queuedWaitingWorkerShort": "נשמר בתור OCR — זיהוי אוטומטי כשהשרת יחזור",
+    "reasonQueuedOffline": "עמוד זה נשמר בבטחה בתור ה-OCR ויזוהה אוטומטית ברגע ששרת ה-OCR יחזור לפעול."
   },
   "ocrContribution": {
     "cardAria": "תרום דוגמאות לשיפור ViRead OCR עבור {title}",

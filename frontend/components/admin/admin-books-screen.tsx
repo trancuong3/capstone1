@@ -1,33 +1,80 @@
 "use client";
 
+import {
+  BookCheck,
+  BookOpen,
+  CheckCircle2,
+  ClipboardCheck,
+  Plus,
+  RotateCcw,
+  Trash2,
+} from "lucide-react";
 import Link from "next/link";
-import { Trash2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  AdminBadge,
+  AdminKpiCard,
+  AdminKpiGrid,
   AdminLoading,
   AdminPageHeader,
   AdminResultsPagination,
+  AdminSearchInput,
+  AdminSelect,
   AdminStatusBadge,
+  AdminToolbar,
 } from "@/components/admin/admin-ui";
+import { BookCover } from "@/components/books/book-cover";
 import { Button, ButtonLink } from "@/components/common/button";
-import { Card } from "@/components/common/card";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
-import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
-import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminBookListItemUI } from "@/types/admin";
 import type { BookLifecycleStatus } from "@/types/book";
+import type { AssetSourceType } from "@/types/book-assets";
 import type { PageRevisionVerificationStatus } from "@/types/reading";
 
 interface ActionNotice {
   tone: "error" | "info";
   title: string;
   message: string;
+}
+
+interface CatalogOverviewSnapshot {
+  readonly total: number;
+  readonly active: number;
+  readonly needsReviewBooks: number;
+  readonly needsReviewPages: number;
+  readonly eligible: number;
+}
+
+function summarizeCatalog(
+  list: readonly AdminBookListItemUI[],
+): CatalogOverviewSnapshot {
+  let active = 0;
+  let needsReviewBooks = 0;
+  let needsReviewPages = 0;
+  let eligible = 0;
+
+  for (const item of list) {
+    if (item.book.lifecycle_status === "ACTIVE") active += 1;
+    if (item.needs_review_count > 0) {
+      needsReviewBooks += 1;
+      needsReviewPages += item.needs_review_count;
+    }
+    if (item.parent_catalog_eligible) eligible += 1;
+  }
+
+  return {
+    total: list.length,
+    active,
+    needsReviewBooks,
+    needsReviewPages,
+    eligible,
+  };
 }
 
 export function AdminBooksScreen() {
@@ -39,6 +86,8 @@ export function AdminBooksScreen() {
   const [items, setItems] = useState<readonly AdminBookListItemUI[] | null>(
     null,
   );
+  const [overviewSnapshot, setOverviewSnapshot] =
+    useState<CatalogOverviewSnapshot | null>(null);
   const [error, setError] = useState<"auth" | "forbidden" | "safe" | null>(
     null,
   );
@@ -47,6 +96,7 @@ export function AdminBooksScreen() {
   const [verification, setVerification] = useState<
     PageRevisionVerificationStatus | ""
   >("");
+  const [eligibleOnly, setEligibleOnly] = useState(false);
   const [lifecycleBusyBookId, setLifecycleBusyBookId] = useState<string | null>(
     null,
   );
@@ -68,6 +118,8 @@ export function AdminBooksScreen() {
       if (options?.resetPage) setPageNumber(1);
       setError(null);
       setItems(null);
+      const isUnfilteredServerQuery =
+        !search.trim() && !lifecycle && !verification;
       try {
         const nextItems = await books.list({
           search,
@@ -78,6 +130,9 @@ export function AdminBooksScreen() {
         const maxPage = Math.max(1, Math.ceil(nextItems.length / pageSize));
         setPageNumber((current) => Math.min(current, maxPage));
         setItems(nextItems);
+        if (isUnfilteredServerQuery) {
+          setOverviewSnapshot(summarizeCatalog(nextItems));
+        }
         return true;
       } catch (cause) {
         if (requestId !== requestIdRef.current) return false;
@@ -126,6 +181,7 @@ export function AdminBooksScreen() {
       }
 
       setPendingLifecycleBook(null);
+      setOverviewSnapshot(null);
       const reloaded = await loadRef.current({ resetPage: false });
       setActionNotice(
         reloaded
@@ -195,6 +251,11 @@ export function AdminBooksScreen() {
         (item) => item.book.id !== book.id,
       );
       setItems(remainingItems);
+      if (!search.trim() && !lifecycle && !verification) {
+        setOverviewSnapshot(summarizeCatalog(remainingItems));
+      } else {
+        setOverviewSnapshot(null);
+      }
       setPageNumber((currentPage) =>
         Math.min(
           currentPage,
@@ -227,96 +288,220 @@ export function AdminBooksScreen() {
     }
   }
 
-  const visibleItems = items?.slice(
+  const filteredItems = useMemo(() => {
+    if (!items) return null;
+    if (!eligibleOnly) return items;
+    return items.filter((item) => item.parent_catalog_eligible);
+  }, [eligibleOnly, items]);
+
+  const metrics = useMemo(() => {
+    if (overviewSnapshot) return overviewSnapshot;
+    if (items) return summarizeCatalog(items);
+    return null;
+  }, [items, overviewSnapshot]);
+
+  const hasActiveFilters = Boolean(
+    search.trim() || lifecycle || verification || eligibleOnly,
+  );
+
+  function resetAllFilters() {
+    setSearch("");
+    setLifecycle("");
+    setVerification("");
+    setEligibleOnly(false);
+    setPageNumber(1);
+  }
+
+  const isTotalKpiActive = !hasActiveFilters;
+  const isActiveKpiActive =
+    lifecycle === "ACTIVE" && !verification && !eligibleOnly;
+  const isNeedsReviewKpiActive =
+    verification === "NEEDS_REVIEW" && !eligibleOnly;
+  const isEligibleKpiActive = eligibleOnly;
+
+  const visibleItems = filteredItems?.slice(
     (pageNumber - 1) * pageSize,
     pageNumber * pageSize,
   );
+  const showMultiPagePagination =
+    filteredItems !== null && filteredItems.length > pageSize;
 
   return (
-    <>
+    <div className="space-y-4">
       <AdminPageHeader
-        eyebrow={t("books.eyebrow")}
-        title={t("books.title")}
-        description={t("books.subtitle")}
         actions={
-          <ButtonLink className="sm:w-auto sm:px-6" href="/admin/books/new">
+          <ButtonLink href="/admin/books/new" size="admin" variant="primary">
+            <Plus aria-hidden="true" className="size-4 shrink-0" />
             {t("books.newBook")}
           </ButtonLink>
         }
+        description={t("books.subtitle")}
+        eyebrow={t("books.eyebrow")}
+        title={t("books.title")}
       />
-      <p
-        aria-label={t("books.overviewAria")}
-        className="mb-4 text-sm text-muted"
+
+      <AdminKpiGrid ariaLabel={t("books.overviewAria")} columns={4}>
+        <AdminKpiCard
+          active={isTotalKpiActive}
+          icon={<BookOpen className="size-4" />}
+          label={t("books.kpi.total", undefined, "Tổng sách")}
+          onClick={resetAllFilters}
+          testId="books-kpi-total"
+          tone="neutral"
+          value={
+            metrics
+              ? formatNumber(metrics.total)
+              : t("common.emptyDash", undefined, "—")
+          }
+        />
+        <AdminKpiCard
+          active={isActiveKpiActive}
+          icon={<CheckCircle2 className="size-4" />}
+          label={t("books.kpi.activeBooks", undefined, "Sách đang hoạt động")}
+          onClick={() => {
+            if (isActiveKpiActive) {
+              setLifecycle("");
+            } else {
+              setLifecycle("ACTIVE");
+              setVerification("");
+              setEligibleOnly(false);
+            }
+            setPageNumber(1);
+          }}
+          testId="books-kpi-active"
+          tone="success"
+          value={
+            metrics
+              ? formatNumber(metrics.active)
+              : t("common.emptyDash", undefined, "—")
+          }
+        />
+        <AdminKpiCard
+          active={isNeedsReviewKpiActive}
+          detail={
+            metrics
+              ? t(
+                  "books.kpi.needsReviewDetail",
+                  { count: formatNumber(metrics.needsReviewPages) },
+                  "{count} trang chờ duyệt",
+                )
+              : undefined
+          }
+          icon={<ClipboardCheck className="size-4" />}
+          label={t("books.kpi.needsReview", undefined, "Cần duyệt OCR")}
+          onClick={() => {
+            if (isNeedsReviewKpiActive) {
+              setVerification("");
+            } else {
+              setVerification("NEEDS_REVIEW");
+              setLifecycle("");
+              setEligibleOnly(false);
+            }
+            setPageNumber(1);
+          }}
+          testId="books-kpi-needs-review"
+          tone="warning"
+          value={
+            metrics
+              ? formatNumber(metrics.needsReviewBooks)
+              : t("common.emptyDash", undefined, "—")
+          }
+        />
+        <AdminKpiCard
+          active={isEligibleKpiActive}
+          icon={<BookCheck className="size-4" />}
+          label={t(
+            "books.kpi.childLibraryEligible",
+            undefined,
+            "Đủ điều kiện thư viện trẻ em",
+          )}
+          onClick={() => {
+            if (isEligibleKpiActive) {
+              setEligibleOnly(false);
+            } else {
+              setEligibleOnly(true);
+              setLifecycle("");
+              setVerification("");
+            }
+            setPageNumber(1);
+          }}
+          testId="books-kpi-eligible"
+          tone="info"
+          value={
+            metrics
+              ? formatNumber(metrics.eligible)
+              : t("common.emptyDash", undefined, "—")
+          }
+        />
+      </AdminKpiGrid>
+
+      <AdminToolbar
+        actions={
+          hasActiveFilters ? (
+            <Button
+              onClick={resetAllFilters}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              <RotateCcw aria-hidden="true" className="size-3.5 shrink-0" />
+              {t("books.resetFilters", undefined, "Đặt lại")}
+            </Button>
+          ) : undefined
+        }
+        ariaLabel={t("books.filterToolbarAria", undefined, "Bộ lọc kho sách")}
       >
-        {items
-          ? t("books.summaryLine", {
-              total: formatNumber(items.length),
-              active: formatNumber(
-                items.filter((i) => i.book.lifecycle_status === "ACTIVE")
-                  .length,
-              ),
-              needsReview: formatNumber(
-                items.reduce((acc, i) => acc + i.needs_review_count, 0),
-              ),
-            })
-          : t("books.loadingSummary")}
-      </p>
-      <div className="mb-4">
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="relative">
-            <TextField
-              label={t("books.searchLabel")}
-              onChange={(event) => setSearch(event.target.value)}
-              value={search}
-            />
-          </div>
-          <SelectField
-            label={t("books.lifecycleLabel")}
-            onChange={(event) =>
-              setLifecycle(event.target.value as BookLifecycleStatus | "")
-            }
-            value={lifecycle}
-          >
-            <option value="">{t("common.all")}</option>
-            <option value="ACTIVE">{t("books.lifecycleOptions.ACTIVE")}</option>
-            <option value="RETIRED">
-              {t("books.lifecycleOptions.RETIRED")}
-            </option>
-          </SelectField>
-          <SelectField
-            label={t("books.ocrStatusLabel")}
-            onChange={(event) =>
-              setVerification(
-                event.target.value as PageRevisionVerificationStatus | "",
-              )
-            }
-            value={verification}
-          >
-            <option value="">{t("common.all")}</option>
-            <option value="PROCESSING">{t("statusBadges.PROCESSING")}</option>
-            <option value="NEEDS_REVIEW">
-              {t("statusBadges.NEEDS_REVIEW")}
-            </option>
-            <option value="VERIFIED">{t("statusBadges.VERIFIED")}</option>
-          </SelectField>
-        </div>
-      </div>
+        <AdminSearchInput
+          label={t("books.searchLabel")}
+          onChange={setSearch}
+          placeholder={t(
+            "books.searchPlaceholder",
+            undefined,
+            "Nhập tên sách, tiêu đề hoặc tác giả…",
+          )}
+          value={search}
+        />
+        <AdminSelect
+          containerClassName="w-full sm:w-44"
+          label={t("books.lifecycleLabel")}
+          onChange={(value) => {
+            setEligibleOnly(false);
+            setLifecycle(value as BookLifecycleStatus | "");
+          }}
+          options={[
+            { value: "", label: t("common.all") },
+            { value: "ACTIVE", label: t("books.lifecycleOptions.ACTIVE") },
+            { value: "RETIRED", label: t("books.lifecycleOptions.RETIRED") },
+          ]}
+          value={lifecycle}
+        />
+        <AdminSelect
+          containerClassName="w-full sm:w-48"
+          label={t("books.ocrStatusLabel")}
+          onChange={(value) => {
+            setEligibleOnly(false);
+            setVerification(value as PageRevisionVerificationStatus | "");
+          }}
+          options={[
+            { value: "", label: t("common.all") },
+            { value: "PROCESSING", label: t("statusBadges.PROCESSING") },
+            { value: "NEEDS_REVIEW", label: t("statusBadges.NEEDS_REVIEW") },
+            { value: "VERIFIED", label: t("statusBadges.VERIFIED") },
+          ]}
+          value={verification}
+        />
+      </AdminToolbar>
 
       {actionNotice ? (
-        <StatusMessage
-          className="mb-5"
-          tone={actionNotice.tone}
-          title={actionNotice.title}
-        >
+        <StatusMessage title={actionNotice.title} tone={actionNotice.tone}>
           {actionNotice.message}
         </StatusMessage>
       ) : null}
 
-      {items === null ? (
-        <AdminLoading />
+      {filteredItems === null ? (
+        <AdminLoading variant="skeleton" />
       ) : error ? (
         <StatusMessage
-          tone="error"
           title={
             error === "auth"
               ? t("books.loadErrorAuth")
@@ -324,11 +509,13 @@ export function AdminBooksScreen() {
                 ? t("books.loadErrorForbidden")
                 : t("books.loadErrorGeneric")
           }
+          tone="error"
         >
           {error === "safe" ? (
             <Button
-              className="mt-2 sm:w-auto"
+              className="mt-2"
               onClick={() => void load()}
+              size="admin"
               type="button"
               variant="secondary"
             >
@@ -336,155 +523,272 @@ export function AdminBooksScreen() {
             </Button>
           ) : (
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-10 items-center rounded-md px-1 font-extrabold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
               {t("common.goToLogin")}
             </Link>
           )}
         </StatusMessage>
-      ) : items.length === 0 ? (
+      ) : filteredItems.length === 0 ? (
         <EmptyState
-          description={t("books.emptyDesc")}
+          action={
+            hasActiveFilters ? (
+              <Button
+                onClick={resetAllFilters}
+                size="admin"
+                type="button"
+                variant="outline"
+              >
+                {t("books.resetFilters", undefined, "Đặt lại")}
+              </Button>
+            ) : undefined
+          }
+          description={
+            hasActiveFilters
+              ? t(
+                  "books.emptyFilteredDesc",
+                  undefined,
+                  "Thử thay đổi từ khóa hoặc đặt lại bộ lọc để xem toàn bộ kho sách.",
+                )
+              : t("books.emptyDesc")
+          }
           title={t("books.emptyTitle")}
         />
       ) : (
-        <div className="grid gap-5">
-          <AdminResultsPagination
-            itemLabel={t("books.itemLabel")}
-            onPageChange={setPageNumber}
-            page={pageNumber}
-            pageSize={pageSize}
-            total={items.length}
-          />
-          {visibleItems?.map((item) => {
-            const book = item.book;
-            const missingTitle = !book.title.trim();
-            const isBusy =
-              lifecycleBusyBookId !== null || deleteBusyBookId !== null;
-            const editHref = missingTitle
-              ? `/admin/books/${encodeURIComponent(book.id)}/edit?issue=MISSING_TITLE`
-              : `/admin/books/${encodeURIComponent(book.id)}/edit`;
+        <div className="space-y-3">
+          {showMultiPagePagination ? (
+            <AdminResultsPagination
+              itemLabel={t("books.itemLabel")}
+              onPageChange={setPageNumber}
+              page={pageNumber}
+              pageSize={pageSize}
+              total={filteredItems.length}
+            />
+          ) : null}
 
-            return (
-              <Card className="catalog-admin-row" key={book.id}>
-                <Link
-                  className="w-fit rounded-sm focus-visible:outline-3 focus-visible:outline-primary"
-                  href={`/admin/books/${encodeURIComponent(book.id)}`}
+          <div
+            aria-label={t(
+              "books.listAria",
+              undefined,
+              "Danh sách sách quản trị",
+            )}
+            className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-white shadow-2xs"
+            role="list"
+          >
+            {visibleItems?.map((item) => {
+              const book = item.book;
+              const missingTitle = !book.title.trim();
+              const isBusy =
+                lifecycleBusyBookId !== null || deleteBusyBookId !== null;
+              const editHref = missingTitle
+                ? `/admin/books/${encodeURIComponent(book.id)}/edit?issue=MISSING_TITLE`
+                : `/admin/books/${encodeURIComponent(book.id)}/edit`;
+              const totalPages = Math.max(0, item.page_count);
+              const verifiedPct =
+                totalPages > 0
+                  ? Math.min(100, (item.verified_count / totalPages) * 100)
+                  : 0;
+              const reviewPct =
+                totalPages > 0
+                  ? Math.min(
+                      100 - verifiedPct,
+                      (item.needs_review_count / totalPages) * 100,
+                    )
+                  : 0;
+              const processingPct =
+                totalPages > 0
+                  ? Math.min(
+                      100 - verifiedPct - reviewPct,
+                      (item.processing_count / totalPages) * 100,
+                    )
+                  : 0;
+
+              return (
+                <article
+                  className="px-4 py-3 transition-colors hover:bg-surface-subtle/50"
+                  key={book.id}
+                  role="listitem"
                 >
-                  <h2 className="break-words text-2xl font-extrabold text-ink">
-                    {missingTitle ? (
-                      t("books.missingTitle")
-                    ) : (
-                      <span dir="auto">{book.title}</span>
-                    )}
-                  </h2>
-                </Link>
-                <p className="break-words text-body text-muted">
-                  {t("books.metaLine", {
-                    name: book.name?.trim()
-                      ? book.name
-                      : t("books.missingName"),
-                    author: book.author?.trim()
-                      ? book.author
-                      : t("books.missingAuthor"),
-                    minGrade: book.min_grade,
-                    maxGrade: book.max_grade,
-                  })}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <AdminStatusBadge status={book.lifecycle_status} />
-                  {item.parent_catalog_eligible ? (
-                    <span className="rounded-control bg-sky px-3 py-1 text-sm font-bold text-primary">
-                      {t("books.inParentLibrary")}
-                    </span>
-                  ) : book.lifecycle_status === "ACTIVE" ? (
-                    <span className="rounded-control bg-amber-100 px-3 py-1 text-sm font-bold text-amber-950">
-                      {t("books.notReadyChildren")}
-                    </span>
-                  ) : null}
-                </div>
-                <p
-                  aria-label={t("books.pageStatusAria")}
-                  className="text-label text-muted"
-                >
-                  {t("books.pageSummaryLine", {
-                    total: formatNumber(item.page_count),
-                    processing: formatNumber(item.processing_count),
-                    needsReview: formatNumber(item.needs_review_count),
-                    verified: formatNumber(item.verified_count),
-                  })}
-                </p>
-                <div className="grid w-full max-w-[820px] grid-cols-2 gap-3 sm:grid-cols-4">
-                  <ButtonLink
-                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
-                    variant="secondary"
-                    href={`/admin/books/${encodeURIComponent(book.id)}`}
-                  >
-                    {t("books.viewPages")}
-                  </ButtonLink>
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between xl:gap-4">
+                    <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center">
+                      <BookCover
+                        author={book.author}
+                        book={book}
+                        className="h-16! w-12! shrink-0 rounded-md!"
+                        coverSourceType={
+                          (book.cover_source_type as AssetSourceType | null) ??
+                          null
+                        }
+                        coverUrl={book.cover_url ?? null}
+                        showTitle={false}
+                        size="small"
+                      />
 
-                  <ButtonLink
-                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
-                    variant="quiet"
-                    href={editHref}
-                  >
-                    {missingTitle
-                      ? t("books.repairTitle")
-                      : t("books.editInfo")}
-                  </ButtonLink>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <Link
+                            className="min-w-0 max-w-full rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                            href={`/admin/books/${encodeURIComponent(book.id)}`}
+                          >
+                            <h2 className="truncate text-base font-extrabold leading-snug text-ink transition-colors hover:text-primary">
+                              {missingTitle ? (
+                                t("books.missingTitle")
+                              ) : (
+                                <span dir="auto">{book.title}</span>
+                              )}
+                            </h2>
+                          </Link>
+                          <AdminStatusBadge status={book.lifecycle_status} />
+                          {item.parent_catalog_eligible ? (
+                            <AdminBadge tone="info">
+                              {t("books.inParentLibrary")}
+                            </AdminBadge>
+                          ) : book.lifecycle_status === "ACTIVE" ? (
+                            <AdminBadge tone="warning">
+                              {t("books.notReadyChildren")}
+                            </AdminBadge>
+                          ) : null}
+                        </div>
 
-                  <Button
-                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2 text-center"
-                    disabled={isBusy}
-                    isLoading={lifecycleBusyBookId === book.id}
-                    onClick={() => setPendingLifecycleBook(book)}
-                    variant="quiet"
-                  >
-                    {lifecycleBusyBookId === book.id
-                      ? t("books.updating")
-                      : book.lifecycle_status === "ACTIVE"
-                        ? t("books.retire")
-                        : t("books.reactivate")}
-                  </Button>
+                        <p className="truncate text-xs text-muted">
+                          {t("books.metaLine", {
+                            name: book.name?.trim()
+                              ? book.name
+                              : t("books.missingName"),
+                            author: book.author?.trim()
+                              ? book.author
+                              : t("books.missingAuthor"),
+                            minGrade: book.min_grade,
+                            maxGrade: book.max_grade,
+                          })}
+                        </p>
 
-                  <Button
-                    className="!min-h-[76px] !h-auto !w-full !min-w-0 !max-w-none whitespace-normal px-2 py-2"
-                    disabled={isBusy}
-                    onClick={() => {
-                      setActionNotice(null);
-                      setDeleteError(null);
-                      setPendingDelete(book);
-                    }}
-                    variant="destructive"
-                  >
-                    <Trash2 aria-hidden="true" className="size-4 shrink-0" />
-                    {t("books.deleteBook")}
-                  </Button>
-                </div>
-              </Card>
-            );
-          })}
-          <AdminResultsPagination
-            itemLabel={t("books.itemLabel")}
-            onPageChange={setPageNumber}
-            page={pageNumber}
-            pageSize={pageSize}
-            total={items.length}
-          />
+                        <div className="flex flex-wrap items-center gap-2.5">
+                          <div
+                            aria-hidden="true"
+                            className="flex h-1.5 w-20 shrink-0 overflow-hidden rounded-full bg-surface-subtle ring-1 ring-border/70"
+                          >
+                            {verifiedPct > 0 ? (
+                              <span
+                                className="h-full bg-emerald-500"
+                                style={{ width: `${verifiedPct}%` }}
+                              />
+                            ) : null}
+                            {reviewPct > 0 ? (
+                              <span
+                                className="h-full bg-amber-500"
+                                style={{ width: `${reviewPct}%` }}
+                              />
+                            ) : null}
+                            {processingPct > 0 ? (
+                              <span
+                                className="h-full bg-primary"
+                                style={{ width: `${processingPct}%` }}
+                              />
+                            ) : null}
+                          </div>
+                          <p
+                            aria-label={t("books.pageStatusAria")}
+                            className="text-xs font-medium text-muted tabular-nums"
+                          >
+                            {t("books.pageSummaryLine", {
+                              total: formatNumber(item.page_count),
+                              processing: formatNumber(item.processing_count),
+                              needsReview: formatNumber(
+                                item.needs_review_count,
+                              ),
+                              verified: formatNumber(item.verified_count),
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center xl:shrink-0 xl:flex-nowrap">
+                      <ButtonLink
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        href={`/admin/books/${encodeURIComponent(book.id)}`}
+                        size="admin"
+                        variant="secondary"
+                      >
+                        {t("books.viewPages")}
+                      </ButtonLink>
+
+                      <ButtonLink
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        href={editHref}
+                        size="admin"
+                        variant="outline"
+                      >
+                        {missingTitle
+                          ? t("books.repairTitle")
+                          : t("books.editInfo")}
+                      </ButtonLink>
+
+                      <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={isBusy}
+                        isLoading={lifecycleBusyBookId === book.id}
+                        onClick={() => setPendingLifecycleBook(book)}
+                        size="admin"
+                        variant="outline"
+                      >
+                        {lifecycleBusyBookId === book.id
+                          ? t("books.updating")
+                          : book.lifecycle_status === "ACTIVE"
+                            ? t("books.retire")
+                            : t("books.reactivate")}
+                      </Button>
+
+                      <Button
+                        className="w-full whitespace-nowrap sm:w-auto"
+                        disabled={isBusy}
+                        onClick={() => {
+                          setActionNotice(null);
+                          setDeleteError(null);
+                          setPendingDelete(book);
+                        }}
+                        size="admin"
+                        variant="destructive-outline"
+                      >
+                        <Trash2
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                        {t("books.deleteBook")}
+                      </Button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          {showMultiPagePagination ? (
+            <AdminResultsPagination
+              itemLabel={t("books.itemLabel")}
+              onPageChange={setPageNumber}
+              page={pageNumber}
+              pageSize={pageSize}
+              total={filteredItems.length}
+            />
+          ) : null}
         </div>
       )}
+
       <Modal
         closeOnBackdropClick={lifecycleBusyBookId === null}
         closeOnEscape={lifecycleBusyBookId === null}
         footer={
-          <div className="flex flex-wrap justify-end gap-3">
+          <div className="flex flex-wrap justify-end gap-2">
             <Button
               disabled={lifecycleBusyBookId !== null}
               fullWidth={false}
               onClick={() => setPendingLifecycleBook(null)}
+              size="admin"
               type="button"
-              variant="secondary"
+              variant="outline"
             >
               {t("common.cancel")}
             </Button>
@@ -493,6 +797,7 @@ export function AdminBooksScreen() {
               fullWidth={false}
               isLoading={lifecycleBusyBookId !== null}
               onClick={() => void confirmLifecycleChange()}
+              size="admin"
               type="button"
               variant={
                 pendingLifecycleBook?.lifecycle_status === "ACTIVE"
@@ -519,12 +824,13 @@ export function AdminBooksScreen() {
         }
         tone="paper"
       >
-        <p className="text-body text-ink">
+        <p className="text-sm leading-relaxed text-ink">
           {pendingLifecycleBook?.lifecycle_status === "ACTIVE"
             ? t("books.confirmModal.retireBody")
             : t("books.confirmModal.reactivateBody")}
         </p>
       </Modal>
+
       <Modal
         closeOnEscape={deleteBusyBookId === null}
         isOpen={pendingDelete !== null}
@@ -532,28 +838,34 @@ export function AdminBooksScreen() {
         showCloseButton={deleteBusyBookId === null}
         title={t("books.deleteModal.title")}
       >
-        <div className="grid gap-5">
-          <p className="text-body text-ink">{t("books.deleteModal.body")}</p>
+        <div className="space-y-4">
+          <p className="text-sm leading-relaxed text-ink">
+            {t("books.deleteModal.body")}
+          </p>
           {deleteError ? (
             <StatusMessage
-              tone="error"
               title={t("books.deleteModal.errorTitle")}
+              tone="error"
             >
               {deleteError}
             </StatusMessage>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
             <Button
               disabled={deleteBusyBookId !== null}
+              fullWidth={false}
               onClick={closeDeleteDialog}
-              variant="secondary"
+              size="admin"
+              variant="outline"
             >
               {t("common.cancel")}
             </Button>
             <Button
               disabled={deleteBusyBookId !== null}
+              fullWidth={false}
               isLoading={deleteBusyBookId !== null}
               onClick={() => void confirmDeleteBook()}
+              size="admin"
               variant="destructive"
             >
               {deleteBusyBookId !== null
@@ -563,6 +875,6 @@ export function AdminBooksScreen() {
           </div>
         </div>
       </Modal>
-    </>
+    </div>
   );
 }

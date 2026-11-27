@@ -321,7 +321,7 @@
     "overviewAria": "Kurze Statusübersicht der Seiten",
     "overviewChipTitle": "Quellseite {page}: {status}",
     "workerFailuresSummary": "{count} Seiten haben OCR/KI-Fehler verursacht (der Prüfdienst ist möglicherweise ausgelastet oder vorübergehend offline). Fertige oder auf Admin-Prüfung wartende Seiten sind nicht betroffen – klicken Sie bei den fehlerhaften Seiten auf «Prüfung wiederholen».",
-    "windowsOcrQueueWaiting": "Warten auf Aktivierung des Windows-OCR-Servers (sichere Warteschlange – {count} Seiten wurden sicher gespeichert und werden automatisch erkannt, sobald der OCR-Server aktiv ist).",
+    "windowsOcrQueueWaiting": "In der OCR-Warteschlange gespeichert ({count} Seiten) — Wartet auf den OCR-Server. Die Erkennung startet automatisch, sobald er wieder online ist.",
     "ocrRunningStatus": "OCR-Erkennung für {running} Seiten läuft",
     "ocrQueuedSuffix": " ({count} Seiten in der Warteschlange)",
     "ocrOtherPagesStillVisible": ". Bereits geprüfte Seiten bleiben für Ihre sofortige Bearbeitung sichtbar.",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "Umfang der Sicherheitsprüfung:",
     "toolCheckFlaggedNotice": "Sicherheitsprüfung fand {count} Elemente, die eine Überprüfung durch Erwachsene erfordern.",
     "toolCheckAdminNotice": "Seite erfordert Admin-Prüfung vor dem Hinzufügen zum Buch.",
+    "toolCheckFailedNotice": "Bei der Überprüfung ist ein technisches Problem aufgetreten.",
+    "toolCheckPassedNotice": "Diese Seite hat die Sicherheitsprüfung bestanden.",
+    "toolCheckCheckingNotice": "Automatische Prüfungen für diese Seite laufen.",
+    "toolCheckRejectedNotice": "Diese Seitenversion wurde vom Admin nicht genehmigt.",
+    "toolCheckRecheckNotice": "Diese Seite muss vor dem Hinzufügen zum Buch erneut geprüft werden.",
     "previewTextLabel": "Inhalt, der zum Buch hinzugefügt werden soll:",
     "proofreadSectionTitle": "Rechtschreibvorschläge ({count})",
     "uncertainWordsSuffix": " · {count} Wörter zu beachten",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "Seiten des Buches paginieren",
     "statusLabels": {
       "PENDING": "Warteschlange für OCR",
+      "PENDING_POST_OCR": "Wartet auf vorherigen Schritt",
       "RUNNING": "OCR läuft",
       "COMPLETED": "Fertig",
       "PASSED": "Bestanden",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "Ausstehender Upload abgebrochen.",
     "cancelSubmissionErrorFallback": "Diese Seite kann nicht abgebrochen werden.",
     "pageNumberHeading": "Seite {page}",
-    "pageItemLabel": "Seiten"
+    "pageItemLabel": "Seiten",
+    "workerOfflineUploadNotice": "Der OCR-Server ist vorübergehend offline — Sie können weiterhin Bilder oder PDF/DOCX-Dateien hochladen, um sie in der Warteschlange zu speichern; die Erkennung startet automatisch, sobald der Server wieder läuft.",
+    "queuedWaitingWorkerBadge": "In OCR-Warteschlange gespeichert — Wartet auf Server",
+    "queuedWaitingWorkerShort": "In OCR-Warteschlange — Automatische Erkennung bei Neustart",
+    "reasonQueuedOffline": "Diese Seite ist sicher in der OCR-Warteschlange gespeichert und wird automatisch erkannt, sobald der OCR-Server wieder online ist."
   },
   "ocrContribution": {
     "cardAria": "Muster beisteuern, um ViRead OCR für {title} zu verbessern",

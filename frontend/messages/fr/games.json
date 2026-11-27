@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "Illustration {theme} avec {count} détails",
       "svgTitle": "Illustration {theme}"
-    }
+    },
+    "mobileLabel": "Coin mémoire"
   }
 }

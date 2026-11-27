@@ -483,7 +483,11 @@ class ParentPrivateBookFlow2ContributionTests(unittest.IsolatedAsyncioTestCase):
 
         # Admin rejects PII/control-char edit attempt (422), then fixes diacritic mistake and approves
         async with self._client(ADMIN_1) as admin_client:
-            cands = (await admin_client.get("/books/admin/quality/user-books/flow2-candidates")).json()["items"]
+            cands = (
+                await admin_client.get(
+                    "/books/admin/quality/user-books/flow2-candidates?status=PENDING_VERIFICATION"
+                )
+            ).json()["items"]
             self.assertEqual(len(cands), 1)
             cand_id = cands[0]["id"]
 

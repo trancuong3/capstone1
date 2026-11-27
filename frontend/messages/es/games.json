@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "Ilustración de {theme} con {count} detalles",
       "svgTitle": "Ilustración {theme}"
-    }
+    },
+    "mobileLabel": "Rincón de memoria"
   }
 }

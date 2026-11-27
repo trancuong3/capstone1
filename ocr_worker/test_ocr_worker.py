@@ -884,6 +884,391 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
                 0,
             )
 
+    def test_wakeup_drain_post_loop_pending_redrain_and_cancelled_disconnect_recovery(self):
+        import asyncio
+        import threading
+        import time
+
+        token = "e" * 40
+        runtime = OcrRuntimeManager(worker_id="aca-race-1")
+        pass_calls = 0
+        pass1_exiting = threading.Event()
+        allow_pass1_return = threading.Event()
+
+        def controlled_drain_runner(_reason: str) -> int:
+            nonlocal pass_calls
+            pass_calls += 1
+            if pass_calls == 1:
+                # Simulate the exact window AFTER drain_queue_synchronously exited its
+                # claim_next_job() loop, right before finish_drain_or_continue() runs!
+                pass1_exiting.set()
+                allow_pass1_return.wait(timeout=2.0)
+                return 1
+            if pass_calls == 2:
+                return 1
+            return 2
+
+        with patch.dict(os.environ, {"VIREAD_OCR_SCALE_TO_ZERO": "true"}, clear=False):
+            app = build_worker_http_app(
+                runtime,
+                worker_token=token,
+                drain_runner=controlled_drain_runner,
+            )
+
+            async def _exercise_race() -> None:
+                transport = httpx.ASGITransport(app=app)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://worker.local"
+                ) as http:
+                    t1 = asyncio.create_task(
+                        http.post(
+                            "/wakeup?drain=true",
+                            headers={"X-ViRead-Ocr-Worker-Token": token},
+                            json={"reason": "first_scan"},
+                        )
+                    )
+                    while not pass1_exiting.is_set():
+                        await asyncio.sleep(0.005)
+
+                    # Arrive in the post-loop window: gets already_draining=True and sets _pending_redrain
+                    dup = await http.post(
+                        "/wakeup?drain=true",
+                        headers={"X-ViRead-Ocr-Worker-Token": token},
+                        json={"reason": "late_arrival_enqueue"},
+                    )
+                    self.assertEqual(dup.status_code, 200)
+                    self.assertTrue(dup.json()["already_draining"])
+
+                    allow_pass1_return.set()
+                    res1 = await t1
+                    self.assertEqual(res1.status_code, 200)
+                    body1 = res1.json()
+                    # Primary wakeup MUST run a 2nd pass before releasing _draining!
+                    self.assertEqual(pass_calls, 2)
+                    self.assertEqual(body1["drained_jobs"], 2)
+                    self.assertEqual(body1["standby_mode"], "scale_to_zero")
+                    self.assertFalse(runtime.is_draining())
+
+            asyncio.run(_exercise_race())
+
+            # Simulate ACA 240s ingress disconnect (CancelledError) mid-drain: must abort_drain cleanly!
+            cancel_entered = threading.Event()
+            release_blocked_thread = threading.Event()
+
+            def slow_drain(_r: str) -> int:
+                cancel_entered.set()
+                release_blocked_thread.wait(timeout=2.0)
+                return 0
+
+            app_cancel = build_worker_http_app(
+                runtime,
+                worker_token=token,
+                drain_runner=slow_drain,
+            )
+
+            async def _exercise_cancel() -> None:
+                transport = httpx.ASGITransport(app=app_cancel)
+                async with httpx.AsyncClient(
+                    transport=transport, base_url="http://worker.local"
+                ) as http:
+                    cancelled_req = asyncio.create_task(
+                        http.post(
+                            "/wakeup?drain=true",
+                            headers={"X-ViRead-Ocr-Worker-Token": token},
+                            json={"reason": "long_batch"},
+                        )
+                    )
+                    while not cancel_entered.is_set():
+                        await asyncio.sleep(0.005)
+                    self.assertTrue(runtime.is_draining())
+                    cancelled_req.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await cancelled_req
+                    release_blocked_thread.set()
+                    self.assertFalse(runtime.is_draining())
+
+                    # Follow-up drain immediately acquires ownership (not stuck in already_draining)!
+                    recovery = await http.post(
+                        "/wakeup?drain=true",
+                        headers={"X-ViRead-Ocr-Worker-Token": token},
+                        json={"reason": "followup_after_240s_disconnect"},
+                    )
+                    self.assertEqual(recovery.status_code, 200)
+                    self.assertFalse(recovery.json()["already_draining"])
+                    self.assertTrue(recovery.json()["drained"])
+
+            asyncio.run(_exercise_cancel())
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows PowerShell 5.1 integration test")
+    def test_azure_powershell_deployer_region_fallback_stderr_json_and_arm_patch(self):
+        import json
+        import subprocess
+
+        ps_script = REPO_ROOT / "scripts" / "azure" / "Deploy-ViReadAzureOcrWorker.ps1"
+        self.assertTrue(ps_script.is_file())
+        secret_token = "f1e2d3c4b5a697887766554433221100ffeeddccbbaa9988"
+
+        with tempfile.TemporaryDirectory(prefix="viread-az-ps51-") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            state_file = tmp_path / "az_state.json"
+            state_file.write_text(
+                json.dumps(
+                    {
+                        "rg": None,
+                        "resources": [],
+                        "env": None,
+                        "app": None,
+                        "calls": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            fake_az_py = tmp_path / "fake_az.py"
+            fake_az_py.write_text(
+                '''import json, os, sys
+from pathlib import Path
+
+state_path = Path(os.environ["FAKE_AZ_STATE_FILE"])
+state = json.loads(state_path.read_text(encoding="utf-8"))
+args = sys.argv[1:]
+state["calls"].append(args)
+
+def save():
+    state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+
+def arg_val(flag):
+    if flag in args:
+        idx = args.index(flag)
+        if idx + 1 < len(args):
+            return args[idx + 1]
+    return None
+
+# Emit a realistic Azure CLI preview warning on stderr to test PS 5.1 NativeCommandError + JSON purity!
+if args[:2] in (["account", "show"], ["containerapp", "show"]):
+    sys.stderr.write("WARNING: Command group 'containerapp' is in preview and under development.\\n")
+
+if args[:2] == ["config", "set"] or args[:2] == ["extension", "add"] or args[:2] == ["provider", "register"]:
+    save()
+    sys.exit(0)
+
+if args[:2] == ["account", "show"]:
+    save()
+    print(json.dumps({"id": "00000000-1111-2222-3333-444444444444", "name": "Azure for Students"}))
+    sys.exit(0)
+
+if args[:2] == ["group", "show"]:
+    save()
+    if state["rg"] is None:
+        sys.stderr.write("ERROR: (ResourceGroupNotFound) Resource group could not be found.\\n")
+        sys.exit(3)
+    print(json.dumps(state["rg"]))
+    sys.exit(0)
+
+if args[:2] == ["resource", "list"]:
+    save()
+    print(json.dumps(state["resources"]))
+    sys.exit(0)
+
+if args[:2] == ["group", "delete"]:
+    state["rg"] = None
+    state["resources"] = []
+    save()
+    sys.exit(0)
+
+if args[:2] == ["group", "create"]:
+    loc = arg_val("--location")
+    state["rg"] = {"name": arg_val("--name"), "location": loc}
+    save()
+    print(json.dumps(state["rg"]))
+    sys.exit(0)
+
+if args[:3] == ["containerapp", "env", "show"]:
+    save()
+    if state["env"] is None:
+        sys.stderr.write("ERROR: ResourceNotFound\\n")
+        sys.exit(3)
+    print(json.dumps(state["env"]))
+    sys.exit(0)
+
+if args[:3] == ["containerapp", "env", "create"]:
+    loc = arg_val("--location")
+    logs_dest = arg_val("--logs-destination")
+    assert logs_dest == "none", f"Expected --logs-destination none, got {logs_dest}"
+    if loc == "southeastasia":
+        save()
+        sys.stderr.write("ERROR: (InvalidTemplateDeployment) RequestDisallowedByPolicy: Resource disallowed in southeastasia.\\n")
+        sys.exit(1)
+    if state["rg"] and state["rg"]["location"] != loc:
+        save()
+        sys.stderr.write("ERROR: (InvalidResourceGroupLocation) Resource location must match resource group location.\\n")
+        sys.exit(1)
+    state["env"] = {"name": arg_val("--name"), "location": loc}
+    state["resources"].append({"type": "Microsoft.App/managedEnvironments", "name": arg_val("--name")})
+    save()
+    print(json.dumps(state["env"]))
+    sys.exit(0)
+
+if args[:2] == ["containerapp", "show"]:
+    save()
+    if state["app"] is None:
+        sys.stderr.write("ERROR: ResourceNotFound\\n")
+        sys.exit(3)
+    if arg_val("-o") == "json":
+        # Like real ARM GET, omit secret values!
+        redacted = json.loads(json.dumps(state["app"]))
+        redacted["properties"]["configuration"]["secrets"] = [{"name": "ocr-worker-token"}]
+        print(json.dumps(redacted))
+    sys.exit(0)
+
+if args[:2] == ["containerapp", "create"]:
+    sec = arg_val("--secrets") or ""
+    assert sec.startswith("ocr-worker-token="), "Missing ocr-worker-token secret"
+    state["app"] = {
+        "name": arg_val("--name"),
+        "location": state["env"]["location"],
+        "secret_raw": sec.split("=", 1)[1],
+        "properties": {
+            "configuration": {
+                "ingress": {"external": True, "targetPort": 7860, "fqdn": "viread-ocr-worker.eastasia.azurecontainerapps.io"},
+                "secrets": [{"name": "ocr-worker-token", "value": sec.split("=", 1)[1]}],
+            },
+            "template": {
+                "scale": {"minReplicas": 0, "maxReplicas": 1, "cooldownPeriod": 300, "pollingInterval": 30}
+            },
+        },
+    }
+    state["resources"].append({"type": "Microsoft.App/containerApps", "name": arg_val("--name")})
+    save()
+    sys.exit(0)
+
+if args[:3] == ["containerapp", "secret", "set"]:
+    sec = arg_val("--secrets") or ""
+    state["app"]["secret_raw"] = sec.split("=", 1)[1]
+    save()
+    sys.exit(0)
+
+if args[:2] == ["containerapp", "update"]:
+    # Like real az containerapp update, reset cooldownPeriod to 300 before Step 5 PATCH runs!
+    state["app"]["properties"]["template"]["scale"]["cooldownPeriod"] = 300
+    save()
+    sys.exit(0)
+
+if args[:2] == ["resource", "update"]:
+    save()
+    sys.stderr.write("ERROR: (ContainerAppSecretInvalid) Secret 'ocr-worker-token' must have a valid value.\\n")
+    sys.exit(1)
+
+if args[:1] == ["rest"]:
+    assert arg_val("--method").upper() == "PATCH", f"Expected PATCH, got {arg_val('--method')}"
+    body_arg = arg_val("--body")
+    assert body_arg and body_arg.startswith("@"), f"Expected @file body, got {body_arg}"
+    raw_bytes = Path(body_arg[1:]).read_bytes()
+    assert not raw_bytes.startswith(b"\\xef\\xbb\\xbf"), "UTF-8 BOM breaks az rest JSON parser!"
+    patch_doc = json.loads(raw_bytes.decode("utf-8"))
+    scale_patch = patch_doc["properties"]["template"]["scale"]
+    state["app"]["properties"]["template"]["scale"].update(scale_patch)
+    save()
+    print(json.dumps(state["app"]))
+    sys.exit(0)
+
+save()
+sys.stderr.write(f"Unhandled fake az command: {args}\\n")
+sys.exit(2)
+''',
+                encoding="utf-8",
+            )
+
+            az_cmd = tmp_path / "az.cmd"
+            az_cmd.write_text(
+                f'@echo off\r\n"{sys.executable}" "{fake_az_py}" %*\r\n',
+                encoding="utf-8",
+            )
+
+            env = {
+                **os.environ,
+                "PATH": f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}",
+                "FAKE_AZ_STATE_FILE": str(state_file),
+                "VIREAD_OCR_WORKER_TOKEN": secret_token,
+            }
+
+            # Run 1: Initial creation (southeastasia blocked -> cleans empty RG -> succeeds in eastasia + PATCH cooldown=30)
+            proc1 = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(ps_script),
+                    "-Image",
+                    "example.com/public/viread-ocr-worker:latest",
+                    "-CandidateRegions",
+                    "southeastasia,eastasia",
+                    "-UseEnvWorkerToken",
+                    "-HealthProbeAttempts",
+                    "0",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            # In PS 5.1, `-CandidateRegions a,b` over `-File` passes string; handle or pass via -Command:
+            if proc1.returncode != 0:
+                self.fail(f"Run 1 failed (exit {proc1.returncode}):\nSTDOUT:\n{proc1.stdout}\nSTDERR:\n{proc1.stderr}")
+
+            state_after_1 = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(state_after_1["rg"]["location"], "eastasia")
+            self.assertEqual(state_after_1["env"]["location"], "eastasia")
+            self.assertEqual(
+                state_after_1["app"]["properties"]["template"]["scale"]["cooldownPeriod"],
+                30,
+            )
+            self.assertEqual(
+                state_after_1["app"]["properties"]["template"]["scale"]["pollingInterval"],
+                15,
+            )
+            self.assertEqual(state_after_1["app"]["secret_raw"], secret_token)
+            self.assertNotIn(secret_token, proc1.stdout)
+            self.assertNotIn(secret_token, proc1.stderr)
+            self.assertIn("VIREAD_OCR_REMOTE_SCALE_TO_ZERO=true", proc1.stdout)
+
+            # Run 2: Idempotent update when environment + app already exist
+            proc2 = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(ps_script),
+                    "-Image",
+                    "example.com/public/viread-ocr-worker:latest",
+                    "-UseEnvWorkerToken",
+                    "-HealthProbeAttempts",
+                    "0",
+                ],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            self.assertEqual(
+                proc2.returncode,
+                0,
+                msg=f"Run 2 failed:\nSTDOUT:\n{proc2.stdout}\nSTDERR:\n{proc2.stderr}",
+            )
+            state_after_2 = json.loads(state_file.read_text(encoding="utf-8"))
+            self.assertEqual(
+                state_after_2["app"]["properties"]["template"]["scale"]["cooldownPeriod"],
+                30,
+            )
+            self.assertNotIn(secret_token, proc2.stdout)
+            self.assertNotIn(secret_token, proc2.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

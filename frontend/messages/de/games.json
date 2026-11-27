@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "Illustration „{theme}“ mit {count} Details",
       "svgTitle": "Illustration {theme}"
-    }
+    },
+    "mobileLabel": "Erinnerungsecke"
   }
 }

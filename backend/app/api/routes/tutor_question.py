@@ -13,6 +13,7 @@ from app.schemas.tutor_question import (
     TutorNextQuestionRead,
     TutorQuestionSetRead,
 )
+from app.services.rate_limiter import rate_limit
 from app.services.tutor_question_service import TutorQuestionService
 
 router = APIRouter()
@@ -29,6 +30,9 @@ def _service(db: AsyncSession) -> TutorQuestionService:
 async def generate_questions(
     session_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("tutor_questions_generate", default_max=30, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Create questions for a finished reading session. Safe to call repeatedly."""
@@ -42,6 +46,9 @@ async def generate_questions(
 async def next_question(
     session_id: UUID,
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("tutor_questions", default_max=120, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Return the next question the child has not answered correctly."""
@@ -57,6 +64,9 @@ async def submit_answer(
     question_id: UUID,
     payload: TutorAnswerRequest,
     actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("tutor_questions", default_max=120, default_window=60.0)
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Grade an answer on the server; the expected answer is never returned."""

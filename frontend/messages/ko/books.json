@@ -321,7 +321,7 @@
     "overviewAria": "페이지 상태 빠른 개요",
     "overviewChipTitle": "소스 페이지 {page}: {status}",
     "workerFailuresSummary": "OCR/AI 오류가 발생한 페이지가 {count}개 있습니다 (서비스가 바쁘거나 일시적으로 오프라인 상태일 수 있습니다). 준비 완료 상태이거나 관리자 검토 대기 중인 페이지는 영향을 받지 않습니다. 오류가 발생한 각 페이지에서 «검사 다시 시도»를 클릭하세요.",
-    "windowsOcrQueueWaiting": "Windows OCR 서버가 켜지기를 기다리는 중입니다 (안전 대기열 — {count}개의 페이지가 안전하게 저장되었으며 OCR 서버가 활성화되는 즉시 자동으로 인식됩니다).",
+    "windowsOcrQueueWaiting": "OCR 대기열에 저장됨 ({count}페이지) — OCR 서버가 다시 켜지기를 기다리는 중입니다. 서버가 연결되면 자동으로 인식이 시작됩니다.",
     "ocrRunningStatus": "OCR 인식 중 ({running}개 페이지)",
     "ocrQueuedSuffix": " ({count}개 페이지 대기 중)",
     "ocrOtherPagesStillVisible": ". 검사가 완료된 페이지는 즉시 조치할 수 있도록 계속 표시됩니다.",
@@ -345,6 +345,11 @@
     "toolCheckScopeLabel": "도구 검사 범위:",
     "toolCheckFlaggedNotice": "도구 검사에서 성인의 검토가 필요한 항목 {count}개를 발견했습니다.",
     "toolCheckAdminNotice": "책에 추가하기 전에 관리자의 검토가 필요한 페이지입니다.",
+    "toolCheckFailedNotice": "검사 과정에서 기술적인 문제가 발생했습니다.",
+    "toolCheckPassedNotice": "이 페이지는 안전 검사를 통과했습니다.",
+    "toolCheckCheckingNotice": "이 페이지의 자동 검사를 실행하는 중입니다.",
+    "toolCheckRejectedNotice": "이 페이지 버전은 관리자의 승인을 받지 못했습니다.",
+    "toolCheckRecheckNotice": "책에 추가하기 전에 이 페이지를 다시 검사해야 합니다.",
     "previewTextLabel": "책에 추가될 예정인 콘텐츠:",
     "proofreadSectionTitle": "맞춤법 제안 ({count})",
     "uncertainWordsSuffix": " · {count}개 주의할 단어",
@@ -404,6 +409,7 @@
     "committedPaginationAria": "도서에 추가된 페이지 페이징",
     "statusLabels": {
       "PENDING": "OCR 대기 중",
+      "PENDING_POST_OCR": "이전 단계 완료 대기 중",
       "RUNNING": "OCR 실행 중",
       "COMPLETED": "완료",
       "PASSED": "통과",
@@ -457,7 +463,11 @@
     "cancelledSubmissionNotice": "대기 중인 업로드가 취소되었습니다.",
     "cancelSubmissionErrorFallback": "이 페이지를 취소할 수 없습니다.",
     "pageNumberHeading": "{page} 페이지",
-    "pageItemLabel": "페이지"
+    "pageItemLabel": "페이지",
+    "workerOfflineUploadNotice": "OCR 서버가 일시적으로 오프라인입니다 — 이미지나 PDF/DOCX 파일을 계속 업로드해 대기열에 저장할 수 있으며, 서버가 다시 켜지면 자동으로 인식됩니다.",
+    "queuedWaitingWorkerBadge": "OCR 대기열 저장됨 — 서버 재연결 대기 중",
+    "queuedWaitingWorkerShort": "OCR 대기열 저장됨 — 서버 켜지면 자동 인식",
+    "reasonQueuedOffline": "이 페이지는 OCR 대기열에 안전하게 저장되었으며 OCR 서버가 다시 켜지면 자동으로 인식됩니다."
   },
   "ocrContribution": {
     "cardAria": "{title}을(를) 위한 ViRead OCR 개선 샘플 기여",

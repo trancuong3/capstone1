@@ -747,7 +747,7 @@ class SentenceShooterService:
             if isinstance(token, dict) and "id" in token
         }
         shuffled_ids = [str(token_id) for token_id in game_round.ShuffledTokenIds]
-        expected_count = len(game_round.ExpectedTokenIds or [])
+        expected_count = len(getattr(game_round, "ExpectedTokenIds", None) or [])
         learning_mode: LearningMode = meta.get("learning_mode", "WORD_ORDER")
         raw_slots = meta.get("prompt_slots") or []
         prompt_slots = [
@@ -1040,7 +1040,7 @@ class SentenceShooterService:
         completed_round_id: UUID,
     ) -> SentenceShooterNextRoundRead:
         await self._require_parent(actor_id)
-        game_session = await self.repository.session_for_parent(session_id, actor_id, lock=True)
+        game_session = await self.repository.session_for_parent(session_id, actor_id, lock=False)
         if game_session is None:
             raise HTTPException(status_code=404, detail="Resource not found")
         if game_session.Status != "IN_PROGRESS":
@@ -1048,7 +1048,7 @@ class SentenceShooterService:
         completed_round = await self.repository.game_round(
             session_id,
             completed_round_id,
-            lock=True,
+            lock=False,
         )
         if (
             completed_round is None

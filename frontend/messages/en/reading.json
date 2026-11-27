@@ -260,7 +260,17 @@
     "referencePageAlt": "Reference image for page {page}",
     "scrollToCurrentWord": "About the word being read",
     "currentWordPrefix": "Current word: ",
-    "overlayAria": "Highlight current word via bounding box"
+    "overlayAria": "Highlight current word via bounding box",
+    "readingModeSwitcherAria": "Book page reading mode",
+    "readingModeIllustrated": "Illustrated",
+    "readingModeIllustratedTitle": "View text-free storybook illustration alongside reading text",
+    "readingModeText": "Read text",
+    "readingModeTextTitle": "Focus on crisp reading text",
+    "readingModeOriginal": "Original page",
+    "readingModeOriginalTitle": "View original scanned book page for reference",
+    "illustrationAlt": "Illustration for page {page}",
+    "originalReferenceHeading": "Original page image (reference)",
+    "originalReferenceAlt": "Original image for page {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Not quite: \"{word}\". Let's try reading this word again.",

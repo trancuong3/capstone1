@@ -312,6 +312,17 @@ def content_hash(value: str) -> str:
     return hashlib.sha256(normalize_safety_text(value).encode("utf-8")).hexdigest()
 
 
+def _ollama_chunk_budget(num_ctx: int) -> tuple[int, int]:
+    """Keep Ollama prompt + source chunk well within small num_ctx windows."""
+    safe_ctx = max(1024, int(num_ctx))
+    if safe_ctx <= 4096:
+        target_chars = min(2500, max(1000, int(safe_ctx * 0.6)))
+    else:
+        target_chars = min(9000, max(2500, int(safe_ctx * 0.6)))
+    overlap_chars = min(400, max(100, target_chars // 10))
+    return target_chars, overlap_chars
+
+
 def _chunks(text: str, *, target_chars: int = 9000, overlap_chars: int = 400) -> list[tuple[int, str]]:
     if len(text) <= target_chars:
         return [(0, text)]
@@ -417,10 +428,12 @@ class ChildSafetyOrchestrator:
             ])
         if config.groq_enabled:
             self.providers.append(SafetyProvider("groq_qwen", config.groq_model, "groq"))
-        if config.local_enabled or not self.providers:
+        if config.local_enabled:
             self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
 
     async def analyze(self, text: str) -> dict[str, Any]:
+        if not self.providers:
+            raise OcrConfigurationError("NO_AI_PROVIDER_CONFIGURED")
         normalized, normalized_spans = _nfc_with_offsets(text)
         left = len(normalized) - len(normalized.lstrip())
         right = len(normalized.rstrip())
@@ -428,7 +441,19 @@ class ChildSafetyOrchestrator:
         normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
-        chunks = _chunks(normalized)
+        ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
+            self.config.local.num_ctx
+        )
+        if self.providers and all(p.family == "ollama" for p in self.providers):
+            chunks = _chunks(
+                normalized,
+                target_chars=ollama_target_chars,
+                overlap_chars=ollama_overlap_chars,
+            )
+        else:
+            chunks = _chunks(normalized)
+        total_timeout = float(getattr(self.config, "total_timeout_seconds", 0) or 0)
+        deadline = (time.monotonic() + total_timeout) if total_timeout > 0 else None
         events: list[dict[str, Any]] = []
         disabled_families: set[str] = set()
         aggregated_suitability = "SUITABLE"
@@ -436,11 +461,14 @@ class ChildSafetyOrchestrator:
         deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
         completed_chunks = 0
         for chunk_index, (offset, chunk_text) in enumerate(chunks):
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
             response = await self._analyze_chunk(
                 chunk_text,
                 events,
                 chunk_index,
                 disabled_families=disabled_families,
+                deadline=deadline,
             )
             suitability, findings = response
             completed_chunks += 1
@@ -499,30 +527,101 @@ class ChildSafetyOrchestrator:
         chunk_id: int,
         *,
         disabled_families: set[str] | None = None,
+        deadline: float | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
         if disabled_families is None:
             disabled_families = set()
+        ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
+            self.config.local.num_ctx
+        )
         for provider in self.providers:
             if provider.family in disabled_families:
                 continue
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
             started = time.perf_counter()
             output_mode = self._output_mode(provider)
             retry_count = 0
-            try:
-                result, status_code, output_mode, retry_count = await asyncio.wait_for(
-                    self._request(provider, source),
-                    timeout=(self.config.local.timeout_seconds if provider.family == "ollama" else self.config.cloud_timeout_seconds),
+            provider_timeout = float(
+                self.config.local.timeout_seconds
+                if provider.family == "ollama"
+                else self.config.cloud_timeout_seconds
+            )
+            sub_chunks = (
+                _chunks(
+                    source,
+                    target_chars=ollama_target_chars,
+                    overlap_chars=ollama_overlap_chars,
                 )
-                suitability, findings = _validate_result(result, source=source, source_offset=0)
+                if provider.family == "ollama" and len(source) > ollama_target_chars
+                else [(0, source)]
+            )
+            hit_document_deadline = False
+            try:
+                combined_suitability = "SUITABLE"
+                combined_findings: list[dict[str, Any]] = []
+                last_status_code: int | None = None
+                total_retries = 0
+                for sub_offset, sub_text in sub_chunks:
+                    remaining = (
+                        deadline - time.monotonic()
+                        if deadline is not None
+                        else provider_timeout
+                    )
+                    if deadline is not None and remaining <= 0:
+                        hit_document_deadline = True
+                        raise asyncio.TimeoutError()
+                    attempt_timeout = (
+                        min(provider_timeout, remaining)
+                        if deadline is not None
+                        else provider_timeout
+                    )
+                    try:
+                        result, status_code, output_mode, sub_retries = await asyncio.wait_for(
+                            self._request(provider, sub_text),
+                            timeout=attempt_timeout,
+                        )
+                    except asyncio.TimeoutError:
+                        if deadline is not None and (
+                            time.monotonic() >= deadline
+                            or remaining <= provider_timeout
+                        ):
+                            hit_document_deadline = True
+                        raise
+                    last_status_code = status_code
+                    total_retries += sub_retries
+                    sub_suitability, sub_findings = _validate_result(
+                        result, source=sub_text, source_offset=sub_offset
+                    )
+                    if (
+                        _SUITABILITY_ORDER[sub_suitability]
+                        > _SUITABILITY_ORDER[combined_suitability]
+                    ):
+                        combined_suitability = sub_suitability
+                    combined_findings.extend(sub_findings)
+                retry_count = total_retries
                 events.append(self._event(
-                    provider, chunk_id, True, status_code, None, started,
+                    provider, chunk_id, True, last_status_code, None, started,
                     output_mode=output_mode, retry_count=retry_count,
                 ))
-                return suitability, findings
+                return combined_suitability, combined_findings
             except asyncio.TimeoutError:
-                code, status_code = "PROVIDER_TIMEOUT", None
+                code = "DOCUMENT_TIMEOUT" if hit_document_deadline else "PROVIDER_TIMEOUT"
+                status_code = None
+                if hit_document_deadline:
+                    events.append(self._event(
+                        provider, chunk_id, False, status_code, code, started,
+                        output_mode=output_mode, retry_count=retry_count,
+                    ))
+                    raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
             except httpx.TimeoutException:
+                if deadline is not None and time.monotonic() >= deadline:
+                    events.append(self._event(
+                        provider, chunk_id, False, None, "DOCUMENT_TIMEOUT", started,
+                        output_mode=output_mode, retry_count=retry_count,
+                    ))
+                    raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
                 code, status_code = "PROVIDER_TIMEOUT", None
             except httpx.RequestError:
                 code, status_code = "PROVIDER_NETWORK", None
@@ -547,6 +646,8 @@ class ChildSafetyOrchestrator:
                 provider, chunk_id, False, status_code, code, started,
                 output_mode=output_mode, retry_count=retry_count,
             ))
+            if deadline is not None and time.monotonic() >= deadline:
+                raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
             if (
                 status_code in {401, 403, 429}
                 or (isinstance(status_code, int) and status_code >= 500)

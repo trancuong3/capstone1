@@ -18,6 +18,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+import { useTranslations } from "@/hooks/use-i18n";
+import type { TranslateFn } from "@/lib/i18n/types";
 import { cn } from "@/lib/utils/cn";
 import {
   ACTIVE_GLOBAL_TASK_STATUSES,
@@ -26,7 +28,7 @@ import {
 } from "@/types/global-tasks";
 
 export interface GlobalTaskCenterProps {
-  readonly variant?: "header-pill" | "floating";
+  readonly variant?: "header-pill" | "floating" | "sidebar" | "topbar";
   readonly hideOnPaths?: readonly string[];
   readonly className?: string;
 }
@@ -47,25 +49,42 @@ function shouldHideOnPath(
   );
 }
 
-function formatElapsedVietnamese(
+function formatElapsed(
   startedIso: string | null,
   createdIso: string,
   nowMs: number,
+  t: TranslateFn,
 ): string {
   const parsed = Date.parse(startedIso ?? createdIso);
   if (!Number.isFinite(parsed)) return "";
   const elapsedSec = Math.max(0, Math.floor((nowMs - parsed) / 1000));
   if (elapsedSec < 60) {
-    return `${elapsedSec} giây`;
+    return t(
+      "taskCenter.elapsedSeconds",
+      { seconds: elapsedSec },
+      "{seconds} giây",
+    );
   }
   const minutes = Math.floor(elapsedSec / 60);
   const seconds = elapsedSec % 60;
   if (minutes < 60) {
-    return seconds > 0 ? `${minutes} phút ${seconds} giây` : `${minutes} phút`;
+    return seconds > 0
+      ? t(
+          "taskCenter.elapsedMinutesSeconds",
+          { minutes, seconds },
+          "{minutes} phút {seconds} giây",
+        )
+      : t("taskCenter.elapsedMinutes", { minutes }, "{minutes} phút");
   }
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;
-  return remMinutes > 0 ? `${hours} giờ ${remMinutes} phút` : `${hours} giờ`;
+  return remMinutes > 0
+    ? t(
+        "taskCenter.elapsedHoursMinutes",
+        { hours, minutes: remMinutes },
+        "{hours} giờ {minutes} phút",
+      )
+    : t("taskCenter.elapsedHours", { hours }, "{hours} giờ");
 }
 
 function statusBadgeTone(status: GlobalTaskStatus): string {
@@ -91,7 +110,13 @@ function statusBadgeTone(status: GlobalTaskStatus): string {
   }
 }
 
-function TaskProgressView({ task }: { readonly task: GlobalTaskItem }) {
+function TaskProgressView({
+  task,
+  t,
+}: {
+  readonly task: GlobalTaskItem;
+  readonly t: TranslateFn;
+}) {
   const isActive = ACTIVE_GLOBAL_TASK_STATUSES.has(task.status);
   const hasMeasuredProgress =
     !task.is_indeterminate &&
@@ -115,7 +140,11 @@ function TaskProgressView({ task }: { readonly task: GlobalTaskItem }) {
           <span className="tabular-nums">{Math.round(pct)}%</span>
         </div>
         <div
-          aria-label={`Tiến độ ${task.title_vi}`}
+          aria-label={t(
+            "taskCenter.progressAria",
+            { title: task.title_vi },
+            "Tiến độ {title}",
+          )}
           aria-valuemax={task.progress_total!}
           aria-valuemin={0}
           aria-valuenow={task.progress_completed!}
@@ -138,6 +167,24 @@ function TaskProgressView({ task }: { readonly task: GlobalTaskItem }) {
     );
   }
 
+  if (task.status === "WAITING_FOR_WORKER") {
+    return (
+      <div
+        className="mt-2.5 flex items-center gap-2 rounded-control border border-amber-200 bg-amber-50/80 px-2.5 py-1.5 text-xs font-medium text-amber-900"
+        data-testid={`task-queued-offline-${task.id}`}
+      >
+        <Clock
+          aria-hidden="true"
+          className="size-3.5 shrink-0 text-amber-700"
+        />
+        <span>
+          {task.stage_label_vi ||
+            "Đã lưu trong hàng chờ — Chờ máy chủ OCR bật lại"}
+        </span>
+      </div>
+    );
+  }
+
   if (isActive) {
     return (
       <div
@@ -146,10 +193,16 @@ function TaskProgressView({ task }: { readonly task: GlobalTaskItem }) {
       >
         <div className="flex items-center justify-between text-xs font-medium text-muted">
           <span>{task.stage_label_vi}</span>
-          <span>Đang xử lý nền…</span>
+          <span>
+            {t("taskCenter.backgroundProcessing", undefined, "Đang xử lý nền…")}
+          </span>
         </div>
         <div
-          aria-label={`Đang xử lý ${task.title_vi}`}
+          aria-label={t(
+            "taskCenter.processingAria",
+            { title: task.title_vi },
+            "Đang xử lý {title}",
+          )}
           className="h-2 w-full overflow-hidden rounded-full bg-canvas"
           data-indeterminate="true"
           role="progressbar"
@@ -168,6 +221,7 @@ export function GlobalTaskCenter({
   hideOnPaths = [],
   className,
 }: GlobalTaskCenterProps) {
+  const t = useTranslations("admin");
   const pathname = usePathname() ?? "/";
   const taskCenter = useOptionalAiTaskCenter();
   const [clockMs, setClockMs] = useState<number>(() => Date.now());
@@ -208,6 +262,7 @@ export function GlobalTaskCenter({
   }
 
   const {
+    actorRole,
     tasks,
     waitingReviewCount,
     failedCount,
@@ -222,56 +277,131 @@ export function GlobalTaskCenter({
     cancelTask,
   } = taskCenter;
 
-  const pillText =
-    activeCount > 0
-      ? `AI đang chạy (${activeCount})`
+  const fullTasksPageHref =
+    actorRole === "admin" ? "/admin/tasks" : "/studio/tasks";
+
+  const activeTasks = tasks.filter((item) =>
+    ACTIVE_GLOBAL_TASK_STATUSES.has(item.status),
+  );
+  const allActiveWaitingForWorker =
+    activeCount > 0 &&
+    activeTasks.length > 0 &&
+    activeTasks.every((item) => item.status === "WAITING_FOR_WORKER");
+
+  const pillText = allActiveWaitingForWorker
+    ? t(
+        "taskCenter.pillWaitingForWorker",
+        { count: activeCount },
+        "Hàng chờ OCR ({count})",
+      )
+    : activeCount > 0
+      ? t(
+          "taskCenter.pillRunning",
+          { count: activeCount },
+          "AI đang chạy ({count})",
+        )
       : waitingReviewCount > 0
-        ? `Cần xác minh (${waitingReviewCount})`
+        ? t(
+            "taskCenter.pillWaitingReview",
+            { count: waitingReviewCount },
+            "Cần xác minh ({count})",
+          )
         : failedCount > 0
-          ? `Tác vụ lỗi (${failedCount})`
-          : "Tác vụ AI";
+          ? t(
+              "taskCenter.pillFailed",
+              { count: failedCount },
+              "Tác vụ lỗi ({count})",
+            )
+          : t("taskCenter.pillIdle", undefined, "Tác vụ AI");
+
+  const highlightCount =
+    activeCount > 0
+      ? activeCount
+      : waitingReviewCount > 0
+        ? waitingReviewCount
+        : failedCount > 0
+          ? failedCount
+          : 0;
+
+  const isCompactTopbar = variant === "header-pill" || variant === "topbar";
 
   const triggerButton = (
     <button
       aria-controls="viread-global-task-center-panel"
       aria-expanded={isOpen}
-      aria-label="Mở trung tâm tác vụ AI"
+      aria-label={t("taskCenter.openAria", undefined, "Mở trung tâm tác vụ AI")}
       className={cn(
-        "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-full border text-xs font-semibold shadow-sm transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:gap-2 sm:px-3.5 sm:text-sm",
-        variant === "header-pill" ? "min-w-11 px-2.5" : "px-3.5",
-        activeCount > 0
-          ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
-          : failedCount > 0
-            ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
-            : waitingReviewCount > 0
-              ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
-              : "border-border bg-white text-ink hover:bg-canvas",
+        "inline-flex items-center border font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+        variant === "sidebar" &&
+          "min-h-10 w-full justify-between gap-2 rounded-control px-3 py-2 text-xs shadow-2xs",
+        variant === "topbar" &&
+          "min-h-10 min-w-10 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-2xs sm:px-3",
+        variant === "header-pill" &&
+          "min-h-11 min-w-11 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-sm sm:gap-2 sm:px-3.5 sm:text-sm",
         variant === "floating" &&
-          "fixed bottom-20 right-4 z-40 min-h-12 px-4 shadow-lg xl:bottom-5 xl:right-5",
+          "fixed bottom-20 end-4 z-40 min-h-12 justify-center gap-2 rounded-full px-4 text-xs shadow-lg sm:text-sm xl:bottom-5 xl:end-5",
+        allActiveWaitingForWorker
+          ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100/70"
+          : activeCount > 0
+            ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
+            : failedCount > 0
+              ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
+              : waitingReviewCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
+                : "border-border bg-white text-ink hover:bg-canvas",
         className,
       )}
       data-testid="global-task-center-trigger"
+      data-variant={variant}
       onClick={togglePanel}
       type="button"
     >
-      {activeCount > 0 ? (
-        <Loader2 aria-hidden="true" className="size-4 shrink-0 animate-spin" />
-      ) : failedCount > 0 ? (
-        <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
-      ) : (
-        <Sparkles aria-hidden="true" className="size-4 shrink-0 text-primary" />
-      )}
-      <span
-        className={cn(
-          "whitespace-nowrap",
-          variant === "header-pill" && "sr-only sm:not-sr-only",
+      <span className="flex min-w-0 items-center gap-2">
+        {allActiveWaitingForWorker ? (
+          <Clock
+            aria-hidden="true"
+            className="size-4 shrink-0 text-amber-700"
+          />
+        ) : activeCount > 0 ? (
+          <Loader2
+            aria-hidden="true"
+            className="size-4 shrink-0 animate-spin"
+          />
+        ) : failedCount > 0 ? (
+          <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
+        ) : (
+          <Sparkles
+            aria-hidden="true"
+            className="size-4 shrink-0 text-primary"
+          />
         )}
-      >
-        {pillText}
+        <span
+          className={cn(
+            "truncate whitespace-nowrap",
+            isCompactTopbar && "sr-only sm:not-sr-only",
+          )}
+        >
+          {pillText}
+        </span>
       </span>
-      {variant === "header-pill" && activeCount > 0 ? (
+      {isCompactTopbar && highlightCount > 0 ? (
         <span aria-hidden="true" className="tabular-nums sm:hidden">
-          {activeCount}
+          {highlightCount}
+        </span>
+      ) : null}
+      {variant === "sidebar" && highlightCount > 0 ? (
+        <span
+          aria-hidden="true"
+          className={cn(
+            "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums",
+            activeCount > 0
+              ? "bg-primary text-white"
+              : failedCount > 0
+                ? "bg-danger text-white"
+                : "bg-amber-600 text-white",
+          )}
+        >
+          {highlightCount}
         </span>
       ) : null}
     </button>
@@ -292,13 +422,13 @@ export function GlobalTaskCenter({
           }}
         >
           <section
-            aria-label="Trung tâm tác vụ AI"
+            aria-label={t("taskCenter.title", undefined, "Trung tâm tác vụ AI")}
             aria-modal="true"
             className={cn(
               "flex w-full flex-col bg-white shadow-2xl outline-none",
               // Mobile bottom sheet (< sm) vs Desktop slide-over (>= sm)
               "max-h-[82dvh] rounded-t-2xl border-t border-border",
-              "sm:h-dvh sm:max-h-dvh sm:w-[min(28rem,100vw)] sm:rounded-none sm:border-l sm:border-t-0",
+              "sm:h-dvh sm:max-h-dvh sm:w-[min(28rem,100vw)] sm:rounded-none sm:border-s sm:border-t-0",
             )}
             data-testid="global-task-center-panel"
             id="viread-global-task-center-panel"
@@ -315,15 +445,23 @@ export function GlobalTaskCenter({
             <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3.5 sm:px-5">
               <div className="min-w-0">
                 <h2 className="text-base font-bold text-ink">
-                  Trung tâm tác vụ AI
+                  {t("taskCenter.title", undefined, "Trung tâm tác vụ AI")}
                 </h2>
                 <p className="text-xs text-muted">
-                  Tác vụ nền tiếp tục chạy an toàn kể cả khi bạn chuyển trang.
+                  {t(
+                    "taskCenter.subtitle",
+                    undefined,
+                    "Tác vụ nền tiếp tục chạy an toàn kể cả khi bạn chuyển trang.",
+                  )}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 <button
-                  aria-label="Làm mới danh sách tác vụ"
+                  aria-label={t(
+                    "taskCenter.refreshAria",
+                    undefined,
+                    "Làm mới danh sách tác vụ",
+                  )}
                   className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-control text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-3 focus-visible:outline-primary"
                   disabled={isRefreshing}
                   onClick={() => void refresh()}
@@ -335,7 +473,11 @@ export function GlobalTaskCenter({
                   />
                 </button>
                 <button
-                  aria-label="Đóng trung tâm tác vụ AI"
+                  aria-label={t(
+                    "taskCenter.closeAria",
+                    undefined,
+                    "Đóng trung tâm tác vụ AI",
+                  )}
                   className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-control text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-3 focus-visible:outline-primary"
                   onClick={closePanel}
                   type="button"
@@ -355,8 +497,11 @@ export function GlobalTaskCenter({
                   className="mt-0.5 size-4 shrink-0"
                 />
                 <span>
-                  Chờ máy xử lý AI kết nối lại. Tác vụ đã lưu bền vững và sẽ tự
-                  tiếp tục.
+                  {t(
+                    "taskCenter.workerOfflineBanner",
+                    undefined,
+                    "Máy chủ OCR đang tạm tắt — Các tác vụ đã lưu trong hàng chờ và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại.",
+                  )}
                 </span>
               </div>
             ) : null}
@@ -378,21 +523,29 @@ export function GlobalTaskCenter({
                     className="mx-auto size-8 text-muted"
                   />
                   <p className="mt-2 text-sm font-semibold text-ink">
-                    Chưa có tác vụ AI nào
+                    {t(
+                      "taskCenter.emptyTitle",
+                      undefined,
+                      "Chưa có tác vụ AI nào",
+                    )}
                   </p>
                   <p className="mt-1 text-xs text-muted">
-                    Khi bạn tải trang sách, tách nội dung OCR hoặc tạo bìa, tiến
-                    trình thực sẽ hiển thị tại đây.
+                    {t(
+                      "taskCenter.emptyDescription",
+                      undefined,
+                      "Khi bạn tải trang sách, tách nội dung OCR hoặc tạo bìa, tiến trình thực sẽ hiển thị tại đây.",
+                    )}
                   </p>
                 </div>
               ) : (
                 tasks.map((task) => {
                   const isBusy = pendingActionJobIds.has(task.id);
                   const isActive = ACTIVE_GLOBAL_TASK_STATUSES.has(task.status);
-                  const elapsedText = formatElapsedVietnamese(
+                  const elapsedText = formatElapsed(
                     task.started_at,
                     task.created_at,
                     clockMs,
+                    t,
                   );
 
                   return (
@@ -408,9 +561,18 @@ export function GlobalTaskCenter({
                           </h3>
                           {task.book_title || task.page_number ? (
                             <p className="mt-0.5 truncate text-xs text-muted">
-                              {task.book_title ?? "Sách"}
+                              {task.book_title ??
+                                t(
+                                  "taskCenter.defaultBookLabel",
+                                  undefined,
+                                  "Sách",
+                                )}
                               {task.page_number
-                                ? ` • Trang ${task.page_number}`
+                                ? t(
+                                    "taskCenter.pageSeparator",
+                                    { pageNumber: task.page_number },
+                                    " • Trang {pageNumber}",
+                                  )
                                 : ""}
                             </p>
                           ) : null}
@@ -426,16 +588,28 @@ export function GlobalTaskCenter({
                       </div>
 
                       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-                        <span>Bước: {task.stage_label_vi}</span>
+                        <span>
+                          {t(
+                            "taskCenter.stagePrefix",
+                            { stage: task.stage_label_vi },
+                            "Bước: {stage}",
+                          )}
+                        </span>
                         {elapsedText ? (
                           <span className="inline-flex items-center gap-1 tabular-nums">
                             <Clock aria-hidden="true" className="size-3.5" />
-                            {isActive ? `Đã chạy ${elapsedText}` : elapsedText}
+                            {isActive
+                              ? t(
+                                  "taskCenter.elapsedRunning",
+                                  { elapsed: elapsedText },
+                                  "Đã chạy {elapsed}",
+                                )
+                              : elapsedText}
                           </span>
                         ) : null}
                       </div>
 
-                      <TaskProgressView task={task} />
+                      <TaskProgressView t={t} task={task} />
 
                       {task.error_message_vi ? (
                         <p className="mt-2 rounded-control bg-red-50 px-2.5 py-1.5 text-xs text-danger">
@@ -452,7 +626,7 @@ export function GlobalTaskCenter({
                             type="button"
                           >
                             <RotateCcw aria-hidden="true" className="size-4" />
-                            Thử lại
+                            {t("common.retry")}
                           </button>
                         ) : null}
 
@@ -464,7 +638,7 @@ export function GlobalTaskCenter({
                             type="button"
                           >
                             <XCircle aria-hidden="true" className="size-4" />
-                            Hủy
+                            {t("common.cancel")}
                           </button>
                         ) : null}
 
@@ -473,11 +647,15 @@ export function GlobalTaskCenter({
                           task.status === "PARTIAL_SUCCESS" ||
                           task.status === "WAITING_FOR_REVIEW") ? (
                           <Link
-                            className="ml-auto inline-flex min-h-12 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-semibold text-white transition-colors hover:bg-primary-hover"
+                            className="ms-auto inline-flex min-h-12 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-semibold text-white transition-colors hover:bg-primary-hover"
                             href={task.result_href}
                             onClick={closePanel}
                           >
-                            Xem kết quả
+                            {t(
+                              "taskCenter.viewResultAction",
+                              undefined,
+                              "Xem kết quả",
+                            )}
                             <ExternalLink
                               aria-hidden="true"
                               className="size-3.5"
@@ -489,6 +667,18 @@ export function GlobalTaskCenter({
                   );
                 })
               )}
+            </div>
+
+            <div className="border-t border-border bg-canvas/40 px-4 py-3 sm:px-5">
+              <Link
+                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control border border-border bg-white px-4 text-xs font-bold text-primary transition-colors hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
+                data-testid="global-task-center-full-page-link"
+                href={fullTasksPageHref}
+                onClick={closePanel}
+              >
+                Mở trang quản lý tác vụ đầy đủ
+                <ExternalLink aria-hidden="true" className="size-3.5" />
+              </Link>
             </div>
           </section>
         </div>

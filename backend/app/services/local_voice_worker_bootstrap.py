@@ -190,6 +190,36 @@ async def _is_worker_healthy(base_url: str) -> bool:
         return False
 
 
+def _terminate_bootstrap_process(proc: object) -> None:
+    """Terminate an unfinished PowerShell bootstrap launcher cleanly on stop/timeout."""
+    poll = getattr(proc, "poll", None)
+    if callable(poll):
+        try:
+            if poll() is not None:
+                return
+        except Exception:
+            pass
+    terminate = getattr(proc, "terminate", None)
+    if callable(terminate):
+        try:
+            terminate()
+        except Exception:
+            pass
+    wait = getattr(proc, "wait", None)
+    if callable(wait):
+        try:
+            wait(timeout=2.0)
+            return
+        except Exception:
+            pass
+    kill = getattr(proc, "kill", None)
+    if callable(kill):
+        try:
+            kill()
+        except Exception:
+            pass
+
+
 async def ensure_local_voice_worker_running(
     *,
     base_url: str | None = None,
@@ -284,35 +314,42 @@ async def ensure_local_voice_worker_running(
             return False
 
         deadline = time.monotonic() + _STARTUP_TIMEOUT_SECONDS + 5
-        while time.monotonic() < deadline:
-            if stop_event is not None and stop_event.is_set():
-                return False
-            if await _is_worker_healthy(resolved_url):
-                _last_failed_attempt_monotonic = None
-                logger.info("Local voice worker is ready on %s", resolved_url)
-                return True
-            exit_code = proc.poll()
-            if exit_code is not None:
-                if exit_code == 0 and await _is_worker_healthy(resolved_url):
+        try:
+            while time.monotonic() < deadline:
+                if stop_event is not None and stop_event.is_set():
+                    _terminate_bootstrap_process(proc)
+                    return False
+                if await _is_worker_healthy(resolved_url):
                     _last_failed_attempt_monotonic = None
                     logger.info("Local voice worker is ready on %s", resolved_url)
                     return True
-                _last_failed_attempt_monotonic = time.monotonic()
-                logger.warning(
-                    "Local voice worker startup exited early (exit_code=%s). Check %s",
-                    exit_code,
-                    runtime_dir / "logs" / "voice-worker.stderr.log",
-                )
-                return False
-            if stop_event is not None:
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=0.5)
+                exit_code = proc.poll()
+                if exit_code is not None:
+                    if exit_code == 0 and await _is_worker_healthy(resolved_url):
+                        _last_failed_attempt_monotonic = None
+                        logger.info("Local voice worker is ready on %s", resolved_url)
+                        return True
+                    _last_failed_attempt_monotonic = time.monotonic()
+                    logger.warning(
+                        "Local voice worker startup exited early (exit_code=%s). Check %s",
+                        exit_code,
+                        runtime_dir / "logs" / "voice-worker.stderr.log",
+                    )
                     return False
-                except TimeoutError:
-                    pass
-            else:
-                await asyncio.sleep(0.5)
+                if stop_event is not None:
+                    try:
+                        await asyncio.wait_for(stop_event.wait(), timeout=0.5)
+                        _terminate_bootstrap_process(proc)
+                        return False
+                    except TimeoutError:
+                        pass
+                else:
+                    await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            _terminate_bootstrap_process(proc)
+            raise
 
+        _terminate_bootstrap_process(proc)
         _last_failed_attempt_monotonic = time.monotonic()
         logger.warning(
             "Timed out waiting for local voice worker readiness on %s. Check %s",

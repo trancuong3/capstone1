@@ -188,7 +188,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   // Catalog & history
   const [catalog, setCatalog] = useState<MemoryThemesCatalogDTO | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [history, setHistory] = useState<MemorySessionSummaryDTO[]>([]);
+  const [catalogRetry, setCatalogRetry] = useState(0);
+  const [historyState, setHistory] = useState<{
+    childId: string;
+    items: MemorySessionSummaryDTO[];
+  } | null>(null);
+  const history = historyState?.childId === childId ? historyState.items : [];
   const catalogLoading = catalog === null && catalogError === null;
 
   // Stage A — Setup selections
@@ -445,15 +450,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     if (!childId) return;
     const controller = new AbortController();
 
-    void Promise.all([
-      memoryService.getThemes(controller.signal),
-      memoryService.listSessions(childId, 6, controller.signal).catch(() => []),
-    ])
-      .then(([themesData, recentSessions]) => {
+    void memoryService
+      .getThemes(controller.signal)
+      .then((themesData) => {
         if (controller.signal.aborted) return;
         setCatalog(themesData);
         setCatalogError(null);
-        setHistory(recentSessions);
         if (!hasCustomizedGradeDefaults && child) {
           const rec = themesData.grade_recommendations.find(
             (r) => r.grade === child.grade,
@@ -475,10 +477,25 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   }, [
     child,
     childId,
+    catalogRetry,
     defaultErrorMessage,
     hasCustomizedGradeDefaults,
     memoryService,
   ]);
+
+  // History is optional and must never delay loading the playable catalog.
+  useEffect(() => {
+    if (!childId) return;
+    const controller = new AbortController();
+    void memoryService
+      .listSessions(childId, 6, controller.signal)
+      .then((recentSessions) => {
+        if (!controller.signal.aborted)
+          setHistory({ childId, items: recentSessions });
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, memoryService]);
 
   const handleSceneReady = useCallback(() => {
     setSceneReady(true);
@@ -654,7 +671,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       if (childId) {
         void memoryService
           .listSessions(childId, 6)
-          .then((items) => setHistory(items))
+          .then((items) => setHistory({ childId, items }))
           .catch(() => undefined);
       }
     } catch (err: unknown) {
@@ -797,6 +814,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       data-stage={stage}
       data-testid="memory-game-screen"
     >
+      <BookChildHeader
+        backHref="/entertainment"
+        child={child}
+        mobileLabel={t("memoryGame.mobileLabel")}
+      />
+
       {/* Top navigation & child header */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
         <div className="flex flex-col gap-1">
@@ -827,7 +850,6 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             )}
             {calmSound ? t("memoryGame.calmSound") : t("memoryGame.soundMuted")}
           </Button>
-          <BookChildHeader child={child} />
         </div>
       </div>
 
@@ -871,7 +893,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       {stage === "SETUP" ? (
         <div className="flex flex-col gap-5">
           {catalogError ? (
-            <StatusMessage tone="error">{catalogError}</StatusMessage>
+            <StatusMessage tone="error">
+              {catalogError}
+              <Button
+                data-testid="retry-memory-catalog-btn"
+                fullWidth={false}
+                onClick={() => {
+                  setCatalogError(null);
+                  setCatalogRetry((value) => value + 1);
+                }}
+                size="compact"
+                variant="secondary"
+              >
+                <RefreshCw aria-hidden="true" className="size-4" />
+                {t("memoryGame.retry")}
+              </Button>
+            </StatusMessage>
           ) : null}
 
           {gradeRec ? (

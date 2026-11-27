@@ -30,7 +30,11 @@ from app.services.ocr_ai.child_safety import (
 )
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError, OcrOrchestrationError
-from app.services.worker_telemetry import record_worker_error, record_worker_success
+from app.services.worker_telemetry import (
+    persist_worker_heartbeat_with_factory,
+    record_worker_error,
+    record_worker_success,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -132,10 +136,23 @@ async def _progress_loop(
             return
         if update is not None:
             latest = update
-        async with AsyncSessionLocal() as session:
-            updated = await AdminAiWorkflowRepository(session).update_progress(
-                workflow_id, worker_id, latest[0], latest[1], lease_seconds=LEASE_SECONDS
+        try:
+            async with AsyncSessionLocal() as session:
+                updated = await AdminAiWorkflowRepository(session).update_progress(
+                    workflow_id, worker_id, latest[0], latest[1], lease_seconds=LEASE_SECONDS
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_diagnostic(
+                logger,
+                logging.WARNING,
+                event="admin_ai_workflow_progress_heartbeat_failed",
+                stage="heartbeat",
+                workflow_id=str(workflow_id),
+                error_code=type(exc).__name__.upper(),
             )
+            continue
         if not updated:
             return
         # A timeout is a lease heartbeat; non-empty updates persist real chunk progress.
@@ -518,11 +535,12 @@ async def _fail(
 
 
 async def _process(workflow_id: UUID, worker_id: str) -> None:
-    snapshot = await _load(workflow_id)
-    if snapshot is None or snapshot.get("worker_id") != worker_id:
-        return
-    stage = str(snapshot["stage"])
+    stage = "UNKNOWN"
     try:
+        snapshot = await _load(workflow_id)
+        if snapshot is None or snapshot.get("worker_id") != worker_id:
+            return
+        stage = str(snapshot["stage"])
         if stage == "PROOFREADING":
             await _run_proofreading(snapshot, worker_id)
         elif stage == "CHILD_SAFETY_SCANNING":
@@ -555,7 +573,53 @@ async def _process(workflow_id: UUID, worker_id: str) -> None:
             f"HTTP_{exc.status_code}",
         )
     except Exception as exc:
+        if stage == "UNKNOWN":
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ai_workflow_load_failed",
+                stage="workflow_load",
+                workflow_id=str(workflow_id),
+                error_code=type(exc).__name__.upper(),
+            )
+            try:
+                async with AsyncSessionLocal() as session:
+                    await AdminAiWorkflowRepository(session).release_claim(
+                        workflow_id, worker_id
+                    )
+            except Exception as release_exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="admin_ai_workflow_claim_release_failed",
+                    workflow_id=str(workflow_id),
+                    stage=stage,
+                    error_code=type(release_exc).__name__.upper(),
+                )
+            return
         await _fail(workflow_id, worker_id, stage, type(exc).__name__.upper())
+
+
+def _reap_done_tasks(tasks: set[asyncio.Task[None]]) -> set[asyncio.Task[None]]:
+    remaining: set[asyncio.Task[None]] = set()
+    for task in tasks:
+        if not task.done():
+            remaining.add(task)
+            continue
+        if task.cancelled():
+            continue
+        exc = task.exception()
+        if exc is not None:
+            record_worker_error("admin_ai_workflow", exc)
+            log_diagnostic(
+                logger,
+                logging.ERROR,
+                event="admin_ai_workflow_task_failed",
+                stage="worker_loop",
+                task_name=task.get_name(),
+                error_code=type(exc).__name__.upper(),
+            )
+    return remaining
 
 
 _EVENT_WORKFLOW_TASKS: set[asyncio.Task[None]] = set()
@@ -571,19 +635,40 @@ def _event_workflow_semaphore() -> asyncio.Semaphore:
     return sem
 
 
-async def _run_event_workflow_once(*, worker_id: str | None = None) -> bool:
+async def run_once(
+    *,
+    worker_id: str | None = None,
+    source: str = "event",
+    execution_mode: str = "on_demand",
+    session_factory: object | None = None,
+    repository_cls: object | None = None,
+    persist_heartbeat: bool = True,
+) -> bool:
     """Claim and execute one queued AdminAiWorkflow stage (zero heavy ML imports)."""
     if not _configured_enabled():
         return False
     effective_worker = worker_id or f"admin-ai-event-{uuid4()}"
+    eff_session_factory = session_factory or AsyncSessionLocal
+    eff_repo_cls = repository_cls or AdminAiWorkflowRepository
     try:
-        async with AsyncSessionLocal() as session:
-            workflow_id = await AdminAiWorkflowRepository(session).claim_next(
+        async with eff_session_factory() as session:  # type: ignore[operator]
+            workflow_id = await eff_repo_cls(session).claim_next(  # type: ignore[operator]
                 effective_worker, lease_seconds=LEASE_SECONDS
             )
-        record_worker_success("admin_ai_workflow")
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
         record_worker_error("admin_ai_workflow", exc)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "admin_ai_workflow",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+            )
         log_diagnostic(
             logger,
             logging.ERROR,
@@ -594,22 +679,95 @@ async def _run_event_workflow_once(*, worker_id: str | None = None) -> bool:
         return False
 
     if workflow_id is None:
+        record_worker_success("admin_ai_workflow")
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "admin_ai_workflow",
+                execution_mode=execution_mode,
+                ok=True,
+                items_processed=0,
+                source=source,
+            )
         return False
-    await _process(workflow_id, effective_worker)
+
+    try:
+        await _process(workflow_id, effective_worker)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        record_worker_error("admin_ai_workflow", exc)
+        if persist_heartbeat:
+            await persist_worker_heartbeat_with_factory(
+                eff_session_factory,
+                "admin_ai_workflow",
+                execution_mode=execution_mode,
+                ok=False,
+                items_processed=0,
+                source=source,
+                error_code=type(exc).__name__,
+            )
+        raise
+
+    record_worker_success("admin_ai_workflow")
+    if persist_heartbeat:
+        await persist_worker_heartbeat_with_factory(
+            eff_session_factory,
+            "admin_ai_workflow",
+            execution_mode=execution_mode,
+            ok=True,
+            items_processed=1,
+            source=source,
+        )
     return True
 
 
-async def _drain_scheduled_admin_ai_workflows(*, max_steps: int = 8) -> None:
+async def _run_event_workflow_once(*, worker_id: str | None = None) -> bool:
+    """Backward-compatible internal alias for `run_once()`."""
+    return await run_once(worker_id=worker_id, source="event", execution_mode="on_demand")
+
+
+async def _drain_scheduled_admin_ai_workflows(
+    *,
+    max_steps: int = 8,
+    source: str = "event",
+) -> None:
     await asyncio.sleep(0)
     sem = _event_workflow_semaphore()
+    processed = 0
+    had_error: str | None = None
     async with sem:
-        for _ in range(max(1, max_steps)):
-            did_work = await _run_event_workflow_once()
-            if not did_work:
-                break
+        try:
+            for _ in range(max(1, max_steps)):
+                did_work = await run_once(
+                    source=source,
+                    execution_mode="on_demand",
+                    persist_heartbeat=False,
+                )
+                if not did_work:
+                    break
+                processed += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            had_error = type(exc).__name__
+            record_worker_error("admin_ai_workflow", exc)
+        await persist_worker_heartbeat_with_factory(
+            AsyncSessionLocal,
+            "admin_ai_workflow",
+            execution_mode="on_demand",
+            ok=had_error is None,
+            items_processed=processed,
+            source=source,
+            error_code=had_error,
+        )
 
 
-def schedule_admin_ai_workflow(*, force: bool = False) -> asyncio.Task[None] | None:
+def schedule_admin_ai_workflow(
+    *,
+    force: bool = False,
+    source: str = "event",
+) -> asyncio.Task[None] | None:
     """Trigger event-driven AdminAiWorkflow execution when heavy background workers are disabled."""
     from app.database.config import APP_ENVIRONMENT
     from app.services.ocr_inference_job_service import is_heavy_workers_disabled
@@ -622,8 +780,11 @@ def schedule_admin_ai_workflow(*, force: bool = False) -> asyncio.Task[None] | N
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return None
+    active_tasks = [t for t in list(_EVENT_WORKFLOW_TASKS) if not t.done()]
+    if len(active_tasks) >= 2:
+        return active_tasks[-1]
     task = loop.create_task(
-        _drain_scheduled_admin_ai_workflows(),
+        _drain_scheduled_admin_ai_workflows(source=source),
         name="admin_ai_workflow_event_drain",
     )
     _EVENT_WORKFLOW_TASKS.add(task)
@@ -661,14 +822,15 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
     active: set[asyncio.Task[None]] = set()
     try:
         while not stop.is_set() or active:
-            active = {task for task in active if not task.done()}
+            active = _reap_done_tasks(active)
             if stop.is_set() or len(active) >= capacity:
                 if active:
-                    _done, pending = await asyncio.wait(
+                    done, pending = await asyncio.wait(
                         active,
                         timeout=poll_seconds,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
+                    _reap_done_tasks(set(done))
                     active = set(pending)
                 continue
             workflow_id = None
@@ -695,11 +857,13 @@ async def run_worker(stop_event: asyncio.Event | None = None, *, poll_seconds: i
                 ))
                 continue
             if active:
-                await asyncio.wait(
+                done, pending = await asyncio.wait(
                     active,
                     timeout=poll_seconds,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                _reap_done_tasks(set(done))
+                active = set(pending)
             else:
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=poll_seconds)

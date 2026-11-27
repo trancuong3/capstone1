@@ -176,14 +176,20 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
   it("validates file inputs and executes chunked upload + model activation", async () => {
     renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
 
     await waitFor(() => {
       expect(
         screen.getByText(/Thay thế trực tiếp Model VietOCR V2 Fine-Tuned/i),
       ).toBeInTheDocument();
     });
-
-    const user = userEvent.setup();
 
     // 1. Prepare dummy files
     const validWeights = new File(
@@ -258,6 +264,14 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
   it("rejects invalid weights file extension with clear error", async () => {
     renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
 
     await waitFor(() => {
       expect(
@@ -288,6 +302,14 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
   it("detects model regression in comparison JSON and warns user immediately", async () => {
     renderScreen();
+    const user = userEvent.setup();
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+      ).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
 
     await waitFor(() => {
       expect(

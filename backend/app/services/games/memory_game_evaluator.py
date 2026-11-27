@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
 
 # Explicit imagination markers so creative elaborations are NEVER treated as factual errors.
 IMAGINATION_MARKERS_FOLDED: tuple[str, ...] = (
@@ -145,6 +146,7 @@ class MemoryAiConfig:
     enabled: bool = True
     gemini_api_key: str | None = field(default=None, repr=False)
     gemini_model: str = DEFAULT_GEMINI_MODEL
+    gemini_fallback_model: str | None = None
     groq_api_key: str | None = field(default=None, repr=False)
     groq_model: str = DEFAULT_GROQ_MODEL
     timeout_seconds: float = 5.5
@@ -158,6 +160,16 @@ def _secret(name: str) -> str | None:
     return stripped or None
 
 
+def _optional_model(name: str, default: str | None) -> str | None:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    stripped = raw.strip().strip('"').strip("'").strip()
+    if not stripped or stripped.lower() in {"none", "off", "disabled"}:
+        return None
+    return stripped
+
+
 def get_memory_ai_config() -> MemoryAiConfig:
     flag = (_secret("MEMORY_GAME_AI_ENRICHMENT_ENABLED") or "true").lower()
     enabled = flag not in {"0", "false", "no", "off"}
@@ -165,6 +177,10 @@ def get_memory_ai_config() -> MemoryAiConfig:
         enabled=enabled,
         gemini_api_key=_secret("GEMINI_API_KEY"),
         gemini_model=_secret("MEMORY_GAME_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
+        gemini_fallback_model=_optional_model(
+            "MEMORY_GAME_GEMINI_FALLBACK_MODEL",
+            DEFAULT_GEMINI_FALLBACK_MODEL,
+        ),
         groq_api_key=_secret("GROQ_API_KEY"),
         groq_model=_secret("MEMORY_GAME_GROQ_MODEL") or DEFAULT_GROQ_MODEL,
     )
@@ -797,11 +813,16 @@ class MemoryGameEvaluator:
             follow_redirects=False,
             transport=self._transport,
         ) as client:
-            # Tier 1: Gemini Free Tier (strict sequential, x-goog-api-key header only)
+            # Tier 1: Gemini Free Tier (primary -> optional fallback, strict sequential, x-goog-api-key header only)
             if self.config.gemini_api_key:
-                enriched = await self._call_gemini(client, prompt)
-                if enriched:
-                    return enriched, f"gemini:{self.config.gemini_model}"
+                gemini_models: list[str] = []
+                for candidate in (self.config.gemini_model, self.config.gemini_fallback_model):
+                    if candidate and candidate not in gemini_models:
+                        gemini_models.append(candidate)
+                for model_name in gemini_models:
+                    enriched = await self._call_gemini(client, prompt, model=model_name)
+                    if enriched:
+                        return enriched, f"gemini:{model_name}"
 
             # Tier 2: Groq Free Tier fallback
             if self.config.groq_api_key:
@@ -812,8 +833,15 @@ class MemoryGameEvaluator:
         # Tier 3: Deterministic fallback handled by caller
         return None, None
 
-    async def _call_gemini(self, client: httpx.AsyncClient, prompt: str) -> dict[str, str] | None:
-        url = f"{GEMINI_API_BASE}/{self.config.gemini_model}:generateContent"
+    async def _call_gemini(
+        self,
+        client: httpx.AsyncClient,
+        prompt: str,
+        *,
+        model: str | None = None,
+    ) -> dict[str, str] | None:
+        model_name = model or self.config.gemini_model
+        url = f"{GEMINI_API_BASE}/{model_name}:generateContent"
         payload: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {

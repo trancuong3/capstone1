@@ -15,7 +15,13 @@
     "auditLogsTitle": "יומני ביקורת",
     "healthTitle": "סטטוס תפעולי",
     "protectedLoadingAria": "טוען את אזור הניהול",
-    "protectedLoadingStatus": "טוען נתוני ניהול..."
+    "protectedLoadingStatus": "טוען נתוני ניהול...",
+    "bookDetailTitle": "פרטי ספר",
+    "karaokeEditTitle": "עריכת שיר",
+    "karaokeNewTitle": "יצירת שיר חדש",
+    "karaokeTitle": "ניהול שירים",
+    "ocrReviewTitle": "בדיקת OCR לעמוד",
+    "vireadTrainingTitle": "אימון OCR"
   },
   "layout": {
     "skipToContent": "דלג על ניווט, עבור לתוכן הניהול",
@@ -35,7 +41,12 @@
     },
     "signOut": "התנתק",
     "signingOut": "מתנתק…",
-    "signOutError": "לא ניתן להתנתק כעת. נא לנסות שוב."
+    "signOutError": "לא ניתן להתנתק כעת. נא לנסות שוב.",
+    "groups": {
+      "content": "תוכן",
+      "systemAi": "מערכת ו-AI",
+      "users": "משתמשים"
+    }
   },
   "login": {
     "areaLabel": "אזור ניהול",
@@ -97,7 +108,9 @@
     "sessionInvalidTitle": "חיבור ההתחברות אינו תקין",
     "yes": "כן",
     "no": "לא",
-    "notYet": "טרם"
+    "notYet": "טרם",
+    "breadcrumbAria": "ניווט פירורי לחם",
+    "clearSearch": "נקה חיפוש"
   },
   "auditLogs": {
     "title": "יומני ביקורת",
@@ -117,7 +130,22 @@
     "viewMetadataDetails": "הצג פרטי מטא-דאטה ({count} תווים)",
     "loadMoreError": "לא ניתן לטעון יומני רישום נוספים. הרשומות הקודמות נשארות לשינוי.",
     "retryLoadMore": "נסה לטעון שוב",
-    "loadMore": "טען עוד"
+    "loadMore": "טען עוד",
+    "clearFilters": "נקה מסננים",
+    "columns": {
+      "action": "פעולה",
+      "metadata": "מטא-נתונים",
+      "resource": "משאב",
+      "timestamp": "חותמת זמן"
+    },
+    "drawerTitleFallback": "פרטי אירוע",
+    "eventIdLabel": "מזהה אירוע",
+    "filterActionPlaceholder": "לדוגמה: book.read, parent.update…",
+    "filterAria": "מסנני יומן ביקורת",
+    "filterResourcePlaceholder": "לדוגמה: book, parent, song…",
+    "inspectBtn": "פרטים",
+    "inspectEventAria": "הצג פרטי אירוע {action}",
+    "tableAria": "טבלת יומני ביקורת"
   },
   "health": {
     "title": "סטטוס תפעולי",
@@ -137,7 +165,14 @@
       "healthy": "מאומת",
       "failed": "התרחשה שגיאה",
       "unknown": "לא מאומת",
-      "disabled": "לא פועל"
+      "disabled": "לא פועל",
+      "cached": "מטמון מוכן מראש",
+      "client_side": "בצד הלקוח",
+      "cloud_ready": "ענן מוכן",
+      "local_only": "מקומי בלבד",
+      "remote_delegated": "האצלה מרחוק",
+      "scheduled": "מתוזמן",
+      "standby": "המתנה"
     },
     "queueDepthLabel": "תור",
     "queueDepthValue": "{count, plural, =0 {0 משימות} one {# משימה} other {# משימות}}",
@@ -186,8 +221,87 @@
       "Queued": "בתור",
       "Quota exhausted": "חריגה מהמגבלה",
       "Unsupported": "לא נתמך",
-      "Unknown": "לא ידוע"
-    }
+      "Unknown": "לא ידוע",
+      "Local only": "מקומי בלבד",
+      "Scheduled": "מתוזמן",
+      "Standby": "המתנה"
+    },
+    "actionHintLabel": "פעולה מומלצת",
+    "audioCacheErrorDetail": "קוד אבחון: {code}",
+    "audioCacheErrorTitle": "לא ניתן לטעון מדדי מטמון TTS מוכן מראש",
+    "audioCachePercentUsed": "{percent} בשימוש",
+    "audioCacheUnlimited": "ללא מגבלה",
+    "audioCacheUsageAria": "ניצול {label}: {percent}%",
+    "autoRefresh30s": "30 שנ'",
+    "autoRefresh60s": "60 שנ'",
+    "autoRefreshActive": "רענון אוטומטי כל {seconds} שנ'",
+    "autoRefreshLabel": "רענון אוטומטי",
+    "autoRefreshOff": "כבוי",
+    "autoRefreshPaused": "הרענון האוטומטי מושהה כשהכרטיסייה מוסתרת",
+    "clearTtsCache": "נקה מטמון TTS",
+    "clearTtsCacheError": "לא ניתן לנקות את מטמון ה-TTS בדפדפן כעת.",
+    "clearTtsCacheSuccess": "מטמון ה-TTS בדפדפן נוקה.",
+    "clearWasmCache": "נקה מטמון מודל STT",
+    "clearWasmCacheError": "לא ניתן לנקות את מטמון מודל ה-STT כעת.",
+    "clearWasmCacheSuccess": "מטמון מודל ה-STT בדפדפן נוקה.",
+    "clearingCache": "מנקה…",
+    "deviceProbeError": "לא ניתן לבדוק באופן מלא את יכולות המכשיר הנוכחי.",
+    "dismissErrorAria": "סגור הודעת שגיאה",
+    "errorHttpStatus": "HTTP {status}",
+    "errorRequestId": "מזהה בקשה: {requestId}",
+    "filterAria": "סנן שירותים לפי סטטוס",
+    "filteredEmpty": "אין שירותים התואמים למסנן סטטוס זה.",
+    "filters": {
+      "all": "הכול",
+      "attention": "דורש תשומת לב",
+      "healthy": "פעיל",
+      "local_only": "מקומי בלבד",
+      "standby": "המתנה"
+    },
+    "groups": {
+      "core": "תשתית ליבה",
+      "coreDesc": "API, מסד נתונים ואחסון אובייקטים החיוניים לפלטפורמה.",
+      "localOnlyWorkers": "מקומי בלבד / האצלה מרחוק / מושבת בתצורה",
+      "localOnlyWorkersToggleHint": "{count} פריטים",
+      "ocr": "צינור OCR ומנועי AI",
+      "ocrDesc": "עובד OCR מרוחק, 4 מנועי זיהוי טקסט והגהת AI.",
+      "voice": "קול ומטמון שמע",
+      "voiceDesc": "טקסט לדיבור, דיבור לטקסט ומטמון שמע מוכן מראש.",
+      "workers": "תהליכי רקע ו-Cron",
+      "workersDesc": "משימות מתוזמנות, תורי פיקוח ועובדי אירועי קריאה."
+    },
+    "kpiAria": "מדדי סטטוס שירותים",
+    "kpiTotalDetail": "/ {total} שירותים",
+    "ocrEnginesSubheading": "מנועי זיהוי OCR",
+    "probeDevice": "בדוק מכשיר",
+    "probingDevice": "בודק מכשיר…",
+    "refreshTimeoutError": "בקשת בדיקת הבריאות חרגה מהזמן המותר לאחר 15 שניות.",
+    "refreshWarningBody": "מוצגת התמונה האחרונה שהתקבלה. נסה שוב.",
+    "refreshWarningTitle": "לא ניתן לרענן את הסטטוס העדכני",
+    "refreshing": "מרענן…",
+    "resetFilter": "הצג את כל השירותים",
+    "sttEnvAndroidWebView": "Android WebView",
+    "sttEnvIosWebView": "iOS WebView",
+    "sttEnvPwa": "אפליקציית PWA",
+    "sttInsecureContextWarning": "החיבור אינו HTTPS מאובטח; המיקרופון וחלק מממשקי הדפדפן עלולים להיחסם.",
+    "sttMicNeedsHttps": "נדרש HTTPS עבור מיקרופון",
+    "sttMicNoMediaDevices": "getUserMedia אינו זמין",
+    "sttModelBytesDetail": "{used} / {total}",
+    "sttModelCacheError": "שגיאת קריאה מ-IndexedDB ({code})",
+    "sttNoIndexedDbWarning": "IndexedDB אינו זמין; לא ניתן לאחסן מודלי STT או מטמון TTS מקומית.",
+    "summaryAllHealthy": "כל {healthy} השירותים פועלים באופן תקין.",
+    "summaryAria": "סיכום תפעולי של המערכת",
+    "summaryAttentionSegment": "{count} דורשים תשומת לב",
+    "summaryHealthySegment": "{count} פעילים",
+    "summaryLocalOnlySegment": "{count} מקומיים בלבד",
+    "summaryStandbySegment": "{count} בהמתנה",
+    "ttsCacheBrowserEmpty": "ריק (0 פריטים)",
+    "ttsCacheBrowserError": "שגיאת מטמון ({code})",
+    "ttsCacheBrowserHitsMisses": "פגיעות: {hits} · החמצות: {misses}",
+    "wakeOcrError": "לא ניתן לשלוח פקודת התעוררות לעובד ה-OCR. נסה שוב.",
+    "wakeOcrRechecking": "בודק שוב אוטומטית בעוד כמה שניות…",
+    "wakeOcrWorker": "הער עובד OCR",
+    "wakingOcrWorker": "מעיר…"
   },
   "parents": {
     "title": "ניהול הורים",
@@ -264,7 +378,8 @@
       "childGrade": "כיתה {grade}",
       "authNotConfigured": "לא ניתן לטעון אימייל ומספר טלפון מכיוון שהבק-אנד אינו מוגדר עם הרשאות גישה ל-Supabase Auth.",
       "authNotFound": "לא נמצא חשבון Supabase Auth המקושר לפרופיל זה. פרטי הפרופיל והילד עדיין מוצגים.",
-      "authUnavailable": "לא ניתן לטעון פרטי קשר מ-Supabase Auth כרגע. בדוק את ההגדרות או נסה לטעון מחדש."
+      "authUnavailable": "לא ניתן לטעון פרטי קשר מ-Supabase Auth כרגע. בדוק את ההגדרות או נסה לטעון מחדש.",
+      "parentIdLabel": "מזהה הורה"
     },
     "modal": {
       "createTitle": "הוסף הורה",
@@ -301,6 +416,16 @@
         "genericUpdate": "לא ניתן לעדכן את החשבון כרגע. אנא נסה שוב.",
         "fallback": "לא ניתן לעדכן את החשבון כרגע. הנתונים שהוזנים נשמרו."
       }
+    },
+    "copiedId": "הועתק",
+    "copyId": "העתק מזהה",
+    "copyIdAria": "העתק מזהה {id}",
+    "directoryAria": "רשימת חשבונות הורים",
+    "overviewAria": "סקירת הורים",
+    "searchToolbarAria": "חפש הורים",
+    "tableHeaders": {
+      "actions": "פעולות",
+      "parent": "הורה"
     }
   },
   "books": {
@@ -415,7 +540,13 @@
         "maxInt": "הכיתה המקסימלית חייבת להיות מספר שלם בין 1 ל-5",
         "maxRange": "הכיתה המקסימלית חייבת להיות בין 1 ל-5",
         "gradeOrder": "הכיתה המינימלית לא יכולה להיות גדולה מהכיתה המקסימלית"
-      }
+      },
+      "authorPlaceholder": "לדוגמה: שארל פרו",
+      "livePreviewDesc": "כאשר לא הועלתה תמונת כריכה מותאמת, ViRead יוצר אוטומטית כריכה טיפוגרפית ברורה מהכותרת, המחבר וטווח הכיתות.",
+      "livePreviewHeading": "תצוגה מקדימה של הכריכה",
+      "livePreviewTitleFallback": "כותרת ספר חדש",
+      "namePlaceholder": "לדוגמה: החתול במגפיים (שם פנימי בקטלוג)",
+      "titlePlaceholder": "לדוגמה: החתול במגפיים"
     },
     "detail": {
       "eyebrow": "פרטי הספר",
@@ -454,7 +585,26 @@
       "notFoundTitle": "הספר לא נמצא",
       "loadErrorTitle": "לא ניתן לטעון את הספר",
       "notFoundDesc": "מזהה הספר אינו שייך לנתוני הניהול הנוכחיים.",
-      "genericErrorDesc": "נא לנסות שוב מאוחר יותר."
+      "genericErrorDesc": "נא לנסות שוב מאוחר יותר.",
+      "ocrQueueOfflineBanner": "נשמרו {count} עמודים בתור ה-OCR — יעובדו אוטומטית ברגע ששרת ה-OCR יחזור לפעול",
+      "ocrQueueOnlineBanner": "מעבד OCR עבור {count} עמודים…",
+      "ocrQueueOfflineHint": "המשימות נשמרו באופן מתמיד; רשימת העמודים תתעדכן אוטומטית כשהשרת יחזור גם לאחר רענון הדף.",
+      "ocrQueueOnlineHint": "מעדכן אוטומטית את התקדמות ה-OCR.",
+      "ocrQueueCheckNow": "בדיקה עכשיו",
+      "queuedNewPageBadge": "עמוד חדש #{index} · נשמר בתור OCR",
+      "pageQueuedOfflineBadge": "נשמר בתור OCR — ממתין לשרת",
+      "pageQueuedOnlineBadge": "מריץ OCR מחדש…",
+      "copiedId": "הועתק",
+      "copyIdAria": "העתק מזהה ספר",
+      "openOcrShort": "פתח בדיקת OCR",
+      "publishRuleToggle": "כללי פרסום לספריית הילדים",
+      "statNeedsReview": "לבדיקה",
+      "statProcessing": "בעיבוד",
+      "statTotalPages": "סה\"כ עמודים",
+      "statVerified": "מאומתים",
+      "summaryStripAria": "סיכום ספר",
+      "toggleAiBatchBtn": "הפעל בדיקת AI מרוכזת",
+      "toggleUploadBtn": "העלה עמודים"
     },
     "editor": {
       "loading": "טוען מטא-נתונים של הספר…",
@@ -490,7 +640,14 @@
       "cannotRetireTitle": "לא ניתן להשבית את הספר",
       "safetyBlocked": "תכונת Child Safety עדיין אינה מאפשרת להכניס ספר זה לספרייה. השלם OCR VERIFIED וודא שתוצאות Safety תואמות ל-Candidate עבור כל העמודים; ממצא מסוג HIGH או NOT_RECOMMENDED ממשיכים להיות חסומים.",
       "invalidMetadata": "המטא-נתונים הנוכחיים אינם תקפים. יש לתקן את הכותרת וטווח הכיתות בטופס ולשמור לפני ההפעלה.",
-      "genericToggleError": "הבקשה לא אומתה. יש לבדוק את הרשאות הניהול (Admin) או חיבור השרת ולנסות שוב."
+      "genericToggleError": "הבקשה לא אומתה. יש לבדוק את הרשאות הניהול (Admin) או חיבור השרת ולנסות שוב.",
+      "closeCoverStudio": "סגור את סטודיו הכריכה",
+      "coverDesc": "עדכן את כריכת הספר (העלאה, חיתוך 3:4, סיבוב או יצירת כריכה ב-AI) מבלי לשנות את עמודי הקריאה או גרסאות מאומתות.",
+      "coverHeading": "כריכת הספר",
+      "dangerZoneActiveDesc": "השבתה תסתיר את הספר מספריית ההורים אך תשמור את כל העמודים, הגרסאות והיסטוריית הקריאה.",
+      "dangerZoneHeading": "מחזור חיי הספר",
+      "dangerZoneRetiredDesc": "ספר זה מושבת כעת. ניתן להפעילו מחדש כאשר המטא-נתונים ועמודי ה-OCR עומדים בדרישות.",
+      "openCoverStudio": "פתח את סטודיו הכריכה"
     },
     "uploader": {
       "heading": "העלאת תמונות עמודים או מסמכים והפעלת OCR",
@@ -517,7 +674,14 @@
         "imageUnreadable": "לא ניתן לקרוא את מימדי התמונה בדפדפן.",
         "noValidFiles": "אין קבצים תקינים להעלאה. בדוק את הפורמט, הגודל ומימדי התמונה.",
         "someInvalidFiles": "חלק מהקבצים אינם תקינים ולכן לא הועלו. קבצים תקינים ממשיכים להיות ממוינים."
-      }
+      },
+      "workerOfflineTitle": "שירות עיבוד ה-OCR אינו מקוון כרגע",
+      "workerOfflineBody": "עדיין ניתן להעלות תמונות או קבצי PDF/DOCX כעת: העמודים יישמרו בתור ויעובדו אוטומטית ברגע ששרת ה-OCR יחזור לפעול.",
+      "workerUnreachableTitle": "לא ניתן לאמת את סטטוס שירות ה-OCR",
+      "workerUnreachableBody": "השרת מופעל כעת או שהחיבור איטי. ניתן לבדוק שוב או להעלות עמודים לתור ה-OCR.",
+      "recheckWorkerBtn": "בדוק שוב חיבור OCR",
+      "workerOfflineDesc": "ניתן עדיין להעלות תמונות או קובצי PDF/DOCX כעת: המערכת תכניס אותם לתור בצורה בטוחה ותריץ OCR אוטומטית כשהשירות יחזור לפעול.",
+      "workerUnreachableDesc": "השרת עשוי להיות באתחול או שהרשת איטית. ניתן לבדוק שוב את החיבור או להעלות קבצים לתור ה-OCR."
     },
     "imagePreview": {
       "hideButton": "הסתרת תמונת עמוד {pageNumber}",
@@ -574,8 +738,25 @@
         "savedNoChanges": "ה-AI לא הציע שינויים וביצע סריקת בטיחות של הטקסט. ממתינה לבדיקת מנהל של תמונות, זכויות שימוש ואישור ידני.",
         "savedPrefix": "גרסת AI זמנית נשמרה וממתינה לאישור ידני על ידי מנהל: {detail}",
         "failedKeepReview": "עיבוד AI נכשל; העמוד נשאר במצב NEEDS_REVIEW (לא אושר אוטומטית). {detail}"
+      },
+      "statusBadges": {
+        "failed": "דורש בדיקה",
+        "saved": "טיוטה נשמרה",
+        "verified": "מאומת"
       }
-    }
+    },
+    "emptyFilteredDesc": "נסה לשנות את מילת החיפוש או לאפס מסננים כדי לראות את כל ספריית הספרים.",
+    "filterToolbarAria": "מסנני ספריית ספרים",
+    "kpi": {
+      "activeBooks": "ספרים פעילים",
+      "childLibraryEligible": "כשיר לספריית ילדים",
+      "needsReview": "דורש בדיקת OCR",
+      "needsReviewDetail": "{count} עמודים ממתינים לבדיקה",
+      "total": "סה\"כ ספרים"
+    },
+    "listAria": "רשימת ספרים לניהול",
+    "resetFilters": "איפוס",
+    "searchPlaceholder": "חפש לפי שם ספר, כותרת או מחבר…"
   },
   "metadataQuality": {
     "title": "איכות נתוני הספר",
@@ -607,7 +788,8 @@
       "invalidGradeRange": "טווח כיתות שגוי",
       "invalidGradeRangeDetail": "מחוץ לכיתות 1–5 או שכיתה המינימלית גבוהה מכיתה המקסימלית",
       "duplicateGroups": "כפילויות אפשריות",
-      "duplicateGroupsDetail": "{count} ספרים בקבוצות מועמדות"
+      "duplicateGroupsDetail": "{count} ספרים בקבוצות מועמדות",
+      "missingMetadataSummary": "מחבר חסר: {missingAuthor} · כיתות לא תקינות: {invalidGrade}"
     },
     "issuesHeading": "ספרים הדורשים בדיקה",
     "duplicateNote": "שכפולים מזוהים לפי כותרת וסופר לאחר חיתוך רווחים והתעלמות מגדיות",
@@ -649,7 +831,8 @@
     "lifecycleLabels": {
       "ACTIVE": "פעיל",
       "RETIRED": "מופסק"
-    }
+    },
+    "searchPlaceholder": "חפש לפי כותרת או מחבר…"
   },
   "contentQuality": {
     "eyebrow": "ניהול איכות ספרים",
@@ -667,7 +850,9 @@
       "RESOLVED": "נפתר",
       "REJECTED": "נדחתה",
       "REPORTED_BOOKS": "ספרים מדווחים",
-      "REPORTED_PAGES": "עמודים מדווחים"
+      "REPORTED_PAGES": "עמודים מדווחים",
+      "reportedScope": "ספרים שדווחו",
+      "reportedScopeDetail": "עמודים שדווחו: {pages} · נדחו: {rejected}"
     },
     "reportIssueTypes": {
       "BOOK_METADATA_ERROR": "פרטי ספר שגויים",
@@ -846,7 +1031,14 @@
       "scanning": "סורק…",
       "scanWholeBook": "סרוק ספר שלם",
       "paginationAria": "עימוד בדיקת איכות ספר",
-      "itemLabel": "ספר"
+      "itemLabel": "ספר",
+      "kpiApprovedDetail": "מוכן: {ready} · אושר ע\"י מנהל: {approved} · פורסם אוטומטית: {published}",
+      "kpiApprovedGroup": "כשיר / מאושר",
+      "kpiAria": "סקירת אישור ובטיחות ספרים",
+      "kpiCopyrightDetail": "בטיחות וזכויות יוצרים יחד: {both}",
+      "kpiProcessingDetail": "נסרק: {processing} · מיושן: {stale} · סריקה נכשלה: {failed}",
+      "kpiProcessingGroup": "בעיבוד / דרוש סריקה מחדש",
+      "statusBreakdownToggle": "הצג פירוט מלא לפי סטטוס ({count} קבוצות)"
     },
     "bookDetail": {
       "subheading": "איכות ספר, היסטוריית AI, ממצאים ובדיקת מנהל",
@@ -974,7 +1166,12 @@
       "checkAndFixPage": "בדוק וערוך עמוד",
       "rescanPage": "סרוק מחדש עמוד זה",
       "noFindingThisScan": "אין ממצאים בבדיקה זו.",
-      "noScanResultYet": "لعמוד אין תוצאות בדיקה; ראה סטטוס וסיבה לעיל."
+      "noScanResultYet": "لعמוד אין תוצאות בדיקה; ראה סטטוס וסיבה לעיל.",
+      "compactFindingsDetail": "HIGH {high} · MEDIUM {medium} · {pages} עמודים מסומנים",
+      "compactMetricsToggle": "הצג מדדי AI מפורטים, תהליכים ו-hash הערכה",
+      "compactOcrDetail": "Hash תקין: {valid}/{total} · לא נסרקו: {unscanned}",
+      "compactPipelineDetail": "מיושן: {stale} · בעיבוד: {processing}",
+      "compactSafetyDetail": "הגהה: {proofreading}"
     }
   },
   "userBooks": {
@@ -1072,7 +1269,8 @@
       "suspendedBook": "ספר פרטי מושעה.",
       "rejected": "גרסת דף זו נדחתה.",
       "suspendedWithTitle": "ספר פרטי \"{title}\" מושעה. המשפחה הבעלים לא יכולה לקרוא מיד."
-    }
+    },
+    "kpiAria": "סקירת תור פיקוח ספרי משתמשים"
   },
   "flow2": {
     "filters": {
@@ -1246,7 +1444,8 @@
       "reuploadCreated": "הרצת OCR על תמונה חדשה עבור דף זה. הגרסה החדשה ממתינה לאישור; התמונה והתוכן לשימוש בסשן יועברו לגרסה החדשה רק לאחר אימות.",
       "reuploadError": "לא ניתן לטעון תמונה חדשה או להריץ OCR. הנתונים הנוכחיים נשמרים; בדוק את Storage, Tesseract 5.x, vie.traineddata ונסה שוב.",
       "aiRejectedAll": "הסרת הצעת ה- AI. הטיוטה הנוכחית נשמרת.",
-      "wordDeleteSyncError": "לא ניתן לסנכרן טקסט לאחר מחיקת מילה. בדוק את התוכן ורשימת המילים לפני שמירה."
+      "wordDeleteSyncError": "לא ניתן לסנכרן טקסט לאחר מחיקת מילה. בדוק את התוכן ורשימת המילים לפני שמירה.",
+      "wordAddSyncError": "לא ניתן לסנכרן את הטקסט לאחר הוספת מילה. יש לבדוק את התוכן ואת רשימת המילים לפני השמירה."
     },
     "newWordPlaceholder": "מילה חדשה",
     "loading": "טוען תמונה ומבנה…",
@@ -1424,7 +1623,9 @@
       "providerUnavailable": "לא זמין",
       "providerChecking": "בודק",
       "noProviderEvents": "אין אירועי ספק.",
-      "safetyDisclaimer": "תוצאות AI אינן מבטיחות בטיחות תוכן מוחלטת. בתהליכי עבודה של AI, ניתן לשמור כמאומת (VERIFIED) רק לאחר שמנהל המערכת (Admin) מאשר את הבטיחות עבור המועמד הנוכחי הנכון."
+      "safetyDisclaimer": "תוצאות AI אינן מבטיחות בטיחות תוכן מוחלטת. בתהליכי עבודה של AI, ניתן לשמור כמאומת (VERIFIED) רק לאחר שמנהל המערכת (Admin) מאשר את הבטיחות עבור המועמד הנוכחי הנכון.",
+      "emptyDesc": "הפעל אשר והרץ AI בסרגל הפעולות למטה לבדיקת איות אוטומטית וסריקת בטיחות לילדים.",
+      "emptyTitle": "אין עדיין תוצאות בטיחות AI לגרסה זו"
     },
     "tabs": {
       "words": "בדיקת מילים ומיקומים",
@@ -1552,12 +1753,91 @@
       "noWords": "אין עדיין מילים בגרסה זו.",
       "addWord": "הוספת מילה",
       "deleteWord": "מחיקת מילה",
-      "finishReview": "סיום סקירה"
+      "finishReview": "סיום סקירה",
+      "hashColumnLabel": "#"
     },
     "historyView": {
       "heading": "היסטוריית עיבוד OCR",
       "subtitle": "{title} · עמוד {pageNumber} · גרסה R{revisionNo}",
       "mobileCardAria": "בחירת גרסה {revisionNo}"
+    },
+    "smartBlocks": {
+      "acceptClearBtn": "אשר בלוקים ברורים",
+      "blockCardAria": "בלוק {typeLabel}",
+      "circuitBreakerDesc": "שיעור ההחרגה הצפוי עלה על 35% מהעמוד, ולכן המערכת שמרה את הבלוקים והעבירה אותם לחלק הדורש אימות ידני.",
+      "circuitBreakerTitle": "הופעלה הגנה מפני אובדן תוכן",
+      "cropReviewTitle": "מסגרת התמונה המקורית נשמרה כדי למנוע חיתוך טקסט",
+      "decisions": {
+        "EXCLUDE": "הוחרג",
+        "KEEP": "שמור",
+        "REVIEW": "דורש אימות"
+      },
+      "editBtn": "ערוך טקסט",
+      "editLabel": "ערוך טקסט בלוק",
+      "emptyClean": "עדיין לא נשמרו בלוקי תוכן נקיים.",
+      "emptyExcluded": "לא הוחרגו רעשים או מספרי עמודים בעמוד זה.",
+      "emptyReview": "לא נותרו בלוקים הדורשים אימות בעמוד זה.",
+      "excludeBtn": "החרג",
+      "geometryMeta": "הטיה משוערת: {angle}° · שטח עמוד: {area}% · {gutterReason}",
+      "heading": "בדיקת חילוץ תוכן OCR חכם",
+      "headingWithPage": "בדיקת חילוץ תוכן OCR חכם — עמוד {pageNumber}",
+      "keepBtn": "שמור",
+      "loaderDesc": "מפריד אוטומטית את תוכן הקריאה הראשי ממספרי עמודים, כותרות חוזרות וטקסט עודף (לעולם לא מוחק תוכן ראשי אוטומטית).",
+      "loaderError": "לא ניתן לסווג בלוקי טקסט חכמים לעמוד זה.",
+      "loaderOpenBtn": "פתח סיווג בלוקי טקסט חכם",
+      "loaderReextractBtn": "נתח מחדש בלוקי טקסט",
+      "manualOverrideBadge": "נערך ידנית",
+      "noImageFallback": "אין תמונת מקור מצורפת — כל {count} בלוקי הטקסט שנותחו עדיין מוצגים.",
+      "notices": {
+        "acceptClearAll": "אושרו כל {confirmed} הבלוקים הברורים.",
+        "acceptClearRemoteRemaining": "הבלוקים הברורים אושרו. נותרו {remaining} בלוקים הדורשים אימות ידני.",
+        "acceptClearWithRemaining": "אושרו {confirmed} בלוקים ברורים. עדיין נותרו {remaining} בלוקים לאימות ידני.",
+        "editSaved": "טקסט הבלוק עודכן ונשמר בתוכן הקריאה.",
+        "emptyEditError": "טקסט הבלוק אינו יכול להיות ריק בעת שמירה.",
+        "excluded": "בלוק הטקסט הוחרג מתוכן הקריאה.",
+        "humanEditReason": "המשתמש ערך את טקסט הבלוק הזה.",
+        "humanExcludeReason": "המשתמש בחר להחריג בלוק זה.",
+        "humanKeepReason": "המשתמש בחר לשמור בלוק זה.",
+        "humanRestoreReason": "הבלוק שוחזר לתוכן הקריאה.",
+        "kept": "בלוק הטקסט נשמר בתוכן הקריאה.",
+        "nothingToUndo": "אין פעולות לביטול.",
+        "restored": "בלוק הטקסט שוחזר לתוכן הקריאה.",
+        "saved": "שינויי בלוק התוכן נשמרו.",
+        "undone": "בוטלה הפעולה האחרונה.",
+        "updateFailed": "לא ניתן לעדכן את ההחלטה לבלוק זה. נסה שוב.",
+        "updated": "סטטוס בלוק התוכן עודכן."
+      },
+      "originalImageAlt": "תמונה מקורית של עמוד הספר",
+      "originalImageAltWithPage": "תמונה מקורית לעמוד {pageNumber}",
+      "overlayAria": "שכבת אזורי טקסט שחולצו",
+      "previewEmpty": "אין טקסט קריאה זמין לאחר הסינון.",
+      "previewHeading": "תוכן הקריאה לילד",
+      "previewReviewNotice": "התצוגה המקדימה כוללת כרגע {count} בלוקים הדורשים אימות כדי להבטיח שלא יוחמץ תוכן קריאה.",
+      "readingOrderMeta": "סדר קריאה #{order} · ביטחון {confidence}%",
+      "reasonPrefix": "סיבה:",
+      "restoreBtn": "שחזר",
+      "reviewBanner": "הבלוקים להלן נשמרים זמנית בתצוגה המקדימה למניעת אובדן טקסט. בחר שמור או החרג עבור כל בלוק.",
+      "saveEditBtn": "שמור עריכה",
+      "shadowModeDesc": "החלטות סינון הרעש נרשמות להשוואה ועדיין אינן משנות את טקסט הקריאה הרשמי.",
+      "shadowModeTitle": "פועל במצב השוואה (Shadow)",
+      "summaryLine": "סוג עמוד: {pageKind} · נשמרו {retention}% מהתווים ({keep} שמורים, {excluded} הוחרגו, {review} לאימות)",
+      "tabs": {
+        "clean": "תוכן נקי",
+        "excluded": "מוחרגים",
+        "original": "תמונה מקורית",
+        "preview": "תצוגה מקדימה",
+        "review": "דורש אימות"
+      },
+      "tabsAria": "מצבי תצוגת חילוץ OCR",
+      "undoBtn": "בטל"
+    },
+    "workbenchTabs": {
+      "ariaLabel": "סביבת עבודה לבדיקת OCR",
+      "draft": "טקסט ובדיקה",
+      "history": "היסטוריית גרסאות",
+      "safety": "בטיחות AI",
+      "smartBlocks": "בלוקים חכמים V2",
+      "words": "מילים ו-BBox"
     }
   },
   "training": {
@@ -1706,7 +1986,15 @@
       "closeDriftSuccess": "המשימה עם שגיאת תצורה נסגרה. ה‑run וה‑checkpoint נשמרים, המועמד עדיין לא עבר benchmark/אישור; המערכת עשויה ליצור משימה חדשה לפי התצורה הנכונה שננעלה.",
       "closeDriftFailed": "לא ניתן לסגור מועמד זה; ייתכן שהמצב או ה‑lineage השתנו.",
       "closeUnbenchmarkedSuccess": "מועמד שלא עבר benchmark נסגר; ה‑run וה‑checkpoint נשמרים. המערכת תיצור Locked Test ומשימה חלופית באופן אוטומטי כאשר יהיה מספיק holdout VERIFIED עצמאי.",
-      "closeUnbenchmarkedFailed": "לא ניתן לסגור מועמד. ייתכן שה‑worker עדיין רץ, למועמד כבר יש benchmark או שה‑lineage השתנה."
+      "closeUnbenchmarkedFailed": "לא ניתן לסגור מועמד. ייתכן שה‑worker עדיין רץ, למועמד כבר יש benchmark או שה‑lineage השתנה.",
+      "flow2AlreadyTrained": "למערך הנתונים וההגדרות הנוכחיים של Flow 2 כבר קיימת תוצאת אימון קודמת. הוסף דגימות VERIFIED חדשות או הערך את המועמד הקיים.",
+      "flow2NoEligibleSamples": "אין עדיין דגימות Flow 2 נקיות המתאימות ליצירת תמונת מצב.",
+      "flow2Paused": "Flow 2 מושהה כעת (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+      "flow2ScheduleBlocked": "לא ניתן להכניס לתור את Flow 2 ({reason}).",
+      "flow2Scheduled": "נוצרה תמונת מצב ל-Flow 2 ({train} אימון / {validation} אימות) והמשימה {jobId} נכנסה לתור ({status}).",
+      "flow2TrainValRequired": "תמונת המצב כוללת כעת {train} אימון ו-{validation} אימות; נדרשות שתי הקבוצות כדי לתזמן ב-Colab.",
+      "flow2TriggerFailed": "יצירת תמונת המצב או תזמון האימון ל-Flow 2 נכשלו.",
+      "flow2UnresolvedJob": "משימת אימון פתוחה כבר נמצאת בתור; לא נוצרה משימה חדשה."
     },
     "flow1": {
       "badgeEyebrow": "זרם 1 חדש · החלפת מודל ישירה",
@@ -1874,7 +2162,10 @@
         "APPS_SCRIPT_ACCESS_DENIED": "אפליקציית ה-Web App של Apps Script חוסמת גישה אנונימית. ב-script.google.com, פרוס מחדש עם 'מי יש גישה: כל אחד (Anyone)' (עדיין מוגן ב-HMAC-SHA256).",
         "BRIDGE_SECRET_MISMATCH": "חתימת Bridge של Apps Script לא תואמת או חסרה VIREAD_BRIDGE_SECRET ב-Script Properties של script.google.com.",
         "DRIVE_SCOPE_MISMATCH": "ההיקף של OAuth אינו תקין; דרוש הרשאת drive.file מינימלית. נא לחבר מחדש ולתת הרשאת תיקייה ייחודית ליישום.",
-        "genericCode": "קוד שגיאה: {code}. בדוק את חיבור Google Drive או לחץ על בדיקת חיבור & שטח אחסון."
+        "genericCode": "קוד שגיאה: {code}. בדוק את חיבור Google Drive או לחץ על בדיקת חיבור & שטח אחסון.",
+        "DESKTOP_REQUIRES_WINDOWS": "שרתי Linux אינם תומכים בחיבור מקומי של Google Drive for Desktop. התחבר דרך Apps Script Bridge.",
+        "DESKTOP_UNAVAILABLE_CLOUD": "שרתי ענן (Render) אינם יכולים לגשת ל-Google Drive for Desktop (G:\\) במחשב אישי. עבור אל Apps Script Bridge.",
+        "ENCRYPTION_KEY_MISSING": "המשתנה VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 תווים) חסר בשרת."
       },
       "notices": {
         "redirectingOauth": "מופנה אל דף אימות OAuth 2.0 של Google (מבקש רק הרשאת drive.file מינימלית)…",
@@ -1895,8 +2186,37 @@
         "disconnectConfirm": "להתנתק מ-Google Drive מצינור 2? נתוני הספר המקוריים והקבצים השמורים ב-Drive לא יימחקו; פריטי outbox חדשים יחכו באופן בטוח (לא יועברו ל‑Supabase).",
         "disconnected": "התנתקנו מ-Google Drive בבטחה והסרנו את ה‑refresh token מה‑backend.",
         "disconnectFailed": "לא ניתן להתנתק מ-Google Drive כרגע."
-      }
-    }
+      },
+      "desktopCloudWarningMid": "(קריא רק בכונן Windows מקומי G:\\). כדי ששרת הענן (Render) ו-Google Colab יוכלו לקרוא/לכתוב ב-Drive, עבור אל",
+      "desktopCloudWarningPrefix": "החיבור הנוכחי משתמש ב-",
+      "disconnectModalConfirm": "נתק",
+      "disconnectModalTitle": "לנתק את Google Drive?"
+    },
+    "colabGuideAnd": "ו-",
+    "colabGuideMid1": ", בחר Runtime",
+    "colabGuideMid2": ", הפעל 2 Colab Secrets",
+    "colabGuidePrefix": "פתח את המחברת",
+    "colabGuideSuffix": ", ולאחר מכן לחץ על",
+    "colabGuideTitle": "מדריך להרצת Colab Free GPU T4 (ללא עלות)",
+    "driveUnavailableDesc": "השרת לא החזיר סטטוס חיבור Google Drive עבור Flow 2.",
+    "driveUnavailableTitle": "Google Drive אינו מוגדר",
+    "errors": {
+      "loadFailed": "לא ניתן לטעון את סטטוס האימון. בדוק הרשאות מנהל ומיגרציות VietOCR V2.",
+      "serviceUnavailable": "שירות ניהול האימון של VietOCR אינו זמין."
+    },
+    "kpiGridAria": "מדדי אימון OCR",
+    "tabs": {
+      "drive": "Google Drive",
+      "flow1": "החלפת מודל Flow 1",
+      "flow2": "אימון והערכה Flow 2",
+      "overview": "סקירה וזמן ריצה"
+    },
+    "tabsAria": "מדורי אימון OCR",
+    "triggerFlow2Btn": "צור תמונת מצב והכנס לתור אימון Flow 2",
+    "workerExecutionModeLabel": "מצב הרצה:",
+    "workerWebHeavyDisabled": "מושבת (השתמש בכפתור למטה)",
+    "workerWebHeavyEnabled": "מופעל",
+    "workerWebHeavyLabel": "עובד רקע Web:"
   },
   "karaoke": {
     "library": {
@@ -1936,7 +2256,11 @@
         "DRAFT": "טיוטה",
         "PUBLISHED": "גלוי",
         "HIDDEN": "מוסתר"
-      }
+      },
+      "emptyTitle": "אין שירים עדיין",
+      "filterAria": "מסנני ספריית שירים",
+      "hasCoverBadge": "כולל עטיפה",
+      "searchPlaceholder": "הזן שם שיר או מחבר…"
     },
     "workspace": {
       "retryLoad": "נסה לטעון מחדש",
@@ -2499,6 +2823,24 @@
         "minOneLyricLine": "הזן לפחות שורת מילים תקינה אחת.",
         "reviewFingerprintMissing": "חסרה טביעת אצבע לאימות העיבוד."
       }
+    },
+    "confirm": {
+      "continueAction": "המשך",
+      "editLyricsTitle": "לערוך מילים מתוזמנות?",
+      "expandRepeatsAction": "אשר הרחבה",
+      "expandRepeatsTitle": "להרחיב סימוני חזרות?",
+      "leaveAction": "עזוב עמוד",
+      "leaveTitle": "לעזוב עמוד זה?",
+      "publishAction": "אשר פרסום",
+      "publishTitle": "לפרסם את השיר?",
+      "reloadAction": "טען מחדש גרסה שמורה",
+      "reloadTitle": "לטעון מחדש מהשרת?",
+      "replaceAudioAction": "החלף שמע",
+      "replaceAudioTitle": "להחליף קובץ שמע MP3?",
+      "replaceLyricsAction": "החלף מילים",
+      "replaceLyricsTitle": "להחליף את כל המילים הנוכחיות?",
+      "resplitAction": "אשר פיצול מחדש",
+      "resplitTitle": "לפצל מחדש הברות לשורה זו?"
     }
   },
   "pageUploadRuntime": {
@@ -2519,5 +2861,44 @@
     "reloadAfterUploadFailed": "לא ניתן לטעון מחדש את רשימת העמודים לאחר ההעלאה. ייתכן שהנתונים נשמרו; יש לרענן לאימות.",
     "reprocessIncomplete": "משימת העיבוד החוזר של OCR לעמוד לא הושלמה. אנא נסו שוב.",
     "reprocessQueuedWindows": "העמוד נכנס לתור לעיבוד חוזר בשרת ה-OCR ב-Windows. יש לרענן לאחר ההשלמה."
+  },
+  "qualityHub": {
+    "description": "בדיקת מטא-נתוני קטלוג, טיפול בדיווחי הורים, אישור בטיחות ספרים ופיקוח על ספרים פרטיים של הורים במרכז אחד.",
+    "eyebrow": "תפעול איכות",
+    "tabs": {
+      "approval": "אישור ובטיחות ספרים",
+      "metadata": "מטא-נתוני ספרים",
+      "reports": "דיווחי משתמשים",
+      "userBooks": "ספרי משתמשים ו-Flow 2"
+    },
+    "tabsAria": "מדורי ניהול איכות ספרים"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "מעבד ברקע…",
+    "closeAria": "סגור מרכז משימות AI",
+    "defaultBookLabel": "ספר",
+    "elapsedHours": "{hours} שע'",
+    "elapsedHoursMinutes": "{hours} שע' {minutes} דק'",
+    "elapsedMinutes": "{minutes} דק'",
+    "elapsedMinutesSeconds": "{minutes} דק' {seconds} שנ'",
+    "elapsedRunning": "רץ כבר {elapsed}",
+    "elapsedSeconds": "{seconds} שנ'",
+    "emptyDescription": "כאשר מעלים עמודי ספר, מפעילים OCR או יוצרים כריכות, ההתקדמות החיה תופיע כאן.",
+    "emptyTitle": "אין עדיין משימות AI",
+    "openAria": "פתח מרכז משימות AI",
+    "pageSeparator": " • עמוד {pageNumber}",
+    "pillFailed": "משימות שנכשלו ({count})",
+    "pillIdle": "משימות AI",
+    "pillRunning": "AI פועל ({count})",
+    "pillWaitingReview": "דורש אימות ({count})",
+    "processingAria": "מעבד {title}",
+    "progressAria": "התקדמות עבור {title}",
+    "refreshAria": "רענן רשימת משימות",
+    "stagePrefix": "שלב: {stage}",
+    "subtitle": "משימות רקע ממשיכות לרוץ בבטחה גם בעת מעבר בין עמודים.",
+    "title": "מרכז משימות AI",
+    "viewResultAction": "הצג תוצאה",
+    "workerOfflineBanner": "ממתין לחיבור מחדש של עובד ה-AI. המשימות נשמרו בבטחה ויתחדשו אוטומטית.",
+    "pillWaitingForWorker": "תור OCR ({count})"
   }
 }

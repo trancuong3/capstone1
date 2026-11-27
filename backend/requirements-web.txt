@@ -1,7 +1,8 @@
 # =============================================================================
 # ViRead Lightweight Web API Dependencies (Render / Staging / Production Web)
 # Excludes heavy OCR ML runtimes (torch, torchvision, paddlepaddle, paddleocr,
-# vietocr, pytesseract, jiwer, opencv-python-headless, numpy, scipy).
+# vietocr, pytesseract, jiwer, scipy); keeps lightweight numpy and
+# opencv-python-headless for image decoding and frame geometry.
 # =============================================================================
 
 # Web Framework & ASGI Server
