@@ -1,0 +1,3 @@
+# Vercel's mail relay uses only Python's standard library.
+# Keep this manifest local to the frontend so the Python builder does not
+# inherit the repository-root requirements for the heavy OCR backend.
