@@ -406,7 +406,7 @@
     "errorTitle": "Có vấn đề xảy ra",
     "savedTitle": "Đã lưu",
     "loadChildFailed": "Không tải được hồ sơ bé. Vui lòng thử lại.",
-    "loadManagementFailed": "Chưa tải được dữ liệu quản lý đọc. Kiểm tra backend và migration Reading Management rồi thử lại.",
+    "loadManagementFailed": "Chưa tải được dữ liệu quản lý đọc. Vui lòng thử lại sau ít phút.",
     "mutationUnconfirmed": "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
     "overviewAria": "Tổng quan thói quen đọc",
     "summaryRunningGoals": "Mục tiêu đang chạy",

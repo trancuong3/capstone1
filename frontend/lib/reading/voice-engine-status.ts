@@ -84,6 +84,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 }
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -275,6 +276,27 @@ export function getFreshVoiceEngineHealth(
   if (!cachedHealth || cachedHealthFetchedAt <= 0) return null;
   if (Date.now() - cachedHealthFetchedAt > maxAgeMs) return null;
   return cachedHealth;
+}
+
+/**
+ * Returns fresh voice health, or retains a confirmed `LOCAL_VOICE_UNCONFIGURED`
+ * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
+ * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
+ */
+export function getVoiceEngineHealthForRouting(
+  maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
+): VoiceEngineHealthSnapshot | null {
+  const fresh = getFreshVoiceEngineHealth(maxAgeMs);
+  if (fresh) return fresh;
+  if (
+    cachedHealth &&
+    cachedHealthFetchedAt > 0 &&
+    isHostedLocalVoiceUnconfigured(cachedHealth) &&
+    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+  ) {
+    return cachedHealth;
+  }
+  return null;
 }
 
 export function setCachedVoiceEngineHealth(

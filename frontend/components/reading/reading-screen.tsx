@@ -1127,21 +1127,20 @@ function ReadingSessionScreen({
     async function load() {
       try {
         const session = await services.readingService.get(sessionId);
-        const [
-          book,
-          child,
-          currentPage,
-          completion,
-          initialProgress,
-          practice,
-        ] = await Promise.all([
+        // Batch startup reads in two smaller waves (3 + 3) instead of blasting
+        // 6 concurrent DB queries on mobile cold start.
+        const [book, child, currentPage] = await Promise.all([
           services.bookService.get(session.book_id),
           services.childService.get(session.child_id),
           services.readingService.getCurrentPage(sessionId),
+        ]);
+        const [completion, initialProgress, practice] = await Promise.all([
           services.readingService.getCompletionSummary(sessionId),
           services.readingService.getPageProgress(sessionId),
-          services.readingService.getPracticeState?.(sessionId) ??
-            Promise.resolve(null),
+          (
+            services.readingService.getPracticeState?.(sessionId) ??
+            Promise.resolve(null)
+          ).catch(() => null),
         ]);
 
         // Server-side progress is authoritative on reload. A stale pageId query
@@ -2516,9 +2515,6 @@ function ReadingSessionScreen({
             }
             return;
           }
-          setLatestTranscript(
-            `Đánh vần tiếng “${plan.focusSyllable}”: ${plan.steps.map((s) => s.displayText).join(" · ")}`,
-          );
           await speakPhonicsLessonGuarded(plan, (stepIdx) => {
             if (isCurrent()) setActivePhonicsStepIndex(stepIdx);
           });
@@ -4303,7 +4299,13 @@ function ReadingSessionScreen({
         true,
       );
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (error instanceof Error && error.name === "AbortError") {
+        if (mountedRef.current) {
+          setIsPlayingPageSample(false);
+          setIsBusy(false);
+        }
+        return;
+      }
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
@@ -4312,16 +4314,19 @@ function ReadingSessionScreen({
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
+        setIsPlayingPageSample(false);
         setIsBusy(false);
       }
     } finally {
+      if (mountedRef.current) {
+        setIsPlayingPageSample(false);
+        setIsBusy(false);
+      }
       if (isCurrentSample()) {
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
             readingCursorBeforeSample,
         );
-        setIsPlayingPageSample(false);
-        setIsBusy(false);
       }
     }
   }
@@ -6714,7 +6719,7 @@ function ReadingSessionScreen({
         }
         return;
       } finally {
-        if (isCurrent()) setIsBusy(false);
+        if (mountedRef.current) setIsBusy(false);
       }
     }
 

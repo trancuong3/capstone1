@@ -28,7 +28,7 @@
     "clearFilter": "Xóa bộ lọc",
     "paginationAria": "Phân trang thư viện sách",
     "paginationItemLabel": "cuốn sách",
-    "savedStatusError": "Chưa tải được trạng thái sách đã lưu. Hãy kiểm tra backend và migration Reading Management.",
+    "savedStatusError": "Chưa tải được trạng thái sách đã lưu. Vui lòng thử lại sau ít phút.",
     "removedFromCollection": "Đã gỡ sách khỏi danh sách.",
     "savedForChild": "Đã lưu sách cho hồ sơ bé.",
     "saveCollectionFailed": "Không lưu được thay đổi. Vui lòng thử lại; trạng thái chưa được cập nhật.",

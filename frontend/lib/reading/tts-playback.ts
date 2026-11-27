@@ -67,7 +67,8 @@ import {
 } from "@/lib/reading/tts-text";
 import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
+  isHostedLocalVoiceUnconfigured,
   mapLocalVoiceToGoogleBackup,
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
@@ -289,11 +290,11 @@ function isLocalVoiceUnconfiguredError(error: unknown): boolean {
 }
 
 function isLocalVoiceUnconfiguredHealth(): boolean {
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return false;
   return (
-    health.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED" ||
-    health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+    isHostedLocalVoiceUnconfigured(health) ||
+    health.local.tts_error_code === "LOCAL_VOICE_UNCONFIGURED"
   );
 }
 
@@ -302,9 +303,12 @@ function canUseAllowedDeviceFallbackTts(
   error?: unknown,
 ): boolean {
   // Enforce SessionVoiceLock ("Một buổi, một giọng"):
-  // never silently jump to OS/Android/browser voice mid-session unless parent
-  // opted into `local_with_google_fallback` + `allowGoogleTtsFallback` and the
-  // local worker is unconfigured (LOCAL_VOICE_UNCONFIGURED).
+  // never silently jump to OS/Android/browser voice mid-session unless:
+  // (a) parent opted into `local_with_google_fallback` + `allowGoogleTtsFallback`
+  //     and the local worker is unconfigured/outaged, OR
+  // (b) `/voice/status` confirmed hosted `LOCAL_VOICE_UNCONFIGURED` on Android APK
+  //     and on-device Android Native TTS (`ViReadNativeSpeech`, 100% offline/local)
+  //     is needed because backend cannot serve this voice/policy.
   const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
   const isSessionLocked = voice?.bypassSessionLock
     ? false
@@ -336,12 +340,22 @@ function canUseAllowedDeviceFallbackTts(
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
     (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
-  if (isSessionLocked && !optedInUnconfiguredFallback) {
+  const hostedAndroidOnDeviceFallback =
+    isAndroidNativeSpeechAvailable() &&
+    isLocalVoiceUnconfiguredHealth() &&
+    (!canUseGoogleTtsFallback() ||
+      isLocalVoiceUnconfiguredError(error) ||
+      isTechnicalServerOutage(error));
+  if (
+    isSessionLocked &&
+    !optedInUnconfiguredFallback &&
+    !hostedAndroidOnDeviceFallback
+  ) {
     return false;
   }
   // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
-  // cloud), so it remains allowed under `local_only` when no session voice lock
-  // is active (Tier 3 Android APK fallback).
+  // cloud), so it remains allowed under `local_only` when unlocked or when
+  // hosted backend has no local worker configured.
   if (isAndroidNativeSpeechAvailable()) {
     return true;
   }
@@ -363,13 +377,13 @@ function shouldSkipBackendTtsForVoice(
   ) {
     return false;
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return false;
-  if (health.elevenlabs?.tts_configured) return false;
-  return (
-    (!health.local.available || !health.local.tts_ready) &&
-    (!health.google.tts_configured || health.google.tts_cooldown)
-  );
+  const allowCloud = canUseGoogleTtsFallback();
+  if (allowCloud && health.elevenlabs?.tts_configured) return false;
+  const googleUsable =
+    allowCloud && health.google.tts_configured && !health.google.tts_cooldown;
+  return (!health.local.available || !health.local.tts_ready) && !googleUsable;
 }
 
 function shouldSkipBackendTtsForBrowserFallback(
@@ -485,7 +499,7 @@ function shouldRetryBackendWithGoogleTts(
   if (!canUseGoogleTtsFallback() || operation.voice.provider !== "local") {
     return false;
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   if (!health) return true;
   return health.google.tts_configured && !health.google.tts_cooldown;
 }
@@ -1105,9 +1119,13 @@ export class TtsPlayback {
         let approxIdx = startWordIdx;
 
         try {
+          const targetVoiceId =
+            operation.voice.requestedVoiceId ?? operation.voice.cacheVoiceId;
           const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
             rate: operation.voice.speed,
             pitch: 1.0,
+            voiceGender: resolveVoiceGender(targetVoiceId),
+            voiceId: targetVoiceId,
             signal: operation.controller.signal,
             onStart: () => {
               if (

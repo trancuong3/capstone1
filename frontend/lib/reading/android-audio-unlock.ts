@@ -84,15 +84,19 @@ export function unlockAudioNow(options?: { readonly force?: boolean }): void {
       if (playPromise && typeof playPromise.then === "function") {
         void playPromise
           .then(() => {
-            probe.pause();
-            probe.muted = false;
-            probe.volume = 1;
-            probe.src = "";
+            if (!sharedAudioInUse) {
+              probe.pause();
+              probe.muted = false;
+              probe.volume = 1;
+              probe.src = "";
+            }
           })
           .catch((error: unknown) => {
-            probe.muted = false;
-            probe.volume = 1;
-            probe.src = "";
+            if (!sharedAudioInUse) {
+              probe.muted = false;
+              probe.volume = 1;
+              probe.src = "";
+            }
             if (error instanceof Error && error.name === "NotAllowedError") {
               unlocked = false;
               installed = false;

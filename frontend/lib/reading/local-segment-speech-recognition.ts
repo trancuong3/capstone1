@@ -26,8 +26,9 @@ import {
 import { getVoicePolicyPreferences } from "@/lib/reading/session-voice-lock";
 import { tokenizeVietnameseText } from "@/lib/reading/vietnamese-text";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
+  isHostedLocalVoiceUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -559,12 +560,16 @@ export function shouldPreferAndroidNativeStt(): boolean {
   if (!isAndroidNativeSpeechAvailable()) return false;
   const caps = getCachedAndroidSpeechCapabilities();
   if (caps && !caps.sttAvailable) return false;
-  const freshHealth = getFreshVoiceEngineHealth();
+  const freshHealth = getVoiceEngineHealthForRouting();
   if (freshHealth) {
     if (freshHealth.local.available && freshHealth.local.stt_ready) {
       return false;
     }
-    if (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown) {
+    if (
+      isHostedLocalVoiceUnconfigured(freshHealth) ||
+      !freshHealth.google.stt_configured ||
+      freshHealth.google.stt_cooldown
+    ) {
       return true;
     }
   }
@@ -859,7 +864,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.attachLifecycleListeners();
 
     const policy = getVoicePolicyPreferences();
-    const freshHealth = getFreshVoiceEngineHealth();
+    const freshHealth = getVoiceEngineHealthForRouting();
     const localHealthy =
       freshHealth !== null &&
       freshHealth.local.available &&
@@ -1170,7 +1175,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       typeof errorOrForce === "boolean"
         ? errorOrForce
         : isImmediateLocalOutageError(errorOrForce);
-    const freshHealth = getFreshVoiceEngineHealth();
+    const freshHealth = getVoiceEngineHealthForRouting();
     const confirmedLocalOutage =
       forceImmediate ||
       (freshHealth !== null &&
@@ -1751,11 +1756,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           return;
         }
         if (
+          msg.code === "LOCAL_VOICE_UNCONFIGURED" ||
           msg.code === "LOCAL_STT_UNAVAILABLE" ||
-          msg.code === "STT_TEMPORARILY_UNAVAILABLE"
+          msg.code === "STT_TEMPORARILY_UNAVAILABLE" ||
+          msg.code === "LOCAL_STT_TIMEOUT" ||
+          msg.code === "VOICE_WORKER_UNAVAILABLE"
         ) {
           this.wsDisabledForRun = true;
           this.closeSttWebSocket();
+          this.recordTechnicalFailureAndMaybeFallback({
+            code: msg.code,
+            message: msg.code,
+          });
         }
         return;
       }
@@ -2959,11 +2971,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 voicedDurationMs,
               },
             );
-            const freshHealth = getFreshVoiceEngineHealth();
+            const freshHealth = getVoiceEngineHealthForRouting();
             const localUnconfigured =
-              freshHealth !== null &&
-              (freshHealth.local.configured === false ||
-                freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
+              isHostedLocalVoiceUnconfigured(freshHealth);
             recordSttEngineUsage({
               provider: "wasm",
               fallbackUsed: !localUnconfigured,

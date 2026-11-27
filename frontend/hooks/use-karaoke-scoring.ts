@@ -351,7 +351,11 @@ class KaraokeMicSession {
   // The temporary stream is already closed before either branch runs.
   private async startInput(recognition: Recognition, probe: boolean) {
     const devices = navigator.mediaDevices;
-    if (!devices?.getUserMedia || (!probe && !this.trackInput)) {
+    if (
+      recognition.managesOwnMicrophone ||
+      !devices?.getUserMedia ||
+      (!probe && !this.trackInput)
+    ) {
       recognition.start();
       return;
     }

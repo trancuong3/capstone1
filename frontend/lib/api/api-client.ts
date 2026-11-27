@@ -552,6 +552,52 @@ export interface RequestApiOptions {
   readonly timeoutMs?: number;
 }
 
+const TRANSIENT_GET_RETRY_STATUSES = new Set([502, 504]);
+const TRANSIENT_GET_RETRY_DELAYS_MS = [400, 900] as const;
+
+async function isRetryableGatewayColdStartResponse(
+  response: Response,
+): Promise<boolean> {
+  if (!TRANSIENT_GET_RETRY_STATUSES.has(response.status)) {
+    return false;
+  }
+  const contentType = (
+    response.headers.get("content-type") ?? ""
+  ).toLowerCase();
+  if (contentType.includes("application/json")) {
+    try {
+      const payload: unknown = await response.clone().json();
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        ("detail" in payload || "code" in payload)
+      ) {
+        return false;
+      }
+    } catch {
+      // Malformed JSON on 502/504 may be a truncated proxy error; allow retry.
+    }
+  }
+  return true;
+}
+
+async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError");
+  }
+  await new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /**
  * Existing GET callers keep their signature; mutations pass RequestApiOptions as
  * argument four.
@@ -578,7 +624,7 @@ export async function requestApi<T>(
 
   const method = requestOptions.method ?? "GET";
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
-    let response: Response;
+    let response!: Response;
     const isFormDataBody =
       typeof FormData !== "undefined" &&
       requestOptions.body instanceof FormData;
@@ -607,42 +653,61 @@ export async function requestApi<T>(
         : isFormDataBody
           ? DEFAULT_UPLOAD_TIMEOUT_MS
           : DEFAULT_REQUEST_TIMEOUT_MS;
-    const timeoutController = fetchSignal ? null : new AbortController();
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+    const maxAttempts =
+      method === "GET" ? TRANSIENT_GET_RETRY_DELAYS_MS.length + 1 : 1;
 
-    try {
-      const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: body as BodyInit } : {}),
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: effectiveSignal,
-      });
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const timeoutController = fetchSignal ? null : new AbortController();
+      let timedOut = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const effectiveSignal = fetchSignal ?? timeoutController!.signal;
 
-      if (timeoutController) {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          timeoutController.abort();
-        }, effectiveTimeoutMs);
-        response = await fetchPromise;
-      } else {
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      try {
+        const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: body as BodyInit } : {}),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: effectiveSignal,
+        });
+
+        if (timeoutController) {
           timeoutId = setTimeout(() => {
             timedOut = true;
-            reject(failure(0, "", true));
+            timeoutController.abort();
           }, effectiveTimeoutMs);
-        });
-        response = await Promise.race([fetchPromise, timeoutPromise]);
+          response = await fetchPromise;
+        } else {
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(() => {
+              timedOut = true;
+              reject(failure(0, "", true));
+            }, effectiveTimeoutMs);
+          });
+          response = await Promise.race([fetchPromise, timeoutPromise]);
+        }
+      } catch (error) {
+        if (fetchSignal?.aborted && !timedOut) throw error;
+        throw failure(0, "", true);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
-    } catch (error) {
-      if (fetchSignal?.aborted && !timedOut) throw error;
-      throw failure(0, "", true);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+      if (
+        method === "GET" &&
+        attempt < TRANSIENT_GET_RETRY_DELAYS_MS.length &&
+        !fetchSignal?.aborted &&
+        (await isRetryableGatewayColdStartResponse(response))
+      ) {
+        await sleepWithAbort(
+          TRANSIENT_GET_RETRY_DELAYS_MS[attempt],
+          fetchSignal,
+        );
+        continue;
+      }
+      break;
     }
 
     const requestId = response.headers.get("x-request-id") ?? "";
