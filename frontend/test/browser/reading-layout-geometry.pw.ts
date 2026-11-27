@@ -122,6 +122,8 @@ async function installLongReadingSession(
     voiceStatusUnavailable?: boolean;
   } = {},
 ) {
+  await page.goto("about:blank");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await installApiFixture(page);
 
   const built =

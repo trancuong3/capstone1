@@ -31,6 +31,7 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  mapLocalVoiceToGoogleBackup,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 
@@ -71,6 +72,7 @@ let activePreloadPromise: Promise<void> | null = null;
 let wasmInitPromise: Promise<boolean> | null = null;
 let wasmProgressUnsub: (() => void) | null = null;
 let pendingTtsWarmOptions: PreloadReadingVoiceOptions | null = null;
+let warmTtsAbortController: AbortController | null = null;
 const prefetchedTtsKeys = new Set<string>();
 
 function warmAudioUnlockSafely(): void {
@@ -233,7 +235,7 @@ function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
   );
   return Boolean(
     localTtsReady ||
-    health.elevenlabs?.tts_configured ||
+    (health.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) ||
     (policy.providerMode === "local_with_google_fallback" &&
       policy.allowGoogleTtsFallback &&
       health.google.tts_configured &&
@@ -243,52 +245,101 @@ function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
 
 async function warmInitialTtsCues(
   options: PreloadReadingVoiceOptions,
+  health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth(),
 ): Promise<void> {
   if (options.warmTts === false) return;
-  const activeLock = getActiveSessionVoiceLock();
-  const voiceId = activeLock?.voiceId ?? getEffectiveVoiceId();
-  const speed = activeLock?.speed ?? getSpeechPreferences().speed;
-  const speechService = createSpeechService();
-  const cues: Array<{ text: string; wordSample: boolean }> = [
-    { text: "Đến lượt con đọc nhé.", wordSample: false },
-  ];
-  const sampleWords = Array.from(
-    new Set(
-      (options.previewWords ?? [])
-        .map((w) => normalizeVietnameseWord(w))
-        .filter(Boolean),
-    ),
-  ).slice(0, 3);
-  for (const word of sampleWords) {
-    cues.push({ text: word, wordSample: true });
+  warmTtsAbortController?.abort();
+  const controller = new AbortController();
+  warmTtsAbortController = controller;
+  const onPageHide = () => {
+    controller.abort();
+  };
+  if (
+    typeof window !== "undefined" &&
+    typeof window.addEventListener === "function"
+  ) {
+    window.addEventListener("pagehide", onPageHide, { once: true });
   }
-  for (const cue of cues) {
-    const key = `${voiceId}::${speed}::${cue.wordSample ? "w" : "c"}::${cue.text}`;
-    if (prefetchedTtsKeys.has(key)) continue;
-    prefetchedTtsKeys.add(key);
-    try {
-      await speechService.synthesize(cue.text, {
-        voiceId,
-        speed,
-        wordSample: cue.wordSample,
-        bookId: cue.wordSample ? (options.bookId ?? null) : null,
-        pageId: cue.wordSample ? (options.pageId ?? null) : null,
-        pageRevisionId: cue.wordSample
-          ? (options.pageRevisionId ?? null)
-          : null,
-        isPrivateBook: cue.wordSample ? options.isPrivateBook : false,
-        cacheScope: cue.wordSample
-          ? options.isPrivateBook
-            ? "PRIVATE"
-            : "CATALOG"
-          : "COACHING",
-        bypassSessionLock: true,
-        timeoutMs: 8_000,
-      });
-    } catch {
-      // Best-effort preload only; never block reading flow.
-      prefetchedTtsKeys.delete(key);
-      break;
+  try {
+    const activeLock = getActiveSessionVoiceLock();
+    const policy = getVoicePolicyPreferences();
+    const localTtsReady = Boolean(
+      health?.local.available && health.local.tts_ready,
+    );
+    const googleTtsActive = Boolean(
+      !localTtsReady &&
+      !(
+        health?.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown
+      ) &&
+      policy.providerMode === "local_with_google_fallback" &&
+      policy.allowGoogleTtsFallback &&
+      health?.google.tts_configured &&
+      !health.google.tts_cooldown,
+    );
+    const rawVoiceId = activeLock?.voiceId ?? getEffectiveVoiceId();
+    const voiceId =
+      googleTtsActive && !(rawVoiceId ?? "").startsWith("google_")
+        ? mapLocalVoiceToGoogleBackup(
+            rawVoiceId,
+            activeLock?.region ?? policy.region,
+          )
+        : rawVoiceId;
+    const speed = activeLock?.speed ?? getSpeechPreferences().speed;
+    const speechService = createSpeechService();
+    const cues: Array<{ text: string; wordSample: boolean }> = [
+      { text: "Đến lượt con đọc nhé.", wordSample: false },
+    ];
+    const sampleWords = Array.from(
+      new Set(
+        (options.previewWords ?? [])
+          .map((w) => normalizeVietnameseWord(w))
+          .filter(Boolean),
+      ),
+    ).slice(0, 3);
+    for (const word of sampleWords) {
+      cues.push({ text: word, wordSample: true });
+    }
+    for (const cue of cues) {
+      if (controller.signal.aborted) break;
+      const key = `${voiceId}::${speed}::${cue.wordSample ? "w" : "c"}::${cue.text}`;
+      if (prefetchedTtsKeys.has(key)) continue;
+      prefetchedTtsKeys.add(key);
+      try {
+        await speechService.synthesize(cue.text, {
+          voiceId,
+          speed,
+          wordSample: cue.wordSample,
+          bookId: cue.wordSample ? (options.bookId ?? null) : null,
+          pageId: cue.wordSample ? (options.pageId ?? null) : null,
+          pageRevisionId: cue.wordSample
+            ? (options.pageRevisionId ?? null)
+            : null,
+          isPrivateBook: cue.wordSample ? options.isPrivateBook : false,
+          cacheScope: cue.wordSample
+            ? options.isPrivateBook
+              ? "PRIVATE"
+              : "CATALOG"
+            : "COACHING",
+          bypassSessionLock: true,
+          timeoutMs: 8_000,
+          signal: controller.signal,
+        });
+      } catch {
+        // Best-effort preload only; never block reading flow.
+        prefetchedTtsKeys.delete(key);
+        break;
+      }
+      if (controller.signal.aborted) break;
+    }
+  } finally {
+    if (
+      typeof window !== "undefined" &&
+      typeof window.removeEventListener === "function"
+    ) {
+      window.removeEventListener("pagehide", onPageHide);
+    }
+    if (warmTtsAbortController === controller) {
+      warmTtsAbortController = null;
     }
   }
 }
@@ -323,7 +374,7 @@ export function preloadReadingVoiceEngines(
       pendingTtsWarmOptions = options;
       const freshHealth = getFreshVoiceEngineHealth();
       if (hasLiveServerTts(freshHealth)) {
-        void warmInitialTtsCues(options);
+        void warmInitialTtsCues(options, freshHealth);
       }
     }
     return activePreloadPromise;
@@ -335,7 +386,7 @@ export function preloadReadingVoiceEngines(
   const existingFreshHealth = getFreshVoiceEngineHealth();
   if (existingFreshHealth && state.sttStatus === "ready") {
     if (options.warmTts !== false && hasLiveServerTts(existingFreshHealth)) {
-      return warmInitialTtsCues(options);
+      return warmInitialTtsCues(options, existingFreshHealth);
     }
     return Promise.resolve();
   }
@@ -429,10 +480,16 @@ export function preloadReadingVoiceEngines(
     const queuedTtsOptions = pendingTtsWarmOptions;
     pendingTtsWarmOptions = null;
     if (hasLiveServerTts(health)) {
-      void warmInitialTtsCues(options);
-      if (queuedTtsOptions && queuedTtsOptions !== options) {
-        void warmInitialTtsCues(queuedTtsOptions);
-      }
+      const mergedTtsOptions =
+        queuedTtsOptions && queuedTtsOptions !== options
+          ? {
+              ...options,
+              ...queuedTtsOptions,
+              previewWords:
+                queuedTtsOptions.previewWords ?? options.previewWords,
+            }
+          : options;
+      void warmInitialTtsCues(mergedTtsOptions, health);
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
     } else {
       // Hosted on-device TTS (Android Native or Browser SpeechSynthesis):
@@ -519,5 +576,7 @@ export function resetVoicePreloaderForTests(): void {
   wasmProgressUnsub?.();
   wasmProgressUnsub = null;
   pendingTtsWarmOptions = null;
+  warmTtsAbortController?.abort();
+  warmTtsAbortController = null;
   prefetchedTtsKeys.clear();
 }

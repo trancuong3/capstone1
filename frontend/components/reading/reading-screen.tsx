@@ -901,15 +901,15 @@ function ReadingSessionScreen({
             // Preserve active Tier-2 on-device Browser WASM STT; never clobber it back to local/browser.
           } else if (wasmSupported && !isAndroidNativeSpeechAvailable()) {
             // Strict Offline-First STT priority: prefer On-Device WASM BEFORE
-            // Cloud Google / Browser Web Speech, and warm WASM eagerly whenever
-            // local STT is down (even when cloud fallback is enabled).
-            if (sttAllowsFallback || hostedLocalUnconfigured) {
+            // Cloud Google / Browser Web Speech. Under `local_only` before reading
+            // begins, keep the mount badge honestly at `"idle"` while Browser WASM
+            // pre-initializes silently in the background and switches to
+            // `browser_wasm` as soon as the child actually begins reading.
+            if (sttAllowsFallback) {
               recordSttEngineUsage({
                 provider: "wasm",
-                fallbackUsed: !hostedLocalUnconfigured,
-                fallbackReason: hostedLocalUnconfigured
-                  ? null
-                  : "LOCAL_STT_UNAVAILABLE",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_STT_UNAVAILABLE",
               });
             }
           } else if (sttAllowsFallback) {
