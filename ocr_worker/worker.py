@@ -63,6 +63,26 @@ def is_quiet_standby_enabled() -> bool:
     )
 
 
+def resolve_quiet_standby_keepalive_seconds(
+    explicit_seconds: float | None = None,
+) -> float:
+    """Resolve optional keepalive heartbeat+claim interval (seconds) during Quiet Standby."""
+    raw = (
+        str(explicit_seconds).strip()
+        if explicit_seconds is not None
+        else (os.getenv("VIREAD_OCR_QUIET_STANDBY_KEEPALIVE_SECONDS") or "").strip()
+    )
+    if not raw:
+        return 0.0
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return 0.0
+    if parsed <= 0.0:
+        return 0.0
+    return max(10.0, min(180.0, parsed))
+
+
 def compute_adaptive_poll_delay(
     *,
     base_poll_seconds: float,
@@ -76,6 +96,8 @@ def compute_adaptive_poll_delay(
         return base
     if idle_seconds < 50.0:
         return min(cap, max(base, 5.0))
+    if idle_seconds >= 120.0:
+        return cap
     return min(cap, max(base, 10.0))
 
 
@@ -676,6 +698,54 @@ def drain_queue_synchronously(
             runtime.set_standby_mode("quiet_standby")
 
 
+def _run_claimed_job_cycle(
+    client: BackendOcrClient,
+    runtime: OcrRuntimeManager,
+    job: dict[str, Any],
+    *,
+    lease_seconds: int,
+    heartbeat_seconds: float,
+    use_quiet_standby: bool,
+    resolved_burst_seconds: float,
+) -> float:
+    """Execute one claimed OCR job with BUSY/IDLE heartbeats and burst renewal."""
+    if use_quiet_standby:
+        runtime.extend_burst_window(resolved_burst_seconds)
+    last_hb = 0.0
+    try:
+        busy_hb = runtime.heartbeat_payload()
+        busy_hb["status"] = "BUSY"
+        busy_hb["active_job_id"] = str(job["job_id"])
+        busy_hb["active_job_count"] = 1
+        client.send_worker_heartbeat(busy_hb)
+        last_hb = time.monotonic()
+    except Exception:
+        pass
+    process_claimed_job(
+        client,
+        runtime,
+        job,
+        lease_seconds=lease_seconds,
+        heartbeat_interval_seconds=min(
+            max(5.0, heartbeat_seconds),
+            max(10.0, lease_seconds / 4.0),
+        ),
+    )
+    if use_quiet_standby:
+        runtime.extend_burst_window(resolved_burst_seconds)
+    try:
+        idle_hb = runtime.heartbeat_payload()
+        if idle_hb.get("status") == "BUSY":
+            idle_hb["status"] = "IDLE"
+        idle_hb["active_job_id"] = None
+        idle_hb["active_job_count"] = 0
+        client.send_worker_heartbeat(idle_hb)
+        last_hb = time.monotonic()
+    except Exception:
+        pass
+    return last_hb
+
+
 def run_worker_forever(
     *,
     backend_url: str,
@@ -688,6 +758,7 @@ def run_worker_forever(
     apply_priority: bool = True,
     quiet_standby: bool | None = None,
     wake_burst_seconds: float | None = None,
+    quiet_standby_keepalive_seconds: float | None = None,
 ) -> None:
     if apply_priority:
         set_windows_below_normal_priority()
@@ -696,6 +767,11 @@ def run_worker_forever(
     use_scale_to_zero = is_scale_to_zero_enabled()
     use_quiet_standby = (
         is_quiet_standby_enabled() if quiet_standby is None else bool(quiet_standby)
+    )
+    keepalive_seconds = (
+        resolve_quiet_standby_keepalive_seconds(quiet_standby_keepalive_seconds)
+        if use_quiet_standby and not use_scale_to_zero
+        else 0.0
     )
     try:
         resolved_burst_seconds = (
@@ -841,14 +917,45 @@ def run_worker_forever(
                     continue
                 if not runtime.is_draining():
                     runtime.set_standby_mode(idle_standby_label)
-                # Quiet Standby / Scale-to-Zero idle: 0 outbound HTTP requests to Render until woken.
-                woken = _wait_for_wake_or_stop(stop_event, runtime.wake_event, None)
+                # Quiet Standby / Scale-to-Zero idle: 0 outbound HTTP requests unless keepalive is enabled.
+                keepalive_wait = (
+                    keepalive_seconds
+                    if (client is not None and keepalive_seconds > 0.0)
+                    else None
+                )
+                woken = _wait_for_wake_or_stop(stop_event, runtime.wake_event, keepalive_wait)
                 if stop_event.is_set():
                     break
                 if woken:
                     warmup_recovery_attempts = 0
                     last_activity_at = time.monotonic()
                     runtime.mark_model_resync_needed()
+                elif keepalive_wait is not None and client is not None and not runtime.is_draining():
+                    try:
+                        with runtime.cycle_lock:
+                            client.send_worker_heartbeat(runtime.heartbeat_payload())
+                            last_hb = time.monotonic()
+                            job = client.claim_next_job(
+                                runtime.worker_id, lease_seconds=lease_seconds
+                            )
+                            if job is not None:
+                                hb_at = _run_claimed_job_cycle(
+                                    client,
+                                    runtime,
+                                    job,
+                                    lease_seconds=lease_seconds,
+                                    heartbeat_seconds=heartbeat_seconds,
+                                    use_quiet_standby=use_quiet_standby,
+                                    resolved_burst_seconds=resolved_burst_seconds,
+                                )
+                                if hb_at > 0.0:
+                                    last_hb = hb_at
+                                last_activity_at = time.monotonic()
+                    except Exception as exc:
+                        logger.warning(
+                            "Quiet standby keepalive cycle failed: %s",
+                            type(exc).__name__,
+                        )
                 continue
 
             if runtime.is_draining():
@@ -897,41 +1004,18 @@ def run_worker_forever(
                         poll_error_streak = 0
                         if job is not None:
                             did_work = True
-                            last_activity_at = time.monotonic()
-                            if use_quiet_standby:
-                                runtime.extend_burst_window(resolved_burst_seconds)
-                            try:
-                                busy_hb = runtime.heartbeat_payload()
-                                busy_hb["status"] = "BUSY"
-                                busy_hb["active_job_id"] = str(job["job_id"])
-                                busy_hb["active_job_count"] = 1
-                                client.send_worker_heartbeat(busy_hb)
-                                last_hb = time.monotonic()
-                            except Exception:
-                                pass
-                            process_claimed_job(
+                            hb_at = _run_claimed_job_cycle(
                                 client,
                                 runtime,
                                 job,
                                 lease_seconds=lease_seconds,
-                                heartbeat_interval_seconds=min(
-                                    max(5.0, heartbeat_seconds),
-                                    max(10.0, lease_seconds / 4.0),
-                                ),
+                                heartbeat_seconds=heartbeat_seconds,
+                                use_quiet_standby=use_quiet_standby,
+                                resolved_burst_seconds=resolved_burst_seconds,
                             )
+                            if hb_at > 0.0:
+                                last_hb = hb_at
                             last_activity_at = time.monotonic()
-                            if use_quiet_standby:
-                                runtime.extend_burst_window(resolved_burst_seconds)
-                            try:
-                                idle_hb = runtime.heartbeat_payload()
-                                if idle_hb.get("status") == "BUSY":
-                                    idle_hb["status"] = "IDLE"
-                                idle_hb["active_job_id"] = None
-                                idle_hb["active_job_count"] = 0
-                                client.send_worker_heartbeat(idle_hb)
-                                last_hb = time.monotonic()
-                            except Exception:
-                                pass
                 except Exception as exc:
                     had_poll_error = True
                     poll_error_streak += 1
@@ -1001,6 +1085,25 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Do not alter process priority class",
     )
+    parser.add_argument(
+        "--quiet-standby",
+        dest="quiet_standby",
+        action="store_true",
+        default=None,
+        help="Enable quiet standby when idle",
+    )
+    parser.add_argument(
+        "--no-quiet-standby",
+        dest="quiet_standby",
+        action="store_false",
+        help="Disable quiet standby even if configured via environment",
+    )
+    parser.add_argument(
+        "--quiet-standby-keepalive-seconds",
+        type=float,
+        default=None,
+        help="Optional heartbeat+claim keepalive interval during quiet standby",
+    )
     args = parser.parse_args(argv)
     token = os.getenv("VIREAD_OCR_WORKER_TOKEN", "")
     run_worker_forever(
@@ -1010,6 +1113,8 @@ def main(argv: list[str] | None = None) -> int:
         bind_port=args.port,
         poll_seconds=args.poll_seconds,
         apply_priority=not args.no_priority,
+        quiet_standby=args.quiet_standby,
+        quiet_standby_keepalive_seconds=args.quiet_standby_keepalive_seconds,
     )
     return 0
 

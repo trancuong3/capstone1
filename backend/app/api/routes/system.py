@@ -48,9 +48,12 @@ from app.services.runtime_diagnostics import (
 )
 from app.services.tts_audio_cache_service import (
     TtsAudioCacheService,
+    get_cached_tts_audio_cache_summary,
     get_tts_cache_daily_egress_limit_bytes,
     get_tts_cache_max_bytes,
     is_tts_cache_enabled,
+    is_tts_cache_runtime_quota_exhausted,
+    set_cached_tts_audio_cache_summary,
 )
 from app.services.worker_telemetry import get_worker_telemetry
 from app.services.voice_orchestrator import VoiceOrchestrator
@@ -973,7 +976,7 @@ class AdminSystemRepository:
 
     async def probe_database(self):
         if isinstance(self.db, AsyncSession):
-            probe = await probe_database_connection(timeout=4.0)
+            probe = await probe_database_connection(timeout=6.0)
             return bool(probe.get("ok"))
         return await self.db.scalar(select(literal(1))) == 1
 
@@ -1067,12 +1070,16 @@ class AdminSystemService:
         *,
         local: dict,
         google: dict,
+        elevenlabs: dict | None = None,
         audio_cache_summary: dict | None = None,
         tts_cache_enabled: bool = True,
         hosted_mode: bool = False,
     ) -> dict[str, object]:
         ready_key = "tts_ready" if capability == "tts" else "stt_ready"
         cap_label = "TTS" if capability == "tts" else "STT"
+        el_info = elevenlabs if isinstance(elevenlabs, dict) else {}
+        elevenlabs_configured = bool(el_info.get("configured"))
+        elevenlabs_cooldown = bool(el_info.get(f"{capability}_cooldown"))
         google_configured = bool(google.get(f"{capability}_configured"))
         google_cooldown = bool(google.get(f"{capability}_cooldown"))
         local_configured = bool(
@@ -1098,6 +1105,17 @@ class AdminSystemService:
             }
 
         if capability == "tts":
+            if elevenlabs_configured and not elevenlabs_cooldown:
+                return {
+                    "status": "HEALTHY",
+                    "detail_status": "cloud_ready",
+                    "operational_state": "Healthy",
+                    "safe_message": "Dịch vụ ElevenLabs TTS đang sẵn sàng.",
+                    "execution_mode": "cloud_ai",
+                    "criticality": "important",
+                    "action_hint": None,
+                    "last_error": None,
+                }
             if google_configured and not google_cooldown:
                 return {
                     "status": "HEALTHY",
@@ -1115,16 +1133,51 @@ class AdminSystemService:
                 else 0
             )
             cache_quota_exhausted = bool(
-                isinstance(audio_cache_summary, dict)
-                and audio_cache_summary.get("quota_exhausted")
+                (
+                    isinstance(audio_cache_summary, dict)
+                    and audio_cache_summary.get("quota_exhausted")
+                )
+                or is_tts_cache_runtime_quota_exhausted()
             )
-            if hosted_mode and tts_cache_enabled and cache_entries > 0 and not cache_quota_exhausted:
+            if hosted_mode and tts_cache_enabled and not cache_quota_exhausted:
+                if cache_entries > 0:
+                    if not local_configured:
+                        return {
+                            "status": "HEALTHY",
+                            "detail_status": "cached",
+                            "operational_state": "Healthy",
+                            "safe_message": f"Đang phục vụ giọng đọc từ bộ nhớ đệm TTS dựng sẵn ({cache_entries} mục).",
+                            "execution_mode": "precomputed_cache",
+                            "criticality": "important",
+                            "action_hint": None,
+                            "last_error": None,
+                        }
+                    return {
+                        "status": "DEGRADED",
+                        "detail_status": "cached",
+                        "operational_state": "Degraded",
+                        "safe_message": f"Tunnel Local TTS không phản hồi; hệ thống vẫn phục vụ từ bộ nhớ đệm TTS dựng sẵn ({cache_entries} mục).",
+                        "execution_mode": "precomputed_cache",
+                        "criticality": "optional",
+                        "action_hint": "Gỡ bỏ biến môi trường VIREAD_LOCAL_VOICE_WORKER_URL đã hết hạn trên Render để dùng hoàn toàn bộ nhớ đệm TTS dựng sẵn.",
+                        "last_error": str(error_code or "LOCAL_VOICE_UNAVAILABLE"),
+                    }
                 if not local_configured:
+                    cloud_cooldown_note = (
+                        " (dịch vụ TTS đám mây đang tạm nghỉ cooldown)"
+                        if (
+                            (elevenlabs_configured and elevenlabs_cooldown)
+                            or (google_configured and google_cooldown)
+                        )
+                        else ""
+                    )
                     return {
                         "status": "HEALTHY",
                         "detail_status": "cached",
                         "operational_state": "Healthy",
-                        "safe_message": f"Đang phục vụ giọng đọc từ bộ nhớ đệm TTS dựng sẵn ({cache_entries} mục).",
+                        "safe_message": (
+                            f"Bộ nhớ đệm TTS sẵn sàng tự động lưu và hệ thống hỗ trợ phát giọng đọc dự phòng trên trình duyệt{cloud_cooldown_note}."
+                        ),
                         "execution_mode": "precomputed_cache",
                         "criticality": "important",
                         "action_hint": None,
@@ -1132,12 +1185,12 @@ class AdminSystemService:
                     }
                 return {
                     "status": "DEGRADED",
-                    "detail_status": "cached",
+                    "detail_status": "client_side",
                     "operational_state": "Degraded",
-                    "safe_message": f"Tunnel Local TTS không phản hồi; hệ thống vẫn phục vụ từ bộ nhớ đệm TTS dựng sẵn ({cache_entries} mục).",
-                    "execution_mode": "precomputed_cache",
+                    "safe_message": "Tunnel Local TTS không phản hồi; hệ thống vẫn sẵn sàng tạo bộ nhớ đệm TTS và phát dự phòng trên trình duyệt.",
+                    "execution_mode": "on_demand",
                     "criticality": "optional",
-                    "action_hint": "Gỡ bỏ biến môi trường VIREAD_LOCAL_VOICE_WORKER_URL đã hết hạn trên Render để dùng hoàn toàn bộ nhớ đệm TTS dựng sẵn.",
+                    "action_hint": "Gỡ bỏ biến môi trường VIREAD_LOCAL_VOICE_WORKER_URL đã hết hạn trên Render để dùng hoàn toàn chế độ cloud/trình duyệt.",
                     "last_error": str(error_code or "LOCAL_VOICE_UNAVAILABLE"),
                 }
             if hosted_mode and tts_cache_enabled and cache_quota_exhausted:
@@ -1151,6 +1204,19 @@ class AdminSystemService:
                     "action_hint": "Chờ qua ngày mới hoặc tăng VIREAD_TTS_CACHE_DAILY_EGRESS_LIMIT_BYTES / bật Google Cloud TTS dự phòng.",
                     "last_error": "QUOTA_EXHAUSTED",
                 }
+            if (elevenlabs_configured and elevenlabs_cooldown) or (
+                google_configured and google_cooldown
+            ):
+                return {
+                    "status": "DEGRADED",
+                    "detail_status": "cloud_ready",
+                    "operational_state": "Degraded",
+                    "safe_message": "Dịch vụ TTS đám mây đã cấu hình nhưng đang trong thời gian chờ quota/giới hạn tốc độ.",
+                    "execution_mode": "cloud_ai",
+                    "criticality": "important",
+                    "action_hint": "Kiểm tra hạn mức ElevenLabs / Google Cloud TTS hoặc khởi chạy Local Voice Worker dự phòng.",
+                    "last_error": "CLOUD_TTS_COOLDOWN",
+                }
             if not local_configured:
                 return {
                     "status": "UNAVAILABLE",
@@ -1159,7 +1225,7 @@ class AdminSystemService:
                     "safe_message": "Local TTS chưa được cấu hình (VIREAD_LOCAL_VOICE_WORKER_URL).",
                     "execution_mode": "on_demand",
                     "criticality": "important",
-                    "action_hint": "Dựng sẵn TTS Audio Cache hoặc cấu hình Google Cloud TTS / Local Voice Worker.",
+                    "action_hint": "Dựng sẵn TTS Audio Cache hoặc cấu hình ElevenLabs / Google Cloud TTS / Local Voice Worker.",
                     "last_error": "LOCAL_VOICE_UNCONFIGURED",
                 }
             if error_code == "LOCAL_VOICE_TIMEOUT":
@@ -1223,6 +1289,17 @@ class AdminSystemService:
                 "last_error": str(error_code or "LOCAL_VOICE_UNAVAILABLE"),
             }
 
+        if elevenlabs_configured and not elevenlabs_cooldown:
+            return {
+                "status": "HEALTHY",
+                "detail_status": "cloud_ready",
+                "operational_state": "Healthy",
+                "safe_message": "Dịch vụ ElevenLabs STT dự phòng đang sẵn sàng.",
+                "execution_mode": "cloud_ai",
+                "criticality": "important",
+                "action_hint": None,
+                "last_error": None,
+            }
         if google_configured and not google_cooldown:
             return {
                 "status": "HEALTHY",
@@ -1314,6 +1391,7 @@ class AdminSystemService:
             "error": False,
             "local": status_payload.get("local") or {},
             "google": status_payload.get("google") or {},
+            "elevenlabs": status_payload.get("elevenlabs") or {},
         }
 
     async def _probe_audio_cache_isolated(self) -> tuple[dict[str, object] | None, str | None]:
@@ -1321,7 +1399,7 @@ class AdminSystemService:
         if TtsAudioCacheService.get_summary is not _ORIG_TTS_CACHE_GET_SUMMARY:
             try:
                 res = await asyncio.wait_for(
-                    TtsAudioCacheService(repo_db).get_summary(), timeout=3.0
+                    TtsAudioCacheService(repo_db).get_summary(), timeout=6.0
                 )
                 if not isinstance(res, dict):
                     return None, "AUDIO_CACHE_PROBE_FAILED"
@@ -1334,6 +1412,15 @@ class AdminSystemService:
                 return None, "AUDIO_CACHE_PROBE_FAILED"
 
         if isinstance(repo_db, AsyncSession):
+            repo_bind = getattr(repo_db, "bind", None)
+            repo_dialect = str(
+                getattr(getattr(repo_bind, "dialect", None), "name", "")
+            ).lower()
+            if repo_dialect != "sqlite":
+                cached_summary = get_cached_tts_audio_cache_summary(repo_db)
+                if isinstance(cached_summary, dict):
+                    return cached_summary, None
+
             async def _read_from_autocommit_session() -> dict[str, object]:
                 async with AsyncSessionLocal() as cache_db:
                     if isinstance(cache_db, AsyncSession) and not cache_db.in_transaction():
@@ -1352,7 +1439,10 @@ class AdminSystemService:
                 daily_egress = int(summary["daily_egress_bytes"])
                 max_bytes = get_tts_cache_max_bytes()
                 daily_limit = get_tts_cache_daily_egress_limit_bytes()
-                quota_exhausted = daily_limit > 0 and daily_egress >= daily_limit
+                quota_exhausted = (
+                    (daily_limit > 0 and daily_egress >= daily_limit)
+                    or is_tts_cache_runtime_quota_exhausted()
+                )
                 return {
                     "entry_count": int(summary["entry_count"]),
                     "storage_used_bytes": int(summary["storage_used_bytes"]),
@@ -1364,7 +1454,9 @@ class AdminSystemService:
                 }
 
             try:
-                res = await asyncio.wait_for(_read_from_autocommit_session(), timeout=3.0)
+                res = await asyncio.wait_for(_read_from_autocommit_session(), timeout=6.0)
+                if repo_dialect != "sqlite":
+                    set_cached_tts_audio_cache_summary(repo_db, res)
                 return res, None
             except (TimeoutError, asyncio.TimeoutError):
                 return None, "AUDIO_CACHE_PROBE_TIMEOUT"
@@ -1375,7 +1467,7 @@ class AdminSystemService:
 
         try:
             res = await asyncio.wait_for(
-                TtsAudioCacheService(None).get_summary(), timeout=3.0
+                TtsAudioCacheService(None).get_summary(), timeout=6.0
             )
             return (res, None) if isinstance(res, dict) else (None, "AUDIO_CACHE_PROBE_FAILED")
         except (TimeoutError, asyncio.TimeoutError):
@@ -1438,7 +1530,7 @@ class AdminSystemService:
 
         async def _probe_db() -> bool:
             try:
-                return bool(await asyncio.wait_for(self.repository.probe_database(), timeout=4.0))
+                return bool(await asyncio.wait_for(self.repository.probe_database(), timeout=6.0))
             except (TimeoutError, asyncio.TimeoutError, SQLAlchemyError, OSError):
                 return False
 
@@ -1529,6 +1621,8 @@ class AdminSystemService:
         remote_worker_desc = "remote_worker"
         remote_ocr_ready = False
         remote_snapshot: dict[str, object] = {}
+        remote_ocr_probe_failed = False
+        remote_ocr_probe_error_code: str | None = None
 
         def _build_remote_ocr_items(remote_info: dict[str, object]) -> list[dict[str, object]]:
             nonlocal remote_worker_desc, remote_ocr_ready, remote_snapshot
@@ -1564,6 +1658,13 @@ class AdminSystemService:
             )
             is_sleeping_with_backlog = (
                 not online_workers and wakeup_configured and probe_degraded and has_backlog
+            )
+            is_hosted_idle_standby = (
+                hosted_mode
+                and not online_workers
+                and not wakeup_configured
+                and not probe_degraded
+                and not has_backlog
             )
 
             base_meta: dict[str, object] = {
@@ -1662,6 +1763,19 @@ class AdminSystemService:
                             "safe_message": f"OCR worker {remote_worker_desc} chưa phản hồi trong khi có {q_depth} trang chờ OCR.",
                         }
                     )
+                elif is_hosted_idle_standby:
+                    items_out.append(
+                        {
+                            **base_meta,
+                            "id": key,
+                            "label": label,
+                            "status": "DEGRADED",
+                            "detail_status": "standby",
+                            "operational_state": "Standby",
+                            "safe_message": "OCR worker độc lập đang ở chế độ chờ (hàng đợi trống); engine sẵn sàng khi worker kết nối.",
+                            "action_hint": None,
+                        }
+                    )
                 else:
                     items_out.append(
                         {
@@ -1710,6 +1824,16 @@ class AdminSystemService:
                     "last_error": "REMOTE_OCR_SLEEPING_OR_WAKING",
                     "safe_message": f"Không thể xác minh binary Tesseract khi OCR worker {remote_worker_desc} đang ngoại tuyến với hàng đợi tồn đọng.",
                 }
+            elif is_hosted_idle_standby:
+                tess_item = {
+                    **base_meta,
+                    "id": "tesseract",
+                    "label": "Tesseract",
+                    "status": "DEGRADED",
+                    "detail_status": "standby",
+                    "operational_state": "Standby",
+                    "safe_message": "Binary Tesseract đang ở chế độ chờ kết nối OCR worker độc lập (hàng đợi trống).",
+                }
             else:
                 tess_item = {
                     **base_meta,
@@ -1723,20 +1847,54 @@ class AdminSystemService:
             return items_out
 
         async def _probe_ocr_engines():
+            nonlocal remote_ocr_probe_failed, remote_ocr_probe_error_code
             if remote_ocr_mode:
                 try:
                     remote_info = await asyncio.wait_for(
                         collect_remote_ocr_health(), timeout=ocr_timeout
                     )
                     return _build_remote_ocr_items(remote_info)
-                except Exception:
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    remote_ocr_probe_failed = True
+                    remote_ocr_probe_error_code = (
+                        "OCR_HEALTH_PROBE_TIMEOUT"
+                        if isinstance(exc, (TimeoutError, asyncio.TimeoutError))
+                        else "OCR_HEALTH_PROBE_FAILED"
+                    )
+                    if is_remote_worker_wakeup_configured():
+                        try:
+                            passive_worker = (
+                                await remote_ocr_wakeup.probe_configured_remote_ocr_worker_health(
+                                    timeout_seconds=min(4.0, ocr_timeout)
+                                )
+                            )
+                        except Exception:
+                            passive_worker = None
+                        probe_degraded = remote_ocr_wakeup.peek_remote_ocr_probe_degraded()
+                        if passive_worker is not None:
+                            remote_ocr_probe_failed = False
+                            remote_ocr_probe_error_code = None
+                            fallback_remote_info: dict[str, object] = {
+                                "mode": "remote_worker",
+                                "ready": bool(passive_worker.get("ready", False)),
+                                "wakeup_configured": True,
+                                "probe_degraded": probe_degraded,
+                                "engines": dict(passive_worker.get("engines") or {}),
+                                "workers": [passive_worker],
+                                "queue": {"pending_total": 0, "active_total": 0},
+                            }
+                            return _build_remote_ocr_items(fallback_remote_info)
                     return [
                         dict(
                             id=key,
                             label=label,
                             status="DEGRADED",
                             detail_status="unknown",
-                            safe_message="Chưa xác minh được trạng thái OCR worker độc lập.",
+                            operational_state="Unknown",
+                            safe_message="Chưa xác minh được trạng thái OCR worker độc lập từ Database.",
+                            last_error=remote_ocr_probe_error_code,
                             service_group="ocr",
                             execution_mode="remote_worker",
                             criticality="important",
@@ -1783,7 +1941,7 @@ class AdminSystemService:
 
         async def _probe_storage():
             try:
-                res = await asyncio.wait_for(probe_storage_health(), timeout=3.0)
+                res = await asyncio.wait_for(probe_storage_health(), timeout=6.0)
                 return {
                     "service_group": "core",
                     "execution_mode": "always_on",
@@ -1958,10 +2116,12 @@ class AdminSystemService:
         else:
             local_voice = voice_raw_res.get("local") or {}
             google_voice = voice_raw_res.get("google") or {}
+            elevenlabs_voice = voice_raw_res.get("elevenlabs") or {}
             tts_info = self._map_voice_capability_health(
                 "tts",
                 local=local_voice,  # type: ignore[arg-type]
                 google=google_voice,  # type: ignore[arg-type]
+                elevenlabs=elevenlabs_voice,  # type: ignore[arg-type]
                 audio_cache_summary=audio_cache_summary,
                 tts_cache_enabled=tts_cache_enabled,
                 hosted_mode=hosted_mode,
@@ -1970,6 +2130,7 @@ class AdminSystemService:
                 "stt",
                 local=local_voice,  # type: ignore[arg-type]
                 google=google_voice,  # type: ignore[arg-type]
+                elevenlabs=elevenlabs_voice,  # type: ignore[arg-type]
                 audio_cache_summary=audio_cache_summary,
                 tts_cache_enabled=tts_cache_enabled,
                 hosted_mode=hosted_mode,
@@ -2306,11 +2467,23 @@ class AdminSystemService:
                 ocr_op_state: str | None = None
                 ocr_can_wake = False
 
-                if remote_ocr_ready and standby_mode in {"quiet_standby", "scale_to_zero"}:
-                    ocr_w_status: Literal["HEALTHY", "DEGRADED", "UNAVAILABLE"] = "HEALTHY"
-                    ocr_w_detail: HealthDetailStatus = "standby"
+                if remote_ocr_probe_failed and not online_workers and not remote_ocr_ready:
+                    ocr_can_wake = wakeup_configured
+                    ocr_w_status = "DEGRADED"
+                    ocr_w_detail = "unknown"
+                    ocr_op_state = "Unknown"
+                    ocr_w_err = remote_ocr_probe_error_code or "OCR_HEALTH_PROBE_FAILED"
+                    ocr_w_msg = (
+                        "Hết thời gian kiểm tra trạng thái OCR worker từ Database."
+                        if ocr_w_err == "OCR_HEALTH_PROBE_TIMEOUT"
+                        else "Chưa thể kiểm tra trạng thái OCR worker từ Database lúc này."
+                    )
+                    ocr_action_hint = "Thử bấm Kiểm tra lại hoặc kiểm tra kết nối Supabase PostgreSQL / trạng thái ocr_worker."
+                elif remote_ocr_ready and standby_mode in {"quiet_standby", "scale_to_zero"}:
+                    ocr_w_status = "HEALTHY"
+                    ocr_w_detail = "standby"
                     ocr_op_state = "Queued" if has_backlog else "Standby"
-                    ocr_w_err: str | None = None
+                    ocr_w_err = None
                     ocr_can_wake = True
                     ocr_w_msg = f"OCR worker {remote_worker_desc} ở chế độ chờ tiết kiệm ({standby_mode}) và sẵn sàng đánh thức tức thì."
                 elif remote_ocr_ready:
@@ -2348,6 +2521,14 @@ class AdminSystemService:
                     ocr_w_err = "NO_ONLINE_OCR_WORKER"
                     ocr_w_msg = "OCR worker từ xa chưa phản hồi kiểm tra sẵn sàng."
                     ocr_action_hint = "Kiểm tra VIREAD_OCR_REMOTE_WORKER_URL, VIREAD_OCR_WORKER_TOKEN và VIREAD_HF_SPACE_TOKEN."
+                elif hosted_mode and not has_backlog:
+                    ocr_can_wake = False
+                    ocr_w_status = "DEGRADED"
+                    ocr_w_detail = "standby"
+                    ocr_op_state = "Standby"
+                    ocr_w_err = None
+                    ocr_w_msg = "Chưa có OCR worker độc lập đang kết nối (hàng đợi OCR đang trống)."
+                    ocr_action_hint = "Khởi chạy ocr_worker cục bộ (Start-ViReadOcrWorker.ps1) hoặc cấu hình VIREAD_OCR_REMOTE_WORKER_URL khi cần OCR trang sách mới."
                 else:
                     ocr_can_wake = False
                     ocr_w_status = "UNAVAILABLE" if has_backlog else "DEGRADED"
@@ -2659,6 +2840,8 @@ async def get_admin_health(
 ):
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
+    if isinstance(db, AsyncSession) and db.in_transaction() is True:
+        await db.rollback()
     return await service.health(
         workers=getattr(request.app.state, "background_workers", None) or {}
     )
@@ -2674,6 +2857,8 @@ async def wake_admin_ocr_worker(
 ):
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
+    if isinstance(db, AsyncSession) and db.in_transaction() is True:
+        await db.rollback()
     max_requests, window_seconds = rate_limiter.resolve_limits(
         "admin_ocr_wakeup", 6, 60.0
     )
