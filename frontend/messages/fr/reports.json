@@ -161,7 +161,8 @@
       "maxRetriesReached": "Entraîné trois fois",
       "uncertainLabel": "Pas entendu clairement",
       "uncertainNote": "Enregistré séparément, non compté comme une erreur de prononciation confirmée."
-    }
+    },
+    "entertainmentSummaryHeading": "Apprentissage ludique et compétences langagières (V4.0)"
   },
   "sessions": {
     "title": "Historique de lecture",
@@ -643,5 +644,26 @@
       "wantToRead": "À lire",
       "savedToRead": "Enregistré dans la liste de lecture"
     }
+  },
+  "entertainmentSummary": {
+    "loading": "Synthèse des progrès ludiques de {childName} en cours…",
+    "empty": "Aucune donnée ludique récente pour {childName}. Les progrès apparaîtront ici dès les premières parties.",
+    "observedCounterLabel": "Compétences bien observées",
+    "estimatedCounterLabel": "Compétences estimées au départ",
+    "unknownCounterLabel": "Compétences à compléter",
+    "activitiesTitle": "Activités ludiques (les {days} derniers jours)",
+    "avgScoreBadge": "Moy. {pct} %",
+    "noScoreBadge": "Pas encore de score",
+    "skillsMapTitle": "Carte des compétences (sans extrapolation si données insuffisantes)",
+    "evidenceCount": "{count} preuves",
+    "noPracticeYet": "Aucune activité pratiquée dans ce domaine pour le moment : statut non évalué conservé.",
+    "statusObserved": "Bien observé",
+    "statusEstimated": "Estimation initiale",
+    "statusUnknown": "Données insuffisantes",
+    "practicedWordsTitle": "Mots difficiles révisés par le jeu",
+    "practiceTimes": "{count} fois",
+    "karaokeWeakSegmentsTitle": "Passages à chanter lentement à 0,85x",
+    "openSongAction": "Ouvrir la chanson",
+    "homeTipsTitle": "Conseils d'accompagnement à la maison"
   }
 }

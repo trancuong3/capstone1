@@ -91,6 +91,69 @@ async function fixture(
       const request = route.request(),
         url = new URL(request.url());
       if (request.method() === "OPTIONS") return respond(route, null, 204);
+      if (
+        request.method() === "GET" &&
+        /^\/karaoke\/songs\/[^/]+\/musical-profile$/.test(url.pathname)
+      ) {
+        return respond(route, {
+          song_id: songId,
+          song_version_id: versionId,
+          bpm: 108,
+          audio_type: "VOCAL_FULL",
+          has_pitch_contour: false,
+          has_beat_grid: true,
+          source_method: "LYRICS_TIMING",
+          beat_grid_ms: [0, 500, 1000, 1500],
+          pitch_contour: [],
+          phrase_windows: [],
+          updated_at: "2026-10-08T00:00:00Z",
+        });
+      }
+      if (url.pathname === "/karaoke/practice-sessions") {
+        if (request.method() === "GET") {
+          return respond(route, {
+            child_id: url.searchParams.get("child_id") ?? ids.child,
+            song_id: url.searchParams.get("song_id") ?? songId,
+            best_full_song_score: null,
+            best_full_song_stars: 0,
+            total_sessions: 0,
+            items: [],
+            storage_ready: true,
+          });
+        }
+        if (request.method() === "POST") {
+          const payload = (request.postDataJSON() ?? {}) as Record<
+            string,
+            unknown
+          >;
+          return respond(
+            route,
+            {
+              id: "99999999-9999-4999-8999-999999999991",
+              child_id: payload.child_id ?? ids.child,
+              song_id: payload.song_id ?? songId,
+              song_version_id: versionId,
+              practice_mode: payload.practice_mode ?? "FULL_SONG",
+              scoring_mode: payload.scoring_mode ?? "LYRICS_ONLY",
+              playback_rate: Number(payload.playback_rate ?? 1),
+              headphone_mode: Boolean(payload.headphone_mode),
+              overall_score: (payload.overall_score as number | null) ?? null,
+              rhythm_score: (payload.rhythm_score as number | null) ?? null,
+              pitch_score: (payload.pitch_score as number | null) ?? null,
+              lyrics_score: (payload.lyrics_score as number | null) ?? null,
+              fluency_score: (payload.fluency_score as number | null) ?? null,
+              stars: Number(payload.stars ?? 0),
+              segment_start_ms: null,
+              segment_end_ms: null,
+              report_payload:
+                (payload.report_payload as Record<string, unknown>) ?? {},
+              created_at: "2026-10-08T00:00:00Z",
+              persisted: true,
+            },
+            201,
+          );
+        }
+      }
       expect(request.method()).toBe("GET");
       expect(request.headers().authorization).toMatch(/^Bearer /);
       expect(url.searchParams.get("child_id")).toBe(ids.child);

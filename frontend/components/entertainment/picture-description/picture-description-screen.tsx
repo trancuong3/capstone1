@@ -43,6 +43,11 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import {
+  getEntertainmentPreferences,
+  subscribeEntertainmentPreferences,
+  useEntertainmentPreferences,
+} from "@/hooks/use-entertainment-preferences";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { useTranslations } from "@/hooks/use-i18n";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
@@ -58,14 +63,17 @@ import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
 } from "@/lib/reading/browser-transcript-collector";
+import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
   PictureBookPageItemDTO,
   PictureCatalogDTO,
   PictureInputMode,
   PictureSampleItemDTO,
+  PictureScaffoldingStep,
   PictureSessionDTO,
   PictureSessionSummaryDTO,
+  PictureTeachingMode,
 } from "@/types/picture-description";
 
 type SourceTab = "SAMPLE" | "CUSTOM_UPLOAD" | "BOOK_PAGE";
@@ -95,6 +103,85 @@ type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognitionLike;
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const ACCEPTED_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const TTS_MIC_COOLDOWN_MS = 280;
+const DUPLICATE_SUBMIT_WINDOW_MS = 1500;
+
+const TEACHING_MODE_SPECS: readonly {
+  readonly id: PictureTeachingMode;
+  readonly labelKey: string;
+  readonly cueKey: string;
+  readonly audioHintKey: string;
+}[] = [
+  {
+    id: "OBSERVE",
+    labelKey: "pictureDescription.teachingModes.OBSERVE.label",
+    cueKey: "pictureDescription.teachingModes.OBSERVE.cue",
+    audioHintKey: "pictureDescription.teachingModes.OBSERVE.audioHint",
+  },
+  {
+    id: "VOCABULARY",
+    labelKey: "pictureDescription.teachingModes.VOCABULARY.label",
+    cueKey: "pictureDescription.teachingModes.VOCABULARY.cue",
+    audioHintKey: "pictureDescription.teachingModes.VOCABULARY.audioHint",
+  },
+  {
+    id: "SENTENCE",
+    labelKey: "pictureDescription.teachingModes.SENTENCE.label",
+    cueKey: "pictureDescription.teachingModes.SENTENCE.cue",
+    audioHintKey: "pictureDescription.teachingModes.SENTENCE.audioHint",
+  },
+  {
+    id: "STORY",
+    labelKey: "pictureDescription.teachingModes.STORY.label",
+    cueKey: "pictureDescription.teachingModes.STORY.cue",
+    audioHintKey: "pictureDescription.teachingModes.STORY.audioHint",
+  },
+  {
+    id: "INFER",
+    labelKey: "pictureDescription.teachingModes.INFER.label",
+    cueKey: "pictureDescription.teachingModes.INFER.cue",
+    audioHintKey: "pictureDescription.teachingModes.INFER.audioHint",
+  },
+  {
+    id: "CREATE",
+    labelKey: "pictureDescription.teachingModes.CREATE.label",
+    cueKey: "pictureDescription.teachingModes.CREATE.cue",
+    audioHintKey: "pictureDescription.teachingModes.CREATE.audioHint",
+  },
+] as const;
+
+const TEACHING_MODE_SPEC_BY_ID: Record<
+  PictureTeachingMode,
+  (typeof TEACHING_MODE_SPECS)[number]
+> = {
+  OBSERVE: TEACHING_MODE_SPECS[0],
+  VOCABULARY: TEACHING_MODE_SPECS[1],
+  SENTENCE: TEACHING_MODE_SPECS[2],
+  STORY: TEACHING_MODE_SPECS[3],
+  INFER: TEACHING_MODE_SPECS[4],
+  CREATE: TEACHING_MODE_SPECS[5],
+};
+
+const SCAFFOLDING_STEP_KEYS: Record<PictureScaffoldingStep, string> = {
+  PROMPT: "pictureDescription.scaffoldingSteps.PROMPT",
+  EXPAND: "pictureDescription.scaffoldingSteps.EXPAND",
+  PRAISE: "pictureDescription.scaffoldingSteps.PRAISE",
+  NEXT_CHALLENGE: "pictureDescription.scaffoldingSteps.NEXT_CHALLENGE",
+};
+
+const GRADE_1_2_VISUAL_HINT_CHIPS = [
+  { id: "who", badge: "1", textKey: "pictureDescription.visualHintChips.who" },
+  {
+    id: "action",
+    badge: "2",
+    textKey: "pictureDescription.visualHintChips.action",
+  },
+  {
+    id: "where",
+    badge: "3",
+    textKey: "pictureDescription.visualHintChips.where",
+  },
+] as const;
 
 const STORYTELLING_STEPS = [
   {
@@ -282,6 +369,8 @@ export function PictureDescriptionScreen() {
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
   const recorder = useSpeechRecorder();
+  const { reducedMotion, calmSound, toggleCalmSound } =
+    useEntertainmentPreferences();
 
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: "loading",
@@ -293,6 +382,12 @@ export function PictureDescriptionScreen() {
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(
     null,
   );
+  const [teachingMode, setTeachingMode] =
+    useState<PictureTeachingMode>("OBSERVE");
+  const [activeFollowUpQuestion, setActiveFollowUpQuestion] = useState<
+    string | null
+  >(null);
+  const [showGradeHintChips, setShowGradeHintChips] = useState(true);
   const [showHints, setShowHints] = useState(false);
   const [showSampleSentences, setShowSampleSentences] = useState(false);
   const [samplesPage, setSamplesPage] = useState(1);
@@ -324,6 +419,17 @@ export function PictureDescriptionScreen() {
   const sessionEpochRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const isRecordingVoiceRef = useRef(false);
+  const isTtsPlayingRef = useRef(false);
+  const lastTtsEndAtRef = useRef(0);
+  const micArmTokenRef = useRef(0);
+  const micCooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const liveTranscriptRef = useRef("");
+  const isEvaluatingRef = useRef(false);
+  const lastSuccessfulSubmitRef = useRef<{ key: string; at: number } | null>(
+    null,
+  );
   const browserRecognitionRef = useRef<BrowserSpeechRecognitionLike | null>(
     null,
   );
@@ -358,25 +464,132 @@ export function PictureDescriptionScreen() {
     };
   });
 
+  const clearMicCooldown = useCallback(() => {
+    if (micCooldownTimerRef.current !== null) {
+      clearTimeout(micCooldownTimerRef.current);
+      micCooldownTimerRef.current = null;
+    }
+  }, []);
+
+  const abortActiveVoiceCapture = useCallback(
+    (options?: { preserveDraft?: boolean }) => {
+      micArmTokenRef.current += 1;
+      clearMicCooldown();
+      const wasActive =
+        isRecordingVoiceRef.current || browserRecognitionRef.current !== null;
+      isRecordingVoiceRef.current = false;
+      setIsRecordingVoice(false);
+
+      const pendingLive = collapseDuplicateSpeech(
+        collectorRef.current.getTranscript() || liveTranscriptRef.current,
+      );
+      try {
+        browserRecognitionRef.current?.abort();
+      } catch {
+        // Ignore browser recognition abort errors.
+      }
+      browserRecognitionRef.current = null;
+      if (wasActive) {
+        unmountActionsRef.current.cancelRecorder();
+      }
+      if (options?.preserveDraft && pendingLive) {
+        setDescriptionText((previous) => {
+          const prefix = previous.trim();
+          if (!prefix) return pendingLive;
+          if (
+            normalizeSpeechUnit(prefix).endsWith(
+              normalizeSpeechUnit(pendingLive),
+            )
+          ) {
+            return prefix;
+          }
+          return `${prefix} ${pendingLive}`;
+        });
+        setInputMode("VOICE");
+      }
+      liveTranscriptRef.current = "";
+      setLiveTranscript("");
+      return wasActive;
+    },
+    [clearMicCooldown],
+  );
+
+  const stopSpeechPlayback = useCallback(() => {
+    const browserSpeaking =
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      Boolean(window.speechSynthesis.speaking);
+    if (isTtsPlayingRef.current || browserSpeaking) {
+      lastTtsEndAtRef.current = Date.now();
+    }
+    isTtsPlayingRef.current = false;
+    unmountActionsRef.current.stopSpeech();
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setPlayingSpeechKey(null);
+  }, []);
+
+  const micPausedBackgroundText = t("pictureDescription.micPausedBackground");
+  const micPausedBackgroundTextRef = useRef(micPausedBackgroundText);
+  useEffect(() => {
+    micPausedBackgroundTextRef.current = micPausedBackgroundText;
+  }, [micPausedBackgroundText]);
+
   useEffect(() => {
     mountedRef.current = true;
+    const suspendMediaOnBackground = () => {
+      stopSpeechPlayback();
+      const interruptedMic = abortActiveVoiceCapture({ preserveDraft: true });
+      if (interruptedMic) {
+        setVoiceMessage(micPausedBackgroundTextRef.current);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (typeof document !== "undefined" && document.hidden) {
+        suspendMediaOnBackground();
+      }
+    };
+    const onAndroidBackground = () => {
+      suspendMediaOnBackground();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+      document.addEventListener(
+        "viread:android-background",
+        onAndroidBackground,
+      );
+    }
     return () => {
       mountedRef.current = false;
       sessionEpochRef.current += 1;
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+        document.removeEventListener(
+          "viread:android-background",
+          onAndroidBackground,
+        );
+      }
+      micArmTokenRef.current += 1;
+      clearMicCooldown();
       isRecordingVoiceRef.current = false;
+      isTtsPlayingRef.current = false;
       requestControllerRef.current?.abort();
       sttControllerRef.current?.abort();
       sttControllerRef.current = null;
       try {
         browserRecognitionRef.current?.abort();
       } catch {
-        // Ignore browser recognition abort errors on unmount.
+        // Ignore cleanup abort errors.
       }
       browserRecognitionRef.current = null;
       unmountActionsRef.current.stopSpeech();
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
       unmountActionsRef.current.cancelRecorder();
     };
-  }, []);
+  }, [abortActiveVoiceCapture, clearMicCooldown, stopSpeechPlayback]);
 
   useEffect(() => {
     if (!childId) return;
@@ -436,16 +649,17 @@ export function PictureDescriptionScreen() {
     return map;
   }, [catalogState]);
 
-  const stopSpeechPlayback = useCallback(() => {
-    speechPlayer.stop();
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
-    setPlayingSpeechKey(null);
-  }, [speechPlayer]);
+  useEffect(() => {
+    return subscribeEntertainmentPreferences(() => {
+      if (!getEntertainmentPreferences().calmSound) {
+        stopSpeechPlayback();
+      }
+    });
+  }, [stopSpeechPlayback]);
 
   const speakVietnamese = useCallback(
     async (text: string, key: string) => {
+      if (!calmSound) return;
       const cleaned = text.trim();
       if (!cleaned) return;
       if (playingSpeechKey === key) {
@@ -453,17 +667,29 @@ export function PictureDescriptionScreen() {
         return;
       }
 
+      // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
+      abortActiveVoiceCapture({ preserveDraft: true });
       stopSpeechPlayback();
+      isTtsPlayingRef.current = true;
       setPlayingSpeechKey(key);
 
       try {
         await speechPlayer.play(cleaned);
-        setPlayingSpeechKey((current) => (current === key ? null : current));
       } catch {
-        setPlayingSpeechKey(null);
+        // Ignore playback interruption / fallback errors.
+      } finally {
+        isTtsPlayingRef.current = false;
+        lastTtsEndAtRef.current = Date.now();
+        setPlayingSpeechKey((current) => (current === key ? null : current));
       }
     },
-    [playingSpeechKey, speechPlayer, stopSpeechPlayback],
+    [
+      abortActiveVoiceCapture,
+      calmSound,
+      playingSpeechKey,
+      speechPlayer,
+      stopSpeechPlayback,
+    ],
   );
 
   const stopVoiceCaptureAndStt = useCallback(() => {
@@ -487,10 +713,20 @@ export function PictureDescriptionScreen() {
   const openSession = useCallback(
     (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
+      abortActiveVoiceCapture({ preserveDraft: false });
       stopVoiceCaptureAndStt();
       sessionIdRef.current = loaded.session_id;
       const newestAttempt = loaded.attempts[0] ?? null;
+      const initialMode =
+        loaded.teaching_mode ?? loaded.guide.teaching_mode ?? "OBSERVE";
       setSession(loaded);
+      setTeachingMode(initialMode);
+      setActiveFollowUpQuestion(
+        newestAttempt?.feedback.next_prompt_question ?? null,
+      );
+      // Grade-adaptive scaffolding: prominent audio-first hints for Grades 1-2,
+      // collapsed by default for Grades 4-5 (expandable in 1 tap).
+      setShowGradeHintChips(loaded.child_grade < 4);
       setSelectedAttemptId(newestAttempt?.attempt_id ?? null);
       setPracticeTab(
         initialTab === "RESULT" && newestAttempt ? "RESULT" : "PRACTICE",
@@ -499,13 +735,15 @@ export function PictureDescriptionScreen() {
       setShowHints(false);
       setShowSampleSentences(false);
       setDescriptionText("");
+      liveTranscriptRef.current = "";
       setLiveTranscript("");
       setInputMode("TEXT");
       setActionError(null);
       setEvaluateError(null);
       setVoiceMessage(null);
+      lastSuccessfulSubmitRef.current = null;
     },
-    [stopSpeechPlayback, stopVoiceCaptureAndStt],
+    [abortActiveVoiceCapture, stopSpeechPlayback, stopVoiceCaptureAndStt],
   );
 
   const handleResumeSession = async (
@@ -536,7 +774,10 @@ export function PictureDescriptionScreen() {
     }
   };
 
-  const handleCreateSampleSession = async (sample: PictureSampleItemDTO) => {
+  const handleCreateSampleSession = async (
+    sample: PictureSampleItemDTO,
+    options?: { refreshAiGuide?: boolean },
+  ) => {
     if (!childId || !pictureService || isAnalyzing) return;
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -550,6 +791,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
+          refresh_ai_guide: options?.refreshAiGuide,
         },
         controller.signal,
       );
@@ -672,11 +914,53 @@ export function PictureDescriptionScreen() {
   const startVoiceRecording = async () => {
     if (isRecordingVoice || isTranscribing || isEvaluating) return;
     const captureEpoch = sessionEpochRef.current;
+
+    // G10 Anti-Self-Capture: Immediately cancel any active TTS playback before arming mic.
+    const browserSpeaking =
+      typeof window !== "undefined" &&
+      "speechSynthesis" in window &&
+      Boolean(window.speechSynthesis.speaking);
+    const wasTtsActive =
+      isTtsPlayingRef.current || speechPlayer.isPlaying || browserSpeaking;
     stopSpeechPlayback();
+
+    clearMicCooldown();
+    const armToken = ++micArmTokenRef.current;
+
     setVoiceMessage(null);
     setActionError(null);
+    liveTranscriptRef.current = "";
     setLiveTranscript("");
     collectorRef.current.reset();
+
+    const elapsedSinceTts =
+      lastTtsEndAtRef.current > 0
+        ? Date.now() - lastTtsEndAtRef.current
+        : Number.POSITIVE_INFINITY;
+    const cooldownRemainingMs = wasTtsActive
+      ? TTS_MIC_COOLDOWN_MS
+      : elapsedSinceTts < TTS_MIC_COOLDOWN_MS
+        ? TTS_MIC_COOLDOWN_MS - elapsedSinceTts
+        : 0;
+
+    if (cooldownRemainingMs > 0) {
+      setVoiceMessage(t("pictureDescription.waitingTtsCooldown"));
+      await new Promise<void>((resolve) => {
+        micCooldownTimerRef.current = setTimeout(() => {
+          micCooldownTimerRef.current = null;
+          resolve();
+        }, cooldownRemainingMs);
+      });
+      if (
+        !mountedRef.current ||
+        sessionEpochRef.current !== captureEpoch ||
+        micArmTokenRef.current !== armToken ||
+        isTtsPlayingRef.current ||
+        (typeof document !== "undefined" && document.hidden)
+      ) {
+        return;
+      }
+    }
 
     try {
       await recorder.start();
@@ -690,7 +974,12 @@ export function PictureDescriptionScreen() {
       return;
     }
 
-    if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+    if (
+      !mountedRef.current ||
+      sessionEpochRef.current !== captureEpoch ||
+      micArmTokenRef.current !== armToken ||
+      isTtsPlayingRef.current
+    ) {
       recorder.cancel();
       return;
     }
@@ -711,15 +1000,24 @@ export function PictureDescriptionScreen() {
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.onresult = (event) => {
+          // Never capture AI Teacher TTS audio into the child's transcript.
+          const synthesisSpeaking =
+            typeof window !== "undefined" &&
+            "speechSynthesis" in window &&
+            Boolean(window.speechSynthesis.speaking);
           if (
             !mountedRef.current ||
             !isRecordingVoiceRef.current ||
-            sessionEpochRef.current !== captureEpoch
+            sessionEpochRef.current !== captureEpoch ||
+            isTtsPlayingRef.current ||
+            synthesisSpeaking
           ) {
             return;
           }
           collectorRef.current.addResults(event);
-          setLiveTranscript(collectLiveTranscript(collectorRef.current, event));
+          const nextLive = collectLiveTranscript(collectorRef.current, event);
+          liveTranscriptRef.current = nextLive;
+          setLiveTranscript(nextLive);
         };
         recognition.onend = () => {
           collectorRef.current.completeRecognitionCycle();
@@ -727,6 +1025,7 @@ export function PictureDescriptionScreen() {
             mountedRef.current &&
             isRecordingVoiceRef.current &&
             sessionEpochRef.current === captureEpoch &&
+            !isTtsPlayingRef.current &&
             !recognitionFailed &&
             browserRecognitionRef.current === recognition
           ) {
@@ -761,7 +1060,7 @@ export function PictureDescriptionScreen() {
     const sttController = new AbortController();
     sttControllerRef.current = sttController;
 
-    const liveSnapshot = liveTranscript;
+    const liveSnapshot = liveTranscriptRef.current || liveTranscript;
     try {
       browserRecognitionRef.current?.stop();
     } catch {
@@ -825,6 +1124,7 @@ export function PictureDescriptionScreen() {
       }
       if (mountedRef.current && sessionEpochRef.current === captureEpoch) {
         setIsTranscribing(false);
+        liveTranscriptRef.current = "";
         setLiveTranscript("");
         browserRecognitionRef.current = null;
       }
@@ -846,13 +1146,16 @@ export function PictureDescriptionScreen() {
     setVoiceMessage(null);
     setActionError(null);
     setEvaluateError(null);
+    lastSuccessfulSubmitRef.current = null;
   };
 
   const handleEvaluate = async (
     overrideTranscript?: string,
     overrideMode?: PictureInputMode,
+    options?: { allowDuplicate?: boolean },
   ) => {
-    if (!session || !pictureService || isEvaluating) return;
+    if (!session || !pictureService || isEvaluating || isEvaluatingRef.current)
+      return;
     const rawText =
       overrideTranscript !== undefined ? overrideTranscript : descriptionText;
     const trimmed = rawText.trim();
@@ -861,11 +1164,36 @@ export function PictureDescriptionScreen() {
       return;
     }
 
+    const submitKey = `${session.session_id}:${teachingMode}:${normalizeSpeechUnit(trimmed)}`;
+    const now = Date.now();
+    if (
+      !options?.allowDuplicate &&
+      lastSuccessfulSubmitRef.current &&
+      lastSuccessfulSubmitRef.current.key === submitKey &&
+      now - lastSuccessfulSubmitRef.current.at < DUPLICATE_SUBMIT_WINDOW_MS
+    ) {
+      return;
+    }
+
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      setEvaluateError(t("pictureDescription.offlineNotice"));
+      return;
+    }
+
     stopSpeechPlayback();
+    abortActiveVoiceCapture({ preserveDraft: false });
     requestControllerRef.current?.abort();
     const controller = new AbortController();
     requestControllerRef.current = controller;
 
+    const sessionTargetWords = Array.from(
+      new Set([
+        ...(session.target_words ?? []),
+        ...(session.guide.target_words ?? []),
+      ]),
+    );
+
+    isEvaluatingRef.current = true;
     setActionError(null);
     setEvaluateError(null);
     setIsEvaluating(true);
@@ -875,22 +1203,32 @@ export function PictureDescriptionScreen() {
         {
           transcript_text: trimmed,
           input_mode: overrideMode ?? inputMode,
+          teaching_mode: teachingMode,
+          ...(sessionTargetWords.length > 0
+            ? { target_words: sessionTargetWords }
+            : {}),
         },
         controller.signal,
       );
       if (controller.signal.aborted) return;
+      lastSuccessfulSubmitRef.current = { key: submitKey, at: Date.now() };
       setSession(response.session);
       setSelectedAttemptId(response.latest_attempt.attempt_id);
+      setActiveFollowUpQuestion(
+        response.latest_attempt.feedback.next_prompt_question ?? null,
+      );
       setVoiceMessage(null);
       setEvaluateError(null);
       setPracticeTab("RESULT");
       setCatalogRefreshKey((value) => value + 1);
     } catch (error: unknown) {
       if (controller.signal.aborted) return;
+      lastSuccessfulSubmitRef.current = null;
       setEvaluateError(
         isServiceError(error) ? error.message : defaultGameError,
       );
     } finally {
+      isEvaluatingRef.current = false;
       setIsEvaluating(false);
     }
   };
@@ -944,12 +1282,23 @@ export function PictureDescriptionScreen() {
   const hasSubmittedAttempt = Boolean(
     session && (session.attempts_count >= 1 || latestAttempt),
   );
+  const effectiveGrade = session?.child_grade ?? selectedChild.grade;
+  const isLowerGrade = effectiveGrade <= 2;
+  const isUpperGrade = effectiveGrade >= 4;
+  const activeModeSpec = TEACHING_MODE_SPEC_BY_ID[teachingMode];
+  const targetWords = session
+    ? Array.from(
+        new Set([
+          ...(session.target_words ?? []),
+          ...(session.guide.target_words ?? []),
+        ]),
+      )
+    : [];
+  const usedTargetWordsCount = targetWords.filter((word) =>
+    descriptionContainsTerm(descriptionText, word),
+  ).length;
   const draftWordCount = countMeaningfulWords(descriptionText);
-  const draftReadiness = readinessHint(
-    draftWordCount,
-    session?.child_grade ?? selectedChild.grade,
-    t,
-  );
+  const draftReadiness = readinessHint(draftWordCount, effectiveGrade, t);
   const usedVocabCount = session
     ? session.guide.suggested_vocabulary.filter((item) =>
         descriptionContainsTerm(descriptionText, item.word),
@@ -957,7 +1306,14 @@ export function PictureDescriptionScreen() {
     : 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
+    <section
+      className={cn(
+        "mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <BookChildHeader
         child={selectedChild}
         mobileLabel={t("pictureDescription.mobileLabel")}
@@ -979,28 +1335,50 @@ export function PictureDescriptionScreen() {
           <p className="text-body text-muted">{t("pictureDescription.lead")}</p>
         </div>
 
-        {session ? (
+        <div className="flex flex-wrap items-center gap-2">
           <Button
-            onClick={() => {
-              stopSpeechPlayback();
-              stopVoiceCaptureAndStt();
-              sessionIdRef.current = null;
-              setShowHints(false);
-              setShowSampleSentences(false);
-              setPracticeTab("PRACTICE");
-              setSession(null);
-              setSelectedAttemptId(null);
-              setActionError(null);
-              setEvaluateError(null);
-            }}
+            aria-pressed={!calmSound}
+            className="min-h-11"
+            onClick={toggleCalmSound}
             size="compact"
             type="button"
-            variant="secondary"
+            variant="quiet"
           >
-            <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
-            {t("pictureDescription.chooseAnotherPicture")}
+            {calmSound ? (
+              <Volume2 aria-hidden="true" className="size-4" />
+            ) : (
+              <VolumeX aria-hidden="true" className="size-4" />
+            )}
+            {calmSound ? t("hub.calmSound") : t("hub.soundMuted")}
           </Button>
-        ) : null}
+          {session ? (
+            <Button
+              onClick={() => {
+                stopSpeechPlayback();
+                abortActiveVoiceCapture({ preserveDraft: false });
+                stopVoiceCaptureAndStt();
+                sessionIdRef.current = null;
+                setShowHints(false);
+                setShowSampleSentences(false);
+                setActiveFollowUpQuestion(null);
+                setPracticeTab("PRACTICE");
+                setSession(null);
+                setSelectedAttemptId(null);
+                setActionError(null);
+                setEvaluateError(null);
+              }}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <ArrowLeft
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+              {t("pictureDescription.chooseAnotherPicture")}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {actionError ? (
@@ -1014,7 +1392,10 @@ export function PictureDescriptionScreen() {
         >
           <LoaderCircle
             aria-hidden="true"
-            className="size-8 animate-spin text-primary"
+            className={cn(
+              "size-8 text-primary",
+              !reducedMotion && "animate-spin",
+            )}
           />
           <h2 className="text-xl font-extrabold text-ink">
             {t("pictureDescription.analyzingTitle")}
@@ -1121,7 +1502,11 @@ export function PictureDescriptionScreen() {
                           );
                           return (
                             <article
-                              className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm transition-transform hover:-translate-y-0.5"
+                              className={cn(
+                                "flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm",
+                                !reducedMotion &&
+                                  "transition-transform hover:-translate-y-0.5",
+                              )}
                               key={sample.sample_key}
                             >
                               <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/40">
@@ -1131,7 +1516,11 @@ export function PictureDescriptionScreen() {
                                   className="h-full w-full object-cover"
                                   src={sample.image_url}
                                 />
-                                <span className="absolute start-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm">
+                                <span
+                                  className="viread-learning-content absolute start-3 top-3 rounded-full bg-white/95 px-3 py-1 text-xs font-extrabold text-primary shadow-sm"
+                                  dir="ltr"
+                                  lang="vi"
+                                >
                                   {sample.theme}
                                 </span>
                                 {hasPriorAttempt && existing ? (
@@ -1181,7 +1570,9 @@ export function PictureDescriptionScreen() {
                                   {hasPriorAttempt ? (
                                     <Button
                                       onClick={() =>
-                                        void handleCreateSampleSession(sample)
+                                        void handleCreateSampleSession(sample, {
+                                          refreshAiGuide: true,
+                                        })
                                       }
                                       size="compact"
                                       type="button"
@@ -1541,25 +1932,107 @@ export function PictureDescriptionScreen() {
             </div>
 
             <div className="rounded-control bg-sky/25 p-3.5">
-              <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                {t("pictureDescription.stepsTitle")}
-              </p>
-              <ol className="mt-2 grid gap-2 sm:grid-cols-3">
-                {STORYTELLING_STEPS.map((item) => (
-                  <li
-                    className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
-                    key={item.step}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                  {isLowerGrade
+                    ? t("pictureDescription.gradeHintChipsLowerTitle")
+                    : t("pictureDescription.stepsTitle")}
+                </p>
+                {isUpperGrade ? (
+                  <button
+                    aria-expanded={showGradeHintChips}
+                    className="inline-flex min-h-9 items-center gap-1 rounded-full bg-white px-2.5 py-1 text-xs font-extrabold text-primary shadow-2xs transition-colors hover:bg-sky"
+                    data-testid="toggle-grade-hint-chips"
+                    onClick={() => setShowGradeHintChips((value) => !value)}
+                    type="button"
                   >
-                    <span className="font-extrabold text-primary">
-                      {t("pictureDescription.stepPrefix", { step: item.step })}
-                    </span>{" "}
-                    <span className="font-bold text-ink">
-                      {t(item.titleKey)}
-                    </span>
-                    <p className="mt-0.5 text-muted">{t(item.detailKey)}</p>
-                  </li>
-                ))}
-              </ol>
+                    {showGradeHintChips ? (
+                      <>
+                        <ChevronUp aria-hidden="true" className="size-3.5" />
+                        {t("pictureDescription.collapseGradeHints")}
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown aria-hidden="true" className="size-3.5" />
+                        {t("pictureDescription.expandGradeHints")}
+                      </>
+                    )}
+                  </button>
+                ) : null}
+              </div>
+
+              {showGradeHintChips ? (
+                <div
+                  className="mt-2 space-y-2.5"
+                  data-testid="grade-hint-chips"
+                >
+                  {isLowerGrade ? (
+                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-primary/20 bg-white px-3 py-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {GRADE_1_2_VISUAL_HINT_CHIPS.map((chip) => (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-sky/50 px-2.5 py-1 text-xs font-extrabold text-ink"
+                            key={chip.id}
+                          >
+                            <span className="inline-flex size-4 items-center justify-center rounded-full bg-primary text-[10px] text-white">
+                              {chip.badge}
+                            </span>
+                            {t(chip.textKey)}
+                          </span>
+                        ))}
+                      </div>
+                      <Button
+                        disabled={!calmSound}
+                        onClick={() =>
+                          void speakVietnamese(
+                            t(activeModeSpec.audioHintKey),
+                            `mode-audio:${teachingMode}`,
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {playingSpeechKey === `mode-audio:${teachingMode}` ? (
+                          <>
+                            <VolumeX aria-hidden="true" className="size-3.5" />
+                            {t("pictureDescription.stopListen")}
+                          </>
+                        ) : (
+                          <>
+                            <Volume2 aria-hidden="true" className="size-3.5" />
+                            {t("pictureDescription.listenGuideButton")}
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : null}
+                  <ol className="grid gap-2 sm:grid-cols-3">
+                    {STORYTELLING_STEPS.map((item) => (
+                      <li
+                        className="rounded-control bg-white/90 p-2.5 text-xs shadow-2xs"
+                        key={item.step}
+                      >
+                        <span className="font-extrabold text-primary">
+                          {t("pictureDescription.stepPrefix", {
+                            step: item.step,
+                          })}
+                        </span>{" "}
+                        <span className="font-bold text-ink">
+                          {t(item.titleKey)}
+                        </span>
+                        <p className="mt-0.5 text-muted">{t(item.detailKey)}</p>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : (
+                <p className="mt-1.5 text-xs font-semibold text-muted">
+                  {t("pictureDescription.gradeHintsCollapsedNote", {
+                    grade: effectiveGrade,
+                  })}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1625,6 +2098,168 @@ export function PictureDescriptionScreen() {
 
             {practiceTab === "PRACTICE" ? (
               <>
+                {/* Teaching Mode Selector Pills (6 Pedagogical Modes V4.0) */}
+                <section
+                  aria-label={t("pictureDescription.teachingModeSectionAria")}
+                  className="rounded-card border border-border bg-white p-4 shadow-sm"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                      {t("pictureDescription.teachingModeHeading")}
+                    </p>
+                    <Button
+                      disabled={!calmSound}
+                      onClick={() =>
+                        void speakVietnamese(
+                          t(activeModeSpec.audioHintKey),
+                          `mode-cue:${teachingMode}`,
+                        )
+                      }
+                      size="compact"
+                      type="button"
+                      variant="secondary"
+                    >
+                      {playingSpeechKey === `mode-cue:${teachingMode}` ? (
+                        <>
+                          <VolumeX aria-hidden="true" className="size-3.5" />
+                          {t("pictureDescription.stopListen")}
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 aria-hidden="true" className="size-3.5" />
+                          {t("pictureDescription.listenModeButton")}
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  <div
+                    className="mt-2.5 flex flex-wrap gap-2"
+                    data-testid="teaching-mode-pills"
+                    role="group"
+                    aria-label={t("pictureDescription.teachingModeGroupAria")}
+                  >
+                    {TEACHING_MODE_SPECS.map((mode) => {
+                      const active = teachingMode === mode.id;
+                      return (
+                        <button
+                          aria-pressed={active}
+                          className={
+                            "min-h-9 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary " +
+                            (active
+                              ? "border-primary bg-primary text-white shadow-2xs"
+                              : "border-border bg-sky/30 text-ink hover:border-primary hover:bg-sky")
+                          }
+                          key={mode.id}
+                          onClick={() => setTeachingMode(mode.id)}
+                          type="button"
+                        >
+                          {t(mode.labelKey)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-xs font-semibold text-muted">
+                    {t(activeModeSpec.cueKey)}
+                  </p>
+
+                  {targetWords.length > 0 ? (
+                    <div
+                      className="mt-3 border-t border-border pt-3"
+                      data-testid="target-words-panel"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
+                          {t("pictureDescription.targetWordsProgress", {
+                            used: usedTargetWordsCount,
+                            total: targetWords.length,
+                          })}
+                        </p>
+                      </div>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {targetWords.map((word) => {
+                          const used = descriptionContainsTerm(
+                            descriptionText,
+                            word,
+                          );
+                          return (
+                            <button
+                              className={
+                                "viread-learning-content inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors " +
+                                (used
+                                  ? "border-success-ink/40 bg-success-surface text-success-ink"
+                                  : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100")
+                              }
+                              dir="ltr"
+                              key={word}
+                              lang="vi"
+                              onClick={() =>
+                                void speakVietnamese(
+                                  word,
+                                  `target-word:${word}`,
+                                )
+                              }
+                              type="button"
+                            >
+                              {used ? (
+                                <CheckCircle2
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                              ) : (
+                                <Volume2
+                                  aria-hidden="true"
+                                  className="size-3.5"
+                                />
+                              )}
+                              {word}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </section>
+
+                {/* Active PEER/CROWD Follow-Up Prompt when Child Replies to AI Teacher */}
+                {activeFollowUpQuestion ? (
+                  <section
+                    aria-label={t("pictureDescription.followUpSectionAria")}
+                    className="rounded-card border border-amber-300/70 bg-amber-50/70 p-4"
+                    data-testid="practice-followup-banner"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-amber-900">
+                        <Sparkles aria-hidden="true" className="size-4" />
+                        {t("pictureDescription.practiceFollowUpTitle")}
+                      </p>
+                      <Button
+                        disabled={!calmSound}
+                        onClick={() =>
+                          void speakVietnamese(
+                            activeFollowUpQuestion,
+                            "practice-followup",
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Volume2 aria-hidden="true" className="size-3.5" />
+                        {playingSpeechKey === "practice-followup"
+                          ? t("pictureDescription.stopShort")
+                          : t("pictureDescription.listenQuestionButton")}
+                      </Button>
+                    </div>
+                    <p
+                      className="viread-learning-content mt-1.5 text-sm font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {activeFollowUpQuestion}
+                    </p>
+                  </section>
+                ) : null}
+
                 {/* Coaching Reminder from Previous Attempt so Child Knows What to Improve */}
                 {latestAttempt ? (
                   <section
@@ -1758,13 +2393,30 @@ export function PictureDescriptionScreen() {
                             aria-hidden="true"
                             className="flex items-center gap-1"
                           >
-                            <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-500" />
-                            <span className="h-6 w-1 animate-pulse rounded-full bg-emerald-500 delay-75" />
-                            <span className="h-3 w-1 animate-pulse rounded-full bg-emerald-500 delay-150" />
+                            <span
+                              className={cn(
+                                "h-4 w-1 rounded-full bg-emerald-500",
+                                !reducedMotion && "animate-pulse",
+                              )}
+                            />
+                            <span
+                              className={cn(
+                                "h-6 w-1 rounded-full bg-emerald-500 delay-75",
+                                !reducedMotion && "animate-pulse",
+                              )}
+                            />
+                            <span
+                              className={cn(
+                                "h-3 w-1 rounded-full bg-emerald-500 delay-150",
+                                !reducedMotion && "animate-pulse",
+                              )}
+                            />
                           </span>
                         ) : (
                           <span className="relative flex size-3.5">
-                            <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                            {!reducedMotion ? (
+                              <span className="absolute inline-flex size-full animate-ping rounded-full bg-primary opacity-75" />
+                            ) : null}
                             <span className="relative inline-flex size-3.5 rounded-full bg-primary" />
                           </span>
                         )}
@@ -1785,7 +2437,12 @@ export function PictureDescriptionScreen() {
                             &ldquo;{liveTranscript}&rdquo;
                           </span>
                         ) : recorder.isSpeaking ? (
-                          <span className="animate-pulse font-bold text-emerald-700">
+                          <span
+                            className={cn(
+                              "font-bold text-emerald-700",
+                              !reducedMotion && "animate-pulse",
+                            )}
+                          >
                             {t("pictureDescription.liveRecognizing")}
                           </span>
                         ) : (
@@ -1834,7 +2491,10 @@ export function PictureDescriptionScreen() {
                     >
                       <RefreshCw
                         aria-hidden="true"
-                        className="size-4 shrink-0 animate-spin"
+                        className={cn(
+                          "size-4 shrink-0",
+                          !reducedMotion && "animate-spin",
+                        )}
                       />
                       <span>{t("pictureDescription.evaluatingBanner")}</span>
                     </div>
@@ -2214,6 +2874,17 @@ export function PictureDescriptionScreen() {
                         number: activeAttempt.attempt_number,
                       })}
                     </span>
+                    {activeAttempt.feedback.teaching_mode ? (
+                      <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                        {t("pictureDescription.resultModeBadge", {
+                          mode: t(
+                            TEACHING_MODE_SPEC_BY_ID[
+                              activeAttempt.feedback.teaching_mode
+                            ].labelKey,
+                          ),
+                        })}
+                      </span>
+                    ) : null}
                     {scoreDelta !== null && scoreDelta > 0 ? (
                       <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-extrabold text-emerald-800">
                         <TrendingUp aria-hidden="true" className="size-3.5" />
@@ -2262,6 +2933,7 @@ export function PictureDescriptionScreen() {
                             void handleEvaluate(
                               activeAttempt.transcript_text,
                               activeAttempt.input_mode,
+                              { allowDuplicate: true },
                             )
                           }
                           size="compact"
@@ -2271,7 +2943,10 @@ export function PictureDescriptionScreen() {
                           <RefreshCw
                             aria-hidden="true"
                             className={
-                              "size-4 " + (isEvaluating ? "animate-spin" : "")
+                              "size-4 " +
+                              (isEvaluating && !reducedMotion
+                                ? "animate-spin"
+                                : "")
                             }
                           />
                           {isEvaluating
@@ -2421,6 +3096,36 @@ export function PictureDescriptionScreen() {
                     </div>
                   ) : null}
 
+                  {activeAttempt.feedback.used_target_words &&
+                  activeAttempt.feedback.used_target_words.length > 0 ? (
+                    <div
+                      className="mt-3 border-t border-border pt-3"
+                      data-testid="used-target-words-result"
+                    >
+                      <p className="text-xs font-extrabold uppercase tracking-wide text-success-ink">
+                        {t("pictureDescription.usedTargetWordsTitle")}
+                      </p>
+                      <div className="mt-1.5 flex flex-wrap gap-2">
+                        {activeAttempt.feedback.used_target_words.map(
+                          (word) => (
+                            <span
+                              className="viread-learning-content inline-flex items-center gap-1 rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink"
+                              dir="ltr"
+                              key={word}
+                              lang="vi"
+                            >
+                              <CheckCircle2
+                                aria-hidden="true"
+                                className="size-3.5"
+                              />
+                              {word}
+                            </span>
+                          ),
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
                   {activeAttempt.feedback.vocabulary_highlights.length > 0 ? (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
@@ -2454,6 +3159,75 @@ export function PictureDescriptionScreen() {
                     </div>
                   ) : null}
                 </div>
+
+                {activeAttempt.feedback.next_prompt_question ? (
+                  <div
+                    className="mt-4 rounded-control border border-primary/30 bg-sky/25 p-4"
+                    data-testid="ai-followup-question"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
+                          <Sparkles aria-hidden="true" className="size-4" />
+                          {t("pictureDescription.resultFollowUpTitle")}
+                        </p>
+                        {activeAttempt.feedback.scaffolding_step ? (
+                          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-extrabold text-ink shadow-2xs">
+                            {t(
+                              SCAFFOLDING_STEP_KEYS[
+                                activeAttempt.feedback.scaffolding_step
+                              ],
+                            )}
+                          </span>
+                        ) : null}
+                      </div>
+                      <Button
+                        disabled={!calmSound}
+                        onClick={() =>
+                          void speakVietnamese(
+                            activeAttempt.feedback.next_prompt_question ?? "",
+                            `followup:${activeAttempt.attempt_id}`,
+                          )
+                        }
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Volume2 aria-hidden="true" className="size-3.5" />
+                        {playingSpeechKey ===
+                        `followup:${activeAttempt.attempt_id}`
+                          ? t("pictureDescription.stopListen")
+                          : t("pictureDescription.listenQuestionButton")}
+                      </Button>
+                    </div>
+                    <p
+                      className="viread-learning-content mt-2 text-sm font-bold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {activeAttempt.feedback.next_prompt_question}
+                    </p>
+                    <div className="mt-3">
+                      <Button
+                        onClick={() => {
+                          stopSpeechPlayback();
+                          setActiveFollowUpQuestion(
+                            activeAttempt.feedback.next_prompt_question ?? null,
+                          );
+                          setDescriptionText("");
+                          setInputMode("TEXT");
+                          setVoiceMessage(null);
+                          setPracticeTab("PRACTICE");
+                        }}
+                        size="compact"
+                        type="button"
+                        variant="secondary"
+                      >
+                        {t("pictureDescription.answerFollowUpButton")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
 
                 <div className="mt-4 flex flex-wrap justify-end gap-2.5">
                   <Button

@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  BookOpen,
   Check,
   Gamepad2,
   Lightbulb,
@@ -9,6 +10,7 @@ import {
   Play,
   RefreshCw,
   RotateCcw,
+  Sparkles,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -30,26 +32,51 @@ import { Modal } from "@/components/common/modal";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import {
+  OrderedShotQueue,
+  type QueuedShot,
+} from "@/components/entertainment/sentence-shooter/shot-queue";
+import {
+  disposeShooterAudio,
+  playShooterSound,
+  prefersReducedMotion,
+  suspendShooterAudio,
+} from "@/components/entertainment/sentence-shooter/sound-engine";
+import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { cn } from "@/lib/utils/cn";
+import type { BookListItemDTO } from "@/types/book";
 import type {
   SentenceShooterBookDTO,
   SentenceShooterDifficulty,
+  SentenceShooterLearningMode,
   SentenceShooterResultDTO,
   SentenceShooterRoundDTO,
   SentenceShooterSessionDTO,
+  SentenceShooterShotDTO,
   SentenceShooterTokenDTO,
 } from "@/types/sentence-shooter";
-import type { BookListItemDTO } from "@/types/book";
 
 type ScreenMode = "lobby" | "playing" | "result";
 type BookLoadState =
   | { status: "loading" }
   | { status: "ready"; books: SentenceShooterBookDTO[] }
   | { status: "error" };
+
+interface ActiveProjectile {
+  readonly id: number;
+  readonly left: number;
+  readonly top: number;
+  readonly dx: number;
+  readonly dy: number;
+  readonly endX: number;
+  readonly endY: number;
+}
 
 const difficulties: ReadonlyArray<{
   value: SentenceShooterDifficulty;
@@ -73,6 +100,36 @@ const difficulties: ReadonlyArray<{
   },
 ];
 
+const learningModes: ReadonlyArray<{
+  value: SentenceShooterLearningMode;
+  titleKey: string;
+  descKey: string;
+}> = [
+  {
+    value: "WORD_ORDER",
+    titleKey: "sentenceShooter.learningModes.wordOrderTitle",
+    descKey: "sentenceShooter.learningModes.wordOrderDesc",
+  },
+  {
+    value: "FILL_BLANK",
+    titleKey: "sentenceShooter.learningModes.fillBlankTitle",
+    descKey: "sentenceShooter.learningModes.fillBlankDesc",
+  },
+  {
+    value: "GRAMMAR_FOCUS",
+    titleKey: "sentenceShooter.learningModes.grammarFocusTitle",
+    descKey: "sentenceShooter.learningModes.grammarFocusDesc",
+  },
+];
+
+const LEARNING_MODE_LABEL_KEYS: Record<SentenceShooterLearningMode, string> = {
+  WORD_ORDER: "sentenceShooter.learningModes.wordOrderTitle",
+  FILL_BLANK: "sentenceShooter.learningModes.fillBlankTitle",
+  GRAMMAR_FOCUS: "sentenceShooter.learningModes.grammarFocusTitle",
+};
+
+const MAX_ACTIVE_PROJECTILES = 6;
+
 interface SentenceShooterScreenProps {
   initialBookId?: string;
   readingSessionId?: string;
@@ -90,87 +147,19 @@ function toBookCover(book: SentenceShooterBookDTO): BookListItemDTO {
   };
 }
 
-function getOrCreateAudioContext(audioContextRef: {
-  current: AudioContext | null;
-}): AudioContext | null {
-  if (typeof window === "undefined") return null;
-  const AudioContextConstructor = window.AudioContext;
-  if (!AudioContextConstructor) return null;
-  if (!audioContextRef.current || audioContextRef.current.state === "closed") {
-    audioContextRef.current = new AudioContextConstructor();
-  }
-  if (
-    audioContextRef.current.state === "suspended" &&
-    typeof audioContextRef.current.resume === "function"
-  ) {
-    void audioContextRef.current.resume().catch(() => undefined);
-  }
-  return audioContextRef.current;
-}
-
-function playSound(
-  kind: "shot" | "correct" | "wrong" | "celebrate",
-  audioContextRef: { current: AudioContext | null },
-) {
-  try {
-    const context = getOrCreateAudioContext(audioContextRef);
-    if (!context) return;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    const frequencies = {
-      shot: [520],
-      correct: [660, 880],
-      wrong: [300],
-      celebrate: [660, 784, 988],
-    } as const;
-    const notes = frequencies[kind];
-    const firstNote = notes[0] ?? 520;
-    const secondNote = notes[1];
-    const thirdNote = notes[2];
-    oscillator.type = kind === "wrong" ? "triangle" : "sine";
-    oscillator.frequency.setValueAtTime(firstNote, context.currentTime);
-    if (secondNote !== undefined) {
-      oscillator.frequency.setValueAtTime(
-        secondNote,
-        context.currentTime + 0.1,
-      );
-    }
-    if (thirdNote !== undefined) {
-      oscillator.frequency.setValueAtTime(thirdNote, context.currentTime + 0.2);
-    }
-    gain.gain.setValueAtTime(0.0001, context.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.055, context.currentTime + 0.025);
-    gain.gain.exponentialRampToValueAtTime(
-      0.0001,
-      context.currentTime + (notes.length > 1 ? 0.34 : 0.18),
-    );
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start();
-    oscillator.stop(context.currentTime + (notes.length > 1 ? 0.36 : 0.2));
-    oscillator.onended = () => {
-      try {
-        oscillator.disconnect();
-        gain.disconnect();
-      } catch {
-        // Ignore already-disconnected audio nodes.
-      }
-    };
-  } catch {
-    // Sound is optional; a browser audio restriction never blocks a turn.
-  }
-}
-
 interface SentenceShooterResultViewProps {
   backHref: string;
+  calmSound: boolean;
   child: NonNullable<
     ReturnType<typeof useValidatedSelectedChild>["state"] & { status: "ready" }
   >["child"];
   finalSentence: string;
   isLoadingResult: boolean;
+  learningMode: SentenceShooterLearningMode;
   onReloadResult: () => void;
   onRestartLobby: () => void;
   readingSessionId?: string;
+  reducedMotion: boolean;
   result: SentenceShooterResultDTO | null;
   resultError: boolean;
   session: SentenceShooterSessionDTO | null;
@@ -178,12 +167,15 @@ interface SentenceShooterResultViewProps {
 
 function SentenceShooterResultView({
   backHref,
+  calmSound,
   child,
   finalSentence,
   isLoadingResult,
+  learningMode,
   onReloadResult,
   onRestartLobby,
   readingSessionId,
+  reducedMotion,
   result,
   resultError,
   session,
@@ -195,15 +187,34 @@ function SentenceShooterResultView({
     result?.completed_rounds ?? session?.completed_rounds ?? 0;
   const summaryTotalRounds = result?.total_rounds ?? session?.total_rounds ?? 0;
   const summaryTotalStars = result?.total_stars ?? session?.total_stars ?? 0;
+  const summaryMode =
+    result?.learning_mode ?? session?.learning_mode ?? learningMode;
+  const summaryPracticedWords =
+    result?.practiced_difficult_words ??
+    session?.practiced_difficult_words ??
+    [];
+
+  useEffect(() => {
+    if (!calmSound) {
+      speechPlayer.stop();
+    }
+  }, [calmSound, speechPlayer]);
 
   function readSentence() {
-    if (!finalSentence.trim()) return;
+    if (!calmSound || !finalSentence.trim()) return;
     speechPlayer.stop();
     void speechPlayer.play(finalSentence).catch(() => undefined);
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10">
+    <section
+      className={cn(
+        "mx-auto flex w-full max-w-[900px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-10",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <BookChildHeader
         backHref={backHref}
         child={child}
@@ -223,7 +234,8 @@ function SentenceShooterResultView({
           <span className="text-3xl">✦</span>
         </div>
         <p className="font-extrabold text-primary">
-          {t("sentenceShooter.resultSavedEyebrow")}
+          {t("sentenceShooter.resultSavedEyebrow")} ·{" "}
+          {t(LEARNING_MODE_LABEL_KEYS[summaryMode])}
         </p>
         <h1 className="mt-2 text-heading font-extrabold text-ink">
           {result && result.status !== "COMPLETED"
@@ -258,7 +270,9 @@ function SentenceShooterResultView({
           ].map(([label, value]) => (
             <div className="rounded-control bg-white/90 p-4" key={label}>
               <p className="text-sm font-bold text-muted">{label}</p>
-              <p className="mt-1 text-2xl font-extrabold text-ink">{value}</p>
+              <p className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+                {value}
+              </p>
             </div>
           ))}
         </div>
@@ -266,6 +280,15 @@ function SentenceShooterResultView({
           <span aria-hidden="true">★</span>{" "}
           {t("sentenceShooter.starsEarned", { count: summaryTotalStars })}
         </p>
+        {summaryPracticedWords.length > 0 ? (
+          <p className="mt-4 inline-flex flex-wrap items-center justify-center gap-1.5 rounded-full bg-sky px-4 py-1.5 text-sm font-bold text-primary">
+            <Sparkles aria-hidden="true" className="size-4" />
+            {t("sentenceShooter.practicedDifficultWordsSummary")}{" "}
+            <span className="viread-learning-content" dir="ltr" lang="vi">
+              {summaryPracticedWords.join(", ")}
+            </span>
+          </p>
+        ) : null}
         {result ? (
           <p className="mt-3 text-sm font-semibold text-muted">
             {t("sentenceShooter.durationLine", {
@@ -297,7 +320,13 @@ function SentenceShooterResultView({
             <RotateCcw aria-hidden="true" className="size-5" />{" "}
             {t("sentenceShooter.playNewSession")}
           </Button>
-          <Button className="sm:flex-1" onClick={readSentence} variant="quiet">
+          <Button
+            className="sm:flex-1"
+            disabled={!calmSound}
+            onClick={readSentence}
+            variant="quiet"
+          >
+            <Volume2 aria-hidden="true" className="size-5" />{" "}
             {t("sentenceShooter.readSampleSentence")}
           </Button>
         </div>
@@ -334,13 +363,22 @@ export function SentenceShooterScreen({
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
   const gameError = t("sentenceShooter.gameError");
+  const shootError = t("sentenceShooter.shootError");
   const router = useRouter();
   const shooterService = useSentenceShooterService();
+  const speechPlayer = useSpeechPlayer();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
+
+  const { reducedMotion, calmSound, setCalmSound } =
+    useEntertainmentPreferences();
+  const soundEnabled = calmSound;
+
   const [difficulty, setDifficulty] =
     useState<SentenceShooterDifficulty>("easy");
+  const [learningMode, setLearningMode] =
+    useState<SentenceShooterLearningMode>("WORD_ORDER");
   const [totalRounds, setTotalRounds] = useState<3 | 5>(3);
   const [bookState, setBookState] = useState<BookLoadState>({
     status: "loading",
@@ -351,52 +389,276 @@ export function SentenceShooterScreen({
   const [hasManuallySelectedBook, setHasManuallySelectedBook] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [mode, setMode] = useState<ScreenMode>("lobby");
+
   const [session, setSession] = useState<SentenceShooterSessionDTO | null>(
     null,
   );
   const [round, setRound] = useState<SentenceShooterRoundDTO | null>(null);
   const [result, setResult] = useState<SentenceShooterResultDTO | null>(null);
   const [finalSentence, setFinalSentence] = useState("");
+  const [roundCompletedSentence, setRoundCompletedSentence] = useState("");
+  const [roundGrammarTip, setRoundGrammarTip] = useState<string | null>(null);
+  const [roundPracticedWords, setRoundPracticedWords] = useState<string[]>([]);
+
   const [placedTokens, setPlacedTokens] = useState<SentenceShooterTokenDTO[]>(
     [],
   );
+  const [pendingShots, setPendingShots] = useState<readonly QueuedShot[]>([]);
   const [selectedTokenId, setSelectedTokenId] = useState("");
   const [hintTargetId, setHintTargetId] = useState("");
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
-  const [isBusy, setIsBusy] = useState(false);
+  const [isStartingSession, setIsStartingSession] = useState(false);
+  const [isLoadingNextRound, setIsLoadingNextRound] = useState(false);
+  const [isRequestingHint, setIsRequestingHint] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(false);
   const [cannonAngle, setCannonAngle] = useState(0);
-  const [firingTokenId, setFiringTokenId] = useState("");
   const [wobbleTokenId, setWobbleTokenId] = useState("");
   const [prefetchedNextRound, setPrefetchedNextRound] =
     useState<SentenceShooterRoundDTO | null>(null);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
   const [resultError, setResultError] = useState(false);
-  const [projectile, setProjectile] = useState<{
-    id: number;
-    left: number;
-    top: number;
-    dx: number;
-    dy: number;
-  } | null>(null);
+  const [sessionScore, setSessionScore] = useState(0);
+  const [projectiles, setProjectiles] = useState<readonly ActiveProjectile[]>(
+    [],
+  );
+
   const arenaRef = useRef<HTMLDivElement>(null);
   const cannonRef = useRef<HTMLDivElement>(null);
-  const tokenButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const shotIdRef = useRef(0);
-  const actionLockRef = useRef(false);
+  const roundCompletedRef = useRef(false);
+  const [layoutCache] = useState(() => new StageLayoutCache());
+  const tokenRefCallbacks = useMemo(() => {
+    const callbacks = new Map<
+      string,
+      (element: HTMLButtonElement | null) => void
+    >();
+    for (const token of round?.tokens ?? []) {
+      callbacks.set(token.id, (element) => {
+        layoutCache.registerToken(token.id, element);
+      });
+    }
+    return callbacks;
+  }, [layoutCache, round]);
+
+  const shotVisualIdRef = useRef(0);
+  const projectileTimersRef = useRef(
+    new Map<number, ReturnType<typeof setTimeout>>(),
+  );
   const sessionEpochRef = useRef(0);
-  const inFlightAbortRef = useRef<AbortController | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const pendingRetryRef = useRef<{
-    roundId: string;
-    tokenId: string;
-    requestId: string;
-  } | null>(null);
+  const controlAbortRef = useRef<AbortController | null>(null);
+  const shooterServiceRef = useRef(shooterService);
+  const speechPlayerRef = useRef(speechPlayer);
+  const soundEnabledRef = useRef(soundEnabled);
+  const reducedMotionRef = useRef(reducedMotion);
+  const calmSoundRef = useRef(calmSound);
+  const roundRef = useRef(round);
+  const shootErrorRef = useRef(shootError);
   const readingCompletionHref = readingSessionId
     ? `/reading/${encodeURIComponent(readingSessionId)}`
     : "/entertainment";
+
+  useEffect(() => {
+    shooterServiceRef.current = shooterService;
+  }, [shooterService]);
+
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+    calmSoundRef.current = calmSound;
+    if (!calmSound) {
+      speechPlayerRef.current.stop();
+    }
+  }, [calmSound, soundEnabled]);
+
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
+
+  useEffect(() => {
+    roundRef.current = round;
+  }, [round]);
+
+  useEffect(() => {
+    shootErrorRef.current = shootError;
+  }, [shootError]);
+
+  function clearProjectileTimers() {
+    for (const timer of projectileTimersRef.current.values()) {
+      clearTimeout(timer);
+    }
+    projectileTimersRef.current.clear();
+  }
+
+  async function fetchCompletedResult(sessionId: string, epoch: number) {
+    const controller = new AbortController();
+    controlAbortRef.current = controller;
+    setIsLoadingResult(true);
+    setResultError(false);
+    try {
+      const completedResult = await shooterServiceRef.current.result(
+        sessionId,
+        controller.signal,
+      );
+      if (epoch !== sessionEpochRef.current) return;
+      setResult(completedResult);
+    } catch {
+      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
+        setResultError(true);
+      }
+    } finally {
+      if (controlAbortRef.current === controller) {
+        controlAbortRef.current = null;
+      }
+      if (epoch === sessionEpochRef.current) {
+        setIsLoadingResult(false);
+      }
+    }
+  }
+
+  const queueCallbacksRef = useRef<{
+    onShotResolved: (
+      shot: QueuedShot,
+      response: SentenceShooterShotDTO,
+    ) => void;
+    onShotError: (shot: QueuedShot) => void;
+  }>({
+    onShotResolved: () => undefined,
+    onShotError: () => undefined,
+  });
+
+  useEffect(() => {
+    queueCallbacksRef.current = {
+      onShotResolved: (shot, response) => {
+        setFeedback(response.message);
+        setSelectedTokenId("");
+        if (typeof response.score === "number") {
+          setSessionScore(response.score);
+        }
+        if (response.is_correct) {
+          setPlacedTokens((current) =>
+            current.some((item) => item.id === shot.token.id)
+              ? current
+              : [...current, shot.token],
+          );
+          setHintTargetId("");
+          playShooterSound(
+            response.session_completed ? "celebrate" : "correct",
+            soundEnabledRef.current,
+            {
+              reducedMotion: reducedMotionRef.current,
+              calmSound: calmSoundRef.current,
+            },
+          );
+          if (response.round_completed) {
+            roundCompletedRef.current = true;
+            const completedText = response.completed_sentence ?? "";
+            setRoundCompletedSentence(completedText);
+            setRoundGrammarTip(response.grammar_tip ?? null);
+            const practiced =
+              response.practiced_difficult_words &&
+              response.practiced_difficult_words.length > 0
+                ? [...response.practiced_difficult_words]
+                : [...(roundRef.current?.practiced_difficult_words ?? [])];
+            setRoundPracticedWords(practiced);
+            setSession((current) =>
+              current
+                ? {
+                    ...current,
+                    completed_rounds: response.completed_rounds,
+                    total_stars: response.total_stars,
+                  }
+                : current,
+            );
+            if (response.session_completed) {
+              setFinalSentence(completedText);
+              setResult(null);
+              setMode("result");
+              void fetchCompletedResult(
+                shot.sessionId,
+                sessionEpochRef.current,
+              );
+            } else {
+              setPrefetchedNextRound(response.next_round ?? null);
+            }
+          }
+        } else {
+          // Surgical rollback: shot has already been shifted off pendingShots,
+          // so only this bubble wobbles & returns to the selectable tray.
+          setWobbleTokenId(shot.token.id);
+          playShooterSound("wrong", soundEnabledRef.current, {
+            reducedMotion: reducedMotionRef.current,
+            calmSound: calmSoundRef.current,
+          });
+        }
+      },
+      onShotError: (shot) => {
+        setError(shootErrorRef.current);
+        setSelectedTokenId(shot.token.id);
+      },
+    };
+  });
+
+  const shotQueueRef = useRef<OrderedShotQueue | null>(null);
+
+  useEffect(() => {
+    if (mode === "playing" && round) {
+      layoutCache.bindStage(arenaRef.current, cannonRef.current);
+      layoutCache.scheduleMeasure();
+    } else {
+      layoutCache.bindStage(null, null);
+    }
+  }, [layoutCache, mode, round]);
+
+  useEffect(() => {
+    const shotQueue = new OrderedShotQueue(
+      (shot, signal) =>
+        shooterServiceRef.current.shoot(
+          shot.sessionId,
+          {
+            round_id: shot.roundId,
+            token_id: shot.token.id,
+            request_id: shot.clientShotId,
+            client_shot_id: shot.clientShotId,
+          },
+          signal,
+        ),
+      {
+        onQueueChange: (snapshot) => {
+          setPendingShots(snapshot.pending);
+        },
+        onShotResolved: (shot, response) => {
+          queueCallbacksRef.current.onShotResolved(shot, response);
+        },
+        onShotError: (shot) => {
+          queueCallbacksRef.current.onShotError(shot);
+        },
+      },
+    );
+    shotQueueRef.current = shotQueue;
+
+    const onBackground = () => suspendShooterAudio();
+    const onVisibility = () => {
+      if (document.hidden) suspendShooterAudio();
+    };
+    document.addEventListener("viread:android-background", onBackground);
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      document.removeEventListener("viread:android-background", onBackground);
+      document.removeEventListener("visibilitychange", onVisibility);
+      sessionEpochRef.current += 1;
+      controlAbortRef.current?.abort();
+      shotQueue.resetEpoch();
+      shotQueueRef.current = null;
+      layoutCache.dispose();
+      clearProjectileTimers();
+      disposeShooterAudio();
+    };
+  }, [layoutCache]);
 
   useEffect(() => {
     if (!childId) return;
@@ -437,6 +699,7 @@ export function SentenceShooterScreen({
     bookState.books.some((book) => book.id === initialBookId)
       ? initialBookId
       : selectedBookId;
+
   const selectedBook = useMemo(
     () =>
       bookState.status === "ready"
@@ -446,88 +709,112 @@ export function SentenceShooterScreen({
         : null,
     [bookState, effectiveSelectedBookId],
   );
+
   const placedTokenIds = useMemo(
     () => new Set(placedTokens.map((token) => token.id)),
     [placedTokens],
   );
 
-  useEffect(() => {
-    return () => {
-      sessionEpochRef.current += 1;
-      inFlightAbortRef.current?.abort();
-      actionLockRef.current = false;
-      const audioContext = audioContextRef.current;
-      audioContextRef.current = null;
-      if (audioContext && audioContext.state !== "closed") {
-        void audioContext.close().catch(() => undefined);
-      }
+  const inFlightTokenIds = useMemo(
+    () => new Set(pendingShots.map((shot) => shot.token.id)),
+    [pendingShots],
+  );
+
+  function spawnVisualProjectile(tokenId: string) {
+    const trajectory = layoutCache.getTrajectory(tokenId);
+    if (!trajectory) return;
+
+    setCannonAngle(trajectory.angle);
+
+    if (reducedMotionRef.current || prefersReducedMotion()) {
+      return;
+    }
+
+    shotVisualIdRef.current += 1;
+    const visualId = shotVisualIdRef.current;
+    const entry: ActiveProjectile = {
+      id: visualId,
+      left: trajectory.startX,
+      top: trajectory.startY,
+      dx: trajectory.dx,
+      dy: trajectory.dy,
+      endX: trajectory.endX,
+      endY: trajectory.endY,
     };
-  }, []);
+
+    setProjectiles((current) => [
+      ...current.slice(-(MAX_ACTIVE_PROJECTILES - 1)),
+      entry,
+    ]);
+
+    const timer = setTimeout(() => {
+      projectileTimersRef.current.delete(visualId);
+      setProjectiles((current) =>
+        current.filter((item) => item.id !== visualId),
+      );
+    }, 360);
+    projectileTimersRef.current.set(visualId, timer);
+  }
+
+  function removeProjectile(visualId: number) {
+    const timer = projectileTimersRef.current.get(visualId);
+    if (timer) {
+      clearTimeout(timer);
+      projectileTimersRef.current.delete(visualId);
+    }
+    setProjectiles((current) => current.filter((item) => item.id !== visualId));
+  }
 
   function selectToken(token: SentenceShooterTokenDTO) {
     if (
-      actionLockRef.current ||
-      isBusy ||
+      !session ||
+      !round ||
       isPaused ||
+      isExiting ||
       mode !== "playing" ||
+      roundCompletedRef.current ||
+      placedTokens.length >= round.token_count ||
       placedTokenIds.has(token.id)
     ) {
       return;
     }
-    actionLockRef.current = true;
+
+    const queue = shotQueueRef.current;
+    if (!queue) return;
+
+    // Enqueue immediately (<1ms): blocks duplicate clicks on the SAME bubble
+    // while allowing rapid sequential taps on OTHER bubbles!
+    const queued = queue.enqueue({
+      sessionId: session.session_id,
+      roundId: round.round_id,
+      token,
+    });
+    if (!queued) return;
+
     setSelectedTokenId(token.id);
     setHintTargetId("");
-    setFiringTokenId(token.id);
+    setWobbleTokenId("");
     setError("");
     setFeedback("");
 
-    const target = tokenButtonRefs.current.get(token.id);
-    const cannon = cannonRef.current;
-    if (target && cannon) {
-      const targetRect = target.getBoundingClientRect();
-      const cannonRect = cannon.getBoundingClientRect();
-      const muzzleX = cannonRect.left + cannonRect.width / 2;
-      const muzzleY = cannonRect.top + cannonRect.height * 0.2;
-      const targetX = targetRect.left + targetRect.width / 2;
-      const targetY = targetRect.top + targetRect.height / 2;
-      const angle =
-        (Math.atan2(targetX - muzzleX, muzzleY - targetY) * 180) / Math.PI;
-      setCannonAngle(Math.max(-58, Math.min(58, angle)));
-    }
-    void fireToken(token);
-  }
-
-  function animateShot(tokenId: string) {
-    const arena = arenaRef.current;
-    const cannon = cannonRef.current;
-    const target = tokenButtonRefs.current.get(tokenId);
-    if (!arena || !cannon || !target) return;
-    const bounds = arena.getBoundingClientRect();
-    const cannonBounds = cannon.getBoundingClientRect();
-    const targetBounds = target.getBoundingClientRect();
-    const startX = cannonBounds.left + cannonBounds.width / 2 - bounds.left;
-    const startY = cannonBounds.top + cannonBounds.height * 0.2 - bounds.top;
-    const endX = targetBounds.left + targetBounds.width / 2 - bounds.left;
-    const endY = targetBounds.top + targetBounds.height / 2 - bounds.top;
-    shotIdRef.current += 1;
-    setProjectile({
-      id: shotIdRef.current,
-      left: startX,
-      top: startY,
-      dx: endX - startX,
-      dy: endY - startY,
+    // Immediate non-blocking visual + audio feedback (<30ms, zero HTTP wait,
+    // zero forced layout reflows via ResizeObserver-cached coordinates).
+    spawnVisualProjectile(token.id);
+    playShooterSound("shot", soundEnabled, {
+      reducedMotion,
+      calmSound,
     });
   }
 
   async function startGame() {
-    if (!child || !selectedBook || actionLockRef.current || isBusy) return;
-    actionLockRef.current = true;
+    if (!child || !selectedBook || isStartingSession) return;
     sessionEpochRef.current += 1;
     const epoch = sessionEpochRef.current;
-    inFlightAbortRef.current?.abort();
+    shotQueueRef.current?.resetEpoch();
+    controlAbortRef.current?.abort();
     const controller = new AbortController();
-    inFlightAbortRef.current = controller;
-    setIsBusy(true);
+    controlAbortRef.current = controller;
+    setIsStartingSession(true);
     setError("");
     try {
       const created = await shooterService.createSession(
@@ -536,11 +823,16 @@ export function SentenceShooterScreen({
           book_id: selectedBook.id,
           difficulty,
           total_rounds: totalRounds,
+          learning_mode: learningMode,
         },
         controller.signal,
       );
       if (epoch !== sessionEpochRef.current) return;
-      pendingRetryRef.current = null;
+      clearProjectileTimers();
+      layoutCache.clearTokens();
+      roundCompletedRef.current = false;
+      setSessionScore(0);
+      setProjectiles([]);
       setPrefetchedNextRound(null);
       setIsLoadingResult(false);
       setResultError(false);
@@ -552,6 +844,10 @@ export function SentenceShooterScreen({
       setFeedback("");
       setResult(null);
       setFinalSentence("");
+      setRoundCompletedSentence("");
+      setRoundGrammarTip(null);
+      setRoundPracticedWords([]);
+      setCannonAngle(0);
       setMode("playing");
       setIsPaused(false);
     } catch {
@@ -559,130 +855,11 @@ export function SentenceShooterScreen({
         setError(gameError);
       }
     } finally {
-      if (inFlightAbortRef.current === controller) {
-        inFlightAbortRef.current = null;
+      if (controlAbortRef.current === controller) {
+        controlAbortRef.current = null;
       }
       if (epoch === sessionEpochRef.current) {
-        actionLockRef.current = false;
-        setIsBusy(false);
-      }
-    }
-  }
-
-  async function fetchCompletedResult(sessionId: string, epoch: number) {
-    const controller = new AbortController();
-    inFlightAbortRef.current = controller;
-    setIsLoadingResult(true);
-    setResultError(false);
-    try {
-      const completedResult = await shooterService.result(
-        sessionId,
-        controller.signal,
-      );
-      if (epoch !== sessionEpochRef.current) return;
-      setResult(completedResult);
-    } catch {
-      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
-        setResultError(true);
-      }
-    } finally {
-      if (inFlightAbortRef.current === controller) {
-        inFlightAbortRef.current = null;
-      }
-      if (epoch === sessionEpochRef.current) {
-        setIsLoadingResult(false);
-      }
-    }
-  }
-
-  async function fireToken(token: SentenceShooterTokenDTO) {
-    if (!session || !round || isPaused) {
-      actionLockRef.current = false;
-      setFiringTokenId("");
-      return;
-    }
-    const epoch = sessionEpochRef.current;
-    const activeSessionId = session.session_id;
-    const activeRoundId = round.round_id;
-    const existingRetry = pendingRetryRef.current;
-    const requestId =
-      existingRetry &&
-      existingRetry.roundId === activeRoundId &&
-      existingRetry.tokenId === token.id
-        ? existingRetry.requestId
-        : crypto.randomUUID();
-    pendingRetryRef.current = {
-      roundId: activeRoundId,
-      tokenId: token.id,
-      requestId,
-    };
-
-    const controller = new AbortController();
-    inFlightAbortRef.current = controller;
-    setIsBusy(true);
-    setWobbleTokenId("");
-    animateShot(token.id);
-    if (soundEnabled) playSound("shot", audioContextRef);
-
-    try {
-      const response = await shooterService.shoot(
-        activeSessionId,
-        {
-          round_id: activeRoundId,
-          token_id: token.id,
-          request_id: requestId,
-        },
-        controller.signal,
-      );
-      if (epoch !== sessionEpochRef.current) return;
-      pendingRetryRef.current = null;
-      setFeedback(response.message);
-      setSelectedTokenId("");
-      if (response.is_correct) {
-        setPlacedTokens((current) => [...current, token]);
-        setHintTargetId("");
-        if (soundEnabled) {
-          playSound(
-            response.session_completed ? "celebrate" : "correct",
-            audioContextRef,
-          );
-        }
-        if (response.round_completed) {
-          setSession((current) =>
-            current
-              ? {
-                  ...current,
-                  completed_rounds: response.completed_rounds,
-                  total_stars: response.total_stars,
-                }
-              : current,
-          );
-          if (response.session_completed) {
-            setFinalSentence(response.completed_sentence ?? "");
-            setResult(null);
-            setMode("result");
-            void fetchCompletedResult(activeSessionId, epoch);
-          } else {
-            setPrefetchedNextRound(response.next_round ?? null);
-          }
-        }
-      } else {
-        setWobbleTokenId(token.id);
-        if (soundEnabled) playSound("wrong", audioContextRef);
-      }
-    } catch {
-      if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
-        setError(t("sentenceShooter.shootError"));
-        setSelectedTokenId(token.id);
-      }
-    } finally {
-      if (inFlightAbortRef.current === controller) {
-        inFlightAbortRef.current = null;
-      }
-      if (epoch === sessionEpochRef.current) {
-        actionLockRef.current = false;
-        setIsBusy(false);
-        setFiringTokenId("");
+        setIsStartingSession(false);
       }
     }
   }
@@ -691,18 +868,16 @@ export function SentenceShooterScreen({
     if (
       !session ||
       !round ||
-      actionLockRef.current ||
-      isBusy ||
+      isRequestingHint ||
       isPaused ||
       placedTokens.length >= round.token_count
     ) {
       return;
     }
-    actionLockRef.current = true;
     const epoch = sessionEpochRef.current;
     const controller = new AbortController();
-    inFlightAbortRef.current = controller;
-    setIsBusy(true);
+    controlAbortRef.current = controller;
+    setIsRequestingHint(true);
     setError("");
     try {
       const hint = await shooterService.hint(
@@ -718,27 +893,31 @@ export function SentenceShooterScreen({
         setError(t("sentenceShooter.hintError"));
       }
     } finally {
-      if (inFlightAbortRef.current === controller) {
-        inFlightAbortRef.current = null;
+      if (controlAbortRef.current === controller) {
+        controlAbortRef.current = null;
       }
       if (epoch === sessionEpochRef.current) {
-        actionLockRef.current = false;
-        setIsBusy(false);
+        setIsRequestingHint(false);
       }
     }
   }
 
   async function continueToNextRound() {
-    if (!session || !round || actionLockRef.current || isBusy) return;
+    if (!session || !round || isLoadingNextRound) return;
     setError("");
+    speechPlayer.stop();
     if (
       prefetchedNextRound &&
       prefetchedNextRound.round_id !== round.round_id
     ) {
       sessionEpochRef.current += 1;
-      pendingRetryRef.current = null;
+      shotQueueRef.current?.resetEpoch();
+      clearProjectileTimers();
+      layoutCache.clearTokens();
+      roundCompletedRef.current = false;
       const upcoming = prefetchedNextRound;
       setPrefetchedNextRound(null);
+      setProjectiles([]);
       setSession((current) =>
         current
           ? {
@@ -752,14 +931,17 @@ export function SentenceShooterScreen({
       setSelectedTokenId("");
       setHintTargetId("");
       setFeedback("");
+      setRoundCompletedSentence("");
+      setRoundGrammarTip(null);
+      setRoundPracticedWords([]);
+      setCannonAngle(0);
       return;
     }
 
-    actionLockRef.current = true;
     const epoch = sessionEpochRef.current;
     const controller = new AbortController();
-    inFlightAbortRef.current = controller;
-    setIsBusy(true);
+    controlAbortRef.current = controller;
+    setIsLoadingNextRound(true);
     try {
       const next = await shooterService.nextRound(
         session.session_id,
@@ -767,8 +949,12 @@ export function SentenceShooterScreen({
         controller.signal,
       );
       if (epoch !== sessionEpochRef.current) return;
-      pendingRetryRef.current = null;
+      shotQueueRef.current?.resetEpoch();
+      clearProjectileTimers();
+      layoutCache.clearTokens();
+      roundCompletedRef.current = false;
       setPrefetchedNextRound(null);
+      setProjectiles([]);
       setSession((current) =>
         current
           ? {
@@ -784,17 +970,20 @@ export function SentenceShooterScreen({
       setSelectedTokenId("");
       setHintTargetId("");
       setFeedback("");
+      setRoundCompletedSentence("");
+      setRoundGrammarTip(null);
+      setRoundPracticedWords([]);
+      setCannonAngle(0);
     } catch {
       if (epoch === sessionEpochRef.current && !controller.signal.aborted) {
         setError(t("sentenceShooter.nextRoundError"));
       }
     } finally {
-      if (inFlightAbortRef.current === controller) {
-        inFlightAbortRef.current = null;
+      if (controlAbortRef.current === controller) {
+        controlAbortRef.current = null;
       }
       if (epoch === sessionEpochRef.current) {
-        actionLockRef.current = false;
-        setIsBusy(false);
+        setIsLoadingNextRound(false);
       }
     }
   }
@@ -810,30 +999,38 @@ export function SentenceShooterScreen({
     const shouldExit = window.confirm(t("sentenceShooter.exitConfirm"));
     if (!shouldExit) return;
     sessionEpochRef.current += 1;
-    inFlightAbortRef.current?.abort();
-    inFlightAbortRef.current = null;
-    actionLockRef.current = false;
-    pendingRetryRef.current = null;
-    setFiringTokenId("");
-    setIsBusy(true);
+    shotQueueRef.current?.resetEpoch();
+    controlAbortRef.current?.abort();
+    controlAbortRef.current = null;
+    clearProjectileTimers();
+    speechPlayer.stop();
+    setProjectiles([]);
+    setIsExiting(true);
     setError("");
     try {
       await shooterService.abandon(session.session_id);
       router.push("/entertainment");
     } catch {
       setError(t("sentenceShooter.exitError"));
-      setIsBusy(false);
+      setIsExiting(false);
     }
   }
 
   function restartLobby() {
     sessionEpochRef.current += 1;
-    inFlightAbortRef.current?.abort();
-    inFlightAbortRef.current = null;
-    actionLockRef.current = false;
-    pendingRetryRef.current = null;
-    setIsBusy(false);
-    setFiringTokenId("");
+    shotQueueRef.current?.resetEpoch();
+    controlAbortRef.current?.abort();
+    controlAbortRef.current = null;
+    clearProjectileTimers();
+    layoutCache.clearTokens();
+    roundCompletedRef.current = false;
+    setSessionScore(0);
+    speechPlayer.stop();
+    setIsStartingSession(false);
+    setIsLoadingNextRound(false);
+    setIsRequestingHint(false);
+    setIsExiting(false);
+    setProjectiles([]);
     setPrefetchedNextRound(null);
     setIsLoadingResult(false);
     setResultError(false);
@@ -842,11 +1039,22 @@ export function SentenceShooterScreen({
     setRound(null);
     setResult(null);
     setFinalSentence("");
+    setRoundCompletedSentence("");
+    setRoundGrammarTip(null);
+    setRoundPracticedWords([]);
     setPlacedTokens([]);
     setSelectedTokenId("");
+    setHintTargetId("");
     setFeedback("");
     setError("");
     setIsPaused(false);
+    setCannonAngle(0);
+  }
+
+  function playSentenceAudio(text: string) {
+    if (!calmSound || !text.trim()) return;
+    speechPlayer.stop();
+    void speechPlayer.play(text).catch(() => undefined);
   }
 
   if (childState.status === "loading" || childState.status === "redirecting") {
@@ -884,12 +1092,15 @@ export function SentenceShooterScreen({
     return (
       <SentenceShooterResultView
         backHref={readingCompletionHref}
+        calmSound={calmSound}
         child={child}
         finalSentence={finalSentence}
         isLoadingResult={isLoadingResult}
+        learningMode={learningMode}
         onReloadResult={() => void loadCompletedResult()}
         onRestartLobby={restartLobby}
         readingSessionId={readingSessionId}
+        reducedMotion={reducedMotion}
         result={result}
         resultError={resultError}
         session={session}
@@ -899,17 +1110,47 @@ export function SentenceShooterScreen({
 
   if (mode === "playing" && session && round) {
     const roundComplete = placedTokens.length === round.token_count;
-    const shotStyle = projectile
-      ? ({
-          left: projectile.left,
-          top: projectile.top,
-          "--shot-dx": `${projectile.dx}px`,
-          "--shot-dy": `${projectile.dy}px`,
-        } as CSSProperties & Record<"--shot-dx" | "--shot-dy", string>)
-      : undefined;
+    const activeLearningMode: SentenceShooterLearningMode =
+      round.learning_mode ?? session.learning_mode ?? learningMode;
+    const hasPromptSlots = Boolean(
+      round.prompt_slots && round.prompt_slots.length > 0,
+    );
+    const activePracticedWords =
+      roundPracticedWords.length > 0
+        ? roundPracticedWords
+        : (round.practiced_difficult_words ?? []);
+    const completedDisplaySentence =
+      roundCompletedSentence ||
+      (hasPromptSlots
+        ? (() => {
+            let blankIdx = 0;
+            return (round.prompt_slots ?? [])
+              .map((slot) => {
+                if (!slot.is_blank) return slot.text ?? "";
+                const token = placedTokens[blankIdx];
+                blankIdx += 1;
+                return token?.text ?? "___";
+              })
+              .join(" ");
+          })()
+        : placedTokens.map((token) => token.text).join(" "));
+
+    // Optimistic preview tokens map cleanly after server-confirmed slots.
+    const optimisticPreviewCount = Math.min(
+      round.token_count,
+      placedTokens.length + pendingShots.length,
+    );
+    let blankCursor = 0;
 
     return (
-      <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5">
+      <section
+        className={cn(
+          "mx-auto flex w-full max-w-[1130px] flex-col gap-3 px-4 py-4 sm:px-6 sm:py-5",
+          reducedMotion && "motion-reduce",
+        )}
+        data-calm-sound={calmSound ? "true" : "false"}
+        data-reduced-motion={reducedMotion ? "true" : "false"}
+      >
         <BookChildHeader
           backHref="/entertainment"
           child={child}
@@ -917,13 +1158,40 @@ export function SentenceShooterScreen({
         />
         <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-card border border-border bg-white px-4 py-2">
           <div className="min-w-0 flex-1">
-            <h1
-              className="viread-learning-content truncate text-lg font-extrabold text-ink"
-              dir="ltr"
-              lang="vi"
-            >
-              {session.book.title}
-            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1
+                className="viread-learning-content truncate text-lg font-extrabold text-ink"
+                dir="ltr"
+                lang="vi"
+              >
+                {session.book.title}
+              </h1>
+              <span className="rounded-full bg-sky px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                {t(LEARNING_MODE_LABEL_KEYS[activeLearningMode])}
+              </span>
+              {activePracticedWords.length > 0 ? (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning"
+                  data-testid="difficult-word-badge"
+                >
+                  <Sparkles aria-hidden="true" className="size-3.5" />
+                  {activeLearningMode === "WORD_ORDER" || roundComplete ? (
+                    <>
+                      {t("sentenceShooter.difficultWordReviewPrefix")}{" "}
+                      <span
+                        className="viread-learning-content"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        {activePracticedWords.join(", ")}
+                      </span>
+                    </>
+                  ) : (
+                    t("sentenceShooter.difficultWordActiveHint")
+                  )}
+                </span>
+              ) : null}
+            </div>
             <p className="mt-1 text-sm font-bold text-muted">
               {t("sentenceShooter.roundProgress", {
                 current: round.round_number,
@@ -943,7 +1211,7 @@ export function SentenceShooterScreen({
               <div
                 className="h-full rounded-full bg-primary transition-[width]"
                 style={{
-                  width: `${(placedTokens.length / round.token_count) * 100}%`,
+                  width: `${(optimisticPreviewCount / round.token_count) * 100}%`,
                 }}
               />
             </div>
@@ -956,6 +1224,14 @@ export function SentenceShooterScreen({
               <span aria-hidden="true">★</span>
               {session.total_stars}
             </span>
+            {sessionScore > 0 ? (
+              <span
+                className="rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-extrabold tabular-nums text-success-ink"
+                data-testid="session-score"
+              >
+                {t("sentenceShooter.scoreBadge", { score: sessionScore })}
+              </span>
+            ) : null}
           </div>
           <div className="flex gap-2">
             <button
@@ -966,7 +1242,7 @@ export function SentenceShooterScreen({
               }
               aria-pressed={soundEnabled}
               className="flex size-11 items-center justify-center rounded-control bg-sky text-primary hover:bg-border"
-              onClick={() => setSoundEnabled((enabled) => !enabled)}
+              onClick={() => setCalmSound(!soundEnabled)}
               type="button"
             >
               {soundEnabled ? (
@@ -988,6 +1264,7 @@ export function SentenceShooterScreen({
             </button>
             <button
               className="flex min-h-11 items-center justify-center rounded-control px-3 font-bold text-danger hover:bg-danger-surface disabled:opacity-55"
+              disabled={isExiting}
               onClick={() => void exitGame()}
               type="button"
             >
@@ -1004,7 +1281,11 @@ export function SentenceShooterScreen({
           <div className="flex flex-col gap-3">
             <div className="space-y-2 rounded-control bg-cream px-3 py-3 sm:px-4">
               <p className="font-bold text-ink">
-                {t("sentenceShooter.childSentenceHeading")}
+                {activeLearningMode === "FILL_BLANK"
+                  ? t("sentenceShooter.slotHeadingFillBlank")
+                  : activeLearningMode === "GRAMMAR_FOCUS"
+                    ? t("sentenceShooter.slotHeadingGrammarFocus")
+                    : t("sentenceShooter.childSentenceHeading")}
               </p>
               <div
                 aria-label={t("sentenceShooter.slotsAria")}
@@ -1013,46 +1294,145 @@ export function SentenceShooterScreen({
                 lang="vi"
                 role="list"
               >
-                {round.tokens.map((token, index) => (
-                  <div
-                    aria-label={
-                      placedTokens[index]
-                        ? t("sentenceShooter.slotFilledAria", {
-                            index: index + 1,
-                            word: placedTokens[index].text,
-                          })
-                        : t("sentenceShooter.slotEmptyAria", {
-                            index: index + 1,
-                          })
-                    }
-                    className={[
-                      "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
-                      placedTokens[index]
-                        ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
-                        : "border-dashed border-[#B8CECA] bg-white/80 text-muted/60",
-                    ].join(" ")}
-                    key={index}
-                    role="listitem"
-                  >
-                    {placedTokens[index] ? (
-                      <>
-                        {" "}
-                        <Check
-                          aria-hidden="true"
-                          className="me-1 size-4 shrink-0"
-                        />
-                        {placedTokens[index].text}
-                      </>
-                    ) : (
-                      "···"
-                    )}
-                  </div>
-                ))}
+                {hasPromptSlots
+                  ? (round.prompt_slots ?? []).map((slot) => {
+                      if (!slot.is_blank) {
+                        return (
+                          <div
+                            className="flex min-h-12 items-center justify-center rounded-control border border-border bg-white px-3 py-2 text-base font-bold text-ink sm:min-h-14 sm:px-4 sm:text-lg"
+                            key={`fixed-${slot.position}`}
+                            role="listitem"
+                          >
+                            {slot.text}
+                          </div>
+                        );
+                      }
+                      const slotIndex = blankCursor;
+                      blankCursor += 1;
+                      const confirmed = placedTokens[slotIndex];
+                      const optimistic =
+                        !confirmed && slotIndex >= placedTokens.length
+                          ? pendingShots[slotIndex - placedTokens.length]?.token
+                          : undefined;
+                      return (
+                        <div
+                          aria-label={
+                            confirmed
+                              ? t("sentenceShooter.slotFilledAria", {
+                                  index: slotIndex + 1,
+                                  word: confirmed.text,
+                                })
+                              : optimistic
+                                ? t("sentenceShooter.slotPendingAria", {
+                                    index: slotIndex + 1,
+                                    word: optimistic.text,
+                                  })
+                                : t("sentenceShooter.slotEmptyAria", {
+                                    index: slotIndex + 1,
+                                  })
+                          }
+                          className={[
+                            "flex min-h-12 min-w-[68px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[84px] sm:px-4 sm:text-lg",
+                            confirmed
+                              ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
+                              : optimistic
+                                ? "border-dashed border-primary bg-sky text-primary"
+                                : "border-dashed border-primary/50 bg-sky/30 text-primary/70",
+                          ].join(" ")}
+                          data-slot-state={
+                            confirmed
+                              ? "confirmed"
+                              : optimistic
+                                ? "optimistic"
+                                : "empty"
+                          }
+                          key={`blank-${slot.position}`}
+                          role="listitem"
+                        >
+                          {confirmed ? (
+                            <>
+                              <Check
+                                aria-hidden="true"
+                                className="me-1 size-4 shrink-0"
+                              />
+                              {confirmed.text}
+                            </>
+                          ) : optimistic ? (
+                            optimistic.text
+                          ) : (
+                            "___"
+                          )}
+                        </div>
+                      );
+                    })
+                  : Array.from({ length: round.token_count }, (_, index) => {
+                      const confirmed = placedTokens[index];
+                      const optimistic =
+                        !confirmed && index >= placedTokens.length
+                          ? pendingShots[index - placedTokens.length]?.token
+                          : undefined;
+                      return (
+                        <div
+                          aria-label={
+                            confirmed
+                              ? t("sentenceShooter.slotFilledAria", {
+                                  index: index + 1,
+                                  word: confirmed.text,
+                                })
+                              : optimistic
+                                ? t("sentenceShooter.slotPendingAria", {
+                                    index: index + 1,
+                                    word: optimistic.text,
+                                  })
+                                : t("sentenceShooter.slotEmptyAria", {
+                                    index: index + 1,
+                                  })
+                          }
+                          className={[
+                            "flex min-h-12 min-w-[54px] max-w-full items-center justify-center rounded-control border-2 px-3 py-2 text-center text-base font-extrabold sm:min-h-14 sm:min-w-[70px] sm:px-4 sm:text-lg",
+                            confirmed
+                              ? "sentence-success-pulse border-[#98D4A2] bg-success-surface text-success-ink"
+                              : optimistic
+                                ? "border-dashed border-primary bg-sky text-primary"
+                                : "border-dashed border-[#B8CECA] bg-white/80 text-muted/60",
+                          ].join(" ")}
+                          data-slot-state={
+                            confirmed
+                              ? "confirmed"
+                              : optimistic
+                                ? "optimistic"
+                                : "empty"
+                          }
+                          key={index}
+                          role="listitem"
+                        >
+                          {confirmed ? (
+                            <>
+                              <Check
+                                aria-hidden="true"
+                                className="me-1 size-4 shrink-0"
+                              />
+                              {confirmed.text}
+                            </>
+                          ) : optimistic ? (
+                            optimistic.text
+                          ) : (
+                            "···"
+                          )}
+                        </div>
+                      );
+                    })}
               </div>
             </div>
             <div className="space-y-2 rounded-control bg-sky/45 px-3 py-3 sm:px-4">
               <p className="font-bold text-ink">
-                {t("sentenceShooter.nextWordHeading")}
+                {round.prompt_hint ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {round.prompt_hint}
+                  </span>
+                ) : (
+                  t("sentenceShooter.nextWordHeading")
+                )}
               </p>
               <div
                 aria-label={t("sentenceShooter.wordBankAria")}
@@ -1063,11 +1443,17 @@ export function SentenceShooterScreen({
               >
                 {round.tokens.map((token) => {
                   const placed = placedTokenIds.has(token.id);
+                  const inFlight = inFlightTokenIds.has(token.id);
                   const selected = selectedTokenId === token.id;
-                  const hinted = hintTargetId === token.id && !placed;
+                  const hinted =
+                    hintTargetId === token.id && !placed && !inFlight;
+                  const showDifficultDot =
+                    activeLearningMode === "WORD_ORDER" &&
+                    Boolean(token.is_difficult_word) &&
+                    !placed;
                   return (
                     <button
-                      aria-pressed={selected}
+                      aria-pressed={selected || inFlight}
                       aria-label={
                         hinted
                           ? t("sentenceShooter.hintedTokenAria", {
@@ -1075,9 +1461,9 @@ export function SentenceShooterScreen({
                             })
                           : undefined
                       }
-                      aria-busy={firingTokenId === token.id || undefined}
+                      aria-busy={inFlight || undefined}
                       className={[
-                        "min-h-12 rounded-control border px-4 py-2 text-lg font-extrabold text-ink transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-14 sm:px-5",
+                        "min-h-12 rounded-control border px-4 py-2 text-lg font-extrabold text-ink transition-transform duration-100 hover:bg-sky active:scale-95 focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-14 sm:px-5",
                         placed
                           ? "invisible pointer-events-none"
                           : "border-border bg-white",
@@ -1085,25 +1471,44 @@ export function SentenceShooterScreen({
                         hinted
                           ? "border-[#d3a446] bg-warning-surface ring-1 ring-warning"
                           : "",
-                        firingTokenId === token.id ? "opacity-70" : "",
+                        inFlight
+                          ? "scale-95 border-primary bg-sky/80 opacity-75"
+                          : "",
                         wobbleTokenId === token.id
-                          ? "sentence-token-wobble"
+                          ? "sentence-token-wobble border-danger/60"
                           : "",
                       ].join(" ")}
-                      disabled={placed || isBusy || isPaused}
+                      data-difficult-word={
+                        showDifficultDot ? "true" : undefined
+                      }
+                      data-shot-state={
+                        placed
+                          ? "placed"
+                          : inFlight
+                            ? "in-flight"
+                            : wobbleTokenId === token.id
+                              ? "wrong"
+                              : "ready"
+                      }
+                      disabled={placed || inFlight || isPaused || roundComplete}
                       key={token.id}
                       onAnimationEnd={() => {
                         if (wobbleTokenId === token.id) setWobbleTokenId("");
                       }}
                       onClick={() => selectToken(token)}
-                      ref={(element) => {
-                        if (element)
-                          tokenButtonRefs.current.set(token.id, element);
-                        else tokenButtonRefs.current.delete(token.id);
-                      }}
+                      ref={tokenRefCallbacks.get(token.id)}
                       type="button"
                     >
-                      {token.text}
+                      <span className="inline-flex items-center gap-1.5">
+                        {token.text}
+                        {showDifficultDot ? (
+                          <span
+                            aria-hidden="true"
+                            className="inline-block size-2 rounded-full bg-warning"
+                            title={t("sentenceShooter.difficultWordDotTitle")}
+                          />
+                        ) : null}
+                      </span>
                     </button>
                   );
                 })}
@@ -1115,6 +1520,7 @@ export function SentenceShooterScreen({
                 ref={cannonRef}
                 aria-hidden="true"
                 className="shrink-0 motion-safe:transition-transform"
+                data-cannon-angle={Math.round(cannonAngle)}
               >
                 <ToyCannon angle={cannonAngle} className="size-14" />
               </div>
@@ -1123,13 +1529,25 @@ export function SentenceShooterScreen({
                 role="status"
                 aria-live="polite"
               >
-                {firingTokenId
-                  ? t("sentenceShooter.checkingTokenStatus")
-                  : feedback || t("sentenceShooter.defaultPromptStatus")}
+                {pendingShots.length > 0 ? (
+                  pendingShots.length > 1 ? (
+                    t("sentenceShooter.checkingMultipleTokensStatus", {
+                      count: pendingShots.length,
+                    })
+                  ) : (
+                    t("sentenceShooter.checkingTokenStatus")
+                  )
+                ) : feedback ? (
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {feedback}
+                  </span>
+                ) : (
+                  t("sentenceShooter.defaultPromptStatus")
+                )}
               </p>
               <button
                 className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-control bg-warning-surface px-3 font-bold text-warning hover:bg-book-orange disabled:opacity-55"
-                disabled={isBusy || isPaused || roundComplete}
+                disabled={isRequestingHint || isPaused || roundComplete}
                 onClick={() => void requestHint()}
                 type="button"
               >
@@ -1144,46 +1562,113 @@ export function SentenceShooterScreen({
                   dir="ltr"
                   lang="vi"
                 >
-                  {placedTokens.map((token) => token.text).join(" ")}
+                  {completedDisplaySentence}
                 </p>
                 <p className="mt-2 font-bold text-success-ink">
                   {t("sentenceShooter.roundCompletePraise")}
                 </p>
-                {session.completed_rounds < session.total_rounds ? (
-                  <Button
-                    className="mx-auto mt-4 max-w-sm"
-                    disabled={isBusy}
-                    isLoading={isBusy}
-                    onClick={() => void continueToNextRound()}
+                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full border border-[#98D4A2] bg-white px-4 py-1.5 text-sm font-extrabold text-success-ink hover:bg-cream disabled:opacity-50"
+                    disabled={!calmSound}
+                    onClick={() => playSentenceAudio(completedDisplaySentence)}
+                    type="button"
                   >
-                    <Play aria-hidden="true" className="size-5" />{" "}
-                    {t("sentenceShooter.nextRound")}
-                  </Button>
-                ) : (
-                  <Button
-                    className="mx-auto mt-4 max-w-sm"
-                    disabled={isBusy}
-                    isLoading={isBusy}
-                    onClick={() => void loadCompletedResult()}
+                    <Volume2 aria-hidden="true" className="size-4" />
+                    {t("sentenceShooter.readFullSentence")}
+                  </button>
+                  {activePracticedWords.length > 0 ? (
+                    <span
+                      className="inline-flex items-center gap-1.5 rounded-full bg-warning-surface px-3.5 py-1.5 text-xs font-extrabold text-warning"
+                      data-testid="practiced-difficult-words"
+                    >
+                      <Sparkles aria-hidden="true" className="size-3.5" />
+                      {t("sentenceShooter.practicedDifficultWordsRound")}{" "}
+                      <span
+                        className="viread-learning-content"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        {activePracticedWords.join(", ")}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+                {roundGrammarTip ? (
+                  <p
+                    className="mx-auto mt-3 inline-flex max-w-xl items-center gap-2 rounded-control bg-white/90 px-4 py-2 text-sm font-bold text-primary"
+                    data-testid="grammar-tip-pill"
                   >
-                    <RefreshCw aria-hidden="true" className="size-5" />{" "}
-                    {t("sentenceShooter.viewResult")}
-                  </Button>
-                )}
+                    <BookOpen aria-hidden="true" className="size-4 shrink-0" />
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {roundGrammarTip}
+                    </span>
+                  </p>
+                ) : null}
+                <div className="mt-4">
+                  {session.completed_rounds < session.total_rounds ? (
+                    <Button
+                      className="mx-auto max-w-sm"
+                      disabled={isLoadingNextRound}
+                      isLoading={isLoadingNextRound}
+                      onClick={() => void continueToNextRound()}
+                    >
+                      <Play aria-hidden="true" className="size-5" />{" "}
+                      {t("sentenceShooter.nextRound")}
+                    </Button>
+                  ) : (
+                    <Button
+                      className="mx-auto max-w-sm"
+                      disabled={isLoadingResult}
+                      isLoading={isLoadingResult}
+                      onClick={() => void loadCompletedResult()}
+                    >
+                      <RefreshCw aria-hidden="true" className="size-5" />{" "}
+                      {t("sentenceShooter.viewResult")}
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : null}
           </div>
-          {projectile ? (
-            <span
-              aria-hidden="true"
-              className="sentence-shot-projectile pointer-events-none absolute z-20 flex size-5 items-center justify-center text-warning"
-              key={projectile.id}
-              onAnimationEnd={() => setProjectile(null)}
-              style={shotStyle}
-            >
-              ✦
-            </span>
-          ) : null}
+          {projectiles.map((item) => {
+            const shotStyle = {
+              left: item.left,
+              top: item.top,
+              "--shot-dx": `${item.dx}px`,
+              "--shot-dy": `${item.dy}px`,
+            } as CSSProperties & Record<"--shot-dx" | "--shot-dy", string>;
+            const burstStyle = {
+              left: item.endX,
+              top: item.endY,
+              transform: "translate(-50%, -50%)",
+            } as CSSProperties;
+            return (
+              <span key={item.id}>
+                <span
+                  aria-hidden="true"
+                  className="sentence-shot-projectile pointer-events-none absolute z-20 flex size-5 items-center justify-center text-warning will-change-transform"
+                  data-testid="shot-projectile"
+                  onAnimationEnd={() => removeProjectile(item.id)}
+                  style={shotStyle}
+                >
+                  ✦
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute z-10 flex items-center justify-center text-xs text-primary/70 opacity-80"
+                  data-testid="shot-particles"
+                  style={burstStyle}
+                >
+                  ✧
+                </span>
+              </span>
+            );
+          })}
         </div>
 
         <Modal
@@ -1229,7 +1714,14 @@ export function SentenceShooterScreen({
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7">
+    <section
+      className={cn(
+        "mx-auto flex w-full max-w-[1130px] flex-col gap-6 px-4 py-4 sm:px-8 sm:py-7",
+        reducedMotion && "motion-reduce",
+      )}
+      data-calm-sound={calmSound ? "true" : "false"}
+      data-reduced-motion={reducedMotion ? "true" : "false"}
+    >
       <BookChildHeader
         backHref={readingCompletionHref}
         child={child}
@@ -1264,6 +1756,38 @@ export function SentenceShooterScreen({
           {t("sentenceShooter.bookNotReadyBody")}
         </StatusMessage>
       ) : null}
+
+      <fieldset>
+        <legend className="mb-3 text-lg font-extrabold text-ink">
+          {t("sentenceShooter.chooseLearningMode")}
+        </legend>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {learningModes.map((option) => (
+            <button
+              aria-pressed={learningMode === option.value}
+              className={[
+                "min-h-24 rounded-card border-2 p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                learningMode === option.value
+                  ? "border-primary bg-sky"
+                  : "border-border bg-white hover:bg-sky/50",
+              ].join(" ")}
+              key={option.value}
+              onClick={() => setLearningMode(option.value)}
+              type="button"
+            >
+              <span className="flex items-center justify-between font-extrabold text-ink">
+                {t(option.titleKey)}
+                {learningMode === option.value ? (
+                  <Check aria-hidden="true" className="size-5 text-primary" />
+                ) : null}
+              </span>
+              <span className="mt-1 block text-sm font-semibold text-muted">
+                {t(option.descKey)}
+              </span>
+            </button>
+          ))}
+        </div>
+      </fieldset>
 
       <fieldset>
         <legend className="mb-3 text-lg font-extrabold text-ink">
@@ -1327,7 +1851,8 @@ export function SentenceShooterScreen({
             {t("sentenceShooter.chooseBook")}
           </h2>
           <span className="text-sm font-semibold text-muted">
-            {t("sentenceShooter.selectedConfig", {
+            {t("sentenceShooter.selectedConfigWithMode", {
+              mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
               difficulty: selectedDifficultyOption
                 ? t(selectedDifficultyOption.titleKey)
                 : "",
@@ -1472,8 +1997,10 @@ export function SentenceShooterScreen({
         </Link>
         <Button
           className="sm:max-w-sm"
-          disabled={!selectedBook || isBusy || bookState.status !== "ready"}
-          isLoading={isBusy}
+          disabled={
+            !selectedBook || isStartingSession || bookState.status !== "ready"
+          }
+          isLoading={isStartingSession}
           onClick={() => void startGame()}
         >
           <Play aria-hidden="true" className="size-5" />{" "}

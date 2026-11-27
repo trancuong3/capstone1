@@ -16,7 +16,9 @@ from app.api.routes import (
     voice,
 )
 from app.api.routes import (
+    adaptive_learning,
     child_progress,
+    memory_game,
     picture_description,
     sentence_shooter,
     tutor_question,
@@ -28,12 +30,17 @@ from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
 from app.api.routes import karaoke
+from app.api.routes import karaoke_practice
 from app.api.routes import karaoke_processing
+from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
 
 api_router = APIRouter()
+api_router.include_router(karaoke_simple_import.router, prefix="/karaoke", tags=["Karaoke Simple Import"])
+api_router.include_router(karaoke_practice.router, prefix="/karaoke", tags=["Karaoke Practice"])
 api_router.include_router(karaoke.router, prefix="/karaoke", tags=["Karaoke"])
 api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["Karaoke processing"])
+api_router.include_router(adaptive_learning.router, prefix="/learning", tags=["Adaptive Learning"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
 api_router.include_router(parent_private_book.router, prefix="/books", tags=["Parent Private Books"])
@@ -63,6 +70,11 @@ api_router.include_router(
     picture_description.router,
     prefix="/games/picture-description",
     tags=["Picture Description"],
+)
+api_router.include_router(
+    memory_game.router,
+    prefix="/games/memory",
+    tags=["Memory Game"],
 )
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])

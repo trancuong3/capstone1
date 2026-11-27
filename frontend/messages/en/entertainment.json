@@ -12,7 +12,52 @@
     "pictureCta": "Select picture",
     "karaokeTitle": "Sing along",
     "karaokeDesc": "Choose a favorite song, listen to the music, and sing along with the lyrics on screen.",
-    "karaokeCta": "Open song library"
+    "karaokeCta": "Open song library",
+    "eyebrow": "Joyful Vietnamese learning every day",
+    "selectChildLabel": "Select child profile",
+    "selectChildAria": "Select child profile for the Play & Learn zone",
+    "childOptionLabel": "{alias} · Grade {grade}",
+    "calmSound": "Calm sound",
+    "soundMuted": "Muted",
+    "reduceMotion": "Reduce motion",
+    "reducedMotionActive": "Reduced motion on",
+    "onboardingGuideButton": "How to play",
+    "mascotBadge": "ViRead Owl's Pick",
+    "childProfileBadge": "Profile {alias} · Grade {grade}",
+    "defaultGreeting": "Hello little reader! Would you like to tell a picture story, build sentences, sing along, or play a memory game today?",
+    "defaultRecommendationReason": "Every activity gently connects with the books you are reading so you remember words longer without any pressure.",
+    "focusDifficultWordsLabel": "Words you're gently reviewing:",
+    "playSuggestedCta": "Play suggested game",
+    "onboardingRegionAria": "Getting started guide for Play & Learn",
+    "onboardingCounter": "Quick guide ({current}/{total})",
+    "onboardingStep1Title": "1. Pick a zone you like",
+    "onboardingStep1Body": "Four calm zones: Picture Storytelling, Sentence Shooter, Happy Karaoke, and What Do You Remember?",
+    "onboardingStep2Title": "2. Play by voice or touch",
+    "onboardingStep2Body": "Large, clear buttons that are easy to tap on phones and tablets. You can speak or pick words anytime.",
+    "onboardingStep3Title": "3. Joyful learning with zero pressure",
+    "onboardingStep3Body": "10–15 minutes per session is ideal. No stressful countdowns — our AI Teacher and Owl always cheer you on!",
+    "onboardingNext": "Next",
+    "onboardingDone": "Got it!",
+    "onboardingClose": "Close",
+    "pictureZoneBadge": "Storytelling World",
+    "todaySuggestionBadge": "Today's pick",
+    "suggestedWordsLabel": "Suggested words:",
+    "shooterZoneBadge": "Word Adventure",
+    "karaokeZoneBadge": "Music Stage",
+    "karaokeChipRhythm": "Rhythm & melody feedback",
+    "karaokeChipTap": "Fun Rhythm Tap",
+    "karaokeChipSlowPractice": "0.85x segment practice",
+    "memoryZoneBadge": "Memory Explorer",
+    "newBadge": "New",
+    "memoryChipObserve": "Observe scene",
+    "memoryChipRemember": "Recall details",
+    "memoryChipStory": "Continue the story",
+    "memoryTitle": "What Do You Remember?",
+    "memoryDesc": "Observe Vietnamese illustrations at your own pace, recall colors and positions, then imagine a fun continuation to the story!",
+    "memoryCta": "Explore Memory Game",
+    "breakReminderTitle": "Healthy eye break:",
+    "defaultBreakReminder": "About 10–15 minutes per session keeps young eyes healthy and learning effortless.",
+    "recommendationLoadError": "Could not load learning recommendations right now."
   },
   "karaoke": {
     "title": "Kids Karaoke",
@@ -150,6 +195,62 @@
         "countdownNext": "Starts in {seconds} seconds",
         "interludeNext": "Music segment · Preparing next sentence",
         "outro": "Let's listen to the final segment"
+      },
+      "practiceModeGroupAria": "Practice mode",
+      "headphoneRecommendation": "Headphones are recommended for the most accurate pitch and rhythm scoring!",
+      "speakerFilterHint": "When using speakers, smart speaker-bleed filtering is active.",
+      "speakerBackingOn": "Speaker accompaniment on",
+      "speakerBackingOff": "Play accompaniment on speaker (noise-filtered)",
+      "unsupportedScoringWithRhythmHint": "This browser supports free singing and Rhythm Tap. To use microphone scoring, please open in a browser with voice recognition support.",
+      "micReadyNoticeDsp": "Please allow microphone access when starting to sing. Rhythm and pitch analysis runs locally on your device without saving your child's audio.",
+      "rhythmTapButton": "Tap the rhythm (Spacebar)",
+      "rhythmTapFeedback": "{feedback} · Streak: {streak}",
+      "livePitchHz": "Voice pitch: {hz} Hz",
+      "practicingSegment": "Practicing difficult segment {number}",
+      "practicingRateSuffix": "({rate}× speed)",
+      "tempoSegment": "Segment practice · 0.85×",
+      "spaceHintRhythmTap": "Press Spacebar to tap along to the beat while the song plays.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "Full Song",
+          "shortLabel": "Full",
+          "description": "Sing the whole song and save your child's high-score record."
+        },
+        "SEGMENT": {
+          "label": "Difficult Segment",
+          "shortLabel": "Segment",
+          "description": "Loop a tricky part at 0.85x speed without overwriting your full-song record."
+        },
+        "LINE_PRACTICE": {
+          "label": "Line by Line",
+          "shortLabel": "By Line",
+          "description": "Pick each line to practice clear lyrics and steady rhythm."
+        },
+        "RHYTHM_TAP": {
+          "label": "Rhythm Tap",
+          "shortLabel": "Tap",
+          "description": "Tap the rhythm button or Spacebar on the beat — fun rhythm practice even without a mic!"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "Musical performance analysis",
+        "unmeasured": "Not measured",
+        "points": "{score} pts",
+        "statusGreat": "Great",
+        "statusGood": "Good",
+        "statusPractice": "Needs practice",
+        "bestFullSong": "Full-song record: {score} pts",
+        "rhythmLabel": "Rhythm",
+        "pitchLabel": "Melody",
+        "lyricsLabel": "Lyrics",
+        "fluencyLabel": "Fluency",
+        "pitchBasisPrefix": "Pitch scoring basis:",
+        "speakerBleedNote": "Mild speaker bleed detected by microphone.",
+        "insufficientHint": "Not enough vocal signal to score musical performance this time. Bring the mic closer or try headphones!",
+        "weakestSegmentTitle": "Segment to practice · Line {number}",
+        "retrySegmentSlow": "Practice this segment (0.85x)",
+        "segmentReportSummary": "Segment report ({count} lines)",
+        "segmentLineHeader": "Line {number} ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "Sentence {number} · ",
       "lineMatchedRetry": "{matched}/{evaluated} words matched · Practice again",
       "lineUnheardRetry": "Not heard clearly · Practice again"
+    },
+    "rhythmTap": {
+      "steady": "Nice steady beat!",
+      "early": "A bit early!",
+      "late": "A bit late!",
+      "perfect": "Right on the beat!",
+      "good": "Very close to the beat!",
+      "slightlyFast": "A little fast!",
+      "slightlySlow": "A little slow!"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "Full Musical Scoring (Rhythm · Melody · Lyrics)",
+        "RHYTHM_AND_LYRICS": "Rhythm & Lyrics Scoring",
+        "LYRICS_ONLY": "Lyrics-Only Scoring",
+        "INSUFFICIENT_EVIDENCE": "Insufficient Vocal Signal",
+        "RHYTHM_TAP": "Rhythm Tap Scoring"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "Matched to reference melody (octave-invariant)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "Vocal pitch steadiness & melodic contour",
+        "UNAVAILABLE": "Pitch not measured"
+      },
+      "gate": {
+        "silence": "We couldn't hear your voice yet. Bring the mic a bit closer or check your microphone and try again!",
+        "noiseOnly": "The room sounds a bit noisy. Please move to a quieter spot or wear headphones!",
+        "electricalHum": "The microphone has electrical hum. Please ask a parent to check the mic or cable!",
+        "bleedHeadphones": "Some audio looped back into the mic. Slightly lower headphone volume and sing clearly!",
+        "bleedSpeaker": "The mic hears speaker music more than your voice. Wear headphones or move closer to the mic!",
+        "lowCoverage": "You only sang a short part. Sing a few more lines so we can score the full performance!",
+        "okHeadphones": "Headphone mode helps the mic capture your voice clearly!",
+        "okSpeaker": "Tip: Wearing headphones helps the mic hear your melody and rhythm most clearly!"
+      },
+      "encouragement": {
+        "insufficient": "Not enough vocal signal to score this take. Try singing more clearly near the mic!",
+        "high": "Wonderful! You sang on beat, clearly, and with great expression!",
+        "good": "Great job! Your rhythm and melody are coming along nicely!",
+        "medium": "Nice try! Practice the tricky segment at 0.85x speed!",
+        "low": "Keep going! Let's practice line by line at a slower pace!"
+      },
+      "lineTips": {
+        "unclear": "This line wasn't clear yet—try practicing it slowly at 0.85x!",
+        "great": "Great! You sang this line confidently and right on beat!",
+        "rhythmLate": "You came in slightly late on this line—listen to the music and start a touch earlier!",
+        "rhythmFast": "You sang slightly ahead of the beat—follow the highlighted lyrics steadily!",
+        "rhythmSteady": "Try Rhythm Tap or practice this line at 0.85x speed for steadier timing!",
+        "pitch": "Listen closely to this line's melody and sustain the notes evenly!",
+        "lyrics": "Read this line slowly once, then sing each syllable clearly!",
+        "practiceMore": "Pretty good! One more practice pass at 0.85x will make it even better!",
+        "insufficientLine": "Couldn't hear this line clearly—try singing a bit closer to the mic!"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "Tap the rhythm button (or Spacebar) along with each syllable on screen!",
+        "insufficientTip": "Try tapping a steady beat along with this line!",
+        "okGuidance": "Rhythm Tap helps build a feel for song tempo before singing with a microphone!"
+      },
+      "lyricsOnlyFallbackGuidance": "Web Audio analysis was not active on this device, so this session scored lyrics only.",
+      "mildSpeakerBleedGuidance": "Mild speaker bleed entered the mic. Headphones will make pitch and rhythm scoring even more accurate!"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "Describe the activity and the surrounding scene.",
       "step3Title": "What about colors and feelings?",
       "step3Detail": "Add details about colors, weather, or how you feel."
+    },
+    "aiTimeoutError": "The AI Teacher is taking a bit longer to respond. Please tap Retry.",
+    "micPausedBackground": "The app went into the background, so the microphone paused safely. Your draft is still saved!",
+    "waitingTtsCooldown": "Waiting for audio playback to finish before opening the microphone...",
+    "offlineNotice": "Your device is offline. Your story is safely kept — tap Retry grading as soon as you're back online!",
+    "gradeHintChipsLowerTitle": "Visual story starters (Grades 1–2)",
+    "collapseGradeHints": "Collapse story frame hints",
+    "expandGradeHints": "Show story frame hints",
+    "listenGuideButton": "Listen to guide",
+    "gradeHintsCollapsedNote": "Story frame hints are collapsed for Grade {grade} to encourage free expression — tap \"Show story frame hints\" anytime!",
+    "teachingModeSectionAria": "AI Teacher coaching modes",
+    "teachingModeHeading": "Learn with AI Teacher mode",
+    "listenModeButton": "Listen to mode tip",
+    "teachingModeGroupAria": "Select storytelling coaching mode",
+    "targetWordsProgress": "Target focus words practiced ({used}/{total})",
+    "followUpSectionAria": "Teacher's next guiding question",
+    "practiceFollowUpTitle": "Teacher's follow-up question",
+    "listenQuestionButton": "Listen to question",
+    "resultModeBadge": "Mode: {mode}",
+    "usedTargetWordsTitle": "Target focus words used well",
+    "resultFollowUpTitle": "Teacher's next guiding prompt",
+    "answerFollowUpButton": "Answer this question",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "Observe",
+        "cue": "Look closely at the picture: who or what do you see, and which colors stand out?",
+        "audioHint": "Observe mode. Look closely at the scene and name the most noticeable people, animals, or objects."
+      },
+      "VOCABULARY": {
+        "label": "Vocabulary",
+        "cue": "Try including 1–2 suggested words or focus words above in your sentence.",
+        "audioHint": "Vocabulary mode. Pick one or two suggested words above and include them in your description."
+      },
+      "SENTENCE": {
+        "label": "Sentence",
+        "cue": "Combine who + action + where to form one complete sentence.",
+        "audioHint": "Sentence mode. Speak a complete sentence saying who is doing what and where."
+      },
+      "STORY": {
+        "label": "Storytelling",
+        "cue": "Connect 2–3 sentences to tell what is happening in the story.",
+        "audioHint": "Storytelling mode. Link two or three sentences clearly telling what is unfolding in the picture."
+      },
+      "INFER": {
+        "label": "Inference",
+        "cue": "Why did the character do that? What might happen right before or next?",
+        "audioHint": "Inference mode. Guess why the character acted that way or what might happen next."
+      },
+      "CREATE": {
+        "label": "Creative",
+        "cue": "Imagine fun dialogue or an exciting ending for this scene!",
+        "audioHint": "Creative mode. Invent funny dialogue or a wonderful next part for this picture."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "Opening prompt",
+      "EXPAND": "Expand sentence",
+      "PRAISE": "Warm praise",
+      "NEXT_CHALLENGE": "Next challenge"
+    },
+    "visualHintChips": {
+      "who": "Who or what is there?",
+      "action": "What are they doing?",
+      "where": "Where & what color?"
     }
   },
   "karaokeRuntime": {

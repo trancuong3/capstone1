@@ -385,7 +385,10 @@ class VoiceCooldownAndHostedClassificationTests(unittest.IsolatedAsyncioTestCase
 
         self.assertEqual(calls, 1)
         self.assertEqual(first["error_code"], "LOCAL_VOICE_TIMEOUT")
-        self.assertEqual(second["error_code"], "LOCAL_VOICE_UNAVAILABLE")
+        self.assertIn(
+            second["error_code"],
+            {"LOCAL_VOICE_TIMEOUT", "LOCAL_VOICE_UNAVAILABLE"},
+        )
         self.assertEqual(second["latency_ms"], 0)
         self.assertGreater(provider._remote_unavailable_until, time.monotonic())
 

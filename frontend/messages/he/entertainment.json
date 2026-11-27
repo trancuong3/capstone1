@@ -12,7 +12,52 @@
     "pictureCta": "בחר תמונה",
     "karaokeTitle": "שير יחד עם הילד",
     "karaokeDesc": "בחרו שיר אהוב, האזינו למוזיקה ושירו יחד עם המילים שעל המסך.",
-    "karaokeCta": "פתח את ספריית השירים"
+    "karaokeCta": "פתח את ספריית השירים",
+    "eyebrow": "לימוד וייטנאמית בשמחה בכל יום",
+    "selectChildLabel": "בחר פרופיל ילד",
+    "selectChildAria": "בחר פרופיל ילד לאזור המשחק והלמידה",
+    "childOptionLabel": "{alias} · כיתה {grade}",
+    "calmSound": "צליל רגוע",
+    "soundMuted": "מושתק",
+    "reduceMotion": "הפחתת תנועה",
+    "reducedMotionActive": "הפחתת תנועה פעילה",
+    "onboardingGuideButton": "מדריך משחק",
+    "mascotBadge": "המלצת הינשוף של ViRead",
+    "childProfileBadge": "פרופיל {alias} · כיתה {grade}",
+    "defaultGreeting": "שלום קורא צעיר! מה תרצה היום: סיפור מתמונה, הרכבת משפטים, שירה או משחק זיכרון?",
+    "defaultRecommendationReason": "כל פעילות מתחברת בעדינות לספרים שהילד קורא כדי לזכור מילים לאורך זמן בלי לחץ.",
+    "focusDifficultWordsLabel": "מילים שהילד מתרגל בעדינות:",
+    "playSuggestedCta": "שחק בפעילות המומלצת",
+    "onboardingRegionAria": "מדריך היכרות לאזור המשחק והלמידה",
+    "onboardingCounter": "מדריך מהיר ({current}/{total})",
+    "onboardingStep1Title": "1. בחר את אזור המשחק האהוב",
+    "onboardingStep1Body": "ארבע פינות רגועות: סיפור מתמונה, קולע המשפטים, קריוקי שמח ומה אתה זוכר?",
+    "onboardingStep2Title": "2. שחק בקול או במגע",
+    "onboardingStep2Body": "כפתורים גדולים וברורים הנוחים ללחיצה בטלפון ובטאבלט. אפשר לדבר או לבחור מילים.",
+    "onboardingStep3Title": "3. למידה שמחה ללא לחץ",
+    "onboardingStep3Body": "10–15 דקות בכל מפגש הן זמן נהדר. בלי טיימר מלחיץ — המורה החכמה והינשוף תמיד מעודדים!",
+    "onboardingNext": "הבא",
+    "onboardingDone": "הבנתי!",
+    "onboardingClose": "סגור",
+    "pictureZoneBadge": "עולם הסיפורים",
+    "todaySuggestionBadge": "המלצת היום",
+    "suggestedWordsLabel": "מילים מוצעות:",
+    "shooterZoneBadge": "הרפתקת מילים",
+    "karaokeZoneBadge": "במת המוזיקה",
+    "karaokeChipRhythm": "משוב קצב ומנגינה",
+    "karaokeChipTap": "הקשת קצב מהנה",
+    "karaokeChipSlowPractice": "תרגול קטע ב-0.85x",
+    "memoryZoneBadge": "חוקרי זיכרון",
+    "newBadge": "חדש",
+    "memoryChipObserve": "התבוננות בתמונה",
+    "memoryChipRemember": "זכירת פרטים",
+    "memoryChipStory": "המשך הסיפור",
+    "memoryTitle": "מה אתה זוכר?",
+    "memoryDesc": "התבונן באיורים בווייטנאמית בקצב שלך, זכור צבעים ומיקומים והמצא המשך נהדר לסיפור!",
+    "memoryCta": "התחל משחק זיכרון",
+    "breakReminderTitle": "הפסקת מנוחה לעיניים:",
+    "defaultBreakReminder": "כ-10–15 דקות בכל סשן שומרות על עיניים רעננות ועל למידה טבעית.",
+    "recommendationLoadError": "לא ניתן לטעון המלצות למידה כעת."
   },
   "karaoke": {
     "title": "קריוקי לילדים",
@@ -150,6 +195,62 @@
         "countdownNext": "מתחיל בעוד {seconds} שניות",
         "interludeNext": "קטע מוזיקה · מכין את המשפט הבא",
         "outro": "בואו נשماع את קטע המוזיקה האחרון"
+      },
+      "practiceModeGroupAria": "מצב תרגול שירה",
+      "headphoneRecommendation": "מומלץ להשתמש באוזניות לקבלת הערכת גובה צליל וקצב מדויקת ביותר!",
+      "speakerFilterHint": "בעת שימוש ברמקולים, סינון זליגת הרמקול החכם מופעל.",
+      "speakerBackingOn": "ליווי ברמקול מופעל",
+      "speakerBackingOff": "נגן ליווי ברמקול (מסונן רעשים)",
+      "unsupportedScoringWithRhythmHint": "דפדפן זה תומך בשירה חופשית ובהקשת קצב. לניקוד באמצעות מיקרופון פתח בדפדפן התומך בזיהוי קול.",
+      "micReadyNoticeDsp": "אנא אשר גישה למיקרופון בתחילת השירה. ניתוח הקצב והצליל מתבצע מקומית במכשיר ואינו שומר את הקול.",
+      "rhythmTapButton": "הקש לפי הקצב (מקש רווח)",
+      "rhythmTapFeedback": "{feedback} · רצף: {streak}",
+      "livePitchHz": "גובה קול: {hz} הרץ",
+      "practicingSegment": "מתרגל קטע מאתגר {number}",
+      "practicingRateSuffix": "(מהירות {rate}×)",
+      "tempoSegment": "תרגול קטע · 0.85×",
+      "spaceHintRhythmTap": "לחץ על מקש הרווח לפי הקצב בזמן שהשיר מתנגן.",
+      "practiceModes": {
+        "FULL_SONG": {
+          "label": "כל השיר",
+          "shortLabel": "מלא",
+          "description": "שיר את כל השיר ושמור את שיא הניקוד שלך."
+        },
+        "SEGMENT": {
+          "label": "תרגול קטע מאתגר",
+          "shortLabel": "קטע",
+          "description": "תרגל קטע מאתגר במהירות 0.85x בלי לשנות את שיא השיר המלא."
+        },
+        "LINE_PRACTICE": {
+          "label": "שורה אחר שורה",
+          "shortLabel": "לפי שורה",
+          "description": "בחר כל שורה כדי לתרגל מילים ברורות וקצב יציב."
+        },
+        "RHYTHM_TAP": {
+          "label": "הקשת קצב",
+          "shortLabel": "קצב",
+          "description": "הקש על הכפתור או מקש הרווח לפי הפעימה — תרגול מהנה גם בלי מיקרופון!"
+        }
+      },
+      "musicalSummary": {
+        "ariaLabel": "ניתוח ביצוע מוזיקלי",
+        "unmeasured": "לא נמדד",
+        "points": "{score} נק׳",
+        "statusGreat": "מצוין",
+        "statusGood": "טוב",
+        "statusPractice": "דרוש תרגול",
+        "bestFullSong": "שיא שיר מלא: {score} נק׳",
+        "rhythmLabel": "קצב",
+        "pitchLabel": "מנגינה",
+        "lyricsLabel": "מילים",
+        "fluencyLabel": "שטף",
+        "pitchBasisPrefix": "בסיס הערכת גובה הצליל:",
+        "speakerBleedNote": "זוהתה זליגה קלה מהרמקול אל המיקרופון.",
+        "insufficientHint": "אות הקול אינו מספיק לניקוד הפעם. קרב את המיקרופון או השתמש באוזניות ונסה שוב!",
+        "weakestSegmentTitle": "קטע מומלץ לתרגול · שורה {number}",
+        "retrySegmentSlow": "תרגל קטע זה שוב (0.85x)",
+        "segmentReportSummary": "דוח לפי שורות ({count} שורות)",
+        "segmentLineHeader": "שורה {number} ({start}–{end})"
       }
     },
     "score": {
@@ -173,6 +274,64 @@
       "linePrefix": "משפט {number} · ",
       "lineMatchedRetry": "{matched}/{evaluated} מילים מותאמות · תרגל שוב",
       "lineUnheardRetry": "לא נשמע בברור · תרגל שוב"
+    },
+    "rhythmTap": {
+      "steady": "קצב יציב ונעים!",
+      "early": "קצת מוקדם מדי!",
+      "late": "קצת מאוחר מדי!",
+      "perfect": "בדיוק על הפעימה!",
+      "good": "קרוב מאוד לקצב!",
+      "slightlyFast": "טיפה מהר מדי!",
+      "slightlySlow": "טיפה איטי מדי!"
+    },
+    "musicalScoring": {
+      "modes": {
+        "FULL_MUSICAL": "ניקוד מוזיקלי מלא (קצב · מנגינה · מילים)",
+        "RHYTHM_AND_LYRICS": "ניקוד קצב ומילים",
+        "LYRICS_ONLY": "ניקוד מילים בלבד",
+        "INSUFFICIENT_EVIDENCE": "אות קול לא מספיק",
+        "RHYTHM_TAP": "ניקוד הקשת קצב"
+      },
+      "pitchBasis": {
+        "REFERENCE_MELODY": "בהשוואה למנגינת הייחוס (ללא תלות באוקטבה)",
+        "VOCAL_STEADINESS_AND_CONTOUR": "יציבות צליל וקווי מתאר מלודיים",
+        "UNAVAILABLE": "גובה צליל לא נמדד"
+      },
+      "gate": {
+        "silence": "עדיין לא שמענו את קולך. קרב מעט את המיקרופון או בדוק אותו ונסה שוב!",
+        "noiseOnly": "הסביבה רועשת מעט. עבור למקום שקט יותר או שים אוזניות!",
+        "electricalHum": "יש זמזום חשמלי במיקרופון. בקש מההורים לבדוק את המיקרופון או הכבל!",
+        "bleedHeadphones": "חלק מהצליל חזר למיקרופון. הנמך מעט את עוצמת האוזניות ושיר בבירור!",
+        "bleedSpeaker": "המיקרופון קולט יותר מוזיקה מהרמקול מאשר את קולך. שים אוזניות או התקרב למיקרופון!",
+        "lowCoverage": "שרת רק קטע קצר. שיר עוד כמה שורות כדי שנוכל לנקד את כל הביצוע!",
+        "okHeadphones": "מצב אוזניות עוזר למיקרופון לקלוט את קולך בצורה חדה וברורה!",
+        "okSpeaker": "טיפ: שימוש באוזניות עוזר למיקרופון לשמוע בצורה הכי מדויקת את המנגינה והקצב!"
+      },
+      "encouragement": {
+        "insufficient": "אין מספיק אות קול לניקוד הפעם. נסה לשיר ברור יותר קרוב למיקרופון!",
+        "high": "נהדר! שרת בקצב, בבירור ועם המון רגש!",
+        "good": "כל הכבוד! הקצב והמנגינה שלך טובים מאוד!",
+        "medium": "נחמד מאוד! נסה לתרגל את הקטע המאתגר במהירות 0.85x!",
+        "low": "המשך כך! נתרגל יחד שורה אחר שורה בקצב איטי!"
+      },
+      "lineTips": {
+        "unclear": "השורה הזו לא נשמעה ברור עדיין — נסה לתרגל אותה לאט ב-0.85x!",
+        "great": "מעולה! שרת את השורה הזו בביטחון ובקצב מדויק!",
+        "rhythmLate": "נכנסת מעט באיחור בשורה הזו — הקשב למוזיקה והתחל רגע מוקדם יותר!",
+        "rhythmFast": "שרת מעט מהר מהקצב — עקוב בנחת אחר המילים המודגשות!",
+        "rhythmSteady": "נסה הקשת קצב או 0.85x בשורה זו כדי לייצב את הקצב!",
+        "pitch": "הקשב היטב למנגינה של שורה זו והחזק את הצלילים באופן אחיד!",
+        "lyrics": "קרא את השורה לאט פעם אחת ואז שיר כל הברה בבירור!",
+        "practiceMore": "יפה מאוד! תרגול אחד נוסף ב-0.85x ישפר את זה עוד יותר!",
+        "insufficientLine": "לא שמענו בבירור את השורה הזו — התקרב מעט למיקרופון!"
+      },
+      "rhythmTap": {
+        "insufficientGuidance": "לחץ על כפתור הקצב (או מקש רווח) לפי ההברות שעל המסך!",
+        "insufficientTip": "נסה להקיש בקצב אחיד יחד עם השורה הזו!",
+        "okGuidance": "מצב הקשת קצב עוזר להרגיש את קצב השיר לפני השירה במיקרופון!"
+      },
+      "lyricsOnlyFallbackGuidance": "ניתוח Web Audio לא היה פעיל במכשיר זה, ולכן הפעם נוקדו המילים בלבד.",
+      "mildSpeakerBleedGuidance": "חלק קל מהצליל מהרמקול נכנס למיקרופון. אוזניות יהפכו את הניקוד למדויק עוד יותר!"
     }
   },
   "pictureDescription": {
@@ -315,6 +474,70 @@
       "step2Detail": "תאר את הפעילות והסביבה.",
       "step3Title": "מה לגבי צבעים ותחושות?",
       "step3Detail": "הוסף פרטים על צבעים, מזג אוויר או איך אתה מרגיש."
+    },
+    "aiTimeoutError": "המורה החכמה מגיבה לאט מהרגיל. לחץ על נסה שוב.",
+    "micPausedBackground": "האפליקציה עברה לרקע ולכן המיקרופון הושהה בבטחה. הטיוטה שלך עדיין שמורה!",
+    "waitingTtsCooldown": "ממתין לסיום ההקראה לפני פתיחת המיקרופון...",
+    "offlineNotice": "המכשיר לא מחובר לאינטרנט. הסיפור שלך שמור בבטחה — לחץ על ניסיון הערכה מחדש כשהחיבור יחזור!",
+    "gradeHintChipsLowerTitle": "רמזים חזותיים לסיפור (כיתות א׳–ב׳)",
+    "collapseGradeHints": "כווץ רמזי מבנה סיפור",
+    "expandGradeHints": "הצג רמזי מבנה סיפור",
+    "listenGuideButton": "שמע הדרכה",
+    "gradeHintsCollapsedNote": "רמזי המבנה מוסתרים בכיתה {grade} כדי לעודד ביטוי חופשי — אפשר לפתוח בכל עת!",
+    "teachingModeSectionAria": "מצבי תרגול עם המורה החכמה",
+    "teachingModeHeading": "מצב למידה עם המורה החכמה",
+    "listenModeButton": "שמע הסבר מצב",
+    "teachingModeGroupAria": "בחר מצב תרגול סיפור",
+    "targetWordsProgress": "מילות מטרה שתורגלו ({used}/{total})",
+    "followUpSectionAria": "שאלת ההמשך הבאה של המורה",
+    "practiceFollowUpTitle": "שאלת ההמשך של המורה",
+    "listenQuestionButton": "שמע שאלה",
+    "resultModeBadge": "מצב: {mode}",
+    "usedTargetWordsTitle": "מילות מטרה שהילד השתמש בהן היטב",
+    "resultFollowUpTitle": "שאלת ההמשך המאתגרת של המורה",
+    "answerFollowUpButton": "ענה על שאלה זו",
+    "teachingModes": {
+      "OBSERVE": {
+        "label": "התבוננות",
+        "cue": "התבונן היטב בתמונה: את מי או מה רואים, ואילו צבעים בולטים?",
+        "audioHint": "מצב התבוננות. הסתכל היטב בתמונה וציין את האנשים, החיות או החפצים הבולטים."
+      },
+      "VOCABULARY": {
+        "label": "אוצר מילים",
+        "cue": "נסה לשלב במשפט שלך 1–2 מילים מוצעות או מילות מטרה מלמעלה.",
+        "audioHint": "מצב אוצר מילים. בחר מילה אחת או שתיים מההצעות למעלה ושלב אותן בתיאור."
+      },
+      "SENTENCE": {
+        "label": "הרכבת משפט",
+        "cue": "חבר מי + מה עושה + היכן למשפט אחד שלם.",
+        "audioHint": "מצב משפט. אמור משפט שלם המתאר מי עושה מה והיכן."
+      },
+      "STORY": {
+        "label": "סיפור סיפור",
+        "cue": "חבר 2–3 משפטים כדי לספר מה קורה בסיפור.",
+        "audioHint": "מצב סיפור. קשר שניים עד שלושה משפטים כדי לספר בבירור מה מתרחש בתמונה."
+      },
+      "INFER": {
+        "label": "הסקה",
+        "cue": "למה הדמות עושה זאת? מה עלול לקרות מיד לפני או אחרי?",
+        "audioHint": "מצב הסקה. נחש מדוע הדמות מתנהגת כך או מה עומד לקרות."
+      },
+      "CREATE": {
+        "label": "יצירתיות",
+        "cue": "המצא דיאלוג משעשע או סיום מרתק לתמונה הזו!",
+        "audioHint": "מצב יצירתיות. המצא דיאלוג משעשע או המשך נפלא לתמונה."
+      }
+    },
+    "scaffoldingSteps": {
+      "PROMPT": "רמז פתיחה",
+      "EXPAND": "הרחבת משפט",
+      "PRAISE": "שבח ועידוד",
+      "NEXT_CHALLENGE": "האתגר הבא"
+    },
+    "visualHintChips": {
+      "who": "מי או איזו חיה יש?",
+      "action": "מה עושים בתמונה?",
+      "where": "היכן ובאיזה צבע?"
     }
   },
   "karaokeRuntime": {

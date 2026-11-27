@@ -75,7 +75,8 @@ async def shoot_word(
         session_id,
         payload.round_id,
         payload.token_id,
-        payload.request_id,
+        payload.effective_request_id,
+        client_shot_id=payload.client_shot_id,
     )
 
 

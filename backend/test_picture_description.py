@@ -36,11 +36,16 @@ from app.services.picture_description_ai import (
     GeminiPictureDescriptionAI,
     PictureAiError,
     PictureDescriptionAiConfig,
+    PictureSafetyError,
+    TEACHING_MODE_SPECS,
     _compute_stars,
     _evaluation_schema,
+    _fallback_evaluate_attempt,
     _guide_schema,
+    detect_used_target_words,
     evaluate_description_with_guide_fallback,
     get_picture_ai_config,
+    resolve_provider_tier,
 )
 from app.services.picture_description_service import (
     PictureDescriptionService,
@@ -782,8 +787,8 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         import os
         from unittest.mock import patch
 
-        self.assertEqual(DEFAULT_PRIMARY_MODEL, "gemini-3.1-flash-lite")
-        self.assertEqual(DEFAULT_FALLBACK_MODEL, "gemini-3.5-flash-lite")
+        self.assertEqual(DEFAULT_PRIMARY_MODEL, "gemini-3.5-flash-lite")
+        self.assertEqual(DEFAULT_FALLBACK_MODEL, "gemini-3.1-flash-lite")
         self.assertEqual(DEFAULT_TIMEOUT_SECONDS, 15)
         self.assertEqual(_guide_schema()["type"], "object")
         self.assertEqual(_evaluation_schema()["type"], "object")
@@ -797,18 +802,32 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
                 "PICTURE_DESC_GEMINI_FALLBACK_MODEL": "",
                 "GEMINI_OCR_PRIMARY_MODEL": "",
                 "GEMINI_OCR_FALLBACK_MODEL": "",
+                "PICTURE_DESC_GROQ_MODEL": "",
+                "GROQ_OCR_MODEL": "",
             },
             clear=False,
         ):
             get_picture_ai_config.cache_clear()
             cfg = get_picture_ai_config()
-            self.assertEqual(cfg.primary_model, "gemini-3.1-flash-lite")
-            self.assertEqual(cfg.fallback_model, "gemini-3.5-flash-lite")
+            self.assertEqual(cfg.primary_model, "gemini-3.5-flash-lite")
+            self.assertEqual(cfg.fallback_model, "gemini-3.1-flash-lite")
+            self.assertEqual(cfg.groq_model, "qwen/qwen3.8-27b")
             self.assertEqual(cfg.groq_api_key, "groq-key-1")
 
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "g-key-2"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "g-key-2",
+                "PICTURE_DESC_GEMINI_MODEL": "gemini-3.1-flash-lite",
+                "PICTURE_DESC_GEMINI_FALLBACK_MODEL": "",
+                "GEMINI_OCR_FALLBACK_MODEL": "",
+            },
+            clear=False,
+        ):
             cfg2 = get_picture_ai_config()
             self.assertEqual(cfg2.api_key, "g-key-2")
+            self.assertEqual(cfg2.primary_model, "gemini-3.1-flash-lite")
+            self.assertEqual(cfg2.fallback_model, "gemini-3.5-flash-lite")
 
     async def test_analyze_picture_falls_back_to_groq_when_gemini_times_out(self):
         endpoints_hit: list[str] = []
@@ -854,6 +873,268 @@ class TestGeminiPictureDescriptionAI(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(endpoints_hit), 3)
         self.assertIn("groq.com", endpoints_hit[-1])
 
+    async def test_default_config_disables_hedged_gemini_and_uses_strict_sequential_order(self):
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "g-key-seq",
+                "GROQ_API_KEY": "groq-key-seq",
+                "PICTURE_DESC_HEDGED_GEMINI": "",
+            },
+            clear=False,
+        ):
+            cfg = get_picture_ai_config()
+            self.assertFalse(cfg.hedged_gemini)
+            self.assertEqual(cfg.transient_retries, 0)
+
+        with patch.dict(os.environ, {"PICTURE_DESC_HEDGED_GEMINI": "true"}, clear=False):
+            self.assertTrue(get_picture_ai_config().hedged_gemini)
+
+        # Even if primary takes slightly longer than hedge stagger, strict sequential mode
+        # MUST NOT fire a duplicate parallel Gemini request!
+        calls: list[str] = []
+
+        async def slow_primary(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            await asyncio.sleep(0.08)
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            _evaluation_json_payload(score_out_of_10=9),
+                                            ensure_ascii=False,
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="g-key-seq",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                hedged_gemini=False,
+                hedge_stagger_seconds=0.02,
+                ollama_enabled=False,
+            ),
+            transport=httpx.MockTransport(slow_primary),
+        )
+        feedback, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=2,
+            scene_title="Khu vườn đầy nắng",
+            guiding_questions=["Trong tranh có ai?"],
+            child_transcript="Chú mèo cam đang ngủ ngon trên ghế gỗ giữa vườn hoa.",
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(model_used, "gemini-3.1-flash-lite")
+        self.assertEqual(feedback.provider_tier, "GEMINI_PRIMARY")
+
+    async def test_evaluate_strict_sequential_fallback_to_groq_text_guided_then_ollama(self):
+        hit_order: list[str] = []
+        groq_request_body: dict = {}
+
+        def handler_groq_win(request: httpx.Request) -> httpx.Response:
+            nonlocal groq_request_body
+            url = str(request.url)
+            if "gemini-3.1-flash-lite" in url:
+                hit_order.append("gemini_primary")
+                return httpx.Response(429, json={"error": {"message": "quota exhausted"}})
+            if "gemini-3.5-flash-lite" in url:
+                hit_order.append("gemini_fallback")
+                return httpx.Response(503, json={"error": {"message": "overloaded"}})
+            if "api.groq.com" in url:
+                hit_order.append("groq_free")
+                groq_request_body = json.loads(request.content.decode("utf-8"))
+                return httpx.Response(
+                    200,
+                    json={
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": json.dumps(
+                                        _evaluation_json_payload(
+                                            score_out_of_10=8,
+                                            scaffolding_step="EXPAND",
+                                            next_prompt_question="Bé kể thêm về màu hoa hướng dương nhé?",
+                                        ),
+                                        ensure_ascii=False,
+                                    )
+                                }
+                            }
+                        ]
+                    },
+                )
+            hit_order.append("ollama")
+            return httpx.Response(500)
+
+        ai = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="gemini-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                extra_models=(),
+                hedged_gemini=False,
+                groq_api_key="groq-free-key",
+                groq_model="qwen/qwen3.8-27b",
+                ollama_enabled=True,
+                ollama_base_url="http://127.0.0.1:11434",
+            ),
+            transport=httpx.MockTransport(handler_groq_win),
+        )
+        fb, model_used = await ai.evaluate_description(
+            image_bytes=_sample_png_bytes(),
+            mime_type="image/png",
+            child_grade=3,
+            scene_title="Khu vườn đầy nắng",
+            scene_summary="Chú mèo cam đang cuộn tròn ngủ trên ghế gỗ giữa vườn hoa hướng dương.",
+            suggested_vocabulary=[
+                PictureVocabItem(word="mèo cam", hint="Chú mèo lông vàng cam"),
+                PictureVocabItem(word="hướng dương", hint="Loài hoa màu vàng tươi"),
+            ],
+            guiding_questions=["Trong tranh có con vật nào?"],
+            child_transcript="Trong vườn nắng có chú mèo cam đang ngủ ngon trên ghế gỗ cạnh hoa hướng dương.",
+            teaching_mode="VOCABULARY",
+            target_words=["hướng dương", "cuộn tròn"],
+        )
+        self.assertEqual(hit_order, ["gemini_primary", "gemini_fallback", "groq_free"])
+        self.assertEqual(model_used, "groq:qwen/qwen3.8-27b")
+        self.assertEqual(fb.provider_tier, "GROQ_FREE")
+        self.assertEqual(fb.teaching_mode, "VOCABULARY")
+        self.assertEqual(fb.scaffolding_step, "EXPAND")
+        self.assertEqual(fb.used_target_words, ["hướng dương"])
+        self.assertTrue(fb.next_prompt_question)
+        # Groq evaluation uses verified text-only scene guide (zero base64 image payload).
+        self.assertIsInstance(groq_request_body["messages"][1]["content"], str)
+        self.assertIn("Mô tả chuẩn của bức tranh", groq_request_body["messages"][1]["content"])
+
+    async def test_unsafe_picture_never_bypasses_to_lower_tiers_including_prompt_feedback(self):
+        # Case 1: Primary Gemini returns is_child_safe=False -> MUST stop at call #1 (never fall through).
+        hits_case_1: list[str] = []
+
+        def handler_unsafe_json(request: httpx.Request) -> httpx.Response:
+            hits_case_1.append(str(request.url))
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "text": json.dumps(
+                                            _guide_json_payload(
+                                                is_child_safe=False,
+                                                safety_reason="violent scene",
+                                            ),
+                                            ensure_ascii=False,
+                                        )
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        ai_1 = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="gemini-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                groq_api_key="groq-key",
+                ollama_enabled=True,
+            ),
+            transport=httpx.MockTransport(handler_unsafe_json),
+        )
+        with self.assertRaises(PictureSafetyError) as ctx_1:
+            await ai_1.analyze_picture(
+                image_bytes=_sample_png_bytes(),
+                mime_type="image/png",
+                child_grade=2,
+            )
+        self.assertEqual(ctx_1.exception.detail, "UNSAFE_PICTURE")
+        self.assertEqual(ctx_1.exception.status_code, 422)
+        self.assertEqual(len(hits_case_1), 1)
+
+        # Case 2: Gemini promptFeedback blockReason=SAFETY -> MUST raise PictureSafetyError immediately!
+        hits_case_2: list[str] = []
+
+        def handler_prompt_safety(request: httpx.Request) -> httpx.Response:
+            hits_case_2.append(str(request.url))
+            return httpx.Response(
+                200,
+                json={"promptFeedback": {"blockReason": "SAFETY"}},
+            )
+
+        ai_2 = GeminiPictureDescriptionAI(
+            config=PictureDescriptionAiConfig(
+                api_key="gemini-key",
+                primary_model="gemini-3.1-flash-lite",
+                fallback_model="gemini-3.5-flash-lite",
+                groq_api_key="groq-key",
+                ollama_enabled=True,
+            ),
+            transport=httpx.MockTransport(handler_prompt_safety),
+        )
+        with self.assertRaises(PictureSafetyError) as ctx_2:
+            await ai_2.analyze_picture(
+                image_bytes=_sample_png_bytes(),
+                mime_type="image/png",
+                child_grade=2,
+            )
+        self.assertEqual(ctx_2.exception.detail, "UNSAFE_PICTURE")
+        self.assertEqual(len(hits_case_2), 1)
+
+    def test_all_six_teaching_modes_peer_crowd_and_target_words_detection(self):
+        guide = PictureGuideRead.model_validate(_guide_json_payload())
+        self.assertIs(_fallback_evaluate_attempt, evaluate_description_with_guide_fallback)
+        self.assertEqual(
+            detect_used_target_words(
+                "Chú mèo cam nằm cuộn tròn cạnh bông hoa hướng dương rực rỡ.",
+                ["nằm cuộn tròn", "hướng dương", "bình tưới"],
+            ),
+            ["nằm cuộn tròn", "hướng dương"],
+        )
+        self.assertEqual(resolve_provider_tier("curated-sample-v4"), "CURATED")
+        self.assertEqual(resolve_provider_tier("guide-fallback"), "DETERMINISTIC_FALLBACK")
+        self.assertEqual(resolve_provider_tier("groq:qwen/qwen3.8-27b"), "GROQ_FREE")
+        self.assertEqual(resolve_provider_tier("ollama:qwen3-vl:4b"), "LOCAL_OLLAMA")
+
+        all_modes = ("OBSERVE", "VOCABULARY", "SENTENCE", "STORY", "INFER", "CREATE")
+        for mode in all_modes:
+            for grade in (1, 4):
+                fb, model_tag = evaluate_description_with_guide_fallback(
+                    guide=guide,
+                    child_grade=grade,
+                    child_transcript=(
+                        "Trong khu vườn nắng ấm, chú mèo cam đang nằm cuộn tròn ngủ ngon "
+                        "trên ghế gỗ vì trời rất dễ chịu bên hoa hướng dương."
+                    ),
+                    teaching_mode=mode,
+                    target_words=["hướng dương", "nắng ấm", "bình tưới nước"],
+                )
+                self.assertEqual(model_tag, "guide-fallback")
+                self.assertEqual(fb.teaching_mode, mode)
+                self.assertEqual(fb.provider_tier, "DETERMINISTIC_FALLBACK")
+                self.assertIn(fb.scaffolding_step, {"PRAISE", "EXPAND", "PROMPT", "NEXT_CHALLENGE"})
+                self.assertTrue(fb.next_prompt_question and len(fb.next_prompt_question) >= 12)
+                self.assertEqual(fb.used_target_words, ["hướng dương", "nắng ấm"])
+                self.assertIn(mode, TEACHING_MODE_SPECS)
+
 
 class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
     def _make_repo_mock(self, *, role: str = "parent", grade: int = 2) -> MagicMock:
@@ -894,7 +1175,7 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
             await service_parent.get_catalog(uuid4(), uuid4())
         self.assertEqual(not_found_ctx.exception.status_code, 404)
 
-    async def test_create_sample_session_releases_db_before_ai_and_saves(self):
+    async def test_create_sample_session_uses_curated_guide_with_zero_cloud_calls_and_supports_refresh(self):
         parent_id = uuid4()
         child_id = uuid4()
         repo = MagicMock(spec=PictureDescriptionRepository)
@@ -904,7 +1185,10 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
             return_value=ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)
         )
 
-        sample_file = Path("app/assets/picture_description/sunny-garden.jpg")
+        sample_file = (
+            Path(__file__).resolve().parent
+            / "app/assets/picture_description/sunny-garden.jpg"
+        )
         self.assertTrue(sample_file.is_file(), "Sample asset must exist on disk")
 
         guide = PictureGuideRead(
@@ -919,16 +1203,18 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
         )
 
         call_order: list[str] = []
+        saved_ai_models: list[str | None] = []
 
         async def track_rollback():
             call_order.append("rollback")
 
         async def fake_analyze(**_kwargs):
             call_order.append("ai_analyze")
-            return guide, "gemini-2.5-flash"
+            return guide, DEFAULT_PRIMARY_MODEL
 
         async def fake_create(orm_session):
             call_order.append("db_create")
+            saved_ai_models.append(orm_session.AiModelUsed)
             now = datetime.now(timezone.utc)
             return SessionProjection(
                 Id=orm_session.Id,
@@ -941,13 +1227,13 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
                 ImagePath=orm_session.ImagePath,
                 ImageMimeType="image/jpeg",
                 ChildGrade=2,
-                SceneTitle=guide.scene_title,
-                PromptPayload=guide.model_dump(mode="json"),
+                SceneTitle=orm_session.SceneTitle,
+                PromptPayload=orm_session.PromptPayload,
                 Status="ACTIVE",
                 BestStars=0,
                 BestScore=0,
                 AttemptsCount=0,
-                AiModelUsed="gemini-2.5-flash",
+                AiModelUsed=orm_session.AiModelUsed,
                 CreatedAt=now,
                 UpdatedAt=now,
             )
@@ -959,17 +1245,38 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
         ai_mock.analyze_picture = AsyncMock(side_effect=fake_analyze)
 
         service = PictureDescriptionService(repo, ai_client=ai_mock)
+        # Default SAMPLE open: ZERO outbound cloud vision call!
         result = await service.create_session(
             parent_id,
             child_id=child_id,
             source_type="SAMPLE",
             sample_key="sunny-garden",
+            teaching_mode="STORY",
+            target_words=["hướng dương"],
         )
 
-        self.assertEqual(call_order, ["rollback", "ai_analyze", "db_create"])
+        self.assertEqual(ai_mock.analyze_picture.await_count, 0)
+        self.assertEqual(call_order, ["rollback", "db_create"])
+        self.assertEqual(saved_ai_models[-1], "curated-sample-v4")
+        self.assertEqual(result.provider_tier, "CURATED")
+        self.assertEqual(result.teaching_mode, "STORY")
+        self.assertEqual(result.target_words, ["hướng dương"])
         self.assertEqual(result.image_url, "/images/picture-description/sunny-garden.jpg")
         self.assertEqual(result.scene_title, "Khu vườn đầy nắng")
         self.assertEqual(result.status, "ACTIVE")
+
+        # Explicit refresh_ai_guide=True releases DB before calling AI vision.
+        call_order.clear()
+        refreshed = await service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type="SAMPLE",
+            sample_key="sunny-garden",
+            refresh_ai_guide=True,
+        )
+        self.assertEqual(ai_mock.analyze_picture.await_count, 1)
+        self.assertEqual(call_order, ["rollback", "ai_analyze", "db_create"])
+        self.assertEqual(refreshed.provider_tier, "GEMINI_PRIMARY")
 
     async def test_custom_upload_cleans_up_storage_object_when_db_save_fails(self):
         parent_id = uuid4()
@@ -1291,6 +1598,278 @@ class TestPictureDescriptionService(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(auth_ctx.exception.detail, "AI_AUTH_FAILED")
 
+    async def test_custom_upload_blocks_unsafe_picture_and_falls_back_gracefully_on_cloud_outage(self):
+        parent_id = uuid4()
+        child_id = uuid4()
+        now = datetime.now(timezone.utc)
+        repo = self._make_repo_mock(role="parent", grade=3)
+
+        uploaded: list[str] = []
+        ai_mock = MagicMock(spec=GeminiPictureDescriptionAI)
+        ai_mock.analyze_picture = AsyncMock(
+            side_effect=PictureSafetyError(safety_reason="unsafe")
+        )
+
+        service = PictureDescriptionService(
+            repo,
+            ai_client=ai_mock,
+            upload_fn=lambda path, _bytes, _mime, upsert=False: uploaded.append(path),
+        )
+        # Unsafe image MUST block with 422 UNSAFE_PICTURE and NEVER upload or fall back!
+        with self.assertRaises(HTTPException) as unsafe_ctx:
+            await service.create_session(
+                parent_id,
+                child_id=child_id,
+                source_type="CUSTOM_UPLOAD",
+                upload_bytes=_sample_png_bytes(320, 240),
+            )
+        self.assertEqual(unsafe_ctx.exception.status_code, 422)
+        self.assertEqual(unsafe_ctx.exception.detail, "UNSAFE_PICTURE")
+        self.assertEqual(uploaded, [])
+
+        # Transient cloud outage on CUSTOM_UPLOAD MUST fail closed (never upload unscreened photo!).
+        ai_mock.analyze_picture = AsyncMock(
+            side_effect=PictureAiError(
+                code="AI_UNAVAILABLE",
+                status_code=503,
+                detail="AI_UNAVAILABLE",
+                retryable=True,
+            )
+        )
+
+        service_fail_closed = PictureDescriptionService(
+            repo,
+            ai_client=ai_mock,
+            upload_fn=lambda path, _bytes, _mime, upsert=False: uploaded.append(path),
+            sign_url_fn=lambda path: f"https://signed.example/{path}",
+        )
+        with self.assertRaises(HTTPException) as unavailable_ctx:
+            await service_fail_closed.create_session(
+                parent_id,
+                child_id=child_id,
+                source_type="CUSTOM_UPLOAD",
+                upload_bytes=_sample_png_bytes(320, 240),
+                teaching_mode="INFER",
+                target_words=["rực rỡ"],
+            )
+        self.assertEqual(unavailable_ctx.exception.status_code, 503)
+        self.assertEqual(unavailable_ctx.exception.detail, "AI_UNAVAILABLE")
+        self.assertEqual(uploaded, [])
+
+        # Pre-verified BOOK_PAGE falls back gracefully to deterministic guide during transient outage.
+        from types import SimpleNamespace
+
+        book_id = uuid4()
+        page_id = uuid4()
+        repo.get_book_page_for_grade = AsyncMock(
+            return_value=SimpleNamespace(
+                BookId=book_id,
+                PageId=page_id,
+                BookTitle="Sách mẫu",
+                PageNumber=1,
+                ImagePath="books/sample/page1.png",
+            )
+        )
+
+        async def fake_create(orm_session):
+            return SessionProjection(
+                Id=orm_session.Id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=book_id,
+                BookPageId=page_id,
+                SourceType="BOOK_PAGE",
+                SampleKey=None,
+                ImagePath=orm_session.ImagePath,
+                ImageMimeType="image/png",
+                ChildGrade=3,
+                SceneTitle=orm_session.SceneTitle,
+                PromptPayload=orm_session.PromptPayload,
+                Status="ACTIVE",
+                BestStars=0,
+                BestScore=0,
+                AttemptsCount=0,
+                AiModelUsed=orm_session.AiModelUsed,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+
+        repo.create_session = AsyncMock(side_effect=fake_create)
+        service_fallback = PictureDescriptionService(
+            repo,
+            ai_client=ai_mock,
+            download_fn=lambda _path: _sample_png_bytes(320, 240),
+            upload_fn=lambda path, _bytes, _mime, upsert=False: uploaded.append(path),
+            sign_url_fn=lambda path: f"https://signed.example/{path}",
+        )
+        created = await service_fallback.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type="BOOK_PAGE",
+            book_page_id=page_id,
+            teaching_mode="INFER",
+            target_words=["rực rỡ"],
+        )
+        self.assertEqual(created.provider_tier, "DETERMINISTIC_FALLBACK")
+        self.assertEqual(created.teaching_mode, "INFER")
+        self.assertEqual(created.target_words, ["rực rỡ"])
+        self.assertEqual(uploaded, [])
+
+    async def test_evaluate_records_learning_skill_evidence_and_skips_unmigrated_table_gracefully(self):
+        parent_id = uuid4()
+        child_id = uuid4()
+        session_id = uuid4()
+        now = datetime.now(timezone.utc)
+        guide = PictureGuideRead.model_validate(_guide_json_payload())
+
+        mode_to_expected_skill = {
+            "OBSERVE": "visual_observation",
+            "VOCABULARY": "vocabulary_naming",
+            "SENTENCE": "descriptive_speaking",
+            "STORY": "story_creativity",
+            "INFER": "inferential_thinking",
+            "CREATE": "story_creativity",
+        }
+
+        for mode, expected_skill in mode_to_expected_skill.items():
+            repo = self._make_repo_mock(role="parent", grade=4)
+            stored = SessionProjection(
+                Id=session_id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=None,
+                BookPageId=None,
+                SourceType="SAMPLE",
+                SampleKey="sunny-garden",
+                ImagePath="sample://sunny-garden.jpg",
+                ImageMimeType="image/jpeg",
+                ChildGrade=4,
+                SceneTitle=guide.scene_title,
+                PromptPayload=guide.model_dump(mode="json"),
+                Status="ACTIVE",
+                BestStars=0,
+                BestScore=0,
+                AttemptsCount=0,
+                AiModelUsed="curated-sample-v4",
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+            repo.get_owned_session_projection = AsyncMock(return_value=stored)
+
+            async def fake_save(**kwargs):
+                att = kwargs["attempt"]
+                att_proj = AttemptProjection(
+                    Id=att.Id,
+                    SessionId=session_id,
+                    AttemptNumber=1,
+                    InputMode=att.InputMode,
+                    TranscriptText=att.TranscriptText,
+                    ScoreOutOf10=att.ScoreOutOf10,
+                    Stars=att.Stars,
+                    FeedbackPayload=att.FeedbackPayload,
+                    AiModelUsed=att.AiModelUsed,
+                    CreatedAt=now,
+                )
+                repo.list_attempts = AsyncMock(return_value=[att_proj])
+                return stored, att_proj
+
+            repo.save_attempt_and_update_session = AsyncMock(side_effect=fake_save)
+            ai_mock = MagicMock(spec=GeminiPictureDescriptionAI)
+            ai_mock.evaluate_description = AsyncMock(
+                side_effect=PictureAiError(
+                    code="AI_RATE_LIMITED",
+                    status_code=429,
+                    detail="AI_RATE_LIMITED",
+                    retryable=True,
+                )
+            )
+
+            service = PictureDescriptionService(repo, ai_client=ai_mock)
+            resp = await service.evaluate_attempt(
+                parent_id,
+                session_id,
+                PictureEvaluateRequest(
+                    transcript_text="Trong khu vườn nắng ấm chú mèo cam đang nằm cuộn tròn cạnh hoa hướng dương.",
+                    input_mode="TEXT",
+                    teaching_mode=mode,  # type: ignore[arg-type]
+                    target_words=["hướng dương"],
+                ),
+            )
+            self.assertEqual(resp.latest_attempt.feedback.teaching_mode, mode)
+            self.assertEqual(resp.latest_attempt.feedback.used_target_words, ["hướng dương"])
+            self.assertEqual(repo.db.execute.await_count, 1)
+            inserted_rows = repo.db.execute.await_args.args[1]
+            inserted_skills = [row["SkillKey"] for row in inserted_rows]
+            self.assertIn(expected_skill, inserted_skills)
+
+        # Simulate unmigrated DB (table does not exist) -> MUST NOT fail evaluate_attempt!
+        repo_unmigrated = self._make_repo_mock(role="parent", grade=2)
+        repo_unmigrated.db.execute = AsyncMock(
+            side_effect=RuntimeError('relation "learning_skill_evidence" does not exist')
+        )
+        stored = SessionProjection(
+            Id=session_id,
+            ChildProfileId=child_id,
+            ParentId=parent_id,
+            BookId=None,
+            BookPageId=None,
+            SourceType="SAMPLE",
+            SampleKey="sunny-garden",
+            ImagePath="sample://sunny-garden.jpg",
+            ImageMimeType="image/jpeg",
+            ChildGrade=2,
+            SceneTitle=guide.scene_title,
+            PromptPayload=guide.model_dump(mode="json"),
+            Status="ACTIVE",
+            BestStars=0,
+            BestScore=0,
+            AttemptsCount=0,
+            AiModelUsed="curated-sample-v4",
+            CreatedAt=now,
+            UpdatedAt=now,
+        )
+        repo_unmigrated.get_owned_session_projection = AsyncMock(return_value=stored)
+
+        async def fake_save_unmigrated(**kwargs):
+            att = kwargs["attempt"]
+            att_proj = AttemptProjection(
+                Id=att.Id,
+                SessionId=session_id,
+                AttemptNumber=1,
+                InputMode=att.InputMode,
+                TranscriptText=att.TranscriptText,
+                ScoreOutOf10=att.ScoreOutOf10,
+                Stars=att.Stars,
+                FeedbackPayload=att.FeedbackPayload,
+                AiModelUsed=att.AiModelUsed,
+                CreatedAt=now,
+            )
+            repo_unmigrated.list_attempts = AsyncMock(return_value=[att_proj])
+            return stored, att_proj
+
+        repo_unmigrated.save_attempt_and_update_session = AsyncMock(
+            side_effect=fake_save_unmigrated
+        )
+        ai_mock_2 = MagicMock(spec=GeminiPictureDescriptionAI)
+        ai_mock_2.evaluate_description = AsyncMock(
+            side_effect=PictureAiError(
+                code="AI_TIMEOUT",
+                status_code=504,
+                detail="AI_TIMEOUT",
+                retryable=True,
+            )
+        )
+        service_unmigrated = PictureDescriptionService(repo_unmigrated, ai_client=ai_mock_2)
+        resp_ok = await service_unmigrated.evaluate_attempt(
+            parent_id,
+            session_id,
+            PictureEvaluateRequest(
+                transcript_text="Chú mèo cam nằm ngủ trong khu vườn đầy nắng.",
+                input_mode="TEXT",
+            ),
+        )
+        self.assertGreaterEqual(resp_ok.latest_attempt.score_out_of_10, 5)
+
 
 class TestPictureDescriptionRoutes(unittest.TestCase):
     def test_routes_reject_blank_transcript_and_oversized_upload(self):
@@ -1315,3 +1894,14 @@ class TestPictureDescriptionRoutes(unittest.TestCase):
         )
         self.assertEqual(oversized_resp.status_code, 422)
         self.assertEqual(oversized_resp.json()["detail"], "INVALID_IMAGE")
+
+    def test_route_target_words_form_parser_handles_json_and_csv(self):
+        self.assertEqual(
+            picture_route._parse_target_words_form('["hướng dương", "nắng ấm", "hướng dương"]'),
+            ["hướng dương", "nắng ấm"],
+        )
+        self.assertEqual(
+            picture_route._parse_target_words_form("mèo cam, ghế gỗ,  "),
+            ["mèo cam", "ghế gỗ"],
+        )
+        self.assertEqual(picture_route._parse_target_words_form(None), [])

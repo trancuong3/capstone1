@@ -68,3 +68,12 @@
     visibility: hidden;
   }
 }
+.unit[data-reduced-motion="true"].highlight.active {
+  transform: none;
+}
+.unit[data-reduced-motion="true"] .fill {
+  clip-path: none;
+}
+.unit[data-reduced-motion="true"][data-state="upcoming"] .fill {
+  visibility: hidden;
+}

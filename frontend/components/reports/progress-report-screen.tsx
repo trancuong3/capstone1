@@ -7,6 +7,7 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
   type MetricCardDelta,
@@ -860,6 +861,18 @@ function ProgressReportContent({
         childName={child.alias}
         showReadingAssessment={!report?.assessment}
       />
+
+      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
+        <summary className="cursor-pointer font-bold text-primary">
+          {t("overview.entertainmentSummaryHeading")}
+        </summary>
+        <div className="mt-4">
+          <EntertainmentLearningSummary
+            childId={child.id}
+            childName={child.alias}
+          />
+        </div>
+      </details>
     </section>
   );
 }

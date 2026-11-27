@@ -2,6 +2,17 @@ export type PictureSourceType = "BOOK_PAGE" | "CUSTOM_UPLOAD" | "SAMPLE";
 export type PictureSessionStatus = "ACTIVE" | "COMPLETED";
 export type PictureInputMode = "VOICE" | "TEXT";
 export type PictureEvaluationSource = "AI" | "FALLBACK";
+export type PictureTeachingMode =
+  "OBSERVE" | "VOCABULARY" | "SENTENCE" | "STORY" | "INFER" | "CREATE";
+export type PictureScaffoldingStep =
+  "PRAISE" | "EXPAND" | "PROMPT" | "NEXT_CHALLENGE";
+export type PictureProviderTier =
+  | "CURATED"
+  | "GEMINI_PRIMARY"
+  | "GEMINI_FALLBACK"
+  | "GROQ_FREE"
+  | "LOCAL_OLLAMA"
+  | "DETERMINISTIC_FALLBACK";
 
 export interface PictureVocabItemDTO {
   readonly word: string;
@@ -36,6 +47,8 @@ export interface PictureGuideDTO {
   readonly guiding_questions: readonly string[];
   readonly suggested_vocabulary: readonly PictureVocabItemDTO[];
   readonly model_sample_sentences: readonly string[];
+  readonly teaching_mode?: PictureTeachingMode;
+  readonly target_words?: readonly string[];
 }
 
 export interface PictureEvaluationFeedbackDTO {
@@ -48,6 +61,11 @@ export interface PictureEvaluationFeedbackDTO {
   readonly improvement_tip: string;
   readonly upgraded_sentences: readonly string[];
   readonly vocabulary_highlights: readonly string[];
+  readonly teaching_mode?: PictureTeachingMode;
+  readonly scaffolding_step?: PictureScaffoldingStep | null;
+  readonly next_prompt_question?: string | null;
+  readonly used_target_words?: readonly string[];
+  readonly provider_tier?: PictureProviderTier | null;
 }
 
 export interface PictureAttemptDTO {
@@ -58,6 +76,7 @@ export interface PictureAttemptDTO {
   readonly score_out_of_10: number;
   readonly stars: number;
   readonly evaluation_source?: PictureEvaluationSource;
+  readonly provider_tier?: PictureProviderTier | null;
   readonly feedback: PictureEvaluationFeedbackDTO;
   readonly created_at: string;
 }
@@ -76,6 +95,9 @@ export interface PictureSessionDTO {
   readonly best_stars: number;
   readonly best_score: number;
   readonly attempts_count: number;
+  readonly teaching_mode?: PictureTeachingMode;
+  readonly target_words?: readonly string[];
+  readonly provider_tier?: PictureProviderTier | null;
   readonly guide: PictureGuideDTO;
   readonly attempts: readonly PictureAttemptDTO[];
   readonly created_at: string;
