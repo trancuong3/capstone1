@@ -13,11 +13,13 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
@@ -382,8 +384,16 @@ export function createSpeechService(): SpeechService {
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        speechPrefs.voiceId ??
+        (policy.region !== "north" ? getEffectiveVoiceId() : null);
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ??
+        getEffectiveVoiceId() ??
+        DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -394,7 +404,7 @@ export function createSpeechService(): SpeechService {
             textOrTokens: normalizedText,
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? 1,
+            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -444,10 +454,14 @@ export function createSpeechService(): SpeechService {
               },
               body: JSON.stringify({
                 text: normalizedText,
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(resolvedRequestVoiceId
+                  ? { voice_id: resolvedRequestVoiceId }
+                  : {}),
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
-                  : {}),
+                  : activeLock
+                    ? { speed: activeLock.speed }
+                    : {}),
                 ...(options.wordSample ? { word_sample: true } : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
@@ -490,8 +504,13 @@ export function createSpeechService(): SpeechService {
               : headerProvider;
           const fallbackReason =
             response.headers.get("x-voice-fallback-reason")?.trim() || null;
+          const isElevenLabsProvider = headerProvider
+            .toLowerCase()
+            .startsWith("elevenlabs");
           const voiceGender = resolveVoiceGender(
-            resolvedVoiceId ?? options.voiceId,
+            isElevenLabsProvider
+              ? (resolvedRequestVoiceId ?? options.voiceId ?? resolvedVoiceId)
+              : (resolvedVoiceId ?? resolvedRequestVoiceId ?? options.voiceId),
             response.headers.get("x-voice-gender"),
           );
           const cachedSpeed = parsePositiveSpeedHeader(
@@ -510,7 +529,11 @@ export function createSpeechService(): SpeechService {
             provider,
             fallbackUsed: usedFallbackVoice,
             fallbackReason,
-            voiceId: resolvedVoiceId ?? options.voiceId ?? null,
+            voiceId:
+              resolvedVoiceId ??
+              resolvedRequestVoiceId ??
+              options.voiceId ??
+              null,
             voiceGender,
           });
           const headerScopeRaw = response.headers
@@ -526,6 +549,7 @@ export function createSpeechService(): SpeechService {
           if (
             browserCacheKey &&
             !usedFallbackVoice &&
+            !isElevenLabsProvider &&
             shouldPersistTtsCacheEntry({
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),
@@ -569,8 +593,16 @@ export function createSpeechService(): SpeechService {
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        speechPrefs.voiceId ??
+        (policy.region !== "north" ? getEffectiveVoiceId() : null);
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ??
+        getEffectiveVoiceId() ??
+        DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -587,7 +619,7 @@ export function createSpeechService(): SpeechService {
             ),
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? 1,
+            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -646,10 +678,14 @@ export function createSpeechService(): SpeechService {
                   spoken_text: s.spokenText.normalize("NFC").trim(),
                   pause_after_ms: s.pauseAfterMs ?? 420,
                 })),
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(resolvedRequestVoiceId
+                  ? { voice_id: resolvedRequestVoiceId }
+                  : {}),
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
-                  : {}),
+                  : activeLock
+                    ? { speed: activeLock.speed }
+                    : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
                   : {}),
@@ -688,10 +724,13 @@ export function createSpeechService(): SpeechService {
           }
           if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
           const phonicsProvider = parsed.data.provider ?? "local";
+          const isElevenLabsPhonics = phonicsProvider
+            .toLowerCase()
+            .startsWith("elevenlabs");
           const phonicsUsedFallback =
-            (Boolean(options.voiceId) &&
-              parsed.data.resolved_voice_id !== options.voiceId) ||
-            (!options.voiceId && phonicsProvider === "google");
+            (Boolean(resolvedRequestVoiceId) &&
+              parsed.data.resolved_voice_id !== resolvedRequestVoiceId) ||
+            (!resolvedRequestVoiceId && phonicsProvider === "google");
           const cachedSpeed =
             parsed.data.cached_speed ??
             parsePositiveSpeedHeader(
@@ -709,7 +748,11 @@ export function createSpeechService(): SpeechService {
             provider: phonicsProvider,
             fallbackUsed: phonicsUsedFallback,
             voiceId: parsed.data.resolved_voice_id,
-            voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
+            voiceGender: resolveVoiceGender(
+              isElevenLabsPhonics
+                ? (resolvedRequestVoiceId ?? parsed.data.resolved_voice_id)
+                : parsed.data.resolved_voice_id,
+            ),
           });
           const headerScopeRaw = response.headers
             .get("x-tts-scope")
@@ -724,6 +767,7 @@ export function createSpeechService(): SpeechService {
           if (
             browserCacheKey &&
             !phonicsUsedFallback &&
+            !isElevenLabsPhonics &&
             shouldPersistTtsCacheEntry({
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),

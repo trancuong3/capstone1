@@ -302,7 +302,9 @@ function isHostedNoLiveServerTts(error?: unknown): boolean {
     isLocalVoiceUnconfiguredError(error) || isLocalVoiceUnconfiguredHealth();
   if (!unconfigured) return false;
   const health = getFreshVoiceEngineHealth();
-  if (health?.elevenlabs?.tts_configured) return false;
+  if (health?.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) {
+    return false;
+  }
   if (
     canUseGoogleTtsFallback() &&
     health?.google.tts_configured &&
@@ -393,32 +395,28 @@ function shouldSkipBackendTtsForVoice(
   voice: ResolvedOperationVoice,
   hasBackendCacheTarget = false,
 ): boolean {
-  if (!canUseAllowedDeviceFallbackTts(voice) || voice.provider !== "local") {
+  // Strict Offline-First priority: NEVER skip Tier 1 Offline VieNeu
+  // `catalog_cache` / IndexedDB / backend `precomputed_cache` when a backend
+  // cache target exists (COACHING, CATALOG, wordSample, page/book refs).
+  if (
+    hasBackendCacheTarget ||
+    !canUseAllowedDeviceFallbackTts(voice) ||
+    voice.provider !== "local"
+  ) {
     return false;
   }
   const health = getFreshVoiceEngineHealth();
   if (!health) return false;
-  if (health.elevenlabs?.tts_configured) return false;
-  const noLiveServerTts =
-    (!health.local.available || !health.local.tts_ready) &&
-    (!health.google.tts_configured || health.google.tts_cooldown);
-  if (!noLiveServerTts) return false;
-
-  // Inside an active locked session on hosted `LOCAL_VOICE_UNCONFIGURED` with no
-  // live server TTS, pin ALL session utterances (reading, guidance, phonics,
-  // comprehension, difficult words) to the single on-device voice so phonics
-  // NEVER mismatches guidance and TTS responds instantaneously without slow 503s.
-  if (
-    voice.sessionId &&
-    !voice.bypassSessionLock &&
-    isHostedNoLiveServerTts() &&
-    (isAndroidNativeSpeechAvailable() || hasVietnameseBrowserVoice())
-  ) {
-    return true;
-  }
-  if (hasBackendCacheTarget) {
+  if (health.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown) {
     return false;
   }
+  const googleActive =
+    canUseGoogleTtsFallback() &&
+    health.google.tts_configured &&
+    !health.google.tts_cooldown;
+  const noLiveServerTts =
+    (!health.local.available || !health.local.tts_ready) && !googleActive;
+  if (!noLiveServerTts) return false;
   return true;
 }
 
@@ -854,6 +852,20 @@ export class TtsPlayback {
     string,
     "android_native" | "browser"
   >();
+  private readonly sessionServerAudioServed = new Set<string>();
+  private lastPreferencesVoiceKey: string | null = null;
+
+  private computePreferencesVoiceKey(): string {
+    const activeLock = getActiveSessionVoiceLock();
+    const prefs = getSpeechPreferences();
+    const policy = getVoicePolicyPreferences();
+    const effectiveVoice =
+      activeLock?.voiceId ??
+      prefs.voiceId ??
+      REGION_DEFAULT_VOICE_ID[policy.region] ??
+      DEFAULT_LOCAL_VOICE_ID;
+    return `${policy.providerMode}::${policy.allowGoogleTtsFallback}::${effectiveVoice}`;
+  }
 
   private sessionTransportKey(operation: Operation): string | null {
     if (operation.voice.bypassSessionLock) return null;
@@ -881,6 +893,19 @@ export class TtsPlayback {
       key,
       isAndroidNativeSpeechAvailable() ? "android_native" : "browser",
     );
+    this.lastPreferencesVoiceKey = this.computePreferencesVoiceKey();
+  }
+
+  private markSessionServerAudioServed(operation: Operation): void {
+    const key = this.sessionTransportKey(operation);
+    if (!key) return;
+    this.sessionServerAudioServed.add(key);
+    this.lastPreferencesVoiceKey = this.computePreferencesVoiceKey();
+  }
+
+  private hasPriorServerAudioInSession(operation: Operation): boolean {
+    const key = this.sessionTransportKey(operation);
+    return key ? this.sessionServerAudioServed.has(key) : false;
   }
 
   constructor(
@@ -888,6 +913,7 @@ export class TtsPlayback {
     private readonly studio: VoiceStudioService,
   ) {
     installAndroidAudioUnlock();
+    this.lastPreferencesVoiceKey = this.computePreferencesVoiceKey();
   }
 
   setCacheContext = (context: TtsPlaybackCacheContext | null): void => {
@@ -979,9 +1005,17 @@ export class TtsPlayback {
   }
 
   handlePreferencesChange = (): void => {
+    const nextVoiceKey = this.computePreferencesVoiceKey();
+    const voiceOrPolicyChanged =
+      this.lastPreferencesVoiceKey !== null &&
+      nextVoiceKey !== this.lastPreferencesVoiceKey;
+    this.lastPreferencesVoiceKey = nextVoiceKey;
     this.timedCooldownUntil = 0;
-    this.sessionDeviceTransport.clear();
-    clearPinnedBrowserVoices();
+    if (voiceOrPolicyChanged) {
+      this.sessionDeviceTransport.clear();
+      this.sessionServerAudioServed.clear();
+      clearPinnedBrowserVoices();
+    }
     this.setFallbackNotice(null);
     this.stop();
   };
@@ -1004,6 +1038,7 @@ export class TtsPlayback {
     this.phonicsCache.clear();
     this.phonicsCacheBytes = 0;
     this.sessionDeviceTransport.clear();
+    this.sessionServerAudioServed.clear();
   };
 
   pause = (): void => {
@@ -1934,6 +1969,7 @@ export class TtsPlayback {
         };
 
         const hasCacheTarget = Boolean(
+          options.precomputedAudioUrl ||
           options.bookId ||
           options.pageId ||
           options.pageRevisionId ||
@@ -1949,7 +1985,7 @@ export class TtsPlayback {
           this.isSessionPinnedToDeviceTts(operation) ||
           shouldSkipBackendTtsForBrowserFallback(operation, hasCacheTarget);
 
-        // Tier 1: Precomputed verified-catalog MP3 URL (gated strictly to DEFAULT_LOCAL_VOICE_ID & public books
+        // Tier 1: Precomputed verified-catalog MP3 URL (gated strictly to matching locked voice & public books
         // and skipped when the session is pinned to on-device TTS so voice never mismatches phonics/guidance).
         if (
           !useBrowserFallback &&
@@ -1973,6 +2009,7 @@ export class TtsPlayback {
               voiceId:
                 options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID,
             });
+            this.markSessionServerAudioServed(operation);
             this.setFallbackNotice(null);
             try {
               const precomputedPlaybackRate = computeEffectivePlaybackRate(
@@ -2012,6 +2049,7 @@ export class TtsPlayback {
         }
 
         let elapsed = 0;
+        let completedChunks = 0;
         const chunks = this.splitShortChunks(
           spokenText,
           operation.voice,
@@ -2092,7 +2130,10 @@ export class TtsPlayback {
           } catch (error) {
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (shouldRetryBackendWithGoogleTts(operation, error)) {
+            if (
+              completedChunks === 0 &&
+              shouldRetryBackendWithGoogleTts(operation, error)
+            ) {
               if (operation.voice.sessionId) {
                 approveSessionVoiceSwitch(operation.voice.sessionId);
               }
@@ -2196,7 +2237,10 @@ export class TtsPlayback {
             nextPrefetch = null;
             this.ensure(operation);
             if (isAbort(error)) throw error;
-            if (canUseAllowedDeviceFallbackTts(operation, error)) {
+            if (
+              completedChunks === 0 &&
+              canUseAllowedDeviceFallbackTts(operation, error)
+            ) {
               useBrowserFallback = true;
               this.pinSessionToDeviceTts(operation);
               recordActualUtterance({
@@ -2215,6 +2259,7 @@ export class TtsPlayback {
                   onTime,
                 },
               );
+              completedChunks += 1;
               continue;
             }
             this.setFallbackNotice(getLockedVoiceUnavailableNotice());
@@ -2222,6 +2267,7 @@ export class TtsPlayback {
           }
 
           const servedMeta = getSynthesizedAudioMeta(fetched.audio);
+          this.markSessionServerAudioServed(operation);
           recordActualUtterance({
             provider: servedMeta?.provider ?? operation.voice.provider,
             voiceId:
@@ -2256,6 +2302,7 @@ export class TtsPlayback {
               onTime,
               playbackRate,
             );
+            completedChunks += 1;
           } catch (error) {
             this.ensure(operation);
             if (isAbort(error) || error instanceof PartialPlaybackError)
@@ -2302,6 +2349,7 @@ export class TtsPlayback {
                   onTime,
                   wavPlaybackRate,
                 );
+                completedChunks += 1;
                 continue;
               } catch (wavError) {
                 this.ensure(operation);
@@ -2778,13 +2826,28 @@ export class TtsPlayback {
                     throw unavailable();
                   }
                 }
-                if (canUseAllowedDeviceFallbackTts(operation, error)) {
-                  this.pinSessionToDeviceTts(operation);
-                  await playPhonicsViaBrowser();
-                  return;
-                }
-                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
-                  return;
+                // If this session has ALREADY served Offline VieNeu / server audio,
+                // keep the exact same locked voice via cached whole-word fallback
+                // BEFORE falling back to on-device Browser/Android TTS so we never
+                // mix two different voices in one session!
+                if (this.hasPriorServerAudioInSession(operation)) {
+                  if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                    return;
+                  }
+                  if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    this.pinSessionToDeviceTts(operation);
+                    await playPhonicsViaBrowser();
+                    return;
+                  }
+                } else {
+                  if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    this.pinSessionToDeviceTts(operation);
+                    await playPhonicsViaBrowser();
+                    return;
+                  }
+                  if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                    return;
+                  }
                 }
                 this.setFallbackNotice(getLockedVoiceUnavailableNotice());
                 throw unavailable();
@@ -2793,6 +2856,7 @@ export class TtsPlayback {
           }
 
           const activePhonics = synthesized;
+          this.markSessionServerAudioServed(operation);
           recordPhonicsUtterance({
             provider: activePhonics.provider,
             voiceId: activePhonics.resolvedVoiceId,
@@ -3047,6 +3111,7 @@ export class TtsPlayback {
           !options.precomputedWordTimings?.length;
 
         const hasTimedCacheTarget = Boolean(
+          options.precomputedAudioUrl ||
           options.bookId ||
           options.pageId ||
           options.pageRevisionId ||
@@ -3064,7 +3129,7 @@ export class TtsPlayback {
           );
 
         // Tier 1: Precomputed verified-catalog MP3 URL — strictly gated on
-        // exact DEFAULT_LOCAL_VOICE_ID, public catalog book, !requireWordTimings,
+        // matching locked voice, public catalog book, !requireWordTimings,
         // and skipped when the session is pinned to on-device TTS so reading voice
         // never mismatches phonics or guidance.
         if (
@@ -3093,6 +3158,7 @@ export class TtsPlayback {
               voiceId:
                 options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID,
             });
+            this.markSessionServerAudioServed(operation);
             this.setFallbackNotice(null);
             try {
               const precomputedPlaybackRate = computeEffectivePlaybackRate(
@@ -3180,7 +3246,10 @@ export class TtsPlayback {
           } catch (synthError) {
             this.ensure(operation);
             if (isAbort(synthError)) throw synthError;
-            if (shouldRetryBackendWithGoogleTts(operation, synthError)) {
+            if (
+              completedChunks === 0 &&
+              shouldRetryBackendWithGoogleTts(operation, synthError)
+            ) {
               if (operation.voice.sessionId) {
                 approveSessionVoiceSwitch(operation.voice.sessionId);
               }
@@ -3259,6 +3328,7 @@ export class TtsPlayback {
             nextTimedPrefetch = null;
             this.ensure(operation);
             synthesizedTimedOk = true;
+            this.markSessionServerAudioServed(operation);
             const timedMeta = getSynthesizedAudioMeta(timed.audio);
             recordTimedUtterance({
               provider: timedMeta?.provider ?? operation.voice.provider,
@@ -3401,6 +3471,7 @@ export class TtsPlayback {
               return;
             }
             if (
+              completedChunks === 0 &&
               (!synthesizedTimedOk || !fallback) &&
               canUseAllowedDeviceFallbackTts(operation, error)
             ) {

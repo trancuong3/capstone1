@@ -28,9 +28,11 @@ import { AppServicesContext } from "@/components/providers/app-services-provider
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   CrossGameRecommendationDTO,
@@ -193,6 +195,7 @@ export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
   const t = useTranslations("entertainment");
+  const teacherPersona = useTeacherPersona();
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
@@ -469,7 +472,10 @@ export function EntertainmentScreen({
           <p className="text-lg font-extrabold text-ink">
             {recommendations?.mascot_greeting_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recommendations.mascot_greeting_vi}
+                {adaptTextToTeacherPersona(
+                  recommendations.mascot_greeting_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultGreeting")
@@ -478,7 +484,10 @@ export function EntertainmentScreen({
           <p className="text-sm leading-6 text-muted">
             {primaryRec?.reason_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {primaryRec.reason_vi}
+                {adaptTextToTeacherPersona(
+                  primaryRec.reason_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultRecommendationReason")
@@ -532,7 +541,10 @@ export function EntertainmentScreen({
                 {t(activeStep.titleKey)}
               </h2>
               <p className="mt-1 text-body text-muted">
-                {t(activeStep.bodyKey)}
+                {adaptTextToTeacherPersona(
+                  t(activeStep.bodyKey),
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">

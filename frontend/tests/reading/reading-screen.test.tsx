@@ -1366,7 +1366,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         );
       });
       await waitFor(() => {
-        expect(speechRecorderMock.prepare).toHaveBeenCalledOnce();
+        expect(speechRecorderMock.prepare).toHaveBeenCalledTimes(2);
         expect(speechRecorderMock.start).toHaveBeenCalledTimes(2);
         expect(speechPlayerMock.play).toHaveBeenNthCalledWith(
           1,

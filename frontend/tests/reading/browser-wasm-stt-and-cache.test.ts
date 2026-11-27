@@ -313,9 +313,11 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
     expect(
       posted.filter((m) => (m as { type?: string }).type === "error"),
     ).toEqual([]);
-    expect(acceptedLengths[0]).toBe(2880 + 19360);
+    // Index 0 is the 0.25s (4000 samples @ 16kHz) JIT warmup stream inside ensureRecognizer().
+    expect(acceptedLengths[0]).toBe(4000);
+    expect(acceptedLengths[1]).toBe(2880 + 19360);
     // Child-voice AGC lifts quiet 0.005 sine wave above 0.05!
-    const boostedPeak = acceptedWaveforms[0].reduce(
+    const boostedPeak = acceptedWaveforms[1].reduce(
       (max, v) => Math.max(max, Math.abs(v)),
       0,
     );
@@ -331,8 +333,8 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
         voicedDurationMs: 1400,
       },
     });
-    expect(acceptedLengths[1]).toBe(2880 + 24000 + 5600);
-    expect(freedStreams).toHaveLength(2);
+    expect(acceptedLengths[2]).toBe(2880 + 24000 + 5600);
+    expect(freedStreams).toHaveLength(3);
     expect(recognizerConfigs[0]).toMatchObject({
       decodingMethod: "modified_beam_search",
       blankPenalty: 0,
@@ -360,8 +362,8 @@ describe("Browser WASM STT worker, client & 50MB TTS IndexedDB cache", () => {
         sampleRate: 16000,
       },
     });
-    expect(acceptedLengths).toHaveLength(2);
-    expect(freedStreams).toHaveLength(2);
+    expect(acceptedLengths).toHaveLength(3);
+    expect(freedStreams).toHaveLength(3);
     expect(
       posted.find((p) => (p as { id?: string }).id === "silence-zeros"),
     ).toEqual(

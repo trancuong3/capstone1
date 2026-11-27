@@ -24,6 +24,7 @@ import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { subscribeSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   getVoicePreloadState,
   preloadReadingVoiceEngines,
@@ -198,11 +199,19 @@ export function ReadingPreparationScreen({
   useEffect(() => {
     if (state.status !== "ready" || !state.data.startPage) return;
     const isPrivateBook = state.data.book.visibility_scope === "PARENT_PRIVATE";
-    void preloadReadingVoiceEngines({
+    const preloadArgs = {
       bookId: state.data.book.id,
       pageId: state.data.startPage.page_id,
       pageRevisionId: state.data.startPage.current_verified_revision_id,
       isPrivateBook,
+    };
+    void preloadReadingVoiceEngines(preloadArgs);
+    return subscribeSpeechPreferences(() => {
+      void preloadReadingVoiceEngines({
+        ...preloadArgs,
+        warmWasmStt: false,
+        warmTts: true,
+      });
     });
   }, [state]);
 

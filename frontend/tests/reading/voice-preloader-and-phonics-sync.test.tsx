@@ -456,9 +456,7 @@ describe("Unified voice & speed sync across guidance, reading, phonics, comprehe
           );
         }
         if (url.endsWith("/voice/text-to-speech")) {
-          ttsBodies.push(
-            JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
-          );
+          ttsBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return new Response(
             JSON.stringify({ detail: { code: "LOCAL_TTS_UNAVAILABLE" } }),
             { status: 503, headers: { "Content-Type": "application/json" } },
@@ -531,14 +529,7 @@ describe("Unified voice & speed sync across guidance, reading, phonics, comprehe
           );
         }
         if (url.endsWith("/voice/text-to-speech")) {
-          ttsPayloads.push(
-            JSON.parse(String(init?.body ?? "{}")) as {
-              text: string;
-              speed?: number;
-              voice_id?: string;
-              word_sample?: boolean;
-            },
-          );
+          ttsPayloads.push(JSON.parse(String(init?.body ?? "{}")));
           // Use bytes across the Node Response and jsdom Blob boundary.
           return new Response(new Uint8Array([82, 73, 70, 70, 119, 97, 118]), {
             status: 200,

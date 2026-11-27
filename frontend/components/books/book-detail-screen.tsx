@@ -184,6 +184,17 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
   ]);
 
   useEffect(() => {
+    if (state.status !== "ready") return;
+    const initialPage = selectedPage ?? state.pages[0] ?? null;
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: initialPage?.page_id ?? null,
+      pageRevisionId: initialPage?.current_verified_revision_id ?? null,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
+  }, [selectedPage, state]);
+
+  useEffect(() => {
     if (
       state.status !== "ready" ||
       !targetPageId ||

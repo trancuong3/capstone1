@@ -22,7 +22,9 @@ import {
   type VoiceOption,
 } from "@/lib/api/voice-studio-service";
 import {
+  clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
+  getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
@@ -236,6 +238,9 @@ export function ReadingVoiceSettings({
             sessionId: activeLock.sessionId,
             voiceId: updatedLock.voiceId,
           })
+          .then(() => {
+            clearPendingSessionVoiceSwitch(activeLock.sessionId);
+          })
           .catch(() => undefined);
       }
     },
@@ -314,15 +319,32 @@ export function ReadingVoiceSettings({
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice
+    // If Google TTS was disabled while a Google voice was chosen, downgrade
+    // cleanly to the matching region+gender local voice (treating default as null).
     const currentVoiceId = getSpeechPreferences().voiceId;
     if (
       currentVoiceId?.startsWith("google_") &&
       (updated.providerMode !== "local_with_google_fallback" ||
         !updated.allowGoogleTtsFallback)
     ) {
-      update({ voiceId: null });
-      syncPausedSessionLock(null);
+      const preservedGender = resolveVoiceGender(currentVoiceId);
+      const preservedRegion = inferRegionFromVoiceId(
+        currentVoiceId,
+        updated.region,
+      );
+      const localFallbackId = getDefaultLocalVoiceIdForRegionAndGender(
+        preservedRegion,
+        preservedGender,
+      );
+      const nextVoiceId =
+        localFallbackId ===
+        (loadState.status === "ready"
+          ? loadState.data.default_voice_id
+          : "local_north_truc_ly")
+          ? null
+          : localFallbackId;
+      update({ voiceId: nextVoiceId });
+      syncPausedSessionLock(nextVoiceId);
     }
     if (isOpen) {
       loadVoices();
@@ -330,35 +352,9 @@ export function ReadingVoiceSettings({
   }
 
   function selectRegionTab(nextTab: "all" | VoiceRegion) {
+    // Region tabs are strictly filter-only so browsing Bắc / Trung / Nam never
+    // silently alters the user's selected voice, gender, or active session lock.
     setRegionTab(nextTab);
-    if (nextTab === "all") return;
-    // During an active locked reading session, switching region tabs ONLY filters
-    // the visible list so browsing regions never silently alters the locked voice.
-    if (getActiveSessionVoiceLock() !== null) {
-      return;
-    }
-    setVoicePolicyPreferences({ region: nextTab });
-    if (loadState.status === "ready") {
-      const regionVoices = loadState.data.voices.filter(
-        (v) => resolveVoiceRegion(v) === nextTab,
-      );
-      if (regionVoices.length > 0) {
-        const currentId =
-          preferences.voiceId ?? loadState.data.default_voice_id;
-        if (!regionVoices.some((v) => v.voice_id === currentId)) {
-          const pick = regionVoices[0];
-          change(
-            {
-              voiceId:
-                pick.voice_id === loadState.data.default_voice_id
-                  ? null
-                  : pick.voice_id,
-            },
-            pick,
-          );
-        }
-      }
-    }
   }
 
   function open() {
@@ -455,7 +451,10 @@ export function ReadingVoiceSettings({
               <Button
                 className="w-auto!"
                 size="compact"
-                onClick={() => change({ voiceId: null })}
+                onClick={() => {
+                  setVoicePolicyPreferences({ region: "north" });
+                  change({ voiceId: null });
+                }}
                 variant="quiet"
               >
                 {t("settings.useDefaultVoice")}

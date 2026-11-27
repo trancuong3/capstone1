@@ -10,6 +10,7 @@
 
 import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import { createSpeechService } from "@/lib/api/speech-service";
+import * as androidAudioUnlock from "@/lib/reading/android-audio-unlock";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -30,7 +31,6 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
-  isHostedLocalVoiceUnconfigured,
   type VoiceEngineHealthSnapshot,
 } from "@/lib/reading/voice-engine-status";
 
@@ -70,7 +70,25 @@ let state: VoicePreloadState = INITIAL_STATE;
 let activePreloadPromise: Promise<void> | null = null;
 let wasmInitPromise: Promise<boolean> | null = null;
 let wasmProgressUnsub: (() => void) | null = null;
+let pendingTtsWarmOptions: PreloadReadingVoiceOptions | null = null;
 const prefetchedTtsKeys = new Set<string>();
+
+function warmAudioUnlockSafely(): void {
+  if (typeof window === "undefined") return;
+  try {
+    androidAudioUnlock.installAndroidAudioUnlock();
+    const maybeGetWarmCtx = (
+      androidAudioUnlock as { getWarmAudioContext?: () => AudioContext | null }
+    ).getWarmAudioContext;
+    const warmCtx =
+      typeof maybeGetWarmCtx === "function" ? maybeGetWarmCtx() : null;
+    if (warmCtx && warmCtx.state === "suspended") {
+      void warmCtx.resume().catch(() => undefined);
+    }
+  } catch {
+    // Best-effort audio unlock warmup only; never fail preload.
+  }
+}
 
 function updateState(patch: Partial<VoicePreloadState>): void {
   const next: VoicePreloadState = { ...state, ...patch };
@@ -228,7 +246,7 @@ async function warmInitialTtsCues(
 ): Promise<void> {
   if (options.warmTts === false) return;
   const activeLock = getActiveSessionVoiceLock();
-  const voiceId = getEffectiveVoiceId();
+  const voiceId = activeLock?.voiceId ?? getEffectiveVoiceId();
   const speed = activeLock?.speed ?? getSpeechPreferences().speed;
   const speechService = createSpeechService();
   const cues: Array<{ text: string; wordSample: boolean }> = [
@@ -287,6 +305,8 @@ export function preloadReadingVoiceEngines(
     return Promise.resolve();
   }
 
+  warmAudioUnlockSafely();
+
   const now = Date.now();
   if (state.startedAt === null) {
     updateState({
@@ -296,15 +316,28 @@ export function preloadReadingVoiceEngines(
     });
   }
 
-  // If already preloading, still trigger best-effort TTS word cue warmup if new preview words arrived
+  // If already preloading, queue/trigger incremental TTS cue warmup for new
+  // previewWords or voice/speed changes without restarting STT/health probing.
   if (activePreloadPromise) {
-    if (options.previewWords?.length && options.warmTts !== false) {
+    if (options.warmTts !== false) {
+      pendingTtsWarmOptions = options;
       const freshHealth = getFreshVoiceEngineHealth();
       if (hasLiveServerTts(freshHealth)) {
         void warmInitialTtsCues(options);
       }
     }
     return activePreloadPromise;
+  }
+
+  // Incremental warmup after an earlier preload completed: if health is fresh
+  // and STT is already ready, warm any new previewWords or newly selected
+  // voice/speed without resetting STT readiness.
+  const existingFreshHealth = getFreshVoiceEngineHealth();
+  if (existingFreshHealth && state.sttStatus === "ready") {
+    if (options.warmTts !== false && hasLiveServerTts(existingFreshHealth)) {
+      return warmInitialTtsCues(options);
+    }
+    return Promise.resolve();
   }
 
   const run = async (): Promise<void> => {
@@ -346,20 +379,18 @@ export function preloadReadingVoiceEngines(
         .catch(() => undefined);
     }
 
-    const [, health, androidCaps] = await Promise.all([
+    const [, fetchedHealth, androidCaps] = await Promise.all([
       tokenPromise,
       healthPromise,
       androidCapsPromise,
       browserVoicesPromise,
     ]);
+    const health = fetchedHealth ?? getFreshVoiceEngineHealth();
 
     const policy = getVoicePolicyPreferences();
     const localSttReady = Boolean(
       health?.local.available && health.local.stt_ready,
     );
-    const hostedUnconfigured = health
-      ? isHostedLocalVoiceUnconfigured(health)
-      : true;
     const sttAllowsCloud =
       policy.providerMode === "local_with_google_fallback" &&
       policy.allowGoogleSttFallback;
@@ -369,7 +400,8 @@ export function preloadReadingVoiceEngines(
       !health.google.stt_cooldown,
     );
 
-    // 1. STT Readiness
+    // 1. STT Readiness (Strict Offline-First: Local Worker -> Android Native /
+    // Browser WASM -> Cloud Google / Browser Web Speech ONLY as last resort)
     if (localSttReady) {
       updateState({
         sttStatus: "ready",
@@ -382,7 +414,7 @@ export function preloadReadingVoiceEngines(
         sttEngineLabel: "Android Native",
         sttProgressStage: "ready",
       });
-    } else if (wasmSupported && (!googleSttReady || hostedUnconfigured)) {
+    } else if (wasmSupported) {
       earlyWasmStarted = true;
       await startWasmSttWarmup();
     } else {
@@ -394,8 +426,13 @@ export function preloadReadingVoiceEngines(
     }
 
     // 2. TTS Readiness
+    const queuedTtsOptions = pendingTtsWarmOptions;
+    pendingTtsWarmOptions = null;
     if (hasLiveServerTts(health)) {
       void warmInitialTtsCues(options);
+      if (queuedTtsOptions && queuedTtsOptions !== options) {
+        void warmInitialTtsCues(queuedTtsOptions);
+      }
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
     } else {
       // Hosted on-device TTS (Android Native or Browser SpeechSynthesis):
@@ -424,7 +461,25 @@ export async function awaitSttReadyBeforeListening(
     await getAndroidSpeechCapabilities().catch(() => null);
     return true;
   }
-  const health = getFreshVoiceEngineHealth();
+  const startedAt = Date.now();
+  let health = getFreshVoiceEngineHealth();
+  if (!health && maxWaitMs > 0) {
+    const healthBudgetMs = Math.min(1_500, maxWaitMs);
+    health = await new Promise<VoiceEngineHealthSnapshot | null>((resolve) => {
+      let settled = false;
+      const finish = (snap: VoiceEngineHealthSnapshot | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timer);
+        resolve(snap);
+      };
+      const timer = window.setTimeout(() => finish(null), healthBudgetMs);
+      fetchVoiceEngineHealth().then(
+        (snap) => finish(snap),
+        () => finish(null),
+      );
+    });
+  }
   if (health?.local.available && health.local.stt_ready) {
     return true;
   }
@@ -436,7 +491,8 @@ export async function awaitSttReadyBeforeListening(
     return true;
   }
   const pending = wasmInitPromise ?? startWasmSttWarmup();
-  if (maxWaitMs <= 0) return wasmClient.isReady();
+  const remainingWaitMs = Math.max(0, maxWaitMs - (Date.now() - startedAt));
+  if (remainingWaitMs <= 0) return wasmClient.isReady();
   return new Promise<boolean>((resolve) => {
     let settled = false;
     const finish = (ok: boolean) => {
@@ -447,7 +503,7 @@ export async function awaitSttReadyBeforeListening(
     };
     const timer = window.setTimeout(
       () => finish(wasmClient.isReady()),
-      maxWaitMs,
+      remainingWaitMs,
     );
     pending.then(
       (ok) => finish(ok),
@@ -462,5 +518,6 @@ export function resetVoicePreloaderForTests(): void {
   wasmInitPromise = null;
   wasmProgressUnsub?.();
   wasmProgressUnsub = null;
+  pendingTtsWarmOptions = null;
   prefetchedTtsKeys.clear();
 }

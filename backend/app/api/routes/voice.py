@@ -344,15 +344,22 @@ async def text_to_speech(
     except VoiceProviderError as error:
         raise provider_http_exception(error) from None
 
-    voice_gender = "female"
-    for item in STATIC_LOCAL_VOICES:
-        if item.get("voice_id") == audio.resolved_voice_id:
-            voice_gender = str(item.get("gender") or "female")
-            break
-    else:
-        g_meta = GOOGLE_VOICE_BY_ID.get(audio.resolved_voice_id)
+    def _lookup_voice_gender(candidate_voice_id: str | None) -> str | None:
+        if not candidate_voice_id:
+            return None
+        for item in STATIC_LOCAL_VOICES:
+            if item.get("voice_id") == candidate_voice_id:
+                return str(item.get("gender") or "female")
+        g_meta = GOOGLE_VOICE_BY_ID.get(candidate_voice_id)
         if g_meta is not None:
-            voice_gender = str(g_meta.get("gender") or "female")
+            return str(g_meta.get("gender") or "female")
+        return None
+
+    voice_gender = (
+        _lookup_voice_gender(audio.resolved_voice_id)
+        or _lookup_voice_gender(payload.voice_id)
+        or "female"
+    )
 
     cache_headers = _tts_cache_headers(audio)
     headers = {

@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import * as browserAuth from "@/lib/api/browser-auth";
 import type { SynthesizedPhonicsSpeech } from "@/lib/api/speech-service";
 import type { TimedSpeech } from "@/lib/api/voice-studio-service";
 import { buildPhonicsLesson } from "@/lib/reading/phonics-lesson";
@@ -10,7 +11,9 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   countUnintendedVoiceSwitches,
+  getActiveSessionVoiceLock,
   getSessionVoiceAudit,
+  hasPendingSessionVoiceSwitch,
   lockSessionVoice,
   releaseSessionVoiceLock,
   resetVoiceLockAndPolicyForTests,
@@ -23,6 +26,7 @@ import {
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import { computeEffectivePlaybackRate } from "@/lib/reading/tts-playback";
 import {
+  fetchVoiceEngineHealth,
   getVoiceEngineStatus,
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
@@ -1172,5 +1176,216 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(customAudio.playbackRate).toBe(1);
     act(() => customAudio.finish());
     await customPromise;
+  });
+
+  it("preserves elevenlabs health metadata in fetchVoiceEngineHealth", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
+    const tokenSpy = vi
+      .spyOn(browserAuth, "getBrowserAccessToken")
+      .mockResolvedValue("test-access-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              default_mode: "local_only",
+              default_voice_id: "local_north_truc_ly",
+              local: {
+                configured: false,
+                available: false,
+                stt_ready: false,
+                tts_ready: false,
+                error_code: "LOCAL_VOICE_UNCONFIGURED",
+              },
+              google: {
+                stt_configured: false,
+                tts_configured: false,
+                stt_cooldown: false,
+                tts_cooldown: false,
+              },
+              elevenlabs: {
+                configured: true,
+                stt_configured: true,
+                tts_configured: true,
+                stt_cooldown: false,
+                tts_cooldown: false,
+                error_code: null,
+                model_id: "eleven_v3",
+                voice_id: "el_female_1",
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      ),
+    );
+
+    try {
+      resetVoiceEngineStatus();
+      const health = await fetchVoiceEngineHealth();
+      expect(health?.elevenlabs).toEqual({
+        configured: true,
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+        error_code: null,
+        model_id: "eleven_v3",
+        voice_id: "el_female_1",
+      });
+    } finally {
+      tokenSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("queries backend precomputed cache before browser TTS on hosted LOCAL_VOICE_UNCONFIGURED and respects configured ElevenLabs", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      region: "central",
+    });
+    lockSessionVoice("hosted-offline-first-central", {
+      voiceId: "local_central_quang_son",
+      speed: 0.9,
+      region: "central",
+      forceUpdate: true,
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const { result } = renderHook(() => useSpeechPlayer());
+
+    // Coaching audio hits backend cache FIRST instead of skipping directly to Browser TTS
+    const coachPlay = result.current.play("Thầy đọc mẫu cho con nghe nhé.", {
+      coaching: true,
+    });
+    const coachAudio = await audioAt(0);
+    act(() => coachAudio.finish());
+    await coachPlay;
+    expect(speech.synthesize).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+
+    // Book page timed audio also queries backend cache FIRST
+    const pagePlay = result.current.playWithWordTimings(["Mặt", "trời"], {
+      bookId: "book-central-1",
+      pageId: "page-1",
+    });
+    const pageAudio = await audioAt(1);
+    act(() => pageAudio.finish());
+    await pagePlay;
+    expect(studio.synthesizeTimed).toHaveBeenCalledTimes(1);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+
+    // When ElevenLabs cloud TTS is configured (no cooldown), uncached text still calls backend
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNCONFIGURED",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+      elevenlabs: {
+        configured: true,
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    const cloudPlay = result.current.play("Câu không nằm trong cache.");
+    const cloudAudio = await audioAt(2);
+    act(() => cloudAudio.finish());
+    await cloudPlay;
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("never switches to Browser TTS mid-utterance after chunk 1 already played via backend audio", async () => {
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+    });
+    lockSessionVoice("no-mid-utterance-switch", {
+      voiceId: "local_north_truc_ly",
+      forceUpdate: true,
+    });
+    speech.synthesize
+      .mockResolvedValueOnce(new Blob(["chunk-1"], { type: "audio/wav" }))
+      .mockRejectedValueOnce(
+        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+          status: 503,
+          code: "TTS_UNAVAILABLE",
+        }),
+      );
+
+    // Construct a long 2-chunk text (> SHORT_TTS_MAX_CHARACTERS = 2,500 chars across two sentences)
+    const sentence1 = `${"Hôm nay trời rất đẹp và chim hót líu lo khắp khu vườn xanh mát. ".repeat(25)}`;
+    const sentence2 = `${"Bé cùng bạn dạo chơi dưới ánh nắng dịu nhẹ buổi sáng thật vui. ".repeat(25)}`;
+
+    const { result } = renderHook(() => useSpeechPlayer());
+    const playback = result.current.play(`${sentence1}${sentence2}`, {
+      coaching: true,
+    });
+    const firstChunkAudio = await audioAt(0);
+    act(() => firstChunkAudio.finish());
+
+    await expect(playback).rejects.toThrow();
+    expect(speech.synthesize).toHaveBeenCalledTimes(2);
+    expect(synthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it("preserves nested reading lock on practice release, preserves male gender on local downgrade, and ignores speed-only switches", () => {
+    // 1. Male Google voice downgraded under local_only stays male (Thầy Thiên Minh)
+    setVoicePolicyPreferences({
+      providerMode: "local_only",
+      allowGoogleTtsFallback: false,
+      region: "north",
+    });
+    setSpeechPreferences({ voiceId: "google_vi_vn_neural2_d", speed: 0.9 });
+    const readingLock = lockSessionVoice("reading-main-1");
+    expect(readingLock.voiceId).toBe("local_north_thien_minh");
+    expect(readingLock.provider).toBe("local");
+
+    // 2. Speed-only update does NOT flag a voice switch
+    lockSessionVoice("reading-main-1", { speed: 1.0, forceUpdate: true });
+    expect(hasPendingSessionVoiceSwitch("reading-main-1")).toBe(false);
+
+    // 3. Nested practice session lock restores reading-main-1 on release
+    lockSessionVoice("practice-nested-1", {
+      voiceId: "local_central_quang_son",
+      region: "central",
+    });
+    expect(getActiveSessionVoiceLock()?.sessionId).toBe("practice-nested-1");
+    releaseSessionVoiceLock("practice-nested-1");
+    expect(getActiveSessionVoiceLock()?.sessionId).toBe("reading-main-1");
+    expect(getActiveSessionVoiceLock()?.voiceId).toBe("local_north_thien_minh");
+
+    releaseSessionVoiceLock("reading-main-1");
+    expect(getActiveSessionVoiceLock()).toBeNull();
   });
 });

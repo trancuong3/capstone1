@@ -65,6 +65,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     public static final float MIN_SPEECH_PITCH = 0.5f;
     public static final float MAX_SPEECH_PITCH = 2.0f;
     public static final long STT_TO_TTS_SETTLE_MS = 150L;
+    public static final long TTS_TO_STT_SETTLE_MS = 120L;
     public static final long TTS_INIT_TIMEOUT_MS = 2_500L;
     public static final long STT_STOP_FALLBACK_TIMEOUT_MS = 2_000L;
     public static final long COMPLETE_SILENCE_LENGTH_MS = 1_500L;
@@ -126,6 +127,19 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         int getVietnameseVoicesCount();
 
         boolean isVietnameseAvailable();
+
+        default boolean hasMaleVietnameseVoice() {
+            return false;
+        }
+
+        default boolean hasFemaleVietnameseVoice() {
+            return isVietnameseAvailable() || getVietnameseVoicesCount() > 0;
+        }
+
+        @Nullable
+        default String getActiveVoiceGender() {
+            return "unknown";
+        }
 
         boolean speak(
                 String text,
@@ -290,10 +304,14 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     private String activeTtsRequestId;
     private String activeTtsUtteranceId;
     private ReplySender activeTtsReply;
+    private long lastTtsStopElapsedMs = -1L;
 
     private PendingSttRequest pendingPermissionSttRequest;
     private SttSession activeSttSession;
+    private SttSession reusableSttSession;
+    private DelegatingSttSessionCallback reusableSttCallbackDelegate;
     private PendingSttRequest activeSttRequest;
+    private Runnable pendingSttSettleRunnable;
     private long activeSttOnsetAt;
     private long lastRmsEmitElapsedMs;
     private boolean activeSttReceivedResults;
@@ -546,12 +564,14 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     private void sendCapabilities(String requestId, ReplySender reply) {
-        int viVoicesCount = (ttsInitSucceeded && ttsEngine.isReady())
+        boolean engineReady = ttsInitSucceeded && ttsEngine.isReady();
+        int viVoicesCount = engineReady
                 ? Math.max(0, ttsEngine.getVietnameseVoicesCount())
                 : 0;
-        boolean ttsAvailable = ttsInitSucceeded
-                && ttsEngine.isReady()
+        boolean ttsAvailable = engineReady
                 && (viVoicesCount > 0 || ttsEngine.isVietnameseAvailable());
+        boolean hasMaleViVoice = engineReady && ttsEngine.hasMaleVietnameseVoice();
+        boolean hasFemaleViVoice = engineReady && ttsEngine.hasFemaleVietnameseVoice();
         boolean onDeviceSttAvailable = sttEngineFactory.isOnDeviceSttAvailable();
         boolean sttAvailable = sttEngineFactory.isSttAvailable() || onDeviceSttAvailable;
 
@@ -560,6 +580,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         putSafe(evt, "requestId", requestId);
         putSafe(evt, "ttsAvailable", ttsAvailable);
         putSafe(evt, "viVoicesCount", viVoicesCount);
+        putSafe(evt, "hasMaleViVoice", hasMaleViVoice);
+        putSafe(evt, "hasFemaleViVoice", hasFemaleViVoice);
         putSafe(evt, "sttAvailable", sttAvailable);
         putSafe(evt, "onDeviceSttAvailable", onDeviceSttAvailable);
         putSafe(evt, "platform", PLATFORM_ID);
@@ -615,8 +637,10 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         cancelPendingSpeakTimers();
         stopActiveTtsSilentlyForSupersede();
 
-        // Atomic mutual exclusion: cancel active STT + enforce 150ms HAL settle
+        // Atomic mutual exclusion: cancel active/pending/reusable STT + enforce 150ms HAL settle
+        cancelPendingSttSettleTimer();
         boolean hadActiveStt = cancelAndCleanupSttOnMain("preempted_by_tts", true);
+        destroyReusableSttSession();
         PendingSpeakRequest request = new PendingSpeakRequest(
                 generation,
                 requestId,
@@ -694,6 +718,10 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                     JSONObject evt = new JSONObject();
                     putSafe(evt, "type", "tts_start");
                     putSafe(evt, "requestId", request.requestId);
+                    putSafe(
+                            evt,
+                            "actualVoiceGender",
+                            normalizeActualVoiceGender(ttsEngine.getActiveVoiceGender()));
                     sendJson(request.reply, evt);
                 });
             }
@@ -773,7 +801,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         stopTtsInternal(requestId, reply, "stop_requested");
     }
 
-    private void stopTtsInternal(
+    private boolean stopTtsInternal(
             @Nullable String explicitStopRequestId,
             @Nullable ReplySender explicitStopReply,
             String reason) {
@@ -782,6 +810,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
 
         String interruptedId = activeTtsRequestId;
         ReplySender interruptedReply = activeTtsReply;
+        boolean hadActiveTts = activeTtsUtteranceId != null;
         clearActiveTtsAndAbandonFocus();
         try {
             ttsEngine.stop();
@@ -799,6 +828,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                     explicitStopReply,
                     explicitStopRequestId != null ? explicitStopRequestId : "");
         }
+        return hadActiveTts;
     }
 
     private void stopActiveTtsSilentlyForSupersede() {
@@ -826,6 +856,9 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     private void clearActiveTtsAndAbandonFocus() {
+        if (activeTtsUtteranceId != null) {
+            lastTtsStopElapsedMs = clock.elapsedRealtime();
+        }
         activeTtsRequestId = null;
         activeTtsUtteranceId = null;
         activeTtsReply = null;
@@ -851,9 +884,10 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
 
     private void handleStartStt(String requestId, JSONObject payload, ReplySender reply) {
         // Atomic mutual exclusion: stop any active/pending TTS & release audio focus FIRST
-        stopTtsInternal(null, null, "preempted_by_stt");
+        boolean hadActiveTts = stopTtsInternal(null, null, "preempted_by_stt");
 
-        // Cancel any previous active or permission-waiting STT cleanly
+        // Cancel any previous active, settle-waiting, or permission-waiting STT cleanly
+        cancelPendingSttSettleTimer();
         if (sttBusyRetryRunnable != null) {
             scheduler.removeCallbacks(sttBusyRetryRunnable);
             sttBusyRetryRunnable = null;
@@ -892,7 +926,44 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             return;
         }
 
-        beginSttSessionOnMain(request, false);
+        startOrSettleStt(request, hadActiveTts);
+    }
+
+    private long computeSttSettleDelayMs(boolean hadActiveTts) {
+        if (hadActiveTts) {
+            return TTS_TO_STT_SETTLE_MS;
+        }
+        if (lastTtsStopElapsedMs >= 0L) {
+            long elapsed = clock.elapsedRealtime() - lastTtsStopElapsedMs;
+            if (elapsed >= 0L && elapsed < TTS_TO_STT_SETTLE_MS) {
+                return TTS_TO_STT_SETTLE_MS - elapsed;
+            }
+        }
+        return 0L;
+    }
+
+    private void startOrSettleStt(PendingSttRequest request, boolean hadActiveTts) {
+        long settleDelayMs = computeSttSettleDelayMs(hadActiveTts);
+        if (settleDelayMs > 0L) {
+            cancelPendingSttSettleTimer();
+            pendingSttSettleRunnable = () -> {
+                pendingSttSettleRunnable = null;
+                if (destroyed || request.generation != sttSeq) {
+                    return;
+                }
+                beginSttSessionOnMain(request, false);
+            };
+            scheduler.postDelayed(pendingSttSettleRunnable, settleDelayMs);
+        } else {
+            beginSttSessionOnMain(request, false);
+        }
+    }
+
+    private void cancelPendingSttSettleTimer() {
+        if (pendingSttSettleRunnable != null) {
+            scheduler.removeCallbacks(pendingSttSettleRunnable);
+            pendingSttSettleRunnable = null;
+        }
     }
 
     /**
@@ -916,8 +987,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 return;
             }
             // Re-ensure TTS didn't start while dialog was up
-            stopTtsInternal(null, null, "preempted_by_stt");
-            beginSttSessionOnMain(pending, false);
+            boolean hadActiveTts = stopTtsInternal(null, null, "preempted_by_stt");
+            startOrSettleStt(pending, hadActiveTts);
         });
     }
 
@@ -1039,7 +1110,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                         }
                     }
 
-                    destroyActiveSttSessionOnly();
+                    parkActiveSttSessionForReuse();
 
                     JSONObject evt = new JSONObject();
                     putSafe(evt, "type", "stt_final");
@@ -1104,20 +1175,36 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             }
         };
 
-        SttSession session;
-        try {
-            session = sttEngineFactory.create(preferOnDevice, listener);
-        } catch (Throwable ex) {
-            session = null;
-        }
-        if (session == null && preferOnDevice && standardAvail) {
-            try {
-                session = sttEngineFactory.create(false, listener);
-            } catch (Throwable ex) {
-                session = null;
+        SttSession session = null;
+        boolean reusedSession = false;
+        if (reusableSttSession != null && reusableSttCallbackDelegate != null) {
+            if (reusableSttSession.isOnDevice() == preferOnDevice) {
+                session = reusableSttSession;
+                reusableSttSession = null;
+                reusableSttCallbackDelegate.setDelegate(listener);
+                reusedSession = true;
+            } else {
+                destroyReusableSttSession();
             }
         }
         if (session == null) {
+            DelegatingSttSessionCallback delegate = new DelegatingSttSessionCallback(listener);
+            reusableSttCallbackDelegate = delegate;
+            try {
+                session = sttEngineFactory.create(preferOnDevice, delegate);
+            } catch (Throwable ex) {
+                session = null;
+            }
+            if (session == null && preferOnDevice && standardAvail) {
+                try {
+                    session = sttEngineFactory.create(false, delegate);
+                } catch (Throwable ex) {
+                    session = null;
+                }
+            }
+        }
+        if (session == null) {
+            reusableSttCallbackDelegate = null;
             activeSttRequest = null;
             sendSttError(
                     request.reply,
@@ -1137,6 +1224,29 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         try {
             session.startListening(recognizerIntent);
         } catch (Throwable ex) {
+            if (reusedSession) {
+                // Reused OEM recognizer failed to restart -> destroy and retry once with a fresh instance.
+                destroyActiveSttSessionOnly();
+                activeSttRequest = request;
+                DelegatingSttSessionCallback freshDelegate =
+                        new DelegatingSttSessionCallback(listener);
+                reusableSttCallbackDelegate = freshDelegate;
+                SttSession freshSession;
+                try {
+                    freshSession = sttEngineFactory.create(preferOnDevice, freshDelegate);
+                } catch (Throwable createEx) {
+                    freshSession = null;
+                }
+                if (freshSession != null) {
+                    activeSttSession = freshSession;
+                    try {
+                        freshSession.startListening(recognizerIntent);
+                        return;
+                    } catch (Throwable retryEx) {
+                        // Fall through to error cleanup below.
+                    }
+                }
+            }
             destroyActiveSttSessionOnly();
             sendSttError(
                     request.reply,
@@ -1148,6 +1258,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     private void handleStopStt(String requestId, ReplySender reply) {
+        cancelPendingSttSettleTimer();
         cancelPendingPermissionStt("stopped");
         if (activeSttSession == null || activeSttRequest == null) {
             sendSttEnd(reply, requestId);
@@ -1158,6 +1269,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             activeSttSession.stopListening();
         } catch (Throwable ignored) {
             cancelAndCleanupSttOnMain("stop_failed", true);
+            destroyReusableSttSession();
             if (!current.requestId.equals(requestId)) {
                 sendSttEnd(reply, requestId);
             }
@@ -1170,6 +1282,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             sttStopFallbackRunnable = null;
             if (isCurrentStt(current)) {
                 cancelAndCleanupSttOnMain("stop_timeout", true);
+                destroyReusableSttSession();
             }
         };
         scheduler.postDelayed(sttStopFallbackRunnable, STT_STOP_FALLBACK_TIMEOUT_MS);
@@ -1180,9 +1293,11 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     private void handleCancelStt(String requestId, ReplySender reply) {
+        cancelPendingSttSettleTimer();
         cancelPendingPermissionStt("canceled");
         String prevRequestId = activeSttRequest != null ? activeSttRequest.requestId : null;
         cancelAndCleanupSttOnMain("canceled", true);
+        destroyReusableSttSession();
         if (prevRequestId == null || !prevRequestId.equals(requestId)) {
             sendSttEnd(reply, requestId);
         }
@@ -1228,6 +1343,24 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         return true;
     }
 
+    private void parkActiveSttSessionForReuse() {
+        cancelSttStopFallbackTimer();
+        SttSession session = activeSttSession;
+        activeSttSession = null;
+        activeSttRequest = null;
+        activeSttOnsetAt = 0L;
+        lastSttStopElapsedMs = clock.elapsedRealtime();
+        if (reusableSttCallbackDelegate != null) {
+            reusableSttCallbackDelegate.setDelegate(null);
+        }
+        if (session != null) {
+            if (reusableSttSession != null && reusableSttSession != session) {
+                destroySessionSafely(reusableSttSession);
+            }
+            reusableSttSession = session;
+        }
+    }
+
     private void destroyActiveSttSessionOnly() {
         cancelSttStopFallbackTimer();
         SttSession session = activeSttSession;
@@ -1236,11 +1369,29 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         activeSttOnsetAt = 0L;
         lastSttStopElapsedMs = clock.elapsedRealtime();
         if (session != null) {
-            try {
-                session.destroy();
-            } catch (Throwable ignored) {
-                // Safe destroy.
-            }
+            destroySessionSafely(session);
+        }
+        destroyReusableSttSession();
+    }
+
+    private void destroyReusableSttSession() {
+        SttSession session = reusableSttSession;
+        reusableSttSession = null;
+        if (reusableSttCallbackDelegate != null) {
+            reusableSttCallbackDelegate.setDelegate(null);
+            reusableSttCallbackDelegate = null;
+        }
+        if (session != null) {
+            destroySessionSafely(session);
+        }
+    }
+
+    private static void destroySessionSafely(@Nullable SttSession session) {
+        if (session == null) return;
+        try {
+            session.destroy();
+        } catch (Throwable ignored) {
+            // Safe destroy.
         }
     }
 
@@ -1265,9 +1416,11 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     public void onHostStop() {
         scheduler.post(() -> {
             if (destroyed) return;
+            cancelPendingSttSettleTimer();
             stopTtsInternal(null, null, "host_stopped");
             cancelPendingPermissionStt("host_stopped");
             cancelAndCleanupSttOnMain("host_stopped", true);
+            destroyReusableSttSession();
         });
     }
 
@@ -1284,6 +1437,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             ttsInitTimeoutRunnable = null;
         }
         cancelPendingSpeakTimers();
+        cancelPendingSttSettleTimer();
         cancelSttStopFallbackTimer();
         pendingCapabilities.clear();
         pendingPermissionSttRequest = null;
@@ -1297,12 +1451,9 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             } catch (Throwable ignored) {
                 // Safe teardown.
             }
-            try {
-                session.destroy();
-            } catch (Throwable ignored) {
-                // Safe teardown.
-            }
+            destroySessionSafely(session);
         }
+        destroyReusableSttSession();
 
         clearActiveTtsAndAbandonFocus();
         try {
@@ -1348,6 +1499,93 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         return selectBestVietnameseVoice(voices, null);
     }
 
+    static String classifyVoiceGender(@Nullable Voice voice) {
+        if (voice == null || voice.getName() == null) {
+            return "unknown";
+        }
+        // Strip "vietnamese" / "vietnam" BEFORE tokenizing so the substring "nam" inside
+        // "vietnam" never falsely classifies female/neutral Vietnamese voices as male.
+        String sanitized = voice.getName()
+                .toLowerCase(Locale.ROOT)
+                .replace("vietnamese", " ")
+                .replace("vietnam", " ");
+        String[] tokens = sanitized.split("[^a-z0-9]+");
+        boolean looksMale = false;
+        boolean looksFemale = false;
+        for (String tok : tokens) {
+            if (tok.isEmpty()) continue;
+            switch (tok) {
+                case "vid":
+                case "male":
+                case "man":
+                case "nam":
+                case "namminh":
+                case "minh":
+                case "hung":
+                case "tuan":
+                case "quang":
+                case "son":
+                case "thien":
+                case "huy":
+                case "duc":
+                case "khanh":
+                    looksMale = true;
+                    break;
+                case "gft":
+                case "vie":
+                case "vif":
+                case "vic":
+                case "female":
+                case "woman":
+                case "hoaimy":
+                case "hoai":
+                case "linh":
+                case "mai":
+                case "lan":
+                case "ngoc":
+                case "truc":
+                case "thuc":
+                case "thao":
+                case "nhu":
+                case "nu":
+                    looksFemale = true;
+                    break;
+                default:
+                    break;
+            }
+        }
+        if (looksFemale && !looksMale) {
+            return "female";
+        }
+        if (looksMale && !looksFemale) {
+            return "male";
+        }
+        return "unknown";
+    }
+
+    static boolean hasUsableVietnameseVoiceWithGender(
+            @Nullable Set<Voice> voices, @NonNull String targetGender) {
+        if (voices == null || voices.isEmpty()) {
+            return false;
+        }
+        for (Voice voice : voices) {
+            if (!isUsableVietnameseVoice(voice)) {
+                continue;
+            }
+            if (targetGender.equals(classifyVoiceGender(voice))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String normalizeActualVoiceGender(@Nullable String gender) {
+        if ("male".equals(gender) || "female".equals(gender)) {
+            return gender;
+        }
+        return "unknown";
+    }
+
     @Nullable
     static Voice selectBestVietnameseVoice(
             @Nullable Set<Voice> voices, @Nullable String preferredGender) {
@@ -1365,36 +1603,19 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             }
             int score = 0;
             if (!voice.isNetworkConnectionRequired()) {
-                score += 1000;
+                score += 800;
             }
             Locale locale = voice.getLocale();
             if (locale != null && "VN".equalsIgnoreCase(locale.getCountry())) {
                 score += 200;
             }
-            String vName = voice.getName() != null
-                    ? voice.getName().toLowerCase(Locale.ROOT)
-                    : "";
-            boolean looksMale = vName.contains("vid")
-                    || vName.contains("male")
-                    || vName.contains("nam")
-                    || vName.contains("minh")
-                    || vName.contains("hung")
-                    || vName.contains("tuan");
-            boolean looksFemale = vName.contains("gft")
-                    || vName.contains("vie")
-                    || vName.contains("vif")
-                    || vName.contains("vic")
-                    || vName.contains("female")
-                    || vName.contains("hoaimy")
-                    || vName.contains("linh")
-                    || vName.contains("mai")
-                    || vName.contains("lan");
+            String voiceGender = classifyVoiceGender(voice);
             if ("male".equals(gender)) {
-                if (looksMale && !looksFemale) score += 600;
-                if (looksFemale) score -= 350;
+                if ("male".equals(voiceGender)) score += 1500;
+                else if ("female".equals(voiceGender)) score -= 900;
             } else if ("female".equals(gender)) {
-                if (looksFemale) score += 600;
-                if (looksMale && !looksFemale) score -= 350;
+                if ("female".equals(voiceGender)) score += 1500;
+                else if ("male".equals(voiceGender)) score -= 900;
             }
             score += voice.getQuality();
             score -= Math.max(0, voice.getLatency()) / 10;
@@ -1653,6 +1874,60 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         }
     }
 
+    private static final class DelegatingSttSessionCallback implements SttSessionCallback {
+        @Nullable private volatile SttSessionCallback delegate;
+
+        DelegatingSttSessionCallback(@Nullable SttSessionCallback initial) {
+            this.delegate = initial;
+        }
+
+        void setDelegate(@Nullable SttSessionCallback next) {
+            this.delegate = next;
+        }
+
+        @Override
+        public void onReadyForSpeech() {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onReadyForSpeech();
+        }
+
+        @Override
+        public void onBeginningOfSpeech() {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onBeginningOfSpeech();
+        }
+
+        @Override
+        public void onRmsChanged(float rmsDb) {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onRmsChanged(rmsDb);
+        }
+
+        @Override
+        public void onPartialResults(List<String> matches) {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onPartialResults(matches);
+        }
+
+        @Override
+        public void onFinalResults(List<String> matches, @Nullable float[] confidences) {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onFinalResults(matches, confidences);
+        }
+
+        @Override
+        public void onError(int errorCode) {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onError(errorCode);
+        }
+
+        @Override
+        public void onEndOfSpeech() {
+            SttSessionCallback cb = delegate;
+            if (cb != null) cb.onEndOfSpeech();
+        }
+    }
+
     private static final class AndroidTtsEngine implements TtsEngine {
         private static final Locale VI_VN = Locale.forLanguageTag(DEFAULT_LANG);
         private final Context appContext;
@@ -1661,6 +1936,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         private volatile TtsCallback activeCallback;
         @Nullable private String pinnedVoiceKey;
         @Nullable private Voice pinnedVoice;
+        private volatile String activeVoiceGender = "unknown";
 
         AndroidTtsEngine(Context appContext) {
             this.appContext = appContext;
@@ -1724,25 +2000,66 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             String targetKey = (voiceGender == null ? "default" : voiceGender)
                     + "::"
                     + (voiceId == null ? "" : voiceId);
+            // Fast path: keep pinned voice without calling setLanguage(VI_VN) first,
+            // which resets the selected voice on some OEM TTS engines mid-session.
+            if (targetKey.equals(pinnedVoiceKey) && pinnedVoice != null) {
+                try {
+                    engine.setVoice(pinnedVoice);
+                    activeVoiceGender = classifyVoiceGender(pinnedVoice);
+                    return;
+                } catch (Throwable ignored) {
+                    // Fall through to full re-configuration if setVoice threw.
+                }
+            }
             try {
                 engine.setLanguage(VI_VN);
             } catch (Throwable ignored) {
                 // Continue with voice selection attempt.
             }
             try {
-                if (targetKey.equals(pinnedVoiceKey) && pinnedVoice != null) {
-                    engine.setVoice(pinnedVoice);
-                    return;
-                }
                 Voice best = selectBestVietnameseVoice(engine.getVoices(), voiceGender);
                 if (best != null) {
                     pinnedVoiceKey = targetKey;
                     pinnedVoice = best;
+                    activeVoiceGender = classifyVoiceGender(best);
                     engine.setVoice(best);
+                } else {
+                    activeVoiceGender = "unknown";
                 }
             } catch (Throwable ignored) {
+                activeVoiceGender = "unknown";
                 // OEM getVoices() can throw on restricted builds; setLanguage fallback applies.
             }
+        }
+
+        @Override
+        public boolean hasMaleVietnameseVoice() {
+            if (!isReady()) return false;
+            try {
+                return hasUsableVietnameseVoiceWithGender(tts.getVoices(), "male");
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+
+        @Override
+        public boolean hasFemaleVietnameseVoice() {
+            if (!isReady()) return false;
+            try {
+                Set<Voice> voices = tts.getVoices();
+                if (hasUsableVietnameseVoiceWithGender(voices, "female")) {
+                    return true;
+                }
+                // If voices are installed without explicit gender tags, default vi-VN voice is usable.
+                return countUsableVietnameseVoices(voices) > 0 && !hasMaleVietnameseVoice();
+            } catch (Throwable ignored) {
+                return isVietnameseAvailable();
+            }
+        }
+
+        @Override
+        public String getActiveVoiceGender() {
+            return activeVoiceGender;
         }
 
         @Override
@@ -1996,5 +2313,13 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
 
     boolean hasPendingSpeakSettleForTest() {
         return pendingSpeakSettleRunnable != null;
+    }
+
+    boolean hasPendingSttSettleForTest() {
+        return pendingSttSettleRunnable != null;
+    }
+
+    boolean hasReusableSttSessionForTest() {
+        return reusableSttSession != null;
     }
 }

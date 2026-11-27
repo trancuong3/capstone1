@@ -46,6 +46,26 @@ export const REGION_DEFAULT_VOICE_ID: Readonly<Record<VoiceRegion, string>> = {
   south: "local_south_thuc_doan",
 };
 
+export const REGION_DEFAULT_MALE_VOICE_ID: Readonly<
+  Record<VoiceRegion, string>
+> = {
+  north: "local_north_thien_minh",
+  central: "local_central_quang_son",
+  south: "local_south_thai_son",
+};
+
+export function getDefaultLocalVoiceIdForRegionAndGender(
+  region: VoiceRegion,
+  gender: VoiceGender,
+): string {
+  if (gender === "male") {
+    return (
+      REGION_DEFAULT_MALE_VOICE_ID[region] ?? REGION_DEFAULT_MALE_VOICE_ID.north
+    );
+  }
+  return REGION_DEFAULT_VOICE_ID[region] ?? DEFAULT_LOCAL_VOICE_ID;
+}
+
 export interface VoicePolicyPreferences {
   readonly region: VoiceRegion;
   readonly providerMode: VoiceProviderMode;
@@ -93,8 +113,30 @@ const lockListeners = new Set<Listener>();
 const voiceSwitchedSessions = new Set<string>();
 let cachedPolicy: VoicePolicyPreferences | null = null;
 let activeSessionId: string | null = null;
+const previousSessionIds: string[] = [];
 const memoryLocks = new Map<string, SessionVoiceLock>();
 const utteranceAudits = new Map<string, SessionUtteranceAuditEntry[]>();
+
+function pushPreviousSessionId(prevId: string | null, nextId: string): void {
+  if (!prevId || prevId === nextId) return;
+  if (!memoryLocks.has(prevId)) return;
+  const existingIdx = previousSessionIds.indexOf(prevId);
+  if (existingIdx >= 0) {
+    previousSessionIds.splice(existingIdx, 1);
+  }
+  previousSessionIds.push(prevId);
+  if (previousSessionIds.length > 16) {
+    previousSessionIds.shift();
+  }
+}
+
+function removeFromPreviousSessionIds(sessionId: string): void {
+  for (let i = previousSessionIds.length - 1; i >= 0; i -= 1) {
+    if (previousSessionIds[i] === sessionId) {
+      previousSessionIds.splice(i, 1);
+    }
+  }
+}
 
 export function inferRegionFromVoiceId(
   voiceId: string | null | undefined,
@@ -321,6 +363,10 @@ export function lockSessionVoice(
     !isLegacyExternalVoiceId(existing.voiceId)
   ) {
     const changedActive = activeSessionId !== cleanSessionId;
+    if (changedActive) {
+      pushPreviousSessionId(activeSessionId, cleanSessionId);
+      removeFromPreviousSessionIds(cleanSessionId);
+    }
     activeSessionId = cleanSessionId;
     if (changedActive) {
       notifyLockListeners();
@@ -345,13 +391,18 @@ export function lockSessionVoice(
       ? requestedVoice
       : (REGION_DEFAULT_VOICE_ID[region] ?? DEFAULT_LOCAL_VOICE_ID);
 
-  // Enforce provider policy: never lock a Google voice when Google TTS is disabled!
+  // Enforce provider policy: never lock a Google voice when Google TTS is disabled,
+  // while preserving the saved gender (male/female) and region!
   if (
     inferProviderFromVoiceId(resolvedVoiceId) === "google" &&
     (policyPrefs.providerMode !== "local_with_google_fallback" ||
       !policyPrefs.allowGoogleTtsFallback)
   ) {
-    resolvedVoiceId = REGION_DEFAULT_VOICE_ID[region] ?? DEFAULT_LOCAL_VOICE_ID;
+    const preservedGender = resolveVoiceGender(resolvedVoiceId);
+    resolvedVoiceId = getDefaultLocalVoiceIdForRegionAndGender(
+      region,
+      preservedGender,
+    );
   }
 
   const provider = inferProviderFromVoiceId(resolvedVoiceId);
@@ -373,6 +424,10 @@ export function lockSessionVoice(
   };
 
   memoryLocks.set(cleanSessionId, lock);
+  if (activeSessionId !== cleanSessionId) {
+    pushPreviousSessionId(activeSessionId, cleanSessionId);
+    removeFromPreviousSessionIds(cleanSessionId);
+  }
   activeSessionId = cleanSessionId;
   if (typeof window !== "undefined") {
     try {
@@ -384,7 +439,7 @@ export function lockSessionVoice(
       // Keep in-memory lock active
     }
   }
-  if (existing && overrides?.forceUpdate) {
+  if (existing && overrides?.forceUpdate && existing.voiceId !== lock.voiceId) {
     voiceSwitchedSessions.add(cleanSessionId);
   }
   notifyLockListeners();
@@ -392,7 +447,12 @@ export function lockSessionVoice(
 }
 
 export function setActiveVoiceSession(sessionId: string | null): void {
-  activeSessionId = sessionId ? sessionId.trim() || null : null;
+  const nextId = sessionId ? sessionId.trim() || null : null;
+  if (nextId && activeSessionId && activeSessionId !== nextId) {
+    pushPreviousSessionId(activeSessionId, nextId);
+    removeFromPreviousSessionIds(nextId);
+  }
+  activeSessionId = nextId;
   notifyLockListeners();
 }
 
@@ -405,8 +465,17 @@ export function releaseSessionVoiceLock(sessionId: string): void {
   const clean = sessionId.trim();
   memoryLocks.delete(clean);
   voiceSwitchedSessions.delete(clean);
+  removeFromPreviousSessionIds(clean);
   if (activeSessionId === clean) {
-    activeSessionId = null;
+    let restored: string | null = null;
+    while (previousSessionIds.length > 0) {
+      const candidate = previousSessionIds.pop()!;
+      if (candidate !== clean && getSessionVoiceLock(candidate) !== null) {
+        restored = candidate;
+        break;
+      }
+    }
+    activeSessionId = restored;
   }
   if (typeof window !== "undefined") {
     try {
@@ -494,6 +563,15 @@ export function approveSessionVoiceSwitch(
   }
 }
 
+export function clearPendingSessionVoiceSwitch(
+  sessionId: string | null | undefined,
+): void {
+  const clean = (sessionId ?? "").trim();
+  if (clean) {
+    voiceSwitchedSessions.delete(clean);
+  }
+}
+
 export function hasPendingSessionVoiceSwitch(
   sessionId: string | null | undefined,
 ): boolean {
@@ -504,6 +582,7 @@ export function hasPendingSessionVoiceSwitch(
 export function resetVoiceLockAndPolicyForTests(): void {
   cachedPolicy = null;
   activeSessionId = null;
+  previousSessionIds.length = 0;
   memoryLocks.clear();
   voiceSwitchedSessions.clear();
   utteranceAudits.clear();
