@@ -189,7 +189,8 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
   await seedBrowserSession(page);
   const headers = {
     "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
-    "access-control-allow-headers": "authorization,content-type,accept",
+    "access-control-allow-headers":
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
     "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
   };
   async function respond(route: Route, json: unknown, status = 200) {
@@ -1088,6 +1089,50 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (request.method() === "GET" && path === "/voice/status")
       return respond(route, readyVoiceStatus("Binh"));
+    if (
+      request.method() === "POST" &&
+      path === "/voice/phonics/analyze"
+    ) {
+      const body = request.postDataJSON() as { text?: string };
+      const text = body.text ?? "";
+      return respond(route, {
+        supported: false,
+        source: "none",
+        raw_text: text,
+        clean_phrase: text,
+        syllables: [],
+        focus_syllable_index: 0,
+        focus_syllable: "",
+        steps: [],
+        message: "Chưa có mẫu đánh vần",
+        can_play_whole_word: true,
+      });
+    }
+    if (
+      request.method() === "POST" &&
+      path.startsWith("/voice/text-to-speech")
+    ) {
+      const bytes = 3200;
+      const audio = Buffer.alloc(44 + bytes);
+      audio.write("RIFF");
+      audio.writeUInt32LE(36 + bytes, 4);
+      audio.write("WAVE", 8);
+      audio.write("fmt ", 12);
+      audio.writeUInt32LE(16, 16);
+      audio.writeUInt16LE(1, 20);
+      audio.writeUInt16LE(1, 22);
+      audio.writeUInt32LE(16_000, 24);
+      audio.writeUInt32LE(32_000, 28);
+      audio.writeUInt16LE(2, 32);
+      audio.writeUInt16LE(16, 34);
+      audio.write("data", 36);
+      audio.writeUInt32LE(bytes, 40);
+      return route.fulfill({
+        status: 200,
+        headers: { ...headers, "content-type": "audio/wav" },
+        body: audio,
+      });
+    }
     if (request.method() === "GET" && path === "/studio/tasks")
       return respond(route, {
         actor_id: ids.parent,
