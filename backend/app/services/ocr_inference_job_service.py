@@ -25,6 +25,7 @@ from app.diagnostic_logging import log_diagnostic
 from app.models import Book, BookPage, OcrInferenceJob, OcrWorkerHeartbeat, PageRevision, ParentBookPageSubmission
 from app.repositories.ocr_inference_job_repository import ACTIVE_JOB_STATUSES, OcrInferenceJobRepository
 from app.services import storage_service
+from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_text_utils import (  # noqa: F401
     align_ocr_tokens,
     normalize_text_tokens,
@@ -391,7 +392,11 @@ _TRANSIENT_POST_OCR_ERROR_CODES = {
 
 
 def _is_transient_post_ocr_error(exc: Exception) -> bool:
+    if isinstance(exc, OcrConfigurationError):
+        return False
     code = str(getattr(exc, "code", "") or "").upper()
+    if code == "NO_AI_PROVIDER_CONFIGURED":
+        return False
     status_code = getattr(exc, "status_code", None)
     if code in _TRANSIENT_POST_OCR_ERROR_CODES:
         return True
@@ -443,7 +448,6 @@ async def run_parent_submission_post_ocr(
         content_hash as safety_content_hash,
     )
     from app.services.ocr_ai.config import OcrCorrectionConfig
-    from app.services.ocr_ai.exceptions import OcrConfigurationError
     from app.services.ocr_ai.orchestrator import OcrCorrectionOrchestrator, OcrOrchestrationError
 
     local_ai_enforced = not OcrCorrectionConfig.private_book_allow_cloud_ai()
@@ -464,10 +468,15 @@ async def run_parent_submission_post_ocr(
         snapshot_storage_path = row.SourceStoragePath
         snapshot_ocr_text = str(row.OcrText or "")
         snapshot_ocr_words = list(row.OcrWordsJson or [])
+        snapshot_ocr_meta = dict(row.OcrMetaJson or {}) if isinstance(row.OcrMetaJson, dict) else {}
         snapshot_is_image_only = bool(row.IsImageOnly)
         snapshot_proofread_status = str(row.ProofreadStatus)
         snapshot_tool_status = str(row.ToolCheckStatus)
         snapshot_candidate_text = str(row.CandidateText or "")
+        snapshot_candidate_words = list(row.CandidateWordsJson or [])
+        snapshot_committed_page_id = getattr(row, "CommittedPageId", None)
+        snapshot_committed_revision_id = getattr(row, "CommittedRevisionId", None)
+        snapshot_owner_parent_id = getattr(row, "OwnerParentId", None)
         snapshot_source_type = str(getattr(row, "SourceType", "") or "")
         snapshot_source_note = str(row.SourceNote or "")
         snapshot_page_num = int(
@@ -483,6 +492,62 @@ async def run_parent_submission_post_ocr(
                 )
             except Exception:
                 committed_texts = []
+
+    # Lightweight CPU-only V2 content extraction (0 ML imports, <1s) when not yet recorded
+    computed_smart_extraction_meta: dict[str, Any] | None = None
+    computed_smart_extraction_obj: Any | None = None
+    computed_smart_source_words: list[Any] = []
+    proofread_input_text = snapshot_candidate_text or snapshot_ocr_text
+    proofread_input_words = snapshot_candidate_words or snapshot_ocr_words
+    if (
+        not snapshot_is_image_only
+        and snapshot_ocr_words
+        and not isinstance(snapshot_ocr_meta.get("smart_ocr_extraction"), dict)
+    ):
+        try:
+            from app.services.ocr_content_extraction import (
+                build_extraction_provenance_meta,
+                extract_ocr_content,
+                filter_word_dicts_by_extraction,
+                ocr_words_from_dicts,
+            )
+            from app.services.smart_studio_flags import SmartStudioFlags
+
+            computed_smart_source_words = ocr_words_from_dicts(snapshot_ocr_words)
+            if computed_smart_source_words:
+                computed_smart_extraction_obj = extract_ocr_content(
+                    computed_smart_source_words,
+                    page_number=max(1, snapshot_page_num),
+                    flags=SmartStudioFlags.from_environment(),
+                    book_id=snapshot_book_id,
+                    book_page_id=snapshot_committed_page_id,
+                    page_revision_id=snapshot_committed_revision_id,
+                )
+                computed_smart_extraction_meta = build_extraction_provenance_meta(
+                    computed_smart_extraction_obj,
+                    computed_smart_source_words,
+                    allow_cloud_ai=not local_ai_enforced,
+                )
+                if (
+                    computed_smart_extraction_obj.filter_mode == "active"
+                    and computed_smart_extraction_obj.stats.exclude_blocks > 0
+                    and computed_smart_extraction_obj.canonical_text.strip()
+                    and snapshot_proofread_status in ("PENDING", "RUNNING", "FAILED")
+                ):
+                    filtered_post_words = filter_word_dicts_by_extraction(
+                        snapshot_ocr_words, computed_smart_extraction_obj
+                    )
+                    if filtered_post_words:
+                        proofread_input_text = normalize_private_book_text(
+                            computed_smart_extraction_obj.canonical_text
+                        )
+                        proofread_input_words = filtered_post_words
+        except Exception as exc:
+            logger.warning(
+                "Non-fatal post-OCR CPU extraction skipped for submission %s: %s",
+                submission_id,
+                type(exc).__name__,
+            )
 
     # Stage 2: AI proofreading (privacy-safe local default; respects PRIVATE_BOOK_ALLOW_CLOUD_AI)
     if (
@@ -505,12 +570,12 @@ async def run_parent_submission_post_ocr(
             # word_boxes always match len(plan.tokens) 1-to-1 with zero WORD_BOX_MISMATCH.
             tokens = [
                 t
-                for t in _WHITESPACE_RE.split(normalize_private_book_text(snapshot_ocr_text))
+                for t in _WHITESPACE_RE.split(normalize_private_book_text(proofread_input_text))
                 if t and normalize_word(t)
             ]
             filtered_ocr_words = [
                 w
-                for w in snapshot_ocr_words
+                for w in proofread_input_words
                 if isinstance(w, dict) and normalize_word(str(w.get("text") or ""))
             ]
             word_boxes: list[tuple[float, float, float, float]] = []
@@ -528,6 +593,8 @@ async def run_parent_submission_post_ocr(
             uncertain_set: set[int] = set()
 
             def _on_event(evt: dict[str, object]) -> None:
+                if evt.get("status") == "started":
+                    return
                 if len(events) < 30:
                     events.append(
                         {
@@ -547,7 +614,7 @@ async def run_parent_submission_post_ocr(
             async def _invoke_proofread() -> str:
                 uncertain_set.clear()
                 return await orchestrator.correct(
-                    snapshot_ocr_text,
+                    proofread_input_text,
                     image_bytes,
                     word_boxes,
                     on_provider_event=_on_event,
@@ -561,11 +628,11 @@ async def run_parent_submission_post_ocr(
                 raise OcrOrchestrationError("EMPTY_PROOFREAD_OUTPUT")
             proofread_hash = safety_content_hash(proofread_text)
             suggestions = build_proofread_suggestions(
-                snapshot_ocr_words or snapshot_ocr_text,
+                proofread_input_words or proofread_input_text,
                 proofread_text,
                 uncertain_set,
             )
-            aligned_words = align_edited_text_to_words(proofread_text, snapshot_ocr_words)
+            aligned_words = align_edited_text_to_words(proofread_text, proofread_input_words)
             new_candidate_hash = compute_candidate_hash(
                 proofread_text,
                 source_sha256=snapshot_source_sha256,
@@ -604,6 +671,10 @@ async def run_parent_submission_post_ocr(
                 return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
 
             now = datetime.now(timezone.utc)
+            if computed_smart_extraction_meta is not None:
+                updated_ocr_meta = dict(locked.OcrMetaJson or {}) if isinstance(locked.OcrMetaJson, dict) else {}
+                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                locked.OcrMetaJson = updated_ocr_meta
             locked.ProofreadStatus = "COMPLETED"
             locked.ProofreadText = proofread_text
             locked.ProofreadHash = proofread_hash
@@ -619,6 +690,22 @@ async def run_parent_submission_post_ocr(
             )
             locked.OptimisticLockVersion = int(locked.OptimisticLockVersion or 1) + 1
             locked.UpdatedAt = now
+            if (
+                computed_smart_extraction_obj is not None
+                and snapshot_book_id is not None
+                and snapshot_committed_page_id is not None
+            ):
+                from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
+
+                await persist_extraction_savepoint_safe(
+                    db,
+                    book_id=snapshot_book_id,
+                    page_id=snapshot_committed_page_id,
+                    page_revision_id=snapshot_committed_revision_id,
+                    owner_id=snapshot_owner_parent_id,
+                    extraction=computed_smart_extraction_obj,
+                    source_words=computed_smart_source_words,
+                )
             await db.commit()
 
             snapshot_candidate_text = proofread_text
@@ -757,6 +844,19 @@ async def run_parent_submission_post_ocr(
                 return {"status": "STALE_DISCARDED", "submission_id": str(submission_id)}
 
             now = datetime.now(timezone.utc)
+            if computed_smart_extraction_meta is not None and not isinstance(
+                (locked.OcrMetaJson or {}).get("smart_ocr_extraction")
+                if isinstance(locked.OcrMetaJson, dict)
+                else None,
+                dict,
+            ):
+                updated_ocr_meta = (
+                    dict(locked.OcrMetaJson or {})
+                    if isinstance(locked.OcrMetaJson, dict)
+                    else {}
+                )
+                updated_ocr_meta["smart_ocr_extraction"] = computed_smart_extraction_meta
+                locked.OcrMetaJson = updated_ocr_meta
             locked.ToolCheckStatus = tool_check_status
             locked.ToolCheckInputHash = snapshot_candidate_hash
             locked.ToolCheckSuitability = suitability
@@ -1061,6 +1161,63 @@ class OcrInferenceJobService:
                 "", source_sha256=sub.SourceSha256, is_image_only=True
             )
         else:
+            # Lightweight CPU-only V2 content extraction (0 ML imports, <1s, savepoint-guarded)
+            candidate_text = clean_full_text
+            candidate_words = normalized_words
+            parent_extraction_obj: Any | None = None
+            parent_source_words: list[Any] = []
+            try:
+                from app.services.ocr_content_extraction import (
+                    build_extraction_provenance_meta,
+                    extract_ocr_content,
+                    filter_word_dicts_by_extraction,
+                    ocr_words_from_dicts,
+                )
+                from app.services.smart_studio_flags import SmartStudioFlags
+
+                parent_source_words = ocr_words_from_dicts(normalized_words)
+                if parent_source_words:
+                    page_num = max(
+                        1,
+                        int(
+                            getattr(sub, "TargetPageNumber", None)
+                            or getattr(sub, "SourcePageNumber", None)
+                            or 1
+                        ),
+                    )
+                    parent_extraction_obj = extract_ocr_content(
+                        parent_source_words,
+                        page_number=page_num,
+                        flags=SmartStudioFlags.from_environment(),
+                        book_id=sub.BookId,
+                        book_page_id=getattr(sub, "CommittedPageId", None),
+                        page_revision_id=getattr(sub, "CommittedRevisionId", None),
+                    )
+                    merged_meta["smart_ocr_extraction"] = build_extraction_provenance_meta(
+                        parent_extraction_obj,
+                        parent_source_words,
+                        allow_cloud_ai=False,
+                    )
+                    sub.OcrMetaJson = merged_meta
+                    if (
+                        parent_extraction_obj.filter_mode == "active"
+                        and parent_extraction_obj.stats.exclude_blocks > 0
+                        and parent_extraction_obj.canonical_text.strip()
+                    ):
+                        filtered_parent_words = filter_word_dicts_by_extraction(
+                            normalized_words, parent_extraction_obj
+                        )
+                        if filtered_parent_words:
+                            candidate_text = normalize_private_book_text(
+                                parent_extraction_obj.canonical_text
+                            )
+                            candidate_words = filtered_parent_words
+            except Exception as exc:
+                logger.warning(
+                    "Non-fatal CPU extraction skipped in _apply_parent_submission_ocr_result: %s",
+                    type(exc).__name__,
+                )
+
             sub.OcrStatus = "COMPLETED"
             sub.IsImageOnly = False
             sub.OcrText = clean_full_text
@@ -1069,11 +1226,28 @@ class OcrInferenceJobService:
                 " ".join(unicodedata.normalize("NFC", clean_full_text).split()).encode("utf-8")
             ).hexdigest()
             sub.ProofreadStatus = "PENDING"
-            sub.CandidateText = clean_full_text
-            sub.CandidateWordsJson = normalized_words
+            sub.CandidateText = candidate_text
+            sub.CandidateWordsJson = candidate_words
             sub.CandidateHash = compute_candidate_hash(
-                clean_full_text, source_sha256=sub.SourceSha256, is_image_only=False
+                candidate_text, source_sha256=sub.SourceSha256, is_image_only=False
             )
+            committed_page_id = getattr(sub, "CommittedPageId", None)
+            if (
+                parent_extraction_obj is not None
+                and sub.BookId is not None
+                and committed_page_id is not None
+            ):
+                from app.services.ocr_content_extraction import persist_extraction_savepoint_safe
+
+                await persist_extraction_savepoint_safe(
+                    self.db,
+                    book_id=sub.BookId,
+                    page_id=committed_page_id,
+                    page_revision_id=getattr(sub, "CommittedRevisionId", None),
+                    owner_id=getattr(sub, "OwnerParentId", None),
+                    extraction=parent_extraction_obj,
+                    source_words=parent_source_words,
+                )
 
         sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
         sub.UpdatedAt = now
@@ -2028,11 +2202,42 @@ class OcrInferenceJobService:
         eff_config_sha = proc_meta.get("active_config_sha256")
         eff_pipeline = str(proc_meta.get("pipeline_version") or OCR_PIPELINE_VERSION)
 
+        local_scan_extraction_summary: dict[str, Any] | None = None
+        if job.JobKind == JOB_KIND_LOCAL_SCAN and not no_text_detected and normalized_words:
+            try:
+                from app.services.ocr_content_extraction import (
+                    extract_ocr_content,
+                    ocr_words_from_dicts,
+                )
+                from app.services.smart_studio_flags import SmartStudioFlags
+
+                scan_words = ocr_words_from_dicts(normalized_words)
+                if scan_words:
+                    scan_ext = extract_ocr_content(
+                        scan_words,
+                        page_number=1,
+                        flags=SmartStudioFlags.from_environment(),
+                    )
+                    local_scan_extraction_summary = {
+                        "filter_mode": scan_ext.filter_mode,
+                        "page_kind": scan_ext.page_kind,
+                        "canonical_text": scan_ext.canonical_text,
+                        "requires_review": bool(scan_ext.requires_review),
+                        "exclude_blocks": scan_ext.stats.exclude_blocks,
+                    }
+            except Exception:
+                local_scan_extraction_summary = None
+
         job.ResultPayload = {
             "full_text": clean_full_text,
             "words": normalized_words,
             "ocr_meta": dict(ocr_meta or {}),
             "no_text_detected": bool(no_text_detected),
+            **(
+                {"smart_ocr_extraction": local_scan_extraction_summary}
+                if local_scan_extraction_summary is not None
+                else {}
+            ),
             "cache_key": {
                 "image_sha256": job.ImageSha256,
                 "active_model_profile": eff_profile,

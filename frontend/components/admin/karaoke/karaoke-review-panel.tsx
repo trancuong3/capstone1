@@ -33,6 +33,7 @@ type Props = {
   onPublish: () => void;
   canPublish: boolean;
 };
+
 export function KaraokeReviewPanel(props: Props) {
   const fingerprint =
     props.preview.kind === "staging"
@@ -46,6 +47,7 @@ export function KaraokeReviewPanel(props: Props) {
     />
   );
 }
+
 function ReviewBody({
   preview,
   detail,
@@ -121,12 +123,14 @@ function ReviewBody({
       : source;
   const ackComplete = flags.every((flag) => acknowledged.includes(flag.id));
   const reviewed = !staging && detail.processing_review?.reviewed === true;
+
   function reloadSelectedSource() {
     // Unmount the old audio synchronously; renewing a URL never starts playback.
     setPlaybackGeneration((generation) => generation + 1);
     if (useReference && !staging) onReference();
     else onReload();
   }
+
   return (
     <section
       className="grid gap-5"
@@ -136,7 +140,7 @@ function ReviewBody({
           : t("karaoke.review.draftAria")
       }
     >
-      <h2 className="text-xl font-extrabold">
+      <h2 className="text-lg font-extrabold text-ink">
         {staging
           ? t("karaoke.review.stagingHeading")
           : t("karaoke.review.draftHeading")}
@@ -146,41 +150,45 @@ function ReviewBody({
           ? t("karaoke.review.stagingSubtitle")
           : t("karaoke.review.draftSubtitle")}
       </StatusMessage>
-      <div className="flex flex-wrap gap-3">
+      <div className="flex flex-wrap items-center gap-2.5">
         <Button
-          variant="secondary"
-          className="sm:w-auto"
           disabled={busy || !useReference}
+          fullWidth={false}
           onClick={() => setUseReference(false)}
+          size="admin"
+          variant="secondary"
         >
           {t("karaoke.review.listenInstrumental")}
         </Button>
         {referenceUrl && referenceExpiry ? (
           <Button
-            variant="secondary"
-            className="sm:w-auto"
             disabled={busy || useReference}
+            fullWidth={false}
             onClick={() => setUseReference(true)}
+            size="admin"
+            variant="secondary"
           >
             {t("karaoke.review.listenReference")}
           </Button>
         ) : (
           !staging && (
             <Button
-              variant="secondary"
-              className="sm:w-auto"
               disabled={busy || dirty}
+              fullWidth={false}
               onClick={onReference}
+              size="admin"
+              variant="secondary"
             >
               {t("karaoke.review.loadReference")}
             </Button>
           )
         )}
         <Button
-          variant="quiet"
-          className="sm:w-auto"
           disabled={busy || dirty}
+          fullWidth={false}
           onClick={reloadSelectedSource}
+          size="admin"
+          variant="outline"
         >
           {useReference
             ? t("karaoke.review.refreshReference")
@@ -220,9 +228,11 @@ function ReviewBody({
                   return (
                     <div
                       key={flag.id}
-                      className="grid gap-2 rounded-control border border-border p-4"
+                      className="grid gap-2.5 rounded-xl border border-border bg-surface-subtle/40 p-4"
                     >
-                      <p>{t(`karaoke.review.flags.${flag.message_key}`)}</p>
+                      <p className="text-sm font-semibold text-ink">
+                        {t(`karaoke.review.flags.${flag.message_key}`)}
+                      </p>
                       {target ? (
                         <p
                           className="viread-learning-content text-sm text-muted"
@@ -237,28 +247,31 @@ function ReviewBody({
                         </p>
                       )}
                       {!staging && target && (
-                        <Button
-                          variant="quiet"
-                          className="sm:w-auto"
-                          disabled={busy}
-                          onClick={() => {
-                            player.pause();
-                            setUseReference(false);
-                            setEditing(true);
-                            setFocus({
-                              lineId: target.id,
-                              syllableId: unit?.id,
-                              request: Date.now(),
-                            });
-                          }}
-                        >
-                          {t("karaoke.review.inspectLineBtn")}
-                        </Button>
+                        <div>
+                          <Button
+                            disabled={busy}
+                            fullWidth={false}
+                            onClick={() => {
+                              player.pause();
+                              setUseReference(false);
+                              setEditing(true);
+                              setFocus({
+                                lineId: target.id,
+                                syllableId: unit?.id,
+                                request: Date.now(),
+                              });
+                            }}
+                            size="admin"
+                            variant="outline"
+                          >
+                            {t("karaoke.review.inspectLineBtn")}
+                          </Button>
+                        </div>
                       )}
                       {!staging && (
-                        <label className="flex items-start gap-3">
+                        <label className="flex items-start gap-2.5 text-sm">
                           <input
-                            className="mt-1 size-5"
+                            className="mt-0.5 size-4 accent-primary"
                             type="checkbox"
                             checked={acknowledged.includes(flag.id)}
                             disabled={busy}
@@ -285,7 +298,7 @@ function ReviewBody({
                 open={editing}
                 onToggle={(event) => setEditing(event.currentTarget.open)}
               >
-                <summary className="min-h-12 cursor-pointer py-3 font-bold text-primary-hover">
+                <summary className="min-h-11 cursor-pointer py-2 text-sm font-bold text-primary-hover">
                   {t("karaoke.review.advancedEditorLink")}
                 </summary>
                 <LyricTimingEditor
@@ -303,9 +316,16 @@ function ReviewBody({
         )}
       </KaraokePlayer>
       {staging ? (
-        <Button disabled={busy} onClick={onApply}>
-          {t("karaoke.review.useInDraftBtn")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Button
+            disabled={busy}
+            fullWidth={false}
+            onClick={onApply}
+            size="admin"
+          >
+            {t("karaoke.review.useInDraftBtn")}
+          </Button>
+        </div>
       ) : (
         <>
           {structural.length > 0 && (
@@ -328,9 +348,9 @@ function ReviewBody({
               </ul>
             </StatusMessage>
           )}
-          <label className="flex items-start gap-3">
+          <label className="flex items-start gap-2.5 text-sm">
             <input
-              className="mt-1 size-5"
+              className="mt-0.5 size-4 accent-primary"
               type="checkbox"
               checked={listened}
               disabled={busy}
@@ -344,29 +364,37 @@ function ReviewBody({
             />
             {t("karaoke.review.reviewedAckCheckbox")}
           </label>
-          <Button
-            variant="secondary"
-            disabled={
-              busy ||
-              dirty ||
-              !listened ||
-              !ackComplete ||
-              structural.length > 0 ||
-              !validation ||
-              reviewed
-            }
-            onClick={() => onConfirm(acknowledged, listened)}
-          >
-            {reviewed
-              ? t("karaoke.review.draftConfirmedBtn")
-              : t("karaoke.review.confirmReviewBtn")}
-          </Button>
-          <Button
-            disabled={busy || dirty || !canPublish || (!listened && !reviewed)}
-            onClick={onPublish}
-          >
-            {t("karaoke.review.publishSongBtn")}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Button
+              disabled={
+                busy ||
+                dirty ||
+                !listened ||
+                !ackComplete ||
+                structural.length > 0 ||
+                !validation ||
+                reviewed
+              }
+              fullWidth={false}
+              onClick={() => onConfirm(acknowledged, listened)}
+              size="admin"
+              variant="secondary"
+            >
+              {reviewed
+                ? t("karaoke.review.draftConfirmedBtn")
+                : t("karaoke.review.confirmReviewBtn")}
+            </Button>
+            <Button
+              disabled={
+                busy || dirty || !canPublish || (!listened && !reviewed)
+              }
+              fullWidth={false}
+              onClick={onPublish}
+              size="admin"
+            >
+              {t("karaoke.review.publishSongBtn")}
+            </Button>
+          </div>
         </>
       )}
     </section>

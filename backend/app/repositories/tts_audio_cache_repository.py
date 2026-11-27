@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Any, Sequence
 from uuid import UUID, uuid4
 
-from sqlalchemy import case, func, literal_column, or_, select, update
+from sqlalchemy import and_, case, func, literal_column, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +20,8 @@ from app.models import (
     TtsAudioCacheDailyUsage,
     TtsAudioCacheEntry,
 )
+
+_ZERO_UUID_LITERAL = literal_column("'00000000-0000-0000-0000-000000000000'::uuid")
 
 
 class TtsAudioCacheRepository:
@@ -41,6 +43,26 @@ class TtsAudioCacheRepository:
                 bind = None
         dialect_name = getattr(getattr(bind, "dialect", None), "name", "") if bind is not None else ""
         return dialect_name if isinstance(dialect_name, str) else ""
+
+    def _owner_filter_predicates(
+        self, scope: str, owner_parent_id: UUID | None
+    ) -> list[Any]:
+        """Match OwnerParentId AND align with `uq_tts_cache_active_key`'s COALESCE expression on Postgres."""
+        if scope == "PRIVATE":
+            preds: list[Any] = [TtsAudioCacheEntry.OwnerParentId == owner_parent_id]
+            if self._get_dialect_name() == "postgresql":
+                preds.append(
+                    func.coalesce(TtsAudioCacheEntry.OwnerParentId, _ZERO_UUID_LITERAL)
+                    == owner_parent_id
+                )
+            return preds
+        preds = [TtsAudioCacheEntry.OwnerParentId.is_(None)]
+        if self._get_dialect_name() == "postgresql":
+            preds.append(
+                func.coalesce(TtsAudioCacheEntry.OwnerParentId, _ZERO_UUID_LITERAL)
+                == _ZERO_UUID_LITERAL
+            )
+        return preds
 
     def _require_word_timings_filters(self) -> list[Any]:
         """Exclude both SQL NULL and legacy JSONB literal `'null'::jsonb` when timings are required."""
@@ -239,15 +261,12 @@ class TtsAudioCacheRepository:
         filters = [
             TtsAudioCacheEntry.Status == "ACTIVE",
             TtsAudioCacheEntry.Scope == scope,
+            *self._owner_filter_predicates(scope, owner_parent_id),
             TtsAudioCacheEntry.ContentSha256 == content_sha256,
             TtsAudioCacheEntry.VoiceId == voice_id,
             TtsAudioCacheEntry.Speed == self._quantize_speed(speed),
             TtsAudioCacheEntry.AudioFormat.in_(list(audio_formats)),
         ]
-        if scope == "PRIVATE":
-            filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
-        else:
-            filters.append(TtsAudioCacheEntry.OwnerParentId.is_(None))
         if model_version:
             filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
         if require_word_timings:
@@ -294,14 +313,11 @@ class TtsAudioCacheRepository:
         filters = [
             TtsAudioCacheEntry.Status == "ACTIVE",
             TtsAudioCacheEntry.Scope == scope,
+            *self._owner_filter_predicates(scope, owner_parent_id),
             TtsAudioCacheEntry.ContentSha256 == content_sha256,
             TtsAudioCacheEntry.VoiceId == voice_id,
             TtsAudioCacheEntry.AudioFormat.in_(list(audio_formats)),
         ]
-        if scope == "PRIVATE":
-            filters.append(TtsAudioCacheEntry.OwnerParentId == owner_parent_id)
-        else:
-            filters.append(TtsAudioCacheEntry.OwnerParentId.is_(None))
         if model_version:
             filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
         if require_word_timings:
@@ -367,6 +383,206 @@ class TtsAudioCacheRepository:
             .limit(max(1, min(int(limit), 16)))
         )
         return list((await self.db.scalars(stmt)).all())
+
+    async def get_best_active_entries(
+        self,
+        *,
+        scope: str,
+        owner_parent_id: UUID | None,
+        content_sha256: str,
+        voice_id: str,
+        model_version: str | None,
+        preferred_model_version: str | None = None,
+        speed: float,
+        audio_formats: Sequence[str],
+        folded_sha256: str | None = None,
+        page_id: UUID | None = None,
+        allow_page_timed_fallback: bool = False,
+        allow_speed_fallback: bool = True,
+        require_word_timings: bool = False,
+        include_coaching_fallback: bool = False,
+        limit: int = 8,
+    ) -> list[TtsAudioCacheEntry]:
+        """Single-query prioritized TTS cache lookup across exact, folded, page-timed, nearest-speed, and COACHING fallback."""
+        if scope == "PRIVATE" and owner_parent_id is None:
+            return []
+        q_speed = self._quantize_speed(speed)
+        format_list = list(audio_formats)
+        if not format_list:
+            return []
+
+        primary_scope_pred = and_(
+            TtsAudioCacheEntry.Scope == scope,
+            *self._owner_filter_predicates(scope, owner_parent_id),
+        )
+
+        sha_candidates = [content_sha256]
+        if folded_sha256 and folded_sha256 != content_sha256 and scope == "CATALOG":
+            sha_candidates.append(folded_sha256)
+
+        match_predicates: list[Any] = [
+            and_(
+                primary_scope_pred,
+                TtsAudioCacheEntry.ContentSha256.in_(sha_candidates),
+            )
+        ]
+
+        can_page_fallback = (
+            allow_page_timed_fallback
+            and scope == "CATALOG"
+            and page_id is not None
+        )
+        if can_page_fallback:
+            match_predicates.append(
+                and_(
+                    primary_scope_pred,
+                    TtsAudioCacheEntry.PageId == page_id,
+                    ~TtsAudioCacheEntry.NormalizedText.like("phonics:%"),
+                    *self._require_word_timings_filters(),
+                )
+            )
+
+        can_coaching_fallback = (
+            include_coaching_fallback
+            and scope == "CATALOG"
+        )
+        if can_coaching_fallback:
+            match_predicates.append(
+                and_(
+                    TtsAudioCacheEntry.Scope == "COACHING",
+                    *self._owner_filter_predicates("COACHING", None),
+                    TtsAudioCacheEntry.ContentSha256 == content_sha256,
+                )
+            )
+
+        filters: list[Any] = [
+            TtsAudioCacheEntry.Status == "ACTIVE",
+            TtsAudioCacheEntry.VoiceId == voice_id,
+            TtsAudioCacheEntry.AudioFormat.in_(format_list),
+            or_(*match_predicates),
+        ]
+        if not allow_speed_fallback:
+            filters.append(TtsAudioCacheEntry.Speed == q_speed)
+        if model_version:
+            filters.append(TtsAudioCacheEntry.ModelVersion == model_version)
+        if require_word_timings:
+            filters.extend(self._require_word_timings_filters())
+
+        is_exact_speed = TtsAudioCacheEntry.Speed == q_speed
+        is_exact_sha = TtsAudioCacheEntry.ContentSha256 == content_sha256
+        rank_whens: list[tuple[Any, int]] = [
+            (and_(TtsAudioCacheEntry.Scope == scope, is_exact_sha, is_exact_speed), 0),
+        ]
+        if folded_sha256 and folded_sha256 != content_sha256 and scope == "CATALOG":
+            is_folded_sha = TtsAudioCacheEntry.ContentSha256 == folded_sha256
+            rank_whens.append(
+                (and_(TtsAudioCacheEntry.Scope == scope, is_folded_sha, is_exact_speed), 1)
+            )
+        if can_page_fallback:
+            rank_whens.append(
+                (and_(TtsAudioCacheEntry.Scope == scope, TtsAudioCacheEntry.PageId == page_id, is_exact_speed), 2)
+            )
+        rank_whens.append((and_(TtsAudioCacheEntry.Scope == scope, is_exact_sha), 3))
+        if folded_sha256 and folded_sha256 != content_sha256 and scope == "CATALOG":
+            is_folded_sha = TtsAudioCacheEntry.ContentSha256 == folded_sha256
+            rank_whens.append((and_(TtsAudioCacheEntry.Scope == scope, is_folded_sha), 4))
+        if can_page_fallback:
+            rank_whens.append(
+                (and_(TtsAudioCacheEntry.Scope == scope, TtsAudioCacheEntry.PageId == page_id), 5)
+            )
+        if can_coaching_fallback:
+            rank_whens.append((and_(TtsAudioCacheEntry.Scope == "COACHING", is_exact_speed), 6))
+            rank_whens.append((TtsAudioCacheEntry.Scope == "COACHING", 7))
+
+        priority_expr = case(*rank_whens, else_=9)
+        order_clauses: list[Any] = [
+            priority_expr.asc(),
+            func.abs(TtsAudioCacheEntry.Speed - q_speed).asc(),
+        ]
+        if preferred_model_version and not model_version:
+            order_clauses.append(
+                case(
+                    (TtsAudioCacheEntry.ModelVersion == preferred_model_version, 0),
+                    else_=1,
+                ).asc()
+            )
+        order_clauses.extend(
+            [
+                self._format_priority_expr(format_list).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            ]
+        )
+        stmt = (
+            select(TtsAudioCacheEntry)
+            .where(*filters)
+            .order_by(*order_clauses)
+            .limit(max(1, min(int(limit), 16)))
+        )
+        return list((await self.db.scalars(stmt)).all())
+
+    async def get_page_precomputed_timed_metadata(
+        self,
+        *,
+        page_id: UUID,
+        page_revision_id: UUID | None = None,
+        voice_id: str | None = None,
+        content_sha256: str | None = None,
+        folded_sha256: str | None = None,
+        target_speed: float | None = None,
+    ) -> tuple[list[dict[str, Any]], str, float | None] | None:
+        """Fetch precomputed word timings metadata for a verified public catalog page."""
+        filters: list[Any] = [
+            TtsAudioCacheEntry.Status == "ACTIVE",
+            TtsAudioCacheEntry.Scope == "CATALOG",
+            *self._owner_filter_predicates("CATALOG", None),
+            TtsAudioCacheEntry.PageId == page_id,
+            ~TtsAudioCacheEntry.NormalizedText.like("phonics:%"),
+            *self._require_word_timings_filters(),
+        ]
+        if voice_id:
+            filters.append(TtsAudioCacheEntry.VoiceId == voice_id)
+        if target_speed is not None:
+            filters.append(TtsAudioCacheEntry.Speed == self._quantize_speed(target_speed))
+        order_by: list[Any] = []
+        if content_sha256 or folded_sha256:
+            sha_whens: list[tuple[Any, int]] = []
+            if content_sha256:
+                sha_whens.append((TtsAudioCacheEntry.ContentSha256 == content_sha256, 0))
+            if folded_sha256 and folded_sha256 != content_sha256:
+                sha_whens.append((TtsAudioCacheEntry.ContentSha256 == folded_sha256, 1))
+            if sha_whens:
+                order_by.append(case(*sha_whens, else_=2).asc())
+        if page_revision_id is not None:
+            order_by.append(
+                case((TtsAudioCacheEntry.PageRevisionId == page_revision_id, 0), else_=1).asc()
+            )
+        desired_speed = (
+            self._quantize_speed(target_speed)
+            if target_speed is not None
+            else Decimal("1.00")
+        )
+        order_by.extend(
+            [
+                func.abs(TtsAudioCacheEntry.Speed - desired_speed).asc(),
+                TtsAudioCacheEntry.CreatedAt.desc(),
+            ]
+        )
+        row = (
+            await self.db.execute(
+                select(
+                    TtsAudioCacheEntry.WordTimingsJson,
+                    TtsAudioCacheEntry.VoiceId,
+                    TtsAudioCacheEntry.Speed,
+                )
+                .where(*filters)
+                .order_by(*order_by)
+                .limit(1)
+            )
+        ).first()
+        if row is None or not isinstance(row.WordTimingsJson, list) or not row.WordTimingsJson:
+            return None
+        speed_val = float(row.Speed) if row.Speed is not None else None
+        return row.WordTimingsJson, str(row.VoiceId), speed_val
 
     async def has_active_entry_for_storage_path(
         self,

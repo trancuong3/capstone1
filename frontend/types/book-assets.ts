@@ -105,6 +105,7 @@ export const bookCoverGenerateResponseSchema = z.object({
     "BLOCKED_NO_IMAGE_PROVIDER",
     "WAITING_FOR_QUOTA",
     "SUPERSEDED_BY_USER_UPLOAD",
+    "REJECTED_CONTAINS_TEXT",
   ]),
   job_id: z.string().uuid().nullable().optional(),
   provider_name: z.string().nullable().optional(),

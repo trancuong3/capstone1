@@ -260,7 +260,17 @@
     "referencePageAlt": "Ảnh tham khảo trang {page}",
     "scrollToCurrentWord": "Về từ đang đọc",
     "currentWordPrefix": "Từ hiện tại: ",
-    "overlayAria": "Vùng tô sáng từ hiện tại theo bounding box"
+    "overlayAria": "Vùng tô sáng từ hiện tại theo bounding box",
+    "readingModeSwitcherAria": "Chế độ đọc trang sách",
+    "readingModeIllustrated": "Đọc có tranh",
+    "readingModeIllustratedTitle": "Xem tranh minh họa không chữ cùng văn bản đọc",
+    "readingModeText": "Đọc chữ",
+    "readingModeTextTitle": "Tập trung vào chữ in rõ nét để bé dễ đọc",
+    "readingModeOriginal": "Trang gốc đối chiếu",
+    "readingModeOriginalTitle": "Xem ảnh trang sách gốc để đối chiếu",
+    "illustrationAlt": "Tranh minh họa trang {page}",
+    "originalReferenceHeading": "Ảnh trang gốc (đối chiếu)",
+    "originalReferenceAlt": "Ảnh trang gốc trang {page}"
   },
   "pageContent": {
     "incorrectWordAria": "Chưa chính xác: \"{word}\". Bé đọc lại từ này nhé.",

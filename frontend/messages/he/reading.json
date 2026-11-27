@@ -260,7 +260,17 @@
     "referencePageAlt": "תמונת הפניה לעמוד {page}",
     "scrollToCurrentWord": "על אודות המילה הנקראת",
     "currentWordPrefix": "מילה נוכחית: ",
-    "overlayAria": "הדגש מילה נוכחית באמצעות תיבת תיחוום"
+    "overlayAria": "הדגש מילה נוכחית באמצעות תיבת תיחוום",
+    "readingModeSwitcherAria": "מצב קריאת עמוד הספר",
+    "readingModeIllustrated": "קריאה עם איור",
+    "readingModeIllustratedTitle": "הצגת איור נקי מטקסט לצד טקסט הקריאה",
+    "readingModeText": "קריאת טקסט",
+    "readingModeTextTitle": "התמקדות בטקסט קריאה ברור",
+    "readingModeOriginal": "עמוד מקורי",
+    "readingModeOriginalTitle": "הצגת תמונת העמוד המקורי להשוואה",
+    "illustrationAlt": "איור לעמוד {page}",
+    "originalReferenceHeading": "תמונת העמוד המקורי (השוואה)",
+    "originalReferenceAlt": "תמונה מקורית לעמוד {page}"
   },
   "pageContent": {
     "incorrectWordAria": "לא מדויק: \"{word}\". בואו ננסה לקרוא מילה זו שוב.",

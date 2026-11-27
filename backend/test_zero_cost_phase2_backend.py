@@ -819,7 +819,18 @@ class ZeroCostPhase2BackendTests(unittest.IsolatedAsyncioTestCase):
         for s in report.services:
             self.assertIn(
                 s.operational_state,
-                {"Healthy", "Degraded", "Offline", "Queued", "Quota exhausted", "Unsupported", "Unknown"},
+                {
+                    "Healthy",
+                    "Degraded",
+                    "Offline",
+                    "Queued",
+                    "Quota exhausted",
+                    "Unsupported",
+                    "Unknown",
+                    "Standby",
+                    "Scheduled",
+                    "Local only",
+                },
             )
 
     async def test_precompute_script_dry_run_and_idempotency(self) -> None:

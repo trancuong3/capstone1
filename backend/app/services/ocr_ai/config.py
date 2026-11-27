@@ -72,7 +72,7 @@ class OcrCorrectionConfig:
         return self.cloud_enabled and self.groq_api_key is not None
 
     def local_only_copy(self) -> "OcrCorrectionConfig":
-        """Return a config restricted strictly to local Ollama (no external cloud calls)."""
+        """Return a config with external cloud providers stripped while preserving local_enabled."""
         return OcrCorrectionConfig(
             cloud_enabled=False,
             gemini_api_key=None,
@@ -91,13 +91,12 @@ class OcrCorrectionConfig:
         """Detect whether a local Ollama daemon is expected on this runtime.
 
         Disabled automatically on Render / remote-worker web dynos unless
-        `LOCAL_OCR_ENABLED=true` or an explicit `LOCAL_OCR_BASE_URL` is set.
+        `LOCAL_OCR_ENABLED=true` is explicitly set (ignoring stray loopback
+        `LOCAL_OCR_BASE_URL` values left in hosted environments).
         """
         explicit = os.getenv("LOCAL_OCR_ENABLED")
         if explicit is not None and explicit.strip() != "":
             return _read_bool("LOCAL_OCR_ENABLED", True)
-        if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
-            return True
         render_flag = (os.getenv("RENDER") or "").strip().lower() in {"1", "true", "yes", "on"}
         disable_heavy = (os.getenv("VIREAD_WEB_DISABLE_HEAVY_WORKERS") or "").strip().lower() in {
             "1",
@@ -106,7 +105,11 @@ class OcrCorrectionConfig:
             "on",
         }
         remote_ocr = (os.getenv("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
-        return not (render_flag or disable_heavy or remote_ocr)
+        if render_flag or disable_heavy or remote_ocr:
+            return False
+        if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
+            return True
+        return True
 
     @staticmethod
     def private_book_allow_cloud_ai() -> bool:

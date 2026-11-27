@@ -24,7 +24,9 @@ import {
 } from "@/lib/reading/synthesized-audio-meta";
 import {
   buildTtsBrowserCacheKey,
+  getCachedPhonicsTts,
   getCachedTtsAudio,
+  putCachedPhonicsTts,
   putCachedTtsAudio,
   shouldPersistTtsCacheEntry,
   type TtsCacheScope,
@@ -105,6 +107,7 @@ export interface TextToSpeechOptions {
   readonly pageRevisionId?: string | null;
   readonly cacheScope?: TtsCacheScope | null;
   readonly isPrivateBook?: boolean;
+  readonly bypassSessionLock?: boolean;
   readonly timeoutMs?: number;
 }
 
@@ -287,8 +290,12 @@ export function createSpeechService(): SpeechService {
       const mode = options.providerMode ?? policy.providerMode;
       const allowGoogleTts =
         options.allowGoogleTts ?? policy.allowGoogleTtsFallback;
-      const activeLock = getActiveSessionVoiceLock();
-      const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
+      const activeLock = options.bypassSessionLock
+        ? null
+        : getActiveSessionVoiceLock();
+      const sessionId = options.bypassSessionLock
+        ? null
+        : (options.sessionId ?? activeLock?.sessionId ?? null);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
@@ -299,14 +306,16 @@ export function createSpeechService(): SpeechService {
         });
       const cacheVoiceId =
         options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+      const cacheModelVersion =
+        activeLock && activeLock.voiceId === cacheVoiceId
+          ? activeLock.modelVersion
+          : inferModelVersionForVoiceId(cacheVoiceId);
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
-            kind: options.wordSample ? "phonics" : "short",
+            kind: options.wordSample ? "wordSample" : "short",
             textOrTokens: normalizedText,
             voiceId: cacheVoiceId,
-            modelVersion:
-              activeLock?.modelVersion ??
-              inferModelVersionForVoiceId(cacheVoiceId),
+            modelVersion: cacheModelVersion,
             speed: options.speed ?? activeLock?.speed ?? 1,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
@@ -439,7 +448,6 @@ export function createSpeechService(): SpeechService {
           if (
             browserCacheKey &&
             !usedFallbackVoice &&
-            provider !== "google" &&
             shouldPersistTtsCacheEntry({
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),
@@ -469,8 +477,74 @@ export function createSpeechService(): SpeechService {
       const mode = options.providerMode ?? policy.providerMode;
       const allowGoogleTts =
         options.allowGoogleTts ?? policy.allowGoogleTtsFallback;
-      const activeLock = getActiveSessionVoiceLock();
-      const sessionId = options.sessionId ?? activeLock?.sessionId ?? null;
+      const activeLock = options.bypassSessionLock
+        ? null
+        : getActiveSessionVoiceLock();
+      const sessionId = options.bypassSessionLock
+        ? null
+        : (options.sessionId ?? activeLock?.sessionId ?? null);
+      const cacheScope: TtsCacheScope =
+        options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "COACHING");
+      const canUseBrowserCache =
+        typeof indexedDB !== "undefined" &&
+        shouldPersistTtsCacheEntry({
+          scope: cacheScope,
+          isPrivateBook: options.isPrivateBook,
+        });
+      const cacheVoiceId =
+        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+      const cacheModelVersion =
+        activeLock && activeLock.voiceId === cacheVoiceId
+          ? activeLock.modelVersion
+          : inferModelVersionForVoiceId(cacheVoiceId);
+      const browserCacheKey = canUseBrowserCache
+        ? buildTtsBrowserCacheKey({
+            kind: "phonics",
+            textOrTokens: JSON.stringify(
+              steps.map((s) => [
+                s.id,
+                s.spokenText.normalize("NFC").trim(),
+                s.pauseAfterMs ?? 420,
+              ]),
+            ),
+            voiceId: cacheVoiceId,
+            modelVersion: cacheModelVersion,
+            speed: options.speed ?? activeLock?.speed ?? 1,
+            format: options.audioFormat ?? "auto",
+            scope: cacheScope,
+          })
+        : null;
+
+      if (browserCacheKey) {
+        const cached = await getCachedPhonicsTts(browserCacheKey);
+        options.signal?.throwIfAborted();
+        if (
+          cached &&
+          cached.audio.size > 0 &&
+          cached.stepTimings.length === steps.length
+        ) {
+          const resolvedId = cached.resolvedVoiceId ?? cacheVoiceId;
+          recordTtsEngineUsage({
+            provider: cached.provider || "precomputed_cache",
+            fallbackUsed: false,
+            fallbackReason: null,
+            voiceId: resolvedId,
+            voiceGender: resolveVoiceGender(resolvedId),
+          });
+          return {
+            audio: cached.audio,
+            durationSeconds: cached.durationSeconds,
+            stepTimings: cached.stepTimings,
+            provider: cached.provider || "precomputed_cache",
+            resolvedVoiceId: resolvedId,
+            region: cached.region ?? activeLock?.region ?? "north",
+            modelVersion: cached.modelVersion ?? cacheModelVersion,
+            ...(cached.cachedSpeed !== null
+              ? { cachedSpeed: cached.cachedSpeed }
+              : {}),
+          };
+        }
+      }
 
       return withRequestDeadline(
         async (signal) => {
@@ -537,9 +611,9 @@ export function createSpeechService(): SpeechService {
           if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
           const phonicsProvider = parsed.data.provider ?? "local";
           const phonicsUsedFallback =
-            phonicsProvider === "google" ||
             (Boolean(options.voiceId) &&
-              parsed.data.resolved_voice_id !== options.voiceId);
+              parsed.data.resolved_voice_id !== options.voiceId) ||
+            (!options.voiceId && phonicsProvider === "google");
           const cachedSpeed =
             parsed.data.cached_speed ??
             parsePositiveSpeedHeader(
@@ -559,11 +633,48 @@ export function createSpeechService(): SpeechService {
             voiceId: parsed.data.resolved_voice_id,
             voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
           });
+          const headerScopeRaw = response.headers
+            .get("x-tts-scope")
+            ?.trim()
+            .toUpperCase();
+          const effectiveScope: TtsCacheScope =
+            headerScopeRaw === "PRIVATE" ||
+            headerScopeRaw === "COACHING" ||
+            headerScopeRaw === "CATALOG"
+              ? headerScopeRaw
+              : cacheScope;
+          if (
+            browserCacheKey &&
+            !phonicsUsedFallback &&
+            shouldPersistTtsCacheEntry({
+              scope: effectiveScope,
+              cacheControl: response.headers.get("cache-control"),
+              isPrivateBook: options.isPrivateBook,
+            })
+          ) {
+            void putCachedPhonicsTts({
+              key: browserCacheKey,
+              audio,
+              durationSeconds: parsed.data.duration_seconds,
+              stepTimings: parsed.data.step_timings,
+              scope: effectiveScope,
+              cacheControl: response.headers.get("cache-control"),
+              isPrivateBook: options.isPrivateBook,
+              resolvedVoiceId: parsed.data.resolved_voice_id,
+              region: parsed.data.region ?? "north",
+              modelVersion: parsed.data.model_version,
+              provider:
+                phonicsProvider === "local"
+                  ? "precomputed_cache"
+                  : phonicsProvider,
+              cachedSpeed,
+            });
+          }
           return {
             audio,
             durationSeconds: parsed.data.duration_seconds,
             stepTimings: parsed.data.step_timings,
-            provider: parsed.data.provider ?? "local",
+            provider: phonicsProvider,
             resolvedVoiceId: parsed.data.resolved_voice_id,
             region: parsed.data.region ?? "north",
             modelVersion: parsed.data.model_version,

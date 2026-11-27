@@ -84,7 +84,9 @@
     "offlineCacheMultiple": "שירות הקול המקומי אינו מקוון. אודיו מוכן מראש זמין במצב Wi-Fi עבור: {voices}; קולות אחרים דורשים הפעלת השירות המקומי או גיבוי למטה.",
     "offlineCacheSingle": "שירות הקול המקומי אינו מקוון. אודיו מוכן מראש זמין במצב Wi-Fi עבור הקול {voice}; להאזנה לקולות נוספים הפעל את השירות המקומי או את הגיבוי למטה.",
     "offlineCacheEmpty": "שירות הקול המקומי אינו מקוון ואין אודיו מוכן מראש במכשיר. הפעל את השירות המקומי או את הגיבוי למטה כדי לשמוע קריאה לדוגמה.",
-    "localWorkerLabel": "שירות קול מקומי:"
+    "localWorkerLabel": "שירות קול מקומי:",
+    "sessionLockedBadge": "נעול למפגש קריאה זה",
+    "offlineBrowserBadge": "הדפדפן במצב לא מקוון"
   },
   "engineBadge": {
     "ariaLabel": "מקור דיבור: STT {stt}, TTS {tts}",
@@ -101,8 +103,10 @@
       "catalog_cache": "מטמון רגיל",
       "android_native": "Android (vi-VN)",
       "google_cloud": "מקוון (Google API)",
-      "browser_default": "מקוון (Google / דפדפן)"
-    }
+      "browser_default": "מקוון (Google / דפדפן)",
+      "idle": "בודק…"
+    },
+    "idleDetail": "{base} (בודק את מצב מנוע הקול)"
   },
   "playback": {
     "unavailable": "הקול במכשיר אינו זמין כרגע. ההורים והילד יכולים לעקוב אחר הטקסט שעל המסך וללחוץ על 'נסה שוב'.",

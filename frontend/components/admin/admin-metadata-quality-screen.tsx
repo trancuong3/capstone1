@@ -1,17 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Copy,
+  FileWarning,
+  RefreshCw,
+} from "lucide-react";
 import Link from "next/link";
-import { RefreshCw, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Button } from "@/components/common/button";
+import {
+  AdminBadge,
+  AdminKpiCard,
+  AdminKpiGrid,
+  AdminLoading,
+  AdminPageHeader,
+  AdminSearchInput,
+  AdminSelect,
+  AdminStatusBadge,
+  AdminToolbar,
+} from "@/components/admin/admin-ui";
+import { Button, ButtonLink } from "@/components/common/button";
+import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { ResponsiveTable } from "@/components/common/responsive-table";
-
-import { AdminLoading, AdminPageHeader } from "@/components/admin/admin-ui";
-import { SelectField } from "@/components/common/select-field";
 import { StatusMessage } from "@/components/common/status-message";
-import { TextField } from "@/components/common/text-field";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
@@ -21,7 +35,30 @@ import type {
   MetadataQualityLifecycleStatus,
 } from "@/types/metadata-quality";
 
-export function AdminMetadataQualityScreen() {
+export interface AdminMetadataQualityScreenProps {
+  readonly embedded?: boolean;
+  readonly refreshSignal?: number;
+}
+
+function getIssueTone(
+  issue: MetadataQualityIssueType,
+): "danger" | "warning" | "info" {
+  switch (issue) {
+    case "MISSING_TITLE":
+    case "INVALID_GRADE_RANGE":
+      return "danger";
+    case "POSSIBLE_DUPLICATE":
+      return "info";
+    case "MISSING_AUTHOR":
+    default:
+      return "warning";
+  }
+}
+
+export function AdminMetadataQualityScreen({
+  embedded = false,
+  refreshSignal = 0,
+}: AdminMetadataQualityScreenProps = {}) {
   const { metadataQuality } = useAdminServices();
   const t = useTranslations("admin");
   const { formatDateTime, formatNumber } = useI18n();
@@ -70,12 +107,24 @@ export function AdminMetadataQualityScreen() {
   }, [issueType, lifecycle, metadataQuality, offset, search]);
 
   useEffect(() => {
+    void refreshSignal;
+    const requestId = requestIdRef;
+    if (!search.trim()) {
+      let cancelled = false;
+      void Promise.resolve().then(() => {
+        if (!cancelled) void load();
+      });
+      return () => {
+        cancelled = true;
+        requestId.current += 1;
+      };
+    }
     const timeout = globalThis.setTimeout(() => void load(), 180);
     return () => {
       globalThis.clearTimeout(timeout);
-      requestIdRef.current += 1;
+      requestId.current += 1;
     };
-  }, [load]);
+  }, [load, refreshSignal, search]);
 
   function clearFilters() {
     setSearch("");
@@ -90,99 +139,171 @@ export function AdminMetadataQualityScreen() {
   const hasFilters = Boolean(search.trim() || issueType || lifecycle);
 
   return (
-    <>
-      <AdminPageHeader
-        eyebrow={t("metadataQuality.eyebrow")}
-        title={t("metadataQuality.dashboardTitle")}
-        description={t("metadataQuality.description")}
-        actions={
-          <Button
-            className="sm:w-auto"
-            disabled={loading}
-            onClick={() => void load()}
-            type="button"
-            variant="secondary"
-          >
-            <RefreshCw aria-hidden className="size-5" />
-            {t("common.reload")}
-          </Button>
-        }
-      />
+    <div className="space-y-4">
+      {!embedded ? (
+        <AdminPageHeader
+          actions={
+            <Button
+              disabled={loading}
+              onClick={() => void load()}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              <RefreshCw aria-hidden="true" className="size-4" />
+              {t("common.reload")}
+            </Button>
+          }
+          description={t("metadataQuality.description")}
+          eyebrow={t("metadataQuality.eyebrow")}
+          title={t("metadataQuality.dashboardTitle")}
+        />
+      ) : null}
 
-      <section aria-label={t("metadataQuality.filterAria")} className="mb-4">
-        <div className="grid gap-4 lg:grid-cols-3">
-          <TextField
-            endAdornment={
-              <Search
-                aria-hidden
-                className="pointer-events-none size-5 text-muted"
-              />
-            }
-            label={t("metadataQuality.searchLabel")}
-            onChange={(event) => {
-              setOffset(0);
-              setSearch(event.target.value);
-            }}
-            value={search}
+      {dashboard ? (
+        <AdminKpiGrid ariaLabel={t("metadataQuality.overviewAria")} columns={4}>
+          <AdminKpiCard
+            detail={t("metadataQuality.cards.totalBooksDetail")}
+            icon={<BookOpen className="size-4" />}
+            label={t("metadataQuality.cards.totalBooks")}
+            tone="neutral"
+            value={formatNumber(dashboard.summary.total_books)}
           />
-          <SelectField
-            label={t("metadataQuality.issueTypeLabel")}
-            onChange={(event) => {
+          <AdminKpiCard
+            active={issueType === ""}
+            detail={t("metadataQuality.cards.flaggedBooksDetail")}
+            icon={<AlertTriangle className="size-4" />}
+            label={t("metadataQuality.cards.flaggedBooks")}
+            onClick={() => {
               setOffset(0);
-              setIssueType(event.target.value as MetadataQualityIssueType | "");
+              setIssueType("");
             }}
-            value={issueType}
-          >
-            <option value="">{t("metadataQuality.allIssues")}</option>
-            <option value="MISSING_TITLE">
-              {t("metadataQuality.issueLabels.MISSING_TITLE")}
-            </option>
-            <option value="MISSING_AUTHOR">
-              {t("metadataQuality.issueLabels.MISSING_AUTHOR")}
-            </option>
-            <option value="INVALID_GRADE_RANGE">
-              {t("metadataQuality.issueLabels.INVALID_GRADE_RANGE")}
-            </option>
-            <option value="POSSIBLE_DUPLICATE">
-              {t("metadataQuality.issueLabels.POSSIBLE_DUPLICATE")}
-            </option>
-          </SelectField>
-          <SelectField
-            label={t("metadataQuality.lifecycleLabel")}
-            onChange={(event) => {
+            tone={
+              dashboard.summary.books_with_issues > 0 ? "warning" : "success"
+            }
+            value={formatNumber(dashboard.summary.books_with_issues)}
+          />
+          <AdminKpiCard
+            active={issueType === "MISSING_TITLE"}
+            detail={t(
+              "metadataQuality.cards.missingMetadataSummary",
+              {
+                missingAuthor: formatNumber(dashboard.summary.missing_author),
+                invalidGrade: formatNumber(
+                  dashboard.summary.invalid_grade_range,
+                ),
+              },
+              "Thiếu tác giả: {missingAuthor} · Sai khối lớp: {invalidGrade}",
+            )}
+            icon={<FileWarning className="size-4" />}
+            label={t("metadataQuality.cards.missingTitle")}
+            onClick={() => {
               setOffset(0);
-              setLifecycle(
-                event.target.value as MetadataQualityLifecycleStatus | "",
+              setIssueType((prev) =>
+                prev === "MISSING_TITLE" ? "" : "MISSING_TITLE",
               );
             }}
-            value={lifecycle}
-          >
-            <option value="">{t("metadataQuality.allStatuses")}</option>
-            <option value="ACTIVE">
-              {t("metadataQuality.lifecycleLabels.ACTIVE")}
-            </option>
-            <option value="RETIRED">
-              {t("metadataQuality.lifecycleLabels.RETIRED")}
-            </option>
-          </SelectField>
-        </div>
-        {hasFilters ? (
-          <Button
-            className="mt-4 sm:w-auto"
-            onClick={clearFilters}
-            type="button"
-            variant="quiet"
-          >
-            {t("metadataQuality.clearFilters")}
-          </Button>
-        ) : null}
-      </section>
+            tone={dashboard.summary.missing_title > 0 ? "danger" : "neutral"}
+            value={formatNumber(dashboard.summary.missing_title)}
+          />
+          <AdminKpiCard
+            active={issueType === "POSSIBLE_DUPLICATE"}
+            detail={t("metadataQuality.cards.duplicateGroupsDetail", {
+              count: formatNumber(dashboard.summary.books_in_duplicate_groups),
+            })}
+            icon={<Copy className="size-4" />}
+            label={t("metadataQuality.cards.duplicateGroups")}
+            onClick={() => {
+              setOffset(0);
+              setIssueType((prev) =>
+                prev === "POSSIBLE_DUPLICATE" ? "" : "POSSIBLE_DUPLICATE",
+              );
+            }}
+            tone={
+              dashboard.summary.possible_duplicate_groups > 0
+                ? "info"
+                : "neutral"
+            }
+            value={formatNumber(dashboard.summary.possible_duplicate_groups)}
+          />
+        </AdminKpiGrid>
+      ) : null}
+
+      <AdminToolbar
+        actions={
+          hasFilters ? (
+            <Button
+              onClick={clearFilters}
+              size="admin"
+              type="button"
+              variant="outline"
+            >
+              {t("metadataQuality.clearFilters")}
+            </Button>
+          ) : undefined
+        }
+        ariaLabel={t("metadataQuality.filterAria")}
+      >
+        <AdminSearchInput
+          label={t("metadataQuality.searchLabel")}
+          onChange={(value) => {
+            setOffset(0);
+            setSearch(value);
+          }}
+          placeholder={t(
+            "metadataQuality.searchPlaceholder",
+            undefined,
+            "Nhập tiêu đề hoặc tác giả…",
+          )}
+          role="textbox"
+          value={search}
+        />
+        <AdminSelect
+          containerClassName="w-full sm:w-56"
+          label={t("metadataQuality.issueTypeLabel")}
+          onChange={(value) => {
+            setOffset(0);
+            setIssueType(value as MetadataQualityIssueType | "");
+          }}
+          value={issueType}
+        >
+          <option value="">{t("metadataQuality.allIssues")}</option>
+          <option value="MISSING_TITLE">
+            {t("metadataQuality.issueLabels.MISSING_TITLE")}
+          </option>
+          <option value="MISSING_AUTHOR">
+            {t("metadataQuality.issueLabels.MISSING_AUTHOR")}
+          </option>
+          <option value="INVALID_GRADE_RANGE">
+            {t("metadataQuality.issueLabels.INVALID_GRADE_RANGE")}
+          </option>
+          <option value="POSSIBLE_DUPLICATE">
+            {t("metadataQuality.issueLabels.POSSIBLE_DUPLICATE")}
+          </option>
+        </AdminSelect>
+        <AdminSelect
+          containerClassName="w-full sm:w-44"
+          label={t("metadataQuality.lifecycleLabel")}
+          onChange={(value) => {
+            setOffset(0);
+            setLifecycle(value as MetadataQualityLifecycleStatus | "");
+          }}
+          value={lifecycle}
+        >
+          <option value="">{t("metadataQuality.allStatuses")}</option>
+          <option value="ACTIVE">
+            {t("metadataQuality.lifecycleLabels.ACTIVE")}
+          </option>
+          <option value="RETIRED">
+            {t("metadataQuality.lifecycleLabels.RETIRED")}
+          </option>
+        </AdminSelect>
+      </AdminToolbar>
 
       {loading ? (
-        <AdminLoading label={t("metadataQuality.loading")} />
+        <AdminLoading label={t("metadataQuality.loading")} variant="skeleton" />
       ) : error ? (
         <StatusMessage
-          tone="error"
           title={
             error === "auth"
               ? t("common.authRequiredTitle")
@@ -190,18 +311,20 @@ export function AdminMetadataQualityScreen() {
                 ? t("common.forbiddenTitle")
                 : t("metadataQuality.loadErrorTitle")
           }
+          tone="error"
         >
           {error === "auth" ? (
             <Link
-              className="inline-flex min-h-11 items-center rounded-md px-1 font-semibold underline focus-visible:outline-3 focus-visible:outline-primary"
+              className="inline-flex min-h-10 items-center rounded-md px-1 font-semibold underline focus-visible:outline-3 focus-visible:outline-primary"
               href="/admin/login"
             >
               {t("common.goToLogin")}
             </Link>
           ) : error === "safe" ? (
             <Button
-              className="mt-2 sm:w-auto"
+              className="mt-2"
               onClick={() => void load()}
+              size="admin"
               type="button"
               variant="secondary"
             >
@@ -212,229 +335,189 @@ export function AdminMetadataQualityScreen() {
           )}
         </StatusMessage>
       ) : dashboard ? (
-        <>
-          <section
-            aria-label={t("metadataQuality.overviewAria")}
-            className="mb-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
-          >
-            {[
-              {
-                label: t("metadataQuality.cards.totalBooks"),
-                value: dashboard.summary.total_books,
-                detail: t("metadataQuality.cards.totalBooksDetail"),
-              },
-              {
-                label: t("metadataQuality.cards.flaggedBooks"),
-                value: dashboard.summary.books_with_issues,
-                detail: t("metadataQuality.cards.flaggedBooksDetail"),
-              },
-              {
-                label: t("metadataQuality.cards.missingTitle"),
-                value: dashboard.summary.missing_title,
-                detail: t("metadataQuality.cards.missingTitleDetail"),
-              },
-              {
-                label: t("metadataQuality.cards.missingAuthor"),
-                value: dashboard.summary.missing_author,
-                detail: t("metadataQuality.cards.missingAuthorDetail"),
-              },
-              {
-                label: t("metadataQuality.cards.invalidGradeRange"),
-                value: dashboard.summary.invalid_grade_range,
-                detail: t("metadataQuality.cards.invalidGradeRangeDetail"),
-              },
-              {
-                label: t("metadataQuality.cards.duplicateGroups"),
-                value: dashboard.summary.possible_duplicate_groups,
-                detail: t("metadataQuality.cards.duplicateGroupsDetail", {
-                  count: formatNumber(
-                    dashboard.summary.books_in_duplicate_groups,
-                  ),
-                }),
-              },
-            ].map((metric) => (
-              <article
-                className="rounded-card border border-border bg-white p-4"
-                key={metric.label}
-              >
-                <p className="text-sm font-semibold text-muted">
-                  {metric.label}
-                </p>
-                <p className="mt-2 text-[32px] font-extrabold tabular-nums text-primary">
-                  {formatNumber(metric.value)}
-                </p>
-                <p className="sr-only">{metric.detail}</p>
-              </article>
-            ))}
-          </section>
-
-          <section className="rounded-card border border-border bg-white p-4 sm:p-6">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <h2 className="text-2xl font-extrabold text-ink">
-                  {t("metadataQuality.issuesHeading")}
-                </h2>
-                <p className="mt-1 text-sm text-muted">
-                  {t("metadataQuality.duplicateNote")}
-                </p>
-              </div>
-              <p
-                aria-live="polite"
-                className="text-sm font-semibold text-muted"
-              >
-                {t("metadataQuality.resultsCount", {
-                  total: formatNumber(dashboard.total),
-                })}
+        <section className="rounded-xl border border-border bg-white p-4 shadow-2xs sm:p-5">
+          <div className="mb-4 flex flex-col gap-1.5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-lg font-extrabold tracking-tight text-ink">
+                {t("metadataQuality.issuesHeading")}
+              </h2>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted">
+                {t("metadataQuality.duplicateNote")}
               </p>
             </div>
+            <p
+              aria-live="polite"
+              className="shrink-0 text-xs font-bold tabular-nums text-muted"
+            >
+              {t("metadataQuality.resultsCount", {
+                total: formatNumber(dashboard.total),
+              })}
+            </p>
+          </div>
 
-            {dashboard.items.length === 0 ? (
-              <div className="rounded-card bg-cream p-8 text-center">
-                <h3 className="font-semibold text-ink">
-                  {hasFilters
-                    ? t("metadataQuality.emptySearchTitle")
-                    : dashboard.summary.books_with_issues === 0
-                      ? t("metadataQuality.emptyOkTitle")
-                      : t("metadataQuality.emptyPageTitle")}
-                </h3>
-                <p className="mt-2 text-sm text-muted">
-                  {hasFilters
-                    ? t("metadataQuality.emptySearchDesc")
-                    : t("metadataQuality.emptyOtherDesc")}
-                </p>
-              </div>
-            ) : (
-              <>
-                <div
-                  aria-label={t("metadataQuality.mobileListAria")}
-                  className="grid gap-3 md:hidden"
-                >
-                  {dashboard.items.map((book) => (
+          {dashboard.items.length === 0 ? (
+            <EmptyState
+              description={
+                hasFilters
+                  ? t("metadataQuality.emptySearchDesc")
+                  : t("metadataQuality.emptyOtherDesc")
+              }
+              title={
+                hasFilters
+                  ? t("metadataQuality.emptySearchTitle")
+                  : dashboard.summary.books_with_issues === 0
+                    ? t("metadataQuality.emptyOkTitle")
+                    : t("metadataQuality.emptyPageTitle")
+              }
+            />
+          ) : (
+            <>
+              <div
+                aria-label={t("metadataQuality.mobileListAria")}
+                className="grid gap-3 md:hidden"
+              >
+                {dashboard.items.map((book) => {
+                  const primaryIssue =
+                    book.issues.find(
+                      (issue) => issue !== "POSSIBLE_DUPLICATE",
+                    ) ?? book.issues[0];
+                  return (
                     <article
-                      className="rounded-card border border-border bg-canvas/40 p-4"
+                      className="rounded-xl border border-border bg-surface-subtle/50 p-3.5"
                       key={book.id}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <h3 className="break-words text-base font-extrabold text-ink">
+                          <h3 className="break-words text-sm font-extrabold text-ink">
                             {book.title?.trim() ? (
                               <span dir="auto">{book.title}</span>
                             ) : (
                               t("metadataQuality.missingTitleFallback")
                             )}
                           </h3>
-                          <p className="mt-0.5 text-sm text-muted">
+                          <p className="mt-0.5 text-xs text-muted">
                             {t("metadataQuality.authorLabel", {
                               author: book.author?.trim()
                                 ? book.author
                                 : t("metadataQuality.authorMissing"),
                             })}{" "}
                             ·{" "}
-                            {book.min_grade == null || book.max_grade == null
-                              ? t("metadataQuality.gradeInvalidSummary")
-                              : t("metadataQuality.gradeRangeSummary", {
-                                  min: book.min_grade,
-                                  max: book.max_grade,
-                                })}
+                            <span className="tabular-nums">
+                              {book.min_grade == null || book.max_grade == null
+                                ? t("metadataQuality.gradeInvalidSummary")
+                                : t("metadataQuality.gradeRangeSummary", {
+                                    min: book.min_grade,
+                                    max: book.max_grade,
+                                  })}
+                            </span>
                           </p>
                         </div>
-                        <span className="shrink-0 rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-muted">
-                          {t(
+                        <AdminStatusBadge
+                          label={t(
                             `metadataQuality.lifecycleLabels.${book.lifecycle_status}`,
                             undefined,
                             book.lifecycle_status,
                           )}
-                        </span>
+                          status={book.lifecycle_status}
+                          tone={
+                            book.lifecycle_status === "ACTIVE"
+                              ? "success"
+                              : "neutral"
+                          }
+                        />
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-1.5">
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
                         {book.issues.map((issue) => (
-                          <span
-                            className="inline-flex rounded-full bg-warning-surface px-2.5 py-1 text-xs font-semibold text-warning"
-                            key={issue}
-                          >
+                          <AdminBadge key={issue} tone={getIssueTone(issue)}>
                             {t(`metadataQuality.issueLabels.${issue}`)}
-                          </span>
+                          </AdminBadge>
                         ))}
                       </div>
-                      <div className="mt-3 flex flex-wrap gap-2 border-t border-border/70 pt-3">
+                      <div className="mt-3 flex flex-wrap gap-2 border-t border-border/80 pt-3">
                         {book.issues.some(
                           (issue) => issue !== "POSSIBLE_DUPLICATE",
                         ) ? (
-                          <Link
-                            className="inline-flex min-h-12 items-center rounded-control bg-sky px-3.5 text-sm font-bold text-primary-hover focus-visible:outline-3 focus-visible:outline-primary"
+                          <ButtonLink
                             href={
                               "/admin/books/" +
                               encodeURIComponent(book.id) +
                               "/edit?returnTo=metadata-quality&issue=" +
-                              encodeURIComponent(
-                                book.issues.find(
-                                  (issue) => issue !== "POSSIBLE_DUPLICATE",
-                                ) ?? book.issues[0],
-                              )
+                              encodeURIComponent(primaryIssue)
                             }
+                            size="admin"
+                            variant="secondary"
                           >
                             {book.issues.includes("MISSING_TITLE")
                               ? t("metadataQuality.repairMetadata")
                               : t("metadataQuality.editMetadata")}
-                          </Link>
+                          </ButtonLink>
                         ) : null}
                         {book.issues.includes("POSSIBLE_DUPLICATE") ? (
-                          <Link
-                            className="inline-flex min-h-12 items-center rounded-control border border-border bg-white px-3.5 text-sm font-bold text-primary focus-visible:outline-3 focus-visible:outline-primary"
+                          <ButtonLink
                             href={"/admin/books/" + encodeURIComponent(book.id)}
+                            size="admin"
+                            variant="outline"
                           >
                             {t("metadataQuality.compareBooks")}
-                          </Link>
+                          </ButtonLink>
                         ) : null}
                       </div>
                     </article>
-                  ))}
-                </div>
+                  );
+                })}
+              </div>
 
-                <div className="hidden md:block">
-                  <ResponsiveTable ariaLabel={t("metadataQuality.tableAria")}>
-                    <table className="w-full min-w-[900px] border-collapse text-start text-sm">
-                      <thead>
-                        <tr className="border-b border-border bg-sky text-primary">
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.book")}
-                          </th>
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.author")}
-                          </th>
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.grades")}
-                          </th>
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.status")}
-                          </th>
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.issues")}
-                          </th>
-                          <th className="px-3 py-3 font-semibold" scope="col">
-                            {t("metadataQuality.columns.actions")}
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dashboard.items.map((book) => (
+              <div className="hidden md:block">
+                <ResponsiveTable ariaLabel={t("metadataQuality.tableAria")}>
+                  <table className="w-full min-w-[780px] border-collapse text-start text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-surface-subtle text-xs font-bold uppercase tracking-wide text-muted">
+                        <th className="px-3.5 py-2.5" scope="col">
+                          {t("metadataQuality.columns.book")}
+                        </th>
+                        <th className="px-3.5 py-2.5" scope="col">
+                          {t("metadataQuality.columns.author")}
+                        </th>
+                        <th className="px-3.5 py-2.5" scope="col">
+                          {t("metadataQuality.columns.grades")}
+                        </th>
+                        <th className="px-3.5 py-2.5" scope="col">
+                          {t("metadataQuality.columns.status")}
+                        </th>
+                        <th className="px-3.5 py-2.5" scope="col">
+                          {t("metadataQuality.columns.issues")}
+                        </th>
+                        <th className="px-3.5 py-2.5 text-end" scope="col">
+                          {t("metadataQuality.columns.actions")}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboard.items.map((book) => {
+                        const primaryIssue =
+                          book.issues.find(
+                            (issue) => issue !== "POSSIBLE_DUPLICATE",
+                          ) ?? book.issues[0];
+                        return (
                           <tr
-                            className="border-b border-border last:border-0"
+                            className="border-b border-border transition-colors last:border-0 hover:bg-surface-subtle/60"
                             key={book.id}
                           >
-                            <td className="px-3 py-4 font-semibold text-ink">
+                            <td className="px-3.5 py-3 font-bold text-ink">
                               {book.title?.trim() ? (
                                 <span dir="auto">{book.title}</span>
                               ) : (
-                                t("metadataQuality.missingTitleFallback")
+                                <span className="text-danger">
+                                  {t("metadataQuality.missingTitleFallback")}
+                                </span>
                               )}
                             </td>
-                            <td className="px-3 py-4 text-muted">
+                            <td className="px-3.5 py-3 text-muted">
                               {book.author?.trim()
                                 ? book.author
                                 : t("metadataQuality.authorMissing")}
                             </td>
-                            <td className="px-3 py-4 text-muted">
+                            <td className="px-3.5 py-3 tabular-nums text-muted">
                               {book.min_grade == null || book.max_grade == null
                                 ? t("metadataQuality.gradeInvalidShort")
                                 : t("metadataQuality.gradeRangeSummary", {
@@ -442,94 +525,97 @@ export function AdminMetadataQualityScreen() {
                                     max: book.max_grade,
                                   })}
                             </td>
-                            <td className="px-3 py-4">
-                              <span className="inline-flex rounded-full bg-canvas px-3 py-1 font-semibold text-muted">
-                                {t(
+                            <td className="px-3.5 py-3">
+                              <AdminStatusBadge
+                                label={t(
                                   `metadataQuality.lifecycleLabels.${book.lifecycle_status}`,
                                   undefined,
                                   book.lifecycle_status,
                                 )}
-                              </span>
+                                status={book.lifecycle_status}
+                                tone={
+                                  book.lifecycle_status === "ACTIVE"
+                                    ? "success"
+                                    : "neutral"
+                                }
+                              />
                             </td>
-                            <td className="px-3 py-4">
-                              <div className="flex max-w-sm flex-wrap gap-2">
+                            <td className="px-3.5 py-3">
+                              <div className="flex max-w-sm flex-wrap gap-1.5">
                                 {book.issues.map((issue) => (
-                                  <span
-                                    className="inline-flex rounded-full bg-warning-surface px-3 py-1 font-semibold text-warning"
+                                  <AdminBadge
                                     key={issue}
+                                    tone={getIssueTone(issue)}
                                   >
                                     {t(`metadataQuality.issueLabels.${issue}`)}
-                                  </span>
+                                  </AdminBadge>
                                 ))}
                               </div>
                             </td>
-                            <td className="px-3 py-4">
-                              <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            <td className="px-3.5 py-3">
+                              <div className="flex flex-wrap justify-end gap-2">
                                 {book.issues.some(
                                   (issue) => issue !== "POSSIBLE_DUPLICATE",
                                 ) ? (
-                                  <Link
-                                    className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                  <ButtonLink
                                     href={
                                       "/admin/books/" +
                                       encodeURIComponent(book.id) +
                                       "/edit?returnTo=metadata-quality&issue=" +
-                                      encodeURIComponent(
-                                        book.issues.find(
-                                          (issue) =>
-                                            issue !== "POSSIBLE_DUPLICATE",
-                                        ) ?? book.issues[0],
-                                      )
+                                      encodeURIComponent(primaryIssue)
                                     }
+                                    size="admin"
+                                    variant="secondary"
                                   >
                                     {book.issues.includes("MISSING_TITLE")
                                       ? t("metadataQuality.repairMetadata")
                                       : t("metadataQuality.editMetadata")}
-                                  </Link>
+                                  </ButtonLink>
                                 ) : null}
                                 {book.issues.includes("POSSIBLE_DUPLICATE") ? (
-                                  <Link
-                                    className="inline-flex min-h-10 items-center rounded-control px-2 font-semibold text-primary underline focus-visible:outline-3 focus-visible:outline-primary"
+                                  <ButtonLink
                                     href={
                                       "/admin/books/" +
                                       encodeURIComponent(book.id)
                                     }
+                                    size="admin"
+                                    variant="outline"
                                   >
                                     {t("metadataQuality.compareBooks")}
-                                  </Link>
+                                  </ButtonLink>
                                 ) : null}
                               </div>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </ResponsiveTable>
-                </div>
-              </>
-            )}
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </ResponsiveTable>
+              </div>
+            </>
+          )}
 
-            <PaginationBar
-              ariaLabel={t("metadataQuality.paginationAria")}
-              className="mt-5"
-              compact
-              disabled={loading}
-              itemLabel={t("metadataQuality.itemLabel")}
-              onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
-              page={currentPage}
-              pageSize={dashboard.limit}
-              showSummaryWhenSinglePage
-              total={dashboard.total}
-            />
-            <p className="mt-4 text-xs text-muted">
-              {t("metadataQuality.checkedAtLabel", {
-                time: formatDateTime(dashboard.summary.checked_at),
-              })}{" "}
-              {t("metadataQuality.footerNote")}
-            </p>
-          </section>
-        </>
+          <PaginationBar
+            ariaLabel={t("metadataQuality.paginationAria")}
+            className="mt-4"
+            compact
+            disabled={loading}
+            itemLabel={t("metadataQuality.itemLabel")}
+            onPageChange={(nextPage) => setOffset((nextPage - 1) * limit)}
+            page={currentPage}
+            pageSize={dashboard.limit}
+            showSummaryWhenSinglePage
+            total={dashboard.total}
+          />
+          <p className="mt-3 text-xs text-muted">
+            {t("metadataQuality.checkedAtLabel", {
+              time: formatDateTime(dashboard.summary.checked_at),
+            })}{" "}
+            {t("metadataQuality.footerNote")}
+          </p>
+        </section>
       ) : null}
-    </>
+    </div>
   );
 }

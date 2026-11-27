@@ -260,7 +260,17 @@
     "referencePageAlt": "{page}페이지 참고 이미지",
     "scrollToCurrentWord": "읽고 있는 단어 정보",
     "currentWordPrefix": "현재 단어: ",
-    "overlayAria": "바운딩 박스를 통해 현재 단어 강조 표시"
+    "overlayAria": "바운딩 박스를 통해 현재 단어 강조 표시",
+    "readingModeSwitcherAria": "책 페이지 읽기 모드",
+    "readingModeIllustrated": "삽화 함께 보기",
+    "readingModeIllustratedTitle": "글자가 없는 삽화와 읽기 본문을 함께 봅니다",
+    "readingModeText": "글자만 읽기",
+    "readingModeTextTitle": "선명한 읽기 본문에 집중합니다",
+    "readingModeOriginal": "원본 페이지",
+    "readingModeOriginalTitle": "비교를 위해 스캔한 원본 책 페이지를 봅니다",
+    "illustrationAlt": "{page}쪽 삽화",
+    "originalReferenceHeading": "원본 페이지 이미지 (비교용)",
+    "originalReferenceAlt": "{page}쪽 원본 이미지"
   },
   "pageContent": {
     "incorrectWordAria": "정답이 아니에요: \"{word}\". 이 단어를 다시 읽어볼까요?",

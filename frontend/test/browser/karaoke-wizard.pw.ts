@@ -315,14 +315,20 @@ test("repeat proposal requires consent, supports undo, and makes no writes", asy
   const field = page.getByLabel("Lời bài hát", { exact: true });
   await field.fill("Bé hát, vui! ×2");
   await expect(field).toHaveValue("Bé hát, vui! ×2");
-  page.once("dialog", (dialog) => dialog.dismiss());
   await page
     .getByRole("button", { name: "Mở rộng câu lặp", exact: true })
     .click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Hủy", exact: true })
+    .click();
   await expect(field).toHaveValue("Bé hát, vui! ×2");
-  page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Mở rộng câu lặp", exact: true })
+    .click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Xác nhận mở rộng", exact: true })
     .click();
   await expect(field).toHaveValue("Bé hát, vui!\nBé hát, vui!");
   await noOverflow(page);
@@ -533,9 +539,12 @@ test("wizard upload → staging → apply → explicit review → publish, with 
   await expect(
     page.getByRole("button", { name: "Xuất bản bài hát", exact: true }),
   ).toBeEnabled();
-  page.once("dialog", (dialog) => dialog.accept());
   await page
     .getByRole("button", { name: "Xuất bản bài hát", exact: true })
+    .click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Xác nhận xuất bản", exact: true })
     .click();
   await expect(
     page.getByRole("heading", { name: "Bài hát đã xuất bản", exact: true }),

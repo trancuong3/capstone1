@@ -314,7 +314,10 @@ export type HealthOperationalStateUI =
   | "Queued"
   | "Quota exhausted"
   | "Unsupported"
-  | "Unknown";
+  | "Unknown"
+  | "Standby"
+  | "Scheduled"
+  | "Local only";
 
 export type RuntimeHealthDetailUI =
   | "installed"
@@ -323,7 +326,31 @@ export type RuntimeHealthDetailUI =
   | "healthy"
   | "failed"
   | "unknown"
-  | "disabled";
+  | "disabled"
+  | "standby"
+  | "cached"
+  | "client_side"
+  | "cloud_ready"
+  | "scheduled"
+  | "remote_delegated"
+  | "local_only";
+
+export type HealthServiceGroupUI = "core" | "voice" | "ocr" | "workers";
+
+export type HealthExecutionModeUI =
+  | "always_on"
+  | "in_process"
+  | "on_demand"
+  | "cron_scheduled"
+  | "remote_worker"
+  | "remote_delegated"
+  | "precomputed_cache"
+  | "browser_wasm"
+  | "cloud_ai"
+  | "local_only"
+  | "disabled_opt_in";
+
+export type HealthCriticalityUI = "core" | "important" | "optional";
 
 export interface HealthServiceItemUI {
   readonly id: string;
@@ -337,6 +364,11 @@ export interface HealthServiceItemUI {
   readonly oldest_pending_job_age_seconds?: number | null;
   readonly queue_depth?: number | null;
   readonly last_error?: string | null;
+  readonly service_group?: HealthServiceGroupUI | null;
+  readonly execution_mode?: HealthExecutionModeUI | null;
+  readonly criticality?: HealthCriticalityUI | null;
+  readonly action_hint?: string | null;
+  readonly can_wake?: boolean;
 }
 
 export interface AudioCacheHealthSummaryUI {
@@ -354,6 +386,13 @@ export interface HealthSnapshotUI {
   readonly checked_at: ISODateTime;
   readonly services: readonly HealthServiceItemUI[];
   readonly audio_cache?: AudioCacheHealthSummaryUI | null;
+  readonly audio_cache_error?: string | null;
+}
+
+export interface OcrWorkerWakeupResponseUI {
+  readonly status: string;
+  readonly woken: boolean;
+  readonly detail: string;
 }
 
 export type AdminMockScenario =

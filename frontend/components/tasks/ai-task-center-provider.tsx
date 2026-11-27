@@ -17,6 +17,7 @@ import {
   createGlobalTasksService,
   getCachedGlobalTasksSnapshot,
   setCachedGlobalTasksSnapshot,
+  STUDIO_TASKS_CHANGED_EVENT,
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -330,6 +331,8 @@ export function AiTaskCenterProvider({
       triggerSync();
     }
 
+    const handledResumeEvents = new WeakSet<Event>();
+
     function handleResumeSync() {
       if (
         typeof document !== "undefined" &&
@@ -337,22 +340,44 @@ export function AiTaskCenterProvider({
       ) {
         return;
       }
-      if (autoSyncOnMount || hasCachedSnapshot || panelState.open) {
+      const hasLiveCache =
+        getCachedGlobalTasksSnapshot(targetActorId, targetRole) !== null;
+      if (autoSyncOnMount || hasLiveCache || panelState.open) {
         triggerSync();
       }
     }
 
-    function handleTaskChanged() {
+    function handleAndroidResume(event: Event) {
+      if (handledResumeEvents.has(event)) {
+        return;
+      }
+      handledResumeEvents.add(event);
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      // Always refresh immediately when Android WebView resumes from background.
+      triggerSync();
+    }
+
+    function handleTaskChanged(event: Event) {
+      const detail = (event as CustomEvent<{ source?: string }>).detail;
+      if (detail?.source === "ai-task-center-provider") {
+        return;
+      }
       triggerSync();
     }
 
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", handleResumeSync);
+      document.addEventListener("viread:android-resume", handleAndroidResume);
     }
     if (typeof window !== "undefined") {
       window.addEventListener("focus", handleResumeSync);
-      window.addEventListener("viread:android-resume", handleResumeSync);
-      window.addEventListener("viread:tasks-changed", handleTaskChanged);
+      window.addEventListener("viread:android-resume", handleAndroidResume);
+      window.addEventListener(STUDIO_TASKS_CHANGED_EVENT, handleTaskChanged);
     }
 
     return () => {
@@ -360,11 +385,21 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       if (typeof document !== "undefined") {
         document.removeEventListener("visibilitychange", handleResumeSync);
+        document.removeEventListener(
+          "viread:android-resume",
+          handleAndroidResume,
+        );
       }
       if (typeof window !== "undefined") {
         window.removeEventListener("focus", handleResumeSync);
-        window.removeEventListener("viread:android-resume", handleResumeSync);
-        window.removeEventListener("viread:tasks-changed", handleTaskChanged);
+        window.removeEventListener(
+          "viread:android-resume",
+          handleAndroidResume,
+        );
+        window.removeEventListener(
+          STUDIO_TASKS_CHANGED_EVENT,
+          handleTaskChanged,
+        );
       }
     };
   }, [
@@ -471,6 +506,13 @@ export function AiTaskCenterProvider({
       try {
         await resolvedService.retryTask(jobId);
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
+              detail: { source: "ai-task-center-provider" },
+            }),
+          );
+        }
       } finally {
         setPendingActionIds((prev) => {
           const next = new Set(prev);
@@ -495,6 +537,13 @@ export function AiTaskCenterProvider({
       try {
         await resolvedService.cancelTask(jobId);
         await fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(
+            new CustomEvent(STUDIO_TASKS_CHANGED_EVENT, {
+              detail: { source: "ai-task-center-provider" },
+            }),
+          );
+        }
       } finally {
         setPendingActionIds((prev) => {
           const next = new Set(prev);

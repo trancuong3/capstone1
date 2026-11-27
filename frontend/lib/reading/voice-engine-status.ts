@@ -22,6 +22,8 @@ export interface VoiceEngineHealthSnapshot {
   readonly default_mode: string;
   readonly default_voice_id: string;
   readonly local: {
+    readonly configured?: boolean;
+    readonly mode?: string | null;
     readonly available: boolean;
     readonly stt_ready: boolean;
     readonly tts_ready: boolean;
@@ -59,10 +61,12 @@ export interface VoiceEngineStatusState {
 function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
   return {
     tier: "idle",
-    provider: "local",
+    provider: "idle",
     engineLabel:
-      kind === "stt" ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)",
-    shortLabel: "Offline",
+      kind === "stt"
+        ? "Đang kiểm tra nhận diện giọng nói…"
+        : "Đang kiểm tra giọng đọc…",
+    shortLabel: "Đang kiểm tra…",
     fallbackUsed: false,
     fallbackReason: null,
     voiceId: null,
@@ -80,13 +84,61 @@ let state: VoiceEngineStatusState = {
 
 let cachedHealth: VoiceEngineHealthSnapshot | null = null;
 let cachedHealthFetchedAt = 0;
+let inFlightHealthPromise: Promise<VoiceEngineHealthSnapshot | null> | null =
+  null;
 
 const listeners = new Set<() => void>();
+const healthListeners = new Set<() => void>();
 
 function emit(): void {
   for (const listener of listeners) {
     listener();
   }
+}
+
+function emitHealth(): void {
+  for (const listener of healthListeners) {
+    listener();
+  }
+}
+
+export function isHostedLocalVoiceUnconfigured(
+  health: VoiceEngineHealthSnapshot | null = cachedHealth,
+): boolean {
+  if (!health) return false;
+  return (
+    health.local.configured === false ||
+    health.local.error_code === "LOCAL_VOICE_UNCONFIGURED"
+  );
+}
+
+export function subscribeVoiceEngineHealth(listener: () => void): () => void {
+  healthListeners.add(listener);
+  return () => {
+    healthListeners.delete(listener);
+  };
+}
+
+export function getBrowserOnlineStatus(): boolean {
+  if (
+    typeof navigator === "undefined" ||
+    typeof navigator.onLine !== "boolean"
+  ) {
+    return true;
+  }
+  return navigator.onLine;
+}
+
+export function subscribeBrowserOnlineStatus(listener: () => void): () => void {
+  if (typeof window === "undefined") {
+    return () => {};
+  }
+  window.addEventListener("online", listener);
+  window.addEventListener("offline", listener);
+  return () => {
+    window.removeEventListener("online", listener);
+    window.removeEventListener("offline", listener);
+  };
 }
 
 export function mapProviderToEngineSnapshot(input: {
@@ -216,16 +268,19 @@ export function setCachedVoiceEngineHealth(
 ): void {
   cachedHealth = health;
   cachedHealthFetchedAt = health ? fetchedAt : 0;
+  emitHealth();
 }
 
 export function resetVoiceEngineStatus(): void {
   cachedHealth = null;
   cachedHealthFetchedAt = 0;
+  inFlightHealthPromise = null;
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),
   };
   emit();
+  emitHealth();
 }
 
 export function mapLocalVoiceToGoogleBackup(
@@ -244,16 +299,11 @@ export function mapLocalVoiceToGoogleBackup(
     : "google_vi_vn_neural2_a";
 }
 
-export async function fetchVoiceEngineHealth(
-  signal?: AbortSignal,
-): Promise<VoiceEngineHealthSnapshot | null> {
+async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapshot | null> {
   if (typeof window === "undefined" || typeof fetch !== "function") {
     return null;
   }
   const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  if (signal?.aborted) return null;
-  signal?.addEventListener("abort", onAbort, { once: true });
   const timeout = window.setTimeout(() => controller.abort(), 8_000);
 
   try {
@@ -294,9 +344,23 @@ export async function fetchVoiceEngineHealth(
           ? rec.default_voice_id
           : "local_north_truc_ly",
       local: {
+        ...(typeof localRaw.configured === "boolean"
+          ? { configured: localRaw.configured }
+          : {}),
+        ...(typeof localRaw.mode === "string" ? { mode: localRaw.mode } : {}),
         available: Boolean(localRaw.available),
         stt_ready: Boolean(localRaw.stt_ready),
         tts_ready: Boolean(localRaw.tts_ready),
+        error_code:
+          typeof localRaw.error_code === "string" ? localRaw.error_code : null,
+        stt_error_code:
+          typeof localRaw.stt_error_code === "string"
+            ? localRaw.stt_error_code
+            : null,
+        tts_error_code:
+          typeof localRaw.tts_error_code === "string"
+            ? localRaw.tts_error_code
+            : null,
         stt_model_version:
           typeof localRaw.stt_model_version === "string"
             ? localRaw.stt_model_version
@@ -319,6 +383,56 @@ export async function fetchVoiceEngineHealth(
     return null;
   } finally {
     window.clearTimeout(timeout);
-    signal?.removeEventListener("abort", onAbort);
   }
+}
+
+export async function fetchVoiceEngineHealth(
+  signal?: AbortSignal,
+): Promise<VoiceEngineHealthSnapshot | null> {
+  if (typeof window === "undefined" || typeof fetch !== "function") {
+    return null;
+  }
+  if (signal?.aborted) return null;
+
+  if (!inFlightHealthPromise) {
+    const req = performFetchVoiceEngineHealth().finally(() => {
+      if (inFlightHealthPromise === req) {
+        inFlightHealthPromise = null;
+      }
+    });
+    inFlightHealthPromise = req;
+  }
+
+  const shared = inFlightHealthPromise;
+  if (!signal) {
+    return shared;
+  }
+
+  return new Promise<VoiceEngineHealthSnapshot | null>((resolve) => {
+    let settled = false;
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      resolve(null);
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    void shared.then(
+      (result) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(result);
+      },
+      () => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        resolve(null);
+      },
+    );
+  });
 }

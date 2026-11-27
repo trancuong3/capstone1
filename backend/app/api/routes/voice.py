@@ -16,6 +16,7 @@ from uuid import UUID
 import websockets
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File,
     Form,
@@ -45,6 +46,8 @@ from app.schemas.voice import (
     PhonicsSpeechRead,
     PhonicsSpeechRequest,
     PhonicsStepTimingRead,
+    SessionVoiceLockRead,
+    SessionVoiceLockUpdateRequest,
     SpeechToTextResponse,
     TextToSpeechRequest,
     VoiceProviderMode,
@@ -221,14 +224,18 @@ def _extract_audio_accept(request: Request) -> str | None:
     return None
 
 
-def _accepts_db_kwarg(fn: Any) -> bool:
+def _accepts_kwarg(fn: Any, name: str) -> bool:
     try:
         params = inspect.signature(fn).parameters
     except (TypeError, ValueError):
         return False
-    return "db" in params or any(
+    return name in params or any(
         p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
     )
+
+
+def _accepts_db_kwarg(fn: Any) -> bool:
+    return _accepts_kwarg(fn, "db")
 
 
 def _tts_cache_headers(speech_or_audio: Any) -> dict[str, str]:
@@ -266,11 +273,36 @@ async def voice_status(
 def _wants_voice_lock_update(request: Request) -> bool:
     return (request.headers.get("x-voice-lock-update") or "").strip() == "1"
 
+@router.put("/session-lock", response_model=SessionVoiceLockRead)
+async def update_session_voice_lock(
+    payload: SessionVoiceLockUpdateRequest,
+    response: Response,
+    actor_id: UUID = Depends(require_active_profile_id),
+    _rate_limited: None = Depends(
+        rate_limit("voice_status", default_max=120, default_window=60.0, actor_dependency=require_active_profile_id)
+    ),
+) -> SessionVoiceLockRead:
+    """Explicitly synchronize a paused session's locked voice between client and server."""
+
+    response.headers["Cache-Control"] = "no-store"
+    policy = VoicePolicyContext(
+        provider_mode=payload.provider_mode,
+        allow_google_tts=payload.allow_google_tts,
+        session_id=payload.session_id,
+        actor_id=actor_id,
+    )
+    try:
+        result = get_voice_orchestrator().update_session_voice_lock(policy, payload.voice_id)
+    except VoiceProviderError as error:
+        raise provider_http_exception(error) from None
+    return SessionVoiceLockRead(**result)
+
 
 @router.post("/text-to-speech", response_class=Response)
 async def text_to_speech(
     payload: TextToSpeechRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     actor_id: UUID = Depends(require_active_profile_id),
     db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
@@ -302,6 +334,8 @@ async def text_to_speech(
     }
     if _accepts_db_kwarg(orchestrator.synthesize):
         synth_kwargs["db"] = db
+    if _accepts_kwarg(orchestrator.synthesize, "background_tasks"):
+        synth_kwargs["background_tasks"] = background_tasks
     try:
         audio = await orchestrator.synthesize(**synth_kwargs)
     except VoiceProviderError as error:
@@ -342,6 +376,7 @@ async def phonics_text_to_speech(
     payload: PhonicsSpeechRequest,
     request: Request,
     response: Response,
+    background_tasks: BackgroundTasks,
     actor_id: UUID = Depends(require_active_profile_id),
     db: AsyncSession = Depends(get_db),
     _rate_limited: None = Depends(
@@ -379,6 +414,8 @@ async def phonics_text_to_speech(
     }
     if _accepts_db_kwarg(orchestrator.synthesize_phonics):
         phonics_kwargs["db"] = db
+    if _accepts_kwarg(orchestrator.synthesize_phonics, "background_tasks"):
+        phonics_kwargs["background_tasks"] = background_tasks
     try:
         speech = await orchestrator.synthesize_phonics(**phonics_kwargs)
     except VoiceProviderError as error:

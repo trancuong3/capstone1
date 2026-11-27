@@ -837,42 +837,52 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3. Tìm từ ở phía trước (tránh nhảy qua >=2 từ hoặc hư từ tần suất cao nếu thiếu từ kế tiếp xác nhận).
+      // 3. Tìm từ ở phía trước (áp dụng shouldDeferLookaheadMatch đồng bộ với addFinalTranscript
+      // để interim không nhảy vọt qua 20 từ chức năng tiếng Việt rồi bật ngược khi final về).
       const matchedIndex = this.findAheadFrom(cursor, token);
+      const nextTokenConfirmsSkip =
+        matchedIndex !== -1 &&
+        tokenIndex + 1 < tokens.length &&
+        matchedIndex + 1 < this.bookWords.length &&
+        this.bookWords[matchedIndex + 1].normalizedText ===
+          tokens[tokenIndex + 1];
 
-      if (matchedIndex !== -1) {
-        const defer = shouldDeferLookaheadMatch(
+      if (
+        matchedIndex !== -1 &&
+        (!shouldDeferLookaheadMatch(
           token,
           cursor,
           matchedIndex,
           this.bookWords.length,
-        );
-        const confirmedByNext =
-          tokenIndex + 1 < tokens.length &&
-          matchedIndex + 1 < this.bookWords.length &&
-          tokens[tokenIndex + 1] ===
-            this.bookWords[matchedIndex + 1].normalizedText;
-        if (!defer || confirmedByNext) {
-          for (let index = cursor; index < matchedIndex; index += 1) {
-            const existing = statusByWordId.get(this.bookWords[index].wordId);
-            if (existing?.status !== "SUBSTITUTE") {
-              setPreviewStatus(index, "DELETE");
-            }
+        ) ||
+          nextTokenConfirmsSkip)
+      ) {
+        // Điền trạng thái nhất quán cho mọi từ bị bỏ qua trong [cursor .. matchedIndex - 1],
+        // giữ nguyên các từ đã có bằng chứng đọc sai (SUBSTITUTE) trước đó.
+        for (let index = cursor; index < matchedIndex; index += 1) {
+          const existing = statusByWordId.get(this.bookWords[index].wordId);
+          if (existing?.status !== "SUBSTITUTE") {
+            setPreviewStatus(index, "DELETE");
           }
-
-          setPreviewStatus(matchedIndex, "MATCH");
-          previewSpelling = false;
-
-          cursor = matchedIndex + 1;
-          targetIndex = cursor < this.bookWords.length ? cursor : matchedIndex;
-          continue;
         }
+
+        setPreviewStatus(matchedIndex, "MATCH");
+        previewSpelling = false;
+
+        cursor = matchedIndex + 1;
+        targetIndex = cursor < this.bookWords.length ? cursor : matchedIndex;
+        continue;
       }
 
       // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch 4–8 từ với bằng chứng 2 từ liên tiếp
       // (giới hạn cửa sổ ở interim để tránh nhảy cóc 18–30 từ cuối trang trước khi chốt final).
       if (tokenIndex + 1 < tokens.length) {
-        const anchor = this.findReanchor(cursor, token, tokens[tokenIndex + 1], 8);
+        const anchor = this.findReanchor(
+          cursor,
+          token,
+          tokens[tokenIndex + 1],
+          8,
+        );
         if (anchor !== -1) {
           for (let index = cursor; index < anchor; index += 1) {
             const existing = statusByWordId.get(this.bookWords[index].wordId);

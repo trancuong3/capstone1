@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+import asyncio
 import hashlib
 import logging
 import os
 import re
 import threading
 import time
+import weakref
 from pathlib import Path
 from typing import Sequence
 from urllib.parse import quote, unquote, urlsplit
 
+import httpx
 import requests
 from fastapi import HTTPException, status
 
@@ -33,6 +36,42 @@ SIGNED_URL_CACHE_MAX_ENTRIES = 2048
 
 _signed_url_cache_lock = threading.Lock()
 _signed_url_cache: "OrderedDict[tuple[str, str, int], tuple[float, str]]" = OrderedDict()
+
+_STORAGE_HTTP_CLIENTS: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _get_storage_async_client() -> httpx.AsyncClient:
+    loop = asyncio.get_running_loop()
+    client = _STORAGE_HTTP_CLIENTS.get(loop)
+    if client is not None and not getattr(client, "is_closed", False):
+        return client
+    client = httpx.AsyncClient(
+        http2=True,
+        trust_env=False,
+        timeout=httpx.Timeout(12.0, connect=4.0, read=12.0, write=10.0, pool=4.0),
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=10,
+            keepalive_expiry=30.0,
+        ),
+    )
+    _STORAGE_HTTP_CLIENTS[loop] = client
+    return client
+
+
+async def aclose_storage_http_clients() -> None:
+    """Close pooled async HTTP clients used for Storage downloads on shutdown."""
+    clients = list(_STORAGE_HTTP_CLIENTS.values())
+    _STORAGE_HTTP_CLIENTS.clear()
+    for client in clients:
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose) and not getattr(client, "is_closed", False):
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 
 def clear_signed_url_cache() -> None:
@@ -337,6 +376,64 @@ def download_object(object_path: str, *, bucket_name: str | None = None) -> byte
         if not isinstance(result, (bytes, bytearray)) or not result:
             raise ValueError("empty Storage object")
         return bytes(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_diagnostic(
+            logger,
+            logging.ERROR,
+            event="storage_download_failed",
+            stage="storage_download",
+            exception=exc,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not read the image from Supabase Storage",
+        ) from exc
+
+
+async def download_object_async(
+    object_path: str,
+    *,
+    bucket_name: str | None = None,
+) -> bytes:
+    """Download a Storage object asynchronously using a pooled HTTP/2 keepalive client."""
+    object_path = _validate_object_path(object_path)
+    local_target = _local_storage_path(object_path, bucket_name)
+    if local_target is not None:
+        return await asyncio.to_thread(download_object, object_path, bucket_name=bucket_name)
+
+    resolved_bucket = _bucket_name(bucket_name)
+    if not SUPABASE_URL or not SUPABASE_ADMIN_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Server-side Supabase Storage credentials are not configured",
+        )
+    url = (
+        f"{SUPABASE_URL.rstrip('/')}/storage/v1/object/authenticated/"
+        f"{quote(resolved_bucket, safe='')}/{quote(object_path, safe='/')}"
+    )
+    headers = supabase_admin_headers(SUPABASE_ADMIN_KEY)
+    try:
+        client = _get_storage_async_client()
+        response = await client.get(url, headers=headers)
+        if response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Could not read the image from Supabase Storage",
+            ) from FileNotFoundError(object_path)
+        if response.status_code == 400:
+            body_preview = (response.text or "")[:256].lower()
+            if "not_found" in body_preview or "object not found" in body_preview or "nosuchkey" in body_preview:
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Could not read the image from Supabase Storage",
+                ) from FileNotFoundError(object_path)
+        response.raise_for_status()
+        data = response.content
+        if not data:
+            raise ValueError("empty Storage object")
+        return bytes(data)
     except HTTPException:
         raise
     except Exception as exc:

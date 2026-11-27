@@ -429,10 +429,12 @@ class ChildSafetyOrchestrator:
             ])
         if config.groq_enabled:
             self.providers.append(SafetyProvider("groq_qwen", config.groq_model, "groq"))
-        if config.local_enabled or not self.providers:
+        if config.local_enabled:
             self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
 
     async def analyze(self, text: str) -> dict[str, Any]:
+        if not self.providers:
+            raise OcrConfigurationError("NO_AI_PROVIDER_CONFIGURED")
         normalized, normalized_spans = _nfc_with_offsets(text)
         left = len(normalized) - len(normalized.lstrip())
         right = len(normalized.rstrip())

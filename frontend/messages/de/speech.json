@@ -84,7 +84,9 @@
     "offlineCacheMultiple": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus sind vorab erzeugte Stimmen bereit für: {voices}; weitere Stimmen erfordern den lokalen Worker oder den Fallback unten.",
     "offlineCacheSingle": "Der lokale Sprach-Worker ist offline. Im eigenständigen WLAN-Modus ist vorab erzeugtes Audio für {voice} verfügbar; für weitere Stimmen starten Sie bitte den lokalen Worker oder aktivieren Sie den Fallback unten.",
     "offlineCacheEmpty": "Der lokale Sprach-Worker ist offline und es ist kein vorab erzeugtes Audio lokal gespeichert. Starten Sie den lokalen Worker oder aktivieren Sie unten den Fallback.",
-    "localWorkerLabel": "Lokaler Worker:"
+    "localWorkerLabel": "Lokaler Worker:",
+    "sessionLockedBadge": "Für diese Lesesitzung gesperrt",
+    "offlineBrowserBadge": "Browser ist offline"
   },
   "engineBadge": {
     "ariaLabel": "Sprachquelle: STT {stt}, TTS {tts}",
@@ -101,8 +103,10 @@
       "catalog_cache": "Standard-Cache",
       "android_native": "Android (vi-VN)",
       "google_cloud": "Online (Google API)",
-      "browser_default": "Online (Google/Browser)"
-    }
+      "browser_default": "Online (Google/Browser)",
+      "idle": "Wird geprüft…"
+    },
+    "idleDetail": "{base} (Status der Sprach-Engine wird geprüft)"
   },
   "playback": {
     "unavailable": "Die Gerätestimme ist noch nicht bereit. Eltern und Kind können dem Text auf dem Bildschirm folgen und auf Wiederholen tippen.",

@@ -17,8 +17,10 @@ describe("protected route policy", () => {
     ["/reports/difficult-words", "parent"],
     ["/karaoke", "parent"],
     ["/karaoke/song-id", "parent"],
+    ["/studio/tasks", "parent"],
     ["/admin", "admin"],
     ["/admin/books/book-id", "admin"],
+    ["/admin/tasks", "admin"],
   ] as const)("classifies %s as %s", (pathname, area) => {
     expect(getProtectedRouteArea(pathname)).toBe(area);
   });

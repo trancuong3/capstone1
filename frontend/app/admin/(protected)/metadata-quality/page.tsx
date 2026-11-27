@@ -1,10 +1,9 @@
 import type { Metadata } from "next";
 
-import { DynamicAdminBookContentQualityScreen } from "@/components/admin/admin-dynamic-screens";
-import { AdminMetadataQualityScreen } from "@/components/admin/admin-metadata-quality-screen";
-import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
+import { AdminQualityHubScreen } from "@/components/admin/admin-quality-hub-screen";
 import { translateMessage } from "@/lib/i18n/formatter";
 import { getServerI18n } from "@/lib/i18n/server";
+import { parseQualityHubTab } from "@/lib/utils/quality-hub-tab";
 import { viMessages } from "@/messages/vi";
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -19,11 +18,12 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function MetadataQualityPage() {
-  return (
-    <AdminServicesProvider>
-      <AdminMetadataQualityScreen />
-      <DynamicAdminBookContentQualityScreen />
-    </AdminServicesProvider>
-  );
+export default async function MetadataQualityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const query = await searchParams;
+  const initialTab = parseQualityHubTab(query.tab);
+  return <AdminQualityHubScreen initialTab={initialTab} />;
 }

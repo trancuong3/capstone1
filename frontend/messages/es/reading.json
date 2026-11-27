@@ -260,7 +260,17 @@
     "referencePageAlt": "Imagen de referencia de la página {page}",
     "scrollToCurrentWord": "Sobre la palabra que se está leyendo",
     "currentWordPrefix": "Palabra actual: ",
-    "overlayAria": "Resaltar la palabra actual mediante cuadro delimitador"
+    "overlayAria": "Resaltar la palabra actual mediante cuadro delimitador",
+    "readingModeSwitcherAria": "Modo de lectura de la página",
+    "readingModeIllustrated": "Con ilustración",
+    "readingModeIllustratedTitle": "Ver ilustración sin texto junto al texto de lectura",
+    "readingModeText": "Solo texto",
+    "readingModeTextTitle": "Enfocarse en el texto claro para leer",
+    "readingModeOriginal": "Página original",
+    "readingModeOriginalTitle": "Ver la imagen original de la página para comparar",
+    "illustrationAlt": "Ilustración de la página {page}",
+    "originalReferenceHeading": "Imagen original de la página (referencia)",
+    "originalReferenceAlt": "Imagen original de la página {page}"
   },
   "pageContent": {
     "incorrectWordAria": "No del todo: \"{word}\". Intentemos leer esta palabra otra vez.",

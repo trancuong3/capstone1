@@ -260,7 +260,17 @@
     "referencePageAlt": "صورة مرجعية للصفحة {page}",
     "scrollToCurrentWord": "حول الكلمة التي يتم قراءتها",
     "currentWordPrefix": "الكلمة الحالية: ",
-    "overlayAria": "تمييز الكلمة الحالية عبر المربع المحيط"
+    "overlayAria": "تمييز الكلمة الحالية عبر المربع المحيط",
+    "readingModeSwitcherAria": "وضع قراءة صفحة الكتاب",
+    "readingModeIllustrated": "قراءة بالرسوم",
+    "readingModeIllustratedTitle": "عرض رسم توضيحي خالٍ من النص مع نص القراءة",
+    "readingModeText": "قراءة النص",
+    "readingModeTextTitle": "التركيز على نص القراءة الواضح",
+    "readingModeOriginal": "الصفحة الأصلية",
+    "readingModeOriginalTitle": "عرض صورة صفحة الكتاب الأصلية للمقارنة",
+    "illustrationAlt": "رسم توضيحي للصفحة {page}",
+    "originalReferenceHeading": "صورة الصفحة الأصلية (للمقارنة)",
+    "originalReferenceAlt": "الصورة الأصلية للصفحة {page}"
   },
   "pageContent": {
     "incorrectWordAria": "غير دقيق تماماً: \"{word}\". لنقم بقراءة هذه الكلمة مرة أخرى.",

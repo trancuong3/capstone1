@@ -84,7 +84,9 @@
     "offlineCacheMultiple": "El servicio de voz local está desconectado. Hay audio pregenerado disponible en modo Wi-Fi para: {voices}; las demás voces requieren iniciar el servicio local o activar el respaldo abajo.",
     "offlineCacheSingle": "El servicio de voz local está desconectado. Hay audio pregenerado listo para {voice} en modo Wi-Fi; para escuchar otras voces regionales, inicia el servicio local o activa el respaldo abajo.",
     "offlineCacheEmpty": "El servicio de voz local está desconectado y aún no hay audio pregenerado en el dispositivo. Inicia el servicio local o activa el respaldo abajo para reproducir muestras.",
-    "localWorkerLabel": "Servicio local:"
+    "localWorkerLabel": "Servicio local:",
+    "sessionLockedBadge": "Bloqueada para esta sesión de lectura",
+    "offlineBrowserBadge": "El navegador está sin conexión"
   },
   "engineBadge": {
     "ariaLabel": "Fuente de voz: STT {stt}, TTS {tts}",
@@ -101,8 +103,10 @@
       "catalog_cache": "Caché estándar",
       "android_native": "Android (vi-VN)",
       "google_cloud": "En línea (Google API)",
-      "browser_default": "En línea (Google/Navegador)"
-    }
+      "browser_default": "En línea (Google/Navegador)",
+      "idle": "Comprobando…"
+    },
+    "idleDetail": "{base} (Comprobando el estado del motor de voz)"
   },
   "playback": {
     "unavailable": "La voz en el dispositivo no está lista. Los padres y el niño pueden seguir el texto en pantalla y pulsar Reintentar.",

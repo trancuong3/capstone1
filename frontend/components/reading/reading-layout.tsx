@@ -2,9 +2,10 @@
 
 import { ArrowLeft, CircleHelp, Volume2 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 import type { BookDetailDTO } from "@/types/book";
+import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ChildProfileDTO } from "@/types/child";
 import { BookCover } from "@/components/books/book-cover";
 import { BookPageViewer } from "@/components/reading/book-page-viewer";
@@ -94,6 +95,8 @@ interface ReadingLayoutProps {
   assistedWordIds?: ReadonlySet<string>;
   companionBubble?: CompanionBubbleState | null;
   isCompanionSpeaking?: boolean;
+  readingMode?: ReadingDisplayMode | null;
+  onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
   topBar?: ReactNode;
 }
@@ -157,12 +160,24 @@ export function ReadingLayout({
   assistedWordIds,
   companionBubble = null,
   isCompanionSpeaking = false,
+  readingMode,
+  onReadingModeChange,
   previewSnapshot,
   topBar,
 }: ReadingLayoutProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
   const tc = useTranslations("child");
+  const [internalReadingMode, setInternalReadingMode] =
+    useState<ReadingDisplayMode | null>(null);
+  const activeReadingMode =
+    readingMode !== undefined ? readingMode : internalReadingMode;
+  const handleReadingModeChange = onReadingModeChange ?? setInternalReadingMode;
+  const pageHasVerifiedIllustration =
+    Boolean(page.illustration_url) && page.illustration_text_free === true;
+  const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
+    activeReadingMode ??
+    (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
@@ -171,6 +186,8 @@ export function ReadingLayout({
     (isMicRecording &&
       (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
     Boolean(latestTranscript);
+  const hasDockedFeedbackPanel =
+    retryMode || Boolean(sentenceReinforcementPanel) || Boolean(phonicsPanel);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
@@ -258,12 +275,11 @@ export function ReadingLayout({
       >
         <BookPageViewer
           title={bookTitle}
-          illustrationUrl={page.illustration_url || undefined}
-          illustrationTextFree={
-            page.illustration_url
-              ? Boolean(page.illustration_text_free)
-              : undefined
-          }
+          illustrationUrl={page.illustration_url ?? null}
+          illustrationTextFree={pageHasVerifiedIllustration}
+          initialReadingMode={resolvedInitialReadingMode}
+          readingMode={activeReadingMode}
+          onReadingModeChange={handleReadingModeChange}
           illustration={
             book && (
               <BookCover
@@ -298,12 +314,17 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
+        className="reading-dock relative -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
+            data-feedback-overlay={hasDockedFeedbackPanel ? undefined : "true"}
+            className={
+              hasDockedFeedbackPanel
+                ? "mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
+                : "pointer-events-none absolute inset-x-0 bottom-full z-20 mx-auto max-h-[20dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain px-3 pb-1.5 sm:max-h-[24dvh] sm:px-6 sm:pb-2 [&>*]:pointer-events-auto [&>*]:shadow-sm"
+            }
           >
             {retryMode ? (
               <div
@@ -528,7 +549,7 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-2 w-full max-w-[1008px] px-1 text-sm text-muted sm:text-body">
+                <p className="mx-auto line-clamp-2 w-full max-w-[1008px] rounded-control border border-border/80 bg-white/95 px-3 py-1.5 text-sm text-muted backdrop-blur-xs sm:text-body">
                   {t("layout.childJustReadPrefix")}{" "}
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     “{latestTranscript}”

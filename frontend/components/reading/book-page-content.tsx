@@ -100,7 +100,10 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control px-2 py-0.5 transition-[background-color,color,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none",
+          "relative me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-2 py-0.5 motion-reduce:transition-none",
+          isCurrent || presentationState === "current"
+            ? "transition-none"
+            : "transition-[background-color,color,border-color,box-shadow] duration-75 ease-out",
           !readOnly &&
             "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
           !readOnly && "cursor-pointer select-none",
@@ -109,10 +112,8 @@ const MemoWordToken = memo(function WordToken({
             presentationState !== "current" &&
             (presentationState === "incorrect"
               ? "shadow-xs"
-              : "font-semibold ring-2 ring-primary/45 shadow-xs"),
+              : "ring-2 ring-primary/45 shadow-xs"),
           isCurrent && presentationState === "current" && "shadow-xs",
-          presentationState === "incorrect" &&
-            "font-semibold border-b-2 border-red-500",
           presentationState === "unread" &&
             !readOnly &&
             "hover:bg-highlight/40",
@@ -145,26 +146,38 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "preview-correct" ? (
           <span
             aria-hidden="true"
-            className="ms-1 inline-block size-1.5 rounded-full bg-emerald-600 align-middle"
+            className="pointer-events-none absolute -top-0.5 -right-0.5 size-2 rounded-full bg-emerald-600"
           />
         ) : null}
         {presentationState === "self-corrected" ? (
-          <span aria-hidden="true" className="ms-1 text-sm">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-green-900 shadow-2xs"
+          >
             ↺
           </span>
         ) : null}
         {presentationState === "unresolved" ? (
-          <span aria-hidden="true" className="ms-1 text-sm">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-red-900 shadow-2xs"
+          >
             ◇
           </span>
         ) : null}
         {presentationState === "uncertain" ? (
-          <span aria-hidden="true" className="ms-1 text-sm">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-slate-700 shadow-2xs"
+          >
             ?
           </span>
         ) : null}
         {presentationState === "assisted" ? (
-          <span aria-hidden="true" className="ms-1 text-sm">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-primary shadow-2xs"
+          >
             {"\u266A"}
           </span>
         ) : null}

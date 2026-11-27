@@ -114,13 +114,13 @@ const MIN_SPEECH_RMS_HOLD = 0.0016;
 const INITIAL_NOISE_FLOOR = 0.0018;
 const MAX_NOISE_FLOOR = 0.0055;
 const MIN_NOISE_FLOOR = 0.0009;
-const SILENCE_FLUSH_MS = 520;
+const SILENCE_FLUSH_MS = 420;
 const CLAUSE_FLUSH_MIN_SPEECH_MS = 1_800;
 const CLAUSE_FLUSH_SILENCE_MS = 160;
 const MIN_SPEECH_MS = 120;
 const MAX_SEGMENT_MS = 3_600;
 const INTERIM_MIN_SPEECH_MS = 140;
-const INTERIM_STEP_MS = 440;
+const INTERIM_STEP_MS = 380;
 const PAUSE_INTERIM_SILENCE_MS = 100;
 const MIN_NEW_VOICED_INTERIM_SAMPLES = Math.floor(TARGET_SAMPLE_RATE * 0.08);
 const WS_PCM_CHUNK_SAMPLES = 1024; // 64ms @ 16kHz mono Int16 LE (2048 bytes)
@@ -146,68 +146,153 @@ export function resetLocalSttEmergencyStateForTests(): void {
   lastLocalSttOutageAt = 0;
 }
 
-function downsampleTo16k(input: Float32Array, inputRate: number): Float32Array {
-  if (
-    inputRate === TARGET_SAMPLE_RATE ||
-    inputRate <= 0 ||
-    input.length === 0
-  ) {
-    return new Float32Array(input);
-  }
-  const ratio = inputRate / TARGET_SAMPLE_RATE;
-  const outLength = Math.max(1, Math.round(input.length / ratio));
-  if (inputRate < TARGET_SAMPLE_RATE) {
-    const out = new Float32Array(outLength);
-    for (let i = 0; i < outLength; i += 1) {
-      const pos = i * ratio;
-      const idx = Math.floor(pos);
-      const frac = pos - idx;
-      const s0 = input[Math.min(idx, input.length - 1)];
-      const s1 = input[Math.min(idx + 1, input.length - 1)];
-      out[i] = s0 + (s1 - s0) * frac;
+/**
+ * Stateful per-stream resampler to 16 kHz mono Float32 PCM.
+ *
+ * Preserves 2nd-order Butterworth anti-aliasing low-pass filter state
+ * (`x1, x2, y1, y2`) AND fractional sample phase (`pos`, `prevFiltered`)
+ * continuously across consecutive AudioWorklet (1024@48kHz) or
+ * ScriptProcessor (512@44.1kHz) chunks, eliminating boundary clicks
+ * (46.9 Hz / 93.75 Hz) and tail-sample drops that distort Vietnamese tones.
+ */
+export class StatefulResampler16k {
+  private readonly ratio: number;
+  private readonly needsFilter: boolean;
+  private readonly b0: number;
+  private readonly b1: number;
+  private readonly b2: number;
+  private readonly a1: number;
+  private readonly a2: number;
+  private filterInitialized = false;
+  private x1 = 0;
+  private x2 = 0;
+  private y1 = 0;
+  private y2 = 0;
+  private hasPrevFiltered = false;
+  private prevFiltered = 0;
+  private phase = 0;
+
+  constructor(private readonly inputRate: number) {
+    this.ratio =
+      inputRate > 0 && inputRate !== TARGET_SAMPLE_RATE
+        ? inputRate / TARGET_SAMPLE_RATE
+        : 1;
+    this.needsFilter = inputRate > TARGET_SAMPLE_RATE;
+    if (this.needsFilter) {
+      // 2nd-order Butterworth anti-aliasing low-pass filter (fc = 7.2 kHz)
+      // before decimation from 44.1/48 kHz -> 16 kHz to preserve Vietnamese sibilants (s/x, ch/tr).
+      const fc = Math.min(7_200, TARGET_SAMPLE_RATE * 0.45);
+      const omega = (2 * Math.PI * fc) / inputRate;
+      const sinW = Math.sin(omega);
+      const cosW = Math.cos(omega);
+      const alpha = sinW / (2 * Math.SQRT1_2);
+      const a0 = 1 + alpha;
+      this.b0 = (1 - cosW) / 2 / a0;
+      this.b1 = (1 - cosW) / a0;
+      this.b2 = this.b0;
+      this.a1 = (-2 * cosW) / a0;
+      this.a2 = (1 - alpha) / a0;
+    } else {
+      this.b0 = 1;
+      this.b1 = 0;
+      this.b2 = 0;
+      this.a1 = 0;
+      this.a2 = 0;
     }
-    return out;
   }
 
-  // 2nd-order Butterworth anti-aliasing low-pass filter (fc = 7.2 kHz) before
-  // decimation from 44.1/48 kHz -> 16 kHz to preserve Vietnamese sibilants (s/x, ch/tr).
-  const fc = Math.min(7_200, TARGET_SAMPLE_RATE * 0.45);
-  const omega = (2 * Math.PI * fc) / inputRate;
-  const sinW = Math.sin(omega);
-  const cosW = Math.cos(omega);
-  const alpha = sinW / (2 * Math.SQRT1_2);
-  const a0 = 1 + alpha;
-  const b0 = (1 - cosW) / 2 / a0;
-  const b1 = (1 - cosW) / a0;
-  const b2 = b0;
-  const a1 = (-2 * cosW) / a0;
-  const a2 = (1 - alpha) / a0;
-
-  const filtered = new Float32Array(input.length);
-  let x1 = input[0];
-  let x2 = input[0];
-  let y1 = input[0];
-  let y2 = input[0];
-  for (let i = 0; i < input.length; i += 1) {
-    const x0 = input[i];
-    const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
-    filtered[i] = y0;
-    x2 = x1;
-    x1 = x0;
-    y2 = y1;
-    y1 = y0;
+  reset(): void {
+    this.filterInitialized = false;
+    this.x1 = 0;
+    this.x2 = 0;
+    this.y1 = 0;
+    this.y2 = 0;
+    this.hasPrevFiltered = false;
+    this.prevFiltered = 0;
+    this.phase = 0;
   }
 
-  const out = new Float32Array(outLength);
-  for (let i = 0; i < outLength; i += 1) {
-    const pos = i * ratio;
-    const idx = Math.floor(pos);
-    const frac = pos - idx;
-    const s0 = filtered[Math.min(idx, filtered.length - 1)];
-    const s1 = filtered[Math.min(idx + 1, filtered.length - 1)];
-    out[i] = s0 + (s1 - s0) * frac;
+  process(input: Float32Array): Float32Array {
+    const n = input.length;
+    if (n === 0) return new Float32Array(0);
+    if (this.inputRate === TARGET_SAMPLE_RATE || this.inputRate <= 0) {
+      return new Float32Array(input);
+    }
+
+    let source: Float32Array;
+    if (this.needsFilter) {
+      source = new Float32Array(n);
+      if (!this.filterInitialized) {
+        const init = input[0];
+        this.x1 = init;
+        this.x2 = init;
+        this.y1 = init;
+        this.y2 = init;
+        this.filterInitialized = true;
+      }
+      let { x1, x2, y1, y2 } = this;
+      const { b0, b1, b2, a1, a2 } = this;
+      for (let i = 0; i < n; i += 1) {
+        const x0 = input[i];
+        const y0 = b0 * x0 + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        source[i] = y0;
+        x2 = x1;
+        x1 = x0;
+        y2 = y1;
+        y1 = y0;
+      }
+      this.x1 = x1;
+      this.x2 = x2;
+      this.y1 = y1;
+      this.y2 = y2;
+    } else {
+      source = input;
+    }
+
+    if (!this.hasPrevFiltered) {
+      this.prevFiltered = source[0];
+      this.hasPrevFiltered = true;
+    }
+
+    const ratio = this.ratio;
+    let pos = this.phase;
+    const maxPos = n - 1;
+    const estimatedOut =
+      pos <= maxPos ? Math.floor((maxPos - pos) / ratio) + 2 : 0;
+    const out = new Float32Array(Math.max(0, estimatedOut));
+    let outIdx = 0;
+
+    while (pos <= maxPos) {
+      if (pos < 0) {
+        const frac = pos + 1;
+        out[outIdx] =
+          this.prevFiltered + (source[0] - this.prevFiltered) * frac;
+      } else {
+        const idx = Math.floor(pos);
+        const frac = pos - idx;
+        if (frac === 0 || idx >= maxPos) {
+          out[outIdx] = source[idx];
+        } else {
+          const s0 = source[idx];
+          const s1 = source[idx + 1];
+          out[outIdx] = s0 + (s1 - s0) * frac;
+        }
+      }
+      outIdx += 1;
+      pos += ratio;
+    }
+
+    this.prevFiltered = source[n - 1];
+    this.phase = pos - n;
+    return outIdx === out.length ? out : out.subarray(0, outIdx);
   }
-  return out;
+}
+
+export function downsampleTo16k(
+  input: Float32Array,
+  inputRate: number,
+): Float32Array {
+  return new StatefulResampler16k(inputRate).process(input);
 }
 
 export function encodeFloat32ToWav16kBlob(samples: Float32Array): Blob {
@@ -661,6 +746,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private processorNode: ScriptProcessorNode | null = null;
   private workletNode: AudioWorkletNode | null = null;
   private workletUrl: string | null = null;
+  private resampler: StatefulResampler16k | null = null;
   private abortController: AbortController | null = null;
   private interimAbortController: AbortController | null = null;
   private resultsHistory: SegmentSpeechResultItem[] = [];
@@ -684,6 +770,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private epoch = 0;
   private lastInterimSpeechSamples = 0;
   private lastInterimVoicedSamples = 0;
+  private lastInterimActiveSamples = 0;
   private interimInFlight = false;
   private interimGeneration = 0;
   private segmentInterims: string[] = [];
@@ -792,16 +879,69 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       const confirmedLocalDown =
         freshHealth !== null &&
         (!freshHealth.local.available || !freshHealth.local.stt_ready);
+      const localUnconfigured =
+        freshHealth !== null &&
+        (freshHealth.local.configured === false ||
+          freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
       const now = Date.now();
-      const withinWasmCooldown =
+      const withinEmergencyCooldown =
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
         (getVoiceEngineStatus().stt.tier === "browser_wasm" ||
           getVoiceEngineStatus().stt.tier === "browser_default" ||
           getVoiceEngineStatus().stt.tier === "android_native");
 
+      const caps = getCachedAndroidSpeechCapabilities();
+      const androidSttReady =
+        isAndroidNativeSpeechAvailable() && (caps ? caps.sttAvailable : true);
+      const optedInStreamingBrowser =
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback &&
+        Boolean(getBrowserSpeechRecognitionCtor());
+      const backendGoogleSttAvailable =
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback &&
+        freshHealth !== null &&
+        freshHealth.google.stt_configured &&
+        !freshHealth.google.stt_cooldown;
+      const confirmedLocalDownNoGoogle =
+        confirmedLocalDown &&
+        (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
+
+      // Priority when Local Worker is unavailable:
+      // 1. Android Native STT (100% on-device streaming on Android APK WebView).
+      // 2. Hosted opted-in streaming Web Speech API (low-latency vi-VN on Chrome/Edge
+      //    when parent enabled online fallback & backend Google STT is unavailable).
+      // 3. Backend Google Cloud STT (when opted-in and configured/not in cooldown).
+      // 4. On-device Browser WASM Sherpa-ONNX (100% offline / privacy-first under `local_only`
+      //    or browsers without Web Speech API).
       if (
-        (confirmedLocalDown || withinWasmCooldown) &&
+        (confirmedLocalDown || withinEmergencyCooldown) &&
+        androidSttReady &&
+        this.tryActivateBrowserFallback()
+      ) {
+        if (confirmedLocalDown) {
+          lastLocalSttOutageAt = now;
+        }
+        return;
+      }
+
+      if (
+        optedInStreamingBrowser &&
+        localUnconfigured &&
+        (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
+      ) {
+        if (confirmedLocalDownNoGoogle) {
+          lastLocalSttOutageAt = now;
+        }
+        if (this.tryActivateBrowserFallback()) {
+          return;
+        }
+      }
+
+      if (
+        !backendGoogleSttAvailable &&
+        (confirmedLocalDown || withinEmergencyCooldown) &&
         detectBrowserWasmSttSupport().supported
       ) {
         if (confirmedLocalDown) {
@@ -809,50 +949,34 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
         this.usingWasmStt = true;
         this.wsDisabledForRun = true;
-        this.wasmFallbackReason = confirmedLocalDown
-          ? "LOCAL_STT_UNAVAILABLE"
-          : null;
+        this.wasmFallbackReason = localUnconfigured
+          ? null
+          : confirmedLocalDown
+            ? "LOCAL_STT_UNAVAILABLE"
+            : null;
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: true,
+          fallbackUsed: !localUnconfigured && confirmedLocalDown,
           fallbackReason: this.wasmFallbackReason,
         });
         void getBrowserWasmSttClient()
           .init(this.abortController.signal)
           .catch(() => undefined);
       } else if (
-        isAndroidNativeSpeechAvailable() ||
-        (policy.providerMode === "local_with_google_fallback" &&
-          policy.allowGoogleSttFallback)
+        optedInStreamingBrowser &&
+        (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
       ) {
-        const confirmedLocalDownNoGoogle =
-          confirmedLocalDown &&
-          (!freshHealth.google.stt_configured ||
-            freshHealth.google.stt_cooldown);
-        const withinEmergencyCooldown =
-          lastLocalSttOutageAt > 0 &&
-          now - lastLocalSttOutageAt < LOCAL_OUTAGE_RETRY_MS &&
-          (getVoiceEngineStatus().stt.tier === "browser_default" ||
-            getVoiceEngineStatus().stt.tier === "android_native");
-
-        if (confirmedLocalDownNoGoogle || withinEmergencyCooldown) {
-          if (confirmedLocalDownNoGoogle) {
-            lastLocalSttOutageAt = now;
-          }
-          if (this.tryActivateBrowserFallback()) {
-            return;
-          }
-        } else if (
-          lastLocalSttOutageAt > 0 &&
-          now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
-        ) {
-          // Emergency cooldown TTL elapsed -> automatically re-try Local Offline STT!
-          lastLocalSttOutageAt = 0;
+        if (confirmedLocalDownNoGoogle) {
+          lastLocalSttOutageAt = now;
+        }
+        if (this.tryActivateBrowserFallback()) {
+          return;
         }
       } else if (
         lastLocalSttOutageAt > 0 &&
         now - lastLocalSttOutageAt >= LOCAL_OUTAGE_RETRY_MS
       ) {
+        // Emergency cooldown TTL elapsed -> automatically re-try Local Offline STT!
         lastLocalSttOutageAt = 0;
       }
     }
@@ -892,7 +1016,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     // Flush any pending speech segment before emitting onend
     if (
       this.inSpeech &&
-      this.speechSamples >= (TARGET_SAMPLE_RATE * MIN_SPEECH_MS) / 1000
+      this.voicedSamples >= (TARGET_SAMPLE_RATE * MIN_SPEECH_MS) / 1000
     ) {
       this.flushCurrentSegment();
     } else {
@@ -1071,15 +1195,39 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.consecutiveTechnicalFailures >= EMERGENCY_FAILURE_THRESHOLD
     ) {
       lastLocalSttOutageAt = Date.now();
+      const caps = getCachedAndroidSpeechCapabilities();
+      const androidSttReady =
+        isAndroidNativeSpeechAvailable() && (caps ? caps.sttAvailable : true);
+      if (androidSttReady && this.tryActivateBrowserFallback()) {
+        return true;
+      }
+      const policy = getVoicePolicyPreferences();
+      const localUnconfigured =
+        freshHealth !== null &&
+        (freshHealth.local.configured === false ||
+          freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
+      const optedInStreamingBrowser =
+        policy.providerMode === "local_with_google_fallback" &&
+        policy.allowGoogleSttFallback &&
+        Boolean(getBrowserSpeechRecognitionCtor());
+      if (
+        localUnconfigured &&
+        optedInStreamingBrowser &&
+        this.tryActivateBrowserFallback()
+      ) {
+        return true;
+      }
       if (detectBrowserWasmSttSupport().supported) {
         this.usingWasmStt = true;
         this.wsDisabledForRun = true;
-        this.wasmFallbackReason = "LOCAL_STT_UNAVAILABLE";
+        this.wasmFallbackReason = localUnconfigured
+          ? null
+          : "LOCAL_STT_UNAVAILABLE";
         this.closeSttWebSocket();
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: true,
-          fallbackReason: "LOCAL_STT_UNAVAILABLE",
+          fallbackUsed: !localUnconfigured,
+          fallbackReason: this.wasmFallbackReason,
         });
         void getBrowserWasmSttClient()
           .init(this.abortController?.signal)
@@ -1202,6 +1350,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         }
 
         const isFinal = Boolean(rawItem.isFinal);
+        // Interim-onset fallback for browsers that emit onresult before onspeechstart/onsoundstart.
+        if (
+          !isFinal &&
+          this.browserSpeechOnsetAt === null &&
+          copiedAlts[0]?.transcript.trim()
+        ) {
+          this.browserSpeechOnsetAt = now;
+        }
+        const effectiveOnset =
+          rawItem.onsetAt ?? capturedOnset ?? this.browserSpeechOnsetAt ?? null;
         const fallbackTurnId =
           rawItem.turnId ?? nextTurnId(ctx.pageId ?? "browser", ++this.turnSeq);
         const itemObj: Record<number, SegmentSpeechResultAlternative> & {
@@ -1225,7 +1383,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           pageId: rawItem.pageId ?? ctx.pageId ?? null,
           turnId: fallbackTurnId,
           segmentId: rawItem.segmentId ?? fallbackTurnId,
-          onsetAt: rawItem.onsetAt ?? capturedOnset ?? null,
+          onsetAt: effectiveOnset,
           audioEndedAt: rawItem.audioEndedAt ?? now,
           speechDurationMs: rawItem.speechDurationMs ?? null,
           audioQuality: rawItem.audioQuality,
@@ -1376,6 +1534,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.segmentPreRollSamples = 0;
     this.voicedSamples = 0;
     this.lastInterimVoicedSamples = 0;
+    this.lastInterimActiveSamples = 0;
     this.silenceSamples = 0;
     this.inSpeech = false;
     this.segmentOnsetAt = null;
@@ -1959,6 +2118,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       // Ignore
     }
     this.sourceNode = null;
+    this.resampler = null;
     if (this.audioCtx) {
       void this.audioCtx.close().catch(() => undefined);
       this.audioCtx = null;
@@ -2058,6 +2218,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       const silentGain = ctx.createGain();
       silentGain.gain.value = 0;
       this.sourceNode = source;
+      const resampler = new StatefulResampler16k(ctx.sampleRate);
+      this.resampler = resampler;
 
       let workletAttached = false;
       if (
@@ -2117,8 +2279,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             if (isStale()) return;
             const raw = ev.data;
             if (!raw?.length) return;
-            const mono16 = downsampleTo16k(raw, ctx.sampleRate);
-            this.consumeSamples16k(mono16);
+            const mono16 = resampler.process(raw);
+            if (mono16.length > 0) {
+              this.consumeSamples16k(mono16);
+            }
           };
           this.workletNode = worklet;
           source.connect(worklet);
@@ -2145,8 +2309,10 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         processor.onaudioprocess = (ev: AudioProcessingEvent) => {
           if (isStale()) return;
           const raw = ev.inputBuffer.getChannelData(0);
-          const mono16 = downsampleTo16k(raw, ctx.sampleRate);
-          this.consumeSamples16k(mono16);
+          const mono16 = resampler.process(raw);
+          if (mono16.length > 0) {
+            this.consumeSamples16k(mono16);
+          }
         };
         source.connect(processor);
         processor.connect(silentGain);
@@ -2269,7 +2435,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
 
     const silenceMs = (this.silenceSamples / TARGET_SAMPLE_RATE) * 1000;
-    const speechMs = (this.speechSamples / TARGET_SAMPLE_RATE) * 1000;
+    const voicedMs = (this.voicedSamples / TARGET_SAMPLE_RATE) * 1000;
+    const activePostOnsetSamples = Math.max(
+      0,
+      this.speechSamples - this.segmentPreRollSamples,
+    );
+    const activeSpanMs = (activePostOnsetSamples / TARGET_SAMPLE_RATE) * 1000;
     const wsStreamingActive = Boolean(
       this.wsStreamingCurrentSegment &&
       this.ws &&
@@ -2278,27 +2449,39 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       !this.wsDisabledForRun,
     );
     const canDispatchHttpInterim = !this.interimInFlight;
-    const deltaSamples = this.speechSamples - this.lastInterimSpeechSamples;
+    const deltaActiveSamples =
+      activePostOnsetSamples - this.lastInterimActiveSamples;
     const newVoicedSamples = this.voicedSamples - this.lastInterimVoicedSamples;
     const hasFreshSpeech = newVoicedSamples >= MIN_NEW_VOICED_INTERIM_SAMPLES;
     const isPauseBoundaryInterim =
       hasFreshSpeech &&
       silenceMs >= PAUSE_INTERIM_SILENCE_MS &&
-      this.speechSamples >= INTERIM_MIN_SAMPLES &&
-      deltaSamples >= Math.floor(TARGET_SAMPLE_RATE * 0.08);
+      this.voicedSamples >= INTERIM_MIN_SAMPLES &&
+      deltaActiveSamples >= Math.floor(TARGET_SAMPLE_RATE * 0.08);
     const isRegularInterimStep =
       hasFreshSpeech &&
-      this.speechSamples >= INTERIM_MIN_SAMPLES &&
-      deltaSamples >= INTERIM_STEP_SAMPLES;
+      this.voicedSamples >= INTERIM_MIN_SAMPLES &&
+      newVoicedSamples >= INTERIM_STEP_SAMPLES;
 
-    if (silenceMs >= SILENCE_FLUSH_MS && speechMs >= MIN_SPEECH_MS) {
-      this.flushCurrentSegment(false);
+    if (silenceMs >= SILENCE_FLUSH_MS) {
+      if (voicedMs >= MIN_SPEECH_MS) {
+        this.flushCurrentSegment(false);
+      } else {
+        // Sub-120ms non-speech click/pop followed by silence: discard cleanly while preserving quiet pre-roll.
+        const quietTail = chunk.slice();
+        this.resetSegmentState();
+        this.quietFrameStreak = 0;
+        this.preRoll =
+          quietTail.length > PRE_ROLL_SAMPLES
+            ? quietTail.slice(quietTail.length - PRE_ROLL_SAMPLES)
+            : quietTail;
+      }
     } else if (
-      speechMs >= CLAUSE_FLUSH_MIN_SPEECH_MS &&
+      voicedMs >= CLAUSE_FLUSH_MIN_SPEECH_MS &&
       silenceMs >= CLAUSE_FLUSH_SILENCE_MS
     ) {
       this.flushCurrentSegment(false);
-    } else if (speechMs >= MAX_SEGMENT_MS) {
+    } else if (activeSpanMs >= MAX_SEGMENT_MS) {
       this.flushCurrentSegment(true);
     } else if (
       !wsStreamingActive &&
@@ -2360,6 +2543,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     ) {
       return;
     }
+    const usedWasm = this.usingWasmStt;
+    if (usedWasm && !getBrowserWasmSttClient().isReady()) {
+      // Avoid timing out a 4s rolling interim while the 34MB WASM model is still cold-initializing.
+      return;
+    }
     const interimCtrl = new AbortController();
     this.interimAbortController = interimCtrl;
     const parentSignal = this.abortController?.signal;
@@ -2395,12 +2583,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const capturedEpoch = this.epoch;
     this.lastInterimSpeechSamples = total;
     this.lastInterimVoicedSamples = this.voicedSamples;
+    this.lastInterimActiveSamples = Math.max(
+      0,
+      total - this.segmentPreRollSamples,
+    );
     this.interimInFlight = true;
     const gen = this.interimGeneration;
     const activeSegmentInterims = this.segmentInterims;
     const ctx = this.getContext?.() ?? {};
     const interimTurnId = nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
-    const usedWasm = this.usingWasmStt;
 
     const interimPromise: Promise<{ text: string }> = usedWasm
       ? getBrowserWasmSttClient().transcribeSamples(combined, {
@@ -2486,6 +2677,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         });
       })
       .catch((err) => {
+        if (
+          !usedWasm &&
+          !this.usingBrowserFallback &&
+          capturedEpoch === this.epoch &&
+          isTechnicalSttUnavailabilityError(err)
+        ) {
+          this.recordTechnicalFailureAndMaybeFallback(err);
+          return;
+        }
         if (interimCtrl.signal.aborted) return;
         if (usedWasm && this.usingWasmStt) {
           if (!getBrowserWasmSttClient().isReady()) {
@@ -2493,8 +2693,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
             // permanently just because the 4s rolling-interim budget elapsed.
             return;
           }
-          this.usingWasmStt = false;
-          this.tryActivateBrowserFallback();
+          // Only leave WASM mode if browser/Android fallback actually activates;
+          // otherwise stay on WASM to prevent an infinite WASM <-> dead-network ping-pong loop!
+          if (this.tryActivateBrowserFallback()) {
+            this.usingWasmStt = false;
+          }
           return;
         }
         if (isTechnicalSttUnavailabilityError(err)) {
@@ -2512,9 +2715,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
   private flushCurrentSegment(carryOverlap = false): void {
     if (!this.active && !this.stopping) return;
+    // Cancel any stale in-flight rolling interim immediately so it never head-of-line blocks final decode.
+    if (this.interimAbortController) {
+      try {
+        this.interimAbortController.abort();
+      } catch {
+        // Ignore abort errors
+      }
+      this.interimAbortController = null;
+      this.interimInFlight = false;
+    }
     this.interimGeneration += 1;
     this.lastInterimSpeechSamples = 0;
     this.lastInterimVoicedSamples = 0;
+    this.lastInterimActiveSamples = 0;
     if (!this.speechChunks.length) {
       this.resetSegmentState();
       return;
@@ -2583,8 +2797,18 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     }
 
     const ctx = this.getContext?.() ?? {};
-    const turnId =
-      this.wsCurrentTurnId ?? nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
+    const canFlushViaWs =
+      wasStreamingViaWs &&
+      this.ws !== null &&
+      this.ws.readyState === WebSocket.OPEN &&
+      this.wsReady &&
+      !this.wsDisabledForRun;
+    // Only consume/advance `wsCurrentTurnId` when this segment actually streamed over WS;
+    // if WS connected mid-utterance, preserve the server's open WS turn ID for the next utterance!
+    const turnId = canFlushViaWs
+      ? (this.wsCurrentTurnId ??
+        nextTurnId(ctx.pageId ?? "live", ++this.turnSeq))
+      : nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
     const nextTurn = nextTurnId(ctx.pageId ?? "live", ++this.turnSeq);
     const signal = this.abortController?.signal;
 
@@ -2612,7 +2836,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         rawNormalizedTokens.length === rawSurfaceWords.length
       ) {
         let stripCount = 0;
-        const maxOverlap = Math.min(2, prevTail.length, rawNormalizedTokens.length);
+        const maxOverlap = Math.min(
+          2,
+          prevTail.length,
+          rawNormalizedTokens.length,
+        );
         for (let k = maxOverlap; k >= 1; k -= 1) {
           const tailSlice = prevTail.slice(prevTail.length - k);
           const headSlice = rawNormalizedTokens.slice(0, k);
@@ -2671,14 +2899,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       });
     };
 
-    const canFlushViaWs =
-      wasStreamingViaWs &&
-      this.ws !== null &&
-      this.ws.readyState === WebSocket.OPEN &&
-      this.wsReady &&
-      !this.wsDisabledForRun;
-
-    this.wsCurrentTurnId = canFlushViaWs ? nextTurn : null;
+    if (canFlushViaWs) {
+      this.wsCurrentTurnId = nextTurn;
+    }
     let attemptedWasm = false;
 
     const responsePromise: Promise<ResolvedSegmentResult | null> = canFlushViaWs
@@ -2751,11 +2974,17 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 voicedDurationMs,
               },
             );
+            const freshHealth = getFreshVoiceEngineHealth();
+            const localUnconfigured =
+              freshHealth !== null &&
+              (freshHealth.local.configured === false ||
+                freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
             recordSttEngineUsage({
               provider: "wasm",
-              fallbackUsed: true,
-              fallbackReason:
-                this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE",
+              fallbackUsed: !localUnconfigured,
+              fallbackReason: localUnconfigured
+                ? null
+                : (this.wasmFallbackReason ?? "LOCAL_STT_UNAVAILABLE"),
             });
             return {
               text: wasmRes.text,
@@ -2801,9 +3030,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                 throw err;
               }
               if (this.usingWasmStt) {
-                // Tier 1 WASM failed -> fall back immediately to Tier 3 (Android Native / Web Speech).
-                this.usingWasmStt = false;
+                // Tier 1 WASM failed -> switch to Tier 3 (Android Native / Web Speech) ONLY if allowed & available.
                 if (this.tryActivateBrowserFallback()) {
+                  this.usingWasmStt = false;
                   return {
                     text: "",
                     words: null as readonly WordTimestamp[] | null,
@@ -2820,8 +3049,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
                   try {
                     return await transcribeWithWasm();
                   } catch (wasmErr) {
-                    this.usingWasmStt = false;
                     if (this.tryActivateBrowserFallback()) {
+                      this.usingWasmStt = false;
                       return {
                         text: "",
                         words: null as readonly WordTimestamp[] | null,

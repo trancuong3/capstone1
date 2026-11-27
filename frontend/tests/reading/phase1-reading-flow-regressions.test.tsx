@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
-import { createSpeechService, type SpeechService } from "@/lib/api/speech-service";
+import {
+  createSpeechService,
+  type SpeechService,
+} from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
 import {
   getBrowserWasmSttClient,
@@ -101,7 +104,10 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
         this.state = "inactive";
       }
     }
-    const track = { readyState: "live", stop: vi.fn() } as unknown as MediaStreamTrack;
+    const track = {
+      readyState: "live",
+      stop: vi.fn(),
+    } as unknown as MediaStreamTrack;
     const stream = { getTracks: () => [track] } as unknown as MediaStream;
     vi.stubGlobal("MediaRecorder", SlowStopRecorder);
     Object.defineProperty(navigator, "mediaDevices", {
@@ -239,7 +245,8 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
       sessionId: "sess-hdr",
       voiceId: "local_south_thuc_doan",
     });
-    const headers = fetchMock.mock.calls.at(-1)?.[1]?.headers as Headers | Record<string, string>;
+    const headers = fetchMock.mock.calls.at(-1)?.[1]?.headers as
+      Headers | Record<string, string>;
     const headerValue =
       headers instanceof Headers
         ? headers.get("x-voice-lock-update")
@@ -260,7 +267,10 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
           spokenTexts.push(spoke);
           queueMicrotask(() => {
             port.onmessage?.({
-              data: JSON.stringify({ type: "tts_start", requestId: currentReqId }),
+              data: JSON.stringify({
+                type: "tts_start",
+                requestId: currentReqId,
+              }),
             });
             port.onmessage?.({
               data: JSON.stringify({
@@ -272,7 +282,10 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
             });
             if (spokenTexts.length >= 2) {
               port.onmessage?.({
-                data: JSON.stringify({ type: "tts_done", requestId: currentReqId }),
+                data: JSON.stringify({
+                  type: "tts_done",
+                  requestId: currentReqId,
+                }),
               });
             }
           });
@@ -280,13 +293,18 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
           const stoppedId = currentReqId;
           queueMicrotask(() => {
             port.onmessage?.({
-              data: JSON.stringify({ type: "tts_stopped", requestId: stoppedId }),
+              data: JSON.stringify({
+                type: "tts_stopped",
+                requestId: stoppedId,
+              }),
             });
           });
         }
       }),
     };
-    const win = window as unknown as { ViReadNativeSpeech?: ViReadNativeSpeechPort };
+    const win = window as unknown as {
+      ViReadNativeSpeech?: ViReadNativeSpeechPort;
+    };
     win.ViReadNativeSpeech = port;
     resetAndroidNativeSpeechBridgeForTests();
 
