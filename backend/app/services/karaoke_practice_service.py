@@ -317,6 +317,8 @@ class KaraokePracticeService:
             phrase_windows = (
                 raw_phrases if isinstance(raw_phrases, list) and raw_phrases else derived_phrases
             )
+            raw_melody = raw_json.get("melody_profile")
+            melody_profile = raw_melody if isinstance(raw_melody, dict) else None
             return MusicalProfileRead(
                 song_id=song.id,
                 song_version_id=published.id,
@@ -328,7 +330,42 @@ class KaraokePracticeService:
                 beat_grid_ms=beat_grid,
                 pitch_contour=contour,
                 phrase_windows=phrase_windows,
+                melody_profile=melody_profile,
                 updated_at=stored.UpdatedAt,
+            )
+
+        version_melody = None
+        if hasattr(self.repository, "get_version_melody_profile"):
+            version_melody = await self.repository.get_version_melody_profile(published.id)
+        if isinstance(version_melody, dict):
+            raw_contour = version_melody.get("pitch_contour")
+            contour = [
+                PitchContourPointRead(
+                    time_ms=int(pt["time_ms"]),
+                    hz=float(pt["hz"]),
+                    midi=float(pt["midi"]) if isinstance(pt.get("midi"), (int, float)) else None,
+                )
+                for pt in (raw_contour if isinstance(raw_contour, list) else [])
+                if isinstance(pt, dict)
+                and isinstance(pt.get("time_ms"), (int, float))
+                and isinstance(pt.get("hz"), (int, float))
+                and pt["hz"] > 0
+            ]
+            return MusicalProfileRead(
+                song_id=song.id,
+                song_version_id=published.id,
+                bpm=float(version_melody["bpm"])
+                if isinstance(version_melody.get("bpm"), (int, float))
+                else derived_bpm,
+                audio_type="DUAL_TRACK",
+                has_pitch_contour=len(contour) > 0,
+                has_beat_grid=len(derived_beats) > 0,
+                source_method="AUDIO_DSP",
+                beat_grid_ms=derived_beats,
+                pitch_contour=contour,
+                phrase_windows=derived_phrases,
+                melody_profile=version_melody,
+                updated_at=published.updated_at,
             )
 
         return MusicalProfileRead(
@@ -342,5 +379,6 @@ class KaraokePracticeService:
             beat_grid_ms=derived_beats,
             pitch_contour=[],
             phrase_windows=derived_phrases,
+            melody_profile=None,
             updated_at=published.updated_at,
         )

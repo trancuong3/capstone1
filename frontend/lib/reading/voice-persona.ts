@@ -101,19 +101,50 @@ export function getTeacherPersonaForVoice(
   return getTeacherPersona(resolveVoiceGender(voiceId, explicitGender));
 }
 
+const QUOTED_SPAN_RE =
+  /("[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|«[^»\n]*»|'[^'\n]*')/gu;
+
+const NON_TEACHER_CO_FOLLOWERS =
+  "(?!\\s+(?:bé|gái|tiên|tấm|chú|bác|dì|chủ|dâu|công\\s+chúa|nàng|gái\\s+nhỏ|em|trợ\\s+lý)(?=$|[^\\p{L}]))";
+
+const CO_GIAO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])Cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const CO_GIAO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])cô giáo(?=$|[^\\p{L}])`,
+  "gu",
+);
+const CO_CAP_RE = new RegExp(
+  `(^|[^\\p{L}])Cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  "gu",
+);
+const CO_LOW_RE = new RegExp(
+  `(^|[^\\p{L}])cô(?=$|[^\\p{L}])${NON_TEACHER_CO_FOLLOWERS}`,
+  "gu",
+);
+
 /**
  * Safely converts Vietnamese teacher self-reference ("cô" / "Cô" / "Cô giáo")
  * to ("thầy" / "Thầy" / "Thầy giáo") when a male voice is active, without
- * altering unrelated words like "con", "công", "cố", "cổ", "cơ".
+ * altering quoted book/story text or unrelated words like "con", "cô bé",
+ * "cô gái", "cô tiên", "cô tấm", "công", "cố", "cổ", "cơ".
  */
 export function adaptTextToTeacherPersona(
   text: string,
   gender: VoiceGender,
 ): string {
   if (gender !== "male" || !text) return text;
-  return text
-    .replace(/(^|[^\p{L}])Cô giáo(?=$|[^\p{L}])/gu, "$1Thầy giáo")
-    .replace(/(^|[^\p{L}])cô giáo(?=$|[^\p{L}])/gu, "$1thầy giáo")
-    .replace(/(^|[^\p{L}])Cô(?=$|[^\p{L}])/gu, "$1Thầy")
-    .replace(/(^|[^\p{L}])cô(?=$|[^\p{L}])/gu, "$1thầy");
+  const parts = text.split(QUOTED_SPAN_RE);
+  return parts
+    .map((segment, index) => {
+      // Odd indices are captured quoted spans (e.g. “cô”, "cô giáo") -> NEVER alter book/story quotes.
+      if (index % 2 === 1) return segment;
+      return segment
+        .replace(CO_GIAO_CAP_RE, "$1Thầy giáo")
+        .replace(CO_GIAO_LOW_RE, "$1thầy giáo")
+        .replace(CO_CAP_RE, "$1Thầy")
+        .replace(CO_LOW_RE, "$1thầy");
+    })
+    .join("");
 }

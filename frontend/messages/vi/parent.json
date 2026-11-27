@@ -233,5 +233,22 @@
         "a3": "Mở mục Tiến bộ để xem báo cáo hoặc mục Lịch sử để xem các buổi đọc đã được lưu."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Đồng bộ giọng đọc toàn hệ thống",
+    "title": "Chọn Cô giáo / Thầy giáo AI",
+    "subtitle": "Giọng đã chọn sẽ đồng hành xuyên suốt Đọc sách · Đánh vần · Đọc lại từ sai · Đọc hiểu · Trò chơi.",
+    "savedForChild": "Đang lưu cho bé {alias}",
+    "previewButton": "Nghe thử giọng",
+    "stopPreviewButton": "Dừng nghe thử",
+    "personaGroupAria": "Chọn nhân vật Cô giáo AI hoặc Thầy giáo AI",
+    "femaleTitle": "Cô giáo AI",
+    "femaleDesc": "Giọng nữ dịu dàng, ấm áp",
+    "maleTitle": "Thầy giáo AI",
+    "maleDesc": "Giọng nam trầm ấm, truyền cảm",
+    "selectedBadge": "Đang chọn",
+    "regionLabel": "Vùng miền",
+    "voiceListLabel": "Chọn giọng cụ thể",
+    "voiceListAria": "Danh sách giọng đọc theo nhân vật và vùng miền"
   }
 }

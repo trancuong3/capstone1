@@ -975,6 +975,13 @@ def build_deterministic_picture_guide(
     )
 
 
+def _resolve_teacher_persona_terms(teacher_gender: str | None) -> tuple[str, str, str]:
+    """Return (pronoun, capitalized_pronoun, role_phrase) for 'male' vs 'female'."""
+    if str(teacher_gender or "").strip().lower() == "male":
+        return "thầy", "Thầy", "thầy giáo"
+    return "cô", "Cô", "cô giáo"
+
+
 def evaluate_description_with_guide_fallback(
     *,
     guide: PictureGuideRead,
@@ -983,6 +990,7 @@ def evaluate_description_with_guide_fallback(
     previous_score: int | None = None,
     teaching_mode: TeachingMode = "OBSERVE",
     target_words: list[str] | None = None,
+    teacher_gender: str | None = None,
 ) -> tuple[PictureEvaluationFeedbackRead, str]:
     """Deterministic guide-grounded evaluator used when all AI providers are unavailable."""
     grade = max(1, min(5, int(child_grade)))
@@ -1102,33 +1110,34 @@ def evaluate_description_with_guide_fallback(
         grade=grade,
     )
 
+    pronoun, cap_pronoun, _role_phrase = _resolve_teacher_persona_terms(teacher_gender)
     if not is_relevant:
         praise_message = (
-            "Cô khen bé đã mạnh dạn gửi bài cho cô! Tuy nhiên câu này chưa nhắc đến hình ảnh trong bức tranh, "
+            f"{cap_pronoun} khen bé đã mạnh dạn gửi bài cho {pronoun}! Tuy nhiên câu này chưa nhắc đến hình ảnh trong bức tranh, "
             "bé hãy quan sát kỹ tranh rồi kể lại theo cách của mình nhé."
         )
         matched_details = []
     elif previous_score is not None and score > previous_score:
         praise_message = (
-            f"Cô khen bé tiến bộ hơn lượt trước (+{score - previous_score} điểm) ở chế độ {mode_spec.label_vi} "
+            f"{cap_pronoun} khen bé tiến bộ hơn lượt trước (+{score - previous_score} điểm) ở chế độ {mode_spec.label_vi} "
             "và kể được nhiều chi tiết đúng trong tranh!"
         )
     elif used_target_words and stars >= 2:
         words_preview = ", ".join(f"“{w}”" for w in used_target_words[:3])
         praise_message = (
-            f"Cô khen bé luyện tập rất tốt ở chế độ {mode_spec.label_vi} và đã khéo léo dùng được từ {words_preview} trong câu!"
+            f"{cap_pronoun} khen bé luyện tập rất tốt ở chế độ {mode_spec.label_vi} và đã khéo léo dùng được từ {words_preview} trong câu!"
         )
     elif stars == 3:
         praise_message = (
-            f"Cô khen bé hoàn thành xuất sắc chế độ {mode_spec.label_vi}, diễn đạt trọn câu và kể được nhiều chi tiết sinh động!"
+            f"{cap_pronoun} khen bé hoàn thành xuất sắc chế độ {mode_spec.label_vi}, diễn đạt trọn câu và kể được nhiều chi tiết sinh động!"
         )
     elif stars == 2:
         praise_message = (
-            f"Cô khen bé đã nhận ra đúng nội dung bức tranh ở chế độ {mode_spec.label_vi} và đặt câu khá rõ ràng!"
+            f"{cap_pronoun} khen bé đã nhận ra đúng nội dung bức tranh ở chế độ {mode_spec.label_vi} và đặt câu khá rõ ràng!"
         )
     else:
         praise_message = (
-            "Cô khen bé đã bắt đầu gọi tên được chi tiết trong tranh! Bé thử nói thành câu dài hơn chút nữa nhé."
+            f"{cap_pronoun} khen bé đã bắt đầu gọi tên được chi tiết trong tranh! Bé thử nói thành câu dài hơn chút nữa nhé."
         )
 
     if override_tip:
@@ -2199,8 +2208,10 @@ class GeminiPictureDescriptionAI:
         context_hint: str | None = None,
         teaching_mode: TeachingMode = "OBSERVE",
         target_words: list[str] | None = None,
+        teacher_gender: str | None = None,
     ) -> tuple[PictureGuideRead, str]:
         grade = max(1, min(5, int(child_grade)))
+        _pronoun, _cap_pronoun, role_phrase = _resolve_teacher_persona_terms(teacher_gender)
         active_mode: TeachingMode = (
             teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
         )
@@ -2217,7 +2228,7 @@ class GeminiPictureDescriptionAI:
             else ""
         )
         prompt = (
-            "Bạn là cô giáo tiểu học thân thiện của ứng dụng ViRead, hướng dẫn học sinh Lớp "
+            f"Bạn là {role_phrase} tiểu học thân thiện của ứng dụng ViRead, hướng dẫn học sinh Lớp "
             f"{grade} tập quan sát tranh và diễn đạt thành câu tiếng Việt hoàn chỉnh.\n"
             f"Trọng tâm chế độ học hiện tại: {mode_spec.ai_instruction}\n"
             "Hãy quan sát kỹ bức tranh đính kèm và trả về đúng 1 JSON object theo schema:\n"
@@ -2317,8 +2328,10 @@ class GeminiPictureDescriptionAI:
         target_words: list[str] | None = None,
         scene_summary: str | None = None,
         suggested_vocabulary: list[PictureVocabItem] | None = None,
+        teacher_gender: str | None = None,
     ) -> tuple[PictureEvaluationFeedbackRead, str]:
         grade = max(1, min(5, int(child_grade)))
+        pronoun, cap_pronoun, role_phrase = _resolve_teacher_persona_terms(teacher_gender)
         active_mode: TeachingMode = (
             teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
         )
@@ -2340,7 +2353,7 @@ class GeminiPictureDescriptionAI:
             safe_prev = _escape_prompt_fence(_clean_text(previous_transcript, max_len=600))
             prev_score_label = f"{int(previous_score)}/10" if previous_score is not None else "chưa rõ"
             prev_tip_line = (
-                f"\nGợi ý cô đã dặn lượt trước: {_escape_prompt_fence(_clean_text(previous_tip, max_len=240))}"
+                f"\nGợi ý {pronoun} đã dặn lượt trước: {_escape_prompt_fence(_clean_text(previous_tip, max_len=240))}"
                 if previous_tip
                 else ""
             )
@@ -2361,7 +2374,7 @@ class GeminiPictureDescriptionAI:
 
         min_words_for_3_stars = 7 if grade >= 3 else 5
         prompt = (
-            "Bạn là cô giáo tiểu học dịu dàng của ứng dụng ViRead đang lắng nghe và chấm phần mô tả tranh của học sinh Lớp "
+            f"Bạn là {role_phrase} tiểu học dịu dàng của ứng dụng ViRead đang lắng nghe và chấm phần mô tả tranh của học sinh Lớp "
             f"{grade}.\n"
             f"{mode_spec.ai_instruction}\n"
             f"Khung gợi mở PEER/CROWD: {mode_spec.crowd_focus}.\n"
@@ -2381,7 +2394,7 @@ class GeminiPictureDescriptionAI:
             f"  + 8-10: câu văn trọn ý (ít nhất {min_words_for_3_stars} từ), kể đúng từ 2 chi tiết/hoạt động/màu sắc trở lên trong tranh phù hợp Lớp {grade}.\n"
             "- matched_details: 1 đến 4 chi tiết đúng mà bé đã kể được dựa trên tranh thật (để mảng rỗng nếu chưa có chi tiết đúng).\n"
             "- missed_details: 1 đến 3 chi tiết thú vị khác đang có trong tranh mà bé có thể bổ sung thêm.\n"
-            "- praise_message: lời khen ấm áp 100% tiếng Việt, luôn xưng 'cô' và gọi học sinh là 'bé' (không dùng 'con'), nhắc lại điểm hay hoặc sự tiến bộ cụ thể trong câu của bé (1-2 câu).\n"
+            f"- praise_message: lời khen ấm áp 100% tiếng Việt, luôn xưng '{pronoun}' và gọi học sinh là 'bé' (không dùng 'con'), nhắc lại điểm hay hoặc sự tiến bộ cụ thể trong câu của bé (1-2 câu).\n"
             "- improvement_tip: 1 mẹo ngắn gọn, cụ thể bằng tiếng Việt để lần nói/viết sau câu của bé hay và đầy đủ hơn (gợi ý nối câu: Ai + đang làm gì + ở đâu/như thế nào).\n"
             "- upgraded_sentences: 1 đến 2 câu gợi ý viết lại phát triển trực tiếp từ ý của bé sao cho mượt mà, giàu hình ảnh hơn với trình độ Lớp "
             f"{grade}.\n"
@@ -2451,9 +2464,9 @@ class GeminiPictureDescriptionAI:
         praise_message = _clean_text(
             parsed.get("praise_message"),
             fallback=(
-                "Cô khen bé đã mạnh dạn thử sức mô tả bức tranh! Bé hãy nhìn kỹ tranh hơn chút nữa nhé."
+                f"{cap_pronoun} khen bé đã mạnh dạn thử sức mô tả bức tranh! Bé hãy nhìn kỹ tranh hơn chút nữa nhé."
                 if not is_relevant
-                else "Cô khen bé đã quan sát rất chăm chú và diễn đạt ý rõ ràng!"
+                else f"{cap_pronoun} khen bé đã quan sát rất chăm chú và diễn đạt ý rõ ràng!"
             ),
             max_len=360,
         )

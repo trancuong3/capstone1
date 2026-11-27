@@ -69,6 +69,34 @@ _RUNTIME_METRICS: dict[str, Any] = {
 }
 
 
+_MALE_VOICE_MARKERS = (
+    "thien_minh",
+    "quang_son",
+    "thai_son",
+    "neural2_d",
+    "wavenet_b",
+    "_male",
+)
+
+
+def _infer_voice_gender(voice_id: str | None) -> str:
+    lower = (voice_id or "").strip().lower()
+    if any(marker in lower for marker in _MALE_VOICE_MARKERS):
+        return "male"
+    return "female"
+
+
+def _entry_matches_requested_voice(entry: Any, requested_voice_id: str) -> bool:
+    entry_voice_id = getattr(entry, "VoiceId", None)
+    if not isinstance(entry_voice_id, str) or not entry_voice_id.strip():
+        return False
+    clean_entry = entry_voice_id.strip()
+    clean_req = (requested_voice_id or "").strip()
+    if not clean_req or clean_entry != clean_req:
+        return False
+    return _infer_voice_gender(clean_entry) == _infer_voice_gender(clean_req)
+
+
 def _reset_day_if_needed_locked(today: date) -> None:
     if _RUNTIME_METRICS["usage_date"] != today:
         _RUNTIME_METRICS["usage_date"] = today
@@ -1328,6 +1356,17 @@ class TtsAudioCacheService:
                         nearest_fn = getattr(self.repo, "get_nearest_active_entry", None)
                         if callable(nearest_fn):
                             entry = await nearest_fn(**coaching_phonics_kwargs)
+
+            if entry is not None and not _entry_matches_requested_voice(entry, voice_id):
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="tts_cache_voice_mismatch_rejected",
+                    stage="tts_cache",
+                    requested_voice_id=voice_id,
+                    cached_voice_id=getattr(entry, "VoiceId", None),
+                )
+                entry = None
 
             if entry is None:
                 if use_bg_writes:

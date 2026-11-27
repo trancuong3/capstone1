@@ -11,7 +11,11 @@
  */
 
 import { translateRuntime } from "@/lib/i18n/runtime";
-import type { KaraokeLine, KaraokeLyrics } from "@/types/karaoke";
+import type {
+  KaraokeLine,
+  KaraokeLyrics,
+  KaraokeMelodyProfile,
+} from "@/types/karaoke";
 import type { LiveSingingScore } from "./live-singing-score";
 import {
   clamp01,
@@ -54,6 +58,7 @@ export interface MusicalProfileData {
     "ID3_LRC" | "AUDIO_DSP" | "WHISPER_DRAFT" | "MANUAL_TAP" | "LYRICS_TIMING";
   beatGridMs: number[];
   pitchContour: ReferencePitchPoint[];
+  melodyProfile?: KaraokeMelodyProfile | null;
 }
 
 export interface MusicalSegmentReport {

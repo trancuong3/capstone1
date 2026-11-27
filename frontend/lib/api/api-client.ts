@@ -686,6 +686,44 @@ export async function requestApi<T>(
     return parsed.data;
   };
 
+  const executeFetchWithColdStartRetry = async (
+    fetchSignal?: AbortSignal,
+  ): Promise<T> => {
+    const canRetryColdStart =
+      method === "GET" && process.env.NODE_ENV !== "test";
+    const maxAttempts = canRetryColdStart ? 2 : 1;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        return await executeFetch(fetchSignal);
+      } catch (error) {
+        const isLastAttempt = attempt === maxAttempts - 1;
+        const callerAborted = Boolean(fetchSignal?.aborted);
+        const isGatewayColdStart =
+          error instanceof ServiceError &&
+          (error.status === 0 || error.status === 502 || error.status === 504);
+
+        // Never retry 401/403/404/422/503 or non-GET requests.
+        if (isLastAttempt || callerAborted || !isGatewayColdStart) {
+          throw error;
+        }
+
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            fetchSignal?.removeEventListener("abort", onAbort);
+            resolve();
+          }, 700);
+          const onAbort = () => {
+            clearTimeout(timer);
+            reject(error);
+          };
+          fetchSignal?.addEventListener("abort", onAbort, { once: true });
+        });
+      }
+    }
+    throw failure(0, "", true);
+  };
+
   if (method !== "GET") {
     invalidateApiReadCache();
     try {
@@ -695,10 +733,16 @@ export async function requestApi<T>(
     }
   }
 
-  return runCoalescedApiGet(path, token, signal, executeFetch, {
-    bypassCache: requestOptions.bypassCache,
-    cacheTtlMs: requestOptions.cacheTtlMs,
-  });
+  return runCoalescedApiGet(
+    path,
+    token,
+    signal,
+    executeFetchWithColdStartRetry,
+    {
+      bypassCache: requestOptions.bypassCache,
+      cacheTtlMs: requestOptions.cacheTtlMs,
+    },
+  );
 }
 
 export function apiQuery(

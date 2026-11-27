@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "Der lokale Sprach-Worker ist offline und es ist kein vorab erzeugtes Audio lokal gespeichert. Starten Sie den lokalen Worker oder aktivieren Sie unten den Fallback.",
     "localWorkerLabel": "Lokaler Worker:",
     "sessionLockedBadge": "Für diese Lesesitzung gesperrt",
-    "offlineBrowserBadge": "Browser ist offline"
+    "offlineBrowserBadge": "Browser ist offline",
+    "teacherPersonaAria": "Schnellwechsel KI-Lehrerin oder KI-Lehrer",
+    "femaleTeacherQuickBtn": "KI-Lehrerin (Weiblich)",
+    "maleTeacherQuickBtn": "KI-Lehrer (Männlich)"
   },
   "engineBadge": {
     "ariaLabel": "Sprachquelle: STT {stt}, TTS {tts}",
@@ -115,7 +118,8 @@
     "androidNativeFallbackNotice": "Server-Stimme deaktiviert – ViRead verwendet die vietnamesische Android-Gerätestimme.",
     "browserFallbackNotice": "Gerätestimme deaktiviert – ViRead verwendet die Online-Browser-Stimme.",
     "autoplayBlocked": "Der Browser wartet auf eine Interaktion, um Ton zu aktivieren. Tippe auf Erneut anhören.",
-    "partialPlayback": "Audiowiedergabe unterbrochen. Du kannst von vorn anhören."
+    "partialPlayback": "Audiowiedergabe unterbrochen. Du kannst von vorn anhören.",
+    "deviceVoiceGenderMismatchNotice": "Auf diesem Gerät ist offline nur eine vietnamesische Stimme des anderen Geschlechts installiert. Aktivieren Sie den lokalen Sprachserver oder Google-Fallback."
   },
   "wasm": {
     "workerUnavailable": "Web Worker nicht verfügbar",

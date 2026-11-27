@@ -388,7 +388,20 @@
         "repeated": "重複",
         "hesitation": "猶豫"
       }
-    }
+    },
+    "summarySessions": "閱讀次數",
+    "summaryDuration": "累計時長",
+    "summaryCompleted": "已完成",
+    "summaryDurationZero": "0 分鐘",
+    "filterAria": "依狀態篩選閱讀紀錄",
+    "filterAll": "全部",
+    "filterCompleted": "已完成",
+    "filterIncomplete": "進行中",
+    "searchPlaceholder": "依本頁書名篩選…",
+    "searchAria": "依書名搜尋閱讀紀錄",
+    "filterEmptyTitle": "沒有符合條件的紀錄",
+    "filterEmptyDesc": "請切換狀態或清空搜尋關鍵字。",
+    "clearFilterAction": "檢視全部紀錄"
   },
   "readingManagement": {
     "title": "閱讀管理與提醒",

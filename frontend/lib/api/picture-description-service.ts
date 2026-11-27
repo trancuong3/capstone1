@@ -162,6 +162,7 @@ export interface CreatePictureSessionInput {
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
   readonly refresh_ai_guide?: boolean;
+  readonly teacher_gender?: "female" | "male";
 }
 
 export interface EvaluatePictureInput {
@@ -169,6 +170,7 @@ export interface EvaluatePictureInput {
   readonly input_mode: PictureInputMode;
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
+  readonly teacher_gender?: "female" | "male";
 }
 
 export interface PictureDescriptionService {
@@ -281,6 +283,9 @@ export function createPictureDescriptionService(): PictureDescriptionService {
       }
       if (input.refresh_ai_guide) {
         form.append("refresh_ai_guide", "true");
+      }
+      if (input.teacher_gender) {
+        form.append("teacher_gender", input.teacher_gender);
       }
       if (input.image_file) {
         form.append(

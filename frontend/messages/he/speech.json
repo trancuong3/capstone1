@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "שירות הקול המקומי אינו מקוון ואין אודיו מוכן מראש במכשיר. הפעל את השירות המקומי או את הגיבוי למטה כדי לשמוע קריאה לדוגמה.",
     "localWorkerLabel": "שירות קול מקומי:",
     "sessionLockedBadge": "נעול למפגש קריאה זה",
-    "offlineBrowserBadge": "הדפדפן במצב לא מקוון"
+    "offlineBrowserBadge": "הדפדפן במצב לא מקוון",
+    "teacherPersonaAria": "החלפה מהירה בין מורה AI אישה לגבר",
+    "femaleTeacherQuickBtn": "מורה AI (אישה)",
+    "maleTeacherQuickBtn": "מורה AI (גבר)"
   },
   "engineBadge": {
     "ariaLabel": "מקור דיבור: STT {stt}, TTS {tts}",
@@ -115,7 +118,8 @@
     "androidNativeFallbackNotice": "קול השרת לא הופעל — ViRead משתמשת בקול הוייטנאמי של מכשיר ה-Android.",
     "browserFallbackNotice": "הקול במכשיר לא הופעל — ViRead משתמשת בקול המקוון של הדפדפן.",
     "autoplayBlocked": "הדפדפן ממתין ללחיצה על כפתור 'האזן שוב' כדי להפעיל את הקול.",
-    "partialPlayback": "השמע הופסק. אפשר להקשיב מההתחלה."
+    "partialPlayback": "השמע הופסק. אפשר להקשיב מההתחלה.",
+    "deviceVoiceGenderMismatchNotice": "במכשיר זה מותקן במצב לא מקוון רק קול וייטנאמי מהמגדר השני. הפעילו את שרת הקול המקומי או גיבוי Google."
   },
   "wasm": {
     "workerUnavailable": "Web Worker אינו זמין",

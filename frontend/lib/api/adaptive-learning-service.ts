@@ -42,7 +42,10 @@ async function fetchJson<T>(path: string): Promise<T> {
 }
 
 export interface AdaptiveLearningService {
-  getRecommendations(childId: string): Promise<EntertainmentRecommendationsDTO>;
+  getRecommendations(
+    childId: string,
+    teacherGender?: "female" | "male",
+  ): Promise<EntertainmentRecommendationsDTO>;
   getParentAnalytics(
     childId: string,
     windowDays?: number,
@@ -51,9 +54,12 @@ export interface AdaptiveLearningService {
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
   return {
-    getRecommendations(childId: string) {
+    getRecommendations(childId: string, teacherGender?: "female" | "male") {
+      const suffix = teacherGender
+        ? `?teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
       return fetchJson<EntertainmentRecommendationsDTO>(
-        `/learning/children/${encodeURIComponent(childId)}/recommendations`,
+        `/learning/children/${encodeURIComponent(childId)}/recommendations${suffix}`,
       );
     },
     getParentAnalytics(childId: string, windowDays = 30) {

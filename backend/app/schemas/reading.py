@@ -167,6 +167,7 @@ class FluencyAssessmentResponse(FluencyAssessmentBase):
 
 
 from typing import Literal
+from app.schemas.book import CatalogBookResponse
 
 SessionStateRead = Literal["CREATED", "PAGE_READY", "LISTENING", "PAUSED", "RECONNECTING", "QUESTIONING", "FINISHED", "ABORTED"]
 
@@ -215,6 +216,7 @@ class HistorySessionSummaryRead(SessionSummaryRead):
     state: SessionStateRead | Literal["IN_PROGRESS"]
     started_at: AwareDatetime
     ended_at: AwareDatetime | None
+    book: CatalogBookResponse | None = None
 
 
 class SessionHistoryRead(BaseModel):

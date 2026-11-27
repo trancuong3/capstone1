@@ -28,9 +28,12 @@ import { AppServicesContext } from "@/components/providers/app-services-provider
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   CrossGameRecommendationDTO,
@@ -193,6 +196,7 @@ export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
   const t = useTranslations("entertainment");
+  const teacherPersona = useTeacherPersona();
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
@@ -281,8 +285,10 @@ export function EntertainmentScreen({
     let active = true;
     async function loadAdaptiveRecommendations(childId: string) {
       try {
-        const recs =
-          await createAdaptiveLearningService().getRecommendations(childId);
+        const recs = await createAdaptiveLearningService().getRecommendations(
+          childId,
+          teacherPersona.gender,
+        );
         if (active) {
           setFetchedRecommendations(recs);
         }
@@ -295,7 +301,12 @@ export function EntertainmentScreen({
     return () => {
       active = false;
     };
-  }, [appStore?.selectedChildId, fallbackChildId, initialRecommendations]);
+  }, [
+    appStore?.selectedChildId,
+    fallbackChildId,
+    initialRecommendations,
+    teacherPersona.gender,
+  ]);
 
   const recommendations =
     fetchedRecommendations &&
@@ -320,6 +331,7 @@ export function EntertainmentScreen({
     }
     if (matched) {
       setValidatedChild(matched);
+      hydrateTeacherVoiceFromChildProfile(matched);
     }
   }
 
@@ -469,7 +481,10 @@ export function EntertainmentScreen({
           <p className="text-lg font-extrabold text-ink">
             {recommendations?.mascot_greeting_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recommendations.mascot_greeting_vi}
+                {adaptTextToTeacherPersona(
+                  recommendations.mascot_greeting_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultGreeting")
@@ -532,7 +547,10 @@ export function EntertainmentScreen({
                 {t(activeStep.titleKey)}
               </h2>
               <p className="mt-1 text-body text-muted">
-                {t(activeStep.bodyKey)}
+                {adaptTextToTeacherPersona(
+                  t(activeStep.bodyKey),
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">

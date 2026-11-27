@@ -16,6 +16,7 @@
 import {
   clampSpeed,
   getSpeechPreferences,
+  getSpeechPreferencesMeta,
   setSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
 import {
@@ -45,6 +46,172 @@ export const REGION_DEFAULT_VOICE_ID: Readonly<Record<VoiceRegion, string>> = {
   central: "local_central_ngoc_tran",
   south: "local_south_thuc_doan",
 };
+
+export const REGION_GENDER_DEFAULT_VOICE_ID: Readonly<
+  Record<VoiceRegion, Readonly<Record<VoiceGender, string>>>
+> = {
+  north: {
+    female: "local_north_truc_ly",
+    male: "local_north_thien_minh",
+  },
+  central: {
+    female: "local_central_ngoc_tran",
+    male: "local_central_quang_son",
+  },
+  south: {
+    female: "local_south_thuc_doan",
+    male: "local_south_thai_son",
+  },
+};
+
+export interface StaticLocalVoiceCatalogItem {
+  readonly voice_id: string;
+  readonly name: string;
+  readonly provider: "local";
+  readonly region: VoiceRegion;
+  readonly region_label: string;
+  readonly model_version: string;
+  readonly category: string;
+  readonly gender: VoiceGender;
+  readonly accent: string;
+  readonly use_case: string;
+  readonly description: string;
+  readonly preview_url: null;
+  readonly is_default: boolean;
+}
+
+export const STATIC_LOCAL_VOICES: readonly StaticLocalVoiceCatalogItem[] = [
+  {
+    voice_id: "local_north_truc_ly",
+    name: "Cô Trúc Ly",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Bắc",
+    use_case: "reading_coach",
+    description: "Miền Bắc · Nữ · Tự nhiên, ấm áp",
+    preview_url: null,
+    is_default: true,
+  },
+  {
+    voice_id: "local_north_ngoc_linh",
+    name: "Cô Ngọc Linh",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Bắc",
+    use_case: "storytelling",
+    description: "Miền Bắc · Nữ · Kể chuyện dịu dàng",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_north_thien_minh",
+    name: "Thầy Thiện Minh",
+    provider: "local",
+    region: "north",
+    region_label: "Miền Bắc",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Bắc",
+    use_case: "storytelling",
+    description: "Miền Bắc · Nam · Kể chuyện truyền cảm",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_central_ngoc_tran",
+    name: "Cô Ngọc Trân",
+    provider: "local",
+    region: "central",
+    region_label: "Miền Trung",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Trung",
+    use_case: "reading_coach",
+    description: "Miền Trung · Nữ · Tự nhiên, dịu dàng",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_central_quang_son",
+    name: "Thầy Quang Sơn",
+    provider: "local",
+    region: "central",
+    region_label: "Miền Trung",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Trung",
+    use_case: "reading_coach",
+    description: "Miền Trung · Nam · Tự nhiên, rõ chữ",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_thuc_doan",
+    name: "Cô Thục Đoan",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nữ · Kể chuyện ấm áp",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_my_duyen",
+    name: "Cô Mỹ Duyên",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "female",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nữ · Đọc truyện thiếu nhi",
+    preview_url: null,
+    is_default: false,
+  },
+  {
+    voice_id: "local_south_thai_son",
+    name: "Thầy Thái Sơn",
+    provider: "local",
+    region: "south",
+    region_label: "Miền Nam",
+    model_version: DEFAULT_LOCAL_TTS_MODEL_VERSION,
+    category: "local_neural",
+    gender: "male",
+    accent: "Miền Nam",
+    use_case: "storytelling",
+    description: "Miền Nam · Nam · Kể chuyện rõ ràng",
+    preview_url: null,
+    is_default: false,
+  },
+];
+
+export function getDefaultVoiceIdForRegionAndGender(
+  region: VoiceRegion,
+  gender: VoiceGender,
+): string {
+  return (
+    REGION_GENDER_DEFAULT_VOICE_ID[region]?.[gender] ??
+    (gender === "male" ? "local_north_thien_minh" : DEFAULT_LOCAL_VOICE_ID)
+  );
+}
 
 export interface VoicePolicyPreferences {
   readonly region: VoiceRegion;
@@ -90,11 +257,49 @@ const DEFAULT_POLICY: VoicePolicyPreferences = {
 type Listener = () => void;
 const policyListeners = new Set<Listener>();
 const lockListeners = new Set<Listener>();
+const voiceCacheInvalidators = new Set<Listener>();
 const voiceSwitchedSessions = new Set<string>();
 let cachedPolicy: VoicePolicyPreferences | null = null;
+let policyStorageSyncInstalled = false;
 let activeSessionId: string | null = null;
 const memoryLocks = new Map<string, SessionVoiceLock>();
 const utteranceAudits = new Map<string, SessionUtteranceAuditEntry[]>();
+
+export function registerVoiceCacheInvalidator(fn: Listener): () => void {
+  voiceCacheInvalidators.add(fn);
+  return () => {
+    voiceCacheInvalidators.delete(fn);
+  };
+}
+
+function invalidateRegisteredVoiceCaches(): void {
+  voiceCacheInvalidators.forEach((fn) => {
+    try {
+      fn();
+    } catch {
+      // Isolate invalidator errors
+    }
+  });
+}
+
+function ensurePolicyStorageSync(): void {
+  if (policyStorageSyncInstalled || typeof window === "undefined") return;
+  policyStorageSyncInstalled = true;
+  window.addEventListener("storage", (event) => {
+    if (event.key !== POLICY_STORAGE_KEY) return;
+    cachedPolicy = event.newValue
+      ? (() => {
+          try {
+            return sanitizePolicy(JSON.parse(event.newValue));
+          } catch {
+            return DEFAULT_POLICY;
+          }
+        })()
+      : DEFAULT_POLICY;
+    invalidateRegisteredVoiceCaches();
+    notifyPolicyListeners();
+  });
+}
 
 export function inferRegionFromVoiceId(
   voiceId: string | null | undefined,
@@ -179,6 +384,7 @@ export function getDefaultVoicePolicyPreferences(): VoicePolicyPreferences {
 
 export function getVoicePolicyPreferences(): VoicePolicyPreferences {
   if (typeof window === "undefined") return DEFAULT_POLICY;
+  ensurePolicyStorageSync();
   if (cachedPolicy !== null) return cachedPolicy;
   try {
     const raw = window.localStorage.getItem(POLICY_STORAGE_KEY);
@@ -315,9 +521,21 @@ export function lockSessionVoice(
 ): SessionVoiceLock {
   const cleanSessionId = sessionId.trim();
   const existing = getSessionVoiceLock(cleanSessionId);
+  const speechPrefs = getSpeechPreferences();
+  const speechMeta = getSpeechPreferencesMeta();
+  const existingLockedAtMs = existing ? Date.parse(existing.lockedAt) : 0;
+  const hasNewerGlobalPreference =
+    Boolean(existing) &&
+    speechMeta.globalSelectionUpdatedAt > 0 &&
+    Number.isFinite(existingLockedAtMs) &&
+    speechMeta.globalSelectionUpdatedAt > existingLockedAtMs &&
+    ((speechPrefs.voiceId && speechPrefs.voiceId !== existing!.voiceId) ||
+      speechMeta.gender !== (existing!.gender ?? resolveVoiceGender(existing!.voiceId)));
+
   if (
     existing &&
     !overrides?.forceUpdate &&
+    !hasNewerGlobalPreference &&
     !isLegacyExternalVoiceId(existing.voiceId)
   ) {
     const changedActive = activeSessionId !== cleanSessionId;
@@ -328,7 +546,6 @@ export function lockSessionVoice(
     return existing;
   }
 
-  const speechPrefs = getSpeechPreferences();
   const policyPrefs = getVoicePolicyPreferences();
   let requestedVoice = overrides?.voiceId ?? speechPrefs.voiceId;
   if (isLegacyExternalVoiceId(requestedVoice)) {
@@ -343,7 +560,7 @@ export function lockSessionVoice(
   let resolvedVoiceId =
     requestedVoice && /^[A-Za-z0-9_-]{1,100}$/.test(requestedVoice)
       ? requestedVoice
-      : (REGION_DEFAULT_VOICE_ID[region] ?? DEFAULT_LOCAL_VOICE_ID);
+      : getDefaultVoiceIdForRegionAndGender(region, speechMeta.gender);
 
   // Enforce provider policy: never lock a Google voice when Google TTS is disabled!
   if (
@@ -351,7 +568,10 @@ export function lockSessionVoice(
     (policyPrefs.providerMode !== "local_with_google_fallback" ||
       !policyPrefs.allowGoogleTtsFallback)
   ) {
-    resolvedVoiceId = REGION_DEFAULT_VOICE_ID[region] ?? DEFAULT_LOCAL_VOICE_ID;
+    resolvedVoiceId = getDefaultVoiceIdForRegionAndGender(
+      region,
+      resolveVoiceGender(resolvedVoiceId, speechMeta.gender),
+    );
   }
 
   const provider = inferProviderFromVoiceId(resolvedVoiceId);
@@ -384,7 +604,7 @@ export function lockSessionVoice(
       // Keep in-memory lock active
     }
   }
-  if (existing && overrides?.forceUpdate) {
+  if (existing && (overrides?.forceUpdate || hasNewerGlobalPreference)) {
     voiceSwitchedSessions.add(cleanSessionId);
   }
   notifyLockListeners();
@@ -467,22 +687,365 @@ export function countUnintendedVoiceSwitches(
 /** Resolve the single source of truth for the active/selected voice across ALL screens. */
 export function getEffectiveVoiceId(): string {
   const active = getActiveSessionVoiceLock();
-  if (active?.voiceId && !isLegacyExternalVoiceId(active.voiceId)) {
+  const prefs = getSpeechPreferences();
+  const meta = getSpeechPreferencesMeta();
+  const activeLockedAtMs = active ? Date.parse(active.lockedAt) : 0;
+  const prefsNewerThanLock =
+    Boolean(active) &&
+    meta.globalSelectionUpdatedAt > 0 &&
+    Number.isFinite(activeLockedAtMs) &&
+    meta.globalSelectionUpdatedAt > activeLockedAtMs;
+
+  if (
+    active?.voiceId &&
+    !prefsNewerThanLock &&
+    !isLegacyExternalVoiceId(active.voiceId)
+  ) {
     return active.voiceId;
   }
-  const prefs = getSpeechPreferences();
   if (prefs.voiceId && !isLegacyExternalVoiceId(prefs.voiceId)) {
     return prefs.voiceId;
   }
   const policy = getVoicePolicyPreferences();
-  return REGION_DEFAULT_VOICE_ID[policy.region] ?? DEFAULT_LOCAL_VOICE_ID;
+  return getDefaultVoiceIdForRegionAndGender(policy.region, meta.gender);
 }
 
 /** Resolve the consistent Teacher Persona ("Cô giáo AI" vs "Thầy giáo AI") across ALL screens. */
 export function getEffectiveTeacherPersona(): TeacherPersona {
   const active = getActiveSessionVoiceLock();
+  const meta = getSpeechPreferencesMeta();
   const voiceId = getEffectiveVoiceId();
-  return getTeacherPersonaForVoice(voiceId, active?.gender ?? null);
+  const activeLockedAtMs = active ? Date.parse(active.lockedAt) : 0;
+  const prefsNewerThanLock =
+    Boolean(active) &&
+    meta.globalSelectionUpdatedAt > 0 &&
+    Number.isFinite(activeLockedAtMs) &&
+    meta.globalSelectionUpdatedAt > activeLockedAtMs;
+  const explicitGender =
+    active && !prefsNewerThanLock ? (active.gender ?? null) : meta.gender;
+  return getTeacherPersonaForVoice(voiceId, explicitGender);
+}
+
+export interface GlobalTeacherVoiceSelectionInput {
+  readonly voiceId?: string | null;
+  /** Optional explicit override stored in `SpeechPreferences.voiceId` (e.g. `null` when choosing server default). */
+  readonly storedVoiceId?: string | null;
+  readonly gender?: VoiceGender;
+  readonly region?: VoiceRegion;
+  readonly speed?: number;
+  readonly modelVersion?: string;
+  readonly updatedAt?: number;
+  readonly childId?: string | null;
+  readonly persistToBackend?: (
+    childId: string,
+    payload: {
+      readonly voice_id: string;
+      readonly gender: VoiceGender;
+      readonly region: VoiceRegion;
+      readonly speed: number;
+      readonly updated_at: number;
+    },
+  ) => Promise<unknown>;
+  readonly syncActiveServerSessionLock?: (input: {
+    readonly sessionId: string;
+    readonly voiceId: string;
+  }) => Promise<unknown>;
+}
+
+export interface GlobalTeacherVoiceSelectionResult {
+  readonly voiceId: string;
+  readonly gender: VoiceGender;
+  readonly region: VoiceRegion;
+  readonly speed: number;
+  readonly modelVersion: string;
+  readonly updatedAt: number;
+}
+
+/**
+ * Synchronizes EVERY cached & persisted SessionVoiceLock (both active in-memory
+ * locks and any stored `viread.session-voice-lock.v1.*` entries in sessionStorage)
+ * so resuming an older reading session never reverts to an outdated voice/gender.
+ */
+export function syncAllSessionVoiceLocks(input: {
+  readonly voiceId: string;
+  readonly gender: VoiceGender;
+  readonly region: VoiceRegion;
+  readonly speed: number;
+  readonly modelVersion: string;
+  readonly updatedAt?: number;
+}): void {
+  const sessionIds = new Set<string>(memoryLocks.keys());
+  if (activeSessionId) {
+    sessionIds.add(activeSessionId);
+  }
+  if (typeof window !== "undefined") {
+    try {
+      for (let i = 0; i < window.sessionStorage.length; i += 1) {
+        const key = window.sessionStorage.key(i);
+        if (key && key.startsWith(LOCK_STORAGE_PREFIX)) {
+          const sid = key.slice(LOCK_STORAGE_PREFIX.length).trim();
+          if (sid) sessionIds.add(sid);
+        }
+      }
+    } catch {
+      // Ignore restricted sessionStorage
+    }
+  }
+
+  const lockedAt = new Date(input.updatedAt ?? Date.now()).toISOString();
+  const provider = inferProviderFromVoiceId(input.voiceId);
+  for (const sid of sessionIds) {
+    const updatedLock: SessionVoiceLock = {
+      sessionId: sid,
+      provider,
+      voiceId: input.voiceId,
+      gender: input.gender,
+      region: input.region,
+      modelVersion: input.modelVersion,
+      speed: input.speed,
+      lockedAt,
+    };
+    memoryLocks.set(sid, updatedLock);
+    voiceSwitchedSessions.add(sid);
+    if (typeof window !== "undefined") {
+      try {
+        window.sessionStorage.setItem(
+          `${LOCK_STORAGE_PREFIX}${sid}`,
+          JSON.stringify(updatedLock),
+        );
+      } catch {
+        // Ignore restricted sessionStorage
+      }
+    }
+  }
+  if (sessionIds.size > 0) {
+    notifyLockListeners();
+  }
+}
+
+/**
+ * Single atomic entry point for changing the AI teacher voice/gender/region/speed
+ * from ANY screen (Dashboard, Reading, Prep, Comprehension, Difficult Words).
+ */
+export function applyGlobalTeacherVoiceSelection(
+  input: GlobalTeacherVoiceSelectionInput,
+): GlobalTeacherVoiceSelectionResult {
+  const currentPrefs = getSpeechPreferences();
+  const currentPolicy = getVoicePolicyPreferences();
+  const currentEffectiveVoiceId = getEffectiveVoiceId();
+
+  const targetRegion: VoiceRegion =
+    input.region ??
+    (input.voiceId
+      ? inferRegionFromVoiceId(input.voiceId, currentPolicy.region)
+      : inferRegionFromVoiceId(currentEffectiveVoiceId, currentPolicy.region));
+
+  let targetVoiceId: string;
+  let targetGender: VoiceGender;
+
+  if (
+    typeof input.voiceId === "string" &&
+    /^[A-Za-z0-9_-]{1,100}$/.test(input.voiceId)
+  ) {
+    targetVoiceId = input.voiceId;
+    targetGender = resolveVoiceGender(targetVoiceId, input.gender ?? null);
+  } else if (input.gender) {
+    targetGender = input.gender;
+    targetVoiceId = getDefaultVoiceIdForRegionAndGender(
+      targetRegion,
+      targetGender,
+    );
+  } else if (input.region) {
+    targetGender = resolveVoiceGender(
+      currentEffectiveVoiceId,
+      getSpeechPreferencesMeta().gender,
+    );
+    const currentVoiceRegion = inferRegionFromVoiceId(
+      currentEffectiveVoiceId,
+      currentPolicy.region,
+    );
+    targetVoiceId =
+      currentVoiceRegion === targetRegion
+        ? currentEffectiveVoiceId
+        : getDefaultVoiceIdForRegionAndGender(targetRegion, targetGender);
+  } else {
+    targetVoiceId = currentEffectiveVoiceId;
+    targetGender = resolveVoiceGender(
+      targetVoiceId,
+      getSpeechPreferencesMeta().gender,
+    );
+  }
+
+  // Enforce provider policy: never keep a Google voice if Google TTS fallback is disabled.
+  if (
+    inferProviderFromVoiceId(targetVoiceId) === "google" &&
+    (currentPolicy.providerMode !== "local_with_google_fallback" ||
+      !currentPolicy.allowGoogleTtsFallback)
+  ) {
+    targetVoiceId = getDefaultVoiceIdForRegionAndGender(
+      targetRegion,
+      targetGender,
+    );
+  }
+
+  const finalRegion = inferRegionFromVoiceId(targetVoiceId, targetRegion);
+  const finalSpeed = clampSpeed(input.speed ?? currentPrefs.speed);
+  const finalModelVersion = inferModelVersionForVoiceId(
+    targetVoiceId,
+    input.modelVersion ?? currentPolicy.modelVersion,
+  );
+  const finalUpdatedAt = input.updatedAt ?? Date.now();
+  const prevActiveLock = getActiveSessionVoiceLock();
+
+  // 1. Update local preferences (notifies useSpeechPreferences, useTeacherPersona, TtsPlayback)
+  const storedVoiceId =
+    input.storedVoiceId !== undefined ? input.storedVoiceId : targetVoiceId;
+  setSpeechPreferences({
+    voiceId: storedVoiceId,
+    gender: targetGender,
+    speed: finalSpeed,
+    updatedAt: finalUpdatedAt,
+    globalSelectionUpdatedAt: finalUpdatedAt,
+  });
+  // Keep child hydration cache consistent so switching Child A -> Child B (change voice) -> Child A
+  // always restores Child A's persisted voice instead of skipping due to a stale cache key.
+  lastHydratedChildVoiceKey = input.childId
+    ? `${input.childId}:${targetVoiceId}:${targetGender}:${finalRegion}:${finalSpeed}:${finalUpdatedAt}`
+    : null;
+
+  // 2. Update voice policy region & model version
+  setVoicePolicyPreferences({
+    region: finalRegion,
+    modelVersion: finalModelVersion,
+  });
+
+  // 3. Synchronize ALL active & stored SessionVoiceLocks
+  syncAllSessionVoiceLocks({
+    voiceId: targetVoiceId,
+    gender: targetGender,
+    region: finalRegion,
+    speed: finalSpeed,
+    modelVersion: finalModelVersion,
+    updatedAt: finalUpdatedAt,
+  });
+
+  // 4. Clear pinned browser voices & client TTS caches
+  invalidateRegisteredVoiceCaches();
+
+  // 5. Resync server-side SessionVoiceLock if an active reading session is locked
+  if (
+    prevActiveLock &&
+    prevActiveLock.voiceId !== targetVoiceId &&
+    typeof input.syncActiveServerSessionLock === "function"
+  ) {
+    void Promise.resolve(
+      input.syncActiveServerSessionLock({
+        sessionId: prevActiveLock.sessionId,
+        voiceId: targetVoiceId,
+      }),
+    ).catch(() => undefined);
+  }
+
+  // 6. Persist to backend child profile settings (fire-and-forget safe)
+  if (input.childId && typeof input.persistToBackend === "function") {
+    void Promise.resolve(
+      input.persistToBackend(input.childId, {
+        voice_id: targetVoiceId,
+        gender: targetGender,
+        region: finalRegion,
+        speed: finalSpeed,
+        updated_at: finalUpdatedAt,
+      }),
+    ).catch(() => undefined);
+  }
+
+  return {
+    voiceId: targetVoiceId,
+    gender: targetGender,
+    region: finalRegion,
+    speed: finalSpeed,
+    modelVersion: finalModelVersion,
+    updatedAt: finalUpdatedAt,
+  };
+}
+
+let lastHydratedChildVoiceKey: string | null = null;
+
+/**
+ * Hydrates the global AI teacher voice selection from a child's persisted
+ * `settings.voice_preferences` (e.g., when switching child profiles or signing in
+ * on another device). Does not trigger a redundant backend PATCH.
+ */
+export function hydrateTeacherVoiceFromChildProfile(
+  child:
+    | {
+        readonly id: string;
+        readonly settings?: Record<string, unknown> | null;
+      }
+    | null
+    | undefined,
+  options?: { readonly force?: boolean },
+): GlobalTeacherVoiceSelectionResult | null {
+  if (!child?.id || !child.settings || typeof child.settings !== "object") {
+    lastHydratedChildVoiceKey = null;
+    return null;
+  }
+  const raw = (child.settings as Record<string, unknown>).voice_preferences;
+  if (!raw || typeof raw !== "object") {
+    lastHydratedChildVoiceKey = null;
+    return null;
+  }
+  const rec = raw as Record<string, unknown>;
+  const rawVoiceId =
+    typeof rec.voice_id === "string" &&
+    /^[A-Za-z0-9_-]{1,100}$/.test(rec.voice_id)
+      ? rec.voice_id
+      : null;
+  if (!rawVoiceId) return null;
+
+  const rawGender: VoiceGender =
+    rec.gender === "male" || rec.gender === "female"
+      ? rec.gender
+      : resolveVoiceGender(rawVoiceId);
+  const rawRegion: VoiceRegion =
+    rec.region === "north" || rec.region === "central" || rec.region === "south"
+      ? rec.region
+      : inferRegionFromVoiceId(rawVoiceId, "north");
+  const rawSpeed =
+    typeof rec.speed === "number" ? clampSpeed(rec.speed) : getSpeechPreferences().speed;
+  const rawUpdatedAt =
+    typeof rec.updated_at === "number" &&
+    Number.isFinite(rec.updated_at) &&
+    rec.updated_at > 0
+      ? Math.floor(rec.updated_at)
+      : Date.now();
+
+  const key = `${child.id}:${rawVoiceId}:${rawGender}:${rawRegion}:${rawSpeed}:${rawUpdatedAt}`;
+  if (!options?.force && lastHydratedChildVoiceKey === key) {
+    return null;
+  }
+
+  // If the same child already has a newer local selection in this browser session, keep local.
+  const currentMeta = getSpeechPreferencesMeta();
+  const sameChildPrefix = `${child.id}:`;
+  if (
+    !options?.force &&
+    lastHydratedChildVoiceKey?.startsWith(sameChildPrefix) &&
+    currentMeta.updatedAt > rawUpdatedAt
+  ) {
+    return null;
+  }
+
+  const applied = applyGlobalTeacherVoiceSelection({
+    voiceId: rawVoiceId,
+    gender: rawGender,
+    region: rawRegion,
+    speed: rawSpeed,
+    updatedAt: rawUpdatedAt,
+    childId: child.id,
+  });
+  lastHydratedChildVoiceKey = key;
+  return applied;
 }
 
 export function approveSessionVoiceSwitch(
@@ -504,6 +1067,7 @@ export function hasPendingSessionVoiceSwitch(
 export function resetVoiceLockAndPolicyForTests(): void {
   cachedPolicy = null;
   activeSessionId = null;
+  lastHydratedChildVoiceKey = null;
   memoryLocks.clear();
   voiceSwitchedSessions.clear();
   utteranceAudits.clear();
