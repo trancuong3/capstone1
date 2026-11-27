@@ -41,6 +41,7 @@ const summarySchema = z.object({
   started_at: z.iso.datetime({ offset: true }),
   ended_at: z.iso.datetime({ offset: true }).nullable(),
   duration_ms: z.number().int().nonnegative().nullable(),
+  book: bookDtoSchema.nullable().optional(),
 });
 const detailSchema = summarySchema.extend({
   assessment: readingAssessmentSchema.nullable().optional(),

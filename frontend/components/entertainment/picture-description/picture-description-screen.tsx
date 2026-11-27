@@ -53,6 +53,7 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -63,6 +64,7 @@ import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
 } from "@/lib/reading/browser-transcript-collector";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
@@ -368,6 +370,11 @@ export function PictureDescriptionScreen() {
   const pictureService = usePictureDescriptionService();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
+  const teacherPersona = useTeacherPersona();
+  const adaptTeacherText = useCallback(
+    (value: string) => adaptTextToTeacherPersona(value, teacherPersona.gender),
+    [teacherPersona.gender],
+  );
   const recorder = useSpeechRecorder();
   const { reducedMotion, calmSound, toggleCalmSound } =
     useEntertainmentPreferences();
@@ -674,6 +681,16 @@ export function PictureDescriptionScreen() {
         return;
       }
 
+      // Preserve exact vocabulary/sample story content; adapt teacher coaching prompts/feedback.
+      const isStoryOrVocabSample =
+        key.startsWith("target-word:") ||
+        key.startsWith("vocab:") ||
+        key.startsWith("sample:") ||
+        key.startsWith("upgraded:");
+      const spokenText = isStoryOrVocabSample
+        ? cleaned
+        : adaptTextToTeacherPersona(cleaned, teacherPersona.gender);
+
       // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
       abortActiveVoiceCapture({ preserveDraft: true });
       stopSpeechPlayback();
@@ -681,7 +698,9 @@ export function PictureDescriptionScreen() {
       setPlayingSpeechKey(key);
 
       try {
-        await speechPlayer.play(cleaned);
+        await speechPlayer.play(spokenText, {
+          utteranceKind: isStoryOrVocabSample ? "game_sample" : "game_coaching",
+        });
       } catch {
         // Ignore playback interruption / fallback errors.
       } finally {
@@ -696,6 +715,7 @@ export function PictureDescriptionScreen() {
       playingSpeechKey,
       speechPlayer,
       stopSpeechPlayback,
+      teacherPersona.gender,
     ],
   );
 
@@ -780,6 +800,7 @@ export function PictureDescriptionScreen() {
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
           refresh_ai_guide: options?.refreshAiGuide,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -820,6 +841,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "BOOK_PAGE",
           book_page_id: page.page_id,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -885,6 +907,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "CUSTOM_UPLOAD",
           image_file: uploadFile,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -1192,6 +1215,7 @@ export function PictureDescriptionScreen() {
           transcript_text: trimmed,
           input_mode: overrideMode ?? inputMode,
           teaching_mode: teachingMode,
+          teacher_gender: teacherPersona.gender,
           ...(sessionTargetWords.length > 0
             ? { target_words: sessionTargetWords }
             : {}),
@@ -2087,12 +2111,16 @@ export function PictureDescriptionScreen() {
               <>
                 {/* Teaching Mode Selector Pills (6 Pedagogical Modes V4.0) */}
                 <section
-                  aria-label={t("pictureDescription.teachingModeSectionAria")}
+                  aria-label={adaptTeacherText(
+                    t("pictureDescription.teachingModeSectionAria"),
+                  )}
                   className="rounded-card border border-border bg-white p-4 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                      {t("pictureDescription.teachingModeHeading")}
+                      {adaptTeacherText(
+                        t("pictureDescription.teachingModeHeading"),
+                      )}
                     </p>
                     <Button
                       disabled={!calmSound}
@@ -2210,14 +2238,18 @@ export function PictureDescriptionScreen() {
                 {/* Active PEER/CROWD Follow-Up Prompt when Child Replies to AI Teacher */}
                 {activeFollowUpQuestion ? (
                   <section
-                    aria-label={t("pictureDescription.followUpSectionAria")}
+                    aria-label={adaptTeacherText(
+                      t("pictureDescription.followUpSectionAria"),
+                    )}
                     className="rounded-card border border-amber-300/70 bg-amber-50/70 p-4"
                     data-testid="practice-followup-banner"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-amber-900">
                         <Sparkles aria-hidden="true" className="size-4" />
-                        {t("pictureDescription.practiceFollowUpTitle")}
+                        {adaptTeacherText(
+                          t("pictureDescription.practiceFollowUpTitle"),
+                        )}
                       </p>
                       <Button
                         disabled={!calmSound}
@@ -2242,7 +2274,7 @@ export function PictureDescriptionScreen() {
                       dir="ltr"
                       lang="vi"
                     >
-                      {activeFollowUpQuestion}
+                      {adaptTeacherText(activeFollowUpQuestion)}
                     </p>
                   </section>
                 ) : null}
@@ -2255,9 +2287,11 @@ export function PictureDescriptionScreen() {
                   >
                     <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
                       <Lightbulb aria-hidden="true" className="size-4" />
-                      {t("pictureDescription.previousCoachingTitle", {
-                        attempt: latestAttempt.attempt_number,
-                      })}
+                      {adaptTeacherText(
+                        t("pictureDescription.previousCoachingTitle", {
+                          attempt: latestAttempt.attempt_number,
+                        }),
+                      )}
                     </p>
                     <p
                       className="viread-learning-content mt-1 text-sm font-semibold text-ink"
@@ -2483,7 +2517,11 @@ export function PictureDescriptionScreen() {
                           !reducedMotion && "animate-spin",
                         )}
                       />
-                      <span>{t("pictureDescription.evaluatingBanner")}</span>
+                      <span>
+                        {adaptTeacherText(
+                          t("pictureDescription.evaluatingBanner"),
+                        )}
+                      </span>
                     </div>
                   ) : null}
 
@@ -2491,7 +2529,7 @@ export function PictureDescriptionScreen() {
                     <div className="mt-3">
                       <StatusMessage tone="error">
                         <div className="flex flex-wrap items-center justify-between gap-2.5">
-                          <span>{evaluateError}</span>
+                          <span>{adaptTeacherText(evaluateError)}</span>
                           <Button
                             disabled={isEvaluating || !descriptionText.trim()}
                             onClick={() => void handleEvaluate()}
@@ -2517,7 +2555,7 @@ export function PictureDescriptionScreen() {
                             : "text-muted")
                         }
                       >
-                        {draftReadiness.label}
+                        {adaptTeacherText(draftReadiness.label)}
                       </p>
                       <p className="text-xs text-muted">
                         {t("pictureDescription.charCounter", {
@@ -2536,9 +2574,11 @@ export function PictureDescriptionScreen() {
                       type="button"
                     >
                       <Send aria-hidden="true" className="size-4" />
-                      {isEvaluating
-                        ? t("pictureDescription.evaluatingButton")
-                        : t("pictureDescription.submitButton")}
+                      {adaptTeacherText(
+                        isEvaluating
+                          ? t("pictureDescription.evaluatingButton")
+                          : t("pictureDescription.submitButton"),
+                      )}
                     </Button>
                   </div>
                 </section>
@@ -2912,7 +2952,9 @@ export function PictureDescriptionScreen() {
                     <StatusMessage tone="info">
                       <div className="flex flex-wrap items-center justify-between gap-2.5">
                         <span>
-                          {t("pictureDescription.fallbackEvalNotice")}
+                          {adaptTeacherText(
+                            t("pictureDescription.fallbackEvalNotice"),
+                          )}
                         </span>
                         <Button
                           disabled={isEvaluating}
@@ -2936,9 +2978,11 @@ export function PictureDescriptionScreen() {
                                 : "")
                             }
                           />
-                          {isEvaluating
-                            ? t("pictureDescription.reEvaluatingAi")
-                            : t("pictureDescription.reEvaluateWithAi")}
+                          {adaptTeacherText(
+                            isEvaluating
+                              ? t("pictureDescription.reEvaluatingAi")
+                              : t("pictureDescription.reEvaluateWithAi"),
+                          )}
                         </Button>
                       </div>
                     </StatusMessage>
@@ -2947,7 +2991,9 @@ export function PictureDescriptionScreen() {
 
                 {evaluateError ? (
                   <div className="mt-3">
-                    <StatusMessage tone="error">{evaluateError}</StatusMessage>
+                    <StatusMessage tone="error">
+                      {adaptTeacherText(evaluateError)}
+                    </StatusMessage>
                   </div>
                 ) : null}
 
@@ -2971,7 +3017,7 @@ export function PictureDescriptionScreen() {
                   dir="ltr"
                   lang="vi"
                 >
-                  {activeAttempt.feedback.praise_message}
+                  {adaptTeacherText(activeAttempt.feedback.praise_message)}
                 </p>
 
                 <div className="mt-4 grid gap-4 sm:grid-cols-2">
@@ -3156,7 +3202,9 @@ export function PictureDescriptionScreen() {
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
                           <Sparkles aria-hidden="true" className="size-4" />
-                          {t("pictureDescription.resultFollowUpTitle")}
+                          {adaptTeacherText(
+                            t("pictureDescription.resultFollowUpTitle"),
+                          )}
                         </p>
                         {activeAttempt.feedback.scaffolding_step ? (
                           <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-extrabold text-ink shadow-2xs">

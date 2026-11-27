@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "Le service vocal local est hors ligne et aucun audio pré-généré n’est disponible localement. Démarrez le service local ou activez le secours ci-dessous pour écouter un exemple.",
     "localWorkerLabel": "Service local :",
     "sessionLockedBadge": "Verrouillée pour cette séance de lecture",
-    "offlineBrowserBadge": "Navigateur hors ligne"
+    "offlineBrowserBadge": "Navigateur hors ligne",
+    "teacherPersonaAria": "Changer rapidement Maîtresse IA ou Maître IA",
+    "femaleTeacherQuickBtn": "Maîtresse IA (Femme)",
+    "maleTeacherQuickBtn": "Maître IA (Homme)"
   },
   "engineBadge": {
     "ariaLabel": "Source audio : STT {stt}, TTS {tts}",
@@ -115,7 +118,8 @@
     "androidNativeFallbackNotice": "La voix sur le serveur est désactivée — ViRead utilise la voix vietnamienne de l'appareil Android.",
     "browserFallbackNotice": "La voix sur l'appareil est désactivée — ViRead utilise la voix en ligne du navigateur.",
     "autoplayBlocked": "Le navigateur attend que vous touchiez le bouton Réécouter pour activer le son.",
-    "partialPlayback": "Audio interrompu. Vous pouvez écouter depuis le début."
+    "partialPlayback": "Audio interrompu. Vous pouvez écouter depuis le début.",
+    "deviceVoiceGenderMismatchNotice": "Cet appareil ne dispose hors ligne que d'une voix vietnamienne de genre différent. Activez le serveur vocal local ou Google pour entendre le genre choisi."
   },
   "wasm": {
     "workerUnavailable": "Web Worker indisponible",

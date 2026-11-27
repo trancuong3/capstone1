@@ -570,6 +570,32 @@ class PictureDescriptionService:
             except Exception:
                 pass
 
+    @staticmethod
+    def _extract_child_teacher_gender(child: Any) -> str | None:
+        settings = getattr(child, "Settings", None)
+        if not isinstance(settings, dict):
+            return None
+        vp = settings.get("voice_preferences")
+        if not isinstance(vp, dict):
+            return None
+        gender = str(vp.get("gender") or "").strip().lower()
+        return gender if gender in ("female", "male") else None
+
+    @staticmethod
+    def _supports_kwarg(fn: Any, name: str) -> bool:
+        import inspect as _inspect
+
+        try:
+            sig = _inspect.signature(fn)
+        except (TypeError, ValueError):
+            return False
+        if name in sig.parameters:
+            return True
+        return any(
+            p.kind == _inspect.Parameter.VAR_KEYWORD
+            for p in sig.parameters.values()
+        )
+
     async def create_session(
         self,
         actor_id: UUID,
@@ -582,10 +608,16 @@ class PictureDescriptionService:
         teaching_mode: TeachingMode = "OBSERVE",
         target_words: list[str] | None = None,
         refresh_ai_guide: bool = False,
+        teacher_gender: str | None = None,
     ) -> PictureSessionRead:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
         child_grade = int(child.Grade)
+        resolved_teacher_gender = (
+            teacher_gender
+            if teacher_gender in ("female", "male")
+            else self._extract_child_teacher_gender(child)
+        )
         session_id = uuid4()
         active_mode: TeachingMode = (
             teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
@@ -673,14 +705,19 @@ class PictureDescriptionService:
             assert image_bytes is not None
             # Release any DB lock completely before calling Vision AI!
             try:
-                guide, model_used = await self.ai_client.analyze_picture(
-                    image_bytes=image_bytes,
-                    mime_type=image_mime,
-                    child_grade=child_grade,
-                    context_hint=context_hint,
-                    teaching_mode=active_mode,
-                    target_words=cleaned_targets,
-                )
+                analyze_kwargs: dict[str, Any] = {
+                    "image_bytes": image_bytes,
+                    "mime_type": image_mime,
+                    "child_grade": child_grade,
+                    "context_hint": context_hint,
+                    "teaching_mode": active_mode,
+                    "target_words": cleaned_targets,
+                }
+                if resolved_teacher_gender and self._supports_kwarg(
+                    self.ai_client.analyze_picture, "teacher_gender"
+                ):
+                    analyze_kwargs["teacher_gender"] = resolved_teacher_gender
+                guide, model_used = await self.ai_client.analyze_picture(**analyze_kwargs)
             except PictureSafetyError as exc:
                 # CRITICAL SAFETY INVARIANT: Never bypass UNSAFE_PICTURE!
                 raise HTTPException(
@@ -827,23 +864,43 @@ class PictureDescriptionService:
 
         image_bytes, image_mime = await self._load_bytes_for_session(session)
 
+        resolved_teacher_gender = (
+            payload.teacher_gender
+            if payload.teacher_gender in ("female", "male")
+            else None
+        )
+        if resolved_teacher_gender is None:
+            child_id = getattr(session, "ChildProfileId", None) or getattr(session, "ChildId", None)
+            if child_id is not None and hasattr(self.repository, "child_owned_by"):
+                try:
+                    owned_child = await self.repository.child_owned_by(child_id, actor_id)
+                    resolved_teacher_gender = self._extract_child_teacher_gender(owned_child)
+                    await self.repository.db.rollback()
+                except Exception:
+                    resolved_teacher_gender = None
+
         try:
-            feedback, model_used = await self.ai_client.evaluate_description(
-                image_bytes=image_bytes,
-                mime_type=image_mime,
-                child_grade=session.ChildGrade,
-                scene_title=session.SceneTitle,
-                guiding_questions=guide.guiding_questions,
-                child_transcript=payload.transcript_text,
-                model_sample_sentences=guide.model_sample_sentences,
-                previous_transcript=previous_transcript,
-                previous_score=previous_score,
-                previous_tip=previous_tip,
-                teaching_mode=active_mode,
-                target_words=active_target_words,
-                scene_summary=guide.scene_summary,
-                suggested_vocabulary=guide.suggested_vocabulary,
-            )
+            eval_kwargs: dict[str, Any] = {
+                "image_bytes": image_bytes,
+                "mime_type": image_mime,
+                "child_grade": session.ChildGrade,
+                "scene_title": session.SceneTitle,
+                "guiding_questions": guide.guiding_questions,
+                "child_transcript": payload.transcript_text,
+                "model_sample_sentences": guide.model_sample_sentences,
+                "previous_transcript": previous_transcript,
+                "previous_score": previous_score,
+                "previous_tip": previous_tip,
+                "teaching_mode": active_mode,
+                "target_words": active_target_words,
+                "scene_summary": guide.scene_summary,
+                "suggested_vocabulary": guide.suggested_vocabulary,
+            }
+            if resolved_teacher_gender and self._supports_kwarg(
+                self.ai_client.evaluate_description, "teacher_gender"
+            ):
+                eval_kwargs["teacher_gender"] = resolved_teacher_gender
+            feedback, model_used = await self.ai_client.evaluate_description(**eval_kwargs)
         except PictureSafetyError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -872,6 +929,7 @@ class PictureDescriptionService:
                     previous_score=previous_score,
                     teaching_mode=active_mode,
                     target_words=active_target_words,
+                    teacher_gender=resolved_teacher_gender,
                 )
             else:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

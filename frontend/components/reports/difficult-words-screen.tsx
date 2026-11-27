@@ -13,10 +13,18 @@ import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
-import { useTranslations } from "@/hooks/use-i18n";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  DEFAULT_USER_CACHE_TTL_MS,
+  PERSISTENT_USER_CACHE_MAX_STALE_MS,
+  readUserCacheWithStale,
+  sanitizeChildProfileForCache,
+  writeUserCache,
+} from "@/lib/cache/user-query-cache";
 import {
   createCalendarWindow,
   currentDateInReportTimezone,
@@ -44,6 +52,11 @@ type WordsState =
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
+interface CachedDifficultWordsPayload {
+  readonly child: ChildProfileDTO;
+  readonly words: readonly DifficultWordDTO[];
+}
+
 export function DifficultWordsScreen({
   requestedChildId,
   requestedPracticeWord,
@@ -51,7 +64,11 @@ export function DifficultWordsScreen({
   readonly requestedChildId?: string;
   readonly requestedPracticeWord?: string;
 }) {
+  const { formatNumber } = useI18n();
   const t = useTranslations("difficultWords");
+  const authRuntime = useAuthRuntime();
+  const userId =
+    authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
   const { childService, difficultWordService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
@@ -122,8 +139,46 @@ export function DifficultWordsScreen({
   useEffect(() => {
     let active = true;
     const requestId = ++loadRequestIdRef.current;
+    const canUseSwrCache = Boolean(userId) && process.env.NODE_ENV !== "test";
+
     async function load(): Promise<void> {
-      setState({ status: "loading" });
+      let hydratedFromCache = false;
+      if (canUseSwrCache && userId) {
+        const cachedChildren = readUserCacheWithStale<ChildProfileDTO[]>(
+          userId,
+          "children",
+          DEFAULT_USER_CACHE_TTL_MS,
+          PERSISTENT_USER_CACHE_MAX_STALE_MS,
+        )?.data;
+        const cachedChild = cachedChildren?.length
+          ? requestedChildId
+            ? cachedChildren.find((item) => item.id === requestedChildId)
+            : cachedChildren[0]
+          : undefined;
+        if (cachedChildren && cachedChild) {
+          const cachedWords =
+            readUserCacheWithStale<CachedDifficultWordsPayload>(
+              userId,
+              `difficult-words:${cachedChild.id}:d${periodDays}`,
+              DEFAULT_USER_CACHE_TTL_MS,
+              PERSISTENT_USER_CACHE_MAX_STALE_MS,
+            )?.data;
+          if (cachedWords && active && requestId === loadRequestIdRef.current) {
+            hydratedFromCache = true;
+            setState({
+              status: "ready",
+              children: cachedChildren,
+              child: cachedWords.child,
+              words: cachedWords.words,
+            });
+          }
+        }
+      }
+
+      if (!hydratedFromCache) {
+        setState({ status: "loading" });
+      }
+
       try {
         const children = await childService.list();
         if (children.length === 0) {
@@ -131,9 +186,12 @@ export function DifficultWordsScreen({
             setState({ status: "no-children" });
           return;
         }
-        const child = requestedChildId
-          ? await childService.get(requestedChildId)
+        const matchedChild = requestedChildId
+          ? children.find((item) => item.id === requestedChildId)
           : children[0];
+        const child = matchedChild
+          ? matchedChild
+          : await childService.get(requestedChildId!);
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(currentDateInReportTimezone(), periodDays),
@@ -141,9 +199,30 @@ export function DifficultWordsScreen({
         if (active && requestId === loadRequestIdRef.current) {
           setBookGroupPage(1);
           setState({ status: "ready", children, child, words });
+          if (canUseSwrCache && userId) {
+            writeUserCache(
+              userId,
+              "children",
+              children.map((entry) => sanitizeChildProfileForCache(entry)),
+              { persist: "session" },
+            );
+            writeUserCache<CachedDifficultWordsPayload>(
+              userId,
+              `difficult-words:${child.id}:d${periodDays}`,
+              {
+                child: sanitizeChildProfileForCache(child),
+                words,
+              },
+              { persist: "session" },
+            );
+          }
         }
       } catch (error) {
-        if (active && requestId === loadRequestIdRef.current)
+        if (
+          active &&
+          requestId === loadRequestIdRef.current &&
+          !hydratedFromCache
+        )
           setState({
             status:
               isServiceError(error) && error.status === 404
@@ -166,6 +245,7 @@ export function DifficultWordsScreen({
     periodDays,
     requestKey,
     requestedChildId,
+    userId,
   ]);
 
   const applyAttemptToLocalState = useCallback(
@@ -220,6 +300,24 @@ export function DifficultWordsScreen({
       // Giữ nguyên state hiện tại nếu background refresh tạm gián đoạn.
     }
   }, [difficultWordService, periodDays, state]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<StatusFilterValue, number> = {
+      ALL: 0,
+      NOT_PRACTICED: 0,
+      IN_PROGRESS: 0,
+      NEEDS_MORE_PRACTICE: 0,
+      COMPLETED: 0,
+    };
+    if (state.status !== "ready") return counts;
+    counts.ALL = state.words.length;
+    for (const word of state.words) {
+      const status: DifficultWordPracticeStatus =
+        word.practice_status ?? "NOT_PRACTICED";
+      counts[status] += 1;
+    }
+    return counts;
+  }, [state]);
 
   const filteredWords = useMemo(() => {
     if (state.status !== "ready") return [];
@@ -304,10 +402,10 @@ export function DifficultWordsScreen({
         aria-label={t("screen.loadingAria")}
         className="mx-auto flex max-w-[1280px] flex-col gap-6"
       >
-        <Skeleton className="h-32 rounded-[24px]" />
+        <Skeleton className="h-32 rounded-card" />
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
           {[0, 1].map((item) => (
-            <Skeleton className="h-64 rounded-[24px]" key={item} />
+            <Skeleton className="h-64 rounded-card" key={item} />
           ))}
         </div>
       </section>
@@ -375,6 +473,14 @@ export function DifficultWordsScreen({
       </div>
     );
 
+  const filterPills = [
+    { value: "ALL", key: "screen.quickAll" },
+    { value: "NOT_PRACTICED", key: "screen.quickNotPracticed" },
+    { value: "IN_PROGRESS", key: "screen.quickInProgress" },
+    { value: "NEEDS_MORE_PRACTICE", key: "screen.quickNeedsMoreFull" },
+    { value: "COMPLETED", key: "screen.quickMastered" },
+  ] as const;
+
   return (
     <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 sm:gap-5">
       <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
@@ -426,124 +532,136 @@ export function DifficultWordsScreen({
         />
       ) : (
         <>
-          <div className="grid w-full grid-cols-1 gap-3 rounded-[24px] border border-[#DCE8E4] bg-white p-3.5 sm:grid-cols-3 sm:gap-4 sm:p-5">
-            <div className="min-w-0 sm:col-span-1">
-              <ChildSelector
-                childrenProfiles={state.children}
-                clearQueryKeys={["word"]}
-                selectedChildId={state.child.id}
-              />
-            </div>
-
-            <div className="flex flex-col gap-2.5 sm:hidden">
-              <div
-                aria-label={t("screen.quickFilterAria")}
-                className="flex items-center gap-2 overflow-x-auto pb-0.5"
-                role="group"
-              >
-                {(
-                  [
-                    { value: "ALL", key: "screen.quickAll" },
-                    { value: "NOT_PRACTICED", key: "screen.quickNotPracticed" },
-                    { value: "IN_PROGRESS", key: "screen.quickInProgress" },
-                    {
-                      value: "NEEDS_MORE_PRACTICE",
-                      key: "screen.quickNeedsMore",
-                    },
-                    { value: "COMPLETED", key: "screen.quickCompleted" },
-                  ] as const
-                ).map((pill) => {
-                  const active = statusFilter === pill.value;
-                  return (
-                    <button
-                      aria-pressed={active}
-                      className={`min-h-11 shrink-0 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors ${
-                        active
-                          ? "border-primary bg-primary text-white"
-                          : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"
-                      }`}
-                      key={pill.value}
-                      onClick={() => {
-                        setStatusFilter(pill.value);
-                        setBookGroupPage(1);
-                      }}
-                      type="button"
-                    >
-                      {t(pill.key)}
-                    </button>
-                  );
-                })}
+          <div className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-4 shadow-2xs sm:p-5">
+            <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+              <div className="min-w-0">
+                <ChildSelector
+                  childrenProfiles={state.children}
+                  clearQueryKeys={["word"]}
+                  selectedChildId={state.child.id}
+                />
               </div>
+
+              <SelectField
+                aria-label={t("screen.periodAria")}
+                label={t("screen.periodLabel")}
+                onChange={(event) => {
+                  const parsed = Number.parseInt(event.target.value, 10);
+                  if (Number.isSafeInteger(parsed) && parsed > 0) {
+                    setPeriodDays(parsed);
+                  }
+                }}
+                value={String(periodDays)}
+              >
+                <option value="30">
+                  {t("screen.periodOption", { days: 30 })}
+                </option>
+                <option value="90">
+                  {t("screen.periodOption", { days: 90 })}
+                </option>
+                <option value="180">
+                  {t("screen.periodOption", { days: 180 })}
+                </option>
+              </SelectField>
             </div>
 
-            <SelectField
-              aria-label={t("screen.periodAria")}
-              label={t("screen.periodLabel")}
-              onChange={(event) => {
-                const parsed = Number.parseInt(event.target.value, 10);
-                if (Number.isSafeInteger(parsed) && parsed > 0) {
-                  setPeriodDays(parsed);
-                }
-              }}
-              value={String(periodDays)}
+            {/* Unified status filter pills with live counts across desktop & mobile */}
+            <div
+              aria-label={t("screen.quickFilterAria")}
+              className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-3"
+              role="group"
             >
-              <option value="30">
-                {t("screen.periodOption", { days: 30 })}
-              </option>
-              <option value="90">
-                {t("screen.periodOption", { days: 90 })}
-              </option>
-              <option value="180">
-                {t("screen.periodOption", { days: 180 })}
-              </option>
-            </SelectField>
-
-            <div className="hidden sm:contents">
-              <SelectField
-                aria-label={t("screen.statusFilterAria")}
-                label={t("screen.statusFilterLabel")}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as StatusFilterValue);
-                  setBookGroupPage(1);
-                }}
-                value={statusFilter}
-              >
-                <option value="ALL">{t("screen.statusAll")}</option>
-                <option value="NOT_PRACTICED">
-                  {t("screen.statusNotPracticed")}
-                </option>
-                <option value="IN_PROGRESS">
-                  {t("screen.statusInProgress")}
-                </option>
-                <option value="NEEDS_MORE_PRACTICE">
-                  {t("screen.statusNeedsMore")}
-                </option>
-                <option value="COMPLETED">{t("screen.statusCompleted")}</option>
-              </SelectField>
+              {filterPills.map((pill) => {
+                const active = statusFilter === pill.value;
+                const count = statusCounts[pill.value];
+                return (
+                  <button
+                    aria-pressed={active}
+                    className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+                      active
+                        ? "border-primary bg-primary text-white shadow-2xs"
+                        : "border-border bg-surface-subtle text-ink hover:bg-sky/60"
+                    }`}
+                    key={pill.value}
+                    onClick={() => {
+                      setStatusFilter(pill.value);
+                      setBookGroupPage(1);
+                    }}
+                    type="button"
+                  >
+                    <span>{t(pill.key)}</span>
+                    <span
+                      className={`inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] tabular-nums ${
+                        active
+                          ? "bg-white/20 text-white"
+                          : "bg-white text-muted"
+                      }`}
+                    >
+                      {formatNumber(count)}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {state.words.length > 0 ? (
-            <div className="flex flex-col justify-between gap-4 rounded-[24px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-5 sm:flex-row sm:items-center">
-              <div className="flex flex-col gap-1">
-                <div className="inline-flex items-center gap-2 text-sm font-extrabold text-[#0E6D76]">
+            <div className="flex flex-col justify-between gap-4 rounded-card border border-primary/20 bg-gradient-to-r from-cream via-white to-sky/65 p-5 shadow-2xs sm:flex-row sm:items-center">
+              <div className="min-w-0 flex-1 space-y-2.5">
+                <div className="inline-flex items-center gap-2 text-sm font-extrabold text-primary-hover">
                   <Sparkles aria-hidden="true" className="size-4" />
                   {t("screen.progressTitle", { alias: state.child.alias })}
                 </div>
-                <p className="text-lg font-extrabold text-[#213C42]">
+                <p className="text-lg font-extrabold text-ink">
                   {t("screen.progressCount", {
-                    completed: summaryStats.completed,
-                    total: summaryStats.total,
+                    completed: formatNumber(summaryStats.completed),
+                    total: formatNumber(summaryStats.total),
                     percent: summaryStats.percent,
                   })}
                 </p>
-                <p className="text-xs text-[#526970]">
-                  {t("screen.progressHint")}
-                </p>
+
+                <div
+                  aria-hidden="true"
+                  className="h-2.5 w-full max-w-md overflow-hidden rounded-full bg-border/60"
+                >
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-300"
+                    style={{ width: `${summaryStats.percent}%` }}
+                  />
+                </div>
+
+                <dl className="flex flex-wrap items-center gap-2 pt-0.5 text-xs">
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-white px-3 py-1">
+                    <dt className="font-semibold text-muted">
+                      {t("screen.statTotal")}
+                    </dt>
+                    <dd className="font-extrabold text-ink tabular-nums">
+                      {formatNumber(summaryStats.total)}
+                    </dd>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-success-surface px-3 py-1">
+                    <dt className="font-semibold text-success-ink">
+                      {t("screen.statCompleted")}
+                    </dt>
+                    <dd className="font-extrabold text-success-ink tabular-nums">
+                      {formatNumber(summaryStats.completed)}
+                    </dd>
+                  </div>
+                  <div className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-warning-surface px-3 py-1">
+                    <dt className="font-semibold text-warning">
+                      {t("screen.statRemaining")}
+                    </dt>
+                    <dd className="font-extrabold text-warning tabular-nums">
+                      {formatNumber(summaryStats.remaining)}
+                    </dd>
+                  </div>
+                </dl>
+
+                <p className="text-xs text-muted">{t("screen.progressHint")}</p>
               </div>
               {firstPendingGlobalWord ? (
                 <Button
-                  className="min-h-12 shrink-0 rounded-2xl px-6 text-base font-extrabold sm:w-auto"
+                  className="min-h-12 shrink-0 rounded-card px-6 text-base font-extrabold shadow-sm sm:w-auto"
                   onClick={() =>
                     openPracticeSession(
                       firstPendingGlobalWord.normalized_word,

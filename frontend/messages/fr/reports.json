@@ -388,7 +388,20 @@
         "repeated": "Répétition",
         "hesitation": "Hésitant"
       }
-    }
+    },
+    "summarySessions": "Séances",
+    "summaryDuration": "Durée totale",
+    "summaryCompleted": "Terminées",
+    "summaryDurationZero": "0 min",
+    "filterAria": "Filtrer les séances par statut",
+    "filterAll": "Toutes",
+    "filterCompleted": "Terminées",
+    "filterIncomplete": "En cours",
+    "searchPlaceholder": "Filtrer par titre sur cette page…",
+    "searchAria": "Rechercher par titre de livre",
+    "filterEmptyTitle": "Aucune séance ne correspond",
+    "filterEmptyDesc": "Essayez un autre filtre ou effacez la recherche.",
+    "clearFilterAction": "Afficher toutes les séances"
   },
   "readingManagement": {
     "title": "Gestion de la lecture et rappels",

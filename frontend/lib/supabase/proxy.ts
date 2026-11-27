@@ -78,6 +78,22 @@ export async function refreshSupabaseAuth(
   const forwardedHeaders = stripUntrustedSsrAuthHeaders(request.headers);
   forwardedHeaders.set("x-viread-next", currentPathWithQuery);
   let response = NextResponse.next({ request: { headers: forwardedHeaders } });
+  const incomingCookies = request.cookies.getAll();
+  const hasIncomingRoleCache = Boolean(
+    request.cookies.get(VIREAD_ROLE_CACHE_COOKIE)?.value,
+  );
+  const incomingCookieHash =
+    computeSupabaseAuthCookieFingerprint(incomingCookies);
+
+  // Fast-path: when no Supabase auth cookie is present in production/dev,
+  // avoid instantiating @supabase/ssr and calling getClaims() on every guest hit.
+  if (process.env.NODE_ENV !== "test" && !incomingCookieHash) {
+    if (hasIncomingRoleCache) {
+      clearRoleCacheCookie(response, request);
+    }
+    return { response, userId: null, role: null };
+  }
+
   const { publishableKey, url } = getSupabasePublicConfig();
   const supabase = createServerClient(url, publishableKey, {
     cookies: {
@@ -115,9 +131,6 @@ export async function refreshSupabaseAuth(
   const userId =
     !error && typeof subject === "string" && subject ? subject : null;
 
-  const hasIncomingRoleCache = Boolean(
-    request.cookies.get(VIREAD_ROLE_CACHE_COOKIE)?.value,
-  );
   if (!userId) {
     if (hasIncomingRoleCache) {
       clearRoleCacheCookie(response, request);

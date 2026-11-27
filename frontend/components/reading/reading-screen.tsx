@@ -22,6 +22,7 @@ import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -46,8 +47,10 @@ import {
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
   getSessionVoiceAudit,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   lockSessionVoice,
   setActiveVoiceSession,
   subscribeVoicePolicy,
@@ -461,6 +464,7 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
+  const teacherPersona = useTeacherPersona();
   const { preferences: automationPreferences, coachingStyle } =
     useAutomationPreferences();
   const automationRef = useRef(automationPreferences);
@@ -783,7 +787,10 @@ function ReadingSessionScreen({
         cachedHealth.google.tts_configured && !cachedHealth.google.tts_cooldown;
       if (ttsAllowsFallback && localTtsDown && useGoogleTts) {
         lockSessionVoice(sessionId, {
-          voiceId: mapLocalVoiceToGoogleBackup(null, policy.region),
+          voiceId: mapLocalVoiceToGoogleBackup(
+            getEffectiveVoiceId(),
+            policy.region,
+          ),
         });
       } else {
         lockSessionVoice(sessionId);
@@ -932,7 +939,7 @@ function ReadingSessionScreen({
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
-              activeLock?.voiceId ?? null,
+              activeLock?.voiceId ?? getEffectiveVoiceId(),
               activeLock?.region ?? policy.region,
             );
             // Lock directly to the configured Google voice (or resync server-side
@@ -944,7 +951,8 @@ function ReadingSessionScreen({
               });
             } else if (
               activeLock.provider === "local" &&
-              getSessionVoiceAudit(sessionId).length === 0
+              (getSessionVoiceAudit(sessionId).length === 0 ||
+                hasPendingSessionVoiceSwitch(sessionId))
             ) {
               lockSessionVoice(sessionId, {
                 voiceId: googleVoiceId,
@@ -974,12 +982,13 @@ function ReadingSessionScreen({
             }
             if (!getActiveSessionVoiceLock() && !ttsUsingCachedAudio) {
               // Only advertise browser TTS fallback when no SessionVoiceLock forbids it.
+              const effectiveId = getEffectiveVoiceId();
               recordTtsEngineUsage({
                 provider: "browser",
                 fallbackUsed: true,
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-                voiceId: null,
-                voiceGender: resolveVoiceGender(null),
+                voiceId: effectiveId,
+                voiceGender: resolveVoiceGender(effectiveId),
               });
             }
           }
@@ -7791,7 +7800,7 @@ function ReadingSessionScreen({
             t("session.retryPromptQuestion", {
               count: formatNumber(retryCandidates.length),
             }),
-            getEffectiveTeacherPersona().gender,
+            teacherPersona.gender,
           )}
           onClose={() => undefined}
           primaryAction={{

@@ -341,6 +341,33 @@ class KaraokeProcessingService:
                 await self.repository.songs.bump(state.song, request.expected_revision)
                 job.status, job.applied_revision = "APPLIED", state.song.revision
                 job.applied_at = job.updated_at = utcnow()
+                melody_profile = (
+                    job.provenance.get("melody_profile")
+                    if isinstance(job.provenance, dict)
+                    else None
+                )
+                if isinstance(melody_profile, dict) and hasattr(self.repository, "db"):
+                    from app.repositories.karaoke_practice_repository import KaraokePracticeRepository
+                    from app.services.karaoke_melody_extractor import build_musical_profile_payload
+
+                    try:
+                        practice_repo = KaraokePracticeRepository(self.repository.db)
+                        payload_json = build_musical_profile_payload(
+                            melody_profile, draft.lyrics if isinstance(draft.lyrics, dict) else None
+                        )
+                        await practice_repo.upsert_musical_profile(
+                            draft.id,
+                            bpm=payload_json.get("bpm"),
+                            audio_type="DUAL_TRACK",
+                            has_pitch_contour=bool(payload_json.get("pitch_contour")),
+                            has_beat_grid=bool(payload_json.get("beat_grid_ms")),
+                            source_method="AUDIO_DSP",
+                            profile_json=payload_json,
+                        )
+                        await practice_repo.save_version_melody_profile(draft.id, melody_profile)
+                    except Exception:
+                        # Non-fatal: aligned lyrics & audio remain applied cleanly.
+                        pass
                 result = await self.songs._detail(state)
         if stale:
             fail(409, "STALE_INPUT")

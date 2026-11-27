@@ -26,7 +26,11 @@
       "sessions": "回顧已完成的閱讀課程",
       "entertainment": "語言遊戲、故事與卡拉 OK",
       "difficultWords": "練習孩子容易讀錯的詞彙"
-    }
+    },
+    "devicePermissions": "麥克風與相機檢測",
+    "aiTasksNotifications": "AI 任務與通知",
+    "userGuide": "詳細使用指南",
+    "helpFeedback": "幫助與意見回饋"
   },
   "admin": {
     "navLabel": "管理員導覽",
@@ -58,7 +62,19 @@
     "accountSection": "帳號",
     "helpSection": "幫助",
     "sessionSection": "登入階段",
-    "defaultAccountLabel": "ViRead 帳號"
+    "defaultAccountLabel": "ViRead 帳號",
+    "activitiesSection": "活動與工具",
+    "accountDeviceSection": "帳戶與裝置",
+    "guideSupportSection": "指南與支援",
+    "quickChildTitle": "目前閱讀兒童",
+    "languageLabel": "介面語言",
+    "taskStatusRunning": "{count} 項任務正在背景執行",
+    "taskStatusReview": "{count} 項任務等待審核",
+    "taskStatusFailed": "{count} 項任務需要處理",
+    "taskStatusNewDone": "{count} 項任務剛剛完成",
+    "taskStatusIdle": "尚無新任務",
+    "unreadBadgeAria": "有未讀 AI 任務通知",
+    "runningBadgeAria": "有背景 AI 任務執行中"
   },
   "childSwitcher": {
     "selectedAria": "目前選擇：{alias}，點擊切換",
@@ -73,5 +89,38 @@
     "ariaLabel": "ViRead 資訊",
     "logoDashboardAria": "ViRead - 前往總覽",
     "logoHomeAria": "ViRead - 前往首頁"
+  },
+  "guide": {
+    "title": "ViRead 使用指南",
+    "subtitle": "每天陪伴孩子閱讀的 5 個簡單步驟。",
+    "closeAction": "知道了",
+    "openHelpCenter": "開啟幫助中心",
+    "steps": {
+      "1": {
+        "title": "1. 建立孩子檔案",
+        "body": "在孩子檔案新增暱稱與年級（1–5 年級），獲得合適的書籍推薦。",
+        "action": "孩子檔案"
+      },
+      "2": {
+        "title": "2. 選書或上傳家庭私密書籍",
+        "body": "從書庫選書，或在「我的書籍」上傳圖片、PDF 或 DOCX 供家庭閱讀。",
+        "action": "我的書籍"
+      },
+      "3": {
+        "title": "3. 檢查麥克風並陪伴閱讀",
+        "body": "開始前測試麥克風，讓 ViRead 清楚收音並即時協助拼讀。",
+        "action": "裝置檢測"
+      },
+      "4": {
+        "title": "4. 複習待練字詞並查看進度",
+        "body": "依書籍練習不熟字詞，並追蹤每週閱讀進度圖表。",
+        "action": "待練字詞"
+      },
+      "5": {
+        "title": "5. 排定閱讀計畫與追蹤 AI 任務",
+        "body": "在閱讀管理設定目標與提醒，並在 AI 任務檢視 OCR 與封面進度。",
+        "action": "閱讀管理"
+      }
+    }
   }
 }

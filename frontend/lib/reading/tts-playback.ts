@@ -36,6 +36,7 @@ import {
   approveSessionVoiceSwitch,
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
+  getDefaultVoiceIdForRegionAndGender,
   getVoicePolicyPreferences,
   GOOGLE_TTS_MODEL_VERSION,
   inferModelVersionForVoiceId,
@@ -43,13 +44,16 @@ import {
   inferRegionFromVoiceId,
   recordSessionUtteranceVoice,
   REGION_DEFAULT_VOICE_ID,
+  registerVoiceCacheInvalidator,
   type VoiceProviderKind,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import { prepareWordSampleAudio } from "@/lib/reading/short-word-audio";
 import {
   clampSpeed,
+  getGlobalVoiceSelectionUpdatedAt,
   getSpeechPreferences,
+  getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
@@ -495,16 +499,48 @@ const MALE_BROWSER_VOICE_RE =
 const FEMALE_BROWSER_VOICE_RE =
   /\b(hoai|hoài|my|mỹ|hoaimy|linh|lan|mai|nu|nữ|female|chi)\b/i;
 
+const pinnedBrowserVoices = new Map<VoiceGender, SpeechSynthesisVoice>();
+
+export function clearPinnedBrowserVoices(): void {
+  pinnedBrowserVoices.clear();
+}
+
+registerVoiceCacheInvalidator(clearPinnedBrowserVoices);
+
+function inferBrowserVoiceGender(
+  voice: SpeechSynthesisVoice,
+): VoiceGender | null {
+  const name = voice.name ?? "";
+  if (MALE_BROWSER_VOICE_RE.test(name)) return "male";
+  if (FEMALE_BROWSER_VOICE_RE.test(name)) return "female";
+  return null;
+}
+
 function pickVietnameseBrowserVoice(
   synth: SpeechSynthesis,
   preferredGender?: VoiceGender,
-): SpeechSynthesisVoice | null {
+): {
+  readonly voice: SpeechSynthesisVoice | null;
+  readonly genderMismatch: boolean;
+} {
   try {
     const voices = synth.getVoices?.() ?? [];
     const viVoices = voices.filter((v) =>
       (v.lang ?? "").toLowerCase().startsWith("vi"),
     );
-    if (!viVoices.length) return null;
+    if (!viVoices.length) return { voice: null, genderMismatch: false };
+
+    if (preferredGender) {
+      const pinned = pinnedBrowserVoices.get(preferredGender);
+      if (pinned && viVoices.some((v) => v.name === pinned.name)) {
+        const inferred = inferBrowserVoiceGender(pinned);
+        return {
+          voice: pinned,
+          genderMismatch: inferred !== null && inferred !== preferredGender,
+        };
+      }
+    }
+
     const scoreVoice = (voice: SpeechSynthesisVoice): number => {
       const name = voice.name ?? "";
       let score = 0;
@@ -519,13 +555,23 @@ function pickVietnameseBrowserVoice(
       }
       return score;
     };
-    return (
+    const chosen =
       [...viVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a))[0] ??
       viVoices[0] ??
-      null
+      null;
+    if (chosen && preferredGender) {
+      pinnedBrowserVoices.set(preferredGender, chosen);
+    }
+    const inferred = chosen ? inferBrowserVoiceGender(chosen) : null;
+    const genderMismatch = Boolean(
+      chosen &&
+      preferredGender &&
+      inferred !== null &&
+      inferred !== preferredGender,
     );
+    return { voice: chosen, genderMismatch };
   } catch {
-    return null;
+    return { voice: null, genderMismatch: false };
   }
 }
 
@@ -533,18 +579,24 @@ async function resolveVietnameseBrowserVoice(
   synth: SpeechSynthesis,
   signal: AbortSignal,
   preferredGender?: VoiceGender,
-): Promise<SpeechSynthesisVoice | null> {
+): Promise<{
+  readonly voice: SpeechSynthesisVoice | null;
+  readonly genderMismatch: boolean;
+}> {
   const existing = pickVietnameseBrowserVoice(synth, preferredGender);
-  if (existing) return existing;
+  if (existing.voice) return existing;
   try {
     const voices = synth.getVoices?.() ?? [];
     if (voices.length > 0 || typeof synth.addEventListener !== "function") {
-      return null;
+      return { voice: null, genderMismatch: false };
     }
   } catch {
-    return null;
+    return { voice: null, genderMismatch: false };
   }
-  return new Promise<SpeechSynthesisVoice | null>((resolve) => {
+  return new Promise<{
+    readonly voice: SpeechSynthesisVoice | null;
+    readonly genderMismatch: boolean;
+  }>((resolve) => {
     let settled = false;
     const done = () => {
       if (settled) return;
@@ -609,9 +661,19 @@ function resolveOperationVoice(
   speedScale = 1,
   bypassSessionLock = false,
 ): ResolvedOperationVoice {
-  const activeLock = bypassSessionLock ? null : getActiveSessionVoiceLock();
+  const rawActiveLock = bypassSessionLock ? null : getActiveSessionVoiceLock();
   const prefs = getSpeechPreferences();
+  const prefsUpdatedAt = getGlobalVoiceSelectionUpdatedAt();
   const policy = getVoicePolicyPreferences();
+  const lockTimestampMs = rawActiveLock
+    ? Date.parse(rawActiveLock.lockedAt)
+    : 0;
+  const prefsNewerThanLock =
+    Boolean(rawActiveLock) &&
+    prefsUpdatedAt > 0 &&
+    Number.isFinite(lockTimestampMs) &&
+    prefsUpdatedAt > lockTimestampMs;
+  const activeLock = prefsNewerThanLock ? null : rawActiveLock;
 
   const baseSpeed = activeLock ? activeLock.speed : prefs.speed;
   const limited = Math.min(baseSpeed, speedLimit);
@@ -633,6 +695,10 @@ function resolveOperationVoice(
 
   const requestedVoiceId =
     prefs.voiceId ??
+    getDefaultVoiceIdForRegionAndGender(
+      policy.region,
+      getSpeechPreferencesMeta().gender,
+    ) ??
     REGION_DEFAULT_VOICE_ID[policy.region] ??
     DEFAULT_LOCAL_VOICE_ID;
   const cacheVoiceId = requestedVoiceId;
@@ -644,7 +710,8 @@ function resolveOperationVoice(
   );
 
   return {
-    sessionId: null,
+    sessionId:
+      rawActiveLock && !bypassSessionLock ? rawActiveLock.sessionId : null,
     bypassSessionLock,
     provider,
     requestedVoiceId,
@@ -869,6 +936,14 @@ export class TtsPlayback {
 
   handlePreferencesChange = (): void => {
     this.timedCooldownUntil = 0;
+    this.cache.clear();
+    this.cacheBytes = 0;
+    this.shortCache.clear();
+    this.shortCacheBytes = 0;
+    this.phonicsCache.clear();
+    this.phonicsCacheBytes = 0;
+    this.inFlightShortPrefetch.clear();
+    clearPinnedBrowserVoices();
     this.setFallbackNotice(null);
     this.stop();
   };
@@ -1105,16 +1180,28 @@ export class TtsPlayback {
         let approxIdx = startWordIdx;
 
         try {
+          const preferredGender = resolveVoiceGender(
+            operation.voice.requestedVoiceId,
+          );
           const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
             rate: operation.voice.speed,
             pitch: 1.0,
+            voiceId: operation.voice.requestedVoiceId,
+            voiceGender: preferredGender,
             signal: operation.controller.signal,
-            onStart: () => {
+            onStart: (meta) => {
               if (
                 this.current !== operation ||
                 operation.controller.signal.aborted
               )
                 return;
+              if (meta?.voiceGenderMismatch) {
+                this.setFallbackNotice(
+                  tSpeechPlayback(
+                    "speech.playback.deviceVoiceGenderMismatchNotice",
+                  ),
+                );
+              }
               this.onState("playing");
               if (!emittedStart) {
                 emittedStart = true;
@@ -1237,11 +1324,12 @@ export class TtsPlayback {
     const preferredGender = resolveVoiceGender(
       operation.voice.requestedVoiceId,
     );
-    const resolvedVoice = await resolveVietnameseBrowserVoice(
-      synth,
-      operation.controller.signal,
-      preferredGender,
-    );
+    const { voice: resolvedVoice, genderMismatch } =
+      await resolveVietnameseBrowserVoice(
+        synth,
+        operation.controller.signal,
+        preferredGender,
+      );
     this.ensure(operation);
     if (!resolvedVoice) {
       this.setFallbackNotice(getLockedVoiceUnavailableNotice());
@@ -1250,11 +1338,17 @@ export class TtsPlayback {
     recordTtsEngineUsage({
       provider: "browser",
       fallbackUsed: true,
-      fallbackReason: "LOCAL_TTS_UNAVAILABLE",
+      fallbackReason: genderMismatch
+        ? "BROWSER_VOICE_GENDER_MISMATCH"
+        : "LOCAL_TTS_UNAVAILABLE",
       voiceId: operation.voice.requestedVoiceId,
       voiceGender: preferredGender,
     });
-    this.setFallbackNotice(getBrowserFallbackVoiceNotice());
+    this.setFallbackNotice(
+      genderMismatch
+        ? tSpeechPlayback("speech.playback.deviceVoiceGenderMismatchNotice")
+        : getBrowserFallbackVoiceNotice(),
+    );
 
     const wordList =
       options.words && options.words.length > 0
@@ -1600,9 +1694,12 @@ export class TtsPlayback {
     }
     const expectedVoiceId =
       options.precomputedVoiceId?.trim() || DEFAULT_LOCAL_VOICE_ID;
+    const expectedGender = resolveVoiceGender(expectedVoiceId);
+    const activeGender = resolveVoiceGender(operation.voice.cacheVoiceId);
     if (
       operation.voice.provider !== "local" ||
-      operation.voice.cacheVoiceId !== expectedVoiceId
+      operation.voice.cacheVoiceId !== expectedVoiceId ||
+      expectedGender !== activeGender
     ) {
       return false;
     }

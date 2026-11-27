@@ -388,7 +388,20 @@
         "repeated": "Repetition",
         "hesitation": "Hesitant"
       }
-    }
+    },
+    "summarySessions": "Sessions",
+    "summaryDuration": "Total Duration",
+    "summaryCompleted": "Completed",
+    "summaryDurationZero": "0 min",
+    "filterAria": "Filter reading sessions by status",
+    "filterAll": "All",
+    "filterCompleted": "Completed",
+    "filterIncomplete": "In progress",
+    "searchPlaceholder": "Filter by book title on this page…",
+    "searchAria": "Search sessions by book title",
+    "filterEmptyTitle": "No sessions match your filter",
+    "filterEmptyDesc": "Try another status filter or clear your search.",
+    "clearFilterAction": "Show all sessions"
   },
   "readingManagement": {
     "title": "Reading Management & Reminders",
