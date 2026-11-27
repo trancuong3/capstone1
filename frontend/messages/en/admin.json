@@ -154,7 +154,7 @@
     "eyebrow": "Operational check",
     "description": "Lightweight check of FastAPI, Database, OCR, Tesseract, worker, TTS, and STT; does not load OCR models on page load.",
     "recheck": "Check again",
-    "loadError": "Unable to load operational health status. Please try again.",
+    "loadError": "Unable to retrieve security status. Please try again.",
     "servicesHeading": "Service status check",
     "checkedAt": "Checked at {time}",
     "technicalStatus": "Technical status: {status}",
@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "Unable to sync text after deleting word. Check content and word list before saving.",
       "wordAddSyncError": "Unable to sync text after adding word. Check content and word list before saving."
     },
-    "newWordPlaceholder": "Word",
+    "newWordPlaceholder": "New word",
     "loading": "Loading image and revision…",
     "errors": {
       "notFoundTitle": "Page not found",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR task not finished. Check the Windows OCR server and try again.",
-    "ocrTaskQueuedWindows": "Page saved in the OCR queue — Will process automatically when the OCR server comes back online",
+    "ocrTaskQueuedWindows": "Page image queued for Windows OCR server processing. Refresh after the server completes.",
     "skippedEmptyNote": "skip {count} blank pages",
     "failedPagesNote": "error {count} pages",
     "createdPagesSummary": "Created {count} pages · Pending approval{suffix}",
-    "queuedDocPagesForWorker": "Saved {count} pages in the OCR queue — Will process automatically when the OCR server comes back online",
+    "queuedDocPagesForWorker": "Queued {count} pages waiting for Windows OCR server activation",
     "docPagesPartialProgress": "Completed {completed}/{total} pages ({pending} pages still queued for OCR)",
     "docPagesComplete": "OCR completed {completed}/{total} pages · Pending approval",
     "singlePageQueued": "Queued waiting for Windows OCR server processing",
     "singlePageRecognizing": "Recognizing OCR page…",
     "singlePageFailed": "OCR page task not finished. Please try again.",
     "singlePageSucceeded": "OCR recognized · Pending approval",
-    "singlePageWaitingWorker": "Saved 1 page in the OCR queue — Will process automatically when the OCR server comes back online",
+    "singlePageWaitingWorker": "Queued safely waiting for Windows OCR server completion",
     "uploadFailedCheckBackend": "Upload failed. Check Backend and try again.",
     "reloadAfterUploadFailed": "Cannot reload page list after upload. Data may have been saved; reload to verify.",
     "reprocessIncomplete": "OCR reprocessing task not finished. Please try again.",
-    "reprocessQueuedWindows": "Re-OCR request saved in the queue — Will process automatically when the OCR server comes back online"
+    "reprocessQueuedWindows": "Page queued for Windows OCR server reprocessing. Refresh after completion."
   },
   "qualityHub": {
     "description": "Review catalog metadata, resolve parent reports, approve book safety, and moderate parent private books in one unified hub.",

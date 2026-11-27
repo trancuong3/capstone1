@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "「{theme}」のイラスト（{count}個の要素）",
       "svgTitle": "{theme} のイラスト"
-    }
+    },
+    "mobileLabel": "記憶コーナー"
   }
 }

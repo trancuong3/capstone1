@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "Bức tranh {theme} với {count} chi tiết minh họa",
       "svgTitle": "Tranh minh họa {theme}"
-    }
+    },
+    "mobileLabel": "Góc trí nhớ"
   }
 }

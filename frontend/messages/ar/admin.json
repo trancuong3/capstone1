@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "تعذّر مزامنة النص بعد حذف الكلمة. يرجى التحقق من المحتوى وقائمة الكلمات قبل الحفظ.",
       "wordAddSyncError": "تعذرت مزامنة النص بعد إضافة الكلمة. يرجى التحقق من المحتوى وقائمة الكلمات قبل الحفظ."
     },
-    "newWordPlaceholder": "كلمة",
+    "newWordPlaceholder": "كلمة جديدة",
     "loading": "جارٍ تحميل الصورة والإصدار…",
     "errors": {
       "notFoundTitle": "الصفحة غير موجودة",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "لم تكتمل مهمة OCR. تحقق من خادم OCR على Windows ثم أعد المحاولة.",
-    "ocrTaskQueuedWindows": "تم حفظ الصفحة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
+    "ocrTaskQueuedWindows": "تم إدراج صورة الصفحة في قائمة الانتظار لخادم OCR على Windows. يمكنك التحديث بعد انتهاء المعالجة.",
     "skippedEmptyNote": "تخطي {count} صفحات فارغة",
     "failedPagesNote": "خطأ في {count} صفحات",
     "createdPagesSummary": "تم إنشاء {count} صفحات · بانتظار المراجعة{suffix}",
-    "queuedDocPagesForWorker": "تم حفظ {count} صفحة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
+    "queuedDocPagesForWorker": "تم وضع {count} صفحات في الانتظار لتشغيل خادم OCR على Windows",
     "docPagesPartialProgress": "اكتملت {completed}/{total} صفحة ({pending} صفحة ما زالت في قائمة انتظار OCR)",
     "docPagesComplete": "اكتمل OCR لـ {completed}/{total} صفحة · بانتظار المراجعة",
     "singlePageQueued": "تم وضعه في الانتظار لمعالجة خادم OCR على Windows",
     "singlePageRecognizing": "جارٍ التعرف على نص الصفحة عبر OCR…",
     "singlePageFailed": "لم تكتمل مهمة OCR لصفحة الكتاب. يُرجى المحاولة مرة أخرى.",
     "singlePageSucceeded": "تم التعرف عبر OCR · بانتظار المراجعة",
-    "singlePageWaitingWorker": "تم حفظ صفحة واحدة في قائمة انتظار OCR — ستُعالج تلقائيًا عند عودة خادم OCR",
+    "singlePageWaitingWorker": "تم الإدراج بأمان في قائمة الانتظار لحين انتهاء خادم OCR على Windows",
     "uploadFailedCheckBackend": "فشل الرفع. تحقق من الخادم الخلفي (Backend) وأعد المحاولة.",
     "reloadAfterUploadFailed": "تعذر إعادة تحميل قائمة الصفحات بعد الرفع. قد تكون البيانات قد حُفظت؛ أعد التحميل للتحقق.",
     "reprocessIncomplete": "لم تكتمل مهمة إعادة معالجة OCR للصفحة. يُرجى المحاولة مرة أخرى.",
-    "reprocessQueuedWindows": "تم حفظ طلب إعادة OCR في قائمة الانتظار — سيُعالج تلقائيًا عند عودة خادم OCR"
+    "reprocessQueuedWindows": "تم وضع الصفحة في قائمة الانتظار لإعادة المعالجة عبر خادم OCR على Windows. يُرجى التحديث عند الانتهاء."
   },
   "qualityHub": {
     "description": "مراجعة البيانات الوصفية للكتب، ومعالجة بلاغات أولياء الأمور، واعتماد سلامة الكتب، والإشراف على كتب المستخدمين في شاشة موحدة.",

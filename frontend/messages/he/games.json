@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "איור של {theme} עם {count} פרטים",
       "svgTitle": "איור {theme}"
-    }
+    },
+    "mobileLabel": "פינת הזיכרון"
   }
 }

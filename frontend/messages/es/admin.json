@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "No se pudo sincronizar el texto después de eliminar la palabra. Verifique el contenido y la lista de palabras antes de guardar.",
       "wordAddSyncError": "No se pudo sincronizar el texto después de agregar una palabra. Revisa el contenido y la lista de palabras antes de guardar."
     },
-    "newWordPlaceholder": "Palabra",
+    "newWordPlaceholder": "Nueva palabra",
     "loading": "Cargando imagen y revisión...",
     "errors": {
       "notFoundTitle": "Página no encontrada",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "La tarea de OCR no finalizó. Revisa el servidor OCR de Windows e inténtalo de nuevo.",
-    "ocrTaskQueuedWindows": "Página guardada en la cola de OCR — Se procesará automáticamente al volver el servidor",
+    "ocrTaskQueuedWindows": "La imagen de la página quedó en cola para el servidor OCR de Windows. Actualiza cuando finalice.",
     "skippedEmptyNote": "{count} páginas en blanco omitidas",
     "failedPagesNote": "{count} páginas con error",
     "createdPagesSummary": "{count} páginas creadas · Pendiente de revisión{suffix}",
-    "queuedDocPagesForWorker": "Se guardaron {count} páginas en la cola de OCR — Se procesarán automáticamente al volver el servidor",
+    "queuedDocPagesForWorker": "{count} páginas en cola esperando la activación del servidor OCR de Windows",
     "docPagesPartialProgress": "{completed}/{total} páginas completadas ({pending} páginas siguen en cola OCR)",
     "docPagesComplete": "OCR completado en {completed}/{total} páginas · Pendiente de revisión",
     "singlePageQueued": "En cola esperando procesamiento del servidor OCR de Windows",
     "singlePageRecognizing": "Reconociendo página mediante OCR…",
     "singlePageFailed": "La tarea de OCR de la página no terminó. Por favor, inténtalo de nuevo.",
     "singlePageSucceeded": "OCR reconocido · Pendiente de revisión",
-    "singlePageWaitingWorker": "Se guardó 1 página en la cola de OCR — Se procesará automáticamente al volver el servidor",
+    "singlePageWaitingWorker": "En cola segura esperando que el servidor OCR de Windows termine",
     "uploadFailedCheckBackend": "Error al subir. Revisa el Backend e inténtalo de nuevo.",
     "reloadAfterUploadFailed": "No se pudo recargar la lista de páginas tras la subida. Es posible que se hayan guardado los datos; recarga para verificar.",
     "reprocessIncomplete": "La tarea de reprocesamiento OCR no terminó. Inténtalo de nuevo.",
-    "reprocessQueuedWindows": "Solicitud de re-OCR guardada en la cola — Se procesará automáticamente al volver el servidor"
+    "reprocessQueuedWindows": "La página quedó en cola para reprocesamiento en el servidor OCR de Windows. Actualiza al finalizar."
   },
   "qualityHub": {
     "description": "Revisa metadatos del catálogo, resuelve reportes de padres, aprueba la seguridad de libros y modera libros privados en un centro unificado.",

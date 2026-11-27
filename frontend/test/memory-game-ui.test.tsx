@@ -448,6 +448,37 @@ describe("MemoryGameScreen", () => {
     vi.unstubAllGlobals();
   });
 
+  it("loads themes without waiting for optional history and can retry a failed catalog", async () => {
+    const responder = createFetchResponder();
+    let failThemes = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/games/memory/themes" && failThemes) {
+          return Response.json(
+            { detail: "Temporarily unavailable" },
+            { status: 503 },
+          );
+        }
+        if (
+          path === "/games/memory/sessions" &&
+          (!init?.method || init.method === "GET")
+        ) {
+          return new Promise<Response>(() => {});
+        }
+        return responder(url, init);
+      }),
+    );
+    renderScreen();
+    await screen.findByTestId("retry-memory-catalog-btn");
+    failThemes = false;
+    fireEvent.click(screen.getByTestId("retry-memory-catalog-btn"));
+    await screen.findByText(sampleCatalog.themes[0]!.name_vi);
+    fireEvent.click(screen.getByTestId("start-memory-game-btn"));
+    await screen.findByTestId("observe-stage");
+  });
+
   it("starts countdown strictly AFTER SVG sceneReady fires", async () => {
     const pendingRafs: FrameRequestCallback[] = [];
     vi.stubGlobal(

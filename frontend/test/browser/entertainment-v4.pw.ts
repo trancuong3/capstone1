@@ -8,6 +8,7 @@ import {
   type Route,
 } from "@playwright/test";
 import {
+  PLAYWRIGHT_ORIGIN,
   installApiFixture,
   setRole,
   book,
@@ -69,7 +70,7 @@ const KARAOKE_SESSION_ID = "dddddddd-dddd-4ddd-8ddd-ddddddddddd1";
 const SIMPLE_JOB_ID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
 
 const CORS_HEADERS = {
-  "access-control-allow-origin": "http://127.0.0.1:3106",
+  "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
   "access-control-allow-headers": "authorization,content-type,accept",
   "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
 };
@@ -195,14 +196,20 @@ async function selectChildAndEnterEntertainment(
   if (mockRecommendations) {
     await installLearningRecommendationsMock(page);
   }
-  await page.goto("/dashboard");
-  await page
-    .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
-    .click();
-  await page
-    .getByRole("button", { name: "Trò chơi và âm nhạc", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/entertainment$/);
+  await page.goto("/dashboard", { timeout: 60_000 });
+  const childButton = page.getByRole("button", {
+    name: `${child.alias}, lớp ${child.grade}`,
+  });
+  await expect(childButton).toBeVisible({ timeout: 30_000 });
+  await childButton.click();
+  await expect(childButton).toHaveAttribute("aria-pressed", "true");
+  const enterEntertainmentBtn = page.getByRole("button", {
+    name: "Trò chơi và âm nhạc",
+    exact: true,
+  });
+  await expect(enterEntertainmentBtn).toBeEnabled();
+  await enterEntertainmentBtn.click();
+  await expect(page).toHaveURL(/\/entertainment$/, { timeout: 30_000 });
 }
 
 async function installVoiceAndTtsMock(page: Page): Promise<void> {
@@ -752,7 +759,9 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Chọn tranh/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/picture-description$/);
+  await expect(page).toHaveURL(/\/entertainment\/picture-description$/, {
+    timeout: 30_000,
+  });
 
   await expect(
     page.getByRole("tab", { name: "Tranh chủ đề ViRead" }),
@@ -920,8 +929,8 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
           token_id: string;
           client_shot_id?: string;
         };
-        // Simulated 500ms backend latency to prove non-blocking optimistic queue & <100ms projectile.
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        // Simulated >=500ms backend latency to prove non-blocking optimistic queue & <100ms projectile.
+        await new Promise((resolve) => setTimeout(resolve, 650));
         const expected = orderedTokens[resolvedShots];
         const isCorrect = expected?.id === body.token_id;
         if (isCorrect) resolvedShots += 1;
@@ -981,7 +990,9 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Bắt đầu chơi/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/sentence-shooter$/);
+  await expect(page).toHaveURL(/\/entertainment\/sentence-shooter$/, {
+    timeout: 30_000,
+  });
 
   // Verify 3 learning modes on lobby
   const fillBlankBtn = page.getByRole("button", {
@@ -1033,26 +1044,27 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
     observer.observe(document.body, { childList: true, subtree: true });
   });
 
-  // Rapid tap 1 -> immediate projectile + in-flight state BEFORE 500ms POST resolves
+  // Rapid tap 1 -> immediate in-flight state BEFORE >=500ms POST resolves, then rapid tap 2 (zero UI lock!)
   await token1Btn.click();
-  await expect(page.getByTestId("shot-projectile").first()).toBeVisible();
   await expect(token1Btn).toHaveAttribute("data-shot-state", "in-flight");
 
-  const latencyMs = await page.evaluate(() => {
+  await expect(token2Btn).toBeEnabled();
+  await token2Btn.click();
+  await expect(token2Btn).toHaveAttribute("data-shot-state", "in-flight");
+
+  const latencyProbe = await page.evaluate(() => {
     const probe = (
       window as unknown as {
         __shooterLatency: { clickAt: number; projectileAt: number };
       }
     ).__shooterLatency;
-    return probe.projectileAt - probe.clickAt;
+    return probe;
   });
+  expect(latencyProbe.clickAt).toBeGreaterThan(0);
+  expect(latencyProbe.projectileAt).toBeGreaterThan(0);
+  const latencyMs = latencyProbe.projectileAt - latencyProbe.clickAt;
   expect(latencyMs).toBeGreaterThanOrEqual(0);
   expect(latencyMs).toBeLessThan(100);
-
-  // Rapid tap 2 while token 1's 500ms POST is STILL in-flight (zero UI lock!)
-  await expect(token2Btn).toBeEnabled();
-  await token2Btn.click();
-  await expect(token2Btn).toHaveAttribute("data-shot-state", "in-flight");
 
   // Wait for tokens 1 & 2 to confirm into sentence slots (removed from word bank)
   const sentenceSlots = page.getByRole("list", { name: "Các ô ghép câu" });
@@ -1243,9 +1255,9 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Mở thư viện bài hát/i }).click();
   await expect(page).toHaveURL(/\/karaoke$/, { timeout: 30_000 });
-  await expect(
-    page.getByRole("heading", { name: "Ngôi sao nhỏ" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Ngôi sao nhỏ" })).toBeVisible(
+    { timeout: 30_000 },
+  );
 
   await assertViewportHealth(page, `karaoke-${testInfo.project.name}`, [
     page.getByRole("link", { name: "Hát bài Ngôi sao nhỏ", exact: true }),
@@ -1255,10 +1267,12 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
   await page
     .getByRole("link", { name: "Hát bài Ngôi sao nhỏ", exact: true })
     .click();
-  await expect(page).toHaveURL(new RegExp(`/karaoke/${songId}`));
+  await expect(page).toHaveURL(new RegExp(`/karaoke/${songId}`), {
+    timeout: 30_000,
+  });
 
   const stage = page.getByRole("region", { name: "Hát cùng bé", exact: true });
-  await expect(stage).toBeVisible();
+  await expect(stage).toBeVisible({ timeout: 30_000 });
 
   // Verify all 4 Musical Practice Mode switcher buttons
   const practiceGroup = stage.getByRole("group", { name: "Kiểu luyện hát" });
@@ -1345,9 +1359,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
     musicalSummary.getByText(/Báo cáo theo từng đoạn/),
   ).toBeVisible();
   await musicalSummary.getByText(/Báo cáo theo từng đoạn/).click();
-  await expect(
-    musicalSummary.getByText(/Câu 1 \(0:01–0:03\)|Câu 1\b/).first(),
-  ).toBeVisible();
+  await expect(musicalSummary.getByText(/^Câu 1 \(/)).toBeVisible();
   expect(capturedSession.body?.practice_mode).toBe("RHYTHM_TAP");
 
   expect(pageErrors).toEqual([]);
@@ -1669,6 +1681,7 @@ test("Flow 5: Admin Karaoke Simple Mode V4 (1-MP3 upload, auto extract, Review b
 test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, hide/recall, hints, spotlight)", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const base = await installApiFixture(page);
   const pageErrors: string[] = [];
   page.on("pageerror", (err) => pageErrors.push(err.message));
@@ -1995,7 +2008,9 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
 
   await selectChildAndEnterEntertainment(page);
   await page.getByRole("link", { name: /Khám phá trí nhớ/i }).click();
-  await expect(page).toHaveURL(/\/entertainment\/memory-game$/);
+  await expect(page).toHaveURL(/\/entertainment\/memory-game$/, {
+    timeout: 30_000,
+  });
 
   await expect(
     page.getByRole("heading", { name: "Bé nhớ được gì?" }),

@@ -894,10 +894,10 @@ def _normalize_focus_words(focus_words: list[str] | None) -> tuple[str, ...]:
     for raw in focus_words:
         if not isinstance(raw, str):
             continue
-        compact = " ".join(raw.strip().split())
+        compact = unicodedata.normalize("NFC", " ".join(raw.strip().split()))
         if not compact:
             continue
-        folded = fold_vietnamese(compact)
+        folded = compact.casefold()
         if not folded or folded in seen:
             continue
         seen.add(folded)
@@ -908,18 +908,20 @@ def _normalize_focus_words(focus_words: list[str] | None) -> tuple[str, ...]:
 
 
 def _sprite_matches_focus_word(sprite: SpriteDefinition, focus_word: str) -> bool:
-    focus_folded = fold_vietnamese(focus_word)
-    if not focus_folded or len(focus_folded) < 2:
+    # Preserve Vietnamese tones: e.g. "diều" and "điều" are different words.
+    def normalized_tokens(value: str) -> str:
+        value = unicodedata.normalize("NFC", value).casefold()
+        return " ".join(re.sub(r"[^\w\s]", " ", value, flags=re.UNICODE).split())
+
+    focus = normalized_tokens(focus_word)
+    if not focus or len(focus) < 2:
         return False
-    focus_tokens = set(focus_folded.split())
     haystacks = [sprite.name_vi, *sprite.aliases_vi, *sprite.focus_keywords]
     for candidate in haystacks:
-        cand_folded = fold_vietnamese(candidate)
-        if not cand_folded:
+        candidate_text = normalized_tokens(candidate)
+        if not candidate_text:
             continue
-        if focus_folded == cand_folded or focus_folded in cand_folded or cand_folded in focus_folded:
-            return True
-        if focus_tokens & set(cand_folded.split()):
+        if f" {focus} " in f" {candidate_text} ":
             return True
     return False
 

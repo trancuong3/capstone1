@@ -19,9 +19,13 @@ from app.repositories.memory_game_repository import (
     MemorySessionProjection,
 )
 from app.services.games.memory_game_evaluator import (
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_GROQ_MODEL,
     MemoryAiConfig,
     MemoryGameEvaluator,
     evaluate_memory_attempt_deterministic,
+    get_memory_ai_config,
 )
 from app.services.games.memory_game_service import MemoryGameService
 from app.services.games.memory_scene_generator import (
@@ -475,6 +479,93 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(enriched.creative_score, deterministic.creative_score)
         self.assertEqual(enriched.matched_facts, deterministic.matched_facts)
         self.assertEqual(enriched.missed_facts, deterministic.missed_facts)
+
+    async def test_default_ai_models_env_overrides_and_gemini_fallback_chain(self):
+        import os
+        from unittest.mock import patch
+
+        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-3.5-flash-lite")
+        self.assertEqual(DEFAULT_GEMINI_FALLBACK_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(DEFAULT_GROQ_MODEL, "qwen/qwen3.8-27b")
+
+        with patch.dict(
+            os.environ,
+            {
+                "GEMINI_API_KEY": "g-key",
+                "GROQ_API_KEY": "q-key",
+            },
+            clear=True,
+        ):
+            cfg_default = get_memory_ai_config()
+        self.assertEqual(cfg_default.gemini_model, "gemini-3.5-flash-lite")
+        self.assertEqual(cfg_default.gemini_fallback_model, "gemini-3.1-flash-lite")
+        self.assertEqual(cfg_default.groq_model, "qwen/qwen3.8-27b")
+
+        with patch.dict(
+            os.environ,
+            {
+                "MEMORY_GAME_GEMINI_MODEL": "custom-gemini-primary",
+                "MEMORY_GAME_GEMINI_FALLBACK_MODEL": "custom-gemini-fallback",
+                "MEMORY_GAME_GROQ_MODEL": "custom-groq-model",
+            },
+            clear=True,
+        ):
+            cfg_override = get_memory_ai_config()
+        self.assertEqual(cfg_override.gemini_model, "custom-gemini-primary")
+        self.assertEqual(cfg_override.gemini_fallback_model, "custom-gemini-fallback")
+        self.assertEqual(cfg_override.groq_model, "custom-groq-model")
+
+        spec = generate_scene_spec(
+            theme_key="happy_classroom",
+            child_grade=2,
+            difficulty_level=2,
+            scene_seed=15,
+        )
+        first_obj = spec.objects[0]
+        called_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            called_urls.append(str(request.url))
+            if "gemini-3.5-flash-lite" in str(request.url):
+                return httpx.Response(429, json={"error": "rate_limited"})
+            if "gemini-3.1-flash-lite" in str(request.url):
+                return httpx.Response(
+                    200,
+                    json={
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "text": json.dumps(
+                                                {
+                                                    "praise_message_vi": "Bé nhớ giỏi quá!",
+                                                    "story_praise_vi": "Kể tiếp nào!",
+                                                    "next_tip_vi": "Quan sát thêm màu nhé!",
+                                                    "creative_followup_vi": "Điều gì xảy ra tiếp theo?",
+                                                },
+                                                ensure_ascii=False,
+                                            )
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    },
+                )
+            return httpx.Response(500)
+
+        evaluator = MemoryGameEvaluator(config=cfg_default, transport=httpx.MockTransport(handler))
+        enriched = await evaluator.evaluate(
+            scene_spec=spec,
+            stage="RECALL",
+            response_text=f"Có {first_obj.name_vi} màu {first_obj.color_vi}.",
+            enable_ai_enrichment=True,
+        )
+        self.assertEqual(len(called_urls), 2)
+        self.assertIn("gemini-3.5-flash-lite", called_urls[0])
+        self.assertIn("gemini-3.1-flash-lite", called_urls[1])
+        self.assertEqual(enriched.ai_provider, "gemini:gemini-3.1-flash-lite")
 
     def test_coaching_prompt_fences_untrusted_child_response(self):
         spec = generate_scene_spec(

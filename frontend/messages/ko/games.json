@@ -239,6 +239,7 @@
     "canvas": {
       "svgAria": "'{theme}' 그림 ({count}개 세부 요소)",
       "svgTitle": "{theme} 그림"
-    }
+    },
+    "mobileLabel": "기억력 코너"
   }
 }

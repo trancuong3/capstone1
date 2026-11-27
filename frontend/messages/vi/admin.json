@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "Không thể đồng bộ văn bản sau khi xóa từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu.",
       "wordAddSyncError": "Không thể đồng bộ văn bản sau khi thêm từ. Hãy kiểm tra nội dung và danh sách từ trước khi lưu."
     },
-    "newWordPlaceholder": "Từ",
+    "newWordPlaceholder": "Từ mới",
     "loading": "Đang tải ảnh và revision…",
     "errors": {
       "notFoundTitle": "Không tìm thấy trang",

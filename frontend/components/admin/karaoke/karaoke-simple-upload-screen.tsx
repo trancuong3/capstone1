@@ -400,10 +400,13 @@ export function KaraokeSimpleUploadScreen({
       if (document.hidden) pauseAudioOnHide();
     }
     document.addEventListener("visibilitychange", onVisibilityChange);
-    window.addEventListener("viread:android-background", pauseAudioOnHide);
+    document.addEventListener("viread:android-background", pauseAudioOnHide);
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
-      window.removeEventListener("viread:android-background", pauseAudioOnHide);
+      document.removeEventListener(
+        "viread:android-background",
+        pauseAudioOnHide,
+      );
     };
   }, []);
 
@@ -1564,7 +1567,6 @@ export function KaraokeSimpleUploadScreen({
                 </div>
               </div>
               {preview?.cover_url ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={preview.cover_url}
                   alt={t("karaoke.simpleUpload.coverAlt", { title })}
@@ -2030,7 +2032,8 @@ export function KaraokeSimpleUploadScreen({
               <Button
                 disabled={!canPublish}
                 isLoading={publishing}
-                className="min-h-11 sm:w-auto"
+                size="compact"
+                className="sm:w-auto"
                 onClick={() => void handleSimplePublish()}
               >
                 {t("karaoke.simpleUpload.publishBtn")}
@@ -2038,6 +2041,7 @@ export function KaraokeSimpleUploadScreen({
               {onSwitchAdvanced ? (
                 <Button
                   variant="secondary"
+                  size="compact"
                   className="sm:w-auto"
                   onClick={() => onSwitchAdvanced(imported.song_id)}
                 >
@@ -2047,6 +2051,7 @@ export function KaraokeSimpleUploadScreen({
                 <ButtonLink
                   href={`/admin/karaoke/${imported.song_id}/edit?mode=advanced`}
                   variant="secondary"
+                  size="compact"
                   className="sm:w-auto"
                 >
                   {t("karaoke.simpleUpload.openAdvancedEditorBtn")}

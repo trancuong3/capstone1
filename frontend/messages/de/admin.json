@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "Der Text konnte nach dem Löschen des Wortes nicht synchronisiert werden. Überprüfen Sie den Inhalt und die Wortliste vor dem Speichern.",
       "wordAddSyncError": "Text konnte nach dem Hinzufügen eines Wortes nicht synchronisiert werden. Bitte Inhalt und Wortliste vor dem Speichern prüfen."
     },
-    "newWordPlaceholder": "Wort",
+    "newWordPlaceholder": "Neues Wort",
     "loading": "Bild und Revision werden geladen...",
     "errors": {
       "notFoundTitle": "Seite nicht gefunden",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "Der OCR-Auftrag wurde nicht abgeschlossen. Prüfen Sie den Windows-OCR-Server und versuchen Sie es erneut.",
-    "ocrTaskQueuedWindows": "Seite in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
+    "ocrTaskQueuedWindows": "Das Seitenbild wartet in der Warteschlange auf den Windows-OCR-Server. Aktualisieren Sie die Seite nach Abschluss.",
     "skippedEmptyNote": "{count} leere Seiten übersprungen",
     "failedPagesNote": "{count} fehlerhafte Seiten",
     "createdPagesSummary": "{count} Seiten erstellt · Prüfung ausstehend{suffix}",
-    "queuedDocPagesForWorker": "{count} Seiten in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
+    "queuedDocPagesForWorker": "{count} Seiten für den Windows-OCR-Server in die Warteschlange gestellt",
     "docPagesPartialProgress": "{completed}/{total} Seiten fertig ({pending} Seiten weiter in OCR-Warteschlange)",
     "docPagesComplete": "OCR für {completed}/{total} Seiten fertig · Prüfung ausstehend",
     "singlePageQueued": "Für den Windows-OCR-Server in die Warteschlange gestellt",
     "singlePageRecognizing": "Buchseite wird per OCR erkannt…",
     "singlePageFailed": "Der OCR-Auftrag für die Seite wurde nicht abgeschlossen. Bitte erneut versuchen.",
     "singlePageSucceeded": "OCR erkannt · Prüfung ausstehend",
-    "singlePageWaitingWorker": "1 Seite in der OCR-Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart",
+    "singlePageWaitingWorker": "Sicher in der Warteschlange für den Abschluss durch den Windows-OCR-Server",
     "uploadFailedCheckBackend": "Hochladen fehlgeschlagen. Prüfen Sie das Backend und versuchen Sie es erneut.",
     "reloadAfterUploadFailed": "Seitenliste konnte nach dem Hochladen nicht neu geladen werden. Daten wurden möglicherweise gespeichert; bitte neu laden.",
     "reprocessIncomplete": "Die erneute OCR-Verarbeitung der Seite wurde nicht abgeschlossen. Bitte erneut versuchen.",
-    "reprocessQueuedWindows": "Erneute OCR-Anfrage in der Warteschlange gespeichert — Automatische Verarbeitung nach Server-Neustart"
+    "reprocessQueuedWindows": "Die Seite wartet auf erneute Verarbeitung durch den Windows-OCR-Server. Bitte danach aktualisieren."
   },
   "qualityHub": {
     "description": "Katalog-Metadaten prüfen, Elternmeldungen bearbeiten, Buchsicherheit freigeben und private Benutzerbücher zentral moderieren.",

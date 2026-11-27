@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "Impossible de synchroniser le texte après la suppression d'un mot. Vérifiez le contenu et la liste de mots avant d'enregistrer.",
       "wordAddSyncError": "Impossible de synchroniser le texte après l'ajout d'un mot. Vérifiez le contenu et la liste de mots avant d'enregistrer."
     },
-    "newWordPlaceholder": "Mot",
+    "newWordPlaceholder": "Nouveau mot",
     "loading": "Chargement de l'image et de la révision…",
     "errors": {
       "notFoundTitle": "Page introuvable",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "La tâche OCR n'est pas terminée. Vérifiez le serveur OCR Windows puis réessayez.",
-    "ocrTaskQueuedWindows": "Page enregistrée dans la file OCR — Traitement automatique dès le retour du serveur",
+    "ocrTaskQueuedWindows": "L'image de la page est en file d'attente pour le serveur OCR Windows. Actualisez après la fin du traitement.",
     "skippedEmptyNote": "{count} pages blanches ignorées",
     "failedPagesNote": "{count} pages en erreur",
     "createdPagesSummary": "{count} pages créées · À valider{suffix}",
-    "queuedDocPagesForWorker": "{count} pages enregistrées dans la file OCR — Traitement automatique dès le retour du serveur",
+    "queuedDocPagesForWorker": "{count} pages mises en file d'attente du serveur OCR Windows",
     "docPagesPartialProgress": "{completed}/{total} pages terminées ({pending} pages encore en file OCR)",
     "docPagesComplete": "OCR terminé pour {completed}/{total} pages · À valider",
     "singlePageQueued": "Mis en file d'attente pour le serveur OCR Windows",
     "singlePageRecognizing": "Reconnaissance OCR de la page en cours…",
     "singlePageFailed": "La tâche OCR de la page n'a pas abouti. Veuillez réessayer.",
     "singlePageSucceeded": "OCR reconnu · À valider",
-    "singlePageWaitingWorker": "1 page enregistrée dans la file OCR — Traitement automatique dès le retour du serveur",
+    "singlePageWaitingWorker": "Mis en file d'attente en toute sécurité pour le serveur OCR Windows",
     "uploadFailedCheckBackend": "Échec du téléversement. Vérifiez le Backend puis réessayez.",
     "reloadAfterUploadFailed": "Impossible de recharger la liste des pages après l'envoi. Les données ont peut-être été enregistrées ; actualisez pour vérifier.",
     "reprocessIncomplete": "La réanalyse OCR de la page ne s'est pas terminée. Veuillez réessayer.",
-    "reprocessQueuedWindows": "Demande de relance OCR enregistrée dans la file — Traitement automatique dès le retour du serveur"
+    "reprocessQueuedWindows": "La page est en file d'attente pour réanalyse par le serveur OCR Windows. Actualisez une fois terminé."
   },
   "qualityHub": {
     "description": "Vérifiez les métadonnées du catalogue, traitez les signalements parents, approuvez la sécurité des livres et modérez les livres utilisateurs dans un espace unifié.",

@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "単語削除後にテキストを同期できませんでした。保存前にコンテンツと単語リストを確認してください。",
       "wordAddSyncError": "単語の追加後にテキストを同期できませんでした。保存前に本文と単語リストを確認してください。"
     },
-    "newWordPlaceholder": "単語",
+    "newWordPlaceholder": "新しい単語",
     "loading": "画像とリビジョンを読み込み中…",
     "errors": {
       "notFoundTitle": "ページが見つかりません",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR タスクが完了していません。Windows OCR サーバーを確認して再試行してください。",
-    "ocrTaskQueuedWindows": "ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
+    "ocrTaskQueuedWindows": "ページ画像は Windows OCR サーバーの処理キューに追加されました。OCR サーバー完了後に再読み込みしてください。",
     "skippedEmptyNote": "空白ページ {count} 件をスキップ",
     "failedPagesNote": "{count} ページでエラー",
     "createdPagesSummary": "{count} ページを作成 · 承認待ち{suffix}",
-    "queuedDocPagesForWorker": "{count}ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
+    "queuedDocPagesForWorker": "Windows OCR サーバー起動待ちとして {count} ページをキューに追加",
     "docPagesPartialProgress": "{completed}/{total} ページ完了（残り {pending} ページは OCR キュー処理中）",
     "docPagesComplete": "OCR {completed}/{total} ページ完了 · 承認待ち",
     "singlePageQueued": "Windows OCR サーバー処理のキューに追加されました",
     "singlePageRecognizing": "ページを OCR 認識中…",
     "singlePageFailed": "ページの OCR タスクを完了できませんでした。もう一度お試しください。",
     "singlePageSucceeded": "OCR 認識完了 · 承認待ち",
-    "singlePageWaitingWorker": "1ページをOCR待機キューに保存しました — OCRサーバー復旧後に自動処理されます",
+    "singlePageWaitingWorker": "安全にキュー登録されました。Windows OCR サーバー完了を待機中です",
     "uploadFailedCheckBackend": "アップロードに失敗しました。Backend を確認して再試行してください。",
     "reloadAfterUploadFailed": "アップロード後にページ一覧を再読み込みできませんでした。データは保存済みの可能性があるため、再読み込みして確認してください。",
     "reprocessIncomplete": "ページの OCR 再処理が完了しませんでした。もう一度お試しください。",
-    "reprocessQueuedWindows": "OCR再実行リクエストを待機キューに保存しました — OCRサーバー復旧後に自動処理されます"
+    "reprocessQueuedWindows": "ページは Windows OCR サーバーの再処理キューに追加されました。完了後に再読み込みしてください。"
   },
   "qualityHub": {
     "description": "カタログのメタデータ確認、保護者報告の処理、書籍の安全性承認、ユーザー投稿本の審査を1つの画面で管理します。",

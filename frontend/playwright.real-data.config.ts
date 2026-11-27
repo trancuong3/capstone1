@@ -6,6 +6,8 @@ import { createPlaywrightAuthFixtureHeaders } from "./lib/auth/playwright-auth-f
 const fixtureToken =
   process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN ?? randomBytes(32).toString("hex");
 process.env.PLAYWRIGHT_AUTH_FIXTURE_TOKEN = fixtureToken;
+const playwrightPort = process.env.PLAYWRIGHT_PORT ?? "3106";
+const playwrightOrigin = `http://127.0.0.1:${playwrightPort}`;
 
 export default defineConfig({
   testDir: "./test/browser",
@@ -22,7 +24,7 @@ export default defineConfig({
     ["json", { outputFile: "test-results/real-data-summary.json" }],
   ],
   use: {
-    baseURL: "http://127.0.0.1:3106",
+    baseURL: playwrightOrigin,
     extraHTTPHeaders: createPlaywrightAuthFixtureHeaders(
       "parent",
       fixtureToken,
@@ -32,9 +34,8 @@ export default defineConfig({
     trace: "off",
   },
   webServer: {
-    command:
-      "npm run dev -- --webpack --disable-source-maps --hostname 127.0.0.1 --port 3106",
-    url: "http://127.0.0.1:3106",
+    command: `npm run dev -- --webpack --disable-source-maps --hostname 127.0.0.1 --port ${playwrightPort}`,
+    url: playwrightOrigin,
     reuseExistingServer: false,
     timeout: 120_000,
     env: {
@@ -43,6 +44,7 @@ export default defineConfig({
       NEXT_PUBLIC_API_URL: "http://127.0.0.1:8000",
       PLAYWRIGHT_AUTH_FIXTURES: "1",
       PLAYWRIGHT_AUTH_FIXTURE_TOKEN: fixtureToken,
+      PLAYWRIGHT_PORT: playwrightPort,
       NEXT_DIST_DIR: ".next-e2e",
     },
   },

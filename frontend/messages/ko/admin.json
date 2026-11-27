@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "단어 삭제 후 텍스트를 동기화할 수 없습니다. 저장하기 전에 콘텐츠와 단어 목록을 확인하세요.",
       "wordAddSyncError": "단어를 추가한 후 텍스트를 동기화할 수 없습니다. 저장 전에 본문과 단어 목록을 확인하세요."
     },
-    "newWordPlaceholder": "단어",
+    "newWordPlaceholder": "새 단어",
     "loading": "이미지 및 리비전 불러오는 중…",
     "errors": {
       "notFoundTitle": "페이지를 찾을 수 없습니다",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR 작업이 완료되지 않았습니다. Windows OCR 서버를 확인한 뒤 다시 시도하세요.",
-    "ocrTaskQueuedWindows": "페이지를 OCR 대기열에 저장했습니다 — OCR 서버가 다시 켜지면 자동 처리됩니다",
+    "ocrTaskQueuedWindows": "페이지 이미지가 Windows OCR 서버 처리 대기열에 등록되었습니다. OCR 서버가 완료된 후 새로고침하세요.",
     "skippedEmptyNote": "빈 페이지 {count}쪽 건너뜀",
     "failedPagesNote": "{count}쪽 오류",
     "createdPagesSummary": "{count}쪽 생성 완료 · 승인 대기{suffix}",
-    "queuedDocPagesForWorker": "{count}페이지를 OCR 대기열에 저장했습니다 — OCR 서버가 다시 켜지면 자동 처리됩니다",
+    "queuedDocPagesForWorker": "Windows OCR 서버 활성화를 기다리며 {count}쪽을 대기열에 추가함",
     "docPagesPartialProgress": "{completed}/{total}쪽 완료 ({pending}쪽은 OCR 대기열 진행 중)",
     "docPagesComplete": "OCR {completed}/{total}쪽 완료 · 승인 대기",
     "singlePageQueued": "Windows OCR 서버 처리 대기열에 등록됨",
     "singlePageRecognizing": "책 페이지 OCR 인식 중…",
     "singlePageFailed": "책 페이지 OCR 작업이 완료되지 않았습니다. 다시 시도해 주세요.",
     "singlePageSucceeded": "OCR 인식 완료 · 승인 대기",
-    "singlePageWaitingWorker": "1페이지를 OCR 대기열에 저장했습니다 — OCR 서버가 다시 켜지면 자동 처리됩니다",
+    "singlePageWaitingWorker": "안전하게 대기열에 등록되었으며 Windows OCR 서버 완료를 기다리는 중입니다",
     "uploadFailedCheckBackend": "업로드에 실패했습니다. Backend 상태를 확인하고 다시 시도하세요.",
     "reloadAfterUploadFailed": "업로드 후 페이지 목록을 다시 불러올 수 없습니다. 데이터가 저장되었을 수 있으니 새로고침해 확인하세요.",
     "reprocessIncomplete": "페이지 OCR 재처리 작업이 완료되지 않았습니다. 다시 시도해 주세요.",
-    "reprocessQueuedWindows": "OCR 재실행 요청을 대기열에 저장했습니다 — OCR 서버가 다시 켜지면 자동 처리됩니다"
+    "reprocessQueuedWindows": "페이지가 Windows OCR 서버 재처리 대기열에 추가되었습니다. 완료 후 새로고침하세요."
   },
   "qualityHub": {
     "description": "카탈로그 메타데이터 점검, 학부모 신고 처리, 도서 안전성 승인 및 사용자 도서 검수를 한 화면에서 관리합니다.",

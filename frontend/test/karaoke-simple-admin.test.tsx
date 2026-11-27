@@ -738,6 +738,44 @@ describe("Admin Karaoke Simple Mode workflow", () => {
     fireEvent.click(retryBtn);
     await screen.findByText(/Worker xử lý nền hiện đang ngoại tuyến/);
   });
+
+  it("pauses preview audio when document receives viread:android-background", async () => {
+    const { service } = makeWizardFixture();
+    service.preview.mockResolvedValue(previewDetail());
+    const simpleService = makeMockSimpleService();
+
+    const { container } = render(
+      <KaraokeServicesProvider service={service}>
+        <KaraokeSimpleUploadScreen
+          simpleService={simpleService}
+          classifier={vi.fn().mockResolvedValue(vocalClassification)}
+        />
+      </KaraokeServicesProvider>,
+    );
+
+    const mp3File = new File(["synthetic-mp3"], "Chau_Len_Ba.mp3", {
+      type: "audio/mpeg",
+    });
+    fireEvent.change(screen.getByLabelText("Chọn file nhạc MP3"), {
+      target: { files: [mp3File] },
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("audio-type-badge")).toHaveTextContent(
+        "Có giọng hát (Vocal)",
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Tự động tạo karaoke" }),
+    );
+    await screen.findByText(/Bước 2 — Kiểm tra nhanh/);
+
+    const audio = container.querySelector("audio") as HTMLAudioElement | null;
+    expect(audio).not.toBeNull();
+    const pauseSpy = vi.spyOn(audio!, "pause").mockImplementation(() => {});
+
+    document.dispatchEvent(new Event("viread:android-background"));
+    expect(pauseSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("SyllableTimingEditor paused rAF performance fix", () => {

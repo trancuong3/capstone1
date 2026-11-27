@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "לא ניתן לסנכרן טקסט לאחר מחיקת מילה. בדוק את התוכן ורשימת המילים לפני שמירה.",
       "wordAddSyncError": "לא ניתן לסנכרן את הטקסט לאחר הוספת מילה. יש לבדוק את התוכן ואת רשימת המילים לפני השמירה."
     },
-    "newWordPlaceholder": "מילה",
+    "newWordPlaceholder": "מילה חדשה",
     "loading": "טוען תמונה ומבנה…",
     "errors": {
       "notFoundTitle": "הדף לא נמצא",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "משימת ה-OCR לא הושלמה. יש לבדוק את שרת ה-OCR ב-Windows ולנסות שוב.",
-    "ocrTaskQueuedWindows": "העמוד נשמר בתור ה-OCR — יעובד אוטומטית כשהשרת יחזור",
+    "ocrTaskQueuedWindows": "תמונת העמוד נכנסה לתור עבור שרת ה-OCR ב-Windows. ניתן לרענן לאחר השלמת העיבוד.",
     "skippedEmptyNote": "דולגו {count} עמודים ריקים",
     "failedPagesNote": "שגיאה ב-{count} עמודים",
     "createdPagesSummary": "נוצרו {count} עמודים · ממתין לאישור{suffix}",
-    "queuedDocPagesForWorker": "נשמרו {count} עמודים בתור ה-OCR — יעובדו אוטומטית כשהשרת יחזור",
+    "queuedDocPagesForWorker": "{count} עמודים נוספו לתור בהמתנה להפעלת שרת ה-OCR ב-Windows",
     "docPagesPartialProgress": "הושלמו {completed}/{total} עמודים ({pending} עמודים עדיין בתור ה-OCR)",
     "docPagesComplete": "הושלם OCR עבור {completed}/{total} עמודים · ממתין לאישור",
     "singlePageQueued": "נוסף לתור בהמתנה לעיבוד בשרת ה-OCR ב-Windows",
     "singlePageRecognizing": "מבצע זיהוי OCR לעמוד הספר…",
     "singlePageFailed": "משימת ה-OCR של עמוד הספר לא הושלמה. אנא נסו שוב.",
     "singlePageSucceeded": "זוהה ב-OCR · ממתין לאישור",
-    "singlePageWaitingWorker": "נשמר עמוד אחד בתור ה-OCR — יעובד אוטומטית כשהשרת יחזור",
+    "singlePageWaitingWorker": "נשמר בתור בבטחה בהמתנה להשלמה בשרת ה-OCR ב-Windows",
     "uploadFailedCheckBackend": "ההעלאה נכשלה. יש לבדוק את ה-Backend ולנסות שוב.",
     "reloadAfterUploadFailed": "לא ניתן לטעון מחדש את רשימת העמודים לאחר ההעלאה. ייתכן שהנתונים נשמרו; יש לרענן לאימות.",
     "reprocessIncomplete": "משימת העיבוד החוזר של OCR לעמוד לא הושלמה. אנא נסו שוב.",
-    "reprocessQueuedWindows": "בקשת ה-OCR החוזר נשמרה בתור — תעובד אוטומטית כשהשרת יחזור"
+    "reprocessQueuedWindows": "העמוד נכנס לתור לעיבוד חוזר בשרת ה-OCR ב-Windows. יש לרענן לאחר ההשלמה."
   },
   "qualityHub": {
     "description": "בדיקת מטא-נתוני קטלוג, טיפול בדיווחי הורים, אישור בטיחות ספרים ופיקוח על ספרים פרטיים של הורים במרכז אחד.",

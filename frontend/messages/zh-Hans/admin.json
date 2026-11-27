@@ -1447,7 +1447,7 @@
       "wordDeleteSyncError": "删除单词后无法同步文本。请在保存前检查内容和单词列表。",
       "wordAddSyncError": "添加词语后无法同步文本。请在保存前检查内容与词语列表。"
     },
-    "newWordPlaceholder": "词",
+    "newWordPlaceholder": "新单词",
     "loading": "正在加载图片和修订版本…",
     "errors": {
       "notFoundTitle": "页面未找到",
@@ -2845,22 +2845,22 @@
   },
   "pageUploadRuntime": {
     "ocrTaskIncomplete": "OCR 任务尚未完成。请检查 Windows OCR 服务器后重试。",
-    "ocrTaskQueuedWindows": "已将该页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
+    "ocrTaskQueuedWindows": "页面图像已加入队列等待 Windows OCR 服务器处理。OCR 服务器完成后可刷新页面查看。",
     "skippedEmptyNote": "跳过 {count} 页空白页",
     "failedPagesNote": "{count} 页出错",
     "createdPagesSummary": "已创建 {count} 页 · 待审核{suffix}",
-    "queuedDocPagesForWorker": "已将 {count} 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
+    "queuedDocPagesForWorker": "已将 {count} 页加入队列，等待 Windows OCR 服务器启动",
     "docPagesPartialProgress": "已完成 {completed}/{total} 页（另有 {pending} 页正在继续排队进行 OCR）",
     "docPagesComplete": "已完成 {completed}/{total} 页 OCR · 待审核",
     "singlePageQueued": "已加入队列等待 Windows OCR 服务器处理",
     "singlePageRecognizing": "正在对书页执行 OCR 识别…",
     "singlePageFailed": "书页 OCR 任务尚未完成，请重试。",
     "singlePageSucceeded": "已完成 OCR 识别 · 待审核",
-    "singlePageWaitingWorker": "已将 1 页保存到 OCR 队列 — OCR 服务器重新上线后将自动处理",
+    "singlePageWaitingWorker": "已安全排队，等待 Windows OCR 服务器处理完成",
     "uploadFailedCheckBackend": "上传失败。请检查 Backend 后重试。",
     "reloadAfterUploadFailed": "上传后无法重新加载页面列表。数据可能已保存；请刷新页面确认。",
     "reprocessIncomplete": "重新执行页面 OCR 的任务尚未完成，请重试。",
-    "reprocessQueuedWindows": "已将重新 OCR 请求保存到队列 — OCR 服务器重新上线后将自动处理"
+    "reprocessQueuedWindows": "页面已加入队列等待 Windows OCR 服务器重新处理。完成后请刷新查看。"
   },
   "qualityHub": {
     "description": "在统一界面中检查目录元数据、处理家长举报、审批图书安全并审核用户私有图书。",

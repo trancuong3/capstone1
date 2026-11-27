@@ -10,6 +10,8 @@ from pathlib import Path
 
 from verify_apk_quality import (
     REQUIRED_ICON_DENSITIES,
+    _build_subprocess_command,
+    _default_runner,
     inspect_apk_zip_contents,
     verify_apk,
     verify_badging_output,
@@ -142,6 +144,53 @@ class VerifyApkQualityTests(unittest.TestCase):
             _write_synthetic_apk(missing_icons_apk, include_icons=False)
             with self.assertRaisesRegex(ValueError, "launcher PNGs"):
                 inspect_apk_zip_contents(missing_icons_apk)
+
+    def test_windows_batch_tools_run_via_cmd_exe(self) -> None:
+        from unittest.mock import patch
+
+        self.assertEqual(
+            _build_subprocess_command(
+                [r"F:\tools\apksigner.bat", "verify", "app.apk"],
+                is_windows=True,
+            ),
+            ["cmd.exe", "/c", r"F:\tools\apksigner.bat", "verify", "app.apk"],
+        )
+        self.assertEqual(
+            _build_subprocess_command(
+                [r"C:\SDK\tool.CMD", "--flag"],
+                is_windows=True,
+            ),
+            ["cmd.exe", "/c", r"C:\SDK\tool.CMD", "--flag"],
+        )
+        self.assertEqual(
+            _build_subprocess_command(
+                [r"F:\tools\aapt2.exe", "dump", "badging", "app.apk"],
+                is_windows=True,
+            ),
+            [r"F:\tools\aapt2.exe", "dump", "badging", "app.apk"],
+        )
+        self.assertEqual(
+            _build_subprocess_command(
+                ["/usr/bin/apksigner.bat", "verify", "app.apk"],
+                is_windows=False,
+            ),
+            ["/usr/bin/apksigner.bat", "verify", "app.apk"],
+        )
+
+        with (
+            patch("verify_apk_quality.os.name", "nt"),
+            patch("verify_apk_quality.subprocess.run") as mock_run,
+        ):
+            mock_run.return_value.returncode = 0
+            mock_run.return_value.stdout = "Verified"
+            mock_run.return_value.stderr = ""
+            rc, out, _ = _default_runner([r"F:\sdk\apksigner.bat", "verify", "app.apk"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, "Verified")
+        self.assertEqual(
+            mock_run.call_args.args[0],
+            ["cmd.exe", "/c", r"F:\sdk\apksigner.bat", "verify", "app.apk"],
+        )
 
 
 if __name__ == "__main__":

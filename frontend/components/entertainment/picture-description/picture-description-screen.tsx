@@ -473,12 +473,18 @@ export function PictureDescriptionScreen() {
 
   const abortActiveVoiceCapture = useCallback(
     (options?: { preserveDraft?: boolean }) => {
+      sessionEpochRef.current += 1;
       micArmTokenRef.current += 1;
       clearMicCooldown();
       const wasActive =
-        isRecordingVoiceRef.current || browserRecognitionRef.current !== null;
+        isRecordingVoiceRef.current ||
+        browserRecognitionRef.current !== null ||
+        sttControllerRef.current !== null;
       isRecordingVoiceRef.current = false;
       setIsRecordingVoice(false);
+      setIsTranscribing(false);
+      sttControllerRef.current?.abort();
+      sttControllerRef.current = null;
 
       const pendingLive = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveTranscriptRef.current,
@@ -489,6 +495,7 @@ export function PictureDescriptionScreen() {
         // Ignore browser recognition abort errors.
       }
       browserRecognitionRef.current = null;
+      collectorRef.current.reset();
       if (wasActive) {
         unmountActionsRef.current.cancelRecorder();
       }
@@ -580,7 +587,7 @@ export function PictureDescriptionScreen() {
       try {
         browserRecognitionRef.current?.abort();
       } catch {
-        // Ignore cleanup abort errors.
+        // Ignore browser recognition abort errors on unmount.
       }
       browserRecognitionRef.current = null;
       unmountActionsRef.current.stopSpeech();
@@ -692,29 +699,10 @@ export function PictureDescriptionScreen() {
     ],
   );
 
-  const stopVoiceCaptureAndStt = useCallback(() => {
-    sessionEpochRef.current += 1;
-    isRecordingVoiceRef.current = false;
-    sttControllerRef.current?.abort();
-    sttControllerRef.current = null;
-    try {
-      browserRecognitionRef.current?.abort();
-    } catch {
-      // Ignore browser recognition abort errors.
-    }
-    browserRecognitionRef.current = null;
-    collectorRef.current.reset();
-    recorder.cancel();
-    setIsRecordingVoice(false);
-    setIsTranscribing(false);
-    setLiveTranscript("");
-  }, [recorder]);
-
   const openSession = useCallback(
     (loaded: PictureSessionDTO, initialTab: PracticeTab = "PRACTICE") => {
       stopSpeechPlayback();
       abortActiveVoiceCapture({ preserveDraft: false });
-      stopVoiceCaptureAndStt();
       sessionIdRef.current = loaded.session_id;
       const newestAttempt = loaded.attempts[0] ?? null;
       const initialMode =
@@ -743,7 +731,7 @@ export function PictureDescriptionScreen() {
       setVoiceMessage(null);
       lastSuccessfulSubmitRef.current = null;
     },
-    [abortActiveVoiceCapture, stopSpeechPlayback, stopVoiceCaptureAndStt],
+    [abortActiveVoiceCapture, stopSpeechPlayback],
   );
 
   const handleResumeSession = async (
@@ -1007,8 +995,8 @@ export function PictureDescriptionScreen() {
             Boolean(window.speechSynthesis.speaking);
           if (
             !mountedRef.current ||
-            !isRecordingVoiceRef.current ||
             sessionEpochRef.current !== captureEpoch ||
+            !isRecordingVoiceRef.current ||
             isTtsPlayingRef.current ||
             synthesisSpeaking
           ) {
@@ -1023,8 +1011,8 @@ export function PictureDescriptionScreen() {
           collectorRef.current.completeRecognitionCycle();
           if (
             mountedRef.current &&
-            isRecordingVoiceRef.current &&
             sessionEpochRef.current === captureEpoch &&
+            isRecordingVoiceRef.current &&
             !isTtsPlayingRef.current &&
             !recognitionFailed &&
             browserRecognitionRef.current === recognition
@@ -1356,7 +1344,6 @@ export function PictureDescriptionScreen() {
               onClick={() => {
                 stopSpeechPlayback();
                 abortActiveVoiceCapture({ preserveDraft: false });
-                stopVoiceCaptureAndStt();
                 sessionIdRef.current = null;
                 setShowHints(false);
                 setShowSampleSentences(false);
