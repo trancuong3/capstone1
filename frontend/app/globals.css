@@ -21,6 +21,7 @@
   --ra-color-warning-surface: #fff3c4;
   --ra-color-desk: #e5f5f6;
   --ra-color-highlight: #ffdb70;
+  --ra-color-surface-subtle: #f4f7f6;
   --ra-gap-4: 4px;
   --ra-gap-8: 8px;
   --ra-gap-12: 12px;
@@ -68,7 +69,7 @@
   --color-warning-surface: var(--ra-color-warning-surface);
   --color-desk: var(--ra-color-desk);
   --color-highlight: var(--ra-color-highlight);
-  --color-surface-subtle: #f3f7f5;
+  --color-surface-subtle: var(--ra-color-surface-subtle);
   --color-admin-canvas: #f7f9f8;
   --color-admin-border: #dbe6e1;
   --color-admin-sidebar: #eef7f3;
@@ -545,8 +546,8 @@
   }
   .reading-shell > section > header a,
   .reading-shell > section > header button {
-    height: 40px;
-    min-height: 40px;
+    height: 44px;
+    min-height: 44px;
     padding-top: 2px;
     padding-bottom: 2px;
   }
@@ -559,8 +560,8 @@
     gap: 6px;
   }
   [data-reading-topbar="true"] button {
-    height: 40px !important;
-    min-height: 40px !important;
+    height: 44px !important;
+    min-height: 44px !important;
     padding-top: 2px !important;
     padding-bottom: 2px !important;
   }

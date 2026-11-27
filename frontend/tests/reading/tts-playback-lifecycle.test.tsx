@@ -1061,8 +1061,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
         forceUpdate: true,
       });
       setVoicePolicyPreferences({
-        providerMode: "local_with_google_fallback",
-        allowGoogleTtsFallback: true,
+        providerMode: "local_only",
+        allowGoogleTtsFallback: false,
       });
       const plan = buildPhonicsLesson("mốt");
       expect(plan.supported).toBe(true);
@@ -1119,8 +1119,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
         forceUpdate: true,
       });
       setVoicePolicyPreferences({
-        providerMode: "local_with_google_fallback",
-        allowGoogleTtsFallback: true,
+        providerMode: "local_only",
+        allowGoogleTtsFallback: false,
       });
       const plan = buildPhonicsLesson("mốt");
       expect(plan.supported).toBe(true);

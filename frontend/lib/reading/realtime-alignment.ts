@@ -674,8 +674,13 @@ export class RealtimeAlignmentEngine {
   }
 
   /** Two consecutive spoken words found together further ahead (line jump). */
-  private findReanchor(cursor: number, first: string, second: string): number {
-    const last = Math.min(cursor + REANCHOR_WINDOW, this.bookWords.length - 2);
+  private findReanchor(
+    cursor: number,
+    first: string,
+    second: string,
+    maxWindow = REANCHOR_WINDOW,
+  ): number {
+    const last = Math.min(cursor + maxWindow, this.bookWords.length - 2);
     for (let index = cursor + 1; index <= last; index += 1) {
       if (
         this.bookWords[index].normalizedText === first &&
@@ -869,9 +874,15 @@ export class RealtimeAlignmentEngine {
         continue;
       }
 
-      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch >= 4 từ (đồng bộ với addFinalTranscript -> findReanchor).
+      // 3b. Khôi phục con trỏ khi bé nhảy dòng / lệch 4–8 từ với bằng chứng 2 từ liên tiếp
+      // (giới hạn cửa sổ ở interim để tránh nhảy cóc 18–30 từ cuối trang trước khi chốt final).
       if (tokenIndex + 1 < tokens.length) {
-        const anchor = this.findReanchor(cursor, token, tokens[tokenIndex + 1]);
+        const anchor = this.findReanchor(
+          cursor,
+          token,
+          tokens[tokenIndex + 1],
+          8,
+        );
         if (anchor !== -1) {
           for (let index = cursor; index < anchor; index += 1) {
             const existing = statusByWordId.get(this.bookWords[index].wordId);
@@ -1326,7 +1337,15 @@ export class RealtimeAlignmentEngine {
     }
 
     const ahead = this.findAhead(pending.token);
-    if (ahead !== -1) {
+    if (
+      ahead !== -1 &&
+      !shouldDeferLookaheadMatch(
+        pending.token,
+        this.currentBookIndex,
+        ahead,
+        this.bookWords.length,
+      )
+    ) {
       for (let index = this.currentBookIndex; index < ahead; index += 1) {
         this.setWordStatus(index, "DELETE");
       }

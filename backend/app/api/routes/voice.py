@@ -270,6 +270,9 @@ async def voice_status(
     return await get_voice_orchestrator().get_status()
 
 
+def _wants_voice_lock_update(request: Request) -> bool:
+    return (request.headers.get("x-voice-lock-update") or "").strip() == "1"
+
 @router.put("/session-lock", response_model=SessionVoiceLockRead)
 async def update_session_voice_lock(
     payload: SessionVoiceLockUpdateRequest,
@@ -319,6 +322,7 @@ async def text_to_speech(
         book_id=payload.book_id,
         page_revision_id=payload.page_revision_id,
         cache_scope=payload.cache_scope,
+        allow_voice_switch=_wants_voice_lock_update(request),
     )
     orchestrator = get_voice_orchestrator()
     synth_kwargs: dict[str, Any] = {
@@ -392,6 +396,7 @@ async def phonics_text_to_speech(
         book_id=payload.book_id,
         page_revision_id=payload.page_revision_id,
         cache_scope=payload.cache_scope,
+        allow_voice_switch=_wants_voice_lock_update(request),
     )
     orchestrator = get_voice_orchestrator()
     phonics_kwargs: dict[str, Any] = {
@@ -739,6 +744,22 @@ async def speech_to_text_stream(websocket: WebSocket) -> None:
         return
 
     orchestrator = get_voice_orchestrator()
+    is_configured_fn = getattr(orchestrator.local, "is_configured", None)
+    if callable(is_configured_fn) and not is_configured_fn():
+        try:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "code": "LOCAL_VOICE_UNCONFIGURED",
+                    "message": "Local voice worker URL is not configured.",
+                    "retryable": False,
+                }
+            )
+            await websocket.close(code=1013)
+        except Exception:
+            pass
+        return
+
     worker_ws_url = orchestrator.local.get_ws_stt_url()
     worker_headers = orchestrator.local.get_ws_auth_headers()
     max_session_s = _ws_max_session_seconds()

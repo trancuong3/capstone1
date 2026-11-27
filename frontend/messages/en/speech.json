@@ -80,6 +80,11 @@
       "british": "British accent"
     },
     "googleProviderLabel": "Google fallback",
+    "wifiReadyBadge": "Ready Offline",
+    "offlineCacheMultiple": "Local voice worker is offline. Standalone Wi-Fi mode has pre-generated audio ready for: {voices}; other voices require starting the local worker or enabling fallback below.",
+    "offlineCacheSingle": "Local voice worker is offline. Standalone Wi-Fi mode has pre-generated audio ready for {voice}; to preview other regional voices live, start the local worker or enable fallback below.",
+    "offlineCacheEmpty": "Local voice worker is offline and no pre-generated audio is cached on device. Start the local worker or enable fallback below to play sample voices.",
+    "localWorkerLabel": "Local Worker:",
     "sessionLockedBadge": "Locked for this reading session",
     "offlineBrowserBadge": "Browser is offline"
   },

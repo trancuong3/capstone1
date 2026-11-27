@@ -370,7 +370,8 @@
     "finish": "Completed",
     "nextQuestion": "Next question",
     "chosenCorrectFeedback": "You chose {label}. {hint}",
-    "chosenWrongFeedback": "You chose {label}. That's not quite right. Let's recall the details from the reading and try again!"
+    "chosenWrongFeedback": "You chose {label}. That's not quite right. Let's recall the details from the reading and try again!",
+    "skipToReport": "Skip and view results"
   },
   "automation": {
     "sectionTitle": "Automatic during reading",

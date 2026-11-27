@@ -147,6 +147,9 @@ async def timed_text_to_speech(
         book_id=payload.book_id,
         page_revision_id=payload.page_revision_id,
         cache_scope=payload.cache_scope,
+        allow_voice_switch=(
+            (request.headers.get("x-voice-lock-update") or "").strip() == "1"
+        ),
     )
     orchestrator = get_voice_orchestrator()
     timed_kwargs: dict[str, Any] = {

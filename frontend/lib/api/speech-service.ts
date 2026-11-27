@@ -14,6 +14,7 @@ import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
@@ -359,6 +360,9 @@ export function createSpeechService(): SpeechService {
               headers: {
                 Accept: getPreferredTtsAcceptHeader(options.audioFormat),
                 "Content-Type": "application/json",
+                ...(hasPendingSessionVoiceSwitch(sessionId)
+                  ? { "X-Voice-Lock-Update": "1" }
+                  : {}),
               },
               body: JSON.stringify({
                 text: normalizedText,
@@ -554,6 +558,9 @@ export function createSpeechService(): SpeechService {
                   ? `application/json, ${getPreferredTtsAcceptHeader(options.audioFormat)}`
                   : "application/json, audio/mpeg;q=0.9, audio/wav;q=0.8",
                 "Content-Type": "application/json",
+                ...(hasPendingSessionVoiceSwitch(sessionId)
+                  ? { "X-Voice-Lock-Update": "1" }
+                  : {}),
               },
               body: JSON.stringify({
                 steps: steps.map((s) => ({

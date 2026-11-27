@@ -120,10 +120,22 @@ async def _verify_optional_active_actor(
     return actor_uuid
 
 
+def _apply_optional_slice(items: list[Any], limit: int | None, offset: int) -> list[Any]:
+    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
+    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    if safe_offset == 0 and safe_limit is None:
+        return items
+    return items[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
+
+
 @router.get("/", response_model=List[PublicBookResponse])
-async def get_books(db: AsyncSession = Depends(get_db)):
+async def get_books(
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
     """Return eligible catalog books without exposing internal admin creator IDs."""
-    return await BookService(db).list_books()
+    return _apply_optional_slice(await BookService(db).list_books(), limit, offset)
 
 
 @router.post("/", response_model=BookResponse)
@@ -146,7 +158,10 @@ async def get_book_pages(
     from app.services.storage_service import create_signed_image_urls
 
     verified_actor_id = await _verify_optional_active_actor(request, db)
-    pages = await BookService(db).list_pages(book_id)
+    pages = await BookService(db).list_pages(
+        book_id,
+        is_authenticated=verified_actor_id is not None,
+    )
 
     # Snapshot scalar page fields and release the DB read transaction before Storage I/O.
     page_snapshots = [
@@ -227,6 +242,8 @@ async def get_parent_catalog(
     author: str | None = Query(default=None),
     grade: int | None = Query(default=None, ge=1, le=5),
     include_private: bool = Query(default=False),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
@@ -235,13 +252,14 @@ async def get_parent_catalog(
     if include_private:
         response.headers["Cache-Control"] = "private, no-store, max-age=0"
         response.headers["Vary"] = "Authorization"
-    return await service.list(
+    items = await service.list(
         search,
         author,
         grade,
         actor_id=actor_id,
         include_private=include_private,
     )
+    return _apply_optional_slice(items, limit, offset)
 
 
 @router.get("/catalog/{book_id}", response_model=CatalogBookResponse)
@@ -338,12 +356,15 @@ async def get_admin_catalog(
     search: str | None = None,
     lifecycle_status: Literal["ACTIVE", "RETIRED"] | None = None,
     verification_status: Literal["PROCESSING", "NEEDS_REVIEW", "VERIFIED"] | None = None,
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
-    return await service.list(search, lifecycle_status, verification_status)
+    items = await service.list(search, lifecycle_status, verification_status)
+    return _apply_optional_slice(items, limit, offset)
 
 
 @router.get("/admin/catalog/{book_id}", response_model=AdminCatalogBookDetailResponse)

@@ -19,6 +19,8 @@ export interface UseReadingAutoScrollOptions {
   readonly pageKey: string;
   /** Disable auto-scroll (e.g. read-only preview). Defaults to true. */
   readonly enabled?: boolean;
+  /** When true (speculative interim preview), avoid jumping backward upward. */
+  readonly isPreview?: boolean;
 }
 
 export interface UseReadingAutoScrollResult {
@@ -88,6 +90,7 @@ export function useReadingAutoScroll({
   activeWordId,
   pageKey,
   enabled = true,
+  isPreview = false,
 }: UseReadingAutoScrollOptions): UseReadingAutoScrollResult {
   const [isDetached, setIsDetached] = useState(false);
   const isDetachedRef = useRef(false);
@@ -145,6 +148,7 @@ export function useReadingAutoScroll({
       );
 
       if (Math.abs(nextTop - container.scrollTop) < 2) return;
+      if (isPreview && !forceInstant && nextTop < container.scrollTop) return;
 
       const instant = forceInstant || prefersReducedMotion();
       const startedAt = nowMs();
@@ -156,7 +160,7 @@ export function useReadingAutoScroll({
           : PROGRAMMATIC_SMOOTH_GUARD_MS);
       scrollContainerTo(container, nextTop, instant ? "instant" : "smooth");
     },
-    [containerRef],
+    [containerRef, isPreview],
   );
 
   const resumeAutoFollow = useCallback(() => {

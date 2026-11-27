@@ -33,7 +33,7 @@ MIGRATION = Path(__file__).resolve().parents[1] / "supabase/migrations/202611141
 _prepared = False
 
 
-def test_url():
+def _karaoke_test_url():
     url = make_url(TEST_URL)
     if (url.host != "127.0.0.1" or url.port != 55447 or url.username != "karaoke_test"
             or url.database != "karaoke_phase2_test"):
@@ -42,7 +42,7 @@ def test_url():
 
 
 async def connect():
-    url = test_url()
+    url = _karaoke_test_url()
     return await asyncpg.connect(host=url.host, port=url.port, user=url.username,
                                  password=url.password, database=url.database, timeout=10)
 
@@ -150,7 +150,7 @@ class TestStorage:
 @unittest.skipUnless(TEST_URL, "Set KARAOKE_TEST_DATABASE_URL to the dedicated disposable loopback database")
 class KaraokePostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        test_url()
+        _karaoke_test_url()
         await prepare_database()
         self.engine = create_async_engine(TEST_URL, poolclass=NullPool)
         self.addAsyncCleanup(self.engine.dispose)

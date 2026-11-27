@@ -342,4 +342,3 @@ async def persist_worker_heartbeat_with_factory(
         raise
     except Exception:
         return
-

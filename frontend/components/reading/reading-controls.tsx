@@ -8,6 +8,7 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
 
 interface ReadingControlsProps {
+  audioLevel?: number;
   pauseDisabled?: boolean;
   disabled?: boolean;
   isListening?: boolean;
@@ -27,12 +28,13 @@ const dockButtonClass =
   "min-w-0 flex-col gap-0.5 px-1.5 py-1.5 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
 
 export function ReadingControls({
+  audioLevel,
   pauseDisabled,
   disabled = false,
   isListening = false,
   isPlayingSample = false,
   onFinish,
-  onHelp,
+  onHelp: _onHelp,
   onPause,
   onReadSample,
   onToggleListening,
@@ -40,8 +42,11 @@ export function ReadingControls({
   onChoosePage,
   voiceSettings,
 }: ReadingControlsProps) {
+  void _onHelp;
   const t = useTranslations("reading");
   const finishDisabled = disabled;
+  const clampedAudioLevel = Math.min(1, Math.max(0, audioLevel ?? 0));
+  const micPulseScale = 1 + clampedAudioLevel * 0.4;
 
   return (
     <div className="mx-auto w-full max-w-[1104px]">
@@ -83,7 +88,7 @@ export function ReadingControls({
           }
           className={dockButtonClass}
           disabled={disabled}
-          onClick={onReadSample ?? onHelp}
+          onClick={onReadSample}
           size="compact"
           variant="secondary"
         >
@@ -117,13 +122,22 @@ export function ReadingControls({
           }
           className={cn(dockButtonClass, "font-extrabold")}
           disabled={disabled}
-          onClick={onToggleListening ?? onPause}
+          onClick={onToggleListening}
           size="compact"
           variant="primary"
         >
           {isListening ? (
-            <span className="relative flex size-5 shrink-0 items-center justify-center lg:size-6">
-              <span className="absolute size-2 rounded-full bg-red-300" />
+            <span className="relative flex size-6 shrink-0 items-center justify-center lg:size-7">
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 animate-ping rounded-full bg-rose-300/60"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-full bg-white/25 transition-transform duration-150"
+                style={{ transform: `scale(${micPulseScale})` }}
+              />
+              <span className="absolute -end-0.5 -top-0.5 size-2.5 rounded-full bg-rose-400 ring-2 ring-primary" />
               <Mic
                 aria-hidden="true"
                 className="relative size-5 text-white lg:size-6"

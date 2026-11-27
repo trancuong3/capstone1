@@ -236,12 +236,27 @@ public final class TrustedNavigation {
      * Returns {@code null} for all non-OAuth or non-loopback URLs.
      */
     public static String extractOAuthLoopbackNonce(String candidateUrl) {
+        return extractOAuthLoopbackNonce(candidateUrl, null);
+    }
+
+    public static String extractOAuthLoopbackNonce(String candidateUrl, String expectedSupabaseHost) {
         URI authUri = parse(candidateUrl);
         if (authUri == null
                 || !"https".equalsIgnoreCase(authUri.getScheme())
                 || authUri.getHost() == null
                 || authUri.getRawUserInfo() != null) {
             return null;
+        }
+        String normalizedAuthHost = authUri.getHost().toLowerCase(Locale.ROOT);
+        if (!normalizedAuthHost.endsWith(".supabase.co")
+                || normalizedAuthHost.length() <= ".supabase.co".length()) {
+            return null;
+        }
+        if (expectedSupabaseHost != null && !expectedSupabaseHost.trim().isEmpty()) {
+            String pinned = expectedSupabaseHost.trim().toLowerCase(Locale.ROOT);
+            if (!normalizedAuthHost.equals(pinned)) {
+                return null;
+            }
         }
         String authPath = authUri.getRawPath();
         if (authPath == null || !authPath.endsWith("/auth/v1/authorize")) {

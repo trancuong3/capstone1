@@ -1254,11 +1254,17 @@ export function AdminOcrReviewScreen({
     t,
   ]);
 
+  const activeWorkflowId = aiWorkflow?.workflow_id ?? null;
+  const activeWorkflowStatus = aiWorkflow?.status ?? null;
+  const activeWorkflowRevisionId = aiWorkflow?.page_revision_id ?? null;
+
   useEffect(() => {
     if (
-      !aiWorkflow ||
+      !activeWorkflowId ||
+      !activeWorkflowRevisionId ||
+      !activeWorkflowStatus ||
       !["QUEUED", "PROOFREADING", "CHILD_SAFETY_SCANNING"].includes(
-        aiWorkflow.status,
+        activeWorkflowStatus,
       )
     ) {
       return;
@@ -1267,12 +1273,19 @@ export function AdminOcrReviewScreen({
     let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
     const poll = async () => {
       if (disposed) return;
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        if (!disposed) timer = globalThis.setTimeout(() => void poll(), 1800);
+        return;
+      }
       try {
         const latest = await ocr.getLatestWorkflow(
           pageId,
-          aiWorkflow.page_revision_id,
+          activeWorkflowRevisionId,
         );
-        if (!disposed && latest?.workflow_id === aiWorkflow.workflow_id) {
+        if (!disposed && latest?.workflow_id === activeWorkflowId) {
           setAiWorkflow(latest);
         }
       } catch {
@@ -1285,7 +1298,13 @@ export function AdminOcrReviewScreen({
       disposed = true;
       if (timer !== undefined) globalThis.clearTimeout(timer);
     };
-  }, [aiWorkflow, ocr, pageId]);
+  }, [
+    activeWorkflowId,
+    activeWorkflowRevisionId,
+    activeWorkflowStatus,
+    ocr,
+    pageId,
+  ]);
 
   useEffect(() => {
     if (!detail || words.length === 0) return;
