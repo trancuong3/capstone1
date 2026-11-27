@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
@@ -58,10 +59,13 @@ import {
   getFreshVoiceEngineHealth,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import {
   buildPhonicsLesson,
   evaluatePostPhonicsAttempt,
+  type PhonicsLessonPlan,
   type ReadingWordMasteryOutcome,
+  type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
 import { hasUsableBrowserConfidence } from "@/lib/reading/recognition-evidence";
 import {
@@ -302,6 +306,11 @@ export function DifficultWordPracticePanel({
     null,
   );
   const [isPlayingPhonics, setIsPlayingPhonics] = useState(false);
+  const [aiPhonicsResult, setAiPhonicsResult] = useState<{
+    readonly key: string;
+    readonly status: "done";
+    readonly plan: SupportedPhonicsLessonPlan | null;
+  } | null>(null);
   const [masteryOutcome, setMasteryOutcome] =
     useState<ReadingWordMasteryOutcome | null>(null);
 
@@ -355,7 +364,7 @@ export function DifficultWordPracticePanel({
   const rawContextPhrase =
     explicitContextPhrase ?? primarySource?.context_phrase ?? null;
   const contextPhrase = shortWordContext(word.display_text, rawContextPhrase);
-  const phonicsLesson = useMemo(() => {
+  const staticPhonicsLesson = useMemo(() => {
     if (rawContextPhrase && rawContextPhrase.trim()) {
       const targetNorm = normalizeVietnameseWord(word.display_text);
       const ctxTokens = tokenizeVietnameseText(rawContextPhrase);
@@ -371,6 +380,58 @@ export function DifficultWordPracticePanel({
     }
     return buildPhonicsLesson(word.display_text);
   }, [rawContextPhrase, word.display_text]);
+
+  const aiPhonicsLookupKey = `${word.display_text}::${rawContextPhrase ?? ""}`;
+  const shouldFetchAiPhonics =
+    !staticPhonicsLesson.supported &&
+    staticPhonicsLesson.canPlayWholeWord &&
+    typeof speechService.analyzePhonics === "function";
+
+  useEffect(() => {
+    if (!shouldFetchAiPhonics) return;
+    let active = true;
+    const controller = new AbortController();
+    void speechService.analyzePhonics!(word.display_text, {
+      contextPhrase: rawContextPhrase,
+      signal: controller.signal,
+    })
+      .then((resolved) => {
+        if (active) {
+          setAiPhonicsResult({
+            key: aiPhonicsLookupKey,
+            status: "done",
+            plan: resolved && resolved.supported ? resolved : null,
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setAiPhonicsResult({
+            key: aiPhonicsLookupKey,
+            status: "done",
+            plan: null,
+          });
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [
+    aiPhonicsLookupKey,
+    rawContextPhrase,
+    shouldFetchAiPhonics,
+    speechService,
+    word.display_text,
+  ]);
+
+  const resolvedAiForWord =
+    aiPhonicsResult?.key === aiPhonicsLookupKey ? aiPhonicsResult : null;
+  const isAnalyzingPhonicsAi =
+    shouldFetchAiPhonics && resolvedAiForWord === null;
+  const phonicsLesson: PhonicsLessonPlan = staticPhonicsLesson.supported
+    ? staticPhonicsLesson
+    : (resolvedAiForWord?.plan ?? staticPhonicsLesson);
   const wordIndexInQueue = useMemo(
     () =>
       words.findIndex((item) => item.normalized_word === word.normalized_word),
@@ -508,6 +569,13 @@ export function DifficultWordPracticePanel({
   useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(practiceSessionLockId, { forceUpdate: true });
+    void preloadReadingVoiceEngines({
+      bookId: primarySource?.book_id ?? null,
+      pageId: primarySource?.page_id ?? null,
+      pageRevisionId: primarySource?.page_revision_id ?? null,
+      isPrivateBook: isPrivateBookSource,
+      previewWords: [word.display_text],
+    });
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
@@ -520,7 +588,14 @@ export function DifficultWordPracticePanel({
       cleanupRef.current();
       releaseSessionVoiceLock(practiceSessionLockId);
     };
-  }, [practiceSessionLockId]);
+  }, [
+    isPrivateBookSource,
+    practiceSessionLockId,
+    primarySource?.book_id,
+    primarySource?.page_id,
+    primarySource?.page_revision_id,
+    word.display_text,
+  ]);
 
   const playCue = useCallback(
     async (text: string, generation: number, wordSample = false) => {
@@ -1761,6 +1836,23 @@ export function DifficultWordPracticePanel({
 
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
+          <ReadingVoiceSettings
+            disabled={flowState === "LISTENING"}
+            fallbackNotice={speechPlayer.fallbackNotice}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={(sample) => {
+              flowGenerationRef.current += 1;
+              clearTimers();
+              stopBrowserRecognition();
+              speechPlayer.stop();
+              return speechPlayer.play(sample, { bypassSessionLock: true });
+            }}
+            onStopPreview={() => {
+              flowGenerationRef.current += 1;
+              clearTimers();
+              speechPlayer.stop();
+            }}
+          />
           {wordIndexInQueue >= 0 ? (
             <span className="rounded-full bg-[#F6FAF8] px-3 py-1 text-xs font-bold text-[#526970]">
               {t("practice.wordPosition", {
@@ -1909,6 +2001,7 @@ export function DifficultWordPracticePanel({
 
       <PhonicsLessonCard
         activeStepIndex={activePhonicsStep}
+        isAnalyzingAi={isAnalyzingPhonicsAi}
         isListeningRetry={flowState === "LISTENING"}
         isPlayingPhonics={isPlayingPhonics}
         isPlayingWord={speechPlayer.isPlaying && !isPlayingPhonics}

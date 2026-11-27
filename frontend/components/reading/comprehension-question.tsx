@@ -14,6 +14,7 @@ import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -21,14 +22,19 @@ import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
-import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
+import {
+  getActiveSessionVoiceLock,
+  getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
+  lockSessionVoice,
+} from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   analyzeComprehensionVoiceInput,
   choiceLetterForSpeech,
 } from "@/lib/reading/comprehension-voice-matcher";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
@@ -890,8 +896,11 @@ export function ComprehensionQuestion({
                 break;
               }
               try {
+                const locked = getActiveSessionVoiceLock();
                 await speechService.synthesize(phrase, {
                   sessionId,
+                  voiceId: locked?.voiceId ?? getEffectiveVoiceId(),
+                  speed: locked?.speed ?? getSpeechPreferences().speed,
                   signal: prefetchController.signal,
                 });
               } catch {
@@ -1081,7 +1090,19 @@ export function ComprehensionQuestion({
                 <p className="text-label font-semibold text-purple-ink">
                   {loadState.value.progress_label}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ReadingVoiceSettings
+                    disabled={voicePhase === "listening"}
+                    fallbackNotice={speechPlayer.fallbackNotice}
+                    isPreviewing={speechPlayer.isPlaying}
+                    onPreview={(sample) => {
+                      stopAllVoice();
+                      return speechPlayer.play(sample, {
+                        bypassSessionLock: true,
+                      });
+                    }}
+                    onStopPreview={stopAllVoice}
+                  />
                   <button
                     type="button"
                     onClick={() => {

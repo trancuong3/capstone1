@@ -930,7 +930,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(onEnded).toHaveBeenCalledOnce();
   });
 
-  it("handles Android WebView local_only /phonics 503: prefers step-by-step Android native phonics when unlocked, and falls back to cached word audio when session-locked", async () => {
+  it("handles Android WebView local_only /phonics 503: spells every phonics step via on-device Android native TTS on LOCAL_VOICE_UNCONFIGURED without 'tạm bận'", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
@@ -961,10 +961,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
-      // Case 1: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
-      // (One-Session-One-Voice), so /phonics 503 falls back to cached word audio with zero Android native TTS calls.
+      // Case 1: Under local_only with an active SessionVoiceLock and hosted LOCAL_VOICE_UNCONFIGURED,
+      // on-device Android native TTS spells every phonics step in the matching gender and speed.
       lockSessionVoice("android-lock-test", {
-        voiceId: "local_north_truc_ly",
+        voiceId: "local_north_thien_minh",
+        speed: 0.9,
         forceUpdate: true,
       });
       speech.synthesizePhonics.mockRejectedValueOnce(
@@ -973,65 +974,19 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
           code: "TTS_UNAVAILABLE",
         }),
       );
-      const cachedWordBlob = new Blob(["cached-mot-1p00"], {
-        type: "audio/mpeg",
-      });
-      setSynthesizedAudioMeta(cachedWordBlob, {
-        resolvedVoiceId: "local_north_truc_ly",
-        usedFallbackVoice: false,
-        provider: "precomputed_cache",
-        cachedSpeed: 1.0,
-      });
-      speech.synthesize.mockResolvedValueOnce(cachedWordBlob);
-
-      const { result } = renderHook(() => useSpeechPlayer());
-      const firstPlay = result.current.playPhonicsLesson(plan, {
-        cacheScope: "COACHING",
-      });
-      const cachedAudio = await audioAt(0);
-      act(() => cachedAudio.finish());
-      await firstPlay;
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
-
-      // Case 2: Under local_only with an active SessionVoiceLock and cache miss, throws without OS fallback.
-      const planMiss = buildPhonicsLesson("bàn");
-      expect(planMiss.supported).toBe(true);
-      if (!planMiss.supported) return;
-      speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
-      speech.synthesize.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
-      await expect(
-        result.current.playPhonicsLesson(planMiss, {
-          cacheScope: "COACHING",
-        }),
-      ).rejects.toThrow();
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
-      releaseSessionVoiceLock("android-lock-test");
-
-      // Case 3: Once unlocked, Android native TTS spells every phonics step rather than only speaking the whole word.
-      speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
 
       const onEnded = vi.fn();
-      await result.current.playPhonicsLesson(planMiss, {
+      const { result } = renderHook(() => useSpeechPlayer());
+      await result.current.playPhonicsLesson(plan, {
         cacheScope: "COACHING",
         onEnded,
       });
       const speakMsgs = sent.filter((m) => m.action === "speak");
-      expect(speakMsgs.length).toBe(planMiss.steps.length);
+      expect(speakMsgs.length).toBe(plan.steps.length);
+      for (const msg of speakMsgs) {
+        expect(msg.voiceGender).toBe("male");
+        expect(msg.rate).toBe(0.9);
+      }
       expect(onEnded).toHaveBeenCalledOnce();
     } finally {
       releaseSessionVoiceLock("android-lock-test");
@@ -1068,16 +1023,20 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
+      // Transient local worker error (NOT LOCAL_VOICE_UNCONFIGURED) -> falls back to server word audio without OS voice switch
       speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+        Object.assign(new Error("worker busy"), {
           status: 503,
           code: "TTS_UNAVAILABLE",
+          providerCode: "LOCAL_TTS_BUSY",
         }),
       );
       const cachedWordBlob = new Blob(["cached-mot-partial"], {
         type: "audio/mpeg",
       });
-      speech.synthesize.mockResolvedValueOnce(cachedWordBlob);
+      speech.synthesize
+        .mockRejectedValueOnce(new Error("step-1-busy"))
+        .mockResolvedValueOnce(cachedWordBlob);
 
       const { result } = renderHook(() => useSpeechPlayer());
       const playback = result.current.playPhonicsLesson(plan, {
@@ -1127,15 +1086,18 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       if (!plan.supported) return;
 
       speech.synthesizePhonics.mockRejectedValue(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+        Object.assign(new Error("worker busy"), {
           status: 503,
           code: "TTS_UNAVAILABLE",
+          providerCode: "LOCAL_TTS_BUSY",
         }),
       );
       const badMp3 = new Blob(["corrupt-mp3"], { type: "audio/mpeg" });
       const goodWav = new Blob(["good-wav"], { type: "audio/wav" });
       speech.synthesize
+        .mockRejectedValueOnce(new Error("step-busy-1"))
         .mockResolvedValueOnce(badMp3)
+        .mockRejectedValueOnce(new Error("step-busy-2"))
         .mockResolvedValueOnce(goodWav);
 
       const { result } = renderHook(() => useSpeechPlayer());
@@ -1156,7 +1118,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       const freshAudio = await audioAt(1);
       act(() => freshAudio.finish());
       await secondPlay;
-      expect(speech.synthesize).toHaveBeenCalledTimes(2);
+      expect(speech.synthesize).toHaveBeenCalledTimes(4);
     } finally {
       releaseSessionVoiceLock("android-evict-lock-test");
       resetAndroidNativeSpeechBridgeForTests();

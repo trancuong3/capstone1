@@ -42,6 +42,8 @@ export interface AndroidSpeechCapabilities {
 export interface AndroidNativeTtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
+  readonly voiceGender?: "male" | "female";
+  readonly voiceId?: string | null;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly onStart?: () => void;
@@ -505,6 +507,8 @@ export async function speakWithAndroidNativeTts(
       text: normalized,
       rate,
       pitch,
+      ...(opts.voiceGender ? { voiceGender: opts.voiceGender } : {}),
+      ...(opts.voiceId ? { voiceId: opts.voiceId } : {}),
     });
     if (!sent.ok) {
       finish(new Error("Failed to dispatch Android native TTS command."));

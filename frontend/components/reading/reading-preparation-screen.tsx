@@ -1,20 +1,34 @@
 "use client";
 
-import { ArrowLeft, Mic, RefreshCw } from "lucide-react";
+import { ArrowLeft, Mic, RefreshCw, Volume2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useBookService } from "@/hooks/use-book-service";
 import { useChildService } from "@/hooks/use-child-service";
 import { useReadingServices } from "@/hooks/use-reading-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  getVoicePreloadState,
+  preloadReadingVoiceEngines,
+  subscribeVoicePreloadState,
+} from "@/lib/reading/voice-preloader";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { MicrophonePermissionUiState } from "@/types/reading";
 import type { ChildProfileDTO } from "@/types/child";
@@ -105,6 +119,12 @@ export function ReadingPreparationScreen({
   const bookService = useBookService();
   const childService = useChildService();
   const { devicePermissionService, readingService } = useReadingServices();
+  const speechPlayer = useSpeechPlayer();
+  const preloadState = useSyncExternalStore(
+    subscribeVoicePreloadState,
+    getVoicePreloadState,
+    getVoicePreloadState,
+  );
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const selectedChildKey =
     childState.status === "ready" ? childState.child.id : "";
@@ -163,12 +183,28 @@ export function ReadingPreparationScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    // Start warming STT (WASM/Android) & TTS immediately on entering preparation.
+    void preloadReadingVoiceEngines({
+      bookId: bookId ?? null,
+      pageId: pageId ?? null,
+    });
     return () => {
       mountedRef.current = false;
       permissionCleanupRef.current?.();
       permissionCleanupRef.current = null;
     };
-  }, []);
+  }, [bookId, pageId]);
+
+  useEffect(() => {
+    if (state.status !== "ready" || !state.data.startPage) return;
+    const isPrivateBook = state.data.book.visibility_scope === "PARENT_PRIVATE";
+    void preloadReadingVoiceEngines({
+      bookId: state.data.book.id,
+      pageId: state.data.startPage.page_id,
+      pageRevisionId: state.data.startPage.current_verified_revision_id,
+      isPrivateBook,
+    });
+  }, [state]);
 
   useEffect(() => {
     if (childState.status !== "ready") return;
@@ -608,6 +644,36 @@ export function ReadingPreparationScreen({
             ? t("preparation.recheckMic")
             : t("preparation.checkAndAllowMic")}
         </Button>
+
+        <div
+          aria-live="polite"
+          className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-canvas/70 px-3 py-2.5"
+          data-testid="preparation-voice-preload-status"
+        >
+          <div className="flex items-center gap-2 text-sm text-ink">
+            <Volume2
+              aria-hidden="true"
+              className="size-4 shrink-0 text-primary"
+            />
+            <span className="font-semibold">
+              {preloadState.sttStatus === "ready" &&
+              preloadState.ttsStatus === "ready"
+                ? `Giọng đọc & nhận diện giọng nói${preloadState.sttEngineLabel ? ` (${preloadState.sttEngineLabel})` : ""} đã sẵn sàng.`
+                : preloadState.sttStatus === "loading"
+                  ? "Đang tải sẵn bộ nhận diện giọng nói & giọng đọc cho bé..."
+                  : "Giọng đọc & nhận diện giọng nói sẽ sẵn sàng ngay khi bé đọc."}
+            </span>
+          </div>
+          <ReadingVoiceSettings
+            disabled={isStarting}
+            fallbackNotice={speechPlayer.fallbackNotice}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={(sample) =>
+              speechPlayer.play(sample, { bypassSessionLock: true })
+            }
+            onStopPreview={speechPlayer.stop}
+          />
+        </div>
       </section>
 
       {startError ? (

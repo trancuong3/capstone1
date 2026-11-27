@@ -135,6 +135,18 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 AudioAttributes attributes,
                 TtsCallback callback);
 
+        default boolean speak(
+                String text,
+                float rate,
+                float pitch,
+                @Nullable String voiceGender,
+                @Nullable String voiceId,
+                String utteranceId,
+                AudioAttributes attributes,
+                TtsCallback callback) {
+            return speak(text, rate, pitch, utteranceId, attributes, callback);
+        }
+
         void stop();
 
         void shutdown();
@@ -208,6 +220,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         final String text;
         final float rate;
         final float pitch;
+        @Nullable final String voiceGender;
+        @Nullable final String voiceId;
         final ReplySender reply;
 
         PendingSpeakRequest(
@@ -216,12 +230,16 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 String text,
                 float rate,
                 float pitch,
+                @Nullable String voiceGender,
+                @Nullable String voiceId,
                 ReplySender reply) {
             this.generation = generation;
             this.requestId = requestId;
             this.text = text;
             this.rate = rate;
             this.pitch = pitch;
+            this.voiceGender = voiceGender;
+            this.voiceId = voiceId;
             this.reply = reply;
         }
     }
@@ -578,6 +596,20 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 MAX_SPEECH_PITCH,
                 1.0f);
 
+        String rawVoiceGender = payload.isNull("voiceGender")
+                ? null
+                : payload.optString("voiceGender", null);
+        String normalizedGender = null;
+        if (rawVoiceGender != null) {
+            String trimmedGender = rawVoiceGender.trim().toLowerCase(Locale.ROOT);
+            if ("male".equals(trimmedGender) || "female".equals(trimmedGender)) {
+                normalizedGender = trimmedGender;
+            }
+        }
+        String rawVoiceId = payload.isNull("voiceId") ? null : payload.optString("voiceId", null);
+        String normalizedVoiceId =
+                (rawVoiceId != null && !rawVoiceId.trim().isEmpty()) ? rawVoiceId.trim() : null;
+
         // Supersede any previous TTS operation cleanly
         int generation = ++ttsSeq;
         cancelPendingSpeakTimers();
@@ -586,7 +618,14 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         // Atomic mutual exclusion: cancel active STT + enforce 150ms HAL settle
         boolean hadActiveStt = cancelAndCleanupSttOnMain("preempted_by_tts", true);
         PendingSpeakRequest request = new PendingSpeakRequest(
-                generation, requestId, rawText, rate, pitch, reply);
+                generation,
+                requestId,
+                rawText,
+                rate,
+                pitch,
+                normalizedGender,
+                normalizedVoiceId,
+                reply);
 
         long settleDelayMs = computeTtsSettleDelayMs(hadActiveStt);
         if (settleDelayMs > 0L) {
@@ -715,6 +754,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 request.text,
                 request.rate,
                 request.pitch,
+                request.voiceGender,
+                request.voiceId,
                 utteranceId,
                 speechAudioAttributes,
                 callback);
@@ -1304,9 +1345,18 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
 
     @Nullable
     static Voice selectBestVietnameseVoice(@Nullable Set<Voice> voices) {
+        return selectBestVietnameseVoice(voices, null);
+    }
+
+    @Nullable
+    static Voice selectBestVietnameseVoice(
+            @Nullable Set<Voice> voices, @Nullable String preferredGender) {
         if (voices == null || voices.isEmpty()) {
             return null;
         }
+        String gender = preferredGender == null
+                ? null
+                : preferredGender.trim().toLowerCase(Locale.ROOT);
         Voice best = null;
         int bestScore = Integer.MIN_VALUE;
         for (Voice voice : voices) {
@@ -1320,6 +1370,31 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             Locale locale = voice.getLocale();
             if (locale != null && "VN".equalsIgnoreCase(locale.getCountry())) {
                 score += 200;
+            }
+            String vName = voice.getName() != null
+                    ? voice.getName().toLowerCase(Locale.ROOT)
+                    : "";
+            boolean looksMale = vName.contains("vid")
+                    || vName.contains("male")
+                    || vName.contains("nam")
+                    || vName.contains("minh")
+                    || vName.contains("hung")
+                    || vName.contains("tuan");
+            boolean looksFemale = vName.contains("gft")
+                    || vName.contains("vie")
+                    || vName.contains("vif")
+                    || vName.contains("vic")
+                    || vName.contains("female")
+                    || vName.contains("hoaimy")
+                    || vName.contains("linh")
+                    || vName.contains("mai")
+                    || vName.contains("lan");
+            if ("male".equals(gender)) {
+                if (looksMale && !looksFemale) score += 600;
+                if (looksFemale) score -= 350;
+            } else if ("female".equals(gender)) {
+                if (looksFemale) score += 600;
+                if (looksMale && !looksFemale) score -= 350;
             }
             score += voice.getQuality();
             score -= Math.max(0, voice.getLatency()) / 10;
@@ -1584,6 +1659,8 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         private TextToSpeech tts;
         private volatile boolean ready;
         private volatile TtsCallback activeCallback;
+        @Nullable private String pinnedVoiceKey;
+        @Nullable private Voice pinnedVoice;
 
         AndroidTtsEngine(Context appContext) {
             this.appContext = appContext;
@@ -1594,7 +1671,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             tts = new TextToSpeech(appContext, status -> {
                 boolean ok = (status == TextToSpeech.SUCCESS);
                 if (ok && tts != null) {
-                    configureVietnameseVoice(tts);
+                    configureVietnameseVoice(tts, null, null);
                     tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                         @Override
                         public void onStart(String utteranceId) {
@@ -1640,15 +1717,27 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             });
         }
 
-        private static void configureVietnameseVoice(TextToSpeech engine) {
+        private void configureVietnameseVoice(
+                TextToSpeech engine,
+                @Nullable String voiceGender,
+                @Nullable String voiceId) {
+            String targetKey = (voiceGender == null ? "default" : voiceGender)
+                    + "::"
+                    + (voiceId == null ? "" : voiceId);
             try {
                 engine.setLanguage(VI_VN);
             } catch (Throwable ignored) {
                 // Continue with voice selection attempt.
             }
             try {
-                Voice best = selectBestVietnameseVoice(engine.getVoices());
+                if (targetKey.equals(pinnedVoiceKey) && pinnedVoice != null) {
+                    engine.setVoice(pinnedVoice);
+                    return;
+                }
+                Voice best = selectBestVietnameseVoice(engine.getVoices(), voiceGender);
                 if (best != null) {
+                    pinnedVoiceKey = targetKey;
+                    pinnedVoice = best;
                     engine.setVoice(best);
                 }
             } catch (Throwable ignored) {
@@ -1692,10 +1781,23 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 String utteranceId,
                 AudioAttributes attributes,
                 TtsCallback callback) {
+            return speak(text, rate, pitch, null, null, utteranceId, attributes, callback);
+        }
+
+        @Override
+        public boolean speak(
+                String text,
+                float rate,
+                float pitch,
+                @Nullable String voiceGender,
+                @Nullable String voiceId,
+                String utteranceId,
+                AudioAttributes attributes,
+                TtsCallback callback) {
             if (!isReady()) return false;
             activeCallback = callback;
             try {
-                configureVietnameseVoice(tts);
+                configureVietnameseVoice(tts, voiceGender, voiceId);
                 tts.setAudioAttributes(attributes);
                 tts.setSpeechRate(rate);
                 tts.setPitch(pitch);

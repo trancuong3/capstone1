@@ -40,6 +40,10 @@ import {
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
+import {
+  normalizeAiPhonicsResponse,
+  type SupportedPhonicsLessonPlan,
+} from "@/lib/reading/phonics-lesson";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const wordTimestampSchema = z.object({
@@ -153,12 +157,85 @@ export interface SpeechToTextOptions {
   readonly timeoutMs?: number;
 }
 
+const phonicsAnalyzeResponseSchema = z.object({
+  supported: z.boolean(),
+  source: z.enum(["rules", "ai", "none"]).optional(),
+  raw_text: z.string().optional(),
+  clean_phrase: z.string().optional(),
+  syllables: z.array(z.string()).optional(),
+  focus_syllable_index: z.number().int().nonnegative().optional(),
+  focus_syllable: z.string().optional(),
+  focus_range_start: z.number().int().nonnegative().optional(),
+  focus_range_end: z.number().int().nonnegative().optional(),
+  onset: z
+    .object({ written: z.string(), spoken: z.string() })
+    .nullable()
+    .optional(),
+  rhyme: z
+    .object({
+      written: z.string(),
+      untoned: z.string(),
+      nucleus: z.string(),
+      coda: z.string(),
+      spoken: z.string(),
+    })
+    .nullable()
+    .optional(),
+  tone: z
+    .object({
+      key: z.enum(["ngang", "sac", "huyen", "hoi", "nga", "nang"]),
+      label: z.string(),
+      spoken: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
+  steps: z
+    .array(
+      z.object({
+        id: z.string(),
+        index: z.number().int().nonnegative(),
+        kind: z.enum([
+          "rhyme_build",
+          "onset_blend",
+          "tone_blend",
+          "whole_syllable",
+          "context_phrase",
+        ]),
+        display_text: z.string(),
+        spoken_text: z.string(),
+        highlight_part: z.enum([
+          "rhyme",
+          "onset_and_rhyme",
+          "tone_and_syllable",
+          "whole_syllable",
+          "context",
+        ]),
+        highlight_start: z.number().int().nonnegative(),
+        highlight_end: z.number().int().nonnegative(),
+        pause_after_ms: z.number().int().positive(),
+      }),
+    )
+    .optional(),
+});
+
+const aiPhonicsCache = new Map<string, SupportedPhonicsLessonPlan | null>();
+
+export interface PhonicsAnalyzeOptions {
+  readonly contextPhrase?: string | null;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+}
+
 export interface SpeechService {
   synthesize(text: string, options?: TextToSpeechOptions): Promise<Blob>;
   synthesizePhonics?(
     steps: readonly SynthesizePhonicsStepInput[],
     options?: TextToSpeechOptions,
   ): Promise<SynthesizedPhonicsSpeech>;
+  analyzePhonics?(
+    text: string,
+    options?: PhonicsAnalyzeOptions,
+  ): Promise<SupportedPhonicsLessonPlan | null>;
   transcribe(
     audio: Blob,
     options?: SpeechToTextOptions,
@@ -198,6 +275,7 @@ async function speechRequest(
   path:
     | "/voice/text-to-speech"
     | "/voice/text-to-speech/phonics"
+    | "/voice/phonics/analyze"
     | "/voice/speech-to-text",
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
   init: RequestInit,
@@ -684,6 +762,55 @@ export function createSpeechService(): SpeechService {
         options.signal,
         options.timeoutMs ?? 30_000,
       );
+    },
+
+    async analyzePhonics(text, options = {}) {
+      const normalized = text.normalize("NFC").trim();
+      if (!normalized) return null;
+      const contextPhrase =
+        options.contextPhrase?.normalize("NFC").trim() || null;
+      const cacheKey = `${normalized.toLowerCase()}::${(contextPhrase ?? "").toLowerCase()}`;
+      if (aiPhonicsCache.has(cacheKey)) {
+        return aiPhonicsCache.get(cacheKey) ?? null;
+      }
+      try {
+        const result = await withRequestDeadline(
+          async (signal) => {
+            const response = await speechRequest(
+              "/voice/phonics/analyze",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  text: normalized,
+                  ...(contextPhrase ? { context_phrase: contextPhrase } : {}),
+                }),
+              },
+              signal,
+            );
+            const payload: unknown = await response.json();
+            signal.throwIfAborted();
+            const parsed = phonicsAnalyzeResponseSchema.safeParse(payload);
+            if (!parsed.success) return null;
+            return normalizeAiPhonicsResponse(parsed.data, normalized);
+          },
+          options.signal,
+          options.timeoutMs ?? 8_000,
+        );
+        if (aiPhonicsCache.size >= 256) {
+          const firstKey = aiPhonicsCache.keys().next().value;
+          if (firstKey !== undefined) aiPhonicsCache.delete(firstKey);
+        }
+        aiPhonicsCache.set(cacheKey, result);
+        return result;
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        return null;
+      }
     },
 
     async transcribe(audio, options = {}) {

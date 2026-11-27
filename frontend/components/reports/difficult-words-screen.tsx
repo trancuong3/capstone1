@@ -17,6 +17,7 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import {
   createCalendarWindow,
   currentDateInReportTimezone,
@@ -113,6 +114,7 @@ export function DifficultWordsScreen({
 
   useEffect(() => {
     mountedRef.current = true;
+    void preloadReadingVoiceEngines();
     return () => {
       mountedRef.current = false;
       loadRequestIdRef.current += 1;

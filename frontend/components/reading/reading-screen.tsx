@@ -25,7 +25,6 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  getWasmModelCacheStatus,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -52,6 +51,11 @@ import {
   setActiveVoiceSession,
   subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
@@ -555,6 +559,7 @@ function ReadingSessionScreen({
     readonly wordId: string | null;
     readonly plan: PhonicsLessonPlan;
   } | null>(null);
+  const [isAnalyzingPhonicsAi, setIsAnalyzingPhonicsAi] = useState(false);
   const [activePhonicsStepIndex, setActivePhonicsStepIndex] = useState<
     number | null
   >(null);
@@ -756,6 +761,15 @@ function ReadingSessionScreen({
       pageRevisionId: activeCachePageRevisionId,
       isPrivateBook: activeCacheIsPrivate,
     });
+    if (activeCachePageId && page?.words?.length) {
+      void preloadReadingVoiceEngines({
+        bookId: activeCacheBookId,
+        pageId: activeCachePageId,
+        pageRevisionId: activeCachePageRevisionId,
+        isPrivateBook: activeCacheIsPrivate,
+        previewWords: page.words.slice(0, 3).map((w) => w.text),
+      });
+    }
     return () => {
       setSpeechCacheContext?.(null);
     };
@@ -765,6 +779,7 @@ function ReadingSessionScreen({
     activeCacheIsPrivate,
     activeCachePageId,
     activeCachePageRevisionId,
+    page?.words,
   ]);
 
   useEffect(() => {
@@ -783,7 +798,10 @@ function ReadingSessionScreen({
         cachedHealth.google.tts_configured && !cachedHealth.google.tts_cooldown;
       if (ttsAllowsFallback && localTtsDown && useGoogleTts) {
         lockSessionVoice(sessionId, {
-          voiceId: mapLocalVoiceToGoogleBackup(null, policy.region),
+          voiceId: mapLocalVoiceToGoogleBackup(
+            getSpeechPreferences().voiceId,
+            policy.region,
+          ),
         });
       } else {
         lockSessionVoice(sessionId);
@@ -792,6 +810,9 @@ function ReadingSessionScreen({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
+    // Warm STT (WASM/Android) & TTS immediately upon entering ReadingScreen
+    // (covers direct URL navigation, refresh, or resume without prep screen).
+    void preloadReadingVoiceEngines();
     const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
@@ -898,17 +919,12 @@ function ReadingSessionScreen({
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
           }
-          // When hosted deployment has no local voice worker configured, quietly
-          // pre-warm Browser WASM ONLY if model files are already cached in IndexedDB.
+          // When hosted deployment has no local voice worker configured, eagerly
+          // initialize Browser WASM STT right away (not gated on prior cache) so
+          // the model is already warm before the child speaks the first word!
           if (hostedLocalUnconfigured && wasmSupported && !sttAllowsFallback) {
-            void getWasmModelCacheStatus()
-              .then((cacheStatus) => {
-                if (!cancelled && cacheStatus.ready) {
-                  void getBrowserWasmSttClient()
-                    .init()
-                    .catch(() => undefined);
-                }
-              })
+            void getBrowserWasmSttClient()
+              .init()
               .catch(() => undefined);
           }
           // Under `local_only` when STT has not started yet, keep the idle mount
@@ -2064,7 +2080,6 @@ function ReadingSessionScreen({
               if (!isCurrent()) return;
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.75,
               });
               if (!isCurrent()) return;
               await speakGuarded(phrase, { preserveBookText: true });
@@ -2074,7 +2089,6 @@ function ReadingSessionScreen({
               );
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.8,
               });
               if (!isCurrent()) return;
               if (phraseWords.length > 1) {
@@ -2486,10 +2500,11 @@ function ReadingSessionScreen({
           })());
     if (!target) return;
 
-    const plan = buildPhonicsLesson(target.text);
+    let plan = buildPhonicsLesson(target.text);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
+    setIsAnalyzingPhonicsAi(false);
 
     if (target.word_id && !retryModeRef.current) {
       helpedWordIdsRef.current.add(target.word_id);
@@ -2509,6 +2524,33 @@ function ReadingSessionScreen({
       await playAssistantAudio(
         async () => {
           if (!isCurrent()) return;
+          if (
+            !plan.supported &&
+            plan.canPlayWholeWord &&
+            typeof speechService.analyzePhonics === "function"
+          ) {
+            setIsAnalyzingPhonicsAi(true);
+            try {
+              const aiPlan = await speechService.analyzePhonics(target.text, {
+                contextPhrase: capturePage?.words
+                  ? capturePage.words
+                      .slice(0, 12)
+                      .map((w) => w.text)
+                      .join(" ")
+                  : null,
+              });
+              if (!isCurrent()) return;
+              if (aiPlan && aiPlan.supported) {
+                plan = aiPlan;
+                setActivePhonicsLesson({ wordId: target.word_id, plan });
+                setActivePhonicsStepIndex(0);
+              }
+            } finally {
+              if (mountedRef.current) {
+                setIsAnalyzingPhonicsAi(false);
+              }
+            }
+          }
           if (!plan.supported) {
             setPhonicsStatusHint(plan.message);
             if (plan.canPlayWholeWord) {
@@ -2610,6 +2652,22 @@ function ReadingSessionScreen({
     }
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    if (
+      !preferAndroidNativeStt &&
+      detectBrowserWasmSttSupport().supported &&
+      !getBrowserWasmSttClient().isReady()
+    ) {
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttReady = Boolean(
+        freshHealth?.local.available && freshHealth.local.stt_ready,
+      );
+      if (!localSttReady) {
+        setLatestTranscript("Đang khởi động nhận diện giọng nói...");
+        await awaitSttReadyBeforeListening(4_000);
+        if (!isCurrent()) return false;
+        setLatestTranscript(null);
+      }
+    }
     let recorderStarted = false;
     if (preferAndroidNativeStt) {
       // Skip parallel WebView getUserMedia/MediaRecorder when Android native
@@ -7627,6 +7685,7 @@ function ReadingSessionScreen({
             <PhonicsLessonCard
               activeStepIndex={activePhonicsStepIndex}
               compact
+              isAnalyzingAi={isAnalyzingPhonicsAi}
               isListeningRetry={isMicRecording}
               isPlayingPhonics={isPlayingPhonicsLesson}
               isPlayingWord={isReadingWord}

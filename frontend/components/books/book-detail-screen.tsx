@@ -25,6 +25,7 @@ import { useBookService } from "@/hooks/use-book-service";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -217,6 +218,14 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     }
 
     setStartState("starting");
+    // Immediately start preloading STT (WASM/Android) & TTS voices on click so
+    // engines are warm BEFORE the child even enters the reading page!
+    void preloadReadingVoiceEngines({
+      bookId: state.book.id,
+      pageId: selectedPage.page_id,
+      pageRevisionId: selectedPage.current_verified_revision_id,
+      isPrivateBook: state.book.visibility_scope === "PARENT_PRIVATE",
+    });
     const params = new URLSearchParams({
       bookId: state.book.id,
       pageId: selectedPage.page_id,

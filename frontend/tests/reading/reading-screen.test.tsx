@@ -474,7 +474,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await waitFor(() =>
         expect(speechPlayerMock.play).toHaveBeenCalledWith("nhỏ", {
           wordSample: true,
-          speedScale: 0.8,
         }),
       );
       await waitFor(() => expect(Recognition.instances).toHaveLength(3));
@@ -573,7 +572,6 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         await act(async () => vi.advanceTimersByTimeAsync(45000));
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé", {
           wordSample: true,
-          speedScale: 0.8,
         });
         expect(speechPlayerMock.play).toHaveBeenCalledWith("Bé mèo nhỏ");
         expect(speechPlayerMock.play).not.toHaveBeenCalledWith(
