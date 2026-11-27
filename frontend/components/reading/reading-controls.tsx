@@ -25,7 +25,7 @@ interface ReadingControlsProps {
 }
 
 const dockButtonClass =
-  "min-h-11 min-w-0 flex-col gap-0.5 px-1 py-1 text-[10px] leading-tight sm:px-1.5 sm:py-1.5 sm:text-xs sm:leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
+  "min-h-11 min-w-0 flex-col gap-0.5 px-1.5 py-1 text-xs leading-snug lg:min-h-14 lg:flex-row lg:gap-2 lg:px-3 lg:py-2 lg:text-button";
 
 export function ReadingControls({
   audioLevel,
@@ -54,14 +54,14 @@ export function ReadingControls({
         aria-label={t("controls.toolbarAria")}
         data-reading-controls
         className={cn(
-          "grid gap-1 sm:gap-2 lg:gap-3",
+          "grid grid-cols-3 gap-1.5 sm:gap-2 lg:gap-3",
           retryMode
             ? voiceSettings
-              ? "grid-cols-5"
-              : "grid-cols-4"
+              ? "sm:grid-cols-5"
+              : "sm:grid-cols-4"
             : voiceSettings
-              ? "grid-cols-6"
-              : "grid-cols-5",
+              ? "sm:grid-cols-6"
+              : "sm:grid-cols-5",
         )}
       >
         <Button
@@ -181,7 +181,11 @@ export function ReadingControls({
               ? t("controls.finishRetryAria")
               : t("controls.finishSessionAria")
           }
-          className={dockButtonClass}
+          className={cn(
+            dockButtonClass,
+            (retryMode ? Boolean(voiceSettings) : !voiceSettings) &&
+              "col-span-2 sm:col-span-1",
+          )}
           disabled={finishDisabled}
           onClick={onFinish}
           size="compact"

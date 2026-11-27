@@ -184,7 +184,8 @@ export function ReadingLayout({
     isPlayingSample ||
     isReadingWord ||
     (isMicRecording &&
-      (isCurrentWordMispronounced || Boolean(latestTranscript)));
+      (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
+    Boolean(latestTranscript);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
@@ -548,6 +549,19 @@ export function ReadingLayout({
                   </span>
                 </p>
               ) : null
+            ) : latestTranscript ? (
+              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
+                <span className="shrink-0 text-sm font-semibold text-purple-ink">
+                  {t("layout.latestRecording")}
+                </span>
+                <p
+                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
+                  &ldquo;{latestTranscript}&rdquo;
+                </p>
+              </div>
             ) : null}
 
             {sentenceReinforcementPanel ? (
