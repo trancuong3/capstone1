@@ -194,6 +194,14 @@ class ElevenLabsVoiceProvider:
     def get_configured_voice_id(self) -> str:
         return self._voice_id(None)
 
+    def get_voice_id_for_gender(self, gender: str | None) -> str | None:
+        normalized = (gender or "female").strip().lower()
+        if normalized == "male":
+            male_voice = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+            return male_voice or None
+        female_voice = os.getenv("ELEVENLABS_FEMALE_VOICE_ID", "").strip()
+        return female_voice or self.get_configured_voice_id()
+
     def get_configured_model_id(self) -> str:
         configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
         return (

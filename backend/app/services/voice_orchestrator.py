@@ -421,6 +421,27 @@ class VoiceOrchestrator:
         )
         return svc, target
 
+    def _resolve_elevenlabs_tts_voice(
+        self, policy: VoicePolicyContext, requested_voice_id: str
+    ) -> str | None:
+        """Allow ElevenLabs TTS ONLY when parent opted into cloud fallback AND gender matches."""
+        if not self.elevenlabs.is_configured():
+            return None
+        if (
+            policy.provider_mode != "local_with_google_fallback"
+            or not policy.allow_google_tts
+        ):
+            return None
+        _region, gender = _resolve_local_voice_region_gender(requested_voice_id)
+        return self.elevenlabs.get_voice_id_for_gender(gender)
+
+    def _can_use_elevenlabs_stt(self, policy: VoicePolicyContext) -> bool:
+        return (
+            self.elevenlabs.is_configured()
+            and policy.provider_mode == "local_with_google_fallback"
+            and policy.allow_google_stt
+        )
+
     def _can_fallback_unlocked_tts(
         self,
         policy: VoicePolicyContext,
@@ -682,11 +703,12 @@ class VoiceOrchestrator:
                 )
                 return audio
             except LocalVoiceTechnicalError as local_err:
-                if self.elevenlabs.is_configured():
+                el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
+                if el_voice_id:
                     t_el = time.perf_counter()
                     el_audio = await self.elevenlabs.synthesize(
                         text=text,
-                        requested_voice_id=None,
+                        requested_voice_id=el_voice_id,
                         speed=speed,
                     )
                     el_resolved_voice = (
@@ -1039,11 +1061,12 @@ class VoiceOrchestrator:
                 )
                 return speech
             except LocalVoiceTechnicalError as local_err:
-                if self.elevenlabs.is_configured():
+                el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
+                if el_voice_id:
                     t_el = time.perf_counter()
                     el_timed = await self.elevenlabs.synthesize_timed(
                         words=words,
-                        requested_voice_id=None,
+                        requested_voice_id=el_voice_id,
                         speed=speed,
                     )
                     if (
@@ -1319,11 +1342,12 @@ class VoiceOrchestrator:
                 )
                 return speech
             except LocalVoiceTechnicalError as local_err:
-                if self.elevenlabs.is_configured():
+                el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
+                if el_voice_id:
                     t_el = time.perf_counter()
                     el_phonics = await self.elevenlabs.synthesize_phonics(
                         steps=steps,
-                        requested_voice_id=None,
+                        requested_voice_id=el_voice_id,
                         speed=speed,
                     )
                     if (
@@ -1489,7 +1513,7 @@ class VoiceOrchestrator:
             )
             return res
         except LocalVoiceTechnicalError as local_err:
-            if self.elevenlabs.is_configured():
+            if self._can_use_elevenlabs_stt(ctx):
                 t_el = time.perf_counter()
                 el_res = await self.elevenlabs.transcribe(
                     audio=audio,

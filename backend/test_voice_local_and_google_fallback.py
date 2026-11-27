@@ -898,18 +898,45 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             self.assertTrue(status_json["elevenlabs"]["tts_configured"])
             self.assertTrue(status_json["elevenlabs"]["stt_configured"])
 
-            # TTS works even with session_id (no locked-voice 503!)
+            # TTS works with session_id when parent opted into cloud fallback & gender matches
             tts_resp = client.post(
                 "/voice/text-to-speech",
                 json={
                     "text": "Chị Dua đang bận ôn thi vào lớp mấy?",
                     "session_id": "sess_el_1",
                     "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
                 },
             )
             self.assertEqual(tts_resp.status_code, 200)
             self.assertEqual(tts_resp.headers["x-voice-provider"], "elevenlabs")
             self.assertEqual(tts_resp.headers["x-voice-fallback"], "0")
+
+            # Strict gender consistency: requesting a MALE voice must NEVER silently switch to FEMALE ElevenLabs!
+            male_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Thầy đọc mẫu cho con nghe nhé.",
+                    "voice_id": "local_north_thien_minh",
+                    "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
+                },
+            )
+            self.assertEqual(male_resp.status_code, 503)
+
+            # Strict offline-first: local_only mode must NEVER call ElevenLabs Online
+            local_only_resp = client.post(
+                "/voice/text-to-speech",
+                json={
+                    "text": "Chào con.",
+                    "speed": 0.9,
+                    "provider_mode": "local_only",
+                    "allow_google_tts": False,
+                },
+            )
+            self.assertEqual(local_only_resp.status_code, 503)
 
             # Timed TTS works
             timed_resp = client.post(
@@ -918,6 +945,8 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                     "words": ["Bộ", "lông", "của", "Miu"],
                     "session_id": "sess_el_1",
                     "speed": 0.9,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
                 },
             )
             self.assertEqual(timed_resp.status_code, 200)
@@ -937,6 +966,8 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
                     ],
                     "session_id": "sess_el_1",
                     "speed": 0.85,
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_tts": True,
                 },
             )
             self.assertEqual(phonics_resp.status_code, 200)
@@ -945,10 +976,16 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             self.assertEqual(len(phonics_json["step_timings"]), 4)
             self.assertGreater(phonics_json["duration_seconds"], 0.5)
 
-            # STT works via ElevenLabs Scribe v2
+            # STT works via ElevenLabs Scribe v2 when opted-in
             stt_resp = client.post(
                 "/voice/speech-to-text",
-                data={"language_code": "vi", "session_id": "sess_el_1", "turn_id": "t1"},
+                data={
+                    "language_code": "vi",
+                    "session_id": "sess_el_1",
+                    "turn_id": "t1",
+                    "provider_mode": "local_with_google_fallback",
+                    "allow_google_stt": "true",
+                },
                 files={"file": ("clip.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 64, "audio/webm")},
             )
             self.assertEqual(stt_resp.status_code, 200)

@@ -2102,6 +2102,10 @@ function ReadingSessionScreen({
         setLatestTranscript(
           "Chưa phát được tiếng mẫu. Con có thể bấm nghe lại nhé.",
         );
+        if (engine.getSnapshot().currentWordId !== null) {
+          const started = await startListeningRef.current();
+          if (isCurrent()) setIsMicRecording(started);
+        }
       }
     }
   }
@@ -2339,22 +2343,12 @@ function ReadingSessionScreen({
     wordId: string,
     outcome: "fixed" | "helped",
   ): ActiveSentenceReinforcement | null {
-    if (!automationRef.current.assist) return null;
-    const active = sentenceReinforcementRef.current.beginForWord(
-      capturePage.words,
-      wordId,
-      outcome,
-      { pageRevisionId: capturePage.page_revision_id },
-    );
-    if (!active) return null;
-    // Only reinforce complete punctuated sentences (e.g. "Tôi ăn cơm.") so
-    // short unpunctuated fragments never unexpectedly pause fluent flow.
-    if (!/[.!?…]["”’')\]]*$/u.test(active.span.text)) {
-      sentenceReinforcementRef.current.finishCurrent();
-      return null;
-    }
-    setActiveSentenceReinforcement(active);
-    return active;
+    // Do not force the child to re-read the entire sentence after a single hard
+    // word; let them keep reading forward naturally without interruption.
+    void capturePage;
+    void wordId;
+    void outcome;
+    return null;
   }
 
   async function announceSentenceReinforcement(
@@ -3136,9 +3130,14 @@ function ReadingSessionScreen({
                 }
                 if (
                   scored.statusByWordId.get(helpedWordBefore ?? "")?.status ===
-                  "MATCH"
+                    "MATCH" ||
+                  (helpedWordBefore &&
+                    scored.currentWordId !== helpedWordBefore)
                 ) {
                   pageHelpWordRef.current = null;
+                  if (lastTrailingMismatchRef.current?.wordId === helpedWordBefore) {
+                    lastTrailingMismatchRef.current = null;
+                  }
                 }
                 const currentPhonicsLesson = activePhonicsLessonRef.current;
                 if (
