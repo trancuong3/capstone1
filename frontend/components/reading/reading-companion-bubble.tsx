@@ -128,7 +128,7 @@ export function ReadingCompanionBubble({
     <div
       aria-live="polite"
       className={cn(
-        "mx-auto flex min-h-16 w-full max-w-[1008px] items-center gap-3.5 rounded-card border px-4 py-3 transition-colors",
+        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-card border px-2.5 py-1.5 transition-colors sm:min-h-16 sm:gap-3.5 sm:px-4 sm:py-3",
         theme.card,
       )}
       data-companion-mood={state.mood}
@@ -139,7 +139,7 @@ export function ReadingCompanionBubble({
       <div
         aria-hidden="true"
         className={cn(
-          "flex size-11 shrink-0 items-center justify-center rounded-full shadow-xs",
+          "flex size-7 shrink-0 items-center justify-center rounded-full shadow-xs sm:size-11",
           theme.badge,
           isSpeaking && "ring-2 ring-offset-2 ring-primary/40",
         )}
@@ -147,10 +147,10 @@ export function ReadingCompanionBubble({
         <MoodIcon mood={state.mood} />
       </div>
       <div className="min-w-0 flex-1">
-        <p className={cn("text-xs font-extrabold", theme.titleColor)}>
+        <p className={cn("truncate text-[11px] font-extrabold sm:text-xs", theme.titleColor)}>
           {displayTitle}
         </p>
-        <p className="mt-0.5 text-sm leading-snug font-semibold text-ink sm:text-base">
+        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-base">
           {displayMessage}
         </p>
       </div>

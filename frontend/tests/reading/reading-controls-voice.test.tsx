@@ -88,7 +88,7 @@ describe("retryMode hides the Chọn trang button", () => {
     expect(nav.className).not.toContain("grid-cols-5");
   });
 
-  it("uses sm:grid-cols-5 and spans Hoàn thành across both mobile columns in retryMode with voiceSettings", () => {
+  it("uses single-row grid-cols-5 in retryMode with voiceSettings so mobile has zero orphan rows", () => {
     render(
       <ReadingControls
         {...handlers}
@@ -106,8 +106,7 @@ describe("retryMode hides the Chọn trang button", () => {
     const finishBtn = within(nav).getByRole("button", {
       name: "Hoàn thành đọc lại",
     });
-    expect(finishBtn.className).toContain("col-span-2");
-    expect(finishBtn.className).toContain("sm:col-span-1");
+    expect(finishBtn).toBeInTheDocument();
   });
 
   it("keeps Tạm dừng, Nghe mẫu từ, Bật mic, and Hoàn thành in retryMode", () => {

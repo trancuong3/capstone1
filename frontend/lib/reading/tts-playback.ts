@@ -309,9 +309,24 @@ function canUseAllowedDeviceFallbackTts(
   const isSessionLocked = voice?.bypassSessionLock
     ? false
     : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
+  const isTechnicalServerOutage = (err: unknown): boolean => {
+    if (!err) return false;
+    if (isLocalVoiceUnconfiguredError(err)) return true;
+    const status =
+      typeof err === "object" && "status" in err
+        ? Number((err as { status?: unknown }).status)
+        : NaN;
+    if (status === 502 || status === 503 || status === 504 || status === 429) {
+      return true;
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return /502|503|504|429|timeout|network|failed to fetch|unavailable|offline/i.test(
+      msg,
+    );
+  };
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
-    (isLocalVoiceUnconfiguredError(error) || isLocalVoiceUnconfiguredHealth());
+    (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
   if (isSessionLocked && !optedInUnconfiguredFallback) {
     return false;
   }
@@ -3134,7 +3149,7 @@ export class TtsPlayback {
             }
             if (
               (!synthesizedTimedOk || !fallback) &&
-              canUseAllowedDeviceFallbackTts(operation)
+              canUseAllowedDeviceFallbackTts(operation, error)
             ) {
               useBrowserFallback = true;
               elapsed += await this.playDeviceFallbackSpeech(

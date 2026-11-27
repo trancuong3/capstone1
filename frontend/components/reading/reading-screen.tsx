@@ -3508,15 +3508,16 @@ function ReadingSessionScreen({
             if (
               mountedRef.current &&
               isListeningActiveRef.current &&
-              sttNetworkErrorStreakRef.current < 3
+              sttNetworkErrorStreakRef.current < 6
             ) {
+              const baseDelayMs = isAndroidNativeSpeechAvailable() ? 250 : 80;
               const restartDelayMs =
                 sttNetworkErrorStreakRef.current > 0
                   ? Math.min(
-                      4_000,
-                      500 * 2 ** (sttNetworkErrorStreakRef.current - 1),
+                      3_000,
+                      400 * 2 ** (sttNetworkErrorStreakRef.current - 1),
                     )
-                  : 80;
+                  : baseDelayMs;
               if (sttRestartTimerRef.current !== null) {
                 window.clearTimeout(sttRestartTimerRef.current);
               }
@@ -3526,7 +3527,7 @@ function ReadingSessionScreen({
                   isCurrent() &&
                   isListeningActiveRef.current &&
                   recognitionRef.current === rec &&
-                  sttNetworkErrorStreakRef.current < 3
+                  sttNetworkErrorStreakRef.current < 6
                 ) {
                   try {
                     rec.start();
@@ -7473,7 +7474,7 @@ function ReadingSessionScreen({
       pageProgress.current_index === pageProgress.total_pages - 1 ? (
         <p
           data-reading-end-hint="true"
-          className="text-xs font-semibold text-primary sm:text-sm"
+          className="hidden text-xs font-semibold text-primary sm:block sm:text-sm"
           role="status"
         >
           {t("session.lastPageHint")}

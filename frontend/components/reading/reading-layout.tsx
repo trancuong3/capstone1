@@ -316,7 +316,7 @@ export function ReadingLayout({
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
+            className="mx-auto mb-1 max-h-[15dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
@@ -455,27 +455,27 @@ export function ReadingLayout({
                 </span>
               </div>
             ) : isPlayingSample ? (
-              <div className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-3 py-2 sm:px-4 sm:py-2.5">
-                <div className="flex min-w-0 basis-full items-center gap-2 min-[520px]:basis-auto min-[520px]:flex-1">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center justify-between gap-2 rounded-card border border-border bg-white px-2.5 py-1 sm:flex-wrap sm:gap-2.5 sm:px-4 sm:py-2.5">
+                <div className="flex min-w-0 flex-1 items-center gap-1.5 sm:gap-2">
                   <Volume2
                     aria-hidden="true"
                     className="size-4 shrink-0 text-primary"
                   />
-                  <span className="shrink-0 text-sm font-semibold text-ink">
+                  <span className="shrink-0 text-xs font-semibold text-ink sm:text-sm">
                     {t("layout.sampleBannerTitle")}
                   </span>
-                  <span className="min-w-0 truncate text-sm text-muted">
+                  <span className="hidden min-w-0 truncate text-sm text-muted sm:inline">
                     {isSamplePaused
                       ? t("layout.samplePaused")
                       : t("layout.samplePlayingPage")}
                   </span>
                 </div>
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
                   {onToggleSamplePause ? (
                     <button
                       type="button"
                       onClick={onToggleSamplePause}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {isSamplePaused
                         ? t("layout.resumeSample")
@@ -486,7 +486,7 @@ export function ReadingLayout({
                     <button
                       type="button"
                       onClick={onReadSample}
-                      className="min-h-11 shrink-0 rounded-control border border-border bg-white px-3 py-1 text-sm font-semibold text-ink hover:bg-canvas"
+                      className="min-h-9 shrink-0 rounded-control border border-border bg-white px-2.5 py-1 text-xs font-semibold text-ink hover:bg-canvas sm:min-h-11 sm:px-3 sm:text-sm"
                     >
                       {t("layout.stopSample")}
                     </button>
