@@ -39,11 +39,11 @@ Sau khi notebook thay đổi này đã được merge vào `main`:
 
 1. Mở trực tiếp [notebook worker trên nhánh main](https://github.com/trancuong3/capstone1/blob/main/ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb).
 2. Trên trang GitHub, chọn **Open in Colab**. Nếu nút không hiện, tải file `.ipynb` rồi trong Colab chọn **File → Upload notebook**.
-3. Trong Colab mở **Secrets** (biểu tượng chìa khóa) và thêm:
-   - `VIREAD_API_BASE`: URL HTTPS gốc của Web Service Render, ví dụ `https://<ten-service>.onrender.com`; không thêm `localhost` hoặc `/api/v1`.
-   - `VIREAD_TRAINING_WORKER_TOKEN`: chính token đã cấu hình ở Render.
-   - `VIREAD_REPOSITORY_REF`: `main`.
-4. Bật quyền truy cập secrets cho notebook.
+3. Trong Colab mở **Secrets** (biểu tượng chìa khóa) và chỉ cần thêm 1 biến (hoặc chạy thẳng cell để nhập vào ô ẩn khi được hỏi):
+   - `VIREAD_TRAINING_WORKER_TOKEN` (hoặc `IREAD_TRAINING_WORKER_TOKEN`): chính token đã cấu hình ở Render.
+   - *(Tùy chọn)* `VIREAD_API_BASE`: mặc định đã trỏ sẵn về `https://capstone1-ssd8.onrender.com`; chỉ cần đặt nếu bạn dùng URL Render khác.
+   - *(Tùy chọn)* `VIREAD_REPOSITORY_REF`: mặc định luôn đồng bộ nhánh `main`.
+4. Bật quyền truy cập secret cho notebook (nếu dùng Colab Secrets).
 5. Chọn **Runtime → Change runtime type → T4 GPU** nếu lựa chọn đó đang có, rồi kết nối. Colab Free có thể không cấp GPU ở thời điểm bạn thử.
 
 ## 4. Khởi động từng job

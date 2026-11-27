@@ -610,6 +610,18 @@ class ColabWorkerTests(unittest.TestCase):
             self.assertEqual(upload_calls, [cand_sha])
             worker.session.close()
 
+    def test_colab_worker_notebook_requires_only_worker_token_with_default_api_base(self):
+        nb_path = Path(__file__).with_name("viread_vietocr_v2_colab_worker.ipynb")
+        nb = json.loads(nb_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(nb.get("cells", [])), 2)
+        code_src = "".join(nb["cells"][1].get("source", []))
+        compile(code_src, str(nb_path), "exec")
+        self.assertIn('DEFAULT_API_BASE = "https://capstone1-ssd8.onrender.com"', code_src)
+        self.assertIn('"VIREAD_TRAINING_WORKER_TOKEN"', code_src)
+        self.assertIn('"IREAD_TRAINING_WORKER_TOKEN"', code_src)
+        self.assertIn("getpass(", code_src)
+        self.assertIn("run_next_job_once(", code_src)
+
 
 if __name__ == "__main__":
     unittest.main()
