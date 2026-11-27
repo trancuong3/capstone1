@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "OCR 伺服器目前暫時離線 — 您仍可上傳圖片或 PDF/DOCX 儲存至佇列；伺服器重新啟動後將自動辨識。",
     "queuedWaitingWorkerBadge": "已儲存至 OCR 佇列 — 等待伺服器上線",
     "queuedWaitingWorkerShort": "已儲存至 OCR 佇列 — 上線後自動辨識",
-    "reasonQueuedOffline": "該書頁已安全儲存在 OCR 佇列中，OCR 伺服器重新上線後將自動開始辨識。"
+    "reasonQueuedOffline": "該書頁已安全儲存在 OCR 佇列中，OCR 伺服器重新上線後將自動開始辨識。",
+    "toolScopeCloudAi": "透過安全雲端 AI 服務進行拼寫校對與兒童安全檢查",
+    "taskCenterLink": "任務中心",
+    "changeCoverAction": "更換封面",
+    "closeCoverStudio": "關閉封面設定",
+    "uploadPrivacyTransparency": "隱私透明說明：私享繪本僅在您的家庭帳戶內可見；上傳的書頁文字會自動進行拼寫與兒童安全檢查（依伺服器設定使用本地模型或安全雲端 AI 服務），預設不用於 OCR 模型訓練。",
+    "openPageIllustrationAria": "開啟第 {page} 頁插圖",
+    "closePageIllustrationAria": "關閉第 {page} 頁插圖",
+    "pageIllustrationAction": "書頁插圖",
+    "closePageIllustrationAction": "關閉插圖",
+    "openPageOcrBlocksAria": "檢視第 {page} 頁 OCR 文字區塊",
+    "closePageOcrBlocksAria": "關閉第 {page} 頁 OCR 文字區塊",
+    "openPageOcrBlocksAction": "OCR 文字區塊",
+    "closePageOcrBlocksAction": "關閉 OCR 區塊"
   },
   "ocrContribution": {
     "cardAria": "貢獻樣本以改善 {title} 的 ViRead OCR",

@@ -59,7 +59,7 @@ export function DifficultWordBookCard({
   onStartBookPractice,
   onSelectWord,
 }: DifficultWordBookCardProps) {
-  const { formatNumber } = useI18n();
+  const { formatNumber, formatPercent } = useI18n();
   const t = useTranslations("difficultWords");
   const tr = useTranslations("reading");
   const [coverError, setCoverError] = useState(false);
@@ -71,6 +71,18 @@ export function DifficultWordBookCard({
     group.words[0];
   const allCompleted =
     group.totalWords > 0 && group.completedWords === group.totalWords;
+  const clampedProgress = Math.min(
+    100,
+    Math.max(0, Math.round(group.progressPercent)),
+  );
+  const progressSummaryLabel = t("bookCard.progressSummary", {
+    completed: formatNumber(group.completedWords),
+    total: formatNumber(group.totalWords),
+  });
+  const formattedProgressPercent = formatPercent(clampedProgress, {
+    isRatio: false,
+    maximumFractionDigits: 0,
+  });
   const gradeLabel =
     group.minGrade != null
       ? group.maxGrade != null && group.maxGrade !== group.minGrade
@@ -164,23 +176,23 @@ export function DifficultWordBookCard({
 
             <div className="mt-3">
               <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-muted">
-                <span>
-                  {t("bookCard.progressSummary", {
-                    completed: formatNumber(group.completedWords),
-                    total: formatNumber(group.totalWords),
-                  })}
-                </span>
+                <span>{progressSummaryLabel}</span>
                 <span className="tabular-nums text-primary-hover">
-                  {group.progressPercent}%
+                  {formattedProgressPercent}
                 </span>
               </div>
               <div
-                aria-hidden="true"
+                aria-label={`${group.bookTitle} — ${progressSummaryLabel}`}
+                aria-valuemax={100}
+                aria-valuemin={0}
+                aria-valuenow={clampedProgress}
+                aria-valuetext={formattedProgressPercent}
                 className="h-2.5 w-full overflow-hidden rounded-full bg-surface-subtle"
+                role="progressbar"
               >
                 <div
                   className="h-full rounded-full bg-primary transition-all duration-300"
-                  style={{ width: `${group.progressPercent}%` }}
+                  style={{ width: `${clampedProgress}%` }}
                 />
               </div>
             </div>

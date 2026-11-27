@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "Der OCR-Server ist vorübergehend offline — Sie können weiterhin Bilder oder PDF/DOCX-Dateien hochladen, um sie in der Warteschlange zu speichern; die Erkennung startet automatisch, sobald der Server wieder läuft.",
     "queuedWaitingWorkerBadge": "In OCR-Warteschlange gespeichert — Wartet auf Server",
     "queuedWaitingWorkerShort": "In OCR-Warteschlange — Automatische Erkennung bei Neustart",
-    "reasonQueuedOffline": "Diese Seite ist sicher in der OCR-Warteschlange gespeichert und wird automatisch erkannt, sobald der OCR-Server wieder online ist."
+    "reasonQueuedOffline": "Diese Seite ist sicher in der OCR-Warteschlange gespeichert und wird automatisch erkannt, sobald der OCR-Server wieder online ist.",
+    "toolScopeCloudAi": "Rechtschreib- und Sicherheitsprüfung über einen sicheren Cloud-KI-Dienst",
+    "taskCenterLink": "Aufgabenzentrale",
+    "changeCoverAction": "Cover ändern",
+    "closeCoverStudio": "Cover-Editor schließen",
+    "uploadPrivacyTransparency": "Datenschutz-Transparenz: Private Bücher sind nur in Ihrem Familienkonto sichtbar; hochgeladene Seitentexte werden automatisch auf Rechtschreibung und Kindersicherheit geprüft (je nach Serverkonfiguration über ein lokales Modell oder einen sicheren Cloud-KI-Dienst) und standardmäßig nicht für das OCR-Training verwendet.",
+    "openPageIllustrationAria": "Illustration für Seite {page} öffnen",
+    "closePageIllustrationAria": "Illustration für Seite {page} schließen",
+    "pageIllustrationAction": "Seitenillustration",
+    "closePageIllustrationAction": "Illustration schließen",
+    "openPageOcrBlocksAria": "OCR-Textblöcke für Seite {page} anzeigen",
+    "closePageOcrBlocksAria": "OCR-Textblöcke für Seite {page} schließen",
+    "openPageOcrBlocksAction": "OCR-Textblöcke",
+    "closePageOcrBlocksAction": "OCR-Blöcke schließen"
   },
   "ocrContribution": {
     "cardAria": "Muster beisteuern, um ViRead OCR für {title} zu verbessern",

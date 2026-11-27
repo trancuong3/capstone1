@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "Le serveur OCR est temporairement hors ligne — Vous pouvez tout de même importer des images ou fichiers PDF/DOCX dans la file d’attente ; la reconnaissance démarrera automatiquement dès sa remise en ligne.",
     "queuedWaitingWorkerBadge": "En file OCR — En attente du serveur",
     "queuedWaitingWorkerShort": "En file OCR — Reconnaissance automatique au retour",
-    "reasonQueuedOffline": "Cette page est enregistrée en toute sécurité dans la file OCR et sera reconnue automatiquement dès le retour du serveur OCR."
+    "reasonQueuedOffline": "Cette page est enregistrée en toute sécurité dans la file OCR et sera reconnue automatiquement dès le retour du serveur OCR.",
+    "toolScopeCloudAi": "vérification orthographique et contrôle de sécurité via un service IA cloud sécurisé",
+    "taskCenterLink": "Centre des tâches",
+    "changeCoverAction": "Changer la couverture",
+    "closeCoverStudio": "Fermer la couverture",
+    "uploadPrivacyTransparency": "Transparence et confidentialité : les livres privés ne sont visibles que dans votre compte familial ; le texte des pages importées fait l’objet d’une vérification automatique de l’orthographe et de la sécurité enfant (modèle local ou service IA cloud sécurisé selon la configuration du serveur) et n’est pas utilisé par défaut pour l’entraînement OCR.",
+    "openPageIllustrationAria": "Ouvrir l’illustration de la page {page}",
+    "closePageIllustrationAria": "Fermer l’illustration de la page {page}",
+    "pageIllustrationAction": "Illustration",
+    "closePageIllustrationAction": "Fermer l’illustration",
+    "openPageOcrBlocksAria": "Voir les blocs de texte OCR de la page {page}",
+    "closePageOcrBlocksAria": "Fermer les blocs de texte OCR de la page {page}",
+    "openPageOcrBlocksAction": "Blocs OCR",
+    "closePageOcrBlocksAction": "Fermer les blocs OCR"
   },
   "ocrContribution": {
     "cardAria": "Contribuer des échantillons pour améliorer l'OCR ViRead pour {title}",

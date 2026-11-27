@@ -73,6 +73,8 @@ async def start(song_id: UUID, request: ProcessingStart, response: Response,
 @router.get("/admin/songs/{song_id}/processing-jobs", response_model=JobList)
 async def list_jobs(song_id: UUID, limit: int = Query(10, ge=1, le=50), offset: int = Query(0, ge=0),
                     actor: UUID = Depends(get_current_parent_id), service=Depends(get_processing_service)):
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return await service.list(actor, song_id, limit=limit, offset=offset)
 
 

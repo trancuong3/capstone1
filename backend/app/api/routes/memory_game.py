@@ -55,6 +55,7 @@ async def list_memory_game_sessions(
     parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     return await _build_service(db).list_sessions(parent_id, child_id, limit=limit)
 
 

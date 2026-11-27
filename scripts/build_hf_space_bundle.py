@@ -9,8 +9,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 from typing import Any
 
@@ -30,6 +32,7 @@ REQUIRED_RELATIVE_FILES: tuple[str, ...] = (
     "ocr_worker/configs/vgg-transformer.yml",
     "ai/vietocr_v2/original_artifact.json",
     "backend/app/services/ocr_engine.py",
+    "backend/app/services/ocr_executor.py",
     "backend/app/services/ocr_adjudication.py",
     "backend/app/services/ocr_punctuation.py",
     "backend/app/services/ocr_evidence.py",
@@ -227,12 +230,101 @@ def verify_hf_space_bundle(bundle_dir: Path) -> dict[str, Any]:
         if locked_pin not in reqs_text:
             raise AssertionError(f"requirements.txt missing locked pin: {locked_pin}")
 
+    _verify_standalone_bundle_imports(bundle_dir)
+
     return {
         "bundle_dir": str(bundle_dir),
         "file_count": len(file_entries),
         "total_bytes": total_bytes,
+        "standalone_imports_verified": True,
         "files": file_entries,
     }
+
+
+_STANDALONE_IMPORT_PROBE = """
+import importlib.util
+import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+
+repo_root = Path(sys.argv[1]).resolve()
+bundle_dir = Path(sys.argv[2]).resolve()
+bundle_backend = (bundle_dir / "backend").resolve()
+
+cleaned_path = []
+for raw_entry in sys.path:
+    if not raw_entry:
+        continue
+    try:
+        resolved = Path(raw_entry).resolve()
+    except OSError:
+        continue
+    lower_parts = {part.lower() for part in resolved.parts}
+    is_site_packages = "site-packages" in lower_parts or "dist-packages" in lower_parts
+    if resolved.is_relative_to(bundle_dir) or is_site_packages or not resolved.is_relative_to(repo_root):
+        cleaned_path.append(str(resolved))
+
+sys.path[:] = [str(bundle_dir), str(bundle_backend), *cleaned_path]
+
+assert importlib.util.find_spec("app.database") is None, "app.database leaked onto standalone bundle sys.path"
+
+# Bare ubuntu-24.04 CI runners execute bundle verification before `docker build` installs wheels;
+# use real installed packages when present (.venv / container) and stub only missing 3rd-party libs.
+if importlib.util.find_spec("PIL") is None:
+    pil_mod = ModuleType("PIL")
+    pil_image = ModuleType("PIL.Image")
+    pil_image.Resampling = SimpleNamespace(LANCZOS=1)
+    pil_image.Image = object
+    pil_mod.Image = pil_image
+    sys.modules["PIL"] = pil_mod
+    sys.modules["PIL.Image"] = pil_image
+
+for third_party in ("cv2", "numpy", "yaml", "requests"):
+    if importlib.util.find_spec(third_party) is None:
+        sys.modules[third_party] = ModuleType(third_party)
+
+import app.services.ocr_engine as ocr_engine
+import ocr_worker.service as worker_service
+import ocr_worker.worker as worker_entrypoint
+
+for loaded_mod in (ocr_engine, worker_service, worker_entrypoint):
+    mod_path = Path(loaded_mod.__file__).resolve()
+    assert mod_path.is_relative_to(bundle_dir), f"{loaded_mod.__name__} loaded outside bundle: {mod_path}"
+
+assert ocr_engine.supabase_admin_headers("sb_secret_bundle_check") == {"apikey": "sb_secret_bundle_check"}
+"""
+
+
+def _verify_standalone_bundle_imports(bundle_dir: Path) -> None:
+    resolved_bundle = bundle_dir.resolve()
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(resolved_bundle), str(resolved_bundle / "backend")]
+    )
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            _STANDALONE_IMPORT_PROBE,
+            str(REPO_ROOT.resolve()),
+            str(resolved_bundle),
+        ],
+        cwd=str(resolved_bundle),
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=45,
+        check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip()
+        raise AssertionError(
+            f"Standalone Zero-DB OCR bundle import smoke test failed (exit {proc.returncode}): {detail}"
+        )
 
 
 def build_hf_space_bundle(output_dir: Path = DEFAULT_BUNDLE_DIR) -> dict[str, Any]:

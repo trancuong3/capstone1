@@ -32,6 +32,7 @@ async def get_progress_assessment(
     db: AsyncSession = Depends(get_db),
 ):
     """Scores and metrics now; comments are the cached AI text or offline comments."""
+    days = days if isinstance(days, int) and not isinstance(days, bool) else 30
     return await _service(db).assess(child_id, actor_id, days=days, use_ai=False)
 
 
