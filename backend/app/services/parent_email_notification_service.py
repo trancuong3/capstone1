@@ -364,7 +364,8 @@ class ParentEmailNotificationService:
                 event="parent_test_email_failed",
                 stage="email_delivery",
                 exception=error,
-                error_code=code,
+                delivery_error_code=code,
+                provider=provider,
             )
             return ParentEmailTestResponse(
                 status="FAILED",

@@ -106,7 +106,7 @@ def send_presence_email(
         return
     if not email_delivery_is_configured():
         raise EmailDeliveryNotConfigured()
-    if active_email_provider() == "resend":
+    if active_email_provider() in {"resend", "vercel_relay"}:
         try:
             send_email_message(message)
         except EmailTransportRetryable as error:

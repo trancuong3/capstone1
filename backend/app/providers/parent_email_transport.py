@@ -11,6 +11,9 @@ Never logs recipient email addresses, SMTP passwords, or API keys.
 from __future__ import annotations
 
 import html
+import hashlib
+import hmac
+import time
 import smtplib
 import socket
 import ssl
@@ -83,6 +86,8 @@ def active_email_provider() -> str:
     if settings.PARENT_EMAIL_MAIL_SINK_DIR:
         return "mail_sink"
     mode = settings.EMAIL_PROVIDER
+    if mode == "vercel_relay":
+        return "vercel_relay" if _relay_is_configured() else "unconfigured"
     if mode == "resend":
         return "resend" if _resend_is_configured() else "unconfigured"
     if mode == "smtp":
@@ -90,9 +95,60 @@ def active_email_provider() -> str:
     # mode == "auto": prefer Resend HTTPS API when configured, else SMTP.
     if _resend_is_configured():
         return "resend"
+    if _relay_is_configured():
+        return "vercel_relay"
     if _smtp_is_configured():
         return "smtp"
     return "unconfigured"
+
+
+def _relay_is_configured() -> bool:
+    try:
+        url = urlparse(settings.EMAIL_RELAY_URL)
+    except ValueError:
+        return False
+    return bool(
+        url.scheme == "https" and url.hostname and not url.username
+        and not url.password and not url.fragment
+        and len(settings.EMAIL_RELAY_SECRET) >= 32
+        and (settings.EMAIL_FROM_ADDRESS or settings.SMTP_FROM_EMAIL)
+    )
+
+
+def _send_via_vercel_relay(message: EmailMessage) -> None:
+    if not _relay_is_configured():
+        raise EmailDeliveryNotConfigured("Incomplete HTTPS email relay configuration")
+    body = message.as_bytes()
+    timestamp = str(int(time.time()))
+    signature = hmac.new(
+        settings.EMAIL_RELAY_SECRET.encode(),
+        timestamp.encode() + b"." + body,
+        hashlib.sha256,
+    ).hexdigest()
+    try:
+        with httpx.Client(timeout=45.0, follow_redirects=False) as client:
+            response = client.post(
+                settings.EMAIL_RELAY_URL,
+                content=body,
+                headers={
+                    "Content-Type": "message/rfc822",
+                    "X-ViRead-Timestamp": timestamp,
+                    "X-ViRead-Signature": signature,
+                },
+            )
+    except (httpx.TransportError, OSError) as error:
+        raise EmailTransportRetryable("HTTPS email relay unreachable") from error
+    if response.status_code == 200:
+        try:
+            accepted = response.json().get("status") == "SENT"
+        except (ValueError, AttributeError):
+            accepted = False
+        if accepted:
+            return
+        raise EmailTransportPermanent("Invalid email relay acknowledgement")
+    if response.status_code == 429 or response.status_code >= 500:
+        raise EmailTransportRetryable("HTTPS email relay temporarily unavailable")
+    raise EmailTransportPermanent("HTTPS email relay rejected request")
 
 
 def parent_email_delivery_is_configured() -> bool:
@@ -584,6 +640,9 @@ def send_email_message(message: EmailMessage) -> str:
         return provider
     if provider == "smtp":
         _send_via_smtp(message)
+        return provider
+    if provider == "vercel_relay":
+        _send_via_vercel_relay(message)
         return provider
     raise EmailDeliveryNotConfigured(
         "Configure RESEND_API_KEY + EMAIL_FROM_ADDRESS or SMTP_* credentials."
