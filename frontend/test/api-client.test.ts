@@ -164,12 +164,44 @@ describe("real API client", () => {
       await vi.advanceTimersByTimeAsync(600);
       await expect(netPromise).resolves.toEqual({ title: "Recovered net" });
       expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(new Response("Gateway Timeout", { status: 504 }))
+        .mockResolvedValueOnce(Response.json({ title: "Recovered 504" }));
+
+      const html504Promise = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(html504Promise).resolves.toEqual({ title: "Recovered 504" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("does not retry GET on 401/503 or POST on 502/network failures", async () => {
+  it("does not retry GET on structured backend 504 domain errors, 401/503, or POST on 502/network failures", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        {
+          detail:
+            "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
+        },
+        { status: 504 },
+      ),
+    );
+    await expect(
+      requestApi("/reading/scan-page-ocr", schema, undefined, {
+        bypassCache: true,
+      }),
+    ).rejects.toMatchObject({
+      status: 504,
+      message: expect.stringContaining("xếp hàng"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
     fetchMock.mockResolvedValueOnce(
       Response.json({ detail: "unauthorized" }, { status: 401 }),
     );
