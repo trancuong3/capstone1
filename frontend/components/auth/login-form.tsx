@@ -4,7 +4,7 @@ import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -100,7 +100,7 @@ export function LoginForm({
   oauthError = null,
   scenario,
 }: LoginFormProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
@@ -136,6 +136,7 @@ export function LoginForm({
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
+    trigger,
   } = useForm<LoginRequest>({
     defaultValues: {
       email: "",
@@ -143,6 +144,25 @@ export function LoginForm({
     },
     resolver: zodResolver(loginSchema),
   });
+  const prevLocaleRef = useRef(locale);
+  const errorsRef = useRef(errors);
+
+  useEffect(() => {
+    errorsRef.current = errors;
+  }, [errors]);
+
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) {
+      return;
+    }
+    prevLocaleRef.current = locale;
+    const activeFields = Object.keys(errorsRef.current) as Array<
+      keyof LoginRequest
+    >;
+    if (activeFields.length > 0) {
+      void trigger(activeFields);
+    }
+  }, [locale, trigger]);
   const isCompletingCallback =
     isAuthCallback &&
     authRuntime.mode === "supabase" &&

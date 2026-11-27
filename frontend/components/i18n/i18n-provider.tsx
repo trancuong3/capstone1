@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   createContext,
   useCallback,
@@ -138,6 +139,7 @@ export function I18nProvider({
   onPersistUserLocale,
 }: I18nProviderProps) {
   const authRuntime = useContext(AuthRuntimeContext);
+  const router = useRouter();
   const [supabaseIdentity, setSupabaseIdentity] = useState<{
     readonly userId: string | null;
     readonly accountLocale: string | null;
@@ -320,6 +322,7 @@ export function I18nProvider({
         return localeRef.current;
       }
 
+      const previousLocale = localeRef.current;
       const requestId = ++requestIdRef.current;
       const cached = !customLoadMessages
         ? getCachedLocaleMessages(normalized)
@@ -334,6 +337,9 @@ export function I18nProvider({
           userId: effectiveUserId,
           onPersistUserLocale,
         });
+        if (previousLocale !== normalized && typeof window !== "undefined") {
+          router.refresh();
+        }
         return normalized;
       }
 
@@ -350,6 +356,9 @@ export function I18nProvider({
           userId: effectiveUserId,
           onPersistUserLocale,
         });
+        if (previousLocale !== normalized && typeof window !== "undefined") {
+          router.refresh();
+        }
         return normalized;
       } finally {
         if (mountedRef.current && requestId === requestIdRef.current) {
@@ -357,7 +366,13 @@ export function I18nProvider({
         }
       }
     },
-    [customLoadMessages, effectiveUserId, onPersistUserLocale, resolveBundle],
+    [
+      customLoadMessages,
+      effectiveUserId,
+      onPersistUserLocale,
+      resolveBundle,
+      router,
+    ],
   );
 
   const value = useMemo<I18nContextValue>(() => {

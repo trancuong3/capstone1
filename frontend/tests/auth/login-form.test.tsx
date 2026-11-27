@@ -2,7 +2,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LoginForm } from "@/components/auth/login-form";
+import { I18nProvider } from "@/components/i18n/i18n-provider";
+import { useI18n } from "@/hooks/use-i18n";
 import { AuthServiceError } from "@/lib/api/auth-service";
+import enMessages from "@/messages/en";
+import { viMessages } from "@/messages/vi";
 import {
   authSessionFixture,
   createAuthServiceFixture,
@@ -268,5 +272,50 @@ describe("LoginForm", () => {
       "Không thể bắt đầu đăng nhập xã hội",
     );
     expect(document.cookie).not.toContain("viread_auth_next=");
+  });
+
+  it("immediately re-translates active validation errors when locale switches from VI to EN", async () => {
+    const user = userEvent.setup();
+    const service = createAuthServiceFixture();
+
+    function LocaleSwitchButton() {
+      const { setLocale } = useI18n();
+      return (
+        <button onClick={() => void setLocale("en")} type="button">
+          Switch to EN
+        </button>
+      );
+    }
+
+    render(
+      <I18nProvider
+        initialLocale="vi"
+        initialMessages={viMessages}
+        loadMessages={async (locale) =>
+          locale === "en" ? enMessages : viMessages
+        }
+      >
+        <LocaleSwitchButton />
+        {withAuthFixture(<LoginForm scenario="default" />, service)}
+      </I18nProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Đăng nhập" }));
+    expect(
+      await screen.findByText("Ba mẹ vui lòng nhập email."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Mật khẩu cần có ít nhất 8 ký tự."),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Switch to EN" }));
+
+    expect(
+      await screen.findByText("Please enter your email."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Password must be at least 8 characters."),
+    ).toBeInTheDocument();
+    expect(refreshMock).toHaveBeenCalledOnce();
   });
 });

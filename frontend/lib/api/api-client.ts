@@ -513,13 +513,27 @@ function resolveSafeMessageText(rawCodeOrText: string): string {
     : tApiError("errors.generic");
 }
 
-async function safeBackendMessage(response: Response): Promise<string> {
+function isKnownBackendDetail(rawCodeOrText: string): boolean {
+  if (
+    Boolean(safeBackendMessageKeys[rawCodeOrText]) ||
+    Boolean(safeFlow2BackendMessages[rawCodeOrText])
+  ) {
+    return true;
+  }
+  return SAFE_BACKEND_PREFIX_CODES.some(
+    (code) => rawCodeOrText === code || rawCodeOrText.startsWith(`${code}:`),
+  );
+}
+
+async function extractBackendDetail(
+  response: Response,
+): Promise<string | null> {
   try {
     const payload: unknown = await response.clone().json();
     if (typeof payload === "object" && payload !== null) {
       if ("detail" in payload) {
         if (typeof payload.detail === "string") {
-          return resolveSafeMessageText(payload.detail);
+          return payload.detail;
         }
         if (
           typeof payload.detail === "object" &&
@@ -527,21 +541,60 @@ async function safeBackendMessage(response: Response): Promise<string> {
           "code" in payload.detail &&
           typeof payload.detail.code === "string"
         ) {
-          return resolveSafeMessageText(payload.detail.code);
+          return payload.detail.code;
         }
       }
       if ("code" in payload && typeof payload.code === "string") {
-        return resolveSafeMessageText(payload.code);
+        return payload.code;
       }
     }
   } catch {
     // A non-JSON error body must not be reflected to the browser.
   }
-  return tApiError("errors.generic");
+  return null;
+}
+
+async function safeBackendMessage(response: Response): Promise<string> {
+  const detail = await extractBackendDetail(response);
+  return detail !== null
+    ? resolveSafeMessageText(detail)
+    : tApiError("errors.generic");
+}
+
+async function shouldRetryColdStartResponse(
+  response: Response,
+): Promise<boolean> {
+  if (!COLD_START_RETRY_STATUSES.has(response.status)) {
+    return false;
+  }
+  const detail = await extractBackendDetail(response);
+  // Only treat unstructured/gateway 502/504 responses as cold starts; never
+  // retry structured application domain errors such as async OCR 504 responses.
+  return detail === null || !isKnownBackendDetail(detail);
 }
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
+
+const COLD_START_RETRY_STATUSES = new Set([502, 504]);
+const COLD_START_RETRY_DELAY_MS = 600;
+
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
@@ -578,7 +631,7 @@ export async function requestApi<T>(
 
   const method = requestOptions.method ?? "GET";
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
-    let response: Response;
+    let response!: Response;
     const isFormDataBody =
       typeof FormData !== "undefined" &&
       requestOptions.body instanceof FormData;
@@ -607,42 +660,62 @@ export async function requestApi<T>(
         : isFormDataBody
           ? DEFAULT_UPLOAD_TIMEOUT_MS
           : DEFAULT_REQUEST_TIMEOUT_MS;
-    const timeoutController = fetchSignal ? null : new AbortController();
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+    const canColdStartRetry = method === "GET";
+    const maxAttempts = canColdStartRetry ? 2 : 1;
 
-    try {
-      const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: body as BodyInit } : {}),
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: effectiveSignal,
-      });
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const timeoutController = fetchSignal ? null : new AbortController();
+      let timedOut = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const effectiveSignal = fetchSignal ?? timeoutController!.signal;
 
-      if (timeoutController) {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          timeoutController.abort();
-        }, effectiveTimeoutMs);
-        response = await fetchPromise;
-      } else {
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      try {
+        const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: body as BodyInit } : {}),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: effectiveSignal,
+        });
+
+        if (timeoutController) {
           timeoutId = setTimeout(() => {
             timedOut = true;
-            reject(failure(0, "", true));
+            timeoutController.abort();
           }, effectiveTimeoutMs);
-        });
-        response = await Promise.race([fetchPromise, timeoutPromise]);
+          response = await fetchPromise;
+        } else {
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(() => {
+              timedOut = true;
+              reject(failure(0, "", true));
+            }, effectiveTimeoutMs);
+          });
+          response = await Promise.race([fetchPromise, timeoutPromise]);
+        }
+      } catch (error) {
+        if (fetchSignal?.aborted && !timedOut) throw error;
+        if (attempt === 0 && canColdStartRetry && !timedOut) {
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+          continue;
+        }
+        throw failure(0, "", true);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
-    } catch (error) {
-      if (fetchSignal?.aborted && !timedOut) throw error;
-      throw failure(0, "", true);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+      if (
+        attempt === 0 &&
+        canColdStartRetry &&
+        !fetchSignal?.aborted &&
+        (await shouldRetryColdStartResponse(response))
+      ) {
+        await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+        continue;
+      }
+      break;
     }
 
     const requestId = response.headers.get("x-request-id") ?? "";

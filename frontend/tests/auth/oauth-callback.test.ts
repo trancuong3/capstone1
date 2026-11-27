@@ -304,4 +304,33 @@ describe("OAuth callback", () => {
     );
     expect(adminResp.cookies.get("viread_auth_next")?.value).toBe("");
   });
+
+  it("redirects safely to login when createServerSupabaseClient throws", async () => {
+    createServerSupabaseClientMock.mockRejectedValue(
+      new Error("Supabase env missing"),
+    );
+
+    const response = await GET(
+      requestFor("/auth/callback?code=oauth-code&next=%2Fbooks"),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      `${APP_ORIGIN}/login?oauth_error=oauth_failed&next=%2Fbooks`,
+    );
+  });
+
+  it("signs out quietly and redirects safely when exchangeCodeForSession throws", async () => {
+    const harness = makeSupabase();
+    harness.exchangeCodeForSession.mockRejectedValue(
+      new Error("Network timeout"),
+    );
+    createServerSupabaseClientMock.mockResolvedValue(harness.client);
+
+    const response = await GET(requestFor(CALLBACK_PATH));
+
+    expect(response.headers.get("location")).toBe(
+      `${APP_ORIGIN}/login?oauth_error=oauth_failed`,
+    );
+    expect(harness.signOut).toHaveBeenCalledWith({ scope: "local" });
+  });
 });
