@@ -252,6 +252,36 @@ describe("Web Audio YIN pitch detector & octave-invariant helpers", () => {
     expect(analyzer.getLiveTelemetry()?.signalState).toBe("singing");
   });
 
+  it("keeps bright high-pitched child vocals voiced on 16 kHz mobile mics while rejecting 16 kHz white noise", () => {
+    const mobileSr = 16_000;
+    const analyzer = new MusicalDspAnalyzer({
+      sampleRate: mobileSr,
+      frameSize: FRAME_SIZE,
+      lyricSpans: [{ startMs: 0, endMs: 1200 }],
+      headphoneMode: true,
+    });
+
+    // Bright child soprano (B5 = 987.77 Hz with strong 2nd & 3rd harmonics inside vocal band)
+    const brightMobileVocal = new Float32Array(FRAME_SIZE);
+    for (let i = 0; i < FRAME_SIZE; i++) {
+      const t = i / mobileSr;
+      brightMobileVocal[i] =
+        0.22 *
+        (0.42 * Math.sin(2 * Math.PI * 987.77 * t) +
+          0.34 * Math.sin(2 * Math.PI * 1975.54 * t + 0.3) +
+          0.24 * Math.sin(2 * Math.PI * 2963.31 * t + 0.7));
+    }
+    const vocalFrame = analyzer.processFrame(brightMobileVocal, 100);
+    expect(vocalFrame.voiced).toBe(true);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("singing");
+
+    // Broadband white noise on 16 kHz mobile mic MUST still be rejected as noise
+    const mobileNoise = synthesizeWhiteNoise(0.14, 777, FRAME_SIZE);
+    const noiseFrame = analyzer.processFrame(mobileNoise, 200);
+    expect(noiseFrame.voiced).toBe(false);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("noise");
+  });
+
   it("tears down AudioContext automatically on document visibilitychange to hidden", () => {
     const close = vi.fn(async () => {});
     const disconnect = vi.fn();

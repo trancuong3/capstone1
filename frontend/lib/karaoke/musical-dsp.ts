@@ -488,9 +488,9 @@ function computeRadix2Fft(ws: YinWorkspace): void {
 
 /**
  * Zero-Crossing Rate (ZCR) unvoiced/wind/breath/white-noise detector combined
- * with spectral flatness. Child singing (130–1100 Hz, harmonic-rich) has low
- * ZCR (~0.005–0.14 @ 48 kHz), whereas white noise (~0.50) and unvoiced
- * fricatives/breath/wind hiss exhibit high ZCR + flat/broadband spectra.
+ * with spectral flatness. Uses sample-rate-invariant `zcrHz` so bright child
+ * vocals on 16 kHz mobile mics stay voiced while broadband white noise, wind,
+ * breath bursts, and high-frequency sibilants are reliably rejected.
  */
 function isHighZcrNoise(
   zeroCrossingRate: number,
@@ -499,9 +499,9 @@ function isHighZcrNoise(
 ): boolean {
   const zcrHz = zeroCrossingRate * sampleRate * 0.5;
   return (
-    zeroCrossingRate >= 0.35 ||
-    (zcrHz >= 5000 && spectralFlatness >= 0.22) ||
-    (zeroCrossingRate >= 0.22 && spectralFlatness >= 0.26)
+    (zcrHz >= 4500 && spectralFlatness >= 0.22) ||
+    (zcrHz >= 3000 && spectralFlatness >= 0.28) ||
+    (zeroCrossingRate >= 0.42 && spectralFlatness >= 0.24)
   );
 }
 
@@ -644,7 +644,8 @@ export function detectPitchYIN(
   const isHumLike = lowBandRatio >= 0.65 && rms >= 0.003;
   const zcrHz = zeroCrossingRate * sampleRate * 0.5;
   const isUnvoicedZcrBurst =
-    zeroCrossingRate >= 0.35 || (zcrHz >= 5200 && highBandRatio >= 0.35);
+    (zcrHz >= 5000 && highBandRatio >= 0.65) ||
+    (zeroCrossingRate >= 0.42 && highBandRatio >= 0.55);
 
   if (isHumLike || isUnvoicedZcrBurst || vocalBandRms < minVocalRms) {
     return {

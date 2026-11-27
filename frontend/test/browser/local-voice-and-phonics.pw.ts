@@ -1,5 +1,10 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
+import {
+  child,
+  ids,
+  installApiFixture,
+  readyVoiceStatus,
+} from "./real-data-fixture";
 
 function silentWav(seconds: number): string {
   const bytes = Math.max(3200, Math.round(16_000 * 2 * seconds));
@@ -399,4 +404,38 @@ test("DifficultWordPracticePanel: shares PhonicsLessonCard for 'mốt' in 'Hai m
       document.documentElement.clientWidth,
   );
   expect(overflow).toBe(false);
+});
+
+test("Dashboard AiTeacherVoiceSection: loads /voice/voices and persists PATCH voice-preferences via real-data-fixture", async ({
+  page,
+}) => {
+  const base = await installApiFixture(page);
+
+  await page.goto("/dashboard");
+  await expect(page.getByTestId("ai-teacher-voice-section")).toBeVisible();
+  await page
+    .getByRole("button", { name: `${child.alias}, lớp ${child.grade}` })
+    .click();
+
+  const patchResponsePromise = page.waitForResponse(
+    (resp) =>
+      resp.request().method() === "PATCH" &&
+      resp.url().includes(`/profiles/children/${ids.child}/voice-preferences`),
+  );
+
+  await page.getByTestId("teacher-card-male").click();
+  const patchResponse = await patchResponsePromise;
+  expect(patchResponse.status()).toBe(200);
+  const updatedChild = (await patchResponse.json()) as {
+    settings?: { voice_preferences?: { gender?: string; voice_id?: string } };
+  };
+  expect(updatedChild.settings?.voice_preferences?.gender).toBe("male");
+  expect(updatedChild.settings?.voice_preferences?.voice_id).toBe(
+    "local_north_thien_minh",
+  );
+  await expect(page.getByTestId("teacher-card-male")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  expect(base.unexpected).toEqual([]);
 });
