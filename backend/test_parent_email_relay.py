@@ -105,7 +105,7 @@ class EmailRelayTests(unittest.TestCase):
     def test_backend_signing_matches_relay_and_requires_sent_ack(self):
         def post(_url, *, content, headers):
             status, result = relay.deliver(
-                content, headers["X-ViRead-Timestamp"], headers["X-ViRead-Signature"]
+                content, headers["X-Email-Relay-Timestamp"], headers["X-Email-Relay-Signature"]
             )
             return httpx.Response(status, json=result)
 

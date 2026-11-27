@@ -85,8 +85,8 @@ class handler(BaseHTTPRequestHandler):
         else:
             code, result = deliver(
                 self.rfile.read(size),
-                self.headers.get("X-ViRead-Timestamp"),
-                self.headers.get("X-ViRead-Signature"),
+                self.headers.get("X-Email-Relay-Timestamp"),
+                self.headers.get("X-Email-Relay-Signature"),
             )
         data = json.dumps(result).encode()
         self.send_response(code)

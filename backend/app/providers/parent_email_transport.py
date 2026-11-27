@@ -132,8 +132,8 @@ def _send_via_vercel_relay(message: EmailMessage) -> None:
                 content=body,
                 headers={
                     "Content-Type": "message/rfc822",
-                    "X-ViRead-Timestamp": timestamp,
-                    "X-ViRead-Signature": signature,
+                    "X-Email-Relay-Timestamp": timestamp,
+                    "X-Email-Relay-Signature": signature,
                 },
             )
     except (httpx.TransportError, OSError) as error:
