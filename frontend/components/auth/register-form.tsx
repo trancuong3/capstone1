@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -28,7 +28,7 @@ export function RegisterForm({
   onEmailConfirmationRequired,
   scenario,
 }: RegisterFormProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
@@ -63,6 +63,7 @@ export function RegisterForm({
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
+    trigger,
   } = useForm<ParentRegistrationInput>({
     defaultValues: {
       displayName: "",
@@ -71,6 +72,25 @@ export function RegisterForm({
     },
     resolver: zodResolver(registerSchema),
   });
+  const prevLocaleRef = useRef(locale);
+  const errorsRef = useRef(errors);
+
+  useEffect(() => {
+    errorsRef.current = errors;
+  }, [errors]);
+
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) {
+      return;
+    }
+    prevLocaleRef.current = locale;
+    const activeFields = Object.keys(errorsRef.current) as Array<
+      keyof ParentRegistrationInput
+    >;
+    if (activeFields.length > 0) {
+      void trigger(activeFields);
+    }
+  }, [locale, trigger]);
 
   const onSubmit = handleSubmit(async (values) => {
     setErrorKind(null);

@@ -7,6 +7,8 @@ import {
 } from "@/lib/auth/route-policy";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
+export const maxDuration = 30;
+
 const SAFE_HOST_HEADER_RE = /^[a-zA-Z0-9.-]+(?::\d{1,5})?$/;
 
 function parseConfiguredOrigin(raw: string | undefined): string | null {
@@ -171,51 +173,61 @@ export async function GET(request: NextRequest) {
     return redirectToLogin(request, "oauth_failed", requestedNext);
   }
 
-  const supabase = await createServerSupabaseClient();
-  const { error: exchangeError } =
-    await supabase.auth.exchangeCodeForSession(code);
+  let supabase: Awaited<ReturnType<typeof createServerSupabaseClient>> | null =
+    null;
 
-  if (exchangeError) {
-    await signOutQuietly(supabase);
+  try {
+    supabase = await createServerSupabaseClient();
+    const { error: exchangeError } =
+      await supabase.auth.exchangeCodeForSession(code);
+
+    if (exchangeError) {
+      await signOutQuietly(supabase);
+      return redirectToLogin(request, "oauth_failed", requestedNext);
+    }
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const email = userData.user?.email?.trim();
+
+    // Facebook may omit email if the account has no confirmed email or the app
+    // has not been granted the email permission. Do not keep such a session.
+    if (!userData.user || userError || !email) {
+      await signOutQuietly(supabase);
+      return redirectToLogin(request, "email_required", requestedNext);
+    }
+
+    // The role comes only from the active database profile, never provider metadata.
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role, active")
+      .eq("id", userData.user.id)
+      .maybeSingle();
+
+    const isInactive =
+      profile !== null &&
+      typeof profile === "object" &&
+      "active" in profile &&
+      (profile.active === 0 || profile.active === false);
+    const role =
+      !isInactive && (profile?.role === "parent" || profile?.role === "admin")
+        ? profile.role
+        : null;
+
+    if (profileError || !role) {
+      await signOutQuietly(supabase);
+      return redirectToLogin(request, "oauth_failed", requestedNext);
+    }
+
+    const destination = sanitizeNextPath(requestedNext, role);
+    const response = NextResponse.redirect(
+      new URL(destination, resolvePublicOrigin(request)),
+    );
+    response.cookies.delete(AUTH_NEXT_COOKIE);
+    return response;
+  } catch {
+    if (supabase) {
+      await signOutQuietly(supabase);
+    }
     return redirectToLogin(request, "oauth_failed", requestedNext);
   }
-
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  const email = userData.user?.email?.trim();
-
-  // Facebook may omit email if the account has no confirmed email or the app
-  // has not been granted the email permission. Do not keep such a session.
-  if (!userData.user || userError || !email) {
-    await signOutQuietly(supabase);
-    return redirectToLogin(request, "email_required", requestedNext);
-  }
-
-  // The role comes only from the active database profile, never provider metadata.
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role, active")
-    .eq("id", userData.user.id)
-    .maybeSingle();
-
-  const isInactive =
-    profile !== null &&
-    typeof profile === "object" &&
-    "active" in profile &&
-    (profile.active === 0 || profile.active === false);
-  const role =
-    !isInactive && (profile?.role === "parent" || profile?.role === "admin")
-      ? profile.role
-      : null;
-
-  if (profileError || !role) {
-    await signOutQuietly(supabase);
-    return redirectToLogin(request, "oauth_failed", requestedNext);
-  }
-
-  const destination = sanitizeNextPath(requestedNext, role);
-  const response = NextResponse.redirect(
-    new URL(destination, resolvePublicOrigin(request)),
-  );
-  response.cookies.delete(AUTH_NEXT_COOKIE);
-  return response;
 }

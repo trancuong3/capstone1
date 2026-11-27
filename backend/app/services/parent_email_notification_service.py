@@ -6,6 +6,7 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Iterable
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -166,6 +167,82 @@ def _format_goal_summary(snapshot: ChildActivitySnapshot, now: datetime) -> str 
         pct = min(100, round(value * 100 / max(1, goal.TargetValue)))
         return f"{value}/{goal.TargetValue} {unit}/{period_label} ({pct}%)"
     return None
+
+
+def _as_utc_or_none(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _snapshot_child(child) -> SimpleNamespace:
+    """Copy scalar ChildProfile attributes so DB rollbacks never expire ORM state."""
+    return SimpleNamespace(
+        Id=child.Id,
+        ParentId=getattr(child, "ParentId", None),
+        Alias=child.Alias,
+        CreatedAt=_as_utc_or_none(getattr(child, "CreatedAt", None)),
+    )
+
+
+def _snapshot_session(session) -> SimpleNamespace:
+    return SimpleNamespace(
+        Id=getattr(session, "Id", None),
+        ChildId=getattr(session, "ChildId", None),
+        State=getattr(session, "State", None),
+        StartedAt=_as_utc_or_none(getattr(session, "StartedAt", None)),
+        EndedAt=_as_utc_or_none(getattr(session, "EndedAt", None)),
+    )
+
+
+def _snapshot_goal(goal) -> SimpleNamespace:
+    return SimpleNamespace(
+        Id=goal.Id,
+        ChildId=getattr(goal, "ChildId", None),
+        Metric=goal.Metric,
+        Period=goal.Period,
+        TargetValue=goal.TargetValue,
+        Timezone=goal.Timezone,
+        StartsOn=getattr(goal, "StartsOn", None),
+        EndsOn=getattr(goal, "EndsOn", None),
+        Status=getattr(goal, "Status", "ACTIVE"),
+    )
+
+
+def _snapshot_retry(row) -> SimpleNamespace:
+    return SimpleNamespace(
+        Status=getattr(row, "Status", None),
+        Attempts=getattr(row, "Attempts", 0),
+        NextAttemptAt=_as_utc_or_none(getattr(row, "NextAttemptAt", None)),
+        DedupeKey=getattr(row, "DedupeKey", None),
+    )
+
+
+def _snapshot_summary(summary: ParentDeliverySummary) -> ParentDeliverySummary:
+    return ParentDeliverySummary(
+        automated_sent_last_7d=summary.automated_sent_last_7d,
+        last_digest_sent_at=_as_utc_or_none(summary.last_digest_sent_at),
+        last_milestone_sent_at=_as_utc_or_none(summary.last_milestone_sent_at),
+        last_inactivity_sent_at=_as_utc_or_none(summary.last_inactivity_sent_at),
+    )
+
+
+def _snapshot_activity(snapshot: ChildActivitySnapshot) -> ChildActivitySnapshot:
+    """Detach all ORM rows inside a ChildActivitySnapshot before DB rollbacks."""
+    return ChildActivitySnapshot(
+        child=_snapshot_child(snapshot.child),  # type: ignore[arg-type]
+        sessions_last_7d=tuple(_snapshot_session(s) for s in snapshot.sessions_last_7d),  # type: ignore[arg-type]
+        sessions_prev_7d_count=snapshot.sessions_prev_7d_count,
+        sessions_last_35d=tuple(_snapshot_session(s) for s in snapshot.sessions_last_35d),  # type: ignore[arg-type]
+        total_completed_sessions=snapshot.total_completed_sessions,
+        last_session_at=_as_utc_or_none(snapshot.last_session_at),
+        avg_fluency_last_7d=snapshot.avg_fluency_last_7d,
+        top_difficult_words_last_7d=tuple(snapshot.top_difficult_words_last_7d),
+        active_goals=tuple(_snapshot_goal(g) for g in snapshot.active_goals),  # type: ignore[arg-type]
+        first_completed_session_at=_as_utc_or_none(snapshot.first_completed_session_at),
+    )
 
 
 class ParentEmailNotificationService:
@@ -336,16 +413,18 @@ class ParentEmailNotificationService:
                 status_code=409,
             )
 
+        delivery_id = delivery.Id
+        await self._release_db()
         message = build_test_email_message(
             recipient=recipient,
             parent_name=parent_name,
-            delivery_id=delivery.Id,
+            delivery_id=delivery_id,
         )
         try:
             used_provider = await asyncio.to_thread(message_sender, message)
         except EmailDeliveryNotConfigured:
             await self.repo.finish_delivery(
-                delivery.Id, status="FAILED", now=now, error_code="EMAIL_NOT_CONFIGURED"
+                delivery_id, status="FAILED", now=now, error_code="EMAIL_NOT_CONFIGURED"
             )
             raise ParentNotificationError(
                 code="EMAIL_NOT_CONFIGURED",
@@ -359,7 +438,7 @@ class ParentEmailNotificationService:
                 else "EMAIL_PROVIDER_UNAVAILABLE"
             )
             await self.repo.finish_delivery(
-                delivery.Id, status="FAILED", now=now, error_code=code
+                delivery_id, status="FAILED", now=now, error_code=code
             )
             log_diagnostic(
                 logger,
@@ -372,16 +451,16 @@ class ParentEmailNotificationService:
             )
             return ParentEmailTestResponse(
                 status="FAILED",
-                delivery_id=delivery.Id,
+                delivery_id=delivery_id,
                 provider=provider,
                 error_code=code,
                 message="Chưa gửi được email thử nghiệm. Vui lòng kiểm tra lại cấu hình gửi email trên máy chủ.",
             )
 
-        await self.repo.finish_delivery(delivery.Id, status="SENT", now=now)
+        await self.repo.finish_delivery(delivery_id, status="SENT", now=now)
         return ParentEmailTestResponse(
             status="SENT",
-            delivery_id=delivery.Id,
+            delivery_id=delivery_id,
             provider=used_provider,
             message="Đã gửi email thử nghiệm đến địa chỉ email đã xác minh của ba mẹ.",
         )
@@ -397,12 +476,11 @@ class ParentEmailNotificationService:
 
     @staticmethod
     def _is_row_due_retry(row, now: datetime) -> bool:
-        return (
-            row is not None
-            and row.Status == "RETRY"
-            and (row.Attempts or 0) < MAX_DELIVERY_ATTEMPTS
-            and (row.NextAttemptAt is None or row.NextAttemptAt <= now)
-        )
+        if row is None or row.Status != "RETRY" or (row.Attempts or 0) >= MAX_DELIVERY_ATTEMPTS:
+            return False
+        next_attempt = _as_utc_or_none(getattr(row, "NextAttemptAt", None))
+        utc_now = _as_utc_or_none(now) or now
+        return next_attempt is None or next_attempt <= utc_now
 
     async def _can_attempt_dedupe_key(
         self,
@@ -497,15 +575,28 @@ class ParentEmailNotificationService:
         if recover_fn is not None:
             await recover_fn(now, stale_after=SENDING_STALE_AFTER)
 
+        expire_retries_fn = getattr(self.repo, "expire_stale_retries", None)
+        if expire_retries_fn is not None:
+            await expire_retries_fn(now, max_attempts=MAX_DELIVERY_ATTEMPTS)
+
         deadline = (
             time.monotonic() + max(0.5, float(max_seconds))
             if max_seconds is not None
             else None
         )
         memoized_resolver = self._make_memoized_recipient_resolver(recipient_resolver)
-        batch_summaries_fn = getattr(self.repo, "get_parent_delivery_summaries_batch", None)
-        batch_retries_fn = getattr(self.repo, "list_retry_deliveries_batch", None)
-        batch_snapshots_fn = getattr(self.repo, "get_children_activity_snapshots_batch", None)
+        raw_summaries_fn = getattr(self.repo, "get_parent_delivery_summaries_batch", None)
+        raw_retries_fn = getattr(self.repo, "list_retry_deliveries_batch", None)
+        raw_snapshots_fn = getattr(self.repo, "get_children_activity_snapshots_batch", None)
+        batch_summaries_fn = (
+            raw_summaries_fn if inspect.iscoroutinefunction(raw_summaries_fn) else None
+        )
+        batch_retries_fn = (
+            raw_retries_fn if inspect.iscoroutinefunction(raw_retries_fn) else None
+        )
+        batch_snapshots_fn = (
+            raw_snapshots_fn if inspect.iscoroutinefunction(raw_snapshots_fn) else None
+        )
 
         delivered = 0
         after_created_at: datetime | None = None
@@ -531,7 +622,13 @@ class ParentEmailNotificationService:
             if not bundles:
                 break
 
-            # Pre-filter quiet-hours and all-disabled parents BEFORE hitting DB for stats/snapshots
+            page_size = len(bundles)
+            last_bundle_created_at = _as_utc_or_none(bundles[-1].created_at)
+            last_bundle_parent_id = bundles[-1].parent_id
+
+            # Pre-filter quiet-hours and all-disabled parents BEFORE hitting DB for stats/snapshots,
+            # and snapshot ORM ChildProfile / ParentEmailPreference fields so later DB rollbacks
+            # before external email sends can never expire prefetched ORM instances (MissingGreenlet).
             candidate_entries: list[
                 tuple[ActiveParentBundle, EffectiveEmailPreferences, ZoneInfo, datetime]
             ] = []
@@ -552,7 +649,14 @@ class ParentEmailNotificationService:
                     or prefs.milestone_enabled
                 ):
                     continue
-                candidate_entries.append((bundle, prefs, zone, local_now))
+                detached_bundle = ActiveParentBundle(
+                    parent_id=bundle.parent_id,
+                    display_name=bundle.display_name,
+                    children=tuple(_snapshot_child(c) for c in bundle.children),  # type: ignore[arg-type]
+                    preferences=None,
+                    created_at=_as_utc_or_none(bundle.created_at),
+                )
+                candidate_entries.append((detached_bundle, prefs, zone, local_now))
 
             prefetched_summaries: dict[UUID, ParentDeliverySummary] | None = None
             prefetched_retries: dict[str, object] | None = None
@@ -560,10 +664,12 @@ class ParentEmailNotificationService:
 
             if candidate_entries:
                 candidate_parent_ids = [b.parent_id for b, _, _, _ in candidate_entries]
-                if callable(batch_summaries_fn):
-                    prefetched_summaries = await batch_summaries_fn(
-                        candidate_parent_ids, now
-                    )
+                if batch_summaries_fn is not None:
+                    raw_summaries = await batch_summaries_fn(candidate_parent_ids, now)
+                    prefetched_summaries = {
+                        pid: _snapshot_summary(summary)
+                        for pid, summary in raw_summaries.items()
+                    }
                     candidate_entries = [
                         entry
                         for entry in candidate_entries
@@ -578,15 +684,18 @@ class ParentEmailNotificationService:
                         > 0
                     ]
 
-                if candidate_entries and callable(batch_retries_fn):
-                    prefetched_retries = await batch_retries_fn(
+                if candidate_entries and batch_retries_fn is not None:
+                    raw_retries = await batch_retries_fn(
                         [b.parent_id for b, _, _, _ in candidate_entries]
                     )
+                    prefetched_retries = {
+                        key: _snapshot_retry(row) for key, row in raw_retries.items()
+                    }
 
-                if candidate_entries and callable(batch_snapshots_fn):
+                if candidate_entries and batch_snapshots_fn is not None:
                     digest_child_ids: set[UUID] = set()
                     all_children = []
-                    for bundle, prefs, _zone, local_now in candidate_entries:
+                    for bundle, prefs, zone, local_now in candidate_entries:
                         all_children.extend(bundle.children)
                         if not prefs.weekly_digest_enabled:
                             continue
@@ -597,7 +706,24 @@ class ParentEmailNotificationService:
                         yesterday_week_token = f"{prev_iso_year}-W{prev_iso_week:02d}"
                         cur_key = f"weekly_digest:{bundle.parent_id}:{week_token}"
                         prev_key = f"weekly_digest:{bundle.parent_id}:{yesterday_week_token}"
-                        needs_digest = local_now.weekday() == prefs.digest_weekday
+                        already_sent_this_week = False
+                        if prefetched_summaries is not None:
+                            summary = prefetched_summaries.get(bundle.parent_id)
+                            if (
+                                summary is not None
+                                and summary.last_digest_sent_at is not None
+                            ):
+                                sent_iso = (
+                                    summary.last_digest_sent_at.astimezone(zone).isocalendar()
+                                )
+                                already_sent_this_week = (
+                                    sent_iso[0],
+                                    sent_iso[1],
+                                ) == (iso_year, iso_week)
+                        needs_digest = (
+                            local_now.weekday() == prefs.digest_weekday
+                            and not already_sent_this_week
+                        )
                         if not needs_digest and prefetched_retries is not None:
                             needs_digest = self._is_row_due_retry(
                                 prefetched_retries.get(cur_key), now
@@ -610,13 +736,20 @@ class ParentEmailNotificationService:
                         if needs_digest:
                             digest_child_ids.update(c.Id for c in bundle.children)
 
-                    prefetched_snapshots = await batch_snapshots_fn(
+                    raw_snapshots = await batch_snapshots_fn(
                         all_children,
                         now,
                         digest_child_ids=digest_child_ids,
                     )
+                    prefetched_snapshots = {
+                        cid: _snapshot_activity(snap)
+                        for cid, snap in raw_snapshots.items()
+                    }
 
-            for bundle, _prefs, _zone, _local_now in candidate_entries:
+            # Release read transaction after all ORM objects on this page have been snapshotted.
+            await self._release_db()
+
+            for bundle, prefs, _zone, _local_now in candidate_entries:
                 if max_emails is not None and delivered >= max_emails:
                     break
                 if deadline is not None and time.monotonic() >= deadline:
@@ -629,6 +762,7 @@ class ParentEmailNotificationService:
                     now,
                     recipient_resolver=memoized_resolver,
                     message_sender=message_sender,
+                    effective_prefs=prefs,
                     prefetched_summary=(
                         prefetched_summaries.get(bundle.parent_id)
                         if prefetched_summaries is not None
@@ -640,13 +774,12 @@ class ParentEmailNotificationService:
                     deadline=deadline,
                 )
 
-            if len(bundles) < batch_limit:
+            if page_size < batch_limit:
                 break
-            last_bundle = bundles[-1]
-            if last_bundle.created_at is None:
+            if last_bundle_created_at is None:
                 break
-            after_created_at = last_bundle.created_at
-            after_id = last_bundle.parent_id
+            after_created_at = last_bundle_created_at
+            after_id = last_bundle_parent_id
 
         await self._release_db()
         return delivered
@@ -658,13 +791,18 @@ class ParentEmailNotificationService:
         *,
         recipient_resolver,
         message_sender,
+        effective_prefs: EffectiveEmailPreferences | None = None,
         prefetched_summary: ParentDeliverySummary | None = None,
         prefetched_retries: dict[str, object] | None = None,
         prefetched_snapshots: dict[UUID, ChildActivitySnapshot] | None = None,
         max_emails_remaining: int | None = None,
         deadline: float | None = None,
     ) -> int:
-        prefs = effective_preferences(bundle.preferences)
+        prefs = (
+            effective_prefs
+            if effective_prefs is not None
+            else effective_preferences(bundle.preferences)
+        )
         zone = safe_zone(prefs.timezone)
         local_now = now.astimezone(zone)
         if is_in_quiet_hours(local_now.hour, prefs.quiet_hours_start, prefs.quiet_hours_end):
@@ -695,7 +833,9 @@ class ParentEmailNotificationService:
             ]
         else:
             snapshots = [
-                await self.repo.get_child_activity_snapshot(child, now)
+                _snapshot_activity(
+                    await self.repo.get_child_activity_snapshot(child, now)
+                )
                 for child in bundle.children
             ]
 
@@ -1133,20 +1273,23 @@ class ParentEmailNotificationService:
         if delivery is None:
             return False
 
-        message = message_builder(recipient, delivery.Id)
+        delivery_id = delivery.Id
+        attempts = int(getattr(delivery, "Attempts", 1) or 1)
+        await self._release_db()
+
+        message = message_builder(recipient, delivery_id)
         try:
             await asyncio.to_thread(message_sender, message)
         except EmailDeliveryNotConfigured:
             await self.repo.finish_delivery(
-                delivery.Id, status="FAILED", now=now, error_code="EMAIL_NOT_CONFIGURED"
+                delivery_id, status="FAILED", now=now, error_code="EMAIL_NOT_CONFIGURED"
             )
             return False
         except EmailTransportRetryable as error:
-            attempts = int(getattr(delivery, "Attempts", 1) or 1)
             terminal = attempts >= MAX_DELIVERY_ATTEMPTS
             backoff_minutes = 15 * (2 ** max(0, attempts - 1))
             await self.repo.finish_delivery(
-                delivery.Id,
+                delivery_id,
                 status="FAILED" if terminal else "RETRY",
                 now=now,
                 error_code="EMAIL_PROVIDER_UNAVAILABLE",
@@ -1172,7 +1315,7 @@ class ParentEmailNotificationService:
                 else "DELIVERY_FAILED"
             )
             await self.repo.finish_delivery(
-                delivery.Id, status="FAILED", now=now, error_code=code
+                delivery_id, status="FAILED", now=now, error_code=code
             )
             log_diagnostic(
                 logger,
@@ -1185,5 +1328,5 @@ class ParentEmailNotificationService:
             )
             return False
 
-        await self.repo.finish_delivery(delivery.Id, status="SENT", now=now)
+        await self.repo.finish_delivery(delivery_id, status="SENT", now=now)
         return True

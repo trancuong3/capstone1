@@ -146,6 +146,7 @@ export interface AdminBadgeProps {
   readonly className?: string;
   readonly dot?: boolean;
   readonly icon?: ReactNode;
+  readonly title?: string;
   readonly tone?: AdminBadgeTone;
 }
 
@@ -154,6 +155,7 @@ export function AdminBadge({
   className,
   dot = false,
   icon,
+  title,
   tone = "neutral",
 }: AdminBadgeProps) {
   return (
@@ -163,6 +165,7 @@ export function AdminBadge({
         badgeToneClassNames[tone],
         className,
       )}
+      title={title}
     >
       {dot ? (
         <span
@@ -540,6 +543,7 @@ export function AdminSelect({
   label,
   onChange,
   options,
+  style,
   ...props
 }: AdminSelectProps) {
   const generatedId = useId();
@@ -556,11 +560,17 @@ export function AdminSelect({
       <div className="relative flex items-center">
         <select
           className={cn(
-            "h-10 min-h-10 w-full appearance-none rounded-control border border-border bg-white pe-9 ps-3 text-sm font-medium text-ink transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted",
+            "h-10 min-h-10 w-full appearance-none [-webkit-appearance:none] [-moz-appearance:none] rounded-control border border-border bg-white bg-none py-0 pe-9 ps-3 text-sm font-medium leading-normal text-ink transition-colors focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:text-muted",
             className,
           )}
           id={selectId}
           onChange={(event) => onChange?.(event.target.value)}
+          style={{
+            appearance: "none",
+            WebkitAppearance: "none",
+            MozAppearance: "none",
+            ...style,
+          }}
           {...props}
         >
           {options
@@ -577,7 +587,7 @@ export function AdminSelect({
         </select>
         <ChevronDown
           aria-hidden="true"
-          className="pointer-events-none absolute end-3 size-4 text-muted"
+          className="pointer-events-none absolute end-3 top-1/2 size-4 -translate-y-1/2 text-muted"
         />
       </div>
     </div>
