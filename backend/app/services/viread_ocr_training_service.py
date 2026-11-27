@@ -597,9 +597,13 @@ class VireadOcrTrainingService:
         self,
         reference: str,
         aggregate: Any | None = None,
+        *,
+        router: TrainingArtifactStoreRouter | None = None,
     ) -> tuple[str, int]:
         if is_gdrive_ref(reference):
-            router = await self._artifact_router()
+            if router is None:
+                router = await self._artifact_router()
+                await self._release_read_txn()
 
             def _stream_hash() -> tuple[str, int]:
                 chunk_digest = hashlib.sha256()
@@ -615,6 +619,14 @@ class VireadOcrTrainingService:
                 return await asyncio.to_thread(_stream_hash)
             except TrainingStorageError as exc:
                 raise _storage_http_error(exc) from exc
+            except (ValueError, KeyError) as exc:
+                raise _storage_http_error(
+                    TrainingStorageError(
+                        f"Unexpected Drive bridge error while streaming checkpoint shard: {exc}",
+                        code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                        http_status=502,
+                    )
+                ) from exc
         return await asyncio.to_thread(hash_storage_object, reference, aggregate)
 
     async def _release_read_txn(self) -> None:
@@ -2600,6 +2612,10 @@ class VireadOcrTrainingService:
         chunks = await self.repo.all("SELECT chunk_index, chunk_sha256, storage_path, byte_count FROM public.viread_ocr_checkpoint_chunks WHERE run_id=:run_id ORDER BY chunk_index", {"run_id": run_id})
         if not chunks or [int(chunk["chunk_index"]) for chunk in chunks] != list(range(len(chunks))):
             raise HTTPException(status_code=422, detail="Checkpoint shards are incomplete or out of order")
+        chunks_on_drive = any(is_gdrive_ref(chunk["storage_path"]) for chunk in chunks)
+        drive_router: TrainingArtifactStoreRouter | None = None
+        if chunks_on_drive:
+            drive_router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
         # Release the read transaction before touching Storage. On Render Free,
         # the checkpoint can exceed 150 MiB and remote I/O must not hold a DB
         # connection or the training-job row lock while heartbeats update it.
@@ -2607,13 +2623,16 @@ class VireadOcrTrainingService:
         digest = hashlib.sha256()
         total = 0
         for chunk in chunks:
-            chunk_digest, chunk_bytes = await self._hash_artifact_stream(chunk["storage_path"], digest)
+            chunk_digest, chunk_bytes = await self._hash_artifact_stream(
+                chunk["storage_path"],
+                digest,
+                router=drive_router,
+            )
             if chunk_bytes != int(chunk["byte_count"]) or chunk_digest != chunk["chunk_sha256"]:
                 raise HTTPException(status_code=422, detail="Stored checkpoint shard failed integrity verification")
             total += chunk_bytes
         if digest.hexdigest() != payload.checkpoint_sha256 or total != payload.checkpoint_bytes:
             raise HTTPException(status_code=422, detail="Reassembled candidate checkpoint does not match the registered hash or size")
-        chunks_on_drive = any(is_gdrive_ref(chunk["storage_path"]) for chunk in chunks)
         manifest_provider = (
             StorageProvider.GOOGLE_DRIVE.value if chunks_on_drive else StorageProvider.SUPABASE_LEGACY.value
         )
@@ -2630,10 +2649,10 @@ class VireadOcrTrainingService:
         manifest_bytes = _canonical(manifest)
         manifest_drive_id: str | None = None
         if chunks_on_drive:
-            router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
+            assert drive_router is not None
             try:
                 stored_manifest = await asyncio.to_thread(
-                    router.put,
+                    drive_router.put,
                     f"checkpoints/{run_id}/checkpoint.manifest.json",
                     manifest_bytes,
                     content_type="application/json",
@@ -2642,6 +2661,14 @@ class VireadOcrTrainingService:
                 )
             except TrainingStorageError as exc:
                 raise _storage_http_error(exc) from exc
+            except (ValueError, KeyError) as exc:
+                raise _storage_http_error(
+                    TrainingStorageError(
+                        f"Unexpected Drive bridge error while storing checkpoint manifest: {exc}",
+                        code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                        http_status=502,
+                    )
+                ) from exc
             manifest_path = stored_manifest.reference
             manifest_drive_id = stored_manifest.drive_file_id
         else:

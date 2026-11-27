@@ -833,7 +833,7 @@ class ColabWorker:
                           files={"file": (chunk["name"], stream, "application/octet-stream")})
             print(f"Uploaded candidate shard {int(chunk['index']) + 1}/{total_shards}", flush=True)
         self.call("POST", f"{API_PREFIX}/jobs/{job_id}/runs/{run_id}/complete",
-                  params={"worker_id": self.worker_id}, json={
+                  params={"worker_id": self.worker_id}, timeout=600, json={
                       "profile": candidate["profile"],
                       "parent_checkpoint_sha256": candidate["parent_checkpoint_sha256"],
                       "manifest_sha256": candidate["manifest_sha256"],
@@ -890,6 +890,80 @@ class ColabWorker:
             raise ValueError("CANDIDATE_ARTIFACT_HASH_MISMATCH")
         return artifact, destination
 
+    _ORIGINAL_WEIGHTS_URL = "https://vocr.vn/data/vietocr/vgg_transformer.pth"
+
+    def _ensure_original_checkpoint(
+        self,
+        run_dir: Path,
+        *,
+        reuse_candidates: list[Path] | None = None,
+    ) -> Path:
+        """Return verified Original weights from run_dir, shared cache, parent, or retried HTTP."""
+        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        if original.is_file():
+            if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            return original
+        shared_cache = self.work_root / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        candidates: list[Path] = [shared_cache]
+        if reuse_candidates:
+            for candidate in reuse_candidates:
+                if candidate and candidate not in candidates:
+                    candidates.append(candidate)
+        for candidate in candidates:
+            try:
+                if candidate.is_file() and sha256_file(candidate) == ORIGINAL_CHECKPOINT_SHA256:
+                    temporary = original.with_suffix(".tmp")
+                    shutil.copyfile(candidate, temporary)
+                    temporary.replace(original)
+                    if candidate != shared_cache and not shared_cache.is_file():
+                        shared_tmp = shared_cache.with_suffix(".tmp")
+                        try:
+                            shutil.copyfile(original, shared_tmp)
+                            shared_tmp.replace(shared_cache)
+                        except OSError:
+                            shared_tmp.unlink(missing_ok=True)
+                    return original
+            except OSError:
+                continue
+        try:
+            self.download(self._ORIGINAL_WEIGHTS_URL, shared_cache, ORIGINAL_CHECKPOINT_SHA256)
+        except Exception as exc:
+            logger.warning(
+                "Retried HTTP download of Original weights failed (%s); falling back to vietocr downloader",
+                type(exc).__name__,
+            )
+            from vietocr.tool.utils import download_weights
+
+            downloaded = Path(download_weights(self._ORIGINAL_WEIGHTS_URL, quiet=True))
+            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
+                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            shared_tmp = shared_cache.with_suffix(".tmp")
+            shared_tmp.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(downloaded, shared_tmp)
+            shared_tmp.replace(shared_cache)
+        if sha256_file(shared_cache) != ORIGINAL_CHECKPOINT_SHA256:
+            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+        temporary = original.with_suffix(".tmp")
+        shutil.copyfile(shared_cache, temporary)
+        temporary.replace(original)
+        return original
+
+    @staticmethod
+    def _cleanup_finished_run_dir(run_dir: Path) -> None:
+        """Remove ephemeral images, shards, and checkpoints after a job finishes cleanly."""
+        for dirname in ("training-images", "locked-test-images", "upload-shards-8mib", "parent-shards", "dataset"):
+            shutil.rmtree(run_dir / dirname, ignore_errors=True)
+        for candidate_shards in run_dir.glob("candidate-shards-*"):
+            if candidate_shards.is_dir():
+                shutil.rmtree(candidate_shards, ignore_errors=True)
+        for filename in ("latest.pt", "candidate.pth"):
+            (run_dir / filename).unlink(missing_ok=True)
+        for pattern in ("best-*.pth", "parent-*.pth", "candidate-*.pth", "original-*.pth"):
+            for path in run_dir.glob(pattern):
+                if path.is_file():
+                    path.unlink(missing_ok=True)
+
     def process_benchmark_only_job(self, job: dict[str, Any], run_dir: Path,
                                    progress: dict[str, Any]) -> None:
         metadata = job.get("metadata") if isinstance(job.get("metadata"), dict) else {}
@@ -908,15 +982,7 @@ class ColabWorker:
             raise ValueError("BENCHMARK_ONLY_COHORT_LINEAGE_MISMATCH")
         receipt, _, cache = self.materialize_dataset(str(job["id"]), locked_data, locked_items,
                                                       run_dir, locked_test=True)
-        original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
-        if not original.exists():
-            from vietocr.tool.utils import download_weights
-            downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
-            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
-                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-            shutil.copyfile(downloaded, original)
-        if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
-            raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+        original = self._ensure_original_checkpoint(run_dir)
 
         parent = active = None
         parent_hash = active_hash = None
@@ -983,23 +1049,29 @@ class ColabWorker:
             if (self.state_store_factory and not is_benchmark_only)
             else None
         )
-        if state_store is not None:
-            try:
-                state_store.restore()
-            except Exception as restore_exc:
-                if (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file():
-                    logger.warning(
-                        "Remote resume restore skipped (%s); continuing with verified local disk state",
-                        type(restore_exc).__name__,
-                    )
-                else:
-                    raise
         stop = threading.Event()
-        progress: dict[str, Any] = {"stage": "downloading_dataset"}
+        progress: dict[str, Any] = {
+            "stage": "restoring_resume_state" if state_store is not None else "downloading_dataset"
+        }
         heartbeat = threading.Thread(target=self.heartbeat_loop, args=(job_id, stop, progress), daemon=True)
         heartbeat.start()
         job_finished = False
+        restore_completed = state_store is None
         try:
+            if state_store is not None:
+                try:
+                    state_store.restore()
+                    restore_completed = True
+                except Exception as restore_exc:
+                    if (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file():
+                        restore_completed = True
+                        logger.warning(
+                            "Remote resume restore skipped (%s); continuing with verified local disk state",
+                            type(restore_exc).__name__,
+                        )
+                    else:
+                        raise
+                progress["stage"] = "downloading_dataset"
             runtime = self.assert_runtime_capacity(run_dir)
             self.runtime_data = runtime
             if is_benchmark_only:
@@ -1146,15 +1218,7 @@ class ColabWorker:
             locked_receipt, _, cache = self.materialize_dataset(job_id, locked_data, locked_items,
                                                                  run_dir, locked_test=True)
             progress["stage"] = "benchmarking"
-            original = run_dir / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
-            if not original.exists():
-                from vietocr.tool.utils import download_weights
-                downloaded = Path(download_weights("https://vocr.vn/data/vietocr/vgg_transformer.pth", quiet=True))
-                if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
-                    raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
-                shutil.copyfile(downloaded, original)
-            if sha256_file(original) != ORIGINAL_CHECKPOINT_SHA256:
-                raise ValueError("ORIGINAL_CHECKPOINT_HASH_MISMATCH")
+            original = self._ensure_original_checkpoint(run_dir, reuse_candidates=[parent] if parent else None)
             report_path = run_dir / f"production-{test_job['locked_test_manifest_sha256']}-{job['parent_checkpoint_sha256']}.json"
             if report_path.exists():
                 report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -1216,11 +1280,15 @@ class ColabWorker:
         finally:
             stop.set()
             heartbeat.join(timeout=2)
-            if state_store is not None and not job_finished:
+            if state_store is not None and not job_finished and (
+                restore_completed or (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file()
+            ):
                 try:
                     state_store.sync()
                 except Exception as sync_exc:
                     logger.warning("Final resume state sync failed (%s)", type(sync_exc).__name__)
+            if job_finished:
+                self._cleanup_finished_run_dir(run_dir)
 
     def run_forever(self) -> None:
         logger.info("ViRead Colab worker started; worker id=%s", self.worker_id)

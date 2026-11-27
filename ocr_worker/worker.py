@@ -347,12 +347,17 @@ def ensure_active_model_resynced(
     needs_resync = bool(force or runtime.needs_model_resync() or sha_mismatch)
     if not needs_resync:
         return False
-    resynced = runtime.maybe_resync_active_model(
-        manifest_fetcher=client.get_active_model,
-        artifact_fetcher=client.download_model_artifact,
-        direct_url_fetcher=client.download_direct_url,
-        force=True,
-    )
+    try:
+        resynced = runtime.maybe_resync_active_model(
+            manifest_fetcher=client.get_active_model,
+            artifact_fetcher=client.download_model_artifact,
+            direct_url_fetcher=client.download_direct_url,
+            force=True,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            runtime.clear_model_resync_needed()
+        raise
     runtime.clear_model_resync_needed()
     return resynced
 

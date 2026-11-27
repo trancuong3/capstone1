@@ -1445,12 +1445,12 @@ def build_worker_http_app(
     app = FastAPI(title="ViRead Local OCR Worker", version=runtime.app_version)
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
+    async def health() -> dict[str, Any]:
         # Passive readiness probe: resets HF Spaces 48h timer without waking DB poll loop.
         return runtime.health_payload()
 
     @app.get("/version")
-    def version() -> dict[str, Any]:
+    async def version() -> dict[str, Any]:
         return runtime.version_payload()
 
     @app.post("/wakeup")

@@ -503,12 +503,41 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
 
     if original_parent:
         parent_path = run_dir / "vgg_transformer_original.pth"
+        shared_cache = run_dir.parent / f"original-{ORIGINAL_CHECKPOINT_SHA256}.pth"
+        if not parent_path.exists() and shared_cache.is_file():
+            try:
+                if sha256_file(shared_cache) == ORIGINAL_CHECKPOINT_SHA256:
+                    temporary_parent = parent_path.with_suffix(".tmp")
+                    shutil.copyfile(shared_cache, temporary_parent)
+                    temporary_parent.replace(parent_path)
+            except OSError:
+                pass
         if not parent_path.exists():
-            from vietocr.tool.utils import download_weights
-            downloaded = Path(download_weights(ORIGINAL_WEIGHTS_URL, quiet=True))
-            if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
-                raise ValueError("downloaded VietOCR Original checkpoint hash mismatch; refusing to train")
-            shutil.copyfile(downloaded, parent_path)
+            downloaded_path: Path | None = None
+            try:
+                from .colab_worker import ColabWorker
+
+                ColabWorker.download(ORIGINAL_WEIGHTS_URL, parent_path, ORIGINAL_CHECKPOINT_SHA256)
+                downloaded_path = parent_path
+            except Exception as exc:
+                logger.warning(
+                    "Retried Original checkpoint download failed (%s); falling back to vietocr.tool.utils.download_weights",
+                    type(exc).__name__,
+                )
+                from vietocr.tool.utils import download_weights
+
+                downloaded = Path(download_weights(ORIGINAL_WEIGHTS_URL, quiet=True))
+                if sha256_file(downloaded) != ORIGINAL_CHECKPOINT_SHA256:
+                    raise ValueError("downloaded VietOCR Original checkpoint hash mismatch; refusing to train")
+                shutil.copyfile(downloaded, parent_path)
+                downloaded_path = parent_path
+            if downloaded_path and downloaded_path.is_file() and not shared_cache.is_file():
+                try:
+                    shared_tmp = shared_cache.with_suffix(".tmp")
+                    shutil.copyfile(downloaded_path, shared_tmp)
+                    shared_tmp.replace(shared_cache)
+                except OSError:
+                    pass
         if sha256_file(parent_path) != ORIGINAL_CHECKPOINT_SHA256:
             raise ValueError("Original checkpoint hash mismatch; refusing to overwrite or continue")
     else:
