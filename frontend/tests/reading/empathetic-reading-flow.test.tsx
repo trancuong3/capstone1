@@ -515,9 +515,10 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
     );
     expect(wordEl("Tê")).not.toHaveClass(SUCCESS);
     expect(wordEl("Tê")).toHaveClass("underline"); // assisted, never plain green
+    // Do not force full-sentence re-read after giving up a hard word
     expect(
-      screen.getByText(/Đọc lại cả câu: “Tê ăn cỏ\.”/),
-    ).toBeInTheDocument();
+      screen.queryByText(/Đọc lại cả câu: “Tê ăn cỏ\.”/),
+    ).not.toBeInTheDocument();
   });
 
   it("accepts 4 low-confidence (0.34) split phonics events 'ê' -> 'tờ' -> 'ê' -> 'tê' on live ReadingScreen without false uncertainty or interruption (G25, G26)", async () => {

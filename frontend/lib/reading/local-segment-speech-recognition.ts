@@ -908,13 +908,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         confirmedLocalDown &&
         (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
 
-      // Priority when Local Worker is unavailable:
+      // Priority when Local Worker is unavailable (strict Offline-First):
       // 1. Android Native STT (100% on-device streaming on Android APK WebView).
-      // 2. Hosted opted-in streaming Web Speech API (low-latency vi-VN on Chrome/Edge
-      //    when parent enabled online fallback & backend Google STT is unavailable).
-      // 3. Backend Google Cloud STT (when opted-in and configured/not in cooldown).
-      // 4. On-device Browser WASM Sherpa-ONNX (100% offline / privacy-first under `local_only`
-      //    or browsers without Web Speech API).
+      // 2. On-device Browser WASM Sherpa-ONNX (100% offline Vietnamese STT on Web).
+      // 3. Hosted opted-in streaming Web Speech API / Backend Cloud STT ONLY when
+      //    offline WASM is unavailable AND parent explicitly enabled cloud fallback.
       if (
         (confirmedLocalDown || withinEmergencyCooldown) &&
         androidSttReady &&
@@ -927,20 +925,6 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
 
       if (
-        optedInStreamingBrowser &&
-        localUnconfigured &&
-        (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
-      ) {
-        if (confirmedLocalDownNoGoogle) {
-          lastLocalSttOutageAt = now;
-        }
-        if (this.tryActivateBrowserFallback()) {
-          return;
-        }
-      }
-
-      if (
-        !backendGoogleSttAvailable &&
         (confirmedLocalDown || withinEmergencyCooldown) &&
         detectBrowserWasmSttSupport().supported
       ) {
@@ -964,6 +948,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           .catch(() => undefined);
       } else if (
         optedInStreamingBrowser &&
+        !backendGoogleSttAvailable &&
         (confirmedLocalDownNoGoogle || withinEmergencyCooldown)
       ) {
         if (confirmedLocalDownNoGoogle) {

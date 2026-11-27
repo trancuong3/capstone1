@@ -672,24 +672,22 @@ describe("automatic reading flow on the reading screen", () => {
       wordSample: true,
     });
 
-    // Wait past echo tail guard -> child pronounces "Tôi" -> triggers sentence reinforcement!
+    // Wait past echo tail guard -> child pronounces "Tôi" -> praises without forcing full-sentence re-read
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
     act(() => lastRecognition().say("Tôi"));
     await act(async () => vi.advanceTimersByTimeAsync(100));
 
-    expect(
-      screen.getByText(/Đọc lại cả câu: “Tôi ăn cơm\.”/),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/Đọc lại cả câu:/)).not.toBeInTheDocument();
     // First-pass rule preserved: "Tôi" was helped so it is assisted, never plain green
     expect(word("Tôi")).not.toHaveClass(SUCCESS);
 
-    // Child reads back the full sentence "Tôi ăn cơm" after echo tail guard
+    // Child continues reading forward ("ăn cơm.") -> accepted & scored cleanly!
     await act(async () => vi.advanceTimersByTimeAsync(2_000));
-    act(() => lastRecognition().say("Tôi ăn cơm"));
+    act(() => lastRecognition().say("ăn cơm"));
     await act(async () => vi.advanceTimersByTimeAsync(100));
 
-    // Reinforcement banner clears cleanly and "Tôi" still never turns plain green
-    expect(screen.queryByText(/Đọc lại cả câu:/)).not.toBeInTheDocument();
+    expect(word("ăn")).toHaveClass(SUCCESS);
+    expect(word("cơm.")).toHaveClass(SUCCESS);
     expect(word("Tôi")).not.toHaveClass(SUCCESS);
   });
 
