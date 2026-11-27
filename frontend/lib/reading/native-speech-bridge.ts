@@ -679,10 +679,6 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
         }
         case "stt_error": {
           const mapped = mapAndroidSttErrorCode(event.code);
-          if (mapped === "no-speech") {
-            this.onerror?.({ error: "no-speech" });
-            break;
-          }
           this.teardownInternal();
           this.onerror?.({ error: mapped });
           this.onend?.();
