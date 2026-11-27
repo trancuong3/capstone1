@@ -930,7 +930,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(onEnded).toHaveBeenCalledOnce();
   });
 
-  it("handles Android WebView local_only /phonics 503: prefers cached word audio first, falls back to Android native TTS on cache miss", async () => {
+  it("handles Android WebView local_only /phonics 503: prefers step-by-step Android native phonics when unlocked, and falls back to cached word audio when session-locked", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
@@ -961,7 +961,12 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
-      // Case 1: /phonics 503, cached word succeeds -> plays cached audio, zero Android native TTS calls
+      // Case 1: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
+      // (One-Session-One-Voice), so /phonics 503 falls back to cached word audio with zero Android native TTS calls.
+      lockSessionVoice("android-lock-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -988,15 +993,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await firstPlay;
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
 
-      // Case 2: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
-      // (One-Session-One-Voice); once unlocked, on-device Android native TTS works under local_only.
+      // Case 2: Under local_only with an active SessionVoiceLock and cache miss, throws without OS fallback.
       const planMiss = buildPhonicsLesson("bàn");
       expect(planMiss.supported).toBe(true);
       if (!planMiss.supported) return;
-      lockSessionVoice("android-lock-test", {
-        voiceId: "local_north_truc_ly",
-        forceUpdate: true,
-      });
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -1017,13 +1017,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
       releaseSessionVoiceLock("android-lock-test");
 
+      // Case 3: Once unlocked, Android native TTS spells every phonics step rather than only speaking the whole word.
       speech.synthesizePhonics.mockRejectedValueOnce(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-        }),
-      );
-      speech.synthesize.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
           code: "TTS_UNAVAILABLE",
@@ -1039,6 +1034,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(speakMsgs.length).toBe(planMiss.steps.length);
       expect(onEnded).toHaveBeenCalledOnce();
     } finally {
+      releaseSessionVoiceLock("android-lock-test");
       resetAndroidNativeSpeechBridgeForTests();
       delete win.ViReadNativeSpeech;
     }
@@ -1060,6 +1056,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     resetAndroidNativeSpeechBridgeForTests();
 
     try {
+      lockSessionVoice("android-partial-lock-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
       setVoicePolicyPreferences({
         providerMode: "local_with_google_fallback",
         allowGoogleTtsFallback: true,
@@ -1092,29 +1092,19 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await expect(playback).rejects.toThrow();
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
     } finally {
+      releaseSessionVoiceLock("android-partial-lock-test");
       resetAndroidNativeSpeechBridgeForTests();
       delete win.ViReadNativeSpeech;
     }
   });
 
-  it("evicts undecodable cached word audio on pre-start phonics fallback error before falling through to Android native TTS", async () => {
+  it("evicts undecodable cached word audio on pre-start phonics fallback error", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
       postMessage: vi.fn((raw: string) => {
         const msg = JSON.parse(raw) as Record<string, unknown>;
         sent.push(msg);
-        if (msg.action === "speak") {
-          const reqId = String(msg.requestId);
-          queueMicrotask(() => {
-            port.onmessage?.({
-              data: JSON.stringify({ type: "tts_start", requestId: reqId }),
-            });
-            port.onmessage?.({
-              data: JSON.stringify({ type: "tts_done", requestId: reqId }),
-            });
-          });
-        }
       }),
     };
     const win = window as unknown as {
@@ -1124,6 +1114,10 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     resetAndroidNativeSpeechBridgeForTests();
 
     try {
+      lockSessionVoice("android-evict-lock-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
       setVoicePolicyPreferences({
         providerMode: "local_with_google_fallback",
         allowGoogleTtsFallback: true,
@@ -1153,20 +1147,18 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       act(() => {
         failedAudio.onerror?.();
       });
-      await firstPlay;
-      expect(sent.filter((m) => m.action === "speak").length).toBe(
-        plan.steps.length,
-      );
+      await expect(firstPlay).rejects.toThrow();
 
-      // Second attempt must NOT reuse the evicted badMp3 from shortCache
+      // Next call refetches fresh audio instead of reusing the evicted bad blob
       const secondPlay = result.current.playPhonicsLesson(plan, {
         cacheScope: "COACHING",
       });
-      const recoveredAudio = await audioAt(1);
-      act(() => recoveredAudio.finish());
+      const freshAudio = await audioAt(1);
+      act(() => freshAudio.finish());
       await secondPlay;
       expect(speech.synthesize).toHaveBeenCalledTimes(2);
     } finally {
+      releaseSessionVoiceLock("android-evict-lock-test");
       resetAndroidNativeSpeechBridgeForTests();
       delete win.ViReadNativeSpeech;
     }

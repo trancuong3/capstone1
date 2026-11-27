@@ -14,6 +14,7 @@ export type VoiceEngineTier =
   | "catalog_cache"
   | "android_native"
   | "browser_wasm"
+  | "elevenlabs_cloud"
   | "google_cloud"
   | "browser_default"
   | "idle";
@@ -38,6 +39,13 @@ export interface VoiceEngineHealthSnapshot {
     readonly tts_configured: boolean;
     readonly stt_cooldown: boolean;
     readonly tts_cooldown: boolean;
+  };
+  readonly elevenlabs?: {
+    readonly configured: boolean;
+    readonly stt_configured: boolean;
+    readonly tts_configured: boolean;
+    readonly model_id?: string | null;
+    readonly voice_id?: string | null;
   };
 }
 
@@ -176,6 +184,13 @@ export function mapProviderToEngineSnapshot(input: {
     tier = "android_native";
     engineLabel = isStt ? "Android (vi-VN)" : "Android TTS (vi-VN)";
     shortLabel = "Android (vi-VN)";
+  } else if (
+    normalized === "elevenlabs" ||
+    normalized.startsWith("elevenlabs")
+  ) {
+    tier = "elevenlabs_cloud";
+    engineLabel = isStt ? "ElevenLabs Scribe v2" : "ElevenLabs Cloud";
+    shortLabel = "ElevenLabs";
   } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
     engineLabel = "Google Cloud API";

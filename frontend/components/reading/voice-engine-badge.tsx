@@ -31,6 +31,7 @@ function getTierStyles(tier: VoiceEngineTier): {
       };
     case "catalog_cache":
     case "browser_wasm":
+    case "elevenlabs_cloud":
     case "local_offline":
       return {
         dot: "bg-emerald-500",
