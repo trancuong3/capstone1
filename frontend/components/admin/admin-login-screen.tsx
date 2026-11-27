@@ -3,7 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -13,7 +13,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader } from "@/components/layout/site-header";
 import { useAdminServices } from "@/hooks/use-admin-services";
-import { useTranslations } from "@/hooks/use-i18n";
+import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isAdminAuthError } from "@/lib/api/admin-auth-service";
 import { sanitizeNextPath } from "@/lib/auth/route-policy";
 import { cn } from "@/lib/utils/cn";
@@ -27,6 +27,7 @@ export function AdminLoginScreen({
   scenario: AdminMockScenario;
 }) {
   const { auth } = useAdminServices();
+  const { locale } = useI18n();
   const t = useTranslations("admin");
   const tAuth = useTranslations("auth");
   const [showPassword, setShowPassword] = useState(false);
@@ -56,11 +57,31 @@ export function AdminLoginScreen({
   const {
     register,
     handleSubmit,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<AdminLoginRequest>({
     resolver: zodResolver(schema),
     defaultValues: { email: "", password: "" },
   });
+  const prevLocaleRef = useRef(locale);
+  const errorsRef = useRef(errors);
+
+  useEffect(() => {
+    errorsRef.current = errors;
+  }, [errors]);
+
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) {
+      return;
+    }
+    prevLocaleRef.current = locale;
+    const activeFields = Object.keys(errorsRef.current) as Array<
+      keyof AdminLoginRequest
+    >;
+    if (activeFields.length > 0) {
+      void trigger(activeFields);
+    }
+  }, [locale, trigger]);
 
   const submit = handleSubmit(async (values) => {
     setNoticeErrorKey(null);

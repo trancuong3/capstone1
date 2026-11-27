@@ -133,4 +133,36 @@ describe("deep-link redirect preservation in proxy and server authorization", ()
       "NEXT_REDIRECT:/admin/login?next=%2Fadmin%2Fbooks%2Fb1%3Ftab%3Docr",
     );
   });
+
+  it("proxy redirects authenticated admin away from /admin/login to /admin/books when no state param is present", async () => {
+    refreshSupabaseAuthMock.mockResolvedValue({
+      response: NextResponse.next(),
+      userId: "admin-1",
+      role: "admin",
+    });
+
+    const req = new NextRequest("http://localhost:3000/admin/login");
+    const resp = await proxy(req);
+
+    expect(resp.status).toBe(307);
+    expect(resp.headers.get("location")).toBe(
+      "http://localhost:3000/admin/books",
+    );
+  });
+
+  it("proxy keeps authenticated admin on /admin/login when ?state= is present", async () => {
+    const passThrough = NextResponse.next();
+    refreshSupabaseAuthMock.mockResolvedValue({
+      response: passThrough,
+      userId: "admin-1",
+      role: "admin",
+    });
+
+    const req = new NextRequest(
+      "http://localhost:3000/admin/login?state=forbidden",
+    );
+    const resp = await proxy(req);
+
+    expect(resp).toBe(passThrough);
+  });
 });

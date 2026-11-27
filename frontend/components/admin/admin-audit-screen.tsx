@@ -281,11 +281,14 @@ export function AdminAuditScreen() {
 
                       <div className="min-w-0">
                         <AdminBadge
-                          className="max-w-full truncate font-mono"
+                          className="max-w-full overflow-hidden font-mono"
                           dot
+                          title={item.action}
                           tone={resolveAuditActionTone(item.action)}
                         >
-                          {item.action}
+                          <span className="min-w-0 truncate">
+                            {item.action}
+                          </span>
                         </AdminBadge>
                       </div>
                     </div>

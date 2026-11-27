@@ -1727,7 +1727,9 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Database" })).toBeInTheDocument();
+      expect(
+        screen.getByRole("heading", { name: "Database" }),
+      ).toBeInTheDocument();
     });
     expect(healthCallCount).toBe(1);
     expect(abortedCount).toBe(0);

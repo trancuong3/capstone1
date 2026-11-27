@@ -508,4 +508,53 @@ describe("admin components", () => {
     await user.keyboard("{Escape}");
     expect(onFinalClose).toHaveBeenCalledWith("abc");
   });
+
+  it("forwards the title tooltip prop on AdminBadge for truncated audit action labels", () => {
+    const actionName = "admin.book.metadata.quality.update";
+    render(
+      <AdminBadge
+        className="max-w-full overflow-hidden font-mono"
+        dot
+        title={actionName}
+        tone="warning"
+      >
+        <span className="min-w-0 truncate">{actionName}</span>
+      </AdminBadge>,
+    );
+
+    const innerText = screen.getByText(actionName);
+    expect(innerText).toHaveClass("min-w-0", "truncate");
+    const badge = innerText.parentElement;
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveAttribute("title", actionName);
+    expect(badge).toHaveClass("overflow-hidden");
+  });
+
+  it("renders AdminSelect with native arrow suppression and a single custom chevron", () => {
+    const { container } = render(
+      <AdminSelect
+        label="Trạng thái lọc"
+        options={[
+          { value: "", label: "Tất cả" },
+          { value: "ACTIVE", label: "Hoạt động" },
+        ]}
+        style={{ minWidth: "160px" }}
+        value=""
+      />,
+    );
+
+    const select = screen.getByLabelText("Trạng thái lọc");
+    expect(select).toHaveClass(
+      "appearance-none",
+      "[-webkit-appearance:none]",
+      "[-moz-appearance:none]",
+      "bg-none",
+      "leading-normal",
+    );
+    expect(select.style.appearance).toBe("none");
+    expect(select.style.minWidth).toBe("160px");
+
+    const icons = container.querySelectorAll('svg[aria-hidden="true"]');
+    expect(icons).toHaveLength(1);
+  });
 });
