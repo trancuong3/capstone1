@@ -116,12 +116,22 @@ def build_remote_backend_state_store_factory(
 
 
 class ColabWorker:
-    ARTIFACT_FETCH_MAX_ATTEMPTS = 5
-    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.0
-    ARTIFACT_DOWNLOAD_WORKERS = 4
+    ARTIFACT_FETCH_MAX_ATTEMPTS = 7
+    ARTIFACT_FETCH_RETRY_BASE_SECONDS = 1.5
+    ARTIFACT_DOWNLOAD_WORKERS = 2
     API_CALL_MAX_ATTEMPTS = 6
     API_CALL_RETRY_BASE_SECONDS = 2.0
-    RETRYABLE_HTTP_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
+    RETRYABLE_HTTP_STATUSES = frozenset({
+        408, 429,
+        500, 502, 503, 504,
+        520, 521, 522, 523, 524, 525, 526, 527, 530,
+    })
+
+    @classmethod
+    def _is_retryable_http_status(cls, status_code: int | None) -> bool:
+        if status_code is None:
+            return True
+        return status_code in cls.RETRYABLE_HTTP_STATUSES or 500 <= int(status_code) < 600
 
     def __init__(
         self,
@@ -195,7 +205,7 @@ class ColabWorker:
                 return response.json() if response.content else {}
             except requests.HTTPError as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if status_code is not None and status_code not in self.RETRYABLE_HTTP_STATUSES:
+                if not self._is_retryable_http_status(status_code):
                     raise
                 last_error = exc
                 reason = f"http_{status_code or 'unknown'}"
@@ -398,7 +408,7 @@ class ColabWorker:
                     return
             except requests.HTTPError as exc:
                 status_code = getattr(getattr(exc, "response", None), "status_code", None)
-                if status_code is not None and status_code not in cls.RETRYABLE_HTTP_STATUSES:
+                if not cls._is_retryable_http_status(status_code):
                     raise
                 last_error = exc
                 retry_reason = f"http_{status_code or 'unknown'}"
@@ -825,7 +835,16 @@ class ColabWorker:
             else None
         )
         if state_store is not None:
-            state_store.restore()
+            try:
+                state_store.restore()
+            except Exception as restore_exc:
+                if (run_dir / "latest.pt").is_file() or (run_dir / "candidate.pth").is_file():
+                    logger.warning(
+                        "Remote resume restore skipped (%s); continuing with verified local disk state",
+                        type(restore_exc).__name__,
+                    )
+                else:
+                    raise
         stop = threading.Event()
         progress: dict[str, Any] = {"stage": "downloading_dataset"}
         heartbeat = threading.Thread(target=self.heartbeat_loop, args=(job_id, stop, progress), daemon=True)

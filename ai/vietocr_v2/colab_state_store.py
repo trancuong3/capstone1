@@ -496,6 +496,25 @@ class RemoteBackendJobStateStore:
 
     def _download_bytes(self, object_path: str) -> bytes:
         url = f"{self.worker.api_base}{self._base_path()}/{object_path}"
+        stream_helper = getattr(self.worker, "_stream_http_download", None)
+        if callable(stream_helper):
+            temporary = self.run_dir / f".resume-dl-{os.getpid()}-{threading.get_ident()}.tmp"
+            temporary.unlink(missing_ok=True)
+            try:
+                stream_helper(
+                    lambda: self.worker.session.get(
+                        url,
+                        params={"worker_id": self.worker.worker_id},
+                        stream=True,
+                        timeout=300,
+                    ),
+                    temporary,
+                    max_attempts=getattr(self.worker, "artifact_fetch_max_attempts", 5),
+                    retry_base_seconds=getattr(self.worker, "artifact_fetch_retry_base_seconds", 1.0),
+                )
+                return temporary.read_bytes()
+            finally:
+                temporary.unlink(missing_ok=True)
         with self.worker.session.get(
             url,
             params={"worker_id": self.worker.worker_id},

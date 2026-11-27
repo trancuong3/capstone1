@@ -210,7 +210,10 @@ class ColabWorkerTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir:
             target = Path(temp_dir) / "sample.png"
-            with patch("ai.vietocr_v2.colab_worker.requests.get", return_value=FakeResponse()):
+            with (
+                patch("ai.vietocr_v2.colab_worker.requests.get", return_value=FakeResponse()),
+                patch("ai.vietocr_v2.colab_worker.time.sleep"),
+            ):
                 with self.assertRaisesRegex(ValueError, "HASH_MISMATCH"):
                     ColabWorker.download("https://storage.example/signed", target, "0" * 64)
             self.assertFalse(target.exists())
@@ -621,6 +624,51 @@ class ColabWorkerTests(unittest.TestCase):
         self.assertIn('"IREAD_TRAINING_WORKER_TOKEN"', code_src)
         self.assertIn("getpass(", code_src)
         self.assertIn("run_next_job_once(", code_src)
+
+    def test_fetch_artifact_retries_cloudflare_http_520_to_530(self):
+        payload = b"recovered-image-after-520"
+        expected_sha = hashlib.sha256(payload).hexdigest()
+        attempts = [0]
+
+        class FakeStreamResponse:
+            def __init__(self, status_code: int, body: bytes):
+                self.status_code = status_code
+                self._body = body
+                self.headers = {"Content-Length": str(len(body))}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def raise_for_status(self):
+                if self.status_code >= 400:
+                    err = requests.HTTPError(f"{self.status_code} Server Error")
+                    err.response = self
+                    raise err
+
+            def iter_content(self, _chunk_size):
+                yield self._body
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            worker = ColabWorker("https://viread.example", "t" * 48, temp_dir)
+            worker.artifact_fetch_retry_base_seconds = 0.0
+            dest = Path(temp_dir) / "img.png"
+
+            def fake_get(_url, **_kwargs):
+                attempts[0] += 1
+                if attempts[0] == 1:
+                    return FakeStreamResponse(520, b"")
+                if attempts[0] == 2:
+                    return FakeStreamResponse(524, b"")
+                return FakeStreamResponse(200, payload)
+
+            with patch.object(worker.session, "get", side_effect=fake_get):
+                worker._fetch_artifact("/books/admin/viread-training/worker/jobs/1/artifact-stream", dest, expected_sha)
+            self.assertEqual(attempts[0], 3)
+            self.assertEqual(dest.read_bytes(), payload)
+            worker.session.close()
 
 
 if __name__ == "__main__":
