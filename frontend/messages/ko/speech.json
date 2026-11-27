@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "로컬 음성 워커가 오프라인이며 기기에 사전 생성된 오디오가 없습니다. 샘플 음성을 들으려면 로컬 워커를 시작하거나 아래 대체를 활성화하세요.",
     "localWorkerLabel": "로컬 워커:",
     "sessionLockedBadge": "이 읽기 세션에 고정됨",
-    "offlineBrowserBadge": "브라우저가 오프라인 상태입니다"
+    "offlineBrowserBadge": "브라우저가 오프라인 상태입니다",
+    "teacherPersonaAria": "AI 여선생님 / 남선생님 빠른 전환",
+    "femaleTeacherQuickBtn": "AI 여선생님 (여성)",
+    "maleTeacherQuickBtn": "AI 남선생님 (남성)"
   },
   "engineBadge": {
     "ariaLabel": "음성 소스: STT {stt}, TTS {tts}",
@@ -115,7 +118,8 @@
     "androidNativeFallbackNotice": "서버 음성이 비활성화되어 Android 기기 음성을 사용 중입니다.",
     "browserFallbackNotice": "기기 내 음성이 비활성화되어 브라우저 온라인 음성을 사용 중입니다.",
     "autoplayBlocked": "브라우저가 오디오 활성화를 위해 다시 듣기 버튼을 기다리고 있습니다.",
-    "partialPlayback": "오디오가 중단되었습니다. 처음부터 다시 들을 수 있습니다."
+    "partialPlayback": "오디오가 중단되었습니다. 처음부터 다시 들을 수 있습니다.",
+    "deviceVoiceGenderMismatchNotice": "이 기기의 오프라인 베트남어 음성에는 다른 성별만 설치되어 있습니다. 선택한 성별 목소리를 들으려면 음성 서버 또는 Google 백업을 켜세요."
   },
   "wasm": {
     "workerUnavailable": "Web Worker를 사용할 수 없습니다",

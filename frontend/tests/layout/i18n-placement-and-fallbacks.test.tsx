@@ -148,7 +148,7 @@ describe("SiteHeader, AppShell, AccountAvatarMenu and fallbacks i18n", () => {
     expect(screen.getByText("ADMIN")).toBeInTheDocument();
   });
 
-  it("exposes LanguageSelector in AppShell desktop header and account menu, and dispatches auth sync on sign-out", async () => {
+  it("exposes a single LanguageSelector in AppShell account menu (no duplicate desktop header trigger) and dispatches auth sync on sign-out", async () => {
     const user = userEvent.setup();
     const authService = createAuthServiceFixture();
     const syncSpy = vi.fn();
@@ -169,11 +169,12 @@ describe("SiteHeader, AppShell, AccountAvatarMenu and fallbacks i18n", () => {
         ),
       );
 
-      // Desktop header selector is present in the DOM (not inside #parent-account-menu)
-      const headerTrigger = screen.getByRole("button", {
-        name: /Chọn ngôn ngữ giao diện/i,
-      });
-      expect(headerTrigger.closest('[data-variant="compact"]')).not.toBeNull();
+      // Duplicate desktop header compact selector is removed; selector lives inside account menu
+      expect(
+        screen.queryByRole("button", {
+          name: /Chọn ngôn ngữ giao diện/i,
+        }),
+      ).not.toBeInTheDocument();
 
       await user.click(
         screen.getByRole("button", { name: "Mở menu tài khoản" }),

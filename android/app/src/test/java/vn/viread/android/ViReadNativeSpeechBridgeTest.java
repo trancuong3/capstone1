@@ -164,9 +164,13 @@ public final class ViReadNativeSpeechBridgeTest {
         String lastText;
         float lastRate;
         float lastPitch;
+        String lastVoiceGender;
+        String lastVoiceId;
         String lastUtteranceId;
         AudioAttributes lastAttributes;
         ViReadNativeSpeechBridge.TtsCallback lastCallback;
+        boolean voiceGenderMismatch;
+        String resolvedVoiceName;
 
         @Override
         public void initialize(ViReadNativeSpeechBridge.TtsInitCallback callback) {
@@ -226,14 +230,39 @@ public final class ViReadNativeSpeechBridgeTest {
                 String utteranceId,
                 AudioAttributes attributes,
                 ViReadNativeSpeechBridge.TtsCallback callback) {
+            return speak(text, rate, pitch, null, null, utteranceId, attributes, callback);
+        }
+
+        @Override
+        public boolean speak(
+                String text,
+                float rate,
+                float pitch,
+                String voiceGender,
+                String voiceId,
+                String utteranceId,
+                AudioAttributes attributes,
+                ViReadNativeSpeechBridge.TtsCallback callback) {
             speakCount++;
             lastText = text;
             lastRate = rate;
             lastPitch = pitch;
+            lastVoiceGender = voiceGender;
+            lastVoiceId = voiceId;
             lastUtteranceId = utteranceId;
             lastAttributes = attributes;
             lastCallback = callback;
             return true;
+        }
+
+        @Override
+        public boolean isLastVoiceGenderMismatch() {
+            return voiceGenderMismatch;
+        }
+
+        @Override
+        public String getLastResolvedVoiceName() {
+            return resolvedVoiceName;
         }
 
         @Override
@@ -860,5 +889,55 @@ public final class ViReadNativeSpeechBridgeTest {
 
         // Clean lifecycle teardown
         controller.pause().stop().destroy();
+    }
+
+    @Test
+    public void teacherVoiceGenderSelectionAndMismatchTelemetry() throws Exception {
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice femaleVoice = new Voice(
+                "vi-vn-x-vie-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.singleton("female"));
+        Voice maleVoice = new Voice(
+                "vi-vn-x-gft-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.singleton("male"));
+        Set<Voice> voices = new HashSet<>(Arrays.asList(femaleVoice, maleVoice));
+
+        Voice chosenMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "male");
+        assertNotNull(chosenMale);
+        assertEquals("vi-vn-x-gft-local", chosenMale.getName());
+
+        Voice chosenFemale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "female");
+        assertNotNull(chosenFemale);
+        assertEquals("vi-vn-x-vie-local", chosenFemale.getName());
+
+        BridgeHarness h = new BridgeHarness();
+        h.tts.voiceGenderMismatch = true;
+        h.tts.resolvedVoiceName = "vi-vn-x-vie-local";
+        h.sendTrusted(
+                "{\"action\":\"speak\",\"requestId\":\"req-male-1\",\"text\":\"Thầy chào con\","
+                        + "\"voiceGender\":\"male\",\"voiceId\":\"local_north_thien_minh\"}");
+        assertEquals("male", h.tts.lastVoiceGender);
+        assertEquals("local_north_thien_minh", h.tts.lastVoiceId);
+
+        assertNotNull(h.tts.lastCallback);
+        h.tts.lastCallback.onStart(h.tts.lastUtteranceId);
+
+        JSONObject startEvent = null;
+        for (JSONObject ev : h.events) {
+            if ("tts_start".equals(ev.optString("type"))) {
+                startEvent = ev;
+            }
+        }
+        assertNotNull("Expected tts_start event", startEvent);
+        assertTrue(startEvent.optBoolean("voiceGenderMismatch", false));
+        assertEquals("vi-vn-x-vie-local", startEvent.optString("resolvedVoiceName"));
     }
 }

@@ -32,6 +32,7 @@ import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
@@ -284,8 +285,10 @@ export function EntertainmentScreen({
     let active = true;
     async function loadAdaptiveRecommendations(childId: string) {
       try {
-        const recs =
-          await createAdaptiveLearningService().getRecommendations(childId);
+        const recs = await createAdaptiveLearningService().getRecommendations(
+          childId,
+          teacherPersona.gender,
+        );
         if (active) {
           setFetchedRecommendations(recs);
         }
@@ -298,7 +301,12 @@ export function EntertainmentScreen({
     return () => {
       active = false;
     };
-  }, [appStore?.selectedChildId, fallbackChildId, initialRecommendations]);
+  }, [
+    appStore?.selectedChildId,
+    fallbackChildId,
+    initialRecommendations,
+    teacherPersona.gender,
+  ]);
 
   const recommendations =
     fetchedRecommendations &&
@@ -323,6 +331,7 @@ export function EntertainmentScreen({
     }
     if (matched) {
       setValidatedChild(matched);
+      hydrateTeacherVoiceFromChildProfile(matched);
     }
   }
 

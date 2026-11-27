@@ -22,6 +22,7 @@ import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -48,11 +49,11 @@ import {
   getEffectiveVoiceId,
   getSessionVoiceAudit,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   lockSessionVoice,
   setActiveVoiceSession,
   subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   awaitSttReadyBeforeListening,
   preloadReadingVoiceEngines,
@@ -139,7 +140,6 @@ import { StatusBanner } from "@/components/reading/status-banner";
 import { TutorMessage } from "@/components/reading/tutor-message";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
-import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useRecordingPlayback } from "@/hooks/use-recording-playback";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
@@ -802,7 +802,7 @@ function ReadingSessionScreen({
       if (ttsAllowsFallback && localTtsDown && useGoogleTts) {
         lockSessionVoice(sessionId, {
           voiceId: mapLocalVoiceToGoogleBackup(
-            getSpeechPreferences().voiceId,
+            getEffectiveVoiceId(),
             policy.region,
           ),
         });
@@ -960,7 +960,7 @@ function ReadingSessionScreen({
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
-              activeLock?.voiceId ?? getSpeechPreferences().voiceId,
+              activeLock?.voiceId ?? getEffectiveVoiceId(),
               activeLock?.region ?? policy.region,
             );
             // Lock directly to the configured Google voice (or resync server-side
@@ -972,7 +972,8 @@ function ReadingSessionScreen({
               });
             } else if (
               activeLock.provider === "local" &&
-              getSessionVoiceAudit(sessionId).length === 0
+              (getSessionVoiceAudit(sessionId).length === 0 ||
+                hasPendingSessionVoiceSwitch(sessionId))
             ) {
               lockSessionVoice(sessionId, {
                 voiceId: googleVoiceId,

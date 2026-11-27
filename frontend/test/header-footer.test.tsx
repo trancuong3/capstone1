@@ -76,8 +76,8 @@ describe("shared header and footer", () => {
 
   it.each([
     ["/dashboard", "Tổng quan"],
+    ["/my-books", "Sách của tôi"],
     ["/reports", "Tiến bộ"],
-    ["/sessions", "Lịch sử"],
     ["/entertainment/sentence-shooter", "Giải trí"],
     ["/entertainment/picture-description", "Giải trí"],
     ["/reports/difficult-words", "Từ cần luyện"],
@@ -129,18 +129,27 @@ describe("shared header and footer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(
+      screen.getByRole("menuitem", { name: "Quản lý đọc" }),
+    ).toHaveAttribute("href", "/reading-management");
+    expect(
+      screen.getByRole("menuitem", { name: "Lịch sử đọc" }),
+    ).toHaveAttribute("href", "/sessions");
+    expect(
       screen.getByRole("menuitem", { name: "Hồ sơ ba mẹ" }),
     ).toHaveAttribute("href", "/profile");
     expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveAttribute(
       "href",
       "/children",
     );
+    expect(
+      screen.getByRole("menuitem", { name: "Kiểm tra Micro & Camera" }),
+    ).toHaveAttribute("href", "/device-permissions");
     expect(screen.getByRole("menuitem", { name: "Cài đặt" })).toHaveAttribute(
       "href",
       "/settings",
     );
     expect(
-      screen.getByRole("menuitem", { name: "Trợ giúp & hỗ trợ" }),
+      screen.getByRole("menuitem", { name: "Trợ giúp & gửi phản hồi" }),
     ).toHaveAttribute("href", "/help-support");
     expect(
       screen.getByRole("menuitem", { name: "Đăng xuất" }),
@@ -148,6 +157,7 @@ describe("shared header and footer", () => {
   });
 
   it.each([
+    ["/sessions", "Lịch sử đọc"],
     ["/children", "Hồ sơ bé"],
     ["/profile", "Hồ sơ ba mẹ"],
   ])("highlights %s in the avatar menu", (pathname, label) => {

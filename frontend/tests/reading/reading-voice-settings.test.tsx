@@ -276,19 +276,13 @@ describe("reading voice settings", () => {
       allowGoogleTtsFallback: false,
     });
 
-    // Switch region tabs: filter-only until parent explicitly clicks a voice
+    // Switch region tabs when unlocked: preserves current gender while updating region voice
     await user.click(screen.getByRole("button", { name: "Miền Trung" }));
-    expect(getVoicePolicyPreferences().region).toBe("north");
-    expect(getSpeechPreferences().voiceId).toBeNull();
-    await user.click(screen.getByRole("radio", { name: /Cô Ngọc Trân/ }));
     expect(getVoicePolicyPreferences().region).toBe("central");
     expect(getSpeechPreferences().voiceId).toBe("local_central_ngoc_tran");
 
-    // Switch region tabs: Miền Nam -> filter-only until explicit selection
+    // Switch region tabs: Miền Nam -> selects female South voice cleanly
     await user.click(screen.getByRole("button", { name: "Miền Nam" }));
-    expect(getVoicePolicyPreferences().region).toBe("central");
-    expect(getSpeechPreferences().voiceId).toBe("local_central_ngoc_tran");
-    await user.click(screen.getByRole("radio", { name: /Cô Thục Đoan/ }));
     expect(getVoicePolicyPreferences().region).toBe("south");
     expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
 

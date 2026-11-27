@@ -88,14 +88,15 @@ describe("parent logout", () => {
     render(withAuthFixture(<AppShell>Dashboard content</AppShell>, service));
     const trigger = screen.getByRole("button", { name: "Mở menu tài khoản" });
 
-    await user.click(trigger);
-    const parentProfile = await screen.findByRole("menuitem", {
-      name: "Hồ sơ ba mẹ",
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    const firstItem = await screen.findByRole("menuitem", {
+      name: "Quản lý đọc",
     });
-    expect(parentProfile).toHaveFocus();
+    expect(firstItem).toHaveFocus();
 
     await user.keyboard("{ArrowDown}");
-    expect(screen.getByRole("menuitem", { name: "Hồ sơ bé" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Lịch sử đọc" })).toHaveFocus();
     await user.keyboard("{End}");
     expect(screen.getByRole("menuitem", { name: "Đăng xuất" })).toHaveFocus();
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
+import { Check, RefreshCw, SlidersHorizontal, Volume2 } from "lucide-react";
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -12,19 +13,25 @@ import {
 
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { AppServicesContext } from "@/components/providers/app-services-provider";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import { createChildService } from "@/lib/api/child-service";
 import {
   createVoiceStudioService,
   type VoiceList,
   type VoiceOption,
 } from "@/lib/api/voice-studio-service";
 import {
+  applyGlobalTeacherVoiceSelection,
   clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
   getDefaultLocalVoiceIdForRegionAndGender,
+  getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
   inferRegionFromVoiceId,
@@ -52,6 +59,7 @@ import {
 import {
   adaptTextToTeacherPersona,
   resolveVoiceGender,
+  type VoiceGender,
 } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
@@ -162,7 +170,15 @@ export function ReadingVoiceSettings({
   const formatSpeed = (speed: number): string =>
     `${formatNumber(speed, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
+  const appStore = useContext(AppStoreContext);
+  const appServices = useContext(AppServicesContext);
+  const childService = useMemo(
+    () => appServices?.childService ?? createChildService(),
+    [appServices?.childService],
+  );
+  const selectedChildId = appStore?.selectedChildId ?? null;
   const { preferences, update } = useSpeechPreferences();
+  const teacherPersona = useTeacherPersona();
   const policy = useSyncExternalStore(
     subscribeVoicePolicy,
     getVoicePolicyPreferences,
@@ -291,21 +307,100 @@ export function ReadingVoiceSettings({
     onStopPreview();
     setPreviewError(false);
     setRemovedVoiceNotice(null);
-    update(value);
-    if (selectedOption) {
-      const reg = resolveVoiceRegion(selectedOption);
-      setVoicePolicyPreferences({
-        ...(reg ? { region: reg } : {}),
-        ...(selectedOption.model_version
-          ? { modelVersion: selectedOption.model_version }
+    const resolvedRegion = selectedOption
+      ? (resolveVoiceRegion(selectedOption) ?? undefined)
+      : undefined;
+    const isDefaultOrReset = value.voiceId === null;
+    const explicitVoiceId =
+      value.voiceId !== undefined
+        ? value.voiceId === null
+          ? loadState.status === "ready"
+            ? loadState.data.default_voice_id
+            : "local_north_truc_ly"
+          : value.voiceId
+        : undefined;
+    const storedVoiceId =
+      value.voiceId !== undefined
+        ? value.voiceId
+        : getSpeechPreferences().voiceId;
+
+    applyGlobalTeacherVoiceSelection({
+      ...(explicitVoiceId !== undefined ? { voiceId: explicitVoiceId } : {}),
+      storedVoiceId: isDefaultOrReset ? null : storedVoiceId,
+      ...(selectedOption
+        ? {
+            gender: resolveVoiceGender(
+              selectedOption.voice_id,
+              selectedOption.gender,
+            ),
+          }
+        : value.voiceId === null
+          ? { gender: "female" }
           : {}),
-      });
+      ...(resolvedRegion ? { region: resolvedRegion } : {}),
+      ...(value.speed !== undefined ? { speed: value.speed } : {}),
+      ...(selectedOption?.model_version
+        ? { modelVersion: selectedOption.model_version }
+        : {}),
+      childId: selectedChildId,
+      persistToBackend:
+        selectedChildId &&
+        typeof childService.updateVoicePreferences === "function"
+          ? (childId, payload) =>
+              childService.updateVoicePreferences!(childId, payload)
+          : undefined,
+      syncActiveServerSessionLock:
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+          ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+          : undefined,
+    });
+  }
+
+  function selectTeacherGender(nextGender: VoiceGender) {
+    previewGenerationRef.current += 1;
+    onStopPreview();
+    setPreviewError(false);
+    setRemovedVoiceNotice(null);
+    const targetRegion: VoiceRegion =
+      regionTab !== "all" ? regionTab : activeRegionKey;
+    let pickedVoice: VoiceOption | undefined;
+    if (loadState.status === "ready") {
+      const sameRegionSameGender = loadState.data.voices.filter(
+        (v) =>
+          resolveVoiceRegion(v) === targetRegion &&
+          resolveVoiceGender(v.voice_id, v.gender) === nextGender,
+      );
+      const defaultForPair = getDefaultVoiceIdForRegionAndGender(
+        targetRegion,
+        nextGender,
+      );
+      pickedVoice =
+        sameRegionSameGender.find((v) => v.voice_id === defaultForPair) ??
+        sameRegionSameGender[0] ??
+        loadState.data.voices.find(
+          (v) => resolveVoiceGender(v.voice_id, v.gender) === nextGender,
+        );
     }
-    syncPausedSessionLock(
-      value.voiceId,
-      value.speed,
-      selectedOption?.model_version ?? undefined,
-    );
+    const nextVoiceId =
+      pickedVoice?.voice_id ??
+      getDefaultVoiceIdForRegionAndGender(targetRegion, nextGender);
+    applyGlobalTeacherVoiceSelection({
+      voiceId: nextVoiceId,
+      gender: nextGender,
+      region: targetRegion,
+      modelVersion: pickedVoice?.model_version ?? undefined,
+      childId: selectedChildId,
+      persistToBackend:
+        selectedChildId &&
+        typeof childService.updateVoicePreferences === "function"
+          ? (childId, payload) =>
+              childService.updateVoicePreferences!(childId, payload)
+          : undefined,
+      syncActiveServerSessionLock:
+        typeof voiceStudio.updateSessionVoiceLock === "function"
+          ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+          : undefined,
+    });
   }
 
   function changeProviderPolicy(
@@ -336,15 +431,28 @@ export function ReadingVoiceSettings({
         preservedRegion,
         preservedGender,
       );
-      const nextVoiceId =
-        localFallbackId ===
-        (loadState.status === "ready"
+      const defaultVoice =
+        loadState.status === "ready"
           ? loadState.data.default_voice_id
-          : "local_north_truc_ly")
-          ? null
-          : localFallbackId;
-      update({ voiceId: nextVoiceId });
-      syncPausedSessionLock(nextVoiceId);
+          : "local_north_truc_ly";
+      applyGlobalTeacherVoiceSelection({
+        voiceId: localFallbackId,
+        storedVoiceId:
+          localFallbackId === defaultVoice ? null : localFallbackId,
+        gender: preservedGender,
+        region: preservedRegion,
+        childId: selectedChildId,
+        persistToBackend:
+          selectedChildId &&
+          typeof childService.updateVoicePreferences === "function"
+            ? (childId, payload) =>
+                childService.updateVoicePreferences!(childId, payload)
+            : undefined,
+        syncActiveServerSessionLock:
+          typeof voiceStudio.updateSessionVoiceLock === "function"
+            ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+            : undefined,
+      });
     }
     if (isOpen) {
       loadVoices();
@@ -352,9 +460,42 @@ export function ReadingVoiceSettings({
   }
 
   function selectRegionTab(nextTab: "all" | VoiceRegion) {
-    // Region tabs are strictly filter-only so browsing Bắc / Trung / Nam never
-    // silently alters the user's selected voice, gender, or active session lock.
     setRegionTab(nextTab);
+    if (nextTab === "all") return;
+    // During an active locked reading session, switching region tabs ONLY filters
+    // the visible list so browsing regions never silently alters the locked voice.
+    if (getActiveSessionVoiceLock() !== null) {
+      return;
+    }
+    setVoicePolicyPreferences({ region: nextTab });
+    if (loadState.status === "ready") {
+      const regionVoices = loadState.data.voices.filter(
+        (v) => resolveVoiceRegion(v) === nextTab,
+      );
+      if (regionVoices.length > 0) {
+        const currentId =
+          preferences.voiceId ?? loadState.data.default_voice_id;
+        const currentGender = resolveVoiceGender(
+          currentId,
+          teacherPersona.gender,
+        );
+        if (!regionVoices.some((v) => v.voice_id === currentId)) {
+          // ALWAYS preserve the active gender when changing region tabs!
+          const sameGenderVoices = regionVoices.filter(
+            (v) => resolveVoiceGender(v.voice_id, v.gender) === currentGender,
+          );
+          const defaultForPair = getDefaultVoiceIdForRegionAndGender(
+            nextTab,
+            currentGender,
+          );
+          const pick =
+            sameGenderVoices.find((v) => v.voice_id === defaultForPair) ??
+            sameGenderVoices[0] ??
+            regionVoices[0];
+          change({ voiceId: pick.voice_id }, pick);
+        }
+      }
+    }
   }
 
   function open() {
@@ -508,14 +649,56 @@ export function ReadingVoiceSettings({
         }
         isOpen={isOpen}
         onClose={close}
-        title={t("settings.modalTitle")}
+        title={`${t("settings.modalTitle")} · ${teacherPersona.title}`}
       >
         <div className="space-y-4">
+          <div
+            aria-label={t("settings.teacherPersonaAria")}
+            className="grid grid-cols-2 gap-2"
+            role="group"
+          >
+            {(
+              [
+                {
+                  gender: "female" as const,
+                  label: t("settings.femaleTeacherQuickBtn"),
+                },
+                {
+                  gender: "male" as const,
+                  label: t("settings.maleTeacherQuickBtn"),
+                },
+              ] as const
+            ).map((option) => {
+              const active = teacherPersona.gender === option.gender;
+              return (
+                <button
+                  aria-pressed={active}
+                  className={cn(
+                    "inline-flex min-h-12 items-center justify-center gap-1.5 rounded-control border-2 px-3 py-2 text-sm font-extrabold transition focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    active
+                      ? "border-primary bg-primary text-white shadow-xs"
+                      : "border-border bg-white text-ink hover:border-primary/60 hover:bg-cream",
+                  )}
+                  data-testid={`voice-modal-teacher-${option.gender}`}
+                  key={option.gender}
+                  onClick={() => selectTeacherGender(option.gender)}
+                  type="button"
+                >
+                  {active ? (
+                    <Check aria-hidden="true" className="size-4 shrink-0" />
+                  ) : null}
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div
             className="rounded-control bg-sky px-3 py-2 text-sm font-semibold text-primary"
             aria-live="polite"
           >
             <div>
+              {teacherPersona.title} ·{" "}
               {selectedVoice
                 ? voiceTitle(selectedVoice)
                 : preferences.voiceId

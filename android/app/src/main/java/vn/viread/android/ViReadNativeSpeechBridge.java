@@ -161,6 +161,15 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             return speak(text, rate, pitch, utteranceId, attributes, callback);
         }
 
+        default boolean isLastVoiceGenderMismatch() {
+            return false;
+        }
+
+        @Nullable
+        default String getLastResolvedVoiceName() {
+            return null;
+        }
+
         void stop();
 
         void shutdown();
@@ -621,16 +630,15 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         String rawVoiceGender = payload.isNull("voiceGender")
                 ? null
                 : payload.optString("voiceGender", null);
-        String normalizedGender = null;
-        if (rawVoiceGender != null) {
-            String trimmedGender = rawVoiceGender.trim().toLowerCase(Locale.ROOT);
-            if ("male".equals(trimmedGender) || "female".equals(trimmedGender)) {
-                normalizedGender = trimmedGender;
+        String normalizedGender = normalizeVoiceGender(rawVoiceGender);
+        String rawVoiceId = payload.isNull("voiceId") ? null : payload.optString("voiceId", null);
+        String normalizedVoiceId = null;
+        if (rawVoiceId != null) {
+            String trimmedVoiceId = rawVoiceId.trim();
+            if (!trimmedVoiceId.isEmpty() && trimmedVoiceId.length() <= 100) {
+                normalizedVoiceId = trimmedVoiceId;
             }
         }
-        String rawVoiceId = payload.isNull("voiceId") ? null : payload.optString("voiceId", null);
-        String normalizedVoiceId =
-                (rawVoiceId != null && !rawVoiceId.trim().isEmpty()) ? rawVoiceId.trim() : null;
 
         // Supersede any previous TTS operation cleanly
         int generation = ++ttsSeq;
@@ -722,6 +730,13 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                             evt,
                             "actualVoiceGender",
                             normalizeActualVoiceGender(ttsEngine.getActiveVoiceGender()));
+                    if (ttsEngine.isLastVoiceGenderMismatch()) {
+                        putSafe(evt, "voiceGenderMismatch", true);
+                    }
+                    String resolvedName = ttsEngine.getLastResolvedVoiceName();
+                    if (resolvedName != null && !resolvedName.isEmpty()) {
+                        putSafe(evt, "resolvedVoiceName", resolvedName);
+                    }
                     sendJson(request.reply, evt);
                 });
             }
@@ -1495,12 +1510,47 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     }
 
     @Nullable
+    static String normalizeVoiceGender(@Nullable String raw) {
+        if (raw == null) return null;
+        String lower = raw.trim().toLowerCase(Locale.ROOT);
+        if ("male".equals(lower) || "nam".equals(lower)) {
+            return "male";
+        }
+        if ("female".equals(lower) || "nu".equals(lower) || "nữ".equals(lower)) {
+            return "female";
+        }
+        return null;
+    }
+
+    @Nullable
+    static String inferAndroidVoiceGender(@Nullable Voice voice) {
+        String classified = classifyVoiceGender(voice);
+        return "unknown".equals(classified) ? null : classified;
+    }
+
+    @Nullable
     static Voice selectBestVietnameseVoice(@Nullable Set<Voice> voices) {
         return selectBestVietnameseVoice(voices, null);
     }
 
     static String classifyVoiceGender(@Nullable Voice voice) {
-        if (voice == null || voice.getName() == null) {
+        if (voice == null) {
+            return "unknown";
+        }
+        Set<String> features = voice.getFeatures();
+        if (features != null) {
+            boolean featureMale = false;
+            boolean featureFemale = false;
+            for (String feature : features) {
+                if (feature == null) continue;
+                String lower = feature.toLowerCase(Locale.ROOT);
+                if (lower.contains("female")) featureFemale = true;
+                else if (lower.contains("male")) featureMale = true;
+            }
+            if (featureFemale && !featureMale) return "female";
+            if (featureMale && !featureFemale) return "male";
+        }
+        if (voice.getName() == null) {
             return "unknown";
         }
         // Strip "vietnamese" / "vietnam" BEFORE tokenizing so the substring "nam" inside
@@ -1509,9 +1559,9 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 .toLowerCase(Locale.ROOT)
                 .replace("vietnamese", " ")
                 .replace("vietnam", " ");
+        boolean looksMale = sanitized.contains("wavenet-b") || sanitized.contains("neural2-d");
+        boolean looksFemale = sanitized.contains("wavenet-c") || sanitized.contains("neural2-a");
         String[] tokens = sanitized.split("[^a-z0-9]+");
-        boolean looksMale = false;
-        boolean looksFemale = false;
         for (String tok : tokens) {
             if (tok.isEmpty()) continue;
             switch (tok) {
@@ -1592,9 +1642,7 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         if (voices == null || voices.isEmpty()) {
             return null;
         }
-        String gender = preferredGender == null
-                ? null
-                : preferredGender.trim().toLowerCase(Locale.ROOT);
+        String targetGender = normalizeVoiceGender(preferredGender);
         Voice best = null;
         int bestScore = Integer.MIN_VALUE;
         for (Voice voice : voices) {
@@ -1603,19 +1651,19 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             }
             int score = 0;
             if (!voice.isNetworkConnectionRequired()) {
-                score += 800;
+                score += 1000;
             }
             Locale locale = voice.getLocale();
             if (locale != null && "VN".equalsIgnoreCase(locale.getCountry())) {
                 score += 200;
             }
-            String voiceGender = classifyVoiceGender(voice);
-            if ("male".equals(gender)) {
-                if ("male".equals(voiceGender)) score += 1500;
-                else if ("female".equals(voiceGender)) score -= 900;
-            } else if ("female".equals(gender)) {
-                if ("female".equals(voiceGender)) score += 1500;
-                else if ("male".equals(voiceGender)) score -= 900;
+            if (targetGender != null) {
+                String inferred = inferAndroidVoiceGender(voice);
+                if (targetGender.equals(inferred)) {
+                    score += 5000;
+                } else if (inferred != null && !targetGender.equals(inferred)) {
+                    score -= 3000;
+                }
             }
             score += voice.getQuality();
             score -= Math.max(0, voice.getLatency()) / 10;
@@ -1928,15 +1976,18 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
         }
     }
 
-    private static final class AndroidTtsEngine implements TtsEngine {
+    static final class AndroidTtsEngine implements TtsEngine {
         private static final Locale VI_VN = Locale.forLanguageTag(DEFAULT_LANG);
         private final Context appContext;
         private TextToSpeech tts;
         private volatile boolean ready;
         private volatile TtsCallback activeCallback;
-        @Nullable private String pinnedVoiceKey;
         @Nullable private Voice pinnedVoice;
+        @Nullable private String pinnedVoiceGender;
+        @Nullable private String pinnedVoiceId;
         private volatile String activeVoiceGender = "unknown";
+        private volatile boolean lastVoiceGenderMismatch;
+        @Nullable private volatile String lastResolvedVoiceName;
 
         AndroidTtsEngine(Context appContext) {
             this.appContext = appContext;
@@ -1993,43 +2044,78 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
             });
         }
 
-        private void configureVietnameseVoice(
+        void configureVietnameseVoice(
                 TextToSpeech engine,
-                @Nullable String voiceGender,
-                @Nullable String voiceId) {
-            String targetKey = (voiceGender == null ? "default" : voiceGender)
-                    + "::"
-                    + (voiceId == null ? "" : voiceId);
+                @Nullable String requestedGender,
+                @Nullable String requestedVoiceId) {
+            String normalizedGender = normalizeVoiceGender(requestedGender);
+            boolean selectionChanged =
+                    pinnedVoice == null
+                            || !equalsNullable(pinnedVoiceGender, normalizedGender)
+                            || !equalsNullable(pinnedVoiceId, requestedVoiceId);
             // Fast path: keep pinned voice without calling setLanguage(VI_VN) first,
             // which resets the selected voice on some OEM TTS engines mid-session.
-            if (targetKey.equals(pinnedVoiceKey) && pinnedVoice != null) {
+            if (!selectionChanged && pinnedVoice != null) {
                 try {
                     engine.setVoice(pinnedVoice);
                     activeVoiceGender = classifyVoiceGender(pinnedVoice);
-                    return;
                 } catch (Throwable ignored) {
-                    // Fall through to full re-configuration if setVoice threw.
+                    // Continue with fallback.
                 }
+                return;
             }
             try {
                 engine.setLanguage(VI_VN);
             } catch (Throwable ignored) {
                 // Continue with voice selection attempt.
             }
+            lastVoiceGenderMismatch = false;
+            lastResolvedVoiceName = null;
             try {
-                Voice best = selectBestVietnameseVoice(engine.getVoices(), voiceGender);
+                Voice best = selectBestVietnameseVoice(engine.getVoices(), normalizedGender);
                 if (best != null) {
-                    pinnedVoiceKey = targetKey;
-                    pinnedVoice = best;
-                    activeVoiceGender = classifyVoiceGender(best);
                     engine.setVoice(best);
+                    pinnedVoice = best;
+                    pinnedVoiceGender = normalizedGender;
+                    pinnedVoiceId = requestedVoiceId;
+                    activeVoiceGender = classifyVoiceGender(best);
+                    lastResolvedVoiceName = best.getName();
+                    if (normalizedGender != null) {
+                        String inferred = inferAndroidVoiceGender(best);
+                        if (inferred != null && !normalizedGender.equals(inferred)) {
+                            lastVoiceGenderMismatch = true;
+                        }
+                    }
                 } else {
+                    pinnedVoice = null;
+                    pinnedVoiceGender = normalizedGender;
+                    pinnedVoiceId = requestedVoiceId;
                     activeVoiceGender = "unknown";
                 }
             } catch (Throwable ignored) {
                 activeVoiceGender = "unknown";
                 // OEM getVoices() can throw on restricted builds; setLanguage fallback applies.
             }
+        }
+
+        private static boolean equalsNullable(@Nullable String a, @Nullable String b) {
+            return a == null ? b == null : a.equals(b);
+        }
+
+        @Nullable
+        Voice getPinnedVoice() {
+            return pinnedVoice;
+        }
+
+        @Override
+        public boolean isLastVoiceGenderMismatch() {
+            return lastVoiceGenderMismatch;
+        }
+
+        @Nullable
+        @Override
+        public String getLastResolvedVoiceName() {
+            return lastResolvedVoiceName;
         }
 
         @Override

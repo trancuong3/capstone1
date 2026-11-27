@@ -323,6 +323,25 @@ class HistoryRepository:
             .where(ReadingSession.Id == session_id, ChildProfile.ParentId == actor_id)
         )
 
+    async def books_by_ids(self, book_ids: list[UUID], actor_id: UUID) -> dict[UUID, Book]:
+        """Batch-load accessible historical books for a page of sessions (eliminates N+1)."""
+        unique_ids = list(dict.fromkeys(book_ids))
+        if not unique_ids:
+            return {}
+        result = await self.db.execute(
+            select(Book).where(
+                Book.Id.in_(unique_ids),
+                or_(
+                    Book.VisibilityScope == "CATALOG",
+                    and_(
+                        Book.VisibilityScope == "PARENT_PRIVATE",
+                        Book.OwnerParentId == actor_id,
+                    ),
+                ),
+            )
+        )
+        return {row.Id: row for row in result.scalars().all()}
+
     async def session_book(self, session_id: UUID, actor_id: UUID):
         # Historical metadata must not depend on current catalog eligibility,
         # but private books must always belong to the authenticated parent.
@@ -397,7 +416,7 @@ class HistoryService:
             raise HTTPException(status_code=404, detail="Resource not found")
 
     @staticmethod
-    def summary(row):
+    def summary(row, book: CatalogBookResponse | None = None):
         duration = None
         try:
             if row.EndedAt is not None:
@@ -406,6 +425,7 @@ class HistoryService:
                 id=row.Id, child_id=row.ChildId, book_id=row.BookId,
                 state="FINISHED" if row.State == "COMPLETED" else row.State,
                 started_at=row.StartedAt, ended_at=row.EndedAt, duration_ms=duration,
+                book=book,
             )
         except (ValidationError, TypeError, ValueError):
             # Unknown states and invalid timelines must never be guessed.
@@ -463,8 +483,19 @@ class HistoryService:
             if not 1 <= page <= 100000:
                 raise HTTPException(status_code=422, detail="Invalid cursor")
         rows = await self.repository.sessions(child_id, actor_id, (page - 1) * limit, limit)
+        page_rows = rows[:limit]
+        books_map: dict[UUID, CatalogBookResponse] = {}
+        batch_loader = getattr(self.repository, "books_by_ids", None)
+        if inspect.iscoroutinefunction(batch_loader) and page_rows:
+            raw_books = await batch_loader([row.BookId for row in page_rows], actor_id)
+            if isinstance(raw_books, dict):
+                for bid, book_row in raw_books.items():
+                    try:
+                        books_map[bid] = CatalogBookResponse.model_validate(book_row)
+                    except ValidationError:
+                        continue
         return SessionHistoryRead(
-            sessions=[self.summary(row) for row in rows[:limit]],
+            sessions=[self.summary(row, book=books_map.get(row.BookId)) for row in page_rows],
             next_cursor=f"page-{page + 1}" if len(rows) > limit and page < 100000 else None,
         )
 

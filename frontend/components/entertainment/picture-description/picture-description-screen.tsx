@@ -383,14 +383,16 @@ export function PictureDescriptionScreen() {
   const defaultGameError = t("pictureDescription.defaultError");
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
-  const teacherPersona = useTeacherPersona();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
+  const teacherPersona = useTeacherPersona();
+  const adaptTeacherText = useCallback(
+    (value: string) => adaptTextToTeacherPersona(value, teacherPersona.gender),
+    [teacherPersona.gender],
+  );
   const recorder = useSpeechRecorder();
   const { reducedMotion, calmSound, toggleCalmSound } =
     useEntertainmentPreferences();
-  const adaptTeacherText = (text: string) =>
-    adaptTextToTeacherPersona(text, teacherPersona.gender);
 
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: "loading",
@@ -711,13 +713,19 @@ export function PictureDescriptionScreen() {
         return;
       }
 
-      const spokenText =
-        options?.adaptPersona === true
-          ? adaptTextToTeacherPersona(
-              cleaned,
-              getEffectiveTeacherPersona().gender,
-            )
-          : cleaned;
+      // Preserve exact vocabulary/sample story content; adapt teacher coaching prompts/feedback.
+      const isStoryOrVocabSample =
+        key.startsWith("target-word:") ||
+        key.startsWith("vocab:") ||
+        key.startsWith("sample:") ||
+        key.startsWith("upgraded:");
+      const shouldAdapt =
+        options?.adaptPersona !== undefined
+          ? options.adaptPersona
+          : !isStoryOrVocabSample;
+      const spokenText = shouldAdapt
+        ? adaptTextToTeacherPersona(cleaned, teacherPersona.gender)
+        : cleaned;
 
       // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
       abortActiveVoiceCapture({ preserveDraft: true });
@@ -726,10 +734,10 @@ export function PictureDescriptionScreen() {
       setPlayingSpeechKey(key);
 
       try {
-        await speechPlayer.play(
-          spokenText,
-          options?.adaptPersona === true ? { coaching: true } : undefined,
-        );
+        await speechPlayer.play(spokenText, {
+          utteranceKind: shouldAdapt ? "game_coaching" : "game_sample",
+          ...(shouldAdapt ? { coaching: true } : {}),
+        });
       } catch {
         // Ignore playback interruption / fallback errors.
       } finally {
@@ -744,6 +752,7 @@ export function PictureDescriptionScreen() {
       playingSpeechKey,
       speechPlayer,
       stopSpeechPlayback,
+      teacherPersona.gender,
     ],
   );
 
@@ -828,6 +837,7 @@ export function PictureDescriptionScreen() {
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
           refresh_ai_guide: options?.refreshAiGuide,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -868,6 +878,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "BOOK_PAGE",
           book_page_id: page.page_id,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -933,6 +944,7 @@ export function PictureDescriptionScreen() {
           child_id: childId,
           source_type: "CUSTOM_UPLOAD",
           image_file: uploadFile,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -1273,6 +1285,7 @@ export function PictureDescriptionScreen() {
           transcript_text: trimmed,
           input_mode: overrideMode ?? inputMode,
           teaching_mode: teachingMode,
+          teacher_gender: teacherPersona.gender,
           ...(sessionTargetWords.length > 0
             ? { target_words: sessionTargetWords }
             : {}),
@@ -2645,13 +2658,11 @@ export function PictureDescriptionScreen() {
                       type="button"
                     >
                       <Send aria-hidden="true" className="size-4" />
-                      {isEvaluating
-                        ? adaptTeacherText(
-                            t("pictureDescription.evaluatingButton"),
-                          )
-                        : adaptTeacherText(
-                            t("pictureDescription.submitButton"),
-                          )}
+                      {adaptTeacherText(
+                        isEvaluating
+                          ? t("pictureDescription.evaluatingButton")
+                          : t("pictureDescription.submitButton"),
+                      )}
                     </Button>
                   </div>
                 </section>
@@ -3052,11 +3063,11 @@ export function PictureDescriptionScreen() {
                                 : "")
                             }
                           />
-                          {isEvaluating
-                            ? t("pictureDescription.reEvaluatingAi")
-                            : adaptTeacherText(
-                                t("pictureDescription.reEvaluateWithAi"),
-                              )}
+                          {adaptTeacherText(
+                            isEvaluating
+                              ? t("pictureDescription.reEvaluatingAi")
+                              : t("pictureDescription.reEvaluateWithAi"),
+                          )}
                         </Button>
                       </div>
                     </StatusMessage>

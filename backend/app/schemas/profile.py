@@ -80,6 +80,54 @@ class ChildProfileUpdate(BaseModel):
         return value
 
 
+_KNOWN_MALE_VOICE_MARKERS = (
+    "thien_minh",
+    "quang_son",
+    "thai_son",
+    "neural2_d",
+    "wavenet_b",
+    "_male",
+)
+_KNOWN_FEMALE_VOICE_MARKERS = (
+    "truc_ly",
+    "ngoc_linh",
+    "ngoc_tran",
+    "thuc_doan",
+    "my_duyen",
+    "neural2_a",
+    "wavenet_c",
+    "_female",
+)
+
+
+class ChildVoicePreferencesUpdate(BaseModel):
+    """Strict validated AI teacher voice preferences persisted in childprofiles.settings."""
+
+    voice_id: str = Field(..., min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]{1,100}$")
+    gender: Literal["female", "male"]
+    region: Literal["north", "central", "south"]
+    speed: float = Field(default=0.9, ge=0.7, le=1.2)
+    updated_at: Optional[int] = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("speed")
+    @classmethod
+    def normalize_speed(cls, value: float) -> float:
+        return round(float(value), 2)
+
+    @model_validator(mode="after")
+    def validate_voice_gender_consistency(self):
+        lower = self.voice_id.lower()
+        is_known_male = any(marker in lower for marker in _KNOWN_MALE_VOICE_MARKERS)
+        is_known_female = any(marker in lower for marker in _KNOWN_FEMALE_VOICE_MARKERS)
+        if is_known_male and self.gender != "male":
+            raise ValueError("voice_id gender conflicts with gender='female'")
+        if is_known_female and self.gender != "female":
+            raise ValueError("voice_id gender conflicts with gender='male'")
+        return self
+
+
 # ==========================================
 # 2. SCHEMAS CHO PHỤ HUYNH (PROFILE)
 # ==========================================

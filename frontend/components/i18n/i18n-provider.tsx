@@ -198,6 +198,38 @@ export function I18nProvider({
     localeRef.current = localeState.locale;
   }, [localeState.locale]);
 
+  // If SSR trimmed the heavy `admin` namespace for a non-default locale on a
+  // parent/public page, hydrate the full client locale chunk lazily in the
+  // background so admin or GlobalTaskCenter labels remain localized.
+  useEffect(() => {
+    if (
+      customLoadMessages ||
+      localeState.locale === DEFAULT_LOCALE ||
+      "admin" in localeState.messages
+    ) {
+      return;
+    }
+    let active = true;
+    const targetLocale = localeState.locale;
+    void loadLocaleMessages(targetLocale).then((fullBundle) => {
+      if (
+        !active ||
+        !mountedRef.current ||
+        localeRef.current !== targetLocale
+      ) {
+        return;
+      }
+      setLocaleState((prev) =>
+        prev.locale === targetLocale && !("admin" in prev.messages)
+          ? { locale: targetLocale, messages: fullBundle }
+          : prev,
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, [customLoadMessages, localeState.locale, localeState.messages]);
+
   useEffect(() => {
     function handleAuthSyncEvent(event: Event) {
       const detail = (event as CustomEvent<I18nAuthSyncDetail>).detail;

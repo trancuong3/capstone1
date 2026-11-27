@@ -52,7 +52,6 @@ import {
 } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import {
-  getEffectiveTeacherPersona,
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
@@ -293,6 +292,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const peekIntervalRef = useRef<number | null>(null);
 
   useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
     mountedRef.current = true;
     lockSessionVoice(memoryVoiceSessionId);
     void preloadReadingVoiceEngines();
@@ -360,7 +363,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       if (!calmSound) return;
       const adaptedText = adaptTextToTeacherPersona(
         text,
-        getEffectiveTeacherPersona().gender,
+        teacherPersona.gender,
       );
       if (!adaptedText.trim()) return;
       // Anti-self-capture invariant: ALWAYS abort active mic BEFORE speaking TTS!
@@ -383,7 +386,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       };
 
       void speechPlayerRef.current
-        .play(adaptedText, { coaching: true })
+        .play(adaptedText, {
+          coaching: true,
+          utteranceKind: "game_prompt",
+        })
         .then(finishSpeak)
         .catch(() => {
           if (!mountedRef.current || ttsGenerationRef.current !== generation) {
@@ -414,7 +420,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           finishSpeak();
         });
     },
-    [calmSound, echoGuard, stopAllTts, stopMicCapture],
+    [calmSound, echoGuard, stopAllTts, stopMicCapture, teacherPersona.gender],
   );
 
   const startVoiceCapture = useCallback(
@@ -772,6 +778,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         stage: "RECALL",
         input_mode: recallInputMode,
         response_text: trimmed,
+        teacher_gender: teacherPersona.gender,
       });
       setSession(result.session);
       setRecallEvaluation(result.attempt.evaluation);
@@ -805,6 +812,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         stage: "CREATIVE",
         input_mode: creativeInputMode,
         response_text: trimmed,
+        teacher_gender: teacherPersona.gender,
       });
       setSession(result.session);
       setCreativeEvaluation(result.attempt.evaluation);
@@ -2041,7 +2049,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     )}
                   </span>
                 ) : (
-                  t("memoryGame.creativeDefaultPraise")
+                  adaptTextToTeacherPersona(
+                    t("memoryGame.creativeDefaultPraise"),
+                    teacherPersona.gender,
+                  )
                 )}
               </p>
             </div>

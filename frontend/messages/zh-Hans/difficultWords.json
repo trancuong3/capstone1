@@ -52,7 +52,12 @@
     "emptyFilterDescription": "没有词匹配所选练习状态。",
     "viewAllWords": "查看全部词 ({count})",
     "paginationAria": "分页显示待练词书籍组",
-    "paginationItemLabel": "本书"
+    "paginationItemLabel": "本书",
+    "statTotal": "总词数",
+    "statCompleted": "已读准",
+    "statRemaining": "待复习",
+    "quickMastered": "已掌握",
+    "quickNeedsMoreFull": "需加强"
   },
   "bookCard": {
     "gradeSingle": "{grade} 年级",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "未重新阅读",
     "badgeNeedsMore": "需要练习",
     "badgeInProgress": "练习中",
-    "badgeCompleted": "已正确朗读"
+    "badgeCompleted": "已正确朗读",
+    "showMoreWords": "+{count} 个词",
+    "showFewerWords": "收起",
+    "tagMispronounced": "读错 {count}",
+    "tagOmitted": "漏读 {count}",
+    "tagRepeated": "重复 {count}"
   },
   "item": {
     "notPracticed": "未练习",

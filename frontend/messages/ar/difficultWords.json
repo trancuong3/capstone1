@@ -52,7 +52,12 @@
     "emptyFilterDescription": "لا توجد كلمات تطابق حالة التدريب المحددة.",
     "viewAllWords": "عرض جميع الكلمات ({count})",
     "paginationAria": "ترقيم صفحات مجموعات كتب تدريب الكلمات",
-    "paginationItemLabel": "كتب"
+    "paginationItemLabel": "كتب",
+    "statTotal": "إجمالي الكلمات",
+    "statCompleted": "قُرئت بدقة",
+    "statRemaining": "للمراجعة",
+    "quickMastered": "مُتقَنة",
+    "quickNeedsMoreFull": "تحتاج مراجعة"
   },
   "bookCard": {
     "gradeSingle": "الصف {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "لم يُقرأ مرة أخرى",
     "badgeNeedsMore": "يحتاج إلى مزيد من التدريب",
     "badgeInProgress": "قيد التدريب",
-    "badgeCompleted": "تمت القراءة بشكل صحيح"
+    "badgeCompleted": "تمت القراءة بشكل صحيح",
+    "showMoreWords": "+{count} كلمات أخرى",
+    "showFewerWords": "عرض أقل",
+    "tagMispronounced": "خطأ {count}",
+    "tagOmitted": "تخطي {count}",
+    "tagRepeated": "تكرار {count}"
   },
   "item": {
     "notPracticed": "لم يتم التدريب",
