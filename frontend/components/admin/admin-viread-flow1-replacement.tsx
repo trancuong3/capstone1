@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { ResponsiveTable } from "@/components/common/responsive-table";
@@ -1134,16 +1135,13 @@ export function AdminVireadFlow1Replacement({
         {/* 5. Progress bar & Submit button */}
         {uploading ? (
           <div className="rounded-control border border-primary/25 bg-white p-4">
-            <div className="flex justify-between text-xs font-bold text-primary-hover">
-              <span>{progressStatus}</span>
-              <span className="tabular-nums">{progressPercent}%</span>
-            </div>
-            <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-sky">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+            <AiProgressBar
+              active={uploading && progressPercent < 100}
+              label={progressStatus || t("training.flow1.uploadingBtn")}
+              percent={progressPercent}
+              size="md"
+              testId="flow1-model-upload-progress"
+            />
           </div>
         ) : null}
 

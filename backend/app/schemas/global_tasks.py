@@ -41,6 +41,7 @@ GlobalTaskStatus = Literal[
 ]
 
 ActorRole = Literal["admin", "parent"]
+ProgressMode = Literal["measured", "staged"]
 
 
 class GlobalTaskCreateRequest(BaseModel):
@@ -85,7 +86,9 @@ class GlobalTaskItem(BaseModel):
     book_title: str | None = None
     page_number: int | None = None
     source_revision_id: UUID | None = None
+    actor_id: UUID | None = None
     actor_role: ActorRole
+    portal: ActorRole | None = None
     status: GlobalTaskStatus
     status_label_vi: str
     stage: str
@@ -97,7 +100,8 @@ class GlobalTaskItem(BaseModel):
     progress_total: int | None = None
     progress_unit: str | None = None
     progress_pct: float | None = None
-    is_indeterminate: bool = True
+    progress_mode: ProgressMode = "staged"
+    is_indeterminate: bool = False
     can_retry: bool = False
     can_cancel: bool = False
     result_href: str | None = None
@@ -110,10 +114,18 @@ class GlobalTaskItem(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _default_item_portal(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("portal") is None and data.get("actor_role") in ("admin", "parent"):
+            return {**data, "portal": data["actor_role"]}
+        return data
+
 
 class GlobalTaskListResponse(BaseModel):
     actor_id: UUID
     actor_role: ActorRole
+    portal: ActorRole
     active_count: int = 0
     waiting_review_count: int = 0
     failed_count: int = 0
@@ -121,6 +133,13 @@ class GlobalTaskListResponse(BaseModel):
     worker_online: bool | None = None
     recommended_poll_ms: int | None = None
     tasks: list[GlobalTaskItem] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_list_portal(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("portal") is None and data.get("actor_role") in ("admin", "parent"):
+            return {**data, "portal": data["actor_role"]}
+        return data
 
 
 class GlobalTaskActionResponse(BaseModel):

@@ -28,6 +28,8 @@ export type SmartJobType =
   | "STYLE_BIBLE"
   | "BATCH_BOOK_IMPORT";
 
+export type GlobalTaskProgressMode = "measured" | "staged";
+
 export interface GlobalTaskItem {
   readonly id: string;
   readonly source: GlobalTaskSource;
@@ -38,7 +40,9 @@ export interface GlobalTaskItem {
   readonly book_title: string | null;
   readonly page_number: number | null;
   readonly source_revision_id: string | null;
+  readonly actor_id?: string | null;
   readonly actor_role: GlobalTaskActorRole;
+  readonly portal?: GlobalTaskActorRole;
   readonly status: GlobalTaskStatus;
   readonly status_label_vi: string;
   readonly stage: string;
@@ -50,6 +54,7 @@ export interface GlobalTaskItem {
   readonly progress_total: number | null;
   readonly progress_unit: string | null;
   readonly progress_pct: number | null;
+  readonly progress_mode?: GlobalTaskProgressMode;
   readonly is_indeterminate: boolean;
   readonly can_retry: boolean;
   readonly can_cancel: boolean;
@@ -67,6 +72,7 @@ export interface GlobalTaskItem {
 export interface GlobalTaskListResponse {
   readonly actor_id: string;
   readonly actor_role: GlobalTaskActorRole;
+  readonly portal?: GlobalTaskActorRole;
   readonly active_count: number;
   readonly waiting_review_count: number;
   readonly failed_count: number;
@@ -74,6 +80,12 @@ export interface GlobalTaskListResponse {
   readonly worker_online: boolean | null;
   readonly recommended_poll_ms: number | null;
   readonly tasks: readonly GlobalTaskItem[];
+}
+
+export interface StudioTasksChangedDetail {
+  readonly source?: string;
+  readonly actorId?: string | null;
+  readonly portal?: GlobalTaskActorRole | null;
 }
 
 export interface GlobalTaskActionResponse {

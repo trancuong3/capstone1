@@ -59,6 +59,8 @@ class KaraokeProcessingService:
 
     @staticmethod
     def _dto(state, job):
+        from app.services.ai_task_progress import compute_karaoke_job_progress
+
         return JobRead(
             **{key: getattr(job, key) for key in (
                 "id", "song_id", "draft_version_id", "base_revision", "mode",
@@ -66,6 +68,10 @@ class KaraokeProcessingService:
                 "created_at", "updated_at", "finished_at", "applied_at",
                 "applied_revision", "safe_error_code", "retry_policy",
             )},
+            progress_pct=compute_karaoke_job_progress(
+                status=getattr(job, "status", None),
+                stage=getattr(job, "stage", None),
+            ),
             can_apply=job.status in {"READY", "NEEDS_REVIEW"} and snapshot_matches(state, job),
             quality_flags=quality_flags(job),
         )

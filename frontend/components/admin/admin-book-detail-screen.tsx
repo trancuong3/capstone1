@@ -25,12 +25,14 @@ import {
   AdminStatusBadge,
 } from "@/components/admin/admin-ui";
 import { BookCover } from "@/components/books/book-cover";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
 import { StatusMessage } from "@/components/common/status-message";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   isActiveAdminOcrJobStatus,
@@ -44,6 +46,7 @@ import type { AssetSourceType } from "@/types/book-assets";
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatNumber } = useI18n();
   const skippedAiPageIds = useSkippedAiPageIds(bookId);
   const pageSize = 24;
@@ -256,6 +259,43 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const ocrWorkerOffline = activeOcrJobs.some(
     (job) => job.worker_online === false,
   );
+  const hasRunningOcrJob = activeOcrJobs.some(
+    (job) => job.status === "RUNNING" || job.status === "CLAIMED",
+  );
+  const isOcrQueueWaitingOffline =
+    activeOcrJobsCount > 0 && ocrWorkerOffline && !hasRunningOcrJob;
+  const ocrQueueRealPercent = useMemo(() => {
+    if (activeOcrJobsCount === 0) return null;
+    if (isOcrQueueWaitingOffline) return 2;
+    const sum = activeOcrJobs.reduce((acc, job) => {
+      if (
+        typeof job.progress_pct === "number" &&
+        Number.isFinite(job.progress_pct)
+      ) {
+        return acc + job.progress_pct;
+      }
+      if (job.status === "RUNNING") return acc + 55;
+      if (job.status === "CLAIMED") return acc + 30;
+      if (job.status === "FAILED_RETRYABLE") return acc + 15;
+      return acc + 12;
+    }, 0);
+    return Math.round(sum / activeOcrJobsCount);
+  }, [activeOcrJobs, activeOcrJobsCount, isOcrQueueWaitingOffline]);
+  const ocrQueueStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 20, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 80, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const ocrQueueProgress = useAiProgress({
+    active: activeOcrJobsCount > 0,
+    realPercent: ocrQueueRealPercent,
+    progressMode: isOcrQueueWaitingOffline ? "measured" : "staged",
+    stages: ocrQueueStages,
+    expectedDurationMs: 16_000,
+  });
 
   // Gently auto-poll active OCR jobs (12s when laptop worker is offline, 4s when online)
   // and refresh pages automatically as soon as any queued job finishes.
@@ -660,6 +700,25 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
                 {t("books.detail.ocrQueueCheckNow")}
               </Button>
             </div>
+            <AiProgressBar
+              active={!isOcrQueueWaitingOffline}
+              detail={`${formatNumber(activeOcrJobsCount)}`}
+              elapsedSeconds={
+                isOcrQueueWaitingOffline
+                  ? undefined
+                  : ocrQueueProgress.elapsedSeconds
+              }
+              label={
+                isOcrQueueWaitingOffline
+                  ? tCommon("aiProgress.waitingWorker")
+                  : (ocrQueueProgress.stageLabel ??
+                    tCommon("aiProgress.ocrExtracting"))
+              }
+              percent={ocrQueueProgress.percent}
+              size="sm"
+              testId="admin-book-ocr-queue-progress"
+              tone={isOcrQueueWaitingOffline ? "warning" : "primary"}
+            />
             {pendingNewPageJobs.length > 0 ? (
               <div className="flex flex-wrap gap-2">
                 {pendingNewPageJobs.map((job, idx) => (

@@ -220,7 +220,7 @@ describe("Global AI Task Center", () => {
     expect(service.listTasks).toHaveBeenCalledTimes(1);
   });
 
-  it("renders honest measured progress vs indeterminate bar without fake percentage timers", async () => {
+  it("renders measured and staged percentage progress bars for every active AI task", async () => {
     const measuredTask = makeTask({
       id: "job-measured",
       title_vi: "Nhập nhiều trang sách",
@@ -228,20 +228,20 @@ describe("Global AI Task Center", () => {
       progress_total: 10,
       progress_unit: "trang",
       progress_pct: 30,
+      progress_mode: "measured",
       is_indeterminate: false,
     });
-    const indeterminateTask = makeTask({
+    const stagedTask = makeTask({
       id: "job-indeterminate",
       title_vi: "Nhận diện chữ trang sách",
       progress_completed: null,
       progress_total: null,
       progress_unit: null,
       progress_pct: null,
+      progress_mode: "staged",
       is_indeterminate: true,
     });
-    const service = createMockService(
-      makeFeed([measuredTask, indeterminateTask]),
-    );
+    const service = createMockService(makeFeed([measuredTask, stagedTask]));
 
     render(
       <AiTaskCenterProvider
@@ -255,6 +255,7 @@ describe("Global AI Task Center", () => {
 
     const trigger = await screen.findByTestId("global-task-center-trigger");
     await waitFor(() => expect(trigger).toHaveTextContent("AI đang chạy (2)"));
+    expect(trigger).toHaveTextContent("30%");
 
     fireEvent.click(trigger);
 
@@ -262,15 +263,17 @@ describe("Global AI Task Center", () => {
     expect(measuredBox).toHaveTextContent("3/10 trang");
     expect(measuredBox).toHaveTextContent("30%");
     const measuredBar = within(measuredBox).getByRole("progressbar");
-    expect(measuredBar).toHaveAttribute("aria-valuenow", "3");
-    expect(measuredBar).toHaveAttribute("aria-valuemax", "10");
+    expect(measuredBar).toHaveAttribute("aria-valuenow", "30");
+    expect(measuredBar).toHaveAttribute("aria-valuemax", "100");
 
-    const indetBox = screen.getByTestId("task-progress-job-indeterminate");
-    expect(indetBox).toHaveTextContent("Đang xử lý nền…");
-    expect(indetBox).not.toHaveTextContent("%");
-    const indetBar = within(indetBox).getByRole("progressbar");
-    expect(indetBar).toHaveAttribute("data-indeterminate", "true");
-    expect(indetBar).not.toHaveAttribute("aria-valuenow");
+    const stagedBox = screen.getByTestId("task-progress-job-indeterminate");
+    expect(stagedBox).toHaveTextContent("%");
+    const stagedBar = within(stagedBox).getByRole("progressbar");
+    expect(stagedBar).toHaveAttribute("aria-valuemin", "0");
+    expect(stagedBar).toHaveAttribute("aria-valuemax", "100");
+    const stagedPct = Number(stagedBar.getAttribute("aria-valuenow"));
+    expect(stagedPct).toBeGreaterThanOrEqual(8);
+    expect(stagedPct).toBeLessThan(100);
   });
 
   it("supports Retry, Cancel, and non-blocking 'Xem kết quả' link with >=48px mobile bottom-sheet targets", async () => {
@@ -317,7 +320,7 @@ describe("Global AI Task Center", () => {
     await waitFor(() => expect(service.listTasks).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByTestId("global-task-center-trigger"));
 
-    const panel = screen.getByTestId("global-task-center-panel");
+    const panel = await screen.findByTestId("global-task-center-panel");
     // Mobile bottom-sheet classes + desktop slide-over classes
     expect(panel.className).toContain("rounded-t-2xl");
     expect(panel.className).toContain("max-h-[82dvh]");
@@ -343,12 +346,16 @@ describe("Global AI Task Center", () => {
 
     fireEvent.click(retryBtn);
     await waitFor(() =>
-      expect(service.retryTask).toHaveBeenCalledWith("job-failed"),
+      expect(service.retryTask).toHaveBeenCalledWith("job-failed", {
+        portal: "parent",
+      }),
     );
 
     fireEvent.click(cancelBtn);
     await waitFor(() =>
-      expect(service.cancelTask).toHaveBeenCalledWith("job-running"),
+      expect(service.cancelTask).toHaveBeenCalledWith("job-running", {
+        portal: "parent",
+      }),
     );
   });
 

@@ -11,10 +11,12 @@ import {
 } from "react";
 import { AdminPageHeader } from "@/components/admin/admin-ui";
 import { karaokeInputClass } from "@/components/admin/karaoke/song-metadata-form";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminKaraoke } from "@/components/karaoke/karaoke-services-provider";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { karaokeErrorMessage } from "@/lib/api/admin-karaoke-service";
 import {
@@ -53,6 +55,28 @@ import type {
 
 const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 const PIPELINE_POLL_INTERVAL_MS = 3000;
+
+const SIMPLE_JOB_STAGE_PCT: Record<string, number> = {
+  QUEUED: 8,
+  VALIDATING_INPUT: 20,
+  PREPARING_AUDIO: 45,
+  ALIGNING_LYRICS: 75,
+  VALIDATING_RESULT: 92,
+  COMPLETE: 100,
+};
+
+const SIMPLE_LIFECYCLE_PCT: Record<SimplePipelineLifecycleState, number> = {
+  UPLOADED: 8,
+  QUEUED: 10,
+  SEPARATING_AUDIO: 32,
+  TRANSCRIBING_LYRICS: 54,
+  ALIGNING_LYRICS: 74,
+  ANALYZING_RHYTHM: 86,
+  ANALYZING_MELODY: 92,
+  READY_FOR_REVIEW: 100,
+  NEEDS_REVIEW: 100,
+  FAILED: 0,
+};
 
 const ACTIVE_PIPELINE_STATES = new Set<SimplePipelineLifecycleState>([
   "QUEUED",
@@ -434,6 +458,40 @@ export function KaraokeSimpleUploadScreen({
     processingStatus?.worker_online ?? imported?.worker_online ?? false;
   const effectiveBpm = processingStatus?.bpm ?? imported?.bpm ?? null;
   const isPipelineRunning = ACTIVE_PIPELINE_STATES.has(effectiveLifecycle);
+  const tCommon = useTranslations("common");
+  const backendPipelinePct = (
+    processingStatus as { progress_pct?: number | null } | null
+  )?.progress_pct;
+  const hasBackendPipelinePct =
+    typeof backendPipelinePct === "number" &&
+    Number.isFinite(backendPipelinePct);
+  const pipelineBasePct = hasBackendPipelinePct
+    ? backendPipelinePct
+    : processingStatus?.job_stage &&
+        SIMPLE_JOB_STAGE_PCT[processingStatus.job_stage] !== undefined
+      ? SIMPLE_JOB_STAGE_PCT[processingStatus.job_stage]
+      : (SIMPLE_LIFECYCLE_PCT[effectiveLifecycle] ?? 10);
+  const importProgress = useAiProgress({
+    active: importing,
+    expectedDurationMs: 18_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.uploading") },
+      { atPct: 28, label: tCommon("aiProgress.processingKaraoke") },
+      { atPct: 62, label: tCommon("aiProgress.transcribing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
+  const pipelineProgress = useAiProgress({
+    active: isPipelineRunning || processingBusy,
+    realPercent: isPipelineRunning ? pipelineBasePct : null,
+    progressMode: hasBackendPipelinePct ? "measured" : "staged",
+    expectedDurationMs: 25_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 30, label: tCommon("aiProgress.processingKaraoke") },
+      { atPct: 80, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   const loadDraftPreview = useCallback(
     (
@@ -1529,6 +1587,19 @@ export function KaraokeSimpleUploadScreen({
               {t("karaoke.simpleUpload.autoCreateBtn")}
             </Button>
           </div>
+          {importing ? (
+            <AiProgressBar
+              active
+              elapsedSeconds={importProgress.elapsedSeconds}
+              label={
+                importProgress.stageLabel ??
+                tCommon("aiProgress.processingKaraoke")
+              }
+              percent={importProgress.percent}
+              size="sm"
+              testId="karaoke-simple-import-progress"
+            />
+          ) : null}
         </Card>
       ) : null}
 
@@ -1636,6 +1707,24 @@ export function KaraokeSimpleUploadScreen({
                   ) : null}
                 </div>
               </div>
+
+              {isPipelineRunning || processingBusy ? (
+                <AiProgressBar
+                  active
+                  elapsedSeconds={pipelineProgress.elapsedSeconds}
+                  label={
+                    isPipelineRunning
+                      ? t(
+                          `karaoke.simpleUpload.lifecycle.${effectiveLifecycle}`,
+                        )
+                      : (pipelineProgress.stageLabel ??
+                        tCommon("aiProgress.processingKaraoke"))
+                  }
+                  percent={pipelineProgress.percent}
+                  size="sm"
+                  testId="karaoke-simple-pipeline-progress"
+                />
+              ) : null}
 
               {processingStatus?.safe_error_code ? (
                 <p className="text-sm font-semibold text-warning">

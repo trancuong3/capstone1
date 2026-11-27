@@ -38,11 +38,13 @@ import {
 } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
@@ -365,6 +367,7 @@ function renderStars(count: number, ariaLabel: string) {
 
 export function PictureDescriptionScreen() {
   const t = useTranslations("entertainment");
+  const tCommon = useTranslations("common");
   const defaultGameError = t("pictureDescription.defaultError");
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
@@ -409,6 +412,33 @@ export function PictureDescriptionScreen() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const analyzeProgress = useAiProgress({
+    active: isAnalyzing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 30, label: tCommon("aiProgress.analyzing") },
+      { atPct: 70, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 90, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 12_000,
+  });
+  const transcribeProgress = useAiProgress({
+    active: isTranscribing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.transcribing") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_500,
+  });
+  const evaluateProgress = useAiProgress({
+    active: isEvaluating,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 50, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 10_000,
+  });
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [evaluateError, setEvaluateError] = useState<string | null>(null);
@@ -1416,6 +1446,18 @@ export function PictureDescriptionScreen() {
               grade: selectedChild.grade,
             })}
           </p>
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              elapsedSeconds={analyzeProgress.elapsedSeconds}
+              label={
+                analyzeProgress.stageLabel ?? tCommon("aiProgress.analyzing")
+              }
+              percent={analyzeProgress.percent}
+              size="md"
+              testId="picture-analyzing-progress"
+            />
+          </div>
         </div>
       ) : null}
 
@@ -2479,6 +2521,21 @@ export function PictureDescriptionScreen() {
                     </div>
                   ) : null}
 
+                  {isTranscribing ? (
+                    <div className="mt-3">
+                      <AiProgressBar
+                        active
+                        label={
+                          transcribeProgress.stageLabel ??
+                          tCommon("aiProgress.transcribing")
+                        }
+                        percent={transcribeProgress.percent}
+                        size="compact"
+                        testId="picture-transcribing-progress"
+                      />
+                    </div>
+                  ) : null}
+
                   <label
                     className="mt-3 block"
                     htmlFor="picture-description-input"
@@ -2508,20 +2565,33 @@ export function PictureDescriptionScreen() {
                   {isEvaluating ? (
                     <div
                       aria-live="polite"
-                      className="mt-3 flex items-center gap-2.5 rounded-control border border-primary/25 bg-sky/25 px-3.5 py-2.5 text-sm font-bold text-primary"
+                      className="mt-3 space-y-2 rounded-control border border-primary/25 bg-sky/25 px-3.5 py-2.5 text-sm font-bold text-primary"
                     >
-                      <RefreshCw
-                        aria-hidden="true"
-                        className={cn(
-                          "size-4 shrink-0",
-                          !reducedMotion && "animate-spin",
-                        )}
+                      <div className="flex items-center gap-2.5">
+                        <RefreshCw
+                          aria-hidden="true"
+                          className={cn(
+                            "size-4 shrink-0",
+                            !reducedMotion && "animate-spin",
+                          )}
+                        />
+                        <span>
+                          {adaptTeacherText(
+                            t("pictureDescription.evaluatingBanner"),
+                          )}
+                        </span>
+                      </div>
+                      <AiProgressBar
+                        active
+                        elapsedSeconds={evaluateProgress.elapsedSeconds}
+                        label={
+                          evaluateProgress.stageLabel ??
+                          tCommon("aiProgress.evaluatingAnswer")
+                        }
+                        percent={evaluateProgress.percent}
+                        size="sm"
+                        testId="picture-evaluating-progress"
                       />
-                      <span>
-                        {adaptTeacherText(
-                          t("pictureDescription.evaluatingBanner"),
-                        )}
-                      </span>
                     </div>
                   ) : null}
 
@@ -2985,6 +3055,20 @@ export function PictureDescriptionScreen() {
                           )}
                         </Button>
                       </div>
+                      {isEvaluating ? (
+                        <div className="mt-2">
+                          <AiProgressBar
+                            active
+                            label={
+                              evaluateProgress.stageLabel ??
+                              tCommon("aiProgress.evaluatingAnswer")
+                            }
+                            percent={evaluateProgress.percent}
+                            size="compact"
+                            testId="picture-re-evaluating-progress"
+                          />
+                        </div>
+                      ) : null}
                     </StatusMessage>
                   </div>
                 ) : null}

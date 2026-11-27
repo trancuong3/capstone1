@@ -15,10 +15,12 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -263,6 +265,7 @@ export function DifficultWordPracticePanel({
 }: DifficultWordPracticePanelProps) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("difficultWords");
+  const tCommon = useTranslations("common");
   const { difficultWordService } = useReportServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -306,6 +309,25 @@ export function DifficultWordPracticePanel({
   const [isPlayingPhonics, setIsPlayingPhonics] = useState(false);
   const [masteryOutcome, setMasteryOutcome] =
     useState<ReadingWordMasteryOutcome | null>(null);
+  const isEvaluatingPronunciation =
+    flowState === "EVALUATING" || flowState === "SAVING";
+  const evalProgress = useAiProgress({
+    active: isEvaluatingPronunciation,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.transcribing") },
+      { atPct: 50, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 5_000,
+  });
+  const phonicsProgress = useAiProgress({
+    active: isPlayingPhonics,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
 
   const mountedRef = useRef(true);
   const flowGenerationRef = useRef(0);
@@ -1874,6 +1896,34 @@ export function DifficultWordPracticePanel({
                           ? t("practice.promptPaused")
                           : t("practice.promptIdle")}
         </p>
+
+        {isEvaluatingPronunciation ? (
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              label={
+                evalProgress.stageLabel ??
+                tCommon("aiProgress.evaluatingAnswer")
+              }
+              percent={evalProgress.percent}
+              size="compact"
+              testId="practice-evaluating-progress"
+            />
+          </div>
+        ) : isPlayingPhonics ? (
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              label={
+                phonicsProgress.stageLabel ??
+                tCommon("aiProgress.synthesizingVoice")
+              }
+              percent={phonicsProgress.percent}
+              size="compact"
+              testId="practice-phonics-progress"
+            />
+          </div>
+        ) : null}
 
         {latestResult?.spoken_transcript ? (
           <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">

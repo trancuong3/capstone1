@@ -11,12 +11,14 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
 import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -165,6 +167,7 @@ export function ReadingVoiceSettings({
 }: ReadingVoiceSettingsProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("speech");
+  const tCommon = useTranslations("common");
   const formatSpeed = (speed: number): string =>
     `${formatNumber(speed, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}×`;
   const voiceStudio = useMemo(() => createVoiceStudioService(), []);
@@ -205,6 +208,24 @@ export function ReadingVoiceSettings({
     null,
   );
   const [previewError, setPreviewError] = useState(false);
+  const [isSynthesizingPreview, setIsSynthesizingPreview] = useState(false);
+  const voiceListProgress = useAiProgress({
+    active: isOpen && loadState.status === "loading",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.connecting") },
+      { atPct: 60, label: tCommon("aiProgress.processing") },
+      { atPct: 88, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const previewVoiceProgress = useAiProgress({
+    active: isSynthesizingPreview || isPreviewing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 70, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
@@ -588,11 +609,13 @@ export function ReadingVoiceSettings({
                 size="compact"
                 onClick={() => {
                   const generation = ++previewGenerationRef.current;
-                  if (isPreviewing) {
+                  if (isPreviewing || isSynthesizingPreview) {
+                    setIsSynthesizingPreview(false);
                     onStopPreview();
                     return;
                   }
                   setPreviewError(false);
+                  setIsSynthesizingPreview(true);
                   const previewText = adaptTextToTeacherPersona(
                     PREVIEW_TEXT,
                     resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
@@ -606,6 +629,14 @@ export function ReadingVoiceSettings({
                         !(error instanceof Error && error.name === "AbortError")
                       )
                         setPreviewError(true);
+                    })
+                    .finally(() => {
+                      if (
+                        mountedRef.current &&
+                        generation === previewGenerationRef.current
+                      ) {
+                        setIsSynthesizingPreview(false);
+                      }
                     });
                 }}
                 variant="primary"
@@ -616,6 +647,18 @@ export function ReadingVoiceSettings({
                   : t("settings.preview")}
               </Button>
             </footer>
+            {isSynthesizingPreview || isPreviewing ? (
+              <AiProgressBar
+                active
+                label={
+                  previewVoiceProgress.stageLabel ??
+                  tCommon("aiProgress.synthesizingVoice")
+                }
+                percent={previewVoiceProgress.percent}
+                size="compact"
+                testId="voice-preview-progress"
+              />
+            ) : null}
             {previewError ? (
               <p role="alert" className="text-body text-muted">
                 {t("settings.previewFailed")}
@@ -840,9 +883,23 @@ export function ReadingVoiceSettings({
             ) : null}
 
             {loadState.status === "loading" || loadState.status === "idle" ? (
-              <p className="text-body text-muted">
-                {t("settings.loadingVoices")}
-              </p>
+              <div className="space-y-2">
+                <p className="text-body text-muted">
+                  {t("settings.loadingVoices")}
+                </p>
+                {loadState.status === "loading" ? (
+                  <AiProgressBar
+                    active
+                    label={
+                      voiceListProgress.stageLabel ??
+                      tCommon("aiProgress.connecting")
+                    }
+                    percent={voiceListProgress.percent}
+                    size="compact"
+                    testId="voice-list-loading-progress"
+                  />
+                ) : null}
+              </div>
             ) : loadState.status === "error" ? (
               <div className="space-y-2">
                 <p className="text-body text-muted">

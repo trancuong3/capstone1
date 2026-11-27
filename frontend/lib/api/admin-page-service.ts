@@ -36,6 +36,8 @@ export const adminOcrJobSchema = z.object({
   submission_id: z.string().nullable().optional(),
   worker_id: z.string().nullable().optional(),
   worker_online: z.boolean().optional(),
+  progress_pct: z.number().min(0).max(100).nullable().optional(),
+  worker_phase: z.string().nullable().optional(),
   attempt_count: z.number().optional(),
   max_attempts: z.number().optional(),
   error_code: z.string().nullable().optional(),

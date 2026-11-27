@@ -20,8 +20,11 @@ import {
 } from "react";
 
 import { BookCover } from "@/components/books/book-cover";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   createBookAssetsService,
   type BookAssetsService,
@@ -101,6 +104,7 @@ export function BookCoverStudio({
 }: BookCoverStudioProps) {
   const defaultService = useMemo(() => createBookAssetsService(), []);
   const service = injectedService ?? defaultService;
+  const tCommon = useTranslations("common");
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -231,7 +235,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(saved);
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       clearStagedFile();
       setNotice({
         tone: "info",
@@ -271,7 +275,7 @@ export function BookCoverStudio({
           : prev,
       );
       onCoverUpdated?.(null);
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       setNotice({
         tone: "info",
         title: "Đã gỡ ảnh bìa",
@@ -295,7 +299,7 @@ export function BookCoverStudio({
       const res = await service.generateAiCover(bookId, {
         prompt_hint: aiPromptHint.trim() || null,
       });
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: actorRole });
       if (res.status === "SUCCEEDED" && res.cover) {
         setSummary((prev) =>
           prev
@@ -364,6 +368,34 @@ export function BookCoverStudio({
 
   const gradeText =
     minGrade === maxGrade ? `Lớp ${minGrade}` : `Lớp ${minGrade}–${maxGrade}`;
+
+  const aiCoverStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 22, label: tCommon("aiProgress.generatingCover") },
+      { atPct: 70, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 88, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const uploadCoverStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 30, label: tCommon("aiProgress.uploading") },
+      { atPct: 78, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const aiCoverProgress = useAiProgress({
+    active: busyAction === "ai",
+    stages: aiCoverStages,
+    expectedDurationMs: 18_000,
+  });
+  const uploadCoverProgress = useAiProgress({
+    active: busyAction === "upload",
+    stages: uploadCoverStages,
+    expectedDurationMs: 6_000,
+  });
 
   return (
     <section
@@ -645,6 +677,19 @@ export function BookCoverStudio({
                   Hủy chọn
                 </Button>
               </div>
+              {busyAction === "upload" ? (
+                <AiProgressBar
+                  active
+                  elapsedSeconds={uploadCoverProgress.elapsedSeconds}
+                  label={
+                    uploadCoverProgress.stageLabel ??
+                    tCommon("aiProgress.uploading")
+                  }
+                  percent={uploadCoverProgress.percent}
+                  size="sm"
+                  testId="book-cover-upload-progress"
+                />
+              ) : null}
             </div>
           ) : null}
 
@@ -688,6 +733,19 @@ export function BookCoverStudio({
                 Tạo bìa bằng AI
               </Button>
             </div>
+            {busyAction === "ai" ? (
+              <AiProgressBar
+                active
+                elapsedSeconds={aiCoverProgress.elapsedSeconds}
+                label={
+                  aiCoverProgress.stageLabel ??
+                  tCommon("aiProgress.generatingCover")
+                }
+                percent={aiCoverProgress.percent}
+                size="sm"
+                testId="book-cover-ai-progress"
+              />
+            ) : null}
             {summary && !summary.ai_image_provider_available ? (
               <p className="text-[11px] text-muted">
                 {summary.ai_image_provider_message_vi}

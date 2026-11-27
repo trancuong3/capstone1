@@ -15,15 +15,19 @@ import {
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ChangeEvent,
 } from "react";
 import { useRouter } from "next/navigation";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
+import { useAiProgress } from "@/hooks/use-ai-progress";
+import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
@@ -37,6 +41,10 @@ import {
   type LocalOcrScanJobStatus,
 } from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  readStoredScanJobId,
+  writeStoredScanJobId,
+} from "@/lib/cache/scan-job-storage";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 import { cn } from "@/lib/utils/cn";
@@ -78,30 +86,6 @@ const POLL_INTERVAL_WORKER_OFFLINE_MS = 12_000;
 const POLL_INTERVAL_OFFLINE_MAX_MS = 15_000;
 const MAX_ONLINE_POLL_ATTEMPTS = 120;
 const MAX_CONSECUTIVE_POLL_ERRORS = 3;
-const LAST_SCAN_JOB_STORAGE_KEY = "viread:book-scanner:last-job-id";
-
-function readStoredScanJobId(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.sessionStorage.getItem(LAST_SCAN_JOB_STORAGE_KEY);
-    return raw && raw.trim() ? raw.trim() : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredScanJobId(jobId: string | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (jobId) {
-      window.sessionStorage.setItem(LAST_SCAN_JOB_STORAGE_KEY, jobId);
-    } else {
-      window.sessionStorage.removeItem(LAST_SCAN_JOB_STORAGE_KEY);
-    }
-  } catch {
-    // Ignore restricted storage contexts.
-  }
-}
 
 function formatQueuedTimeLabel(iso: string | null | undefined): string | null {
   if (!iso) return null;
@@ -242,6 +226,8 @@ type LocalOcrScanState =
         "QUEUED" | "CLAIMED" | "RUNNING" | "FAILED_RETRYABLE"
       >;
       readonly workerOnline: boolean;
+      readonly progressPct: number | null;
+      readonly workerPhase: string | null;
       readonly fileName: string;
       readonly file: File | null;
       readonly wasOptimized: boolean;
@@ -267,8 +253,12 @@ type LocalOcrScanState =
 
 export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const { formatNumber } = useI18n();
+  const authRuntime = useAuthRuntime();
+  const actorUserId =
+    authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
   const t = useTranslations("ocr");
   const tc = useTranslations("child");
+  const tCommon = useTranslations("common");
   const router = useRouter();
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const [cameraStarted, setCameraStarted] = useState(false);
@@ -386,7 +376,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         options;
       activeJobIdRef.current = initialJob.job_id;
       activeJobWorkerOnlineRef.current = initialJob.worker_online;
-      writeStoredScanJobId(initialJob.job_id);
+      writeStoredScanJobId(actorUserId, initialJob.job_id);
       let currentJob = initialJob;
       let onlineAttempts = 0;
       let offlineAttempts = 0;
@@ -408,7 +398,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         if (currentJob.status === "SUCCEEDED" && currentJob.result) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
-          writeStoredScanJobId(null);
+          writeStoredScanJobId(actorUserId, null);
           setOcrState({
             status: "succeeded",
             fileName: resolvedFileName,
@@ -424,7 +414,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         ) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
-          writeStoredScanJobId(null);
+          writeStoredScanJobId(actorUserId, null);
           setOcrState({
             status: "error",
             fileName: resolvedFileName,
@@ -443,6 +433,8 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           jobStatus:
             currentJob.status === "SUCCEEDED" ? "RUNNING" : currentJob.status,
           workerOnline: currentJob.worker_online,
+          progressPct: currentJob.progress_pct ?? null,
+          workerPhase: currentJob.worker_phase ?? null,
           fileName: resolvedFileName,
           file,
           wasOptimized,
@@ -540,7 +532,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         }
       }
     },
-    [t, upsertQueuedJob],
+    [actorUserId, t, upsertQueuedJob],
   );
 
   // Restore parent's active queued LOCAL_PAGE_SCAN jobs across page reloads.
@@ -581,7 +573,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           return;
         }
 
-        const storedJobId = readStoredScanJobId();
+        const storedJobId = readStoredScanJobId(actorUserId);
         if (storedJobId && ocrGenerationRef.current === 0) {
           const savedJob = await getScanPageOcrJob(
             storedJobId,
@@ -589,7 +581,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           );
           if (!active || restoreController.signal.aborted) return;
           if (savedJob.status === "SUCCEEDED" && savedJob.result) {
-            writeStoredScanJobId(null);
+            writeStoredScanJobId(actorUserId, null);
             setOcrState({
               status: "succeeded",
               fileName: savedJob.file_name || "book-page.jpg",
@@ -600,7 +592,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             savedJob.status === "DEAD_LETTER" ||
             savedJob.status === "CANCELLED"
           ) {
-            writeStoredScanJobId(null);
+            writeStoredScanJobId(actorUserId, null);
           }
         }
       } catch {
@@ -613,7 +605,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       active = false;
       restoreController.abort();
     };
-  }, [childReadyId, pollScanJobLoop]);
+  }, [actorUserId, childReadyId, pollScanJobLoop]);
 
   const handleCameraUnavailable = useCallback(() => {
     setCameraUnavailable(true);
@@ -812,20 +804,25 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     }
   }, []);
 
-  const handleCancelSpecificQueuedJob = useCallback((jobId: string) => {
-    setQueuedJobs((current) => current.filter((item) => item.job_id !== jobId));
-    void cancelScanPageOcrJob(jobId).catch(() => undefined);
-    if (activeJobIdRef.current === jobId) {
-      ocrGenerationRef.current += 1;
-      ocrAbortRef.current?.abort();
-      ocrAbortRef.current = null;
-      pollWakeRef.current = null;
-      activeJobIdRef.current = null;
-      activeJobWorkerOnlineRef.current = false;
-      writeStoredScanJobId(null);
-      setOcrState({ status: "idle" });
-    }
-  }, []);
+  const handleCancelSpecificQueuedJob = useCallback(
+    (jobId: string) => {
+      setQueuedJobs((current) =>
+        current.filter((item) => item.job_id !== jobId),
+      );
+      void cancelScanPageOcrJob(jobId).catch(() => undefined);
+      if (activeJobIdRef.current === jobId) {
+        ocrGenerationRef.current += 1;
+        ocrAbortRef.current?.abort();
+        ocrAbortRef.current = null;
+        pollWakeRef.current = null;
+        activeJobIdRef.current = null;
+        activeJobWorkerOnlineRef.current = false;
+        writeStoredScanJobId(actorUserId, null);
+        setOcrState({ status: "idle" });
+      }
+    },
+    [actorUserId],
+  );
 
   const handleCancelOcr = useCallback(() => {
     ocrGenerationRef.current += 1;
@@ -835,7 +832,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     const jobIdToCancel = activeJobIdRef.current;
     activeJobIdRef.current = null;
     activeJobWorkerOnlineRef.current = false;
-    writeStoredScanJobId(null);
+    writeStoredScanJobId(actorUserId, null);
     if (jobIdToCancel) {
       setQueuedJobs((current) =>
         current.filter((item) => item.job_id !== jobIdToCancel),
@@ -845,7 +842,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (nativeCameraInputRef.current) nativeCameraInputRef.current.value = "";
     setOcrState({ status: "idle" });
-  }, []);
+  }, [actorUserId]);
 
   const handleFileChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>, childId: string) => {
@@ -892,6 +889,60 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
     },
     [runLocalOcrUpload, t],
   );
+
+  const isScanProcessing = ocrState.status === "processing";
+  const isScanQueued = ocrState.status === "queued";
+  const isScanQueuedOffline =
+    isScanQueued &&
+    !ocrState.workerOnline &&
+    (ocrState.jobStatus === "QUEUED" ||
+      ocrState.jobStatus === "FAILED_RETRYABLE");
+
+  const scanRealPercent = isScanProcessing
+    ? ocrState.stage === "optimizing"
+      ? 15
+      : 35
+    : isScanQueued
+      ? isScanQueuedOffline
+        ? 2
+        : typeof ocrState.progressPct === "number" &&
+            Number.isFinite(ocrState.progressPct)
+          ? ocrState.progressPct
+          : ocrState.jobStatus === "RUNNING"
+            ? 55
+            : ocrState.jobStatus === "CLAIMED"
+              ? 30
+              : ocrState.jobStatus === "FAILED_RETRYABLE"
+                ? 15
+                : 12
+      : null;
+
+  const scanProgressStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 22, label: tCommon("aiProgress.uploading") },
+      { atPct: 45, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 82, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+
+  const scanResetKey = isScanQueued
+    ? `queued:${ocrState.jobId}:${isScanQueuedOffline ? "offline" : "online"}`
+    : isScanProcessing
+      ? `processing:${ocrState.idempotencyKey}`
+      : ocrState.status;
+
+  const scanProgress = useAiProgress({
+    active: isScanProcessing || isScanQueued,
+    realPercent: scanRealPercent,
+    progressMode: isScanQueuedOffline ? "measured" : "staged",
+    stages: scanProgressStages,
+    expectedDurationMs: 14_000,
+    completed: ocrState.status === "succeeded",
+    failed: ocrState.status === "error",
+    resetKey: scanResetKey,
+  });
 
   if (childState.status === "loading" || childState.status === "redirecting") {
     return (
@@ -1023,6 +1074,18 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               <p className="truncate text-sm text-muted">{ocrState.fileName}</p>
             </div>
           </div>
+          <AiProgressBar
+            active
+            elapsedSeconds={scanProgress.elapsedSeconds}
+            label={
+              ocrState.stage === "optimizing"
+                ? tCommon("aiProgress.preparing")
+                : tCommon("aiProgress.uploading")
+            }
+            percent={scanProgress.percent}
+            size="md"
+            testId="scanner-processing-progress"
+          />
           <Button
             className="min-h-12 sm:w-auto sm:self-start"
             onClick={handleCancelOcr}
@@ -1133,6 +1196,29 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
               </div>
             </div>
           </div>
+          <AiProgressBar
+            active={!isScanQueuedOffline}
+            detail={
+              ocrState.queuePosition
+                ? t("scanner.queuePositionLabel", {
+                    position: formatNumber(ocrState.queuePosition),
+                  })
+                : undefined
+            }
+            elapsedSeconds={
+              isScanQueuedOffline ? undefined : scanProgress.elapsedSeconds
+            }
+            label={
+              isScanQueuedOffline
+                ? tCommon("aiProgress.waitingWorker")
+                : (scanProgress.stageLabel ??
+                  tCommon("aiProgress.ocrExtracting"))
+            }
+            percent={scanProgress.percent}
+            size="md"
+            testId="scanner-queued-progress"
+            tone={isScanQueuedOffline ? "warning" : "primary"}
+          />
           <div className="flex flex-wrap gap-2.5">
             <Button
               className="min-h-12 sm:w-auto"
