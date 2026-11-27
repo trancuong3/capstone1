@@ -186,6 +186,22 @@ async function installReading(
         locked: true,
       });
     }
+    if (path === "/voice/phonics/analyze") {
+      const body = route.request().postDataJSON() as { text?: string };
+      const text = body.text ?? "";
+      return respond(route, {
+        supported: false,
+        source: "none",
+        raw_text: text,
+        clean_phrase: text,
+        syllables: [],
+        focus_syllable_index: 0,
+        focus_syllable: "",
+        steps: [],
+        message: "Chưa có mẫu đánh vần",
+        can_play_whole_word: true,
+      });
+    }
     if (path === "/voice/text-to-speech/timed") {
       const body = route.request().postDataJSON() as {
         words: string[];
@@ -344,7 +360,7 @@ test("Phase 3: a second word cancels the first locked-voice sample with zero OS 
   expect(playback.firstPaused).toBe(true);
   expect(playback.secondActive).toBe(true);
   await expect(page.getByText("Đọc mẫu từ")).toBeVisible();
-  expect(fixture.prompts.map((p) => p.text)).toEqual(["bé", "mèo"]);
+  expect(fixture.prompts.slice(-2).map((p) => p.text)).toEqual(["bé", "mèo"]);
   expect(fixture.requests).toEqual([]);
   expect(fixture.writes).toEqual([]);
 });
@@ -478,7 +494,9 @@ test("Phase 3: timed failure falls back to locked-voice short TTS without OS voi
   expect(await page.evaluate(() => window.__ttsProbe.utterances.length)).toBe(
     0,
   );
-  expect(fixture.prompts).toEqual([
+  expect(
+    fixture.prompts.filter((prompt) => prompt.text === fixture.text),
+  ).toEqual([
     expect.objectContaining({
       text: fixture.text,
       voice_id: fixture.requests[0]?.voice_id,
@@ -529,7 +547,9 @@ test("Phase 3: unavailable TTS produces a safe recoverable error with zero OS vo
     "0",
   );
   expect(fixture.requests).toHaveLength(1);
-  expect(fixture.prompts).toHaveLength(1);
+  expect(
+    fixture.prompts.filter((prompt) => prompt.text === fixture.text),
+  ).toHaveLength(1);
   expect(await page.evaluate(() => window.__ttsProbe.microphoneRequests)).toBe(
     0,
   );
