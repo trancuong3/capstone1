@@ -3135,7 +3135,9 @@ function ReadingSessionScreen({
                     scored.currentWordId !== helpedWordBefore)
                 ) {
                   pageHelpWordRef.current = null;
-                  if (lastTrailingMismatchRef.current?.wordId === helpedWordBefore) {
+                  if (
+                    lastTrailingMismatchRef.current?.wordId === helpedWordBefore
+                  ) {
                     lastTrailingMismatchRef.current = null;
                   }
                 }
