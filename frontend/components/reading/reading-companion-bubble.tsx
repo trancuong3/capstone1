@@ -77,15 +77,17 @@ const MOOD_STYLES: Readonly<
 
 function MoodIcon({ mood }: { readonly mood: CompanionMood }) {
   if (mood === "comforting") {
-    return <Heart aria-hidden="true" className="size-5 fill-current" />;
+    return (
+      <Heart aria-hidden="true" className="size-3.5 fill-current sm:size-5" />
+    );
   }
   if (mood === "teaching") {
-    return <BookOpenCheck aria-hidden="true" className="size-5" />;
+    return <BookOpenCheck aria-hidden="true" className="size-3.5 sm:size-5" />;
   }
   if (mood === "celebrating") {
-    return <Sparkles aria-hidden="true" className="size-5" />;
+    return <Sparkles aria-hidden="true" className="size-3.5 sm:size-5" />;
   }
-  return <Volume2 aria-hidden="true" className="size-5" />;
+  return <Volume2 aria-hidden="true" className="size-3.5 sm:size-5" />;
 }
 
 /**
@@ -128,7 +130,7 @@ export function ReadingCompanionBubble({
     <div
       aria-live="polite"
       className={cn(
-        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-card border px-2.5 py-1.5 transition-colors sm:min-h-16 sm:gap-3.5 sm:px-4 sm:py-3",
+        "mx-auto flex min-h-0 w-full max-w-[1008px] items-center gap-2 rounded-card border px-3 py-1.5 text-xs transition-colors sm:min-h-14 sm:gap-3 sm:px-4 sm:py-2.5 sm:text-sm",
         theme.card,
       )}
       data-companion-mood={state.mood}
@@ -139,7 +141,7 @@ export function ReadingCompanionBubble({
       <div
         aria-hidden="true"
         className={cn(
-          "flex size-7 shrink-0 items-center justify-center rounded-full shadow-xs sm:size-11",
+          "flex size-6 shrink-0 items-center justify-center rounded-full shadow-xs sm:size-10",
           theme.badge,
           isSpeaking && "ring-2 ring-offset-2 ring-primary/40",
         )}
@@ -149,13 +151,13 @@ export function ReadingCompanionBubble({
       <div className="min-w-0 flex-1">
         <p
           className={cn(
-            "truncate text-[11px] font-extrabold sm:text-xs",
+            "truncate text-[11px] font-extrabold leading-tight sm:text-xs",
             theme.titleColor,
           )}
         >
           {displayTitle}
         </p>
-        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-base">
+        <p className="mt-0.5 line-clamp-2 text-xs leading-snug font-semibold text-ink sm:line-clamp-none sm:text-sm">
           {displayMessage}
         </p>
       </div>

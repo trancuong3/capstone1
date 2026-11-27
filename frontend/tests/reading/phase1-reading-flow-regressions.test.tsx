@@ -254,8 +254,9 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
     expect(headerValue).toBe("1");
   });
 
-  it("allows LOCAL_VOICE_UNCONFIGURED fallback inside locked session only when opted-in and supports Android TTS pause/resume", async () => {
+  it("blocks local_only locked-session fallback on web and transient busy on Android, while allowing offline Android native TTS with gender and pause/resume", async () => {
     const spokenTexts: string[] = [];
+    const spokenGenders: Array<unknown> = [];
     let currentReqId = "";
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
@@ -265,6 +266,7 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
           currentReqId = String(msg.requestId);
           const spoke = String(msg.text ?? "");
           spokenTexts.push(spoke);
+          spokenGenders.push(msg.gender);
           queueMicrotask(() => {
             port.onmessage?.({
               data: JSON.stringify({
@@ -305,17 +307,16 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
     const win = window as unknown as {
       ViReadNativeSpeech?: ViReadNativeSpeechPort;
     };
-    win.ViReadNativeSpeech = port;
-    resetAndroidNativeSpeechBridgeForTests();
 
+    const synthesize = vi.fn().mockRejectedValue(
+      Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+        status: 503,
+        code: "TTS_UNAVAILABLE",
+        providerCode: "LOCAL_VOICE_UNCONFIGURED",
+      }),
+    );
     const speech: SpeechService = {
-      synthesize: vi.fn().mockRejectedValue(
-        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
-          status: 503,
-          code: "TTS_UNAVAILABLE",
-          providerCode: "LOCAL_VOICE_UNCONFIGURED",
-        }),
-      ),
+      synthesize,
       transcribe: vi.fn(),
     };
     const studio = {
@@ -323,34 +324,55 @@ describe("Phase 1 Reading Flow Regressions (STT, TTS, SessionLock, Preview Highl
       synthesizeTimed: vi.fn(),
     } as unknown as VoiceStudioService;
 
-    // 1. local_only + locked session -> blocked
-    setVoicePolicyPreferences({
-      providerMode: "local_only",
-      allowGoogleTtsFallback: false,
-    });
-    lockSessionVoice("sess-android-pause", { voiceId: "local_north_truc_ly" });
     const player = new TtsPlayback(speech, studio);
-    await expect(player.play("Chào các bạn nhỏ.")).rejects.toThrow();
-    expect(spokenTexts).toHaveLength(0);
+    try {
+      setVoicePolicyPreferences({
+        providerMode: "local_only",
+        allowGoogleTtsFallback: false,
+      });
+      lockSessionVoice("sess-android-pause", {
+        voiceId: "local_north_truc_ly",
+      });
 
-    // 2. Opted-in local_with_google_fallback + LOCAL_VOICE_UNCONFIGURED -> speaks & supports pause/resume
-    setVoicePolicyPreferences({
-      providerMode: "local_with_google_fallback",
-      allowGoogleTtsFallback: true,
-    });
-    const playbackPromise = player.play("Chào các bạn nhỏ.");
-    await vi.waitFor(() => expect(spokenTexts).toHaveLength(1));
+      // 1. Web (no Android native bridge): local_only + locked session + LOCAL_VOICE_UNCONFIGURED stays blocked
+      delete win.ViReadNativeSpeech;
+      resetAndroidNativeSpeechBridgeForTests();
+      await expect(player.play("Chào các bạn nhỏ.")).rejects.toThrow();
+      expect(spokenTexts).toHaveLength(0);
 
-    player.pause();
-    expect(player.getState()).toBe("paused");
-    await act(async () => {
-      await player.resume();
-      await playbackPromise;
-    });
+      // 2. Android APK: local_only + locked session + transient VOICE_WORKER_BUSY stays blocked
+      win.ViReadNativeSpeech = port;
+      resetAndroidNativeSpeechBridgeForTests();
+      synthesize.mockRejectedValueOnce(
+        Object.assign(new Error("VOICE_WORKER_BUSY"), {
+          status: 503,
+          code: "VOICE_WORKER_BUSY",
+          providerCode: "VOICE_WORKER_BUSY",
+        }),
+      );
+      await expect(player.play("Chào các bạn nhỏ.")).rejects.toThrow();
+      expect(spokenTexts).toHaveLength(0);
 
-    expect(spokenTexts).toHaveLength(2);
-    expect(spokenTexts[1]).toBe("các bạn nhỏ.");
-    player.dispose();
+      // 3. Android APK: LOCAL_VOICE_UNCONFIGURED falls back to offline android_native with gender & supports pause/resume
+      const playbackPromise = player.play("Chào các bạn nhỏ.");
+      await vi.waitFor(() => expect(spokenTexts).toHaveLength(1));
+      expect(spokenGenders[0]).toBe("female");
+
+      player.pause();
+      expect(player.getState()).toBe("paused");
+      await act(async () => {
+        await player.resume();
+        await playbackPromise;
+      });
+
+      expect(spokenTexts).toHaveLength(2);
+      expect(spokenTexts[1]).toBe("các bạn nhỏ.");
+      expect(spokenGenders).toEqual(["female", "female"]);
+    } finally {
+      player.dispose();
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
   });
 
   it("previewAlignment avoids 18-30-word far jump and defers unconfirmed skips or function words", () => {

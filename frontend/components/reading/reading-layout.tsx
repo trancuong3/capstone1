@@ -193,12 +193,12 @@ export function ReadingLayout({
     Boolean(!retryMode && companionBubble);
 
   return (
-    <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1.5 px-3 pt-1.5 sm:gap-3 sm:px-6 sm:pt-3">
-      <header className="flex shrink-0 flex-nowrap items-center gap-1.5 sm:gap-3">
+    <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1 px-2.5 pt-1 sm:gap-3 sm:px-6 sm:pt-3">
+      <header className="flex h-10 shrink-0 flex-nowrap items-center gap-1.5 sm:h-auto sm:gap-3">
         <div className="flex shrink-0 items-center">
           <Link
             aria-label={t("layout.exitAria")}
-            className="inline-flex min-h-12 min-w-12 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-label"
+            className="inline-flex min-h-10 min-w-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-xs font-semibold text-ink focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary hover:bg-sky sm:h-11 sm:min-h-11 sm:min-w-12 sm:gap-2 sm:px-3 sm:text-label"
             href={exitHref}
             onClick={
               onExit
@@ -224,7 +224,7 @@ export function ReadingLayout({
             </p>
           )}
           {!topBar && progressLabel && (
-            <p className="truncate text-xs tabular-nums text-muted sm:text-sm">
+            <p className="truncate text-[11px] tabular-nums text-muted sm:text-sm">
               {progressLabel}
             </p>
           )}
@@ -235,7 +235,7 @@ export function ReadingLayout({
             aria-label={t("layout.phonicsAria")}
             onClick={onSpellWord}
             disabled={controlsDisabled}
-            className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
+            className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:gap-2 sm:px-3 sm:text-sm"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
             <span>
@@ -251,11 +251,11 @@ export function ReadingLayout({
           aria-label={t("layout.tutorAria")}
           onClick={onHelp}
           disabled={controlsDisabled || retryMode}
-          className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
+          className="inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-control px-2 text-xs font-semibold text-ink hover:bg-sky disabled:opacity-55 sm:min-h-11 sm:min-w-11 sm:gap-2 sm:px-3 sm:text-sm"
         >
           <CircleHelp
             aria-hidden="true"
-            className="size-5 shrink-0 sm:size-5"
+            className="size-4.5 shrink-0 sm:size-5"
           />
           <span>{t("layout.tutorLabel")}</span>
         </button>
@@ -312,16 +312,16 @@ export function ReadingLayout({
 
       <div
         data-reading-dock="true"
-        className="reading-dock relative -mx-3 px-3 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
+        className="reading-dock relative -mx-2.5 px-2.5 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:px-6 sm:pt-2.5 sm:pb-2"
       >
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            className="mx-auto mb-1 max-h-[15dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
+            className="mx-auto mb-1 max-h-[14dvh] w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
-                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-3 rounded-card border border-border bg-white px-4 py-2.5"
+                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-2 rounded-card border border-border bg-white px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5"
                 aria-live="polite"
               >
                 <div className="min-w-0 flex-1">
@@ -542,7 +542,7 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-3 py-1 text-xs text-muted sm:text-sm">
+                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-2.5 py-0.5 text-[11px] text-muted sm:px-3 sm:py-1 sm:text-sm">
                   {t("layout.childJustReadPrefix")}{" "}
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     “{latestTranscript}”
@@ -550,12 +550,12 @@ export function ReadingLayout({
                 </p>
               ) : null
             ) : latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
-                <span className="shrink-0 text-sm font-semibold text-purple-ink">
+              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-2 rounded-card border border-purple/50 bg-purple/40 px-2.5 py-0.5 sm:gap-3 sm:px-4 sm:py-1.5">
+                <span className="shrink-0 text-[11px] font-semibold text-purple-ink sm:text-sm">
                   {t("layout.latestRecording")}
                 </span>
                 <p
-                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
+                  className="viread-learning-content min-w-0 flex-1 truncate text-[11px] font-semibold italic text-ink sm:text-sm"
                   dir="ltr"
                   lang="vi"
                 >
@@ -608,7 +608,7 @@ export function ReadingLayout({
 
         <div
           data-reading-progress-wrap="true"
-          className="mt-0.5 [&>div]:flex [&>div]:flex-wrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:gap-y-0.5 [&>div]:pt-0.5 [&>div]:text-[11px] sm:mt-1 sm:[&>div]:pt-1 sm:[&>div]:text-sm"
+          className="mt-1 [&>div]:flex [&>div]:flex-nowrap [&>div]:items-center [&>div]:justify-between [&>div]:gap-x-2 [&>div]:border-t [&>div]:border-border/70 [&>div]:pt-1 [&>div]:text-[11px] [&>div>span:first-child]:shrink-0 [&>div>span:last-child]:min-w-0 [&>div>span:last-child]:truncate [&>div>span:last-child]:text-[11px] sm:mt-1 sm:[&>div]:flex-wrap sm:[&>div]:pt-1 sm:[&>div]:text-sm sm:[&>div>span:last-child]:text-sm"
         >
           <ReadingProgress
             isListening={isListening}

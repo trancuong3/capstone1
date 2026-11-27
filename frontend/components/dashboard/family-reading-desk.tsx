@@ -96,20 +96,23 @@ export function FamilyReadingDesk({
 
   return (
     <section
-      className="family-reading-desk order-2 md:order-1"
+      className="family-reading-desk order-2 max-sm:rounded-card! sm:order-1"
       aria-labelledby="desk-title"
     >
-      <div className="desk-copy">
-        <div className="desk-label">
-          <BookOpen aria-hidden="true" size={17} />
+      <div className="desk-copy max-sm:p-3.5!">
+        <div className="desk-label max-sm:text-xs!">
+          <BookOpen aria-hidden="true" size={16} />
           {recent?.resumable
             ? tParent("desk.continueReadingLabel")
             : tParent("desk.familyBookshelfLabel")}
         </div>
-        <h2 id="desk-title">
+        <h2
+          id="desk-title"
+          className="max-sm:my-1.5! max-sm:text-lg! max-sm:leading-snug!"
+        >
           {recent?.resumable ? recent.title : tParent("desk.defaultHeading")}
         </h2>
-        <p>
+        <p className="max-sm:text-xs! max-sm:leading-relaxed!">
           {recent?.resumable
             ? tParent("desk.resumePrompt", { alias: child?.alias ?? "" })
             : child
@@ -120,9 +123,12 @@ export function FamilyReadingDesk({
                   ? tParent("desk.selectChildPrompt")
                   : tParent("desk.createFirstChildPrompt")}
         </p>
-        <div className="desk-actions">
+        <div className="desk-actions max-sm:mt-3! max-sm:gap-2!">
           {recent?.resumable ? (
-            <ButtonLink href={recent.href} className="desk-primary">
+            <ButtonLink
+              href={recent.href}
+              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
+            >
               {tParent("desk.resumeButton")}{" "}
               <ArrowRight
                 aria-hidden="true"
@@ -133,7 +139,7 @@ export function FamilyReadingDesk({
           ) : hasProfiles || isLoadingProfiles ? (
             <Button
               onClick={onChooseBook}
-              className="desk-primary"
+              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
               disabled={isLoadingProfiles && !child}
             >
               {tParent("desk.chooseBookButton")}{" "}
@@ -144,7 +150,10 @@ export function FamilyReadingDesk({
               />
             </Button>
           ) : (
-            <ButtonLink href="/children/new" className="desk-primary">
+            <ButtonLink
+              href="/children/new"
+              className="desk-primary max-sm:min-h-11! max-sm:px-4! max-sm:text-sm!"
+            >
               {tParent("desk.createFirstChildButton")}{" "}
               <ArrowRight
                 aria-hidden="true"
@@ -155,7 +164,7 @@ export function FamilyReadingDesk({
           )}
           {recent?.resumable ? (
             <button
-              className="desk-text-link min-h-11 px-1"
+              className="desk-text-link min-h-11 px-1 max-sm:text-xs!"
               type="button"
               onClick={onChooseBook}
             >
@@ -164,12 +173,15 @@ export function FamilyReadingDesk({
           ) : null}
         </div>
         {recent && !recent.resumable ? (
-          <Link className="desk-recent" href={recent.href}>
+          <Link
+            className="desk-recent max-sm:mt-2! max-sm:text-xs!"
+            href={recent.href}
+          >
             {tParent("desk.latestReadPrefix", { title: recent.title })}
           </Link>
         ) : null}
       </div>
-      <div className="desk-illustration">
+      <div className="desk-illustration max-sm:min-h-[96px]! max-sm:max-h-[112px]!">
         <Image
           alt=""
           src="/images/reading-studio.webp"

@@ -477,7 +477,7 @@ function ProgressReportContent({
     : [];
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
       <ReportPageHeader
         eyebrow={t("overview.eyebrow", {
           alias: child.alias,
@@ -487,7 +487,7 @@ function ProgressReportContent({
         description={t("overview.childSubtitle")}
         action={
           <ButtonLink
-            className="sm:w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             href={`/sessions?childId=${encodeURIComponent(child.id)}`}
             variant="secondary"
           >
@@ -546,8 +546,8 @@ function ProgressReportContent({
         : null}
 
       {report ? (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-muted">
+        <div className="flex flex-col gap-3.5 sm:gap-5">
+          <div className="flex flex-wrap items-baseline justify-between gap-1.5 text-xs text-muted sm:gap-2 sm:text-sm">
             <p className="font-semibold text-ink">
               {t("overview.periodBannerRange", {
                 start: report.period_start,
@@ -609,15 +609,15 @@ function ProgressReportContent({
             ))}
           </div>
 
-          <div className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <div className="grid items-stretch gap-3.5 sm:gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <ProgressChart report={report} />
 
             <section
               aria-labelledby="comparison-title"
-              className="rounded-card border border-border bg-white p-5 sm:p-6"
+              className="rounded-card border border-border bg-white p-3.5 sm:p-6"
             >
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-lg font-extrabold text-ink sm:text-xl"
                 id="comparison-title"
               >
                 {t("overview.comparisonTitle")}
@@ -684,18 +684,18 @@ function ProgressReportContent({
             scopeLabel={`${report.period_start} → ${report.period_end}`}
           />
 
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+          <section className="rounded-card border border-border bg-white p-3.5 sm:p-6">
+            <div className="flex flex-col justify-between gap-2.5 sm:flex-row sm:items-end sm:gap-3">
               <div>
-                <h2 className="text-xl font-extrabold text-ink">
+                <h2 className="text-lg font-extrabold text-ink sm:text-xl">
                   {t("overview.difficultWordsTitle")}
                 </h2>
-                <p className="mt-0.5 text-sm text-muted">
+                <p className="mt-0.5 text-xs text-muted sm:text-sm">
                   {t("overview.difficultWordsSubtitle")}
                 </p>
               </div>
               <ButtonLink
-                className="sm:w-auto"
+                className="min-h-10 sm:min-h-12 sm:w-auto"
                 href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
                 variant="secondary"
               >
@@ -757,7 +757,7 @@ function ProgressReportContent({
 
                     return (
                       <li
-                        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 sm:px-4 sm:py-3"
                         key={`${word.normalized_word}-${index}`}
                       >
                         <div className="min-w-0">
@@ -822,7 +822,7 @@ function ProgressReportContent({
           </section>
 
           {report.legacy ? (
-            <section className="rounded-card border border-border bg-cream/60 p-5 sm:p-6">
+            <section className="rounded-card border border-border bg-cream/60 p-3.5 sm:p-6">
               <h2 className="text-lg font-extrabold text-ink">
                 {t("overview.legacyMetricsTitle")}
               </h2>
@@ -862,8 +862,8 @@ function ProgressReportContent({
         showReadingAssessment={!report?.assessment}
       />
 
-      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="cursor-pointer font-bold text-primary">
+      <details className="rounded-card border border-border bg-white p-3.5 sm:p-6">
+        <summary className="flex min-h-10 cursor-pointer items-center font-bold text-primary">
           {t("overview.entertainmentSummaryHeading")}
         </summary>
         <div className="mt-4">

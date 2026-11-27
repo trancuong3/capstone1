@@ -100,12 +100,12 @@ const MemoWordToken = memo(function WordToken({
       <span
         ref={handleRef}
         className={cn(
-          "relative me-1.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-2 py-0.5 motion-reduce:transition-none",
+          "relative me-0.5 inline-block scroll-mt-4 scroll-mb-6 rounded-control border-b-4 px-1 py-0.5 motion-reduce:transition-none sm:me-1.5 sm:px-2",
           isCurrent || presentationState === "current"
             ? "transition-none"
             : "transition-[background-color,color,border-color,box-shadow] duration-75 ease-out",
           !readOnly &&
-            "min-h-11 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+            "min-h-9 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-11",
           !readOnly && "cursor-pointer select-none",
           wordPresentationClasses[presentationState],
           isCurrent &&
@@ -152,7 +152,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "self-corrected" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-green-900 shadow-2xs"
+            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-green-900 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
           >
             ↺
           </span>
@@ -160,7 +160,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "unresolved" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-red-900 shadow-2xs"
+            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-red-900 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
           >
             ◇
           </span>
@@ -168,7 +168,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "uncertain" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-slate-700 shadow-2xs"
+            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-slate-700 shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
           >
             ?
           </span>
@@ -176,7 +176,7 @@ const MemoWordToken = memo(function WordToken({
         {presentationState === "assisted" ? (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-2 -right-1 rounded-full bg-white/95 px-1 text-[10px] leading-tight text-primary shadow-2xs"
+            className="pointer-events-none absolute -top-1.5 -right-0.5 rounded-full bg-white/95 px-1 text-[9px] leading-tight text-primary shadow-2xs sm:-top-2 sm:-right-1 sm:text-[10px]"
           >
             {"\u266A"}
           </span>
@@ -274,7 +274,7 @@ export function BookPageContent(props: BookPageContentProps) {
     >
       {hasWords ? (
         <p
-          className="viread-learning-content w-full max-w-[58ch] text-[24px] font-bold leading-[2] tracking-[0.01em] text-ink sm:text-[30px] sm:leading-[1.9]"
+          className="viread-learning-content w-full max-w-[58ch] text-[23px] font-bold leading-[1.85] tracking-normal text-ink sm:text-[30px] sm:leading-[1.9]"
           dir="ltr"
           lang="vi"
         >

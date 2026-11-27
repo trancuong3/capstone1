@@ -333,4 +333,57 @@ describe("MobileBottomNav, AppShell and AdminLayout mobile UX", () => {
     expect(mobileNav.className).toContain("lg:hidden");
     expect(mobileNav.className).not.toContain("xl:hidden");
   });
+
+  it("keeps MobileBottomNav visible with bottom padding on /books catalog while keeping /books/[bookId] and /reading/[sessionId] fullscreen", () => {
+    const authService = createAuthServiceFixture();
+
+    navigationState.pathname = "/books";
+    const { rerender } = render(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Tủ sách</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+
+    const booksBottomNav = screen.getByTestId("mobile-bottom-nav");
+    expect(booksBottomNav).toBeInTheDocument();
+    expect(
+      within(booksBottomNav).getByRole("link", { name: "Sách" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("main").className).toContain("pb-24");
+
+    navigationState.pathname = "/books/book-123";
+    rerender(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Chi tiết sách</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+    expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
+    expect(screen.getByRole("main").className).not.toContain("pb-24");
+
+    navigationState.pathname = "/reading/session-123";
+    rerender(
+      withAuthFixture(
+        <AppStoreProvider>
+          <AppShell>
+            <div>Đang đọc</div>
+          </AppShell>
+        </AppStoreProvider>,
+        authService,
+        { session: authSessionFixture },
+      ),
+    );
+    expect(screen.queryByTestId("mobile-bottom-nav")).not.toBeInTheDocument();
+  });
 });

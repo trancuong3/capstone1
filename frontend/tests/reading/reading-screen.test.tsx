@@ -13,6 +13,7 @@ import type { ReadingUiState } from "@/types/reading";
 import type { WordTimedPlayOptions } from "@/hooks/use-speech-player";
 import { ReadingScreen } from "@/components/reading/reading-screen";
 import type { ReadingServices } from "@/hooks/use-reading-services";
+import { resetAndroidNativeSpeechBridgeForTests } from "@/lib/reading/native-speech-bridge";
 import {
   bookFixture,
   childFixture,
@@ -3532,5 +3533,145 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     ).toBeInTheDocument();
     // Microphone must NOT have been auto-reopened after TTS failure
     expect(recStartCount).toBe(1);
+  });
+
+  it("renders clickable mobile Trang X/Y pill in readingTopBar that opens the page picker and preserves nav aria-labels", async () => {
+    const user = userEvent.setup();
+    renderReading("reading");
+
+    await screen.findByLabelText("Trang sách 4");
+    expect(
+      screen.getByRole("button", { name: "Trang trước" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Trang tiếp theo" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Tùy chọn trang" }),
+    ).toBeInTheDocument();
+
+    const pagePill = document.querySelector<HTMLButtonElement>(
+      '[data-reading-page-pill="true"]',
+    );
+    expect(pagePill).not.toBeNull();
+    expect(pagePill?.textContent).toContain("Trang 1 / 2");
+    expect(pagePill?.className).toContain("h-8");
+    expect(
+      screen.getByRole("button", { name: "Trang trước" }).className,
+    ).toContain("h-8!");
+
+    await user.click(pagePill!);
+    expect(
+      await screen.findByRole("dialog", { name: "Bé đang đọc trang nào?" }),
+    ).toBeVisible();
+  });
+
+  it("applies cancelable 180ms post-TTS mic settle on Android after assistant word sample and notifies Android audio ended", async () => {
+    let recStartCount = 0;
+    class TrackingRecognition {
+      onresult: null = null;
+      onerror: null = null;
+      onend: (() => void) | null = null;
+      start() {
+        recStartCount += 1;
+      }
+      stop() {
+        this.onend?.();
+      }
+    }
+    Object.defineProperty(window, "SpeechRecognition", {
+      configurable: true,
+      value: TrackingRecognition,
+    });
+
+    const sent: Array<Record<string, unknown>> = [];
+    const win = window as unknown as {
+      ViReadNativeSpeech?: {
+        postMessage: (raw: string) => void;
+        onmessage?: ((ev: { data?: unknown }) => void) | null;
+      };
+    };
+    win.ViReadNativeSpeech = {
+      onmessage: null,
+      postMessage: vi.fn((raw: string) => {
+        sent.push(JSON.parse(raw) as Record<string, unknown>);
+      }),
+    };
+
+    try {
+      let resolveWordPlay: () => void = () => undefined;
+      speechPlayerMock.play.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            resolveWordPlay = resolve;
+          }),
+      );
+
+      const user = userEvent.setup();
+      renderReading("reading");
+
+      // Start mic listening first so wasListening = true when tapping a word
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Bé đọc với nhận diện giọng nói",
+        }),
+      );
+      await waitFor(() => expect(recStartCount).toBe(1));
+
+      vi.useFakeTimers();
+      fireEvent.click(screen.getByRole("button", { name: /^mèo$/ }));
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+
+      // Finish TTS playback -> notifyAudioEnded is sent immediately, but STT waits 180ms
+      await act(async () => {
+        resolveWordPlay();
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(sent.some((m) => m.action === "notifyAudioEnded")).toBe(true);
+      expect(recStartCount).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+      });
+      expect(recStartCount).toBe(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      expect(recStartCount).toBe(2);
+
+      // Interrupt during settle window (pause reading) -> STT must NOT reopen!
+      fireEvent.click(screen.getByRole("button", { name: /^mèo$/ }));
+      for (let i = 0; i < 8; i += 1) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+      await act(async () => {
+        resolveWordPlay();
+        for (let i = 0; i < 8; i += 1) {
+          await Promise.resolve();
+        }
+      });
+      expect(recStartCount).toBe(2);
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Tạm dừng buổi đọc" }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(recStartCount).toBe(2);
+    } finally {
+      vi.useRealTimers();
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
   });
 });

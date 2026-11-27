@@ -233,15 +233,20 @@ export function DashboardScreen() {
       : null;
 
   return (
-    <section className="family-dashboard">
-      <header className="family-title">
-        <h1 className="book-title">{t("parent.dashboard.familyTitle")}</h1>
-        <Link href="/children" className="family-inline-link min-h-12">
-          <UsersRound aria-hidden="true" size={17} />{" "}
+    <section className="family-dashboard max-sm:pb-6">
+      <header className="family-title max-sm:mb-3! max-sm:items-center! max-sm:gap-2!">
+        <h1 className="book-title max-sm:text-xl!">
+          {t("parent.dashboard.familyTitle")}
+        </h1>
+        <Link
+          href="/children"
+          className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
+        >
+          <UsersRound aria-hidden="true" size={16} />{" "}
           {t("parent.dashboard.manageProfiles")}
         </Link>
       </header>
-      <div className="family-spread">
+      <div className="family-spread max-sm:gap-3!">
         <FamilyReadingDesk
           key={selectedChild?.id ?? "family"}
           child={selectedChild}
@@ -260,15 +265,18 @@ export function DashboardScreen() {
           aria-labelledby="child-selection-title"
           aria-busy={isLoading ? "true" : undefined}
           className={
-            "family-profiles order-1 md:order-2" +
+            "family-profiles order-1 max-sm:gap-2! sm:order-2" +
             (selectionRequired ? " family-profiles-prompt" : "")
           }
         >
-          <h2 id="child-selection-title">
+          <h2 id="child-selection-title" className="max-sm:text-base!">
             {t("parent.dashboard.selectChildHeading")}
           </h2>
           {selectionRequired && children.length > 0 ? (
-            <p role="status" className="family-selection-notice">
+            <p
+              role="status"
+              className="family-selection-notice max-sm:text-xs!"
+            >
               {invalidSelection
                 ? t("parent.dashboard.invalidSelectionNotice")
                 : t("parent.dashboard.missingSelectionNotice")}
@@ -276,18 +284,18 @@ export function DashboardScreen() {
           ) : null}
           {isLoading ? (
             <div
-              className="family-profile-list"
+              className="family-profile-list max-sm:gap-2!"
               aria-label={t("parent.dashboard.loadingChildrenAria")}
             >
               <span className="sr-only" role="status">
                 {t("common.states.loading")}
               </span>
-              <Skeleton className="h-[68px] w-full rounded-control" />
-              <Skeleton className="h-[68px] w-full rounded-control" />
+              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
+              <Skeleton className="h-[58px] w-full rounded-control sm:h-[68px]" />
             </div>
           ) : children.length ? (
             <>
-              <div className="family-profile-list">
+              <div className="family-profile-list max-sm:gap-2! [&>button]:max-sm:min-h-[56px]! [&>button]:max-sm:px-3! [&>button]:max-sm:py-2!">
                 {children.map((child) => (
                   <ChildProfileCard
                     key={child.id}
@@ -304,14 +312,14 @@ export function DashboardScreen() {
               </div>
               <Link
                 href="/children/new"
-                className="family-inline-link min-h-12"
+                className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
               >
-                <Plus aria-hidden="true" size={17} />{" "}
+                <Plus aria-hidden="true" size={16} />{" "}
                 {t("parent.dashboard.createChildLink")}
               </Link>
             </>
           ) : (
-            <p className="text-muted">
+            <p className="text-sm text-muted sm:text-body">
               {t("parent.dashboard.emptyChildrenDescription")}
             </p>
           )}
@@ -319,26 +327,91 @@ export function DashboardScreen() {
       </div>
 
       {!isLoading && children.length > 0 ? (
-        <>
-          <div className="mt-4 grid grid-cols-2 gap-2.5 md:hidden">
+        <section
+          aria-labelledby="reading-actions-title"
+          className="family-tools max-sm:mt-4!"
+        >
+          <div className="family-tools-heading max-sm:items-center! max-sm:pb-2!">
+            <h2 id="reading-actions-title" className="max-sm:text-base!">
+              {t("parent.dashboard.readingActionsTitle")}
+            </h2>
             <Link
-              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-sky/40 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              href={
+                selectedChild
+                  ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
+                  : "/sessions"
+              }
+              className="family-inline-link min-h-11 max-sm:text-xs! sm:min-h-12"
+            >
+              <History aria-hidden="true" size={16} />{" "}
+              {t("parent.dashboard.readingHistoryLink")}
+            </Link>
+          </div>
+          <div className="family-tool-list max-sm:mt-2.5! max-sm:grid! max-sm:grid-cols-2! max-sm:gap-2.5!">
+            <button
+              type="button"
+              aria-label={t("parent.dashboard.scanBookTitle")}
+              className="order-1 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
+              onClick={() => handleReadingAction("/book-scanner")}
+            >
+              <Camera aria-hidden="true" />
+              <span className="min-w-0">
+                <strong className="max-sm:text-sm! max-sm:leading-snug!">
+                  {t("parent.dashboard.scanBookTitle")}
+                </strong>
+                <small className="max-sm:hidden!">
+                  {t("parent.dashboard.scanBookDesc")}
+                </small>
+              </span>
+              <ArrowUpRight
+                aria-hidden="true"
+                className="viread-rtl-flip max-sm:hidden!"
+              />
+            </button>
+            <button
+              type="button"
+              aria-label={t("parent.dashboard.entertainmentTitle")}
+              className="order-4 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
+              onClick={() => handleReadingAction("/entertainment")}
+            >
+              <Music2 aria-hidden="true" />
+              <span className="min-w-0">
+                <strong className="max-sm:text-sm! max-sm:leading-snug!">
+                  {t("parent.dashboard.entertainmentTitle")}
+                </strong>
+                <small className="max-sm:hidden!">
+                  {t("parent.dashboard.entertainmentDesc")}
+                </small>
+              </span>
+              <ArrowUpRight
+                aria-hidden="true"
+                className="viread-rtl-flip max-sm:hidden!"
+              />
+            </button>
+            <Link
+              className="order-2 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:order-none"
               href={
                 selectedChild
                   ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
                   : "/reports"
               }
             >
-              <BarChart3
-                aria-hidden="true"
-                className="size-5 shrink-0 text-primary"
-              />
-              <span className="truncate">
-                {t("parent.dashboard.recentProgressLink")}
+              <BarChart3 aria-hidden="true" />
+              <span className="min-w-0">
+                <strong className="max-sm:text-sm! max-sm:leading-snug!">
+                  {t("parent.dashboard.progressTitle")}
+                </strong>
+                <small className="max-sm:hidden!">
+                  {t("parent.dashboard.progressDesc")}
+                </small>
               </span>
+              <ArrowUpRight
+                aria-hidden="true"
+                className="viread-rtl-flip max-sm:hidden!"
+              />
             </Link>
             <Link
-              className="flex min-h-12 items-center gap-2 rounded-card border border-border bg-white px-3 py-3 text-sm font-bold text-ink shadow-xs transition-colors hover:bg-warning-surface/50 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              className="order-3 max-sm:min-h-[84px]! max-sm:flex-col! max-sm:items-start! max-sm:justify-between! max-sm:gap-2! max-sm:rounded-card! max-sm:border! max-sm:border-border! max-sm:bg-white! max-sm:p-3! max-sm:shadow-xs! sm:hidden!"
               href={
                 selectedChild
                   ? `/reports/difficult-words?childId=${encodeURIComponent(selectedChild.id)}`
@@ -347,76 +420,16 @@ export function DashboardScreen() {
             >
               <Volume2
                 aria-hidden="true"
-                className="size-5 shrink-0 text-warning"
+                className="bg-warning-surface! text-warning!"
               />
-              <span className="truncate">
-                {t("parent.dashboard.difficultWordsLink")}
+              <span className="min-w-0">
+                <strong className="max-sm:text-sm! max-sm:leading-snug!">
+                  {t("parent.dashboard.difficultWordsLink")}
+                </strong>
               </span>
             </Link>
           </div>
-
-          <section
-            aria-labelledby="reading-actions-title"
-            className="family-tools"
-          >
-            <div className="family-tools-heading">
-              <h2 id="reading-actions-title">
-                {t("parent.dashboard.readingActionsTitle")}
-              </h2>
-              <Link
-                href={
-                  selectedChild
-                    ? `/sessions?childId=${encodeURIComponent(selectedChild.id)}`
-                    : "/sessions"
-                }
-                className="family-inline-link min-h-12"
-              >
-                <History aria-hidden="true" size={16} />{" "}
-                {t("parent.dashboard.readingHistoryLink")}
-              </Link>
-            </div>
-            <div className="family-tool-list">
-              <button
-                type="button"
-                aria-label={t("parent.dashboard.scanBookTitle")}
-                onClick={() => handleReadingAction("/book-scanner")}
-              >
-                <Camera aria-hidden="true" />
-                <span>
-                  <strong>{t("parent.dashboard.scanBookTitle")}</strong>
-                  <small>{t("parent.dashboard.scanBookDesc")}</small>
-                </span>
-                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
-              </button>
-              <button
-                type="button"
-                aria-label={t("parent.dashboard.entertainmentTitle")}
-                onClick={() => handleReadingAction("/entertainment")}
-              >
-                <Music2 aria-hidden="true" />
-                <span>
-                  <strong>{t("parent.dashboard.entertainmentTitle")}</strong>
-                  <small>{t("parent.dashboard.entertainmentDesc")}</small>
-                </span>
-                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
-              </button>
-              <Link
-                href={
-                  selectedChild
-                    ? `/reports?childId=${encodeURIComponent(selectedChild.id)}`
-                    : "/reports"
-                }
-              >
-                <BarChart3 aria-hidden="true" />
-                <span>
-                  <strong>{t("parent.dashboard.progressTitle")}</strong>
-                  <small>{t("parent.dashboard.progressDesc")}</small>
-                </span>
-                <ArrowUpRight aria-hidden="true" className="viread-rtl-flip" />
-              </Link>
-            </div>
-          </section>
-        </>
+        </section>
       ) : null}
     </section>
   );

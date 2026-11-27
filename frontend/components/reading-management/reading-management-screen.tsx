@@ -71,7 +71,7 @@ const inputClass =
 const labelClass =
   "flex min-w-0 flex-col gap-1 text-label font-semibold text-ink";
 const actionClass =
-  "inline-flex min-h-10 items-center justify-center gap-2 rounded-control px-3 py-2 text-label font-semibold";
+  "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-control px-2.5 py-1.5 text-sm font-semibold sm:gap-2 sm:px-3 sm:py-2 sm:text-label";
 
 function localToday(timeZone = "Asia/Ho_Chi_Minh"): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -636,7 +636,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 <legend className="mb-2 text-label font-semibold text-ink">
                   {t("readingManagement.modal.readingDaysLabel")}
                 </legend>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   {weekdayOptions.map((day) => (
                     <label
                       key={day.value}
@@ -833,7 +833,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 <legend className="mb-2 text-label font-semibold text-ink">
                   {t("readingManagement.modal.repeatDaysLabel")}
                 </legend>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-4 gap-1.5 sm:flex sm:flex-wrap sm:gap-2">
                   {weekdayOptions.map((day) => (
                     <label
                       key={day.value}
@@ -919,20 +919,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     );
 
   return (
-    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-4">
-      <header className="flex flex-wrap items-end justify-between gap-5">
+    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-4 sm:pb-4">
+      <header className="flex flex-wrap items-center justify-between gap-2.5 max-sm:pb-3! sm:items-end sm:gap-5">
         <div className="min-w-0 flex-1">
-          <h1 className="text-heading font-extrabold leading-tight text-ink">
+          <h1 className="text-xl font-extrabold leading-tight text-ink sm:text-heading">
             {t("readingManagement.heading")}
           </h1>
-          <p className="mt-1.5 max-w-3xl text-body leading-6 text-muted">
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-muted sm:mt-1.5 sm:text-body sm:leading-6">
             {t("readingManagement.headingSubtitle")}
           </p>
         </div>
         <Button
           onClick={() => setReloadKey((value) => value + 1)}
           size="compact"
-          className="min-h-10! px-4! py-2! text-sm! sm:w-auto"
+          className="min-h-10! px-3! py-1.5! text-xs! sm:w-auto sm:px-4! sm:py-2! sm:text-sm!"
           fullWidth={false}
           variant="secondary"
           disabled={isReadingDataLoading || !childId}
@@ -942,9 +942,9 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         </Button>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-2.5 sm:gap-4 md:grid-cols-2">
         <label
-          className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 text-label text-muted shadow-xs"
+          className="flex min-h-[64px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-3 py-2.5 text-label text-muted shadow-xs sm:min-h-[72px] sm:px-4 sm:py-3"
           htmlFor="management-child"
         >
           {t("readingManagement.childProfileLabel")}
@@ -1002,7 +1002,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <>
           <section
             aria-label={t("readingManagement.overviewAria")}
-            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4"
           >
             {[
               {
@@ -1033,27 +1033,31 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             ].map((item) => (
               <article
                 key={item.label}
-                className="rounded-card border border-border bg-white p-4 shadow-xs transition hover:border-primary/40"
+                className="rounded-card border border-border bg-white p-3 shadow-xs transition hover:border-primary/40 sm:p-4"
               >
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-bold text-muted">{item.label}</p>
+                  <p className="text-xs font-bold text-muted sm:text-sm">
+                    {item.label}
+                  </p>
                   <span
                     aria-hidden="true"
-                    className="shrink-0 rounded-xl bg-sky/60 p-2 text-primary"
+                    className="shrink-0 rounded-xl bg-sky/60 p-1.5 text-primary sm:p-2"
                   >
                     {item.icon}
                   </span>
                 </div>
-                <p className="mt-2 text-heading font-extrabold tabular-nums text-primary">
+                <p className="mt-1 text-2xl font-extrabold tabular-nums text-primary sm:mt-2 sm:text-heading">
                   {item.value}
                 </p>
-                <p className="mt-0.5 text-xs text-muted">{item.detail}</p>
+                <p className="mt-0.5 text-[11px] text-muted sm:text-xs">
+                  {item.detail}
+                </p>
               </article>
             ))}
           </section>
 
-          <details className="rounded-control border border-border bg-white px-4 py-3 shadow-xs transition hover:border-primary/40">
-            <summary className="cursor-pointer font-bold text-primary">
+          <details className="rounded-control border border-border bg-white px-3.5 py-2.5 shadow-xs transition hover:border-primary/40 sm:px-4 sm:py-3">
+            <summary className="flex min-h-10 cursor-pointer items-center font-bold text-primary">
               {t("readingManagement.todayTitle", {
                 childName: t("readingManagement.todayDefaultChild"),
               })}
@@ -1067,11 +1071,11 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             />
           </details>
 
-          <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-            <div className="flex min-w-0 flex-col gap-6">
+          <div className="grid gap-4 sm:gap-6 lg:grid-cols-2 lg:items-start">
+            <div className="flex min-w-0 flex-col gap-4 sm:gap-6">
               <section
                 aria-label={t("readingManagement.plansSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-3.5 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1099,7 +1103,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
                     onClick={() => {
                       setEditingPlanId("");
                       setActiveForm("plan");
@@ -1189,7 +1193,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                 onClick={() => {
                                   setActiveForm("plan");
                                   setEditingPlanId(plan.id);
@@ -1209,7 +1213,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="quiet"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
+                                  className="min-h-10! w-auto! border border-border bg-cream px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "PAUSED")
@@ -1222,7 +1226,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="secondary"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                  className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transitionPlan(plan, "ACTIVE")
@@ -1235,7 +1239,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="secondary"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "COMPLETED")
@@ -1251,7 +1255,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-muted sm:min-h-8! sm:px-2.5!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transitionPlan(plan, "ENDED")
@@ -1280,7 +1284,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label={t("readingManagement.collectionsSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-3.5 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1315,7 +1319,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   <div
                     role="group"
                     aria-label={t("readingManagement.collectionsFilterAria")}
-                    className="mb-3 flex flex-wrap gap-1.5"
+                    className="mb-3 flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-wrap sm:overflow-visible sm:pb-0"
                   >
                     {(
                       [
@@ -1347,7 +1351,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           setCollectionFilter(tab.key);
                           setCollectionsPage(1);
                         }}
-                        className={`inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-bold transition ${
+                        className={`inline-flex min-h-10 shrink-0 items-center whitespace-nowrap rounded-full border px-3 text-xs font-bold transition sm:min-h-8 ${
                           collectionFilter === tab.key
                             ? "border-primary bg-sky text-primary-hover"
                             : "border-border bg-white text-ink hover:bg-canvas"
@@ -1399,7 +1403,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <div className="flex shrink-0 flex-wrap items-center gap-2">
                             {entry.book.lifecycle_status === "ACTIVE" ? (
                               <Link
-                                className="inline-flex min-h-8 items-center rounded-control px-2 text-xs font-bold text-primary hover:bg-sky hover:underline"
+                                className="inline-flex min-h-10 items-center rounded-control px-2.5 text-xs font-bold text-primary hover:bg-sky hover:underline sm:min-h-8 sm:px-2"
                                 href={`/books/${encodeURIComponent(entry.book_id)}?childId=${encodeURIComponent(childId)}`}
                               >
                                 {t("readingManagement.openBook")}
@@ -1409,7 +1413,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               variant="quiet"
                               size="compact"
                               fullWidth={false}
-                              className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-primary"
+                              className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-primary sm:min-h-8! sm:px-2.5!"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void toggleCollection(
@@ -1455,10 +1459,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </section>
             </div>
 
-            <div className="flex min-w-0 flex-col gap-6">
+            <div className="flex min-w-0 flex-col gap-4 sm:gap-6">
               <section
                 aria-label={t("readingManagement.goalsSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-3.5 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1486,7 +1490,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
                     onClick={() => setActiveForm("goal")}
                   >
                     {t("readingManagement.addGoal")}
@@ -1558,7 +1562,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 aria-label={t(
                                   "readingManagement.newTargetValueAria",
                                 )}
-                                className="min-h-9 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary"
+                                className="min-h-10 w-28 rounded-control border border-border bg-white px-3 text-sm text-ink focus-visible:outline-3 focus-visible:outline-primary sm:min-h-9"
                                 type="number"
                                 min={1}
                                 value={editingTarget}
@@ -1569,7 +1573,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-9! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-10! w-auto! px-3! py-1.5! text-xs! sm:min-h-9!"
                                 onClick={() => void saveEditedGoal(goal)}
                                 disabled={Boolean(busyKey)}
                               >
@@ -1578,7 +1582,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               <Button
                                 fullWidth={false}
                                 size="compact"
-                                className="min-h-9! w-auto! px-3! py-1.5! text-xs!"
+                                className="min-h-10! w-auto! px-3! py-1.5! text-xs! sm:min-h-9!"
                                 variant="secondary"
                                 onClick={() => setEditingGoalId("")}
                               >
@@ -1593,7 +1597,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                 onClick={() => {
                                   setEditingGoalId(goal.id);
                                   setEditingTarget(String(goal.target_value));
@@ -1606,7 +1610,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="quiet"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! border border-border bg-cream px-2.5! py-1! text-xs!"
+                                  className="min-h-10! w-auto! border border-border bg-cream px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "PAUSED")
@@ -1619,7 +1623,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   variant="secondary"
                                   size="compact"
                                   fullWidth={false}
-                                  className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                  className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                   disabled={Boolean(busyKey)}
                                   onClick={() =>
                                     void transition(goal, "ACTIVE")
@@ -1632,7 +1636,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="secondary"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                                className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void transition(goal, "COMPLETED")
@@ -1644,7 +1648,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-muted"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-muted sm:min-h-8! sm:px-2.5!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() => void transition(goal, "ENDED")}
                               >
@@ -1674,7 +1678,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label={t("readingManagement.remindersSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-3.5 shadow-xs sm:px-5 sm:py-5"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1702,7 +1706,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                     fullWidth={false}
                     size="compact"
                     variant="secondary"
-                    className="min-h-9! shrink-0 px-3! py-1.5! text-xs!"
+                    className="min-h-10! shrink-0 px-3! py-1.5! text-xs! sm:min-h-9!"
                     onClick={() => {
                       setEditingReminderId("");
                       setActiveForm("reminder");
@@ -1754,7 +1758,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               variant="secondary"
                               size="compact"
                               fullWidth={false}
-                              className="min-h-8! w-auto! px-2.5! py-1! text-xs!"
+                              className="min-h-10! w-auto! px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                               disabled={Boolean(busyKey)}
                               onClick={() =>
                                 void runAction(
@@ -1832,7 +1836,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               </span>
                             </div>
                             <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink">
+                              <label className="inline-flex min-h-10 shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink sm:min-h-8">
                                 <input
                                   type="checkbox"
                                   className="size-4 accent-primary"
@@ -1861,7 +1865,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! sm:min-h-8! sm:px-2.5!"
                                 onClick={() => {
                                   setEditingReminderId(reminder.id);
                                   setActiveForm("reminder");
@@ -1879,7 +1883,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-danger"
+                                className="min-h-10! w-auto! border border-border bg-white px-3! py-1! text-xs! text-danger sm:min-h-8! sm:px-2.5!"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void (

@@ -376,18 +376,18 @@ export function DifficultWordsScreen({
     );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-4 sm:gap-5">
+    <section className="mx-auto flex w-full max-w-[1160px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
       <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
         <ReportPageHeader
           action={
             <ButtonLink
-              className="sm:w-auto"
+              className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
               href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
               variant="secondary"
             >
               <ArrowLeft
                 aria-hidden="true"
-                className="viread-rtl-flip size-5"
+                className="viread-rtl-flip size-4 sm:size-5"
               />
               {t("screen.backToReports")}
             </ButtonLink>
@@ -426,7 +426,7 @@ export function DifficultWordsScreen({
         />
       ) : (
         <>
-          <div className="grid w-full grid-cols-1 gap-3 rounded-[24px] border border-[#DCE8E4] bg-white p-3.5 sm:grid-cols-3 sm:gap-4 sm:p-5">
+          <div className="grid w-full grid-cols-1 gap-2.5 rounded-card border border-[#DCE8E4] bg-white p-3 sm:grid-cols-3 sm:gap-4 sm:rounded-[24px] sm:p-5">
             <div className="min-w-0 sm:col-span-1">
               <ChildSelector
                 childrenProfiles={state.children}
@@ -435,10 +435,10 @@ export function DifficultWordsScreen({
               />
             </div>
 
-            <div className="flex flex-col gap-2.5 sm:hidden">
+            <div className="flex min-w-0 flex-col gap-2 sm:hidden">
               <div
                 aria-label={t("screen.quickFilterAria")}
-                className="flex items-center gap-2 overflow-x-auto pb-0.5"
+                className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 role="group"
               >
                 {(
@@ -457,7 +457,7 @@ export function DifficultWordsScreen({
                   return (
                     <button
                       aria-pressed={active}
-                      className={`min-h-11 shrink-0 rounded-full border px-3.5 py-2 text-xs font-extrabold transition-colors ${
+                      className={`min-h-10 shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-extrabold transition-colors ${
                         active
                           ? "border-primary bg-primary text-white"
                           : "border-[#DCE8E4] bg-[#F6FAF8] text-[#213C42]"
@@ -524,13 +524,13 @@ export function DifficultWordsScreen({
           </div>
 
           {state.words.length > 0 ? (
-            <div className="flex flex-col justify-between gap-4 rounded-[24px] border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-5 sm:flex-row sm:items-center">
+            <div className="flex flex-col justify-between gap-3 rounded-card border border-[#DDF3F5] bg-gradient-to-r from-[#F6FAF8] to-[#ECF8F9] p-3.5 sm:flex-row sm:items-center sm:gap-4 sm:rounded-[24px] sm:p-5">
               <div className="flex flex-col gap-1">
-                <div className="inline-flex items-center gap-2 text-sm font-extrabold text-[#0E6D76]">
+                <div className="inline-flex items-center gap-2 text-xs font-extrabold text-[#0E6D76] sm:text-sm">
                   <Sparkles aria-hidden="true" className="size-4" />
                   {t("screen.progressTitle", { alias: state.child.alias })}
                 </div>
-                <p className="text-lg font-extrabold text-[#213C42]">
+                <p className="text-base font-extrabold text-[#213C42] sm:text-lg">
                   {t("screen.progressCount", {
                     completed: summaryStats.completed,
                     total: summaryStats.total,
@@ -543,7 +543,7 @@ export function DifficultWordsScreen({
               </div>
               {firstPendingGlobalWord ? (
                 <Button
-                  className="min-h-12 shrink-0 rounded-2xl px-6 text-base font-extrabold sm:w-auto"
+                  className="min-h-11 shrink-0 rounded-2xl px-4 text-sm font-extrabold sm:min-h-12 sm:w-auto sm:px-6 sm:text-base"
                   onClick={() =>
                     openPracticeSession(
                       firstPendingGlobalWord.normalized_word,
@@ -597,7 +597,7 @@ export function DifficultWordsScreen({
             />
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3.5 sm:gap-5 lg:grid-cols-2">
                 {bookGroups
                   .slice(
                     (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,

@@ -1,4 +1,3 @@
-import { PageHeader } from "@/components/common/page-header";
 import type { ReactNode } from "react";
 
 interface ReportPageHeaderProps {
@@ -15,13 +14,27 @@ export function ReportPageHeader({
   title,
 }: ReportPageHeaderProps) {
   return (
-    <PageHeader
-      action={action}
-      actionClassName="sm:w-auto"
-      className="mb-0"
-      description={description}
-      eyebrow={eyebrow}
-      title={title}
-    />
+    <header className="mb-0 flex flex-col justify-between gap-2.5 border-b border-border pb-3 sm:gap-4 sm:pb-5 lg:flex-row lg:items-end">
+      <div className="min-w-0 max-w-3xl">
+        {eyebrow ? (
+          <p className="text-xs font-semibold text-muted sm:text-sm">
+            {eyebrow}
+          </p>
+        ) : null}
+        <h1 className="book-title mt-0.5 text-xl text-ink sm:mt-1 sm:text-3xl lg:text-[40px]">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted sm:mt-2 sm:text-body sm:leading-6">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {action ? (
+        <div className="flex w-full shrink-0 flex-wrap gap-2 sm:w-auto sm:gap-3">
+          {action}
+        </div>
+      ) : null}
+    </header>
   );
 }

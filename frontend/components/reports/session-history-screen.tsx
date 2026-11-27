@@ -237,11 +237,11 @@ export function SessionHistoryScreen({
   };
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-24 sm:gap-5 sm:pb-4">
       <ReportPageHeader
         action={
           <ButtonLink
-            className="sm:w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             href={`/reports?${childQuery}`}
             variant="secondary"
           >
@@ -257,8 +257,8 @@ export function SessionHistoryScreen({
         title={t("sessions.title")}
       />
 
-      <div className="flex flex-col justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:flex-row sm:items-end sm:p-4">
-        <div className="w-full sm:max-w-sm">
+      <div className="flex flex-col justify-between gap-2.5 rounded-card border border-border bg-white p-3 sm:flex-row sm:items-end sm:gap-3 sm:p-4">
+        <div className="w-full min-w-0 sm:max-w-sm">
           <ChildSelector
             childrenProfiles={state.children}
             selectedChildId={state.child.id}
@@ -290,7 +290,7 @@ export function SessionHistoryScreen({
           }
         />
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3.5 sm:gap-5">
           {dayGroups.map((group) => (
             <section
               aria-labelledby={`history-day-${group.dayKey}`}

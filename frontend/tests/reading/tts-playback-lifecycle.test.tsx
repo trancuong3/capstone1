@@ -930,7 +930,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(onEnded).toHaveBeenCalledOnce();
   });
 
-  it("handles Android WebView local_only /phonics 503: prefers step-by-step Android native phonics when unlocked, and falls back to cached word audio when session-locked", async () => {
+  it("handles Android WebView local_only /phonics 503: prefers cached word audio when locked & cached, falls back to Android native TTS on cache miss, and prefers step-by-step Android native phonics when unlocked", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const port: ViReadNativeSpeechPort = {
       onmessage: null,
@@ -961,8 +961,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       expect(plan.supported).toBe(true);
       if (!plan.supported) return;
 
-      // Case 1: Under local_only with an active SessionVoiceLock, Android native TTS fallback is blocked
-      // (One-Session-One-Voice), so /phonics 503 falls back to cached word audio with zero Android native TTS calls.
+      // Case 1: Under local_only with an active SessionVoiceLock, /phonics 503 prefers
+      // cached VieNeu word audio when available (zero Android native TTS calls).
       lockSessionVoice("android-lock-test", {
         voiceId: "local_north_truc_ly",
         forceUpdate: true,
@@ -993,7 +993,8 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       await firstPlay;
       expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
 
-      // Case 2: Under local_only with an active SessionVoiceLock and cache miss, throws without OS fallback.
+      // Case 2: Under local_only with an active SessionVoiceLock and cache miss (backend offline),
+      // Android APK falls back to on-device Android Native TTS with matching gender instead of silence.
       const planMiss = buildPhonicsLesson("bàn");
       expect(planMiss.supported).toBe(true);
       if (!planMiss.supported) return;
@@ -1009,15 +1010,21 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
           code: "TTS_UNAVAILABLE",
         }),
       );
-      await expect(
-        result.current.playPhonicsLesson(planMiss, {
-          cacheScope: "COACHING",
-        }),
-      ).rejects.toThrow();
-      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
+      const onLockedMissEnded = vi.fn();
+      await result.current.playPhonicsLesson(planMiss, {
+        cacheScope: "COACHING",
+        onEnded: onLockedMissEnded,
+      });
+      const lockedMissSpeakMsgs = sent.filter((m) => m.action === "speak");
+      expect(lockedMissSpeakMsgs.length).toBe(planMiss.steps.length);
+      expect(lockedMissSpeakMsgs.every((m) => m.gender === "female")).toBe(
+        true,
+      );
+      expect(onLockedMissEnded).toHaveBeenCalledOnce();
+      sent.length = 0;
       releaseSessionVoiceLock("android-lock-test");
 
-      // Case 3: Once unlocked, Android native TTS spells every phonics step rather than only speaking the whole word.
+      // Case 3: Once unlocked, Android native TTS spells every phonics step immediately.
       speech.synthesizePhonics.mockRejectedValueOnce(
         Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
           status: 503,
@@ -1105,6 +1112,17 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       postMessage: vi.fn((raw: string) => {
         const msg = JSON.parse(raw) as Record<string, unknown>;
         sent.push(msg);
+        if (msg.action === "speak") {
+          const reqId = String(msg.requestId);
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({ type: "tts_start", requestId: reqId }),
+            });
+            port.onmessage?.({
+              data: JSON.stringify({ type: "tts_done", requestId: reqId }),
+            });
+          });
+        }
       }),
     };
     const win = window as unknown as {
@@ -1147,7 +1165,11 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
       act(() => {
         failedAudio.onerror?.();
       });
-      await expect(firstPlay).rejects.toThrow();
+      // Bad cached MP3 is evicted AND Android APK falls back to on-device native TTS instead of silence
+      await firstPlay;
+      expect(sent.filter((m) => m.action === "speak").length).toBe(
+        plan.steps.length,
+      );
 
       // Next call refetches fresh audio instead of reusing the evicted bad blob
       const secondPlay = result.current.playPhonicsLesson(plan, {
@@ -1210,5 +1232,119 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(customAudio.playbackRate).toBe(1);
     act(() => customAudio.finish());
     await customPromise;
+  });
+
+  it("falls back to Android native TTS with matching gender on local_only + locked session + LOCAL_VOICE_UNCONFIGURED, skips doomed backend calls when offline, and sends notifyAudioEnded on HTML5 audio end", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const port: ViReadNativeSpeechPort = {
+      onmessage: null,
+      postMessage: vi.fn((raw: string) => {
+        const msg = JSON.parse(raw) as Record<string, unknown>;
+        sent.push(msg);
+        if (msg.action === "speak") {
+          const reqId = String(msg.requestId);
+          queueMicrotask(() => {
+            port.onmessage?.({
+              data: JSON.stringify({ type: "tts_start", requestId: reqId }),
+            });
+            port.onmessage?.({
+              data: JSON.stringify({ type: "tts_done", requestId: reqId }),
+            });
+          });
+        }
+      }),
+    };
+    const win = window as unknown as {
+      ViReadNativeSpeech?: ViReadNativeSpeechPort;
+    };
+    win.ViReadNativeSpeech = port;
+    resetAndroidNativeSpeechBridgeForTests();
+
+    try {
+      setVoicePolicyPreferences({
+        providerMode: "local_only",
+        allowGoogleTtsFallback: false,
+      });
+
+      // 1. Session-locked female voice + backend 503 LOCAL_VOICE_UNCONFIGURED -> android_native with gender:"female"
+      lockSessionVoice("android-offline-fallback-test", {
+        voiceId: "local_north_truc_ly",
+        forceUpdate: true,
+      });
+      speech.synthesize.mockRejectedValueOnce(
+        Object.assign(new Error("LOCAL_VOICE_UNCONFIGURED"), {
+          status: 503,
+          code: "TTS_UNAVAILABLE",
+        }),
+      );
+      const { result } = renderHook(() => useSpeechPlayer());
+      await result.current.play("Con đọc giỏi lắm.");
+      expect(sent.filter((m) => m.action === "speak")).toEqual([
+        expect.objectContaining({
+          action: "speak",
+          text: "Con đọc giỏi lắm.",
+          gender: "female",
+        }),
+      ]);
+
+      // 2. Transient VOICE_WORKER_BUSY does NOT switch to android_native
+      sent.length = 0;
+      speech.synthesize.mockRejectedValueOnce(
+        Object.assign(new Error("VOICE_WORKER_BUSY"), {
+          status: 503,
+          code: "VOICE_WORKER_BUSY",
+        }),
+      );
+      await expect(result.current.play("Đang bận tạm thời.")).rejects.toThrow();
+      expect(sent.filter((m) => m.action === "speak")).toHaveLength(0);
+
+      // 3. Session-locked male voice + fresh offline health (local down) -> skips backend roundtrip with gender:"male"
+      lockSessionVoice("android-offline-fallback-test", {
+        voiceId: "local_north_thien_minh",
+        forceUpdate: true,
+      });
+      setCachedVoiceEngineHealth({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          available: false,
+          tts_ready: false,
+          stt_ready: false,
+          tts_error_code: "LOCAL_VOICE_UNCONFIGURED",
+        },
+        google: {
+          tts_configured: true,
+          stt_configured: true,
+          tts_cooldown: false,
+          stt_cooldown: false,
+        },
+      });
+      speech.synthesize.mockClear();
+      await result.current.play("Thầy khen con đọc to rõ.");
+      expect(speech.synthesize).not.toHaveBeenCalled();
+      expect(sent.filter((m) => m.action === "speak")).toEqual([
+        expect.objectContaining({
+          action: "speak",
+          text: "Thầy khen con đọc to rõ.",
+          gender: "male",
+        }),
+      ]);
+
+      // 4. HTML5 playAudio finish dispatches notifyAudioEnded to Android bridge
+      sent.length = 0;
+      resetVoiceEngineStatus();
+      speech.synthesize.mockResolvedValueOnce(
+        new Blob(["audio-bytes"], { type: "audio/mpeg" }),
+      );
+      const html5Play = result.current.play("Trang sách đẹp.");
+      const el = await audioAt(0);
+      act(() => el.finish());
+      await html5Play;
+      expect(sent.some((m) => m.action === "notifyAudioEnded")).toBe(true);
+    } finally {
+      releaseSessionVoiceLock("android-offline-fallback-test");
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
   });
 });

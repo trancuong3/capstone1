@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import type { ReadingServices } from "@/hooks/use-reading-services";
 import { matchComprehensionVoiceInput } from "@/lib/reading/comprehension-voice-matcher";
+import { resetAndroidNativeSpeechBridgeForTests } from "@/lib/reading/native-speech-bridge";
 import {
   lockSessionVoice,
   resetVoiceLockAndPolicyForTests,
@@ -770,5 +771,94 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     expect(capturedSignal?.aborted).toBe(true);
     act(() => resolveQuestionPlay());
     await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
+  });
+
+  it("waits cancelable 180ms post-TTS settle on Android before starting quiz STT and notifies Android audio ended", async () => {
+    const sent: Array<Record<string, unknown>> = [];
+    const win = window as unknown as {
+      ViReadNativeSpeech?: {
+        postMessage: (raw: string) => void;
+        onmessage?: ((ev: { data?: unknown }) => void) | null;
+      };
+    };
+    win.ViReadNativeSpeech = {
+      onmessage: null,
+      postMessage: vi.fn((raw: string) => {
+        sent.push(JSON.parse(raw) as Record<string, unknown>);
+      }),
+    };
+
+    try {
+      vi.useFakeTimers();
+      const q1 = makeQuizQuestion(1, 1, "Mi cầm gì che mưa?", [
+        "Chiếc ô",
+        "Quả táo",
+        "Quyển sách",
+      ]);
+      servicesHook.mockReturnValue({
+        comprehensionService: {
+          getQuestion: vi.fn().mockResolvedValue(q1),
+          submitAnswer: vi.fn(),
+        },
+      } as unknown as ReadingServices);
+
+      // Case 1: Uninterrupted -> sends notifyAudioEnded, waits full 180ms, then opens Android STT
+      const { unmount } = render(
+        <ComprehensionQuestion
+          child={childFixture}
+          onComplete={vi.fn()}
+          sessionId={TEST_SESSION_ID}
+        />,
+      );
+
+      for (let i = 0; i < 12; i += 1) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+
+      // TTS prompts finished and notified Android audio ended, but STT MUST NOT start before 180ms settle!
+      expect(sent.some((m) => m.action === "notifyAudioEnded")).toBe(true);
+      expect(QuizRecognition.instances).toHaveLength(0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(150);
+      });
+      expect(QuizRecognition.instances).toHaveLength(0);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      expect(QuizRecognition.instances).toHaveLength(1);
+      unmount();
+
+      // Case 2: User pauses voice during the 180ms settle window -> STT NEVER opens!
+      sent.length = 0;
+      QuizRecognition.instances = [];
+      render(
+        <ComprehensionQuestion
+          child={childFixture}
+          onComplete={vi.fn()}
+          sessionId={TEST_SESSION_ID}
+        />,
+      );
+
+      for (let i = 0; i < 12; i += 1) {
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
+      expect(QuizRecognition.instances).toHaveLength(0);
+
+      fireEvent.click(screen.getByRole("button", { name: /Tạm dừng nghe/ }));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+      expect(QuizRecognition.instances).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      resetAndroidNativeSpeechBridgeForTests();
+      delete win.ViReadNativeSpeech;
+    }
   });
 });

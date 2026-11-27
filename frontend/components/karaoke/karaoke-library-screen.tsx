@@ -29,23 +29,27 @@ function Library({ child }: { child: ChildProfileDTO }) {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
   return (
-    <section className="mx-auto grid w-full max-w-[1280px] gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="mt-2 text-heading font-extrabold">
+    <section className="mx-auto grid w-full max-w-[1280px] gap-3.5 pb-24 sm:gap-6 sm:pb-4">
+      <div className="flex flex-wrap items-start justify-between gap-2.5 sm:gap-4">
+        <div className="min-w-0">
+          <h1 className="text-xl font-extrabold sm:mt-2 sm:text-heading">
             {t("karaoke.library.heading", { alias: child.alias })}
           </h1>
-          <p className="mt-3 text-body text-muted">
+          <p className="mt-1 text-sm text-muted sm:mt-3 sm:text-body">
             {t("karaoke.library.subtitle")}
           </p>
         </div>
-        <ButtonLink href="/dashboard" variant="secondary" className="sm:w-auto">
+        <ButtonLink
+          href="/dashboard"
+          variant="secondary"
+          className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
+        >
           {t("karaoke.library.backToDashboard")}
         </ButtonLink>
       </div>
       <SelectedChildIdentity child={child} />
       <form
-        className="flex flex-wrap items-end gap-3"
+        className="flex flex-wrap items-end gap-2.5 sm:gap-3"
         onSubmit={(event) => {
           event.preventDefault();
           setQuery({
@@ -55,16 +59,20 @@ function Library({ child }: { child: ChildProfileDTO }) {
           });
         }}
       >
-        <label className="grid min-w-0 flex-1 gap-2 font-bold">
+        <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-bold sm:gap-2 sm:text-base">
           {t("karaoke.library.searchLabel")}
           <input
-            className="min-h-12 w-full rounded-control border border-border bg-white px-4 focus-visible:outline-3 focus-visible:outline-primary"
+            className="min-h-11 w-full rounded-control border border-border bg-white px-3.5 focus-visible:outline-3 focus-visible:outline-primary sm:min-h-12 sm:px-4"
             maxLength={120}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </label>
-        <Button className="sm:w-auto" type="submit" variant="secondary">
+        <Button
+          className="min-h-11 sm:min-h-12 sm:w-auto"
+          type="submit"
+          variant="secondary"
+        >
           {t("karaoke.library.searchAction")}
         </Button>
       </form>
@@ -139,7 +147,7 @@ function Catalog({
   return (
     <>
       {data.items.length ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-3.5 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
           {data.items.map((song) => (
             <SongCard key={`${song.song_id}:${song.version_id}`} song={song} />
           ))}

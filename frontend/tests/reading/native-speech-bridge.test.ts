@@ -12,11 +12,14 @@ import {
 import {
   AndroidNativeSpeechRecognition,
   getAndroidSpeechCapabilities,
+  getPostTtsMicSettleMs,
   isAndroidNativeSpeechAvailable,
+  notifyAndroidWebAudioEnded,
   openAndroidTtsInstallSettings,
   resetAndroidNativeSpeechBridgeForTests,
   speakWithAndroidNativeTts,
   stopAndroidNativeTts,
+  waitForPostTtsMicSettle,
   type ViReadNativeSpeechPort,
 } from "@/lib/reading/native-speech-bridge";
 import { resetVoiceLockAndPolicyForTests } from "@/lib/reading/session-voice-lock";
@@ -417,5 +420,116 @@ describe("Deterministic 0-VND TTS & STT Routing", () => {
     expect(shouldPreferAndroidNativeStt()).toBe(true);
 
     rec.abort();
+  });
+
+  it("passes optional gender in speak command and parses viMaleVoicesCount / viFemaleVoicesCount in capabilities", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    const capsPromise = getAndroidSpeechCapabilities({ forceRefresh: true });
+    const capReqId = String(port.sent[0].requestId);
+    port.emit({
+      type: "capabilities",
+      requestId: capReqId,
+      ttsAvailable: true,
+      viVoicesCount: 5,
+      viMaleVoicesCount: 2,
+      viFemaleVoicesCount: 3,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+    const caps = await capsPromise;
+    expect(caps).toEqual({
+      ttsAvailable: true,
+      viVoicesCount: 5,
+      viMaleVoicesCount: 2,
+      viFemaleVoicesCount: 3,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+
+    const speakMale = speakWithAndroidNativeTts("Xin chào", {
+      rate: 0.9,
+      gender: "male",
+    });
+    const maleCmd = port.sent.find((m) => m.action === "speak");
+    expect(maleCmd).toMatchObject({
+      action: "speak",
+      text: "Xin chào",
+      rate: 0.9,
+      gender: "male",
+    });
+    port.emit({ type: "tts_done", requestId: String(maleCmd?.requestId) });
+    await speakMale;
+
+    const speakDefault = speakWithAndroidNativeTts("Chào con");
+    const defaultCmd = port.sent.filter((m) => m.action === "speak")[1];
+    expect(defaultCmd).not.toHaveProperty("gender");
+    port.emit({ type: "tts_done", requestId: String(defaultCmd?.requestId) });
+    await speakDefault;
+  });
+
+  it("dispatches notifyAudioEnded when Android bridge is present and is a no-op when absent", () => {
+    notifyAndroidWebAudioEnded();
+
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+    notifyAndroidWebAudioEnded();
+    expect(port.sent).toHaveLength(1);
+    expect(port.sent[0]).toMatchObject({
+      action: "notifyAudioEnded",
+    });
+    expect(typeof port.sent[0].requestId).toBe("string");
+  });
+
+  it("computes post-TTS mic settle delay (180ms Android, 80ms desktop, 0ms jsdom) and supports cancellation", async () => {
+    const originalUa = navigator.userAgent;
+    try {
+      // Plain jsdom without bridge -> 0ms
+      expect(getPostTtsMicSettleMs()).toBe(0);
+
+      // Android native bridge -> 180ms
+      installAndroidPort(new FakeAndroidSpeechPort());
+      expect(getPostTtsMicSettleMs()).toBe(180);
+
+      // Desktop browser UA -> 80ms
+      delete (window as unknown as { ViReadNativeSpeech?: unknown })
+        .ViReadNativeSpeech;
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0.0.0",
+      });
+      expect(getPostTtsMicSettleMs()).toBe(80);
+
+      // Android UA without bridge -> 180ms
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Mobile Safari/537.36",
+      });
+      expect(getPostTtsMicSettleMs()).toBe(180);
+
+      // Cancelable settle wait
+      vi.useFakeTimers();
+      let cancelled = false;
+      const activeWait = waitForPostTtsMicSettle(() => cancelled, 180);
+      await vi.advanceTimersByTimeAsync(180);
+      expect(await activeWait).toBe(true);
+
+      const cancelledWait = waitForPostTtsMicSettle(() => cancelled, 180);
+      await vi.advanceTimersByTimeAsync(90);
+      cancelled = true;
+      await vi.advanceTimersByTimeAsync(90);
+      expect(await cancelledWait).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUa,
+      });
+    }
   });
 });

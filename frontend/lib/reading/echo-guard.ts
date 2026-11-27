@@ -33,7 +33,7 @@ export interface EchoGuardOptions {
 
 function defaultOnsetGraceMs(): number {
   if (isAndroidNativeSpeechAvailable()) {
-    return 400;
+    return 320;
   }
   if (
     typeof navigator !== "undefined" &&

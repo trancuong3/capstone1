@@ -20,7 +20,12 @@ import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
-import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
+import {
+  getPostTtsMicSettleMs,
+  isAndroidNativeSpeechAvailable,
+  notifyAndroidWebAudioEnded,
+  waitForPostTtsMicSettle,
+} from "@/lib/reading/native-speech-bridge";
 import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
 import {
   analyzeComprehensionVoiceInput,
@@ -259,6 +264,7 @@ export function ComprehensionQuestion({
         return mountedRef.current && gen === flowGenRef.current;
       } finally {
         echoGuard.playbackEnded(id, performance.now());
+        notifyAndroidWebAudioEnded();
       }
     },
     [echoGuard],
@@ -422,6 +428,18 @@ export function ComprehensionQuestion({
           !voicePausedRef.current &&
           activeQuestionRef.current?.question.id === submittedQuestionId
         ) {
+          const settleMs = getPostTtsMicSettleMs();
+          if (settleMs > 0) {
+            const settled = await waitForPostTtsMicSettle(
+              () =>
+                !mountedRef.current ||
+                gen !== flowGenRef.current ||
+                voicePausedRef.current ||
+                activeQuestionRef.current?.question.id !== submittedQuestionId,
+              settleMs,
+            );
+            if (!settled) return;
+          }
           startVoiceListenRef.current(activeValue, gen);
         }
       }
@@ -535,16 +553,31 @@ export function ComprehensionQuestion({
           remindedForQuestionRef.current = true;
           stopVoiceRecognition();
           setVoicePhase("reading");
-          void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
-            if (
-              ok &&
-              mountedRef.current &&
-              !voicePausedRef.current &&
-              activeQuestionRef.current?.question.id === boundQuestionId
-            ) {
-              startVoiceListenRef.current(value, gen);
-            }
-          });
+          void speakGuarded(prompts.next("quizRemind"), gen).then(
+            async (ok) => {
+              if (
+                ok &&
+                mountedRef.current &&
+                !voicePausedRef.current &&
+                activeQuestionRef.current?.question.id === boundQuestionId
+              ) {
+                const settleMs = getPostTtsMicSettleMs();
+                if (settleMs > 0) {
+                  const settled = await waitForPostTtsMicSettle(
+                    () =>
+                      !mountedRef.current ||
+                      gen !== flowGenRef.current ||
+                      voicePausedRef.current ||
+                      activeQuestionRef.current?.question.id !==
+                        boundQuestionId,
+                    settleMs,
+                  );
+                  if (!settled) return;
+                }
+                startVoiceListenRef.current(value, gen);
+              }
+            },
+          );
         }, REMIND_SILENCE_MS);
       };
 
@@ -659,13 +692,26 @@ export function ComprehensionQuestion({
             setFeedbackNote(promptMsg);
             stopVoiceRecognition();
             setVoicePhase("reading");
-            void speakGuarded(promptMsg, gen).then((ok) => {
+            void speakGuarded(promptMsg, gen).then(async (ok) => {
               if (
                 ok &&
                 mountedRef.current &&
                 !voicePausedRef.current &&
                 activeQuestionRef.current?.question.id === boundQuestionId
               ) {
+                const settleMs = getPostTtsMicSettleMs();
+                if (settleMs > 0) {
+                  const settled = await waitForPostTtsMicSettle(
+                    () =>
+                      !mountedRef.current ||
+                      gen !== flowGenRef.current ||
+                      voicePausedRef.current ||
+                      activeQuestionRef.current?.question.id !==
+                        boundQuestionId,
+                    settleMs,
+                  );
+                  if (!settled) return;
+                }
                 startVoiceListenRef.current(value, gen);
               }
             });
@@ -924,7 +970,23 @@ export function ComprehensionQuestion({
       setReadingChoiceId(null);
       if (!(await speakGuarded(prompts.next("quizAskChoice"), gen))) return;
 
-      if (mountedRef.current && gen === flowGenRef.current) {
+      if (
+        mountedRef.current &&
+        gen === flowGenRef.current &&
+        !voicePausedRef.current
+      ) {
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () =>
+              !mountedRef.current ||
+              gen !== flowGenRef.current ||
+              voicePausedRef.current ||
+              activeQuestionRef.current?.question.id !== value.question.id,
+            settleMs,
+          );
+          if (!settled) return;
+        }
         startVoiceListenRef.current(value, gen);
       }
     },
@@ -1004,13 +1066,13 @@ export function ComprehensionQuestion({
   };
 
   return (
-    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-4 px-4 py-4 sm:gap-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex min-h-dvh w-full max-w-[1440px] flex-col gap-3 px-3.5 py-3 sm:gap-6 sm:px-8 sm:py-8">
       <BookChildHeader
         backHref="/dashboard"
         child={child}
         mobileLabel={t("session.mobileLabel")}
       />
-      <div className="mx-auto flex w-full max-w-[700px] flex-col gap-4">
+      <div className="mx-auto flex w-full max-w-[700px] flex-col gap-3 sm:gap-4">
         <h1 className="text-heading font-extrabold text-ink sm:text-center">
           {t("comprehension.heading")}
         </h1>
@@ -1076,7 +1138,7 @@ export function ComprehensionQuestion({
           </div>
         ) : (
           <>
-            <div className="rounded-card bg-cream p-4 sm:p-6">
+            <div className="rounded-card bg-cream p-3.5 sm:p-6">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-label font-semibold text-purple-ink">
                   {loadState.value.progress_label}
@@ -1115,7 +1177,7 @@ export function ComprehensionQuestion({
                 </div>
               </div>
               <p
-                className="viread-learning-content mt-4 text-[26px] font-semibold text-ink sm:text-heading"
+                className="viread-learning-content mt-3 text-lg leading-snug font-semibold text-ink sm:mt-4 sm:text-2xl"
                 dir="ltr"
                 lang="vi"
               >
@@ -1123,7 +1185,7 @@ export function ComprehensionQuestion({
               </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-2.5 sm:space-y-3">
               {loadState.value.choices.map((choice) => {
                 const selected = selectedAnswer === choice.value;
                 const previewing =
@@ -1136,7 +1198,7 @@ export function ComprehensionQuestion({
                     data-reading-choice={beingRead ? "true" : undefined}
                     data-preview-choice={previewing ? "true" : undefined}
                     className={cn(
-                      "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-start text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                      "flex min-h-13 w-full items-center gap-3 rounded-card border-2 px-3.5 py-2.5 text-start text-base font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-18 sm:gap-6 sm:p-4 sm:text-body",
                       // Hover only applies to answers that can still be chosen.
                       "enabled:cursor-pointer enabled:hover:border-primary enabled:hover:bg-cream enabled:hover:font-semibold enabled:hover:shadow-md",
                       !correct &&

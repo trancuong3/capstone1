@@ -25,6 +25,7 @@ import {
 } from "@/lib/reading/android-audio-unlock";
 import {
   isAndroidNativeSpeechAvailable,
+  notifyAndroidWebAudioEnded,
   speakWithAndroidNativeTts,
   stopAndroidNativeTts,
 } from "@/lib/reading/native-speech-bridge";
@@ -301,10 +302,6 @@ function canUseAllowedDeviceFallbackTts(
   voiceOrOp?: Operation | ResolvedOperationVoice,
   error?: unknown,
 ): boolean {
-  // Enforce SessionVoiceLock ("Một buổi, một giọng"):
-  // never silently jump to OS/Android/browser voice mid-session unless parent
-  // opted into `local_with_google_fallback` + `allowGoogleTtsFallback` and the
-  // local worker is unconfigured (LOCAL_VOICE_UNCONFIGURED).
   const voice = voiceOrOp && "voice" in voiceOrOp ? voiceOrOp.voice : voiceOrOp;
   const isSessionLocked = voice?.bypassSessionLock
     ? false
@@ -317,6 +314,13 @@ function canUseAllowedDeviceFallbackTts(
       combined,
     );
   };
+  // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
+  // cloud). Never leave an Android APK child in total silence when backend TTS
+  // is offline/unconfigured (even under `local_only` + active SessionVoiceLock);
+  // only refrain during transient worker-busy errors.
+  if (isAndroidNativeSpeechAvailable()) {
+    return !isTransientBusyError(error);
+  }
   const isTechnicalServerOutage = (err: unknown): boolean => {
     if (!err) return false;
     if (isTransientBusyError(err)) return false;
@@ -333,17 +337,15 @@ function canUseAllowedDeviceFallbackTts(
       msg,
     );
   };
+  // Enforce SessionVoiceLock ("Một buổi, một giọng") on web:
+  // never silently jump to browser OS voice mid-session unless parent opted into
+  // `local_with_google_fallback` + `allowGoogleTtsFallback` during a technical
+  // server outage / LOCAL_VOICE_UNCONFIGURED.
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
     (isTechnicalServerOutage(error) || isLocalVoiceUnconfiguredHealth());
   if (isSessionLocked && !optedInUnconfiguredFallback) {
     return false;
-  }
-  // Android Native TTS (`android_native`) is 100% on-device/offline (NOT Google
-  // cloud), so it remains allowed under `local_only` when no session voice lock
-  // is active (Tier 3 Android APK fallback).
-  if (isAndroidNativeSpeechAvailable()) {
-    return true;
   }
   const policy = getVoicePolicyPreferences();
   if (policy.providerMode === "local_only") {
@@ -366,10 +368,12 @@ function shouldSkipBackendTtsForVoice(
   const health = getFreshVoiceEngineHealth();
   if (!health) return false;
   if (health.elevenlabs?.tts_configured) return false;
-  return (
-    (!health.local.available || !health.local.tts_ready) &&
-    (!health.google.tts_configured || health.google.tts_cooldown)
-  );
+  const localUnavailable = !health.local.available || !health.local.tts_ready;
+  if (!localUnavailable) return false;
+  if (isAndroidNativeSpeechAvailable() && !canUseGoogleTtsFallback()) {
+    return true;
+  }
+  return !health.google.tts_configured || health.google.tts_cooldown;
 }
 
 function shouldSkipBackendTtsForBrowserFallback(
@@ -1108,6 +1112,7 @@ export class TtsPlayback {
           const elapsedSec = await speakWithAndroidNativeTts(remainingSlice, {
             rate: operation.voice.speed,
             pitch: 1.0,
+            gender: resolveVoiceGender(operation.voice.requestedVoiceId),
             signal: operation.controller.signal,
             onStart: () => {
               if (
@@ -2541,12 +2546,27 @@ export class TtsPlayback {
                 }
               }
               if (!synthesized) {
-                if (canUseAllowedDeviceFallbackTts(operation, error)) {
-                  await playPhonicsViaBrowser();
-                  return;
-                }
-                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
-                  return;
+                const isSessionLocked = operation.voice.bypassSessionLock
+                  ? false
+                  : Boolean(
+                      operation.voice.sessionId ?? getActiveSessionVoiceLock(),
+                    );
+                if (isSessionLocked) {
+                  if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                    return;
+                  }
+                  if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    await playPhonicsViaBrowser();
+                    return;
+                  }
+                } else {
+                  if (canUseAllowedDeviceFallbackTts(operation, error)) {
+                    await playPhonicsViaBrowser();
+                    return;
+                  }
+                  if (await tryPlayPhonicsViaCachedWordSynthesize()) {
+                    return;
+                  }
                 }
                 this.setFallbackNotice(getLockedVoiceUnavailableNotice());
                 throw unavailable();
@@ -3356,6 +3376,7 @@ export class TtsPlayback {
         audio.src = "";
         borrowedAudio?.release();
         releaseUrl();
+        notifyAndroidWebAudioEnded();
         if (error) reject(error);
         else resolve(duration);
       };

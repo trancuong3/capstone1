@@ -152,6 +152,8 @@ public final class ViReadNativeSpeechBridgeTest {
         boolean initSuccess = true;
         boolean ready;
         int viVoicesCount = 2;
+        int viMaleVoicesCount = 1;
+        int viFemaleVoicesCount = 1;
         boolean viAvailable = true;
         ViReadNativeSpeechBridge.TtsInitCallback pendingInitCallback;
 
@@ -161,6 +163,7 @@ public final class ViReadNativeSpeechBridgeTest {
         String lastText;
         float lastRate;
         float lastPitch;
+        String lastGender;
         String lastUtteranceId;
         AudioAttributes lastAttributes;
         ViReadNativeSpeechBridge.TtsCallback lastCallback;
@@ -196,6 +199,16 @@ public final class ViReadNativeSpeechBridgeTest {
         }
 
         @Override
+        public int getVietnameseMaleVoicesCount() {
+            return viMaleVoicesCount;
+        }
+
+        @Override
+        public int getVietnameseFemaleVoicesCount() {
+            return viFemaleVoicesCount;
+        }
+
+        @Override
         public boolean isVietnameseAvailable() {
             return viAvailable;
         }
@@ -205,6 +218,7 @@ public final class ViReadNativeSpeechBridgeTest {
                 String text,
                 float rate,
                 float pitch,
+                String gender,
                 String utteranceId,
                 AudioAttributes attributes,
                 ViReadNativeSpeechBridge.TtsCallback callback) {
@@ -212,6 +226,7 @@ public final class ViReadNativeSpeechBridgeTest {
             lastText = text;
             lastRate = rate;
             lastPitch = pitch;
+            lastGender = gender;
             lastUtteranceId = utteranceId;
             lastAttributes = attributes;
             lastCallback = callback;
@@ -404,6 +419,8 @@ public final class ViReadNativeSpeechBridgeTest {
         BridgeHarness h = new BridgeHarness();
         h.tts.autoCompleteInit = false;
         h.tts.viVoicesCount = 3;
+        h.tts.viMaleVoicesCount = 1;
+        h.tts.viFemaleVoicesCount = 2;
         h.sttFactory.sttAvailable = true;
         h.sttFactory.onDeviceAvailable = true;
 
@@ -417,6 +434,8 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("cap-async", cap.getString("requestId"));
         assertTrue(cap.getBoolean("ttsAvailable"));
         assertEquals(3, cap.getInt("viVoicesCount"));
+        assertEquals(1, cap.getInt("viMaleVoicesCount"));
+        assertEquals(2, cap.getInt("viFemaleVoicesCount"));
         assertTrue(cap.getBoolean("sttAvailable"));
         assertTrue(cap.getBoolean("onDeviceSttAvailable"));
         assertEquals("android-webview", cap.getString("platform"));
@@ -439,13 +458,14 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("text_too_long", h.events.get(1).getString("code"));
         assertEquals(0, h.tts.speakCount);
 
-        // Valid speak clamps rate [0.6, 1.4] and uses USAGE_MEDIA + CONTENT_TYPE_SPEECH
+        // Valid speak clamps rate [0.6, 1.4], forwards gender, and uses USAGE_MEDIA + CONTENT_TYPE_SPEECH
         h.events.clear();
-        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"t-1\",\"text\":\"Hoa thơm ngát\",\"rate\":2.8,\"pitch\":1.1}");
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"t-1\",\"text\":\"Hoa thơm ngát\",\"rate\":2.8,\"pitch\":1.1,\"gender\":\"  FEMALE \"}");
         assertEquals(1, h.tts.speakCount);
         assertEquals("Hoa thơm ngát", h.tts.lastText);
         assertEquals(1.4f, h.tts.lastRate, 0.001f);
         assertEquals(1.1f, h.tts.lastPitch, 0.001f);
+        assertEquals("female", h.tts.lastGender);
         assertEquals(AudioAttributes.USAGE_MEDIA, h.tts.lastAttributes.getUsage());
         assertEquals(AudioAttributes.CONTENT_TYPE_SPEECH, h.tts.lastAttributes.getContentType());
         assertTrue("Audio focus must be held during TTS", h.audioFocus.currentlyHeld);
@@ -464,10 +484,11 @@ public final class ViReadNativeSpeechBridgeTest {
         assertEquals("tts_done", h.events.get(2).getString("type"));
         assertFalse("Audio focus must be released on tts_done", h.audioFocus.currentlyHeld);
 
-        // Lower rate clamp [0.6] + stopSpeak releases audio focus
+        // Lower rate clamp [0.6], male gender, + stopSpeak releases audio focus
         h.events.clear();
-        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"t-2\",\"text\":\"Con mèo\",\"rate\":0.1}");
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"t-2\",\"text\":\"Con mèo\",\"rate\":0.1,\"gender\":\"male\"}");
         assertEquals(0.6f, h.tts.lastRate, 0.001f);
+        assertEquals("male", h.tts.lastGender);
         assertTrue(h.audioFocus.currentlyHeld);
 
         h.sendTrusted("{\"action\":\"stopSpeak\",\"requestId\":\"stop-2\"}");
@@ -642,7 +663,8 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(h.audioFocus.currentlyHeld);
         assertTrue(h.bridge.hasActiveTtsForTest());
 
-        // 3. Start STT while TTS is speaking -> TTS stopped & audio focus abandoned immediately
+        // 3. Start STT while TTS is speaking -> TTS stopped & audio focus abandoned immediately;
+        //    STT waits symmetric 180ms HAL settle before opening SpeechRecognizer.
         h.events.clear();
         int stopCountBeforePreempt = h.tts.stopCount;
         h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-preempt\"}");
@@ -651,7 +673,14 @@ public final class ViReadNativeSpeechBridgeTest {
         assertFalse(h.bridge.hasActiveTtsForTest());
         assertEquals("tts_stopped", h.events.get(0).getString("type"));
         assertEquals("tts-after-stt", h.events.get(0).getString("requestId"));
-        assertTrue(h.bridge.hasActiveSttForTest());
+        assertFalse("STT must NOT open mic before 180ms HAL settle", h.bridge.hasActiveSttForTest());
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+
+        h.scheduler.advanceBy(150L);
+        assertFalse("STT must still be settling at 150ms", h.bridge.hasActiveSttForTest());
+        h.scheduler.advanceBy(30L);
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        assertTrue("STT must start cleanly at 180ms", h.bridge.hasActiveSttForTest());
 
         // 4. stopStt calls stopListening and cancelStt destroys cleanly
         FakeSttSession preemptSession = h.sttFactory.latest();
@@ -675,6 +704,208 @@ public final class ViReadNativeSpeechBridgeTest {
     }
 
     @Test
+    public void ttsDoneFollowedByImmediateStartSttEnforcesRemaining180msSettle() {
+        BridgeHarness h = new BridgeHarness();
+
+        // 1. TTS finishes via onDone -> immediate startStt waits full 180ms
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-1\",\"text\":\"Chào bé\"}");
+        h.tts.lastCallback.onDone(h.tts.lastUtteranceId);
+        assertFalse(h.bridge.hasActiveTtsForTest());
+
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-immediate\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+        assertFalse(h.bridge.hasActiveSttForTest());
+        assertTrue(h.sttFactory.createdSessions.isEmpty());
+
+        h.scheduler.advanceBy(179L);
+        assertFalse(h.bridge.hasActiveSttForTest());
+        h.scheduler.advanceBy(1L);
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        assertTrue(h.bridge.hasActiveSttForTest());
+        assertEquals(1, h.sttFactory.createdSessions.size());
+
+        // End STT and advance past STT->TTS settle
+        h.sendTrusted("{\"action\":\"cancelStt\",\"requestId\":\"stt-immediate\"}");
+        h.scheduler.advanceBy(200L);
+
+        // 2. TTS finishes, 60ms elapses, then startStt waits only remaining 120ms
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-2\",\"text\":\"Đọc tiếp\"}");
+        h.tts.lastCallback.onDone(h.tts.lastUtteranceId);
+        h.scheduler.advanceBy(60L);
+
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-partial-settle\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+        assertFalse(h.bridge.hasActiveSttForTest());
+
+        h.scheduler.advanceBy(119L);
+        assertFalse(h.bridge.hasActiveSttForTest());
+        h.scheduler.advanceBy(1L);
+        assertTrue(h.bridge.hasActiveSttForTest());
+        assertEquals(2, h.sttFactory.createdSessions.size());
+
+        // 3. After >= 180ms elapsed since tts_done, startStt starts immediately at 0ms
+        h.sendTrusted("{\"action\":\"cancelStt\",\"requestId\":\"stt-partial-settle\"}");
+        h.scheduler.advanceBy(200L);
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-3\",\"text\":\"Tốt lắm\"}");
+        h.tts.lastCallback.onDone(h.tts.lastUtteranceId);
+        h.scheduler.advanceBy(180L);
+
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-no-wait\"}");
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        assertTrue(h.bridge.hasActiveSttForTest());
+        assertEquals(3, h.sttFactory.createdSessions.size());
+    }
+
+    @Test
+    public void notifyAudioEndedReleasesFocusAcksAndEnforces180msSttSettle() throws Exception {
+        BridgeHarness h = new BridgeHarness();
+        h.audioFocus.currentlyHeld = true;
+        int abandonBefore = h.audioFocus.abandonCount;
+
+        // HTML5 <audio> ends -> notifyAudioEnded releases focus, sends audio_ended_ack, arms 180ms settle
+        h.sendTrusted("{\"action\":\"notifyAudioEnded\",\"requestId\":\"web-aud-1\"}");
+        assertFalse(h.audioFocus.currentlyHeld);
+        assertEquals(abandonBefore + 1, h.audioFocus.abandonCount);
+        assertEquals(1, h.events.size());
+        assertEquals("audio_ended_ack", h.events.get(0).getString("type"));
+        assertEquals("web-aud-1", h.events.get(0).getString("requestId"));
+
+        // Empty requestId omits ack while still arming settle
+        h.events.clear();
+        h.scheduler.advanceBy(500L);
+        h.sendTrusted("{\"action\":\"notifyAudioEnded\"}");
+        assertTrue("Empty requestId must not emit audio_ended_ack", h.events.isEmpty());
+
+        // Immediate startStt waits 180ms after notifyAudioEnded
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-after-html5\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+        assertFalse(h.bridge.hasActiveSttForTest());
+
+        h.scheduler.advanceBy(120L);
+        assertFalse(h.bridge.hasActiveSttForTest());
+        h.scheduler.advanceBy(60L);
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        assertTrue(h.bridge.hasActiveSttForTest());
+        assertEquals(1, h.sttFactory.createdSessions.size());
+    }
+
+    @Test
+    public void cancelSttStopSttAndSpeakCancelPendingSttSettleTimerCleanly() throws Exception {
+        BridgeHarness h = new BridgeHarness();
+
+        // 1. cancelStt during 180ms settle prevents SpeechRecognizer from ever starting
+        h.sendTrusted("{\"action\":\"notifyAudioEnded\",\"requestId\":\"aud-c1\"}");
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-to-cancel\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+
+        h.scheduler.advanceBy(50L);
+        h.sendTrusted("{\"action\":\"cancelStt\",\"requestId\":\"cancel-req-1\"}");
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        h.scheduler.advanceBy(250L);
+        assertTrue("Canceled pending STT must NEVER create a session", h.sttFactory.createdSessions.isEmpty());
+        assertEquals("stt_end", h.events.get(0).getString("type"));
+        assertEquals("stt-to-cancel", h.events.get(0).getString("requestId"));
+        assertEquals("stt_end", h.events.get(1).getString("type"));
+        assertEquals("cancel-req-1", h.events.get(1).getString("requestId"));
+
+        // 2. speak during 180ms STT settle cancels pending STT and speaks immediately (mic never opened)
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"notifyAudioEnded\",\"requestId\":\"aud-c2\"}");
+        h.events.clear();
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-preempted-during-settle\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+
+        h.scheduler.advanceBy(40L);
+        h.sendTrusted("{\"action\":\"speak\",\"requestId\":\"tts-interrupts-stt-settle\",\"text\":\"Nghe mẫu\"}");
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        assertEquals("stt_end", h.events.get(0).getString("type"));
+        assertEquals("stt-preempted-during-settle", h.events.get(0).getString("requestId"));
+        assertEquals("TTS starts immediately because STT never opened hardware mic", 1, h.tts.speakCount);
+
+        h.scheduler.advanceBy(300L);
+        assertTrue("Preempted pending STT must NEVER start", h.sttFactory.createdSessions.isEmpty());
+    }
+
+    @Test
+    public void selectBestVietnameseVoicePrefersRequestedGenderAndCountsMaleFemaleVoices() {
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Locale enUs = Locale.forLanguageTag("en-US");
+
+        Voice offlineMaleGoogle = new Voice(
+                "vi-vn-x-gft-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, Collections.emptySet());
+        Voice offlineFemaleGoogle = new Voice(
+                "vi-vn-x-vie-local", viVn, Voice.QUALITY_HIGH, Voice.LATENCY_NORMAL, false, Collections.emptySet());
+        Voice offlineFemaleVeryHigh = new Voice(
+                "vi-vn-x-vic-local", viVn, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        Voice onlineMaleVeryHigh = new Voice(
+                "vi-vn-x-vid-network", viVn, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_VERY_LOW, true, Collections.emptySet());
+        Voice neutralLanguageVoice = new Voice(
+                "vi-VN-language", viVn, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+        Voice featureMaleVoice = new Voice(
+                "vi-vn-custom-1",
+                viVn,
+                Voice.QUALITY_NORMAL,
+                Voice.LATENCY_NORMAL,
+                false,
+                new HashSet<>(Collections.singletonList("gender=male")));
+        Voice camelFemaleVoice = new Voice(
+                "vi-VN-HoaiMyNeural", viVn, Voice.QUALITY_NORMAL, Voice.LATENCY_NORMAL, false, Collections.emptySet());
+        Voice notInstalledMale = new Voice(
+                "vi-vn-nam-missing",
+                viVn,
+                Voice.QUALITY_VERY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                new HashSet<>(Collections.singletonList(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)));
+        Voice offlineEnMale = new Voice(
+                "en-us-x-male-local", enUs, Voice.QUALITY_VERY_HIGH, Voice.LATENCY_LOW, false, Collections.emptySet());
+
+        Set<Voice> voices = new HashSet<>(Arrays.asList(
+                offlineMaleGoogle,
+                offlineFemaleGoogle,
+                offlineFemaleVeryHigh,
+                onlineMaleVeryHigh,
+                neutralLanguageVoice,
+                featureMaleVoice,
+                camelFemaleVoice,
+                notInstalledMale,
+                offlineEnMale));
+
+        // Verify neutral token non-false-positive ("language" does NOT match "lan")
+        assertEquals(null, ViReadNativeSpeechBridge.inferVietnameseVoiceGender(neutralLanguageVoice));
+        assertEquals("male", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(offlineMaleGoogle));
+        assertEquals("male", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(onlineMaleVeryHigh));
+        assertEquals("male", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(featureMaleVoice));
+        assertEquals("female", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(offlineFemaleGoogle));
+        assertEquals("female", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(offlineFemaleVeryHigh));
+        assertEquals("female", ViReadNativeSpeechBridge.inferVietnameseVoiceGender(camelFemaleVoice));
+
+        // Male preference selects offline high-quality male (vi-vn-x-gft-local) over female & online male
+        Voice chosenMale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "male");
+        assertNotNull(chosenMale);
+        assertEquals("vi-vn-x-gft-local", chosenMale.getName());
+
+        // Female preference selects offline very-high female (vi-vn-x-vic-local)
+        Voice chosenFemale = ViReadNativeSpeechBridge.selectBestVietnameseVoice(voices, "female");
+        assertNotNull(chosenFemale);
+        assertEquals("vi-vn-x-vic-local", chosenFemale.getName());
+
+        // Offline bonus (+1000) still beats online gender match when only offline opposite-gender exists
+        Set<Voice> offlineFemaleAndOnlineMale = new HashSet<>(Arrays.asList(
+                offlineFemaleGoogle, onlineMaleVeryHigh));
+        Voice chosenOfflineFirst = ViReadNativeSpeechBridge.selectBestVietnameseVoice(
+                offlineFemaleAndOnlineMale, "male");
+        assertNotNull(chosenOfflineFirst);
+        assertEquals("vi-vn-x-vie-local", chosenOfflineFirst.getName());
+
+        // Counts usable Vietnamese voices by gender (excludes not-installed and non-Vietnamese)
+        assertEquals(7, ViReadNativeSpeechBridge.countUsableVietnameseVoices(voices));
+        assertEquals(3, ViReadNativeSpeechBridge.countUsableVietnameseVoicesByGender(voices, "male"));
+        assertEquals(3, ViReadNativeSpeechBridge.countUsableVietnameseVoicesByGender(voices, "female"));
+    }
+
+    @Test
     public void lifecycleStopAndDestroyCleanUpTtsSttAndAudioFocus() {
         BridgeHarness h = new BridgeHarness();
 
@@ -685,6 +916,14 @@ public final class ViReadNativeSpeechBridgeTest {
         assertFalse(h.audioFocus.currentlyHeld);
         assertFalse(h.bridge.hasActiveTtsForTest());
         assertEquals(1, h.tts.stopCount);
+
+        // Pending STT settle -> onHostStop cancels pending settle cleanly
+        h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-pending-stop\"}");
+        assertTrue(h.bridge.hasPendingSttSettleForTest());
+        h.bridge.onHostStop();
+        assertFalse(h.bridge.hasPendingSttSettleForTest());
+        h.scheduler.advanceBy(250L);
+        assertFalse(h.bridge.hasActiveSttForTest());
 
         // Active STT -> onHostStop cancels & destroys recognizer
         h.sendTrusted("{\"action\":\"startStt\",\"requestId\":\"stt-life\"}");

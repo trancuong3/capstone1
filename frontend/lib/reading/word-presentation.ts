@@ -40,13 +40,14 @@ export const wordPresentationLabels: Record<WordPresentationState, string> = {
 // font-weight, font-size, padding, margin, or border-width.
 export const wordPresentationClasses: Record<WordPresentationState, string> = {
   unread: "border-b-transparent",
-  current: "bg-yellow-200/60 ring-2 ring-yellow-500 border-b-amber-600",
+  current: "bg-amber-200/80 text-ink ring-2 ring-yellow-500 border-b-amber-600",
   "preview-correct":
     "bg-emerald-50 text-emerald-950 border-dashed border-b-emerald-500",
   correct:
-    "bg-success-surface text-success-ink border-solid border-b-emerald-700/60",
-  incorrect: "bg-red-200 text-red-900 ring-1 ring-red-500 border-b-red-500",
-  omission: "bg-red-200 text-red-900 ring-1 ring-red-500 border-b-transparent",
+    "bg-success-surface text-success-ink border-solid border-b-emerald-500/50",
+  incorrect: "bg-red-200 text-rose-900 ring-1 ring-rose-400 border-b-rose-500",
+  omission:
+    "bg-red-200 text-rose-900 ring-1 ring-rose-400 border-b-transparent",
   repeated:
     "bg-purple-200 text-purple-900 ring-1 ring-purple-500 border-b-transparent",
   hesitation:
@@ -54,7 +55,7 @@ export const wordPresentationClasses: Record<WordPresentationState, string> = {
   "self-corrected":
     "bg-green-200 text-green-900 ring-2 ring-green-600 ring-offset-2 border-b-transparent",
   unresolved:
-    "bg-red-200 text-red-900 ring-2 ring-red-600 border-b-transparent",
+    "bg-red-200 text-rose-900 ring-2 ring-rose-500 border-b-transparent",
   // Not colour alone: dotted underline marks "the app read this one for you".
   assisted:
     "bg-sky text-primary underline decoration-dotted decoration-2 underline-offset-4 border-b-transparent",

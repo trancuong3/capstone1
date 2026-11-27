@@ -357,23 +357,23 @@ function ParentMyBooksContent({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
+    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-4 px-3.5 py-3.5 pb-24 sm:gap-6 sm:px-8 sm:py-8">
+      <header className="flex flex-col gap-3 border-b border-border pb-3.5 sm:flex-row sm:items-start sm:justify-between sm:gap-4 sm:pb-5">
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-bold uppercase tracking-wider text-primary">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-primary sm:text-xs">
             {t("myBooks.eyebrow")}
           </p>
-          <h1 className="book-title mt-1 text-3xl text-ink sm:text-4xl">
+          <h1 className="book-title mt-0.5 text-xl text-ink sm:mt-1 sm:text-4xl">
             {t("myBooks.title")}
           </h1>
-          <p className="mt-2 max-w-2xl text-body text-muted">
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted sm:mt-2 sm:text-body sm:leading-6">
             {t("myBooks.headingSubtitle")}
           </p>
         </div>
 
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
           <Button
-            className="w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             fullWidth={false}
             onClick={() => void loadBooks()}
             variant="secondary"
@@ -383,7 +383,7 @@ function ParentMyBooksContent({
             {t("myBooks.reload")}
           </Button>
           <Button
-            className="w-auto"
+            className="min-h-10 w-auto px-3 py-1.5 text-xs sm:min-h-12 sm:px-4 sm:text-button"
             fullWidth={false}
             onClick={() => setShowCreateForm((open) => !open)}
           >
@@ -397,13 +397,13 @@ function ParentMyBooksContent({
 
       <div
         role="note"
-        className="flex items-start gap-3 rounded-card border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950"
+        className="flex items-start gap-2.5 rounded-card border border-emerald-200 bg-emerald-50/70 p-3 text-xs text-emerald-950 sm:gap-3 sm:p-4 sm:text-sm"
       >
         <Lock
           aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-emerald-700"
+          className="mt-0.5 size-4 shrink-0 text-emerald-700 sm:size-5"
         />
-        <div>
+        <div className="min-w-0">
           <p className="font-bold">{t("myBooks.privacyBannerTitle")}</p>
           <p className="mt-0.5 text-emerald-900">
             {t("myBooks.privacyBannerBody")}
@@ -582,7 +582,7 @@ function ParentMyBooksContent({
           ) : null}
           <div
             aria-busy={fetching || undefined}
-            className={`grid gap-5 sm:grid-cols-2 lg:grid-cols-3 ${fetching ? "opacity-75 transition-opacity" : ""}`}
+            className={`grid gap-3.5 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3 ${fetching ? "opacity-75 transition-opacity" : ""}`}
           >
             {books.map((book) => {
               const isSuspended = book.moderation_status === "SUSPENDED";
@@ -601,7 +601,7 @@ function ParentMyBooksContent({
                 <article
                   key={book.id}
                   data-private-book-id={book.id}
-                  className="flex min-w-0 flex-col gap-3 rounded-card border border-border bg-white p-5 shadow-sm"
+                  className="flex min-w-0 flex-col gap-2.5 rounded-card border border-border bg-white p-3.5 shadow-sm sm:gap-3 sm:p-5"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
@@ -633,14 +633,14 @@ function ParentMyBooksContent({
 
                   <div className="min-w-0">
                     <h2
-                      className="book-title viread-learning-content line-clamp-2 break-words text-xl text-ink"
+                      className="book-title viread-learning-content line-clamp-2 break-words text-base text-ink sm:text-xl"
                       dir="ltr"
                       lang="vi"
                       title={book.title}
                     >
                       {book.title}
                     </h2>
-                    <p className="mt-1 line-clamp-1 break-words text-sm text-muted">
+                    <p className="mt-0.5 line-clamp-1 break-words text-xs text-muted sm:mt-1 sm:text-sm">
                       {book.author ? (
                         <span
                           className="viread-learning-content"
@@ -669,39 +669,48 @@ function ParentMyBooksContent({
                     </p>
                   ) : null}
 
-                  <dl className="grid grid-cols-2 gap-2 rounded-control bg-canvas p-3 text-xs">
-                    <div>
-                      <dt className="text-muted">
+                  <dl className="grid grid-cols-4 gap-1.5 rounded-control bg-canvas p-2 text-center text-[11px] sm:grid-cols-2 sm:gap-2 sm:p-3 sm:text-start sm:text-xs">
+                    <div className="min-w-0">
+                      <dt className="truncate text-muted">
                         {t("myBooks.statCommitted")}
                       </dt>
-                      <dd className="text-base font-extrabold text-ink">
+                      <dd className="text-sm font-extrabold tabular-nums text-ink sm:text-base">
                         {t("catalog.pagesCount", {
                           count: book.committed_page_count,
                         })}
                       </dd>
                     </div>
-                    <div>
-                      <dt className="text-muted">{t("myBooks.statPending")}</dt>
-                      <dd className="text-base font-extrabold text-ink">
+                    <div className="min-w-0">
+                      <dt className="truncate text-muted">
+                        {t("myBooks.statPending")}
+                      </dt>
+                      <dd className="text-sm font-extrabold tabular-nums text-ink sm:text-base">
                         {book.pending_submission_count}
                       </dd>
                     </div>
-                    <div>
-                      <dt className="text-muted">{t("myBooks.statAdmin")}</dt>
-                      <dd className="text-base font-extrabold text-amber-800">
+                    <div className="min-w-0">
+                      <dt className="truncate text-muted">
+                        {t("myBooks.statAdmin")}
+                      </dt>
+                      <dd className="text-sm font-extrabold tabular-nums text-amber-800 sm:text-base">
                         {book.flagged_submission_count}
                       </dd>
                     </div>
-                    <div>
-                      <dt className="text-muted">{t("myBooks.statFailed")}</dt>
-                      <dd className="text-base font-extrabold text-rose-800">
+                    <div className="min-w-0">
+                      <dt className="truncate text-muted">
+                        {t("myBooks.statFailed")}
+                      </dt>
+                      <dd className="text-sm font-extrabold tabular-nums text-rose-800 sm:text-base">
                         {book.failed_submission_count}
                       </dd>
                     </div>
                   </dl>
 
-                  <div className="mt-auto flex flex-col gap-2 pt-2">
-                    <ButtonLink href={detailHref} className="min-h-11">
+                  <div className="mt-auto flex flex-col gap-1.5 pt-1 sm:gap-2 sm:pt-2">
+                    <ButtonLink
+                      href={detailHref}
+                      className="min-h-10 text-sm sm:min-h-11"
+                    >
                       {t("myBooks.manageAndAddPages")}
                     </ButtonLink>
 

@@ -35,7 +35,10 @@ import {
 } from "@/lib/reading/local-segment-speech-recognition";
 import {
   getAndroidSpeechCapabilities,
+  getPostTtsMicSettleMs,
   isAndroidNativeSpeechAvailable,
+  notifyAndroidWebAudioEnded,
+  waitForPostTtsMicSettle,
 } from "@/lib/reading/native-speech-bridge";
 import {
   buildPhonicsLesson,
@@ -1875,6 +1878,14 @@ function ReadingSessionScreen({
         true,
       );
       if (isCurrent()) {
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () => !isCurrent(),
+            settleMs,
+          );
+          if (!settled) return;
+        }
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
       }
@@ -1943,6 +1954,14 @@ function ReadingSessionScreen({
       );
       if (!isCurrent()) return;
       if (engine.getSnapshot().currentWordId !== null) {
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () => !isCurrent(),
+            settleMs,
+          );
+          if (!settled) return;
+        }
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
       } else {
@@ -2091,6 +2110,14 @@ function ReadingSessionScreen({
       );
       if (!isCurrent()) return;
       if (engine.getSnapshot().currentWordId !== null) {
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () => !isCurrent(),
+            settleMs,
+          );
+          if (!settled) return;
+        }
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
       } else {
@@ -2103,6 +2130,14 @@ function ReadingSessionScreen({
           "Chưa phát được tiếng mẫu. Con có thể bấm nghe lại nhé.",
         );
         if (engine.getSnapshot().currentWordId !== null) {
+          const settleMs = getPostTtsMicSettleMs();
+          if (settleMs > 0) {
+            const settled = await waitForPostTtsMicSettle(
+              () => !isCurrent(),
+              settleMs,
+            );
+            if (!settled) return;
+          }
           const started = await startListeningRef.current();
           if (isCurrent()) setIsMicRecording(started);
         }
@@ -2385,6 +2420,14 @@ function ReadingSessionScreen({
         false,
       );
       if (!isCurrent()) return;
+      const settleMs = getPostTtsMicSettleMs();
+      if (settleMs > 0) {
+        const settled = await waitForPostTtsMicSettle(
+          () => !isCurrent(),
+          settleMs,
+        );
+        if (!settled) return;
+      }
       const started = await startListeningRef.current();
       if (isCurrent()) setIsMicRecording(started);
     } catch {
@@ -2422,6 +2465,14 @@ function ReadingSessionScreen({
         if (!engine.getSnapshot().currentWordId) {
           await autoCompletePageAfterFinalWordRef.current(engine.getSnapshot());
           return;
+        }
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () => !isCurrent(),
+            settleMs,
+          );
+          if (!settled) return;
         }
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
@@ -2532,6 +2583,16 @@ function ReadingSessionScreen({
         wasListening,
       );
       if (!isCurrent()) return;
+      if (wasListening) {
+        const settleMs = getPostTtsMicSettleMs();
+        if (settleMs > 0) {
+          const settled = await waitForPostTtsMicSettle(
+            () => !isCurrent(),
+            settleMs,
+          );
+          if (!settled) return;
+        }
+      }
       if (wasListening && !retryModeRef.current) {
         const started = await startListeningRef.current();
         if (isCurrent()) setIsMicRecording(started);
@@ -4057,6 +4118,7 @@ function ReadingSessionScreen({
       if (generation === assistantAudioGenerationRef.current) {
         assistantAudioPlayingRef.current = false;
         assistantAudioPendingRef.current = false;
+        notifyAndroidWebAudioEnded();
 
         if (playbackFailed) {
           assistantAudioResumeRequestedRef.current = false;
@@ -4092,6 +4154,18 @@ function ReadingSessionScreen({
           ) {
             // If a child stops a retry sample early (for example from voice
             // settings), restore capture after the TTS promise has settled.
+            const settleMs = getPostTtsMicSettleMs();
+            if (settleMs > 0) {
+              const settled = await waitForPostTtsMicSettle(
+                () =>
+                  generation !== assistantAudioGenerationRef.current ||
+                  !mountedRef.current ||
+                  !retryModeRef.current ||
+                  !isActiveRetryCandidate(retryCandidate),
+                settleMs,
+              );
+              if (!settled) return;
+            }
             await startRetryRecognition(retryCandidate);
             return;
           }
@@ -4109,6 +4183,18 @@ function ReadingSessionScreen({
             uiStateRef.current === "reading" &&
             !retryModeRef.current
           ) {
+            const settleMs = getPostTtsMicSettleMs();
+            if (settleMs > 0) {
+              const settled = await waitForPostTtsMicSettle(
+                () =>
+                  generation !== assistantAudioGenerationRef.current ||
+                  !mountedRef.current ||
+                  uiStateRef.current !== "reading" ||
+                  retryModeRef.current,
+                settleMs,
+              );
+              if (!settled) return;
+            }
             const resumed = await startListening();
             if (mountedRef.current) setIsMicRecording(resumed);
           }
@@ -4120,6 +4206,17 @@ function ReadingSessionScreen({
             !retryModeRef.current
           ) {
             tutorResumeMicAfterPlaybackRef.current = false;
+            const settleMs = getPostTtsMicSettleMs();
+            if (settleMs > 0) {
+              const settled = await waitForPostTtsMicSettle(
+                () =>
+                  generation !== assistantAudioGenerationRef.current ||
+                  !mountedRef.current ||
+                  retryModeRef.current,
+                settleMs,
+              );
+              if (!settled) return;
+            }
             const resumed = await startListening();
             if (mountedRef.current) setIsMicRecording(resumed);
           }
@@ -6622,11 +6719,18 @@ function ReadingSessionScreen({
         return;
       }
 
-      await new Promise<void>((resolve) =>
-        window.setTimeout(resolve, SHORT_WORD_CAPTURE_CONFIG.acousticSettleMs),
+      const retrySettleMs = Math.max(
+        SHORT_WORD_CAPTURE_CONFIG.acousticSettleMs,
+        getPostTtsMicSettleMs(),
       );
-      if (!isCurrent()) {
-        return;
+      if (retrySettleMs > 0) {
+        const settled = await waitForPostTtsMicSettle(
+          () => !isCurrent(),
+          retrySettleMs,
+        );
+        if (!settled) {
+          return;
+        }
       }
 
       await startRetryRecognition(
@@ -7343,13 +7447,13 @@ function ReadingSessionScreen({
   );
 
   const readingTopBar = hasTopBarContent ? (
-    <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
+    <div className="relative flex flex-col gap-0.5 border-b border-border/80 pb-1 sm:gap-1 sm:pb-1.5">
       {pageProgress ? (
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
-          <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
+        <div className="flex flex-col gap-0.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2.5">
+          <div className="flex w-full min-w-0 flex-nowrap items-center gap-1 sm:w-auto sm:gap-1.5">
             <Button
               aria-label={t("session.previousPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              className="h-8! min-h-0! w-8! min-w-0! shrink-0 gap-0! px-0! py-0! text-xs! sm:h-11! sm:min-h-11! sm:w-auto! sm:gap-2! sm:px-2.5! sm:py-1! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
                 (uiState !== "reading" && uiState !== "tts-error") ||
@@ -7367,11 +7471,32 @@ function ReadingSessionScreen({
               <span className="hidden sm:inline">
                 {t("session.previousPage")}
               </span>
-              <span className="sm:hidden">{t("session.prevPageShort")}</span>
             </Button>
+            <button
+              type="button"
+              data-reading-page-pill="true"
+              aria-label={`${t("session.pageProgress", {
+                current: formatNumber(pageProgress.current_index + 1),
+                total: formatNumber(pageProgress.total_pages),
+              })} (${t("controls.choosePageAria")})`}
+              disabled={
+                isBusy ||
+                retryMode ||
+                (uiState !== "reading" &&
+                  uiState !== "paused" &&
+                  uiState !== "tts-error")
+              }
+              onClick={() => void openPagePicker()}
+              className="inline-flex h-8 min-w-0 shrink items-center justify-center truncate rounded-full border border-border bg-sky/50 px-2 text-xs font-bold text-ink transition hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:opacity-50 sm:hidden"
+            >
+              {t("session.pageProgress", {
+                current: formatNumber(pageProgress.current_index + 1),
+                total: formatNumber(pageProgress.total_pages),
+              })}
+            </button>
             <Button
               aria-label={t("session.nextPage")}
-              className="h-11! w-auto! min-w-0 gap-1! px-2! py-1! text-xs! sm:gap-2! sm:px-2.5! sm:text-sm!"
+              className="h-8! min-h-0! w-8! min-w-0! shrink-0 gap-0! px-0! py-0! text-xs! sm:h-11! sm:min-h-11! sm:w-auto! sm:gap-2! sm:px-2.5! sm:py-1! sm:text-sm!"
               disabled={
                 (isBusy && !speechPlayer.isPlaying) ||
                 (uiState !== "reading" && uiState !== "tts-error") ||
@@ -7383,7 +7508,6 @@ function ReadingSessionScreen({
               variant="secondary"
             >
               <span className="hidden sm:inline">{t("session.nextPage")}</span>
-              <span className="sm:hidden">{t("session.nextPageShort")}</span>
               <ChevronRight
                 aria-hidden="true"
                 className="viread-rtl-flip size-4 shrink-0 sm:size-5"
@@ -7394,7 +7518,7 @@ function ReadingSessionScreen({
               "COMPLETED" ? (
               <Button
                 aria-label={t("session.markPageDoneAria")}
-                className="h-11! w-auto! min-w-0 px-2! py-1! text-xs! sm:px-2.5! sm:text-sm!"
+                className="h-8! min-h-0! w-auto! min-w-0! shrink-0 rounded-full! px-2! py-0! text-xs! sm:h-11! sm:min-h-11! sm:rounded-control! sm:px-2.5! sm:py-1! sm:text-sm!"
                 disabled={isBusy || uiState !== "reading"}
                 onClick={() => void confirmCurrentPageCompleted()}
                 variant="quiet"
@@ -7402,27 +7526,24 @@ function ReadingSessionScreen({
                 <span className="hidden sm:inline">
                   {t("session.markPageDone")}
                 </span>
-                <span className="sm:hidden">
-                  {t("session.markPageDoneShort")}
-                </span>
+                <span className="sm:hidden">{t("controls.done")}</span>
               </Button>
             ) : null}
-          </div>
 
-          <button
-            type="button"
-            aria-label={t("session.pageOptionsAria")}
-            aria-expanded={pageOptionsOpen}
-            aria-controls="reading-page-options"
-            onClick={() => setPageOptionsOpen((open) => !open)}
-            className="ms-auto inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-border bg-white px-2 text-xs font-semibold text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
-          >
-            <span>{t("session.pageOptions")}</span>
-            <ChevronDown
-              aria-hidden="true"
-              className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
-            />
-          </button>
+            <button
+              type="button"
+              aria-label={t("session.pageOptionsAria")}
+              aria-expanded={pageOptionsOpen}
+              aria-controls="reading-page-options"
+              onClick={() => setPageOptionsOpen((open) => !open)}
+              className="ms-auto inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-control border border-border bg-white text-ink hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary sm:hidden"
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className={`size-4 transition-transform ${pageOptionsOpen ? "rotate-180" : ""}`}
+              />
+            </button>
+          </div>
 
           <div
             id="reading-page-options"

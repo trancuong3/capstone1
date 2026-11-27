@@ -34,6 +34,8 @@ export interface ViReadNativeSpeechPort {
 export interface AndroidSpeechCapabilities {
   readonly ttsAvailable: boolean;
   readonly viVoicesCount: number;
+  readonly viMaleVoicesCount?: number;
+  readonly viFemaleVoicesCount?: number;
   readonly sttAvailable: boolean;
   readonly onDeviceSttAvailable: boolean;
   readonly platform: string;
@@ -42,6 +44,7 @@ export interface AndroidSpeechCapabilities {
 export interface AndroidNativeTtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
+  readonly gender?: "male" | "female";
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly onStart?: () => void;
@@ -54,6 +57,8 @@ export interface NativeSpeechIncomingEvent {
   readonly requestId?: string;
   readonly ttsAvailable?: boolean;
   readonly viVoicesCount?: number;
+  readonly viMaleVoicesCount?: number;
+  readonly viFemaleVoicesCount?: number;
   readonly sttAvailable?: boolean;
   readonly onDeviceSttAvailable?: boolean;
   readonly platform?: string;
@@ -337,6 +342,16 @@ export async function getAndroidSpeechCapabilities(options?: {
     const unsubscribe = subscribeBridgeEvents((event) => {
       if (event.type !== "capabilities") return;
       if (event.requestId && event.requestId !== requestId) return;
+      const maleCount =
+        typeof event.viMaleVoicesCount === "number" &&
+        Number.isFinite(event.viMaleVoicesCount)
+          ? Math.max(0, Math.floor(event.viMaleVoicesCount))
+          : undefined;
+      const femaleCount =
+        typeof event.viFemaleVoicesCount === "number" &&
+        Number.isFinite(event.viFemaleVoicesCount)
+          ? Math.max(0, Math.floor(event.viFemaleVoicesCount))
+          : undefined;
       finish({
         ttsAvailable: Boolean(event.ttsAvailable),
         viVoicesCount:
@@ -344,6 +359,10 @@ export async function getAndroidSpeechCapabilities(options?: {
           Number.isFinite(event.viVoicesCount)
             ? Math.max(0, Math.floor(event.viVoicesCount))
             : 0,
+        ...(maleCount !== undefined ? { viMaleVoicesCount: maleCount } : {}),
+        ...(femaleCount !== undefined
+          ? { viFemaleVoicesCount: femaleCount }
+          : {}),
         sttAvailable: Boolean(event.sttAvailable),
         onDeviceSttAvailable: Boolean(event.onDeviceSttAvailable),
         platform:
@@ -372,6 +391,71 @@ export function stopAndroidNativeTts(): void {
   sendBridgeCommand({
     action: "stopSpeak",
     requestId,
+  });
+}
+
+/**
+ * Notifies Android WebView native bridge that HTML5/Web TTS audio has finished
+ * or stopped so Android can release audio focus and record `lastTtsStopElapsedMs`
+ * for acoustic TTS -> STT handoff gating.
+ */
+export function notifyAndroidWebAudioEnded(): void {
+  if (!isAndroidNativeSpeechAvailable()) return;
+  const requestId = nextRequestId("audio_end");
+  sendBridgeCommand({
+    action: "notifyAudioEnded",
+    requestId,
+  });
+}
+
+const ANDROID_POST_TTS_MIC_SETTLE_MS = 180;
+const DESKTOP_POST_TTS_MIC_SETTLE_MS = 80;
+
+/**
+ * Returns the acoustic settle delay before reopening STT after TTS playback ends.
+ * - Android WebView / Android UA: 180ms (pairs with 320ms EchoGuard onset grace = 500ms)
+ * - SSR / jsdom test environment (without Android bridge/UA): 0ms to avoid breaking
+ *   fake-timer unit tests that do not explicitly opt into Android/browser settle delays.
+ * - Real desktop/iOS browsers: 80ms
+ */
+export function getPostTtsMicSettleMs(): number {
+  if (isAndroidNativeSpeechAvailable()) {
+    return ANDROID_POST_TTS_MIC_SETTLE_MS;
+  }
+  if (
+    typeof navigator !== "undefined" &&
+    /android/i.test(navigator.userAgent ?? "")
+  ) {
+    return ANDROID_POST_TTS_MIC_SETTLE_MS;
+  }
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  if (
+    typeof navigator !== "undefined" &&
+    /jsdom/i.test(navigator.userAgent ?? "")
+  ) {
+    return 0;
+  }
+  return DESKTOP_POST_TTS_MIC_SETTLE_MS;
+}
+
+/**
+ * Waits for the post-TTS acoustic settle window while checking `isCancelled`.
+ * Resolves `true` if still active after the settle window, or `false` if cancelled.
+ */
+export function waitForPostTtsMicSettle(
+  isCancelled: () => boolean,
+  settleMs = getPostTtsMicSettleMs(),
+): Promise<boolean> {
+  if (isCancelled()) return Promise.resolve(false);
+  if (settleMs <= 0) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    const schedule =
+      typeof window !== "undefined" ? window.setTimeout : setTimeout;
+    schedule(() => {
+      resolve(!isCancelled());
+    }, settleMs);
   });
 }
 
@@ -505,6 +589,7 @@ export async function speakWithAndroidNativeTts(
       text: normalized,
       rate,
       pitch,
+      ...(opts.gender ? { gender: opts.gender } : {}),
     });
     if (!sent.ok) {
       finish(new Error("Failed to dispatch Android native TTS command."));
