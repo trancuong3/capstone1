@@ -354,6 +354,18 @@ function createFetchResponder() {
     if (path === `/profiles/children/${TEST_CHILD_ID}`) {
       return Response.json(childFixture);
     }
+    if (path === "/voice/status") {
+      return Response.json(
+        { detail: { code: "LOCAL_VOICE_UNCONFIGURED" } },
+        { status: 503 },
+      );
+    }
+    if (path === "/voice/text-to-speech") {
+      return Response.json(
+        { detail: { code: "LOCAL_TTS_UNAVAILABLE" } },
+        { status: 503 },
+      );
+    }
     if (path === "/games/memory/themes") {
       return Response.json(sampleCatalog);
     }
@@ -706,7 +718,7 @@ describe("MemoryGameScreen", () => {
     // 2. Click "Nghe hướng dẫn" -> MUST immediately abort active mic BEFORE speaking TTS!
     await user.click(screen.getByRole("button", { name: /Nghe hướng dẫn/i }));
     expect(abortSpy).toHaveBeenCalledTimes(1);
-    expect(speakTtsSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(speakTtsSpy).toHaveBeenCalledTimes(1));
   });
 
   it("supports 3-second gentle Supported Peek during Recall and hides again automatically", async () => {

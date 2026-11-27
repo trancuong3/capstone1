@@ -214,6 +214,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const speechService = useMemo(() => createSpeechService(), []);
   const echoGuard = useMemo(() => new EchoGuard(), []);
   const speechPlayer = useSpeechPlayer();
+  const speechPlayerRef = useRef(speechPlayer);
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
   const { reducedMotion, calmSound, toggleCalmSound } =
     useEntertainmentPreferences();
 
@@ -326,8 +330,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
   const stopAllTts = useCallback(() => {
     ttsGenerationRef.current += 1;
-    const wasSpeaking = isSpeakingPromptRef.current || speechPlayer.isPlaying;
-    speechPlayer.stop();
+    const currentPlayer = speechPlayerRef.current;
+    const wasSpeaking = isSpeakingPromptRef.current || currentPlayer.isPlaying;
+    currentPlayer.stop();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
@@ -340,7 +345,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     if (wasSpeaking) {
       ttsCooldownUntilRef.current = Date.now() + TTS_MIC_COOLDOWN_MS;
     }
-  }, [speechPlayer]);
+  }, []);
 
   useEffect(() => {
     return subscribeEntertainmentPreferences(() => {
@@ -377,7 +382,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         ttsCooldownUntilRef.current = Date.now() + TTS_MIC_COOLDOWN_MS;
       };
 
-      void speechPlayer
+      void speechPlayerRef.current
         .play(adaptedText, { coaching: true })
         .then(finishSpeak)
         .catch(() => {
@@ -409,7 +414,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           finishSpeak();
         });
     },
-    [calmSound, echoGuard, speechPlayer, stopAllTts, stopMicCapture],
+    [calmSound, echoGuard, stopAllTts, stopMicCapture],
   );
 
   const startVoiceCapture = useCallback(
