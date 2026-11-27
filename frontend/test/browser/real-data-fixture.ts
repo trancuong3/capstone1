@@ -1089,10 +1089,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       });
     if (request.method() === "GET" && path === "/voice/status")
       return respond(route, readyVoiceStatus("Binh"));
-    if (
-      request.method() === "POST" &&
-      path === "/voice/phonics/analyze"
-    ) {
+    if (request.method() === "POST" && path === "/voice/phonics/analyze") {
       const body = request.postDataJSON() as { text?: string };
       const text = body.text ?? "";
       return respond(route, {
