@@ -530,6 +530,7 @@ function PageSurface(
     getActiveElement: getActiveNode,
     activeWordId: activeId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
+    isPreview: Boolean(previewSnapshot),
   });
 
   const handleSelectWord = useCallback(

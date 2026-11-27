@@ -39,6 +39,21 @@ def clear_auth_token_cache() -> None:
         _AUTH_CACHE.clear()
 
 
+def invalidate_auth_cache_for_actor(actor_id: UUID) -> int:
+    """Evict all cached bearer tokens belonging to `actor_id`."""
+    removed = 0
+    with _AUTH_CACHE_LOCK:
+        stale_keys = [
+            key
+            for key, (cached_actor_id, _) in _AUTH_CACHE.items()
+            if cached_actor_id == actor_id
+        ]
+        for key in stale_keys:
+            _AUTH_CACHE.pop(key, None)
+            removed += 1
+    return removed
+
+
 def _auth_token_cache_ttl_seconds() -> float:
     raw = os.getenv("AUTH_TOKEN_CACHE_TTL_SECONDS")
     if raw is not None and raw.strip() != "":

@@ -736,7 +736,7 @@ export function ReadingVoiceSettings({
                               className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
                               data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
                             >
-                              Sẵn Wi-Fi
+                              {t("settings.wifiReadyBadge")}
                             </span>
                           ) : null}
                         </span>
@@ -788,10 +788,14 @@ export function ReadingVoiceSettings({
                       data-testid="voice-offline-cache-notice"
                     >
                       {cachedNames.length > 1
-                        ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                        ? t("settings.offlineCacheMultiple", {
+                            voices: cachedNames.join(", "),
+                          })
                         : cachedNames.length === 1
-                          ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng ${cachedNames[0]}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
-                          : "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu."}
+                          ? t("settings.offlineCacheSingle", {
+                              voice: cachedNames[0],
+                            })
+                          : t("settings.offlineCacheEmpty")}
                     </p>
                   );
                 })()
@@ -831,7 +835,7 @@ export function ReadingVoiceSettings({
                     )}
                     aria-hidden="true"
                   />
-                  Local Worker:{" "}
+                  {t("settings.localWorkerLabel")}{" "}
                   {voiceHealth.local.available
                     ? t("settings.localAvailable")
                     : t("settings.localUnavailable")}

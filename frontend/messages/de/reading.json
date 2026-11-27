@@ -370,7 +370,8 @@
     "finish": "Abgeschlossen",
     "nextQuestion": "Nächste Frage",
     "chosenCorrectFeedback": "Du hast {label} gewählt. {hint}",
-    "chosenWrongFeedback": "Du hast {label} gewählt. Das ist nicht ganz richtig. Lass uns die Details aus dem Text noch einmal durchgehen und es erneut versuchen!"
+    "chosenWrongFeedback": "Du hast {label} gewählt. Das ist nicht ganz richtig. Lass uns die Details aus dem Text noch einmal durchgehen und es erneut versuchen!",
+    "skipToReport": "Überspringen und Ergebnisse ansehen"
   },
   "automation": {
     "sectionTitle": "Automatisch beim Lesen",

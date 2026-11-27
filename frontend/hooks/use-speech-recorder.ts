@@ -431,10 +431,42 @@ export function useSpeechRecorder(
   const start = useCallback(
     (options?: SpeechRecorderStartOptions): Promise<void> => {
       if (startRef.current) return startRef.current;
-      if (pendingStopRef.current)
-        return Promise.reject(new Error("Microphone is still stopping."));
-      if (isRecordingRef.current) return Promise.resolve();
-      const pending = begin(options);
+      const pendingStop = pendingStopRef.current;
+      if (!pendingStop && isRecordingRef.current) return Promise.resolve();
+      if (!pendingStop) {
+        const pending = begin(options);
+        startRef.current = pending;
+        void pending
+          .finally(() => {
+            if (startRef.current === pending) startRef.current = null;
+          })
+          .catch(() => undefined);
+        return pending;
+      }
+      const pendingHolder: { promise?: Promise<void> } = {};
+      const pending = (async () => {
+        let stopDrainTimer: ReturnType<typeof setTimeout> | null = null;
+        try {
+          await Promise.race([
+            pendingStop.catch(() => null),
+            new Promise<never>((_resolve, reject) => {
+              stopDrainTimer = setTimeout(() => {
+                reject(new Error("Microphone stop timed out."));
+              }, 2500);
+            }),
+          ]);
+        } finally {
+          if (stopDrainTimer !== null) clearTimeout(stopDrainTimer);
+        }
+        if (startRef.current !== pendingHolder.promise) {
+          throw new DOMException(
+            "Microphone start was cancelled.",
+            "AbortError",
+          );
+        }
+        await begin(options);
+      })();
+      pendingHolder.promise = pending;
       startRef.current = pending;
       void pending
         .finally(() => {

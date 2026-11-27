@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 
+from app.services.ocr_executor import get_ocr_executor
+
 from app.diagnostic_logging import log_diagnostic
 from app.models import AdminAiWorkflow, Book, BookPage, BookRightsEvidence, PageRevision
 from app.repositories.admin_ocr_repository import AdminOcrRepository
@@ -1773,7 +1775,9 @@ class AdminOcrService:
                         upload_id=upload_id,
                         started_at=started_at,
                     )
-                ocr = await run_in_threadpool(extract_text_and_boxes, data)
+                ocr = await asyncio.get_running_loop().run_in_executor(
+                    get_ocr_executor(), extract_text_and_boxes, data
+                )
                 words = self._word_data(ocr["words"])
                 text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
                 if not text_value:
@@ -2288,7 +2292,9 @@ class AdminOcrService:
                     expected_latest_revision_id=expected_latest_revision_id,
                     upload_id=upload_id,
                 )
-            ocr = await run_in_threadpool(extract_text_and_boxes, data)
+            ocr = await asyncio.get_running_loop().run_in_executor(
+                get_ocr_executor(), extract_text_and_boxes, data
+            )
             words = self._word_data(ocr["words"])
             text_value = unicodedata.normalize("NFC", str(ocr["text"]).strip())
             if not text_value:
@@ -3697,7 +3703,9 @@ class AdminOcrService:
                     expected_latest_revision_id=expected_latest_revision_id,
                 )
             image_bytes = await run_in_threadpool(download_object, source_image_path)
-            ocr = await run_in_threadpool(extract_text_and_boxes, image_bytes)
+            ocr = await asyncio.get_running_loop().run_in_executor(
+                get_ocr_executor(), extract_text_and_boxes, image_bytes
+            )
         except OcrEngineUnavailable as exc:
             log_diagnostic(
                 logger,

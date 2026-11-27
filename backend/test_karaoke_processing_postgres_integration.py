@@ -6,13 +6,13 @@ from uuid import uuid4
 
 import asyncpg
 
-from test_karaoke_postgres_integration import TEST_URL, connect, prepare_database, test_url
+from test_karaoke_postgres_integration import TEST_URL, connect, prepare_database, _karaoke_test_url
 
 
 @unittest.skipUnless(TEST_URL, "Set KARAOKE_TEST_DATABASE_URL to the disposable karaoke database")
 class ProcessingSchemaPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        test_url()
+        _karaoke_test_url()
         await prepare_database()
         self.db = await connect()
         self.addAsyncCleanup(self.db.close)

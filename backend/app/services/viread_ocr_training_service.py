@@ -518,6 +518,22 @@ class VireadOcrTrainingService:
             return None
         return create_signed_image_url(reference)
 
+    async def _artifact_download_url_async(
+        self,
+        reference: str,
+        *,
+        expected_sha256: str | None = None,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self._artifact_download_url,
+            reference,
+            expected_sha256=expected_sha256,
+            job_id=job_id,
+            worker_id=worker_id,
+        )
+
     async def overview(self, actor_id: UUID) -> dict[str, Any]:
         await self._admin(actor_id)
         outbox = await self.repo.all("SELECT status, count(*)::integer AS count FROM public.viread_ocr_outbox GROUP BY status ORDER BY status")
@@ -2048,7 +2064,7 @@ class VireadOcrTrainingService:
             ORDER BY created_at, id LIMIT :limit OFFSET :offset
         """, {"dataset_id": dataset_id, "limit": limit, "offset": offset})
         for item in items:
-            item["image"] = self._artifact_download_url(
+            item["image"] = await self._artifact_download_url_async(
                 item["image_storage_path"],
                 expected_sha256=item["image_sha256"],
             )
@@ -2102,7 +2118,7 @@ class VireadOcrTrainingService:
         for item in manifest["chunks"]:
             chunks.append({
                 **item,
-                "url": self._artifact_download_url(
+                "url": await self._artifact_download_url_async(
                     item["path"],
                     expected_sha256=item.get("sha256"),
                     job_id=job_id,
@@ -2157,7 +2173,7 @@ class VireadOcrTrainingService:
             WHERE sample.dataset_version_id=:dataset_id
             ORDER BY group_id, sample.source_annotation_id, sample.id LIMIT :limit OFFSET :offset
         """, {"dataset_id": dataset_id, "limit": limit, "offset": offset})
-        dataset["manifest_url"] = self._artifact_download_url(
+        dataset["manifest_url"] = await self._artifact_download_url_async(
             dataset["manifest_storage_path"],
             expected_sha256=dataset["version_sha256"],
             job_id=job_id,
@@ -2170,7 +2186,7 @@ class VireadOcrTrainingService:
         )
         dataset["drive_file_id"] = drive_file_id_from_reference(dataset["manifest_storage_path"])
         for item in items:
-            item["image_url"] = self._artifact_download_url(
+            item["image_url"] = await self._artifact_download_url_async(
                 item["image_storage_path"],
                 expected_sha256=item["image_sha256"],
                 job_id=job_id,
@@ -3069,8 +3085,12 @@ class VireadOcrTrainingService:
                 "quality_gate": stored_metrics.get("quality_gate"),
                 "idempotent": True,
             }
+        cer_metric, wer_metric = await asyncio.gather(
+            asyncio.to_thread(_paired_metric, paired, "cer"),
+            asyncio.to_thread(_paired_metric, paired, "wer", seed=20261113),
+        )
         metrics = {"sample_count": len(paired), "group_count": len({item["group_id"] for item in paired}),
-                   "cer": _paired_metric(paired, "cer"), "wer": _paired_metric(paired, "wer", seed=20261113),
+                   "cer": cer_metric, "wer": wer_metric,
                    "outputs": paired, "original_checkpoint_sha256": ORIGINAL_SHA256,
                    "candidate_checkpoint_sha256": run["checkpoint_sha256"],
                    "parent_checkpoint_sha256": payload.parent_checkpoint_sha256 or run["parent_checkpoint_sha256"],
@@ -3078,11 +3098,15 @@ class VireadOcrTrainingService:
                    "locked_test_manifest_sha256": locked["version_sha256"],
                    "evaluation_type": evaluation_type}
         if all("parent" in item for item in paired):
-            metrics["parent_cer"] = _paired_metric(paired, "cer", baseline="parent")
-            metrics["parent_wer"] = _paired_metric(paired, "wer", baseline="parent", seed=20261113)
+            metrics["parent_cer"], metrics["parent_wer"] = await asyncio.gather(
+                asyncio.to_thread(_paired_metric, paired, "cer", baseline="parent"),
+                asyncio.to_thread(_paired_metric, paired, "wer", baseline="parent", seed=20261113),
+            )
         if all("active" in item for item in paired):
-            metrics["active_cer"] = _paired_metric(paired, "cer", baseline="active")
-            metrics["active_wer"] = _paired_metric(paired, "wer", baseline="active", seed=20261113)
+            metrics["active_cer"], metrics["active_wer"] = await asyncio.gather(
+                asyncio.to_thread(_paired_metric, paired, "cer", baseline="active"),
+                asyncio.to_thread(_paired_metric, paired, "wer", baseline="active", seed=20261113),
+            )
         gate = _gate(metrics, manifest_sha=locked["version_sha256"], evaluation_type=evaluation_type,
                      require_model_baselines=require_baselines)
         benchmark_id = uuid4()
@@ -3285,7 +3309,7 @@ class VireadOcrTrainingService:
                 raise HTTPException(status_code=503, detail="Candidate checkpoint shard manifest is malformed")
             chunks.append({
                 **item,
-                "url": self._artifact_download_url(
+                "url": await self._artifact_download_url_async(
                     item["path"],
                     expected_sha256=item.get("sha256"),
                     job_id=job_id,

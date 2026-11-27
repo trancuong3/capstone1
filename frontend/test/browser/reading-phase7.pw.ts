@@ -258,7 +258,7 @@ test("Phase 7: microphone indicator stays static and audio releases on pause", a
   await page.getByRole("button", { name: startName }).click();
   const indicator = page
     .getByRole("button", { name: stopName })
-    .locator(".bg-red-300");
+    .locator("span.animate-ping");
   await expect(indicator).toBeVisible();
   const animation = await indicator.evaluate((element) => {
     const style = getComputedStyle(element);

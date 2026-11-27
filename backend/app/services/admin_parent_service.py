@@ -8,6 +8,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from app.api.deps import invalidate_auth_cache_for_actor
+from app.database.role_cache import invalidate_cached_role
 from app.providers.supabase_auth_contact_provider import (
     ContactInfoStatus,
     SupabaseAuthContactProvider,
@@ -286,4 +288,6 @@ class AdminParentService:
         if not changed:
             raise AdminParentNotFoundError("Parent profile was not found or is inactive.")
 
+        invalidate_cached_role(parent_id)
+        invalidate_auth_cache_for_actor(parent_id)
         return {"id": parent_id, "active": 0}

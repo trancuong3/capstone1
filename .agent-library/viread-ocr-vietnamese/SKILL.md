@@ -38,6 +38,10 @@ ViRead uses a local Dual-Engine OCR pipeline (**PaddleOCR 2.7.3** detector + **V
 6. **Flow 2 Data Hygiene & Colab Training Resilience**:
    - Flow 2 crops and labels must pass `viread_flow2_hygiene.py` before materialization or dataset snapshots: NFC + `Cf` strip, exact 229-char locked VietOCR vocabulary, EXIF-safe cropping (`ImageOps.exif_transpose`), contrast/sharpness/density bounds, and archived/quarantined holdout rows must never block sibling splits.
    - Colab resume validation compares `LINEAGE_IDENTITY_FIELDS` (excluding `repository_commit`) so resuming across repository pushes works safely; throttle heavy `state_store.sync()` checkpoint uploads to every 500 steps, and configure Apps Script Bridge permanent delete (Advanced Drive API with `setTrashed` fallback) to avoid Drive Trash overflow.
+7. **OCR Throughput & Concurrency Invariants**:
+   - **Dependency-Free Executor**: Offload CPU-bound `extract_text_and_boxes` calls through `app/services/ocr_executor.py` (`ThreadPoolExecutor(max_workers=1)`) instead of importing `ocr_engine` at web module load, preserving lightweight API startup with zero `torch`/`paddle` imports.
+   - **CPU & Lock Contention**: Cap CPU `torch.set_num_threads` (`<= 2` on Render/low-CPU, `<= 4` otherwise) and run VietOCR crop resizing/`preprocess_line_array` outside `_vietocr_inference_lock`, holding the lock only once for chunked `predict_batch` (batch size 16) with per-line `.predict()` fallback.
+   - **Worker Availability & Failover**: `has_online_worker` accepts both `IDLE` and `BUSY` heartbeats so active workers do not fail health checks; LLM correction providers share persistent `httpx.AsyncClient` instances (closed in orchestrator `finally`) and trigger `disables_family=True` on `PROVIDER_TIMEOUT`/`PROVIDER_NETWORK`.
 
 ## 3. Safe Diagnostics & Testing
 

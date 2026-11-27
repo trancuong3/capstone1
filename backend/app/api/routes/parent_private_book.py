@@ -79,11 +79,18 @@ async def create_my_private_book(
 async def list_my_private_books(
     response: Response,
     ready_only: bool = Query(default=False),
+    limit: int | None = Query(default=None, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
-    return await ParentPrivateBookService(db).list_books(actor_id, ready_only=ready_only)
+    items = await ParentPrivateBookService(db).list_books(actor_id, ready_only=ready_only)
+    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
+    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    if safe_offset == 0 and safe_limit is None:
+        return items
+    return items[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
 
 
 @router.get("/my-books/paged", response_model=ParentPrivateBookPageRead)

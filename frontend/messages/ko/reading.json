@@ -370,7 +370,8 @@
     "finish": "완료",
     "nextQuestion": "다음 질문",
     "chosenCorrectFeedback": "콘이 {label}을(를) 선택했습니다. {hint}",
-    "chosenWrongFeedback": "콘이 {label}을(를) 선택했습니다. 정답이 아니에요. 읽은 내용의 세부 사항을 떠올리고 다시 선택해 봐요!"
+    "chosenWrongFeedback": "콘이 {label}을(를) 선택했습니다. 정답이 아니에요. 읽은 내용의 세부 사항을 떠올리고 다시 선택해 봐요!",
+    "skipToReport": "건너뛰고 결과 보기"
   },
   "automation": {
     "sectionTitle": "읽을 때 자동으로",

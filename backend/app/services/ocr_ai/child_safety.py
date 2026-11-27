@@ -420,6 +420,7 @@ class ChildSafetyOrchestrator:
     def __init__(self, config: OcrCorrectionConfig, *, transport: httpx.AsyncBaseTransport | None = None):
         self.config = config
         self.transport = transport
+        self._active_client: httpx.AsyncClient | None = None
         self.providers: list[SafetyProvider] = []
         if config.gemini_enabled:
             self.providers.extend([
@@ -460,47 +461,56 @@ class ChildSafetyOrchestrator:
         candidate_hash = content_hash(text)
         deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
         completed_chunks = 0
-        for chunk_index, (offset, chunk_text) in enumerate(chunks):
-            if deadline is not None and time.monotonic() >= deadline:
-                raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
-            response = await self._analyze_chunk(
-                chunk_text,
-                events,
-                chunk_index,
-                disabled_families=disabled_families,
-                deadline=deadline,
-            )
-            suitability, findings = response
-            completed_chunks += 1
-            if _SUITABILITY_ORDER[suitability] > _SUITABILITY_ORDER[aggregated_suitability]:
-                aggregated_suitability = suitability
-            for finding in findings:
-                min_suitability = _SEVERITY_MIN_SUITABILITY.get(
-                    str(finding.get("severity") or "").upper()
-                )
-                if (
-                    min_suitability is not None
-                    and _SUITABILITY_ORDER[min_suitability]
-                    > _SUITABILITY_ORDER[aggregated_suitability]
-                ):
-                    aggregated_suitability = min_suitability
-                finding["evidence_start"] += offset
-                finding["evidence_end"] += offset
-                canonical_start = finding["evidence_start"]
-                canonical_end = finding["evidence_end"]
-                raw_start = normalized_spans[canonical_start][0]
-                raw_end = normalized_spans[canonical_end - 1][1]
-                finding["evidence_start"] = raw_start
-                finding["evidence_end"] = raw_end
-                finding["evidence_text"] = text[raw_start:raw_end]
-                finding["content_hash"] = candidate_hash
-                key = (
-                    raw_start,
-                    raw_end,
-                    finding["category"],
-                    candidate_hash,
-                )
-                deduped.setdefault(key, finding)
+        async with httpx.AsyncClient(
+            trust_env=False,
+            follow_redirects=False,
+            transport=self.transport,
+        ) as shared_client:
+            self._active_client = shared_client
+            try:
+                for chunk_index, (offset, chunk_text) in enumerate(chunks):
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
+                    response = await self._analyze_chunk(
+                        chunk_text,
+                        events,
+                        chunk_index,
+                        disabled_families=disabled_families,
+                        deadline=deadline,
+                    )
+                    suitability, findings = response
+                    completed_chunks += 1
+                    if _SUITABILITY_ORDER[suitability] > _SUITABILITY_ORDER[aggregated_suitability]:
+                        aggregated_suitability = suitability
+                    for finding in findings:
+                        min_suitability = _SEVERITY_MIN_SUITABILITY.get(
+                            str(finding.get("severity") or "").upper()
+                        )
+                        if (
+                            min_suitability is not None
+                            and _SUITABILITY_ORDER[min_suitability]
+                            > _SUITABILITY_ORDER[aggregated_suitability]
+                        ):
+                            aggregated_suitability = min_suitability
+                        finding["evidence_start"] += offset
+                        finding["evidence_end"] += offset
+                        canonical_start = finding["evidence_start"]
+                        canonical_end = finding["evidence_end"]
+                        raw_start = normalized_spans[canonical_start][0]
+                        raw_end = normalized_spans[canonical_end - 1][1]
+                        finding["evidence_start"] = raw_start
+                        finding["evidence_end"] = raw_end
+                        finding["evidence_text"] = text[raw_start:raw_end]
+                        finding["content_hash"] = candidate_hash
+                        key = (
+                            raw_start,
+                            raw_end,
+                            finding["category"],
+                            candidate_hash,
+                        )
+                        deduped.setdefault(key, finding)
+            finally:
+                self._active_client = None
         findings = list(deduped.values())
         for finding in findings:
             finding["finding_id"] = hashlib.sha256(
@@ -735,24 +745,39 @@ class ChildSafetyOrchestrator:
             url = self.config.local.base_url.rstrip("/") + "/api/chat"
             headers = {}
         timeout = self.config.local.timeout_seconds if provider.family == "ollama" else self.config.cloud_timeout_seconds
+        req_timeout = httpx.Timeout(timeout)
         output_mode = self._output_mode(provider)
         retry_count = 0
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout), trust_env=False, follow_redirects=False, transport=self.transport
-        ) as client:
-            response = await client.post(url, headers=headers, json=payload)
+
+        async def _post_with(active_client: httpx.AsyncClient) -> httpx.Response:
+            nonlocal output_mode, retry_count
+            resp = await active_client.post(
+                url, headers=headers, json=payload, timeout=req_timeout
+            )
             # Older Ollama servers may reject JSON Schema in `format`. Retry
             # once in JSON mode with the explicit field/enum contract; the
             # application validator remains authoritative.
-            if provider.family == "ollama" and response.status_code in {400, 422}:
+            if provider.family == "ollama" and resp.status_code in {400, 422}:
                 payload["format"] = "json"
                 payload["messages"] = [
                     {"role": "system", "content": f"{_SYSTEM_PROMPT}{_JSON_CONTRACT_APPENDIX}"},
                     {"role": "user", "content": request_data},
                 ]
-                response = await client.post(url, headers=headers, json=payload)
+                resp = await active_client.post(
+                    url, headers=headers, json=payload, timeout=req_timeout
+                )
                 output_mode = "json_fallback"
                 retry_count = 1
+            return resp
+
+        client = self._active_client
+        if client is not None and not client.is_closed:
+            response = await _post_with(client)
+        else:
+            async with httpx.AsyncClient(
+                timeout=req_timeout, trust_env=False, follow_redirects=False, transport=self.transport
+            ) as temp_client:
+                response = await _post_with(temp_client)
         if response.status_code != 200:
             status_code = response.status_code
             if status_code in {401, 403}:

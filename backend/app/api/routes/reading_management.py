@@ -45,7 +45,13 @@ async def create_goal(payload: ReadingGoalCreate, actor_id: UUID = Depends(get_c
     try:
         management_service = build_service(db)
         row = await management_service.create_goal(actor_id, payload)
-        return next(item for item in await management_service.list_goals(actor_id, row.ChildId) if item["id"] == row.Id)
+        item = next(
+            (item for item in await management_service.list_goals(actor_id, row.ChildId) if item["id"] == row.Id),
+            None,
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return item
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
@@ -55,7 +61,13 @@ async def update_goal(goal_id: UUID, payload: ReadingGoalUpdate, actor_id: UUID 
     try:
         service = build_service(db)
         row = await service.update_goal(actor_id, goal_id, payload)
-        return next(item for item in await service.list_goals(actor_id, row.ChildId) if item["id"] == goal_id)
+        item = next(
+            (item for item in await service.list_goals(actor_id, row.ChildId) if item["id"] == goal_id),
+            None,
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return item
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
@@ -65,7 +77,13 @@ async def transition_goal(goal_id: UUID, payload: ReadingGoalTransition, actor_i
     try:
         service = build_service(db)
         row = await service.transition_goal(actor_id, goal_id, payload)
-        return next(item for item in await service.list_goals(actor_id, row.ChildId) if item["id"] == goal_id)
+        item = next(
+            (item for item in await service.list_goals(actor_id, row.ChildId) if item["id"] == goal_id),
+            None,
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return item
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 
@@ -121,8 +139,17 @@ async def add_collection(book_id: UUID, payload: ChildBookCollectionCreate, acto
     try:
         service = build_service(db)
         await service.add_collection(actor_id, book_id, payload)
-        return next(item for item in await service.list_collections(actor_id, payload.child_id)
-                    if item["book_id"] == book_id and item["collection_type"] == payload.collection_type)
+        item = next(
+            (
+                item
+                for item in await service.list_collections(actor_id, payload.child_id)
+                if item["book_id"] == book_id and item["collection_type"] == payload.collection_type
+            ),
+            None,
+        )
+        if item is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return item
     except (ManagementForbidden, ManagementNotFound, ManagementConflict) as exc:
         raise map_domain_error(exc) from None
 

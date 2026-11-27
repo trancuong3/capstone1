@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -108,6 +108,7 @@ export function LoginForm({
   const [socialLoading, setSocialLoading] = useState<OAuthProvider | null>(
     null,
   );
+  const [showPassword, setShowPassword] = useState(false);
   const [noticeKind, setNoticeKind] = useState<LoginNoticeKind | null>(() => {
     if (oauthError === "email_required") return "email_required";
     if (oauthError === "oauth_failed") return "oauth_failed";
@@ -269,10 +270,28 @@ export function LoginForm({
       />
       <TextField
         autoComplete="current-password"
+        endAdornment={
+          <button
+            aria-label={
+              showPassword
+                ? t("auth.passwordToggle.hide")
+                : t("auth.passwordToggle.show")
+            }
+            aria-pressed={showPassword}
+            className="inline-flex size-9 items-center justify-center rounded-control text-muted hover:bg-canvas hover:text-ink focus-visible:outline-2 focus-visible:outline-primary"
+            onClick={() => setShowPassword((prev) => !prev)}
+            type="button"
+          >
+            {showPassword ? (
+              <EyeOff aria-hidden="true" className="size-5" />
+            ) : (
+              <Eye aria-hidden="true" className="size-5" />
+            )}
+          </button>
+        }
         error={errors.password?.message}
         label={t("auth.fields.password")}
-        placeholder="••••••••••••"
-        type="password"
+        type={showPassword ? "text" : "password"}
         {...register("password")}
       />
       <Link href="/forgot-password" className="account-forgot">

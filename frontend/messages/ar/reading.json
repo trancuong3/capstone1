@@ -370,7 +370,8 @@
     "finish": "مكتمل",
     "nextQuestion": "السؤال التالي",
     "chosenCorrectFeedback": "لقد اخترت للتو {label}. {hint}",
-    "chosenWrongFeedback": "لقد اخترت للتو {label}. الإجابة ليست صحيحة تماماً، تذكر التفاصيل من نص القراءة ثم اختر مرة أخرى!"
+    "chosenWrongFeedback": "لقد اخترت للتو {label}. الإجابة ليست صحيحة تماماً، تذكر التفاصيل من نص القراءة ثم اختر مرة أخرى!",
+    "skipToReport": "تخطّ وعرض النتائج"
   },
   "automation": {
     "sectionTitle": "تلقائي أثناء القراءة",

@@ -31,6 +31,22 @@ class GeminiOcrProvider:
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._transport = transport
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self._timeout_seconds),
+                trust_env=False,
+                follow_redirects=False,
+                transport=self._transport,
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None
 
     async def correct_chunk(
         self,
@@ -63,24 +79,25 @@ class GeminiOcrProvider:
         }
         url = f"{_GEMINI_API_BASE}/models/{self.model}:generateContent"
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(self._timeout_seconds),
-                trust_env=False,
-                follow_redirects=False,
-                transport=self._transport,
-            ) as client:
-                response = await client.post(
-                    url,
-                    headers={"x-goog-api-key": self._api_key},
-                    json=payload,
-                )
+            client = self._get_client()
+            response = await client.post(
+                url,
+                headers={"x-goog-api-key": self._api_key},
+                json=payload,
+            )
         except httpx.TimeoutException as exc:
             raise OcrProviderError(
-                provider=self.name, code="PROVIDER_TIMEOUT", status_code=504
+                provider=self.name,
+                code="PROVIDER_TIMEOUT",
+                status_code=504,
+                disables_family=True,
             ) from exc
         except httpx.RequestError as exc:
             raise OcrProviderError(
-                provider=self.name, code="PROVIDER_NETWORK", status_code=503
+                provider=self.name,
+                code="PROVIDER_NETWORK",
+                status_code=503,
+                disables_family=True,
             ) from exc
         if response.status_code != 200:
             raise self._http_error(response.status_code)

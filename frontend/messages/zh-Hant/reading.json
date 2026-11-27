@@ -370,7 +370,8 @@
     "finish": "已完成",
     "nextQuestion": "下一題",
     "chosenCorrectFeedback": "你選擇了 {label}。{hint}",
-    "chosenWrongFeedback": "你選擇了 {label}。還不太對，回想一下文章中的細節再選一次吧！"
+    "chosenWrongFeedback": "你選擇了 {label}。還不太對，回想一下文章中的細節再選一次吧！",
+    "skipToReport": "略過並查看結果"
   },
   "automation": {
     "sectionTitle": "閱讀時自動進行",
