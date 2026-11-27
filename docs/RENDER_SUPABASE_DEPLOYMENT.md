@@ -59,10 +59,11 @@ Configure these under the Render Web Service's Environment section:
 | VIREAD_OCR_WORKER_TOKEN | >= 32-char shared secret matching remote OCR worker |
 | VIREAD_OCR_REMOTE_WORKER_URL | Optional HTTPS URL of hosted OCR worker (e.g. `https://<owner>-<space>.hf.space`) for post-commit `/wakeup` and passive 60s `/health` |
 | VIREAD_HF_SPACE_TOKEN | Optional Hugging Face Read token when the OCR Space is Private |
-| PRIVATE_BOOK_ALLOW_CLOUD_AI | true when `/my-books` Stage 2+3 should use Gemini/Groq while local Ollama is off (see `docs/HF_SPACES_ZERO_COST_OCR_DEPLOYMENT.md`) |
+| PRIVATE_BOOK_ALLOW_CLOUD_AI | `true` (or unset when `OCR_CLOUD_CORRECTION_ENABLED=true` and local Ollama is off) so `/my-books` Stage 2+3 use Gemini/Groq on Render; set `false` only if you intentionally require local Ollama |
+| LOCAL_OCR_ENABLED | `false` on Render (auto-disabled when `RENDER=true` or `VIREAD_OCR_MODE=remote_worker`; never copy `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` onto Render expecting local Ollama) |
 
 Restart the Render service after changing OCR settings. Missing keys cause their
-providers to be skipped while the configured chain continues. Local repository
+providers to be skipped while the configured chain continues. **Do not set `LOCAL_OCR_BASE_URL=http://127.0.0.1:11434` on Render** unless an Ollama sidecar is actually listening on loopback with `LOCAL_OCR_ENABLED=true`. Local repository
 checks cannot change or verify Render secrets.
 
 Never place the database URL, password, Supabase secret key or service-role key in the frontend or a committed file.

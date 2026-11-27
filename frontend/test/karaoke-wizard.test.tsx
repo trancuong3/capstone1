@@ -261,7 +261,7 @@ describe("karaoke wizard rendering and explicit workflow", () => {
         <KaraokeWorkspaceScreen />
       </KaraokeServicesProvider>,
     );
-    await screen.findByText(/Tự động tạo karaoke chưa sẵn sàng/);
+    await screen.findByText(/Tự động tạo karaoke hiện chưa sẵn sàng/);
     expect(service.startProcessing).not.toHaveBeenCalled();
     expect(service.create).not.toHaveBeenCalled();
   });
@@ -457,7 +457,9 @@ describe("wizard controller recovery and input identity", () => {
       if (changed) {
         expect(service.upload).toHaveBeenCalledTimes(1);
         expect(model.getSnapshot().file).toBe(replacement);
-        expect(model.getSnapshot().error).toContain("máy chủ đã đổi");
+        expect(model.getSnapshot().error).toContain(
+          "Nội dung bài hát vừa được cập nhật",
+        );
       } else {
         expect(service.upload).toHaveBeenCalledTimes(2);
         expect(service.save.mock.calls.at(-1)![1].title).toBe(

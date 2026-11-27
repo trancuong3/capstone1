@@ -144,7 +144,9 @@ describe("BookDetailScreen with real API adapters", () => {
       await screen.findByRole("heading", { name: bookFixture.title }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Trang OCR trả về không nằm trong danh sách trang/),
+      screen.getByText(
+        /Trang vừa quét không nằm trong danh sách trang có thể đọc/,
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Chọn trang 1" }),

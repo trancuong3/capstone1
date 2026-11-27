@@ -161,9 +161,7 @@ describe("Saved reading progress UI", () => {
     expect(
       within(table).getByRole("row", { name: "Lặp từ 0" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Giá trị avg_fluency đã lưu (chưa xác định đơn vị)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Điểm trôi chảy trung bình")).toBeInTheDocument();
     expect(
       screen.queryByText("Báo cáo này chưa ghi nhận từ cần luyện."),
     ).not.toBeInTheDocument();

@@ -34,17 +34,15 @@ import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contrib
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
-import {
-  fetchOcrWorkerHealth,
-  type OcrWorkerHealthSnapshot,
-} from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
@@ -77,6 +75,7 @@ const WORKFLOW_BADGE_STYLES: Record<SubmissionWorkflowStatus, string> = {
 
 const STAGE_LABEL_KEYS: Record<string, string> = {
   PENDING: "privateManager.statusLabels.PENDING",
+  PENDING_POST_OCR: "privateManager.statusLabels.PENDING_POST_OCR",
   RUNNING: "privateManager.statusLabels.RUNNING",
   COMPLETED: "privateManager.statusLabels.COMPLETED",
   PASSED: "privateManager.statusLabels.PASSED",
@@ -85,6 +84,50 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   SKIPPED: "privateManager.statusLabels.SKIPPED",
   FAILED: "privateManager.statusLabels.FAILED",
 };
+
+function resolveNoticeBoxStyle(
+  workflowStatus: SubmissionWorkflowStatus,
+  findingsCount: number,
+): string {
+  if (findingsCount > 0) {
+    return "border-amber-300 bg-amber-50 text-amber-950";
+  }
+  switch (workflowStatus) {
+    case "CHECK_FAILED":
+    case "REJECTED":
+      return "border-rose-300 bg-rose-50 text-rose-950";
+    case "CHECKING":
+      return "border-sky-200 bg-sky/40 text-ink";
+    case "PASSED_READY_TO_ADD":
+    case "APPROVED_READY_TO_ADD":
+    case "ADDED_TO_BOOK":
+      return "border-emerald-300 bg-emerald-50 text-emerald-950";
+    default:
+      return "border-amber-300 bg-amber-50 text-amber-950";
+  }
+}
+
+function resolveNoticeHeadingKey(
+  workflowStatus: SubmissionWorkflowStatus,
+): string {
+  switch (workflowStatus) {
+    case "CHECK_FAILED":
+      return "privateManager.toolCheckFailedNotice";
+    case "CHECKING":
+      return "privateManager.toolCheckCheckingNotice";
+    case "PASSED_READY_TO_ADD":
+    case "APPROVED_READY_TO_ADD":
+      return "privateManager.toolCheckReadyNotice";
+    case "REJECTED":
+      return "privateManager.toolCheckRejectedNotice";
+    case "NEEDS_RECHECK":
+      return "privateManager.toolCheckRecheckNotice";
+    case "ADDED_TO_BOOK":
+      return "privateManager.toolCheckAddedNotice";
+    default:
+      return "privateManager.toolCheckAdminNotice";
+  }
+}
 
 function generateClientKey(): string {
   if (
@@ -136,30 +179,18 @@ function describeToolCheckScope(
   if (scope.modality === "TEXT_ONLY") {
     parts.push(t("privateManager.toolScopeBase"));
   } else {
-    parts.push(
-      t("privateManager.toolScopeModality", { modality: scope.modality }),
-    );
+    parts.push(t("privateManager.toolScopeModality"));
   }
   if (scope.local_ai_enforced) {
     parts.push(t("privateManager.toolScopeLocalModel"));
   } else {
-    parts.push(
-      "soát chính tả & kiểm tra an toàn qua dịch vụ AI đám mây bảo mật",
-    );
+    parts.push("rà soát chính tả và an toàn nội dung tự động");
   }
   if (!scope.image_visual_safety_checked) {
     parts.push(t("privateManager.toolScopeNoImage"));
   }
   if (scope.copyright_scanner_status === "NOT_CONFIGURED") {
     parts.push(t("privateManager.toolScopeNoCopyright"));
-  }
-  if (scope.total_chunks > 0) {
-    parts.push(
-      t("privateManager.toolScopeChunks", {
-        checked: scope.chunks_checked,
-        total: scope.total_chunks,
-      }),
-    );
   }
   return `${parts.join("; ")}.`;
 }
@@ -299,8 +330,6 @@ function ParentPrivateBookManagerContent({
     returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
-  const [ocrWorkerHealth, setOcrWorkerHealth] =
-    useState<OcrWorkerHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -429,39 +458,26 @@ function ParentPrivateBookManagerContent({
     };
   }, [bookId, currentUserId, service, t]);
 
+  const ocrWorker = useOcrWorkerStatus({
+    onRecovered: () => {
+      void loadDetail(true);
+    },
+  });
+  const ocrWorkerOffline = ocrWorker.isUnavailable;
+
   // Auto-poll while any submission is CHECKING with exponential backoff (3s -> 15s),
-  // in-flight overlap guard, tab-visibility pause, and throttled /health checks (<= 1/30s).
+  // in-flight overlap guard, tab-visibility pause, and gentle >=12s cadence when OCR is offline.
   const hasCheckingSubmission = Boolean(
     detail?.submissions.some((sub) => sub.workflow_status === "CHECKING"),
   );
   const pollInFlightRef = useRef(false);
-  const lastHealthCheckAtRef = useRef(0);
-  const workerOnlineRef = useRef<boolean | null>(null);
+  const workerOfflineRef = useRef<boolean>(ocrWorkerOffline);
   useEffect(() => {
-    workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
-  }, [ocrWorkerHealth]);
-
-  // Probe OCR worker health once on book view so parents immediately see reassuring
-  // offline-queue guidance even before uploading new pages.
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    void fetchOcrWorkerHealth(controller.signal)
-      .then((snapshot) => {
-        if (active && snapshot) {
-          lastHealthCheckAtRef.current = Date.now();
-          setOcrWorkerHealth(snapshot);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [bookId]);
+    workerOfflineRef.current = ocrWorkerOffline;
+  }, [ocrWorkerOffline]);
 
   useEffect(() => {
-    if (!hasCheckingSubmission) return;
+    if (!hasCheckingSubmission || ocrWorker.isChecking) return;
     let active = true;
     let timerId: number | null = null;
     let idleTicks = 0;
@@ -469,7 +485,6 @@ function ParentPrivateBookManagerContent({
     const ONLINE_MAX_POLL_MS = 6_000;
     const OFFLINE_MIN_POLL_MS = 12_000;
     const OFFLINE_MAX_POLL_MS = 15_000;
-    const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
 
     const clearTimer = () => {
       if (timerId !== null) {
@@ -477,24 +492,9 @@ function ParentPrivateBookManagerContent({
         timerId = null;
       }
     };
-    const maybePollWorkerHealth = async (force = false) => {
-      const now = Date.now();
-      if (
-        !force &&
-        now - lastHealthCheckAtRef.current < HEALTH_POLL_MIN_INTERVAL_MS
-      ) {
-        return;
-      }
-      lastHealthCheckAtRef.current = now;
-      const snapshot = await fetchOcrWorkerHealth();
-      if (active && snapshot) {
-        setOcrWorkerHealth(snapshot);
-      }
-    };
 
     const nextDelayMs = () => {
-      const offline = workerOnlineRef.current === false;
-      if (offline) {
+      if (workerOfflineRef.current) {
         // Gentle 12-15s cadence while laptop OCR worker is offline to protect Render DB.
         return idleTicks <= 1 ? OFFLINE_MIN_POLL_MS : OFFLINE_MAX_POLL_MS;
       }
@@ -533,7 +533,6 @@ function ParentPrivateBookManagerContent({
       }
       pollInFlightRef.current = true;
       try {
-        void maybePollWorkerHealth(false).catch(() => undefined);
         await loadDetail(true);
         idleTicks += 1;
       } finally {
@@ -552,11 +551,8 @@ function ParentPrivateBookManagerContent({
       }
     };
 
-    void maybePollWorkerHealth(true);
     scheduleNext(
-      workerOnlineRef.current === false
-        ? OFFLINE_MIN_POLL_MS
-        : ONLINE_BASE_POLL_MS,
+      workerOfflineRef.current ? OFFLINE_MIN_POLL_MS : ONLINE_BASE_POLL_MS,
     );
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibilityChange);
@@ -569,7 +565,7 @@ function ParentPrivateBookManagerContent({
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
     };
-  }, [hasCheckingSubmission, loadDetail]);
+  }, [hasCheckingSubmission, loadDetail, ocrWorker.isChecking]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -595,11 +591,19 @@ function ParentPrivateBookManagerContent({
       }
       setUploadIdempotencyKey(generateClientKey());
       setActionNotice(
-        t("privateManager.uploadAcceptedNotice", {
-          total: response.total_pages,
-          format: response.source_format,
-        }),
+        ocrWorkerOffline
+          ? t("privateManager.uploadQueuedOfflineNotice", {
+              total: response.total_pages,
+              format: response.source_format,
+            })
+          : t("privateManager.uploadAcceptedNotice", {
+              total: response.total_pages,
+              format: response.source_format,
+            }),
       );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -681,11 +685,7 @@ function ParentPrivateBookManagerContent({
       });
       setReviewFormSubId(null);
       setReviewRequestNote("");
-      setActionNotice(
-        t("privateManager.submittedAdminNotice", {
-          version: sub.submission_version,
-        }),
-      );
+      setActionNotice(t("privateManager.submittedAdminNotice"));
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -702,7 +702,14 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.retrySubmission(bookId, sub.id, "AUTO");
-      setActionNotice(t("privateManager.retriedNotice"));
+      setActionNotice(
+        ocrWorkerOffline
+          ? t("privateManager.retriedQueuedOfflineNotice")
+          : t("privateManager.retriedNotice"),
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.retryErrorFallback")));
@@ -855,10 +862,17 @@ function ParentPrivateBookManagerContent({
       await service.replaceCommittedPageFile(bookId, page.page_id, file);
       setEditingPageId(null);
       setActionNotice(
-        t("privateManager.replacedPageImageNotice", {
-          page: page.page_number,
-        }),
+        ocrWorkerOffline
+          ? t("privateManager.replacedPageImageQueuedOfflineNotice", {
+              page: page.page_number,
+            })
+          : t("privateManager.replacedPageImageNotice", {
+              page: page.page_number,
+            }),
       );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -905,7 +919,14 @@ function ParentPrivateBookManagerContent({
         sub.source_type,
         sub.source_note,
       );
-      setActionNotice(t("privateManager.replacedSubmissionImageNotice"));
+      setActionNotice(
+        ocrWorkerOffline
+          ? t("privateManager.replacedSubmissionImageQueuedOfflineNotice")
+          : t("privateManager.replacedSubmissionImageNotice"),
+      );
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -926,6 +947,9 @@ function ParentPrivateBookManagerContent({
     try {
       await service.cancelSubmission(bookId, sub.id);
       setActionNotice(t("privateManager.cancelledSubmissionNotice"));
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1012,8 +1036,6 @@ function ParentPrivateBookManagerContent({
     (item) =>
       item.workflow_status === "CHECKING" && item.ocr_status === "RUNNING",
   ).length;
-  const ocrWorkerOffline =
-    ocrWorkerHealth !== null && !ocrWorkerHealth.workerOnline;
   const workerFailureCount = activeSubmissions.filter(
     (item) =>
       Boolean(item.ocr_error_code) ||
@@ -1431,11 +1453,24 @@ function ParentPrivateBookManagerContent({
           </p>
           <p className="mt-1 text-xs text-muted">
             Minh bạch quyền riêng tư: Sách riêng chỉ hiển thị trong tài khoản
-            gia đình; văn bản trang sách tải lên được rà soát chính tả và an
-            toàn trẻ em tự động (mô hình cục bộ hoặc dịch vụ AI đám mây bảo mật
-            tùy cấu hình máy chủ) và mặc định không dùng để huấn luyện OCR.
+            gia đình; nội dung trang sách tải lên được rà soát chính tả và an
+            toàn trẻ em tự động, và mặc định không dùng để cải thiện nhận diện
+            chữ.
           </p>
         </div>
+
+        <OcrServiceStatusBanner
+          isChecking={ocrWorker.isChecking}
+          justRecovered={ocrWorker.justRecovered}
+          onDismissRecovered={ocrWorker.dismissRecoveredNotice}
+          onRecheck={() => void ocrWorker.recheckNow()}
+          queuedCount={
+            pendingOcrCount > 0 ? pendingOcrCount : ocrWorker.queueDepth
+          }
+          status={ocrWorker.status}
+          testId="private-book-worker-offline-notice"
+          variant="parent"
+        />
 
         <div className="grid gap-4 md:grid-cols-2">
           <label className="flex flex-col gap-1.5 text-label font-semibold text-ink">
@@ -1496,16 +1531,6 @@ function ParentPrivateBookManagerContent({
           />
         </label>
 
-        {ocrWorkerOffline ? (
-          <div
-            className="rounded-control border border-amber-300 bg-amber-50/80 px-3.5 py-2.5 text-xs font-medium text-amber-950"
-            data-testid="private-book-worker-offline-notice"
-            role="status"
-          >
-            {t("privateManager.workerOfflineUploadNotice")}
-          </div>
-        ) : null}
-
         <div className="flex flex-wrap items-center gap-3">
           <Button
             className="sm:w-auto"
@@ -1516,7 +1541,9 @@ function ParentPrivateBookManagerContent({
             <FileUp aria-hidden="true" className="size-4" />
             {uploading
               ? t("privateManager.uploadingButton")
-              : t("privateManager.uploadButton")}
+              : ocrWorker.status === "unavailable"
+                ? t("privateManager.uploadOfflineQueueButton")
+                : t("privateManager.uploadButton")}
           </Button>
           {hasCheckingSubmission ? (
             ocrWorkerOffline && pendingOcrCount > 0 ? (
@@ -1776,14 +1803,6 @@ function ParentPrivateBookManagerContent({
                             page: `${sub.source_page_number}/${sub.batch_total_pages}`,
                           })}
                         </p>
-                        <p className="text-[11px] font-mono text-muted">
-                          {t("privateManager.versionBadge", {
-                            version: sub.submission_version,
-                          })}
-                          {sub.candidate_hash
-                            ? ` · #${sub.candidate_hash.slice(0, 8)}`
-                            : ""}
-                        </p>
                       </div>
 
                       {/* Details & Pipeline Stages */}
@@ -1847,9 +1866,6 @@ function ParentPrivateBookManagerContent({
                                 : STAGE_LABEL_KEYS[sub.ocr_status]
                                   ? t(STAGE_LABEL_KEYS[sub.ocr_status])
                                   : sub.ocr_status}
-                              {sub.ocr_error_code
-                                ? ` (${sub.ocr_error_code})`
-                                : ""}
                             </p>
                             {ocrHint ? (
                               <p className="mt-1 text-[11px] font-medium text-rose-800">
@@ -1862,9 +1878,11 @@ function ParentPrivateBookManagerContent({
                               {t("privateManager.stepProofreadTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABEL_KEYS[sub.proofread_status]
-                                ? t(STAGE_LABEL_KEYS[sub.proofread_status])
-                                : sub.proofread_status}
+                              {sub.proofread_status === "PENDING"
+                                ? t(STAGE_LABEL_KEYS.PENDING_POST_OCR)
+                                : STAGE_LABEL_KEYS[sub.proofread_status]
+                                  ? t(STAGE_LABEL_KEYS[sub.proofread_status])
+                                  : sub.proofread_status}
                               {sub.proofread_suggestions.length > 0
                                 ? t(
                                     "privateManager.proofreadSuggestionsSuffix",
@@ -1872,9 +1890,6 @@ function ParentPrivateBookManagerContent({
                                       count: sub.proofread_suggestions.length,
                                     },
                                   )
-                                : ""}
-                              {sub.proofread_error_code
-                                ? ` (${sub.proofread_error_code})`
                                 : ""}
                             </p>
                             {proofreadHint ? (
@@ -1888,16 +1903,15 @@ function ParentPrivateBookManagerContent({
                               {t("privateManager.stepSafetyTitle")}
                             </p>
                             <p className="mt-0.5 text-muted">
-                              {STAGE_LABEL_KEYS[sub.tool_check_status]
-                                ? t(STAGE_LABEL_KEYS[sub.tool_check_status])
-                                : sub.tool_check_status}
+                              {sub.tool_check_status === "PENDING"
+                                ? t(STAGE_LABEL_KEYS.PENDING_POST_OCR)
+                                : STAGE_LABEL_KEYS[sub.tool_check_status]
+                                  ? t(STAGE_LABEL_KEYS[sub.tool_check_status])
+                                  : sub.tool_check_status}
                               {sub.tool_check_findings_count > 0
                                 ? t("privateManager.safetyFindingsSuffix", {
                                     count: sub.tool_check_findings_count,
                                   })
-                                : ""}
-                              {sub.tool_check_error_code
-                                ? ` (${sub.tool_check_error_code})`
                                 : ""}
                             </p>
                             {toolCheckHint ? (
@@ -1919,7 +1933,12 @@ function ParentPrivateBookManagerContent({
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
                         {sub.tool_check_parent_notice ||
                         sub.tool_check_findings_count > 0 ? (
-                          <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                          <div
+                            className={`rounded-control border p-3 text-xs ${resolveNoticeBoxStyle(
+                              sub.workflow_status,
+                              sub.tool_check_findings_count,
+                            )}`}
+                          >
                             <p className="flex items-center gap-1.5 font-bold">
                               <AlertTriangle
                                 aria-hidden="true"
@@ -1929,7 +1948,11 @@ function ParentPrivateBookManagerContent({
                                 ? t("privateManager.toolCheckFlaggedNotice", {
                                     count: sub.tool_check_findings_count,
                                   })
-                                : t("privateManager.toolCheckAdminNotice")}
+                                : t(
+                                    resolveNoticeHeadingKey(
+                                      sub.workflow_status,
+                                    ),
+                                  )}
                             </p>
                             {sub.tool_check_parent_notice ? (
                               <p className="mt-1">
@@ -2128,9 +2151,7 @@ function ParentPrivateBookManagerContent({
                         {isReviewFormOpen ? (
                           <div className="rounded-control border border-amber-400 bg-amber-50/70 p-3">
                             <p className="text-xs font-bold text-amber-950">
-                              {t("privateManager.submitAdminTitle", {
-                                version: sub.submission_version,
-                              })}
+                              {t("privateManager.submitAdminTitle")}
                             </p>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <label className="flex flex-col gap-1 text-xs font-semibold text-ink">

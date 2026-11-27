@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, UploadCloud } from "lucide-react";
+import { Clock3, RefreshCw, UploadCloud } from "lucide-react";
 import {
   useEffect,
   useRef,
@@ -11,9 +11,14 @@ import {
 
 import { AdminBadge } from "@/components/admin/admin-ui";
 import { Button } from "@/components/common/button";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import {
+  useOcrWorkerStatus,
+  type UseOcrWorkerStatusResult,
+} from "@/hooks/use-ocr-worker-status";
 import {
   emptyAdminBookUploadSession,
   getAdminBookUploadSession,
@@ -23,7 +28,6 @@ import {
   subscribeAdminBookUploadSession,
 } from "@/lib/admin/admin-book-upload-session";
 import type { TranslateFn } from "@/lib/i18n/types";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   AdminPageUploadInputUI,
   AdminPageUploadProgressUI,
@@ -34,6 +38,7 @@ interface AdminPageUploaderProps {
   bookId: string;
   collapsed?: boolean;
   onUploaded: () => void;
+  ocrWorkerStatus?: UseOcrWorkerStatusResult;
 }
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
@@ -166,16 +171,13 @@ export function AdminPageUploader({
   bookId,
   collapsed = false,
   onUploaded,
+  ocrWorkerStatus,
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
   const t = useTranslations("admin");
   const { formatNumber } = useI18n();
   const [files, setFiles] = useState<File[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
-  const [workerStatus, setWorkerStatus] = useState<
-    "checking" | "ready" | "offline" | "unreachable"
-  >("checking");
-  const [healthNonce, setHealthNonce] = useState(0);
   const session = useSyncExternalStore(
     (onChange) => subscribeAdminBookUploadSession(bookId, onChange),
     () => getAdminBookUploadSession(bookId),
@@ -186,49 +188,10 @@ export function AdminPageUploader({
   const shouldRender =
     !collapsed || session.busy || session.progress.length > 0;
 
-  useEffect(() => {
-    if (!shouldRender) return;
-    let active = true;
-    const controller = new AbortController();
-    const timer = globalThis.setTimeout(() => controller.abort(), 10_000);
-    async function probeOcrWorker() {
-      try {
-        const res = await fetch(`${getApiBaseUrl()}/health`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-          cache: "no-store",
-          signal: controller.signal,
-        });
-        if (!active) return;
-        if (!res.ok) {
-          setWorkerStatus("unreachable");
-          return;
-        }
-        const body = (await res.json()) as {
-          ocr?: { ready?: boolean; probe_degraded?: boolean };
-        };
-        if (!active) return;
-        if (body?.ocr?.probe_degraded) {
-          setWorkerStatus("unreachable");
-        } else if (body?.ocr?.ready === false) {
-          setWorkerStatus("offline");
-        } else {
-          setWorkerStatus("ready");
-        }
-      } catch {
-        if (!active) return;
-        setWorkerStatus("unreachable");
-      } finally {
-        globalThis.clearTimeout(timer);
-      }
-    }
-    void probeOcrWorker();
-    return () => {
-      active = false;
-      globalThis.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [healthNonce, shouldRender]);
+  const ownWorkerStatus = useOcrWorkerStatus({
+    enabled: !ocrWorkerStatus && shouldRender,
+  });
+  const workerStatusState = ocrWorkerStatus ?? ownWorkerStatus;
 
   useEffect(() => {
     if (
@@ -380,57 +343,47 @@ export function AdminPageUploader({
         </p>
       </div>
 
-      {workerStatus === "offline" || workerStatus === "unreachable" ? (
-        <div
-          className="flex flex-col gap-2"
-          data-testid="admin-ocr-worker-offline-banner"
-        >
-          <StatusMessage
-            title={
-              workerStatus === "offline"
-                ? t(
-                    "books.uploader.workerOfflineTitle",
-                    undefined,
-                    "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
-                  )
-                : t(
-                    "books.uploader.workerUnreachableTitle",
-                    undefined,
-                    "Chưa kiểm tra được trạng thái dịch vụ OCR",
-                  )
-            }
-            tone="warning"
-          >
-            {workerStatus === "offline"
+      {!ocrWorkerStatus ? (
+        <OcrServiceStatusBanner
+          body={
+            workerStatusState.status === "unreachable"
               ? t(
+                  "books.uploader.workerUnreachableBody",
+                  undefined,
+                  "Hệ thống đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng xử lý.",
+                )
+              : t(
                   "books.uploader.workerOfflineBody",
                   undefined,
                   "Bạn vẫn có thể tải ảnh hoặc PDF/DOCX ngay bây giờ: hệ thống sẽ xếp hàng an toàn và tự động chạy OCR khi dịch vụ xử lý OCR hoạt động.",
                 )
-              : t(
-                  "books.uploader.workerUnreachableBody",
+          }
+          isChecking={workerStatusState.isChecking}
+          justRecovered={workerStatusState.justRecovered}
+          onDismissRecovered={workerStatusState.dismissRecoveredNotice}
+          onRecheck={() => void workerStatusState.recheckNow()}
+          queuedCount={workerStatusState.queueDepth}
+          recheckLabel={t(
+            "books.uploader.recheckWorkerBtn",
+            undefined,
+            "Kiểm tra lại kết nối OCR",
+          )}
+          status={workerStatusState.status}
+          title={
+            workerStatusState.status === "unreachable"
+              ? t(
+                  "books.uploader.workerUnreachableTitle",
                   undefined,
-                  "Backend đang khởi động hoặc mạng chậm. Bạn vẫn có thể bấm Kiểm tra lại hoặc tải lên để xếp hàng OCR.",
-                )}
-          </StatusMessage>
-          <Button
-            className="self-start"
-            onClick={() => {
-              setWorkerStatus("checking");
-              setHealthNonce((n) => n + 1);
-            }}
-            size="admin"
-            type="button"
-            variant="outline"
-          >
-            <RefreshCw aria-hidden="true" className="size-3.5 shrink-0" />
-            {t(
-              "books.uploader.recheckWorkerBtn",
-              undefined,
-              "Kiểm tra lại kết nối OCR",
-            )}
-          </Button>
-        </div>
+                  "Chưa kiểm tra được trạng thái dịch vụ OCR",
+                )
+              : t(
+                  "books.uploader.workerOfflineTitle",
+                  undefined,
+                  "Dịch vụ xử lý OCR hiện đang ngoại tuyến",
+                )
+          }
+          variant="admin"
+        />
       ) : null}
 
       {formError || session.error ? (
@@ -473,53 +426,86 @@ export function AdminPageUploader({
             variant="primary"
           >
             <UploadCloud aria-hidden="true" className="size-4 shrink-0" />
-            {t("books.uploader.submit")}
+            {workerStatusState.status === "unavailable"
+              ? t(
+                  "books.uploader.submitOffline",
+                  undefined,
+                  "Tải lên & đưa vào hàng chờ OCR",
+                )
+              : t("books.uploader.submit")}
           </Button>
         </div>
       </form>
 
       {session.progress.length ? (
         <div className="space-y-2" aria-live="polite">
-          {session.progress.map((item) => (
-            <div
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2"
-              key={item.client_id}
-            >
-              <span className="min-w-0 flex-1 break-all text-xs font-semibold text-ink">
-                {item.file_name ?? item.client_id}
-              </span>
-              <div className="flex items-center gap-2">
-                <AdminBadge
-                  tone={
-                    item.status === "FAILED"
-                      ? "danger"
-                      : item.status === "UPLOADING"
-                        ? "info"
-                        : item.status === "QUEUED"
-                          ? "neutral"
-                          : "success"
-                  }
-                >
-                  {item.status === "FAILED"
-                    ? t("books.uploader.statusFailed")
-                    : item.status === "UPLOADING"
-                      ? t("books.uploader.statusUploading")
-                      : item.status === "QUEUED"
-                        ? t("books.uploader.statusPending")
-                        : (item.summary_message ??
-                          t("books.uploader.statusSavedFallback"))}
-                </AdminBadge>
-                <span className="text-xs font-bold text-muted tabular-nums">
-                  {formatNumber(item.progress_percent)}%
+          {session.progress.map((item) => {
+            const isQueuedOffline =
+              item.status === "QUEUED_OFFLINE" || item.queued_offline === true;
+            return (
+              <div
+                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2"
+                key={item.client_id}
+              >
+                <span className="min-w-0 flex-1 break-all text-xs font-semibold text-ink">
+                  {item.file_name ?? item.client_id}
                 </span>
+                <div className="flex items-center gap-2">
+                  <AdminBadge
+                    icon={
+                      isQueuedOffline ? (
+                        <Clock3
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0"
+                        />
+                      ) : undefined
+                    }
+                    tone={
+                      item.status === "FAILED"
+                        ? "danger"
+                        : isQueuedOffline
+                          ? "warning"
+                          : item.status === "UPLOADING"
+                            ? "info"
+                            : item.status === "QUEUED"
+                              ? "neutral"
+                              : "success"
+                    }
+                  >
+                    {item.status === "FAILED"
+                      ? t("books.uploader.statusFailed")
+                      : isQueuedOffline
+                        ? t(
+                            "books.uploader.statusQueuedOffline",
+                            undefined,
+                            "Đã đưa vào hàng chờ OCR",
+                          )
+                        : item.status === "UPLOADING"
+                          ? t("books.uploader.statusUploading")
+                          : item.status === "QUEUED"
+                            ? t("books.uploader.statusPending")
+                            : (item.summary_message ??
+                              t("books.uploader.statusSavedFallback"))}
+                  </AdminBadge>
+                  {!isQueuedOffline ? (
+                    <span className="text-xs font-bold text-muted tabular-nums">
+                      {formatNumber(item.progress_percent)}%
+                    </span>
+                  ) : null}
+                </div>
+                {isQueuedOffline && item.summary_message ? (
+                  <span className="basis-full text-xs text-amber-900">
+                    {item.summary_message}
+                  </span>
+                ) : null}
+                {item.status === "FAILED" && item.error_message ? (
+                  <span className="basis-full text-xs text-danger">
+                    {item.error_message}
+                  </span>
+                ) : null}
               </div>
-              {item.status === "FAILED" && item.error_message ? (
-                <span className="basis-full text-xs text-danger">
-                  {item.error_message}
-                </span>
-              ) : null}
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : null}
 

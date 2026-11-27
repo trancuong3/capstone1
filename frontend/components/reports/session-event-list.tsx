@@ -80,8 +80,7 @@ export function SessionEventList({ events }: SessionEventListProps) {
                     >
                       {typeof targetWord === "string"
                         ? targetWord
-                        : (event.page_revision_word_id ??
-                          t("sessions.detail.notRecorded"))}
+                        : t("sessions.detail.notRecorded")}
                     </strong>
                     {typeof originalStatus === "string"
                       ? ` · ${
@@ -98,12 +97,6 @@ export function SessionEventList({ events }: SessionEventListProps) {
                       })}
                     </p>
                   ) : null}
-                  <p className="text-xs text-muted">
-                    {t("sessions.events.pageRevisionMeta", {
-                      pageId: event.page_id,
-                    })}
-                    <code className="break-all">{event.page_revision_id}</code>
-                  </p>
                 </li>
               );
             })}
@@ -153,8 +146,6 @@ export function SessionEventList({ events }: SessionEventListProps) {
                         ),
                       })}
                     </span>
-                    {t("sessions.events.versionSeparator")}
-                    <code className="break-all">{event.page_revision_id}</code>
                   </p>
                   <p className="text-xs font-semibold text-muted">
                     {countsAsError

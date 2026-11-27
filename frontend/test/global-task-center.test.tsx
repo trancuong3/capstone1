@@ -569,4 +569,55 @@ describe("Global AI Task Center", () => {
     expect(typeof svc.getCapabilities).toBe("function");
     vi.unstubAllGlobals();
   });
+
+  it("uses amber bg-amber-600 count pill on sidebar variant when all active tasks are WAITING_FOR_WORKER and shows offline banner even with 0 active tasks", async () => {
+    const waitingTask = makeTask({
+      id: "job-waiting-1",
+      status: "WAITING_FOR_WORKER",
+      status_label_vi: "Chờ máy xử lý AI kết nối lại",
+      stage_label_vi: "Đã lưu trong hàng chờ — Chờ máy chủ OCR bật lại",
+    });
+    const service = createMockService(
+      makeFeed([waitingTask], { worker_online: false }),
+    );
+
+    const { rerender } = render(
+      <AiTaskCenterProvider
+        actorId="parent-a"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+      </AiTaskCenterProvider>,
+    );
+
+    const sidebarBadge = await screen.findByTestId(
+      "global-task-center-sidebar-count",
+    );
+    expect(sidebarBadge).toHaveTextContent("1");
+    expect(sidebarBadge.className).toContain("bg-amber-600");
+    expect(sidebarBadge.className).not.toContain("bg-primary");
+
+    // Now simulate 0 active tasks while worker_online === false -> drawer STILL shows workerOfflineBanner
+    service.listTasks.mockResolvedValue(
+      makeFeed([], { active_count: 0, worker_online: false }),
+    );
+    rerender(
+      <AiTaskCenterProvider
+        actorId="parent-b"
+        actorRole="parent"
+        service={service}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    fireEvent.click(trigger);
+
+    const offlineBanner = await screen.findByTestId(
+      "global-task-center-worker-offline-banner",
+    );
+    expect(offlineBanner).toHaveTextContent(/Dịch vụ OCR hiện chưa sẵn sàng/i);
+  });
 });

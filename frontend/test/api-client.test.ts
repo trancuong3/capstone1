@@ -230,7 +230,7 @@ describe("real API client", () => {
       requestApi("/books/admin/viread-training/flow2/trigger", schema),
     ).rejects.toMatchObject({
       status: 507,
-      message: expect.stringContaining("Google Drive"),
+      message: expect.stringContaining("Không gian lưu trữ dữ liệu"),
     });
 
     fetchMock.mockResolvedValueOnce(

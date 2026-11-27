@@ -141,16 +141,8 @@ export function ParentOcrContributionCard({
 
       {state.enabled ? (
         <div className="flex flex-col gap-3 rounded-control border border-emerald-200 bg-emerald-50/60 p-4 text-xs text-emerald-950">
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-            <span>
-              <strong>{t("ocrContribution.noticeVersionLabel")}</strong>{" "}
-              {state.notice_version}
-            </span>
-            <span>
-              <strong>{t("ocrContribution.consentVersionLabel")}</strong> #
-              {state.consent_version}
-            </span>
-            {state.consented_at ? (
+          {state.consented_at ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
               <span>
                 <strong>{t("ocrContribution.enabledAtLabel")}</strong>{" "}
                 {formatDateTime(state.consented_at, {
@@ -158,8 +150,8 @@ export function ParentOcrContributionCard({
                   timeStyle: "short",
                 })}
               </span>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
           <div className="flex flex-wrap gap-3 font-semibold">
             <span>
               {t("ocrContribution.pendingVerificationCount", {

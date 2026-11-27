@@ -19,15 +19,15 @@ const DELTA_TONE_CLASSES: Record<MetricCardDelta["tone"], string> = {
 
 export function MetricCard({ metric, delta }: MetricCardProps) {
   return (
-    <article className="report-metric flex h-full min-w-0 flex-col justify-between gap-2">
+    <article className="report-metric flex h-full min-w-0 flex-col justify-between gap-1">
       <div className="flex flex-wrap items-start justify-between gap-1.5">
-        <h2 className="text-xs font-bold leading-snug text-muted sm:text-sm">
+        <h2 className="text-xs font-bold leading-snug text-muted">
           {metric.label}
         </h2>
         {delta ? (
           <span
             className={cn(
-              "inline-flex shrink-0 items-center rounded-control px-1.5 py-0.5 text-[11px] font-bold tabular-nums sm:px-2 sm:text-xs",
+              "inline-flex shrink-0 items-center rounded-control px-1.5 py-0.5 text-[11px] font-bold tabular-nums",
               DELTA_TONE_CLASSES[delta.tone],
             )}
           >
@@ -39,15 +39,15 @@ export function MetricCard({ metric, delta }: MetricCardProps) {
         className={cn(
           "break-words leading-tight",
           metric.unavailable
-            ? "text-sm font-bold text-muted sm:text-base"
-            : "text-[22px] font-extrabold tracking-tight tabular-nums text-primary sm:text-[28px] lg:text-[32px]",
+            ? "text-sm font-bold text-muted"
+            : "text-xl font-extrabold tracking-tight tabular-nums text-primary sm:text-2xl",
         )}
         data-metric-value="true"
         data-unavailable={metric.unavailable || undefined}
       >
         {metric.value}
       </p>
-      <p className="text-xs leading-5 text-muted">{metric.hint}</p>
+      <p className="text-[11px] leading-4 text-muted">{metric.hint}</p>
     </article>
   );
 }

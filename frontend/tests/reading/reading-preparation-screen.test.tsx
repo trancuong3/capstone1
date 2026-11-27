@@ -161,7 +161,7 @@ describe("Shared reading preparation", () => {
       screen.getByText(new RegExp(childFixture.alias)),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Trang OCR xác nhận: Trang 1 · Độ tin cậy 91%/),
+      screen.getByText(/Trang đã nhận diện: Trang 1 · Độ tin cậy 91%/),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Kiểm tra microphone" }),
@@ -266,7 +266,7 @@ describe("Shared reading preparation", () => {
     renderPreparation({ pageId: "15000000-0000-4000-8000-000000000099" });
     expect(
       await screen.findByText(
-        /Trang OCR không nằm trong danh sách trang hợp lệ/,
+        /Trang vừa nhận diện không nằm trong danh sách trang hợp lệ/,
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Bắt đầu đọc" })).toBeDisabled();

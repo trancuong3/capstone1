@@ -55,50 +55,50 @@ export function ReadingAssessmentSummary({
         embedded ? "rounded-control bg-canvas/55" : "rounded-card bg-white",
       )}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border px-4 py-3.5 sm:px-6">
-        <div>
-          <h3 className="text-lg font-extrabold text-ink">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2 sm:px-3.5">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h3 className="text-sm font-extrabold text-ink sm:text-base">
             {t("overview.firstPassSummary.heading")}
           </h3>
-          <p className="mt-0.5 text-sm text-muted">
+          <p className="text-xs text-muted">
             {t("overview.firstPassSummary.subtitle")}
           </p>
         </div>
         {scopeLabel ? (
-          <span className="rounded-control bg-canvas px-2.5 py-1 text-xs font-bold text-muted ring-1 ring-inset ring-border">
+          <span className="shrink-0 rounded-control bg-canvas px-2 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
             {scopeLabel}
           </span>
         ) : null}
       </div>
 
-      <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:divide-x lg:divide-y-0">
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+      <div className="grid divide-y divide-border lg:grid-cols-[minmax(0,4.5fr)_minmax(0,7.5fr)] lg:divide-x lg:divide-y-0">
+        <div className="flex flex-col justify-between gap-2 p-2.5 sm:p-3">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               {t("overview.firstPassSummary.firstPassTitle")}
             </h4>
-            <dl className="mt-3 grid grid-cols-2 gap-4">
-              <div>
-                <dt className="text-sm text-muted">
+            <dl className="mt-1.5 grid grid-cols-2 gap-2">
+              <div className="flex flex-col justify-between rounded-control border border-border/70 bg-canvas/50 px-2.5 py-1.5">
+                <dt className="text-xs font-semibold leading-snug text-muted">
                   {t("overview.firstPassSummary.firstPassCorrect")}
                 </dt>
-                <dd className="mt-1 text-2xl font-extrabold tabular-nums text-success-ink">
+                <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-success-ink sm:text-xl">
                   {formatNumber(assessment.first_pass_correct)}
                 </dd>
               </div>
-              <div>
-                <dt className="text-sm text-muted">
+              <div className="flex flex-col justify-between rounded-control border border-border/70 bg-canvas/50 px-2.5 py-1.5">
+                <dt className="text-xs font-semibold leading-snug text-muted">
                   {t("overview.firstPassSummary.firstPassNeedsPractice")}
                 </dt>
-                <dd className="mt-1 text-2xl font-extrabold tabular-nums text-ink">
+                <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink sm:text-xl">
                   {formatNumber(assessment.first_pass_incorrect)}
                 </dd>
               </div>
             </dl>
           </div>
           {firstPassCorrectPct !== null ? (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs font-semibold text-muted">
+            <div className="space-y-1">
+              <div className="flex items-center justify-between gap-2 text-xs font-semibold text-muted">
                 <span>{t("overview.firstPassSummary.firstPassAccuracy")}</span>
                 <span className="tabular-nums text-ink">
                   {firstPassCorrectPct}%{" "}
@@ -110,7 +110,7 @@ export function ReadingAssessmentSummary({
               </div>
               <div
                 aria-hidden="true"
-                className="flex h-2 w-full overflow-hidden rounded-full bg-danger-surface"
+                className="flex h-1.5 w-full overflow-hidden rounded-full bg-danger-surface"
               >
                 <div
                   className="h-full bg-primary"
@@ -121,17 +121,22 @@ export function ReadingAssessmentSummary({
           ) : null}
         </div>
 
-        <div className="flex flex-col justify-between gap-4 p-4 sm:p-5">
+        <div className="flex flex-col justify-between gap-2 p-2.5 sm:p-3">
           <div>
             <h4 className="text-xs font-extrabold tracking-wide text-primary">
               {t("overview.firstPassSummary.retrySectionTitle")}
             </h4>
-            <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            <dl className="mt-1.5 grid grid-cols-2 gap-2 sm:grid-cols-4">
               {retryMetrics.map(({ label, value, valueClass }) => (
-                <div key={label}>
-                  <dt className="text-xs leading-snug text-muted">{label}</dt>
+                <div
+                  className="flex flex-col justify-between rounded-control border border-border/70 bg-canvas/50 px-2.5 py-1.5"
+                  key={label}
+                >
+                  <dt className="text-[11px] font-semibold leading-snug text-muted">
+                    {label}
+                  </dt>
                   <dd
-                    className={`mt-1 text-xl font-extrabold tabular-nums ${valueClass}`}
+                    className={`mt-0.5 text-lg font-extrabold tabular-nums ${valueClass}`}
                   >
                     {formatNumber(value)}
                   </dd>
@@ -140,16 +145,16 @@ export function ReadingAssessmentSummary({
             </dl>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-canvas px-3.5 py-2.5 text-sm ring-1 ring-inset ring-border/80">
-            <div className="flex items-baseline gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-control bg-canvas px-2.5 py-1 text-xs ring-1 ring-inset ring-border/80">
+            <div className="flex items-baseline gap-1.5">
               <span className="font-semibold text-muted">
                 {t("overview.firstPassSummary.uncertainLabel")}
               </span>
-              <span className="text-base font-extrabold tabular-nums text-ink">
+              <span className="text-sm font-extrabold tabular-nums text-ink">
                 {formatNumber(assessment.recognition_uncertain)}
               </span>
             </div>
-            <span className="text-xs text-muted">
+            <span className="text-[11px] text-muted">
               {t("overview.firstPassSummary.uncertainNote")}
             </span>
           </div>

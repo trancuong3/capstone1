@@ -428,7 +428,7 @@ class ChildSafetyOrchestrator:
             ])
         if config.groq_enabled:
             self.providers.append(SafetyProvider("groq_qwen", config.groq_model, "groq"))
-        if config.local_enabled or not self.providers:
+        if config.local_enabled:
             self.providers.append(SafetyProvider("ollama_local", config.local.model, "ollama"))
 
     async def analyze(self, text: str) -> dict[str, Any]:
@@ -439,6 +439,8 @@ class ChildSafetyOrchestrator:
         normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
+        if not self.providers:
+            raise ChildSafetyError("NO_AI_PROVIDER_CONFIGURED", [])
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )

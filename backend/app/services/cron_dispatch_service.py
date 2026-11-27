@@ -142,6 +142,28 @@ async def _count_pending_book_quality_scans(now: datetime) -> int:
         return max(0, int(count or 0))
 
 
+async def _count_pending_smart_studio_jobs(now: datetime) -> int:
+    from app.models import SmartStudioJob
+
+    try:
+        async with AsyncSessionLocal() as session:
+            expired_running = and_(
+                SmartStudioJob.Status == "RUNNING",
+                or_(
+                    SmartStudioJob.LeaseExpiresAt.is_(None),
+                    SmartStudioJob.LeaseExpiresAt <= now,
+                ),
+            )
+            count = await session.scalar(
+                select(func.count(SmartStudioJob.Id)).where(
+                    or_(SmartStudioJob.Status == "QUEUED", expired_running)
+                )
+            )
+            return max(0, int(count or 0))
+    except Exception:
+        return 0
+
+
 async def _sweep_ocr_leases_and_heartbeats(*, max_age_hours: int) -> tuple[int, int, int]:
     """Reap expired OCR inference leases and prune stale worker heartbeats if supported."""
     requeued = 0
@@ -775,6 +797,25 @@ async def run_scheduled_cron_dispatch(
                 )
                 logger.warning(
                     "cron_ocr_training_maintenance_skipped error=%s",
+                    type(exc).__name__,
+                )
+
+        # 11. Non-blocking Smart Studio worker wake/drain for queued or stale-lease jobs
+        budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
+        if budget > 0.25:
+            try:
+                from app.services.global_tasks_service import notify_smart_studio_worker
+
+                pending_studio = await asyncio.wait_for(
+                    _count_pending_smart_studio_jobs(current),
+                    timeout=min(budget, 2.0),
+                )
+                if pending_studio > 0:
+                    notify_smart_studio_worker()
+            except Exception as exc:
+                sweep_errors.append("smart_studio")
+                logger.warning(
+                    "cron_smart_studio_notify_skipped error=%s",
                     type(exc).__name__,
                 )
 

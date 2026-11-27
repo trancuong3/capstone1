@@ -264,7 +264,7 @@ describe("LoginForm", () => {
       screen.getByRole("button", { name: "Tiếp tục với Facebook" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Không thể bắt đầu đăng nhập xã hội",
+      "Không thể bắt đầu đăng nhập lúc này. Ba mẹ vui lòng thử lại sau.",
     );
     expect(document.cookie).not.toContain("viread_auth_next=");
   });

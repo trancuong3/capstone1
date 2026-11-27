@@ -403,7 +403,7 @@ function ProgressReportContent({
   const visibleDifficultWords = report?.difficult_words
     ? showAllDifficultWords
       ? report.difficult_words
-      : report.difficult_words.slice(0, 8)
+      : report.difficult_words.slice(0, 6)
     : [];
   const localizedMetrics = report
     ? mapReportMetrics(report).map((metric) => {
@@ -476,7 +476,7 @@ function ProgressReportContent({
     : [];
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-2.5 pb-2">
       <ReportPageHeader
         eyebrow={t("overview.eyebrow", {
           alias: child.alias,
@@ -486,8 +486,9 @@ function ProgressReportContent({
         description={t("overview.childSubtitle")}
         action={
           <ButtonLink
-            className="sm:w-auto"
+            className="h-10 min-h-10! py-0! sm:w-auto"
             href={`/sessions?childId=${encodeURIComponent(child.id)}`}
+            size="admin"
             variant="secondary"
           >
             <History aria-hidden="true" className="size-4" />
@@ -524,8 +525,8 @@ function ProgressReportContent({
       ) : null}
 
       {state.reportStatus === "unavailable" ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-2xl font-extrabold text-ink">
+        <section className="flex flex-col gap-3">
+          <h2 className="text-xl font-extrabold text-ink">
             {t("overview.pendingReportTitle")}
           </h2>
           <StatusMessage>{t("overview.pendingReportDesc")}</StatusMessage>
@@ -545,8 +546,8 @@ function ProgressReportContent({
         : null}
 
       {report ? (
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm text-muted">
+        <div className="flex flex-col gap-2.5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 px-0.5 text-xs text-muted">
             <p className="font-semibold text-ink">
               {t("overview.periodBannerRange", {
                 start: report.period_start,
@@ -608,15 +609,15 @@ function ProgressReportContent({
             ))}
           </div>
 
-          <div className="grid items-stretch gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+          <div className="grid items-stretch gap-2.5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
             <ProgressChart report={report} />
 
             <section
               aria-labelledby="comparison-title"
-              className="rounded-card border border-border bg-white p-5 sm:p-6"
+              className="rounded-card border border-border bg-white p-3 sm:p-3.5"
             >
               <h2
-                className="text-xl font-extrabold text-ink"
+                className="text-base font-extrabold text-ink"
                 id="comparison-title"
               >
                 {t("overview.comparisonTitle")}
@@ -625,10 +626,10 @@ function ProgressReportContent({
               report.previous_period &&
               report.trend_deltas ? (
                 <>
-                  <p className="mt-1 text-sm text-muted">
+                  <p className="mt-0.5 text-xs text-muted">
                     {t("overview.comparisonSubtitle")}
                   </p>
-                  <dl className="mt-4 divide-y divide-border">
+                  <dl className="mt-2.5 divide-y divide-border">
                     {[
                       {
                         label: t("overview.deltaCompletedSessionsLabel"),
@@ -650,13 +651,13 @@ function ProgressReportContent({
                       },
                     ].map((row) => (
                       <div
-                        className="flex items-baseline justify-between gap-4 py-3 first:pt-0 last:pb-0"
+                        className="flex items-baseline justify-between gap-4 py-1.5 first:pt-0 last:pb-0"
                         key={row.label}
                       >
-                        <dt className="text-sm font-semibold text-muted">
+                        <dt className="text-xs font-semibold text-muted sm:text-sm">
                           {row.label}
                         </dt>
-                        <dd className="text-base font-extrabold tabular-nums text-ink">
+                        <dd className="text-sm font-extrabold tabular-nums text-ink">
                           {typeof row.value !== "number"
                             ? t("overview.notEnoughData")
                             : t(row.key, {
@@ -669,7 +670,7 @@ function ProgressReportContent({
                 </>
               ) : (
                 <StatusMessage
-                  className="mt-4"
+                  className="mt-2.5"
                   title={t("overview.comparisonUnavailableTitle")}
                 >
                   {t("overview.comparisonUnavailableDesc")}
@@ -683,43 +684,48 @@ function ProgressReportContent({
             scopeLabel={`${report.period_start} → ${report.period_end}`}
           />
 
-          <section className="rounded-card border border-border bg-white p-5 sm:p-6">
-            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-              <div>
-                <h2 className="text-xl font-extrabold text-ink">
-                  {t("overview.difficultWordsTitle")}
-                </h2>
-                <p className="mt-0.5 text-sm text-muted">
+          <section className="rounded-card border border-border bg-white p-3 sm:p-3.5">
+            <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <h2 className="text-base font-extrabold text-ink">
+                    {t("overview.difficultWordsTitle")}
+                  </h2>
+                  {report.difficult_words?.length ? (
+                    <span className="text-xs font-bold text-muted">
+                      {t("overview.difficultWordsTotalSummary", {
+                        count: report.difficult_words.length,
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-0.5 text-xs text-muted">
                   {t("overview.difficultWordsSubtitle")}
                 </p>
               </div>
               <ButtonLink
-                className="sm:w-auto"
+                className="h-9 min-h-9! shrink-0 py-0! text-xs! sm:w-auto"
                 href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+                size="admin"
                 variant="secondary"
               >
                 {t("overview.openDifficultWordsAction")}
                 <ArrowRight
                   aria-hidden="true"
-                  className="viread-rtl-flip size-4"
+                  className="viread-rtl-flip size-3.5"
                 />
               </ButtonLink>
             </div>
 
             {report.availability.difficult_words !== "available" ? (
-              <StatusMessage className="mt-4">
+              <StatusMessage className="mt-2.5">
                 {t("overview.difficultWordsPartialNotice")}
               </StatusMessage>
             ) : null}
 
             {report.difficult_words?.length ? (
               <>
-                <p className="mt-3 text-xs font-bold text-muted">
-                  {t("overview.difficultWordsTotalSummary", {
-                    count: report.difficult_words.length,
-                  })}
-                </p>
-                <ul className="mt-3 divide-y divide-border rounded-control border border-border">
+                <ul className="mt-2.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                   {visibleDifficultWords.map((word, index) => {
                     const statusStyle = word.practice_status
                       ? PRACTICE_STATUS_KEYS[word.practice_status]
@@ -756,32 +762,32 @@ function ProgressReportContent({
 
                     return (
                       <li
-                        className="flex flex-wrap items-center justify-between gap-2 px-4 py-3"
+                        className="flex flex-wrap items-center justify-between gap-1.5 rounded-control border border-border bg-canvas/35 px-2.5 py-1.5"
                         key={`${word.normalized_word}-${index}`}
                       >
                         <div className="min-w-0">
                           <span
-                            className="viread-learning-content text-base font-extrabold text-ink"
+                            className="viread-learning-content text-sm font-extrabold text-ink"
                             dir="ltr"
                             lang="vi"
                           >
                             {word.display_text}
                           </span>
                           {noteParts.length > 0 ? (
-                            <span className="ms-2 text-xs text-muted">
+                            <span className="ms-1.5 text-[11px] text-muted">
                               {noteParts.join(" · ")}
                             </span>
                           ) : null}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-bold tabular-nums text-muted">
+                        <div className="flex shrink-0 items-center gap-1">
+                          <span className="text-[11px] font-bold tabular-nums text-muted">
                             {t("overview.difficultWordScore", {
                               score: word.difficulty_score,
                             })}
                           </span>
                           {statusStyle ? (
                             <span
-                              className={`rounded-control px-2 py-0.5 text-xs font-bold ${statusStyle.className}`}
+                              className={`rounded-control px-1.5 py-0.5 text-[10px] font-bold ${statusStyle.className}`}
                             >
                               {t(statusStyle.key)}
                             </span>
@@ -791,13 +797,14 @@ function ProgressReportContent({
                     );
                   })}
                 </ul>
-                {report.difficult_words.length > 8 ? (
+                {report.difficult_words.length > 6 ? (
                   <Button
-                    className="mt-3"
+                    className="mt-2 h-8 min-h-8! py-0! text-xs!"
                     fullWidth={false}
                     onClick={() =>
                       setShowAllDifficultWords((current) => !current)
                     }
+                    size="admin"
                     type="button"
                     variant="quiet"
                   >
@@ -810,46 +817,50 @@ function ProgressReportContent({
                 ) : null}
               </>
             ) : report.availability.difficult_words === "available" ? (
-              <p className="mt-4 text-sm text-muted">
+              <p className="mt-2.5 text-sm text-muted">
                 {t("overview.noDifficultWordsInPeriod")}
               </p>
             ) : null}
 
-            <p className="mt-3 text-xs text-muted">
+            <p className="mt-2 text-[11px] text-muted">
               {t("overview.difficultWordsWindowNote")}
             </p>
           </section>
 
           {report.legacy ? (
-            <section className="rounded-card border border-border bg-cream/60 p-5 sm:p-6">
-              <h2 className="text-lg font-extrabold text-ink">
-                {t("overview.legacyMetricsTitle")}
-              </h2>
-              <p className="mt-1 text-sm text-muted">
-                {t("overview.legacyMetricsSubtitle")}
-              </p>
-              <dl className="mt-3 grid gap-3 sm:grid-cols-2">
-                {report.legacy.total_books !== null ? (
-                  <div>
-                    <dt className="text-xs font-semibold text-muted">
-                      {t("overview.legacyTotalBooks")}
-                    </dt>
-                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
-                      {report.legacy.total_books}
-                    </dd>
-                  </div>
-                ) : null}
-                {report.legacy.avg_fluency !== null ? (
-                  <div>
-                    <dt className="text-xs font-semibold text-muted">
-                      {t("overview.legacyAvgFluency")}
-                    </dt>
-                    <dd className="mt-0.5 text-lg font-extrabold tabular-nums text-ink">
-                      {report.legacy.avg_fluency}
-                    </dd>
-                  </div>
-                ) : null}
-              </dl>
+            <section className="rounded-card border border-border bg-cream/60 p-4 sm:p-5">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h2 className="text-base font-extrabold text-ink">
+                    {t("overview.legacyMetricsTitle")}
+                  </h2>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {t("overview.legacyMetricsSubtitle")}
+                  </p>
+                </div>
+                <dl className="flex flex-wrap gap-5">
+                  {report.legacy.total_books !== null ? (
+                    <div>
+                      <dt className="text-xs font-semibold text-muted">
+                        {t("overview.legacyTotalBooks")}
+                      </dt>
+                      <dd className="text-base font-extrabold tabular-nums text-ink">
+                        {report.legacy.total_books}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {report.legacy.avg_fluency !== null ? (
+                    <div>
+                      <dt className="text-xs font-semibold text-muted">
+                        {t("overview.legacyAvgFluency")}
+                      </dt>
+                      <dd className="text-base font-extrabold tabular-nums text-ink">
+                        {report.legacy.avg_fluency}
+                      </dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </div>
             </section>
           ) : null}
         </div>

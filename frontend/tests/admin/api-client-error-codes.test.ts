@@ -32,11 +32,11 @@ describe("api-client structured backend error code translation", () => {
 
   it("translates allowlisted detail.code payloads into user-facing Vietnamese errors", async () => {
     const expectedCases = [
-      ["AI_AUTO_VERIFY_DISABLED", "tự động xác minh AI"],
-      ["IMAGE_SAFETY_UNASSESSED", "xác nhận an toàn hình ảnh"],
+      ["AI_AUTO_VERIFY_DISABLED", "người kiểm duyệt trực tiếp rà soát"],
+      ["IMAGE_SAFETY_UNASSESSED", "xác nhận an toàn"],
       ["RIGHTS_EVIDENCE_REQUIRED", "bằng chứng quyền sử dụng"],
-      ["CANDIDATE_HASH_MISMATCH", "khớp hash"],
-      ["TEXT_SAFETY_HIGH_RISK_BLOCKED", "HIGH hoặc NOT_RECOMMENDED"],
+      ["CANDIDATE_HASH_MISMATCH", "kiểm tra an toàn cho nội dung mới"],
+      ["TEXT_SAFETY_HIGH_RISK_BLOCKED", "không phù hợp với trẻ em"],
       ["RIGHTS_CONCERN_BLOCKED", "nghi ngại bản quyền"],
     ] as const;
 

@@ -1,8 +1,9 @@
 "use client";
 
-import { Send, ShieldCheck } from "lucide-react";
+import { Bot, Send, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
+import { openViReadAssistant } from "@/components/assistant/viread-assistant-widget";
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { FormPage } from "@/components/common/form-page";
@@ -339,13 +340,23 @@ export function HelpSupportScreen() {
           >
             <span className="break-all">{VIREAD_SUPPORT_EMAIL}</span>
           </a>
-          <Button
-            className="mt-2 sm:max-w-72"
-            variant="secondary"
-            onClick={() => setShowFeedbackEditor(true)}
-          >
-            {t("parent.support.openFeedbackButton")}
-          </Button>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              className="sm:max-w-72"
+              variant="secondary"
+              onClick={() => setShowFeedbackEditor(true)}
+            >
+              {t("parent.support.openFeedbackButton")}
+            </Button>
+            <Button
+              className="sm:max-w-72"
+              variant="outline"
+              onClick={() => openViReadAssistant()}
+            >
+              <Bot aria-hidden="true" className="size-4" />
+              {t("common.assistant.openFromSupport")}
+            </Button>
+          </div>
         </Card>
       </section>
     </section>

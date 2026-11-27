@@ -182,11 +182,7 @@ export function ParentBookReportsScreen() {
                   </span>
                 </p>
               ) : null}
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3 text-xs text-muted">
-                <span className="break-all">
-                  {t("bookReports.reportIdPrefix")}
-                  <span className="font-mono">{item.id}</span>
-                </span>
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-border pt-3 text-xs text-muted">
                 <time dateTime={item.created_at}>
                   {formatDateTime(item.created_at, {
                     dateStyle: "medium",
@@ -194,12 +190,6 @@ export function ParentBookReportsScreen() {
                   })}
                 </time>
               </div>
-              {item.scan_run_id ? (
-                <p className="mt-2 break-all text-xs text-muted">
-                  {t("bookReports.wholeBookScanPrefix")}
-                  <span className="font-mono">{item.scan_run_id}</span>
-                </p>
-              ) : null}
               <div className="mt-3">
                 <Button
                   className="h-9 px-3 text-xs"

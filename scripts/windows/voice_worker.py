@@ -21,10 +21,12 @@ import hmac
 import io
 import json
 import logging
+import math
 import os
 import re
 import struct
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -201,7 +203,11 @@ TTS_CACHE_DIR = Path(
         "VIREAD_VOICE_TTS_CACHE_DIR", str(VOICE_RUNTIME_ROOT / "tts-cache")
     )
 )
-TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+except OSError:
+    TTS_CACHE_DIR = Path(tempfile.gettempdir()) / "viread-voice-tts-cache"
+    TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TTS_CACHE_MAX_BYTES = max(
     1024 * 1024,
     int(os.environ.get("VIREAD_VOICE_TTS_CACHE_MAX_BYTES", str(500 * 1024 * 1024))),
@@ -409,9 +415,75 @@ class PhonicsSynthesisRequest(BaseModel):
     audio_format: Literal["wav", "mp3", "ogg"] | None = None
 
 
+def _ensure_bpe_vocab(model_dir: Path) -> Path | None:
+    """Ensure `bpe.vocab` exists alongside `bpe.model` using SentencePiece when available."""
+    vocab_path = model_dir / "bpe.vocab"
+    try:
+        if vocab_path.is_file() and vocab_path.stat().st_size > 0:
+            return vocab_path
+    except OSError:
+        pass
+    bpe_model = model_dir / "bpe.model"
+    if not bpe_model.is_file():
+        return None
+    try:
+        import sentencepiece as spm  # type: ignore[import-not-found]
+    except ImportError:
+        return None
+    try:
+        sp = spm.SentencePieceProcessor()
+        sp.load(str(bpe_model))
+        lines = [
+            f"{sp.id_to_piece(i)}\t{sp.get_score(i)}\n"
+            for i in range(sp.get_piece_size())
+        ]
+        _atomic_write_bytes(vocab_path, "".join(lines).encode("utf-8"))
+        return vocab_path
+    except Exception as exc:
+        logger.warning("bpe_vocab_export_failed error_type=%s", type(exc).__name__)
+        return None
+
+
+def _parse_stt_hotwords(raw_keyterms: list[str] | str | None) -> list[str]:
+    if not raw_keyterms:
+        return []
+    candidates: list[str] = []
+    if isinstance(raw_keyterms, str):
+        stripped = raw_keyterms.strip()
+        if not stripped:
+            return []
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    candidates = [str(item) for item in parsed if isinstance(item, str)]
+            except Exception:
+                candidates = []
+        if not candidates:
+            candidates = re.split(r"[\n,;]+", stripped)
+    else:
+        candidates = [str(item) for item in raw_keyterms if isinstance(item, str)]
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in candidates:
+        term = unicodedata.normalize("NFC", raw).strip()[:80]
+        if not term:
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(term)
+        if len(out) >= 30:
+            break
+    return out
+
+
 class VoiceRuntimeEngine:
     def __init__(self) -> None:
         self.stt_recognizer: Any | None = None
+        self.stt_bpe_vocab_active: bool = False
         self.tts_engine: Any | None = None
         self.tts_engine_fp32: Any | None = None
         self.tts_engine_int8: Any | None = None
@@ -470,22 +542,32 @@ class VoiceRuntimeEngine:
                     f"Missing Sherpa-ONNX Vietnamese STT model at {SHERPA_MODEL_DIR}"
                 )
             t0 = time.perf_counter()
+            bpe_vocab_path = _ensure_bpe_vocab(SHERPA_MODEL_DIR)
+            transducer_kwargs: dict[str, Any] = {
+                "encoder": str(encoder_path),
+                "decoder": str(decoder_path),
+                "joiner": str(joiner_path),
+                "tokens": str(SHERPA_MODEL_DIR / "tokens.txt"),
+                "num_threads": 4,
+                "sample_rate": 16000,
+                "feature_dim": 80,
+                "decoding_method": "modified_beam_search",
+                "max_active_paths": 4,
+                "blank_penalty": 0.0,
+            }
+            if bpe_vocab_path is not None:
+                transducer_kwargs["modeling_unit"] = "bpe"
+                transducer_kwargs["bpe_vocab"] = str(bpe_vocab_path)
+                transducer_kwargs["hotwords_score"] = 1.2
             self.stt_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-                encoder=str(encoder_path),
-                decoder=str(decoder_path),
-                joiner=str(joiner_path),
-                tokens=str(SHERPA_MODEL_DIR / "tokens.txt"),
-                num_threads=4,
-                sample_rate=16000,
-                feature_dim=80,
-                decoding_method="modified_beam_search",
-                max_active_paths=4,
-                blank_penalty=0.0,
+                **transducer_kwargs
             )
+            self.stt_bpe_vocab_active = bpe_vocab_path is not None
             logger.info(
-                "Loaded STT (%s, mode=%s) in %.2fs",
+                "Loaded STT (%s, mode=%s, bpe_vocab=%s) in %.2fs",
                 STT_MODEL_VERSION,
                 STT_MODE,
+                self.stt_bpe_vocab_active,
                 time.perf_counter() - t0,
             )
 
@@ -1240,14 +1322,28 @@ def build_stt_words_from_sherpa(
     duration_s: float,
     *,
     audio_16k: np.ndarray | None = None,
+    ys_log_probs: list[float] | tuple[float, ...] | None = None,
 ) -> list[dict[str, Any]]:
     words: list[dict[str, Any]] = []
     cur_text = ""
     cur_start: float | None = None
     cur_last_tok: float = 0.0
+    cur_logprobs: list[float] = []
+
+    def _safe_word_logprob(logprobs: list[float]) -> float | None:
+        if not logprobs:
+            return None
+        return round(sum(logprobs), 4)
 
     for idx, raw_tok in enumerate(tokens):
         ts = float(timestamps[idx]) if idx < len(timestamps) else cur_last_tok
+        tok_lp: float | None = None
+        if ys_log_probs is not None and idx < len(ys_log_probs):
+            raw_lp = ys_log_probs[idx]
+            if isinstance(raw_lp, (int, float)) and not isinstance(raw_lp, bool):
+                lp_val = float(raw_lp)
+                if math.isfinite(lp_val):
+                    tok_lp = lp_val
         starts_new = raw_tok.startswith(" ") or raw_tok.startswith("▁")
         piece = raw_tok.replace("▁", " ").strip()
         if not piece:
@@ -1263,16 +1359,20 @@ def build_stt_words_from_sherpa(
                     "start": round(w_start, 3),
                     "end": round(max(w_start + 0.04, w_end), 3),
                     "type": "word",
+                    "logprob": _safe_word_logprob(cur_logprobs),
                 }
             )
             cur_text = piece
             cur_start = ts
             cur_last_tok = ts
+            cur_logprobs = [tok_lp] if tok_lp is not None else []
         else:
             if cur_start is None:
                 cur_start = ts
             cur_text += piece
             cur_last_tok = max(cur_last_tok, ts)
+            if tok_lp is not None:
+                cur_logprobs.append(tok_lp)
 
     if cur_text:
         w_start = max(0.0, cur_start or 0.0)
@@ -1285,6 +1385,7 @@ def build_stt_words_from_sherpa(
                 "start": round(w_start, 3),
                 "end": round(max(w_start, w_end), 3),
                 "type": "word",
+                "logprob": _safe_word_logprob(cur_logprobs),
             }
         )
     return words
@@ -2125,7 +2226,7 @@ async def post_tts_phonics(req: PhonicsSynthesisRequest, request: Request) -> di
 
 
 def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
-    """Apply DC offset removal, 60Hz high-pass filter, and gentle child-voice AGC."""
+    """Apply DC removal, 60Hz HPF, dead-air trim (>350ms -> 180ms/220ms), voiced p90 AGC, and tanh soft-limiter."""
     arr = samples16.astype(np.float32, copy=True)
     if arr.size == 0:
         return arr
@@ -2133,28 +2234,50 @@ def preprocess_audio_for_stt(samples16: np.ndarray) -> np.ndarray:
     if arr.size > 32:
         arr = scipy_signal.sosfilt(_HIGHPASS_60HZ_SOS, arr).astype(np.float32)
 
+    sr = 16000
     frame_len = 320
     n_frames = arr.size // frame_len
     if n_frames > 0:
         frames = arr[: n_frames * frame_len].reshape(n_frames, frame_len)
         frame_rms = np.sqrt(np.mean(frames * frames, axis=1))
-        max_frame_rms = float(np.max(frame_rms))
-        active_thresh = max(0.002, max_frame_rms * 0.2)
-        active_frames = frame_rms[frame_rms >= active_thresh]
-        rms = (
-            float(np.sqrt(np.mean(active_frames * active_frames)))
-            if active_frames.size > 0
-            else float(np.sqrt(np.mean(arr * arr)))
-        )
+        sorted_desc = np.sort(frame_rms)[::-1]
+        ref_rms = float(sorted_desc[min(1, sorted_desc.size - 1)])
+        active_thresh = max(0.002, ref_rms * 0.15)
+        active_indices = np.flatnonzero(frame_rms >= active_thresh)
+        if active_indices.size > 0:
+            first_idx = int(active_indices[0])
+            last_idx = int(active_indices[-1])
+            lead_samples = first_idx * frame_len
+            last_active_end = min(arr.size, (last_idx + 1) * frame_len)
+            trail_samples = arr.size - last_active_end
+            max_dead_samples = int(sr * 0.35)
+            lead_keep = int(sr * 0.18)
+            trail_keep = int(sr * 0.22)
+            start_sample = (
+                max(0, lead_samples - lead_keep)
+                if lead_samples > max_dead_samples
+                else 0
+            )
+            end_sample = (
+                min(arr.size, last_active_end + trail_keep)
+                if trail_samples > max_dead_samples
+                else arr.size
+            )
+            if end_sample > start_sample:
+                arr = arr[start_sample:end_sample]
+            voiced_frames = frame_rms[active_indices]
+            rms = float(np.percentile(voiced_frames, 90))
+        else:
+            rms = float(np.sqrt(np.mean(arr * arr)))
     else:
         rms = float(np.sqrt(np.mean(arr * arr)))
-    peak = float(np.max(np.abs(arr)))
-    if rms > 0.0004 and peak > 0.0015:
-        gain_rms = 0.08 / rms
-        gain_peak = 0.92 / peak
-        gain = min(15.0, gain_rms, gain_peak)
+
+    peak = float(np.max(np.abs(arr))) if arr.size > 0 else 0.0
+    if 0.0004 < rms < 0.065 and peak > 0.0015:
+        gain = min(15.0, 0.08 / rms)
         if gain > 1.0:
-            arr = np.clip(arr * gain, -0.98, 0.98).astype(np.float32)
+            scaled = arr * gain
+            arr = (0.95 * np.tanh(scaled / 0.95)).astype(np.float32)
     return arr
 
 
@@ -2212,6 +2335,7 @@ def decode_stt_window_sync(
     voiced_duration_ms: float | None = None,
     cap_lead_silence: bool = True,
     cap_trail_silence: bool = True,
+    keyterms: list[str] | str | None = None,
 ) -> tuple[str, list[dict[str, Any]], float]:
     """Decode one 16kHz float32 audio window using Sherpa-ONNX Zipformer."""
     assert runtime.stt_recognizer is not None
@@ -2221,9 +2345,15 @@ def decode_stt_window_sync(
     if float(np.max(np.abs(samples16))) <= 0.0008:
         return "", [], (time.perf_counter() - t_d0) * 1000.0
     duration_s = float(samples16.size / 16000.0)
+    _, orig_lead_s, _ = analyze_speech_window_s(samples16, sample_rate=16000)
     arr = preprocess_audio_for_stt(samples16)
     estimated_voiced_s, existing_lead_s, existing_tail_s = analyze_speech_window_s(
         arr, sample_rate=16000
+    )
+    pre_trimmed_lead_s = (
+        max(0.0, orig_lead_s - existing_lead_s)
+        if arr.size < samples16.size
+        else 0.0
     )
     # Never decode filtered silence (e.g. 20-50Hz desk rumble removed by 60Hz HPF)
     # even if unfiltered client VAD reported a non-zero voiced_duration_ms.
@@ -2237,7 +2367,7 @@ def decode_stt_window_sync(
         else estimated_voiced_s
     )
     target_lead_s = max(0.0, float(lead_pad_s))
-    trimmed_lead_s = 0.0
+    trimmed_lead_s = pre_trimmed_lead_s
     arr_for_decode = arr
     if cap_lead_silence:
         # Avoid double-stacking leading silence (e.g. 0.45s pre-roll + 0.18s pad -> 0.63s),
@@ -2246,7 +2376,7 @@ def decode_stt_window_sync(
             trim_samples = int((existing_lead_s - target_lead_s) * 16000)
             if 0 < trim_samples < arr_for_decode.size:
                 arr_for_decode = arr_for_decode[trim_samples:]
-                trimmed_lead_s = trim_samples / 16000.0
+                trimmed_lead_s += trim_samples / 16000.0
             effective_lead_s = 0.0
         else:
             effective_lead_s = max(0.0, target_lead_s - existing_lead_s)
@@ -2271,7 +2401,16 @@ def decode_stt_window_sync(
             np.zeros(int(16000 * effective_trail_pad), dtype=np.float32),
         ]
     )
-    stream = runtime.stt_recognizer.create_stream()
+    hotwords_list = _parse_stt_hotwords(keyterms)
+    stream = None
+    if hotwords_list and getattr(runtime, "stt_bpe_vocab_active", False):
+        hotwords_str = "/".join(hotwords_list)
+        try:
+            stream = runtime.stt_recognizer.create_stream(hotwords=hotwords_str)
+        except Exception:
+            stream = None
+    if stream is None:
+        stream = runtime.stt_recognizer.create_stream()
     stream.accept_waveform(16000, padded)
     runtime.stt_recognizer.decode_stream(stream)
     res = stream.result
@@ -2279,11 +2418,18 @@ def decode_stt_window_sync(
     adjusted_timestamps = [
         max(0.0, float(t) + trimmed_lead_s - effective_lead_s) for t in list(res.timestamps)
     ]
+    raw_ys_log_probs = getattr(res, "ys_log_probs", None)
+    ys_log_probs = (
+        list(raw_ys_log_probs)
+        if isinstance(raw_ys_log_probs, (list, tuple))
+        else None
+    )
     words = build_stt_words_from_sherpa(
         list(res.tokens),
         adjusted_timestamps,
         duration_s,
         audio_16k=arr,
+        ys_log_probs=ys_log_probs,
     )
     return txt, words, (time.perf_counter() - t_d0) * 1000.0
 
@@ -2294,6 +2440,7 @@ async def post_stt(
     response: Response,
     audio_file: UploadFile = File(...),
     language: str = Form(default="vi"),
+    keyterms: str = Form(default=""),
     source: str = Form(default=""),
     session_id: str = Form(default=""),
     turn_id: str = Form(default=""),
@@ -2404,6 +2551,7 @@ async def post_stt(
             trail_pad_s=0.35,
             voiced_duration_ms=voiced_duration_ms,
             cap_lead_silence=True,
+            keyterms=keyterms,
         )
         total_ms = (time.perf_counter() - t_req_start) * 1000.0
         response.headers["X-STT-Queue-Ms"] = f"{queue_ms:.2f}"

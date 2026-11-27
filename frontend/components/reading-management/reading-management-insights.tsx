@@ -219,10 +219,16 @@ interface TodaySummaryProps {
   readonly childName: string;
   readonly plans: readonly ReadingPlanDTO[];
   readonly goals: readonly ReadingGoalDTO[];
+  readonly embedded?: boolean;
 }
 
 /** One glance at what the child should do today. */
-export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
+export function TodaySummary({
+  childName,
+  plans,
+  goals,
+  embedded = false,
+}: TodaySummaryProps) {
   const t = useTranslations("reports");
   const formatDay = (value: string) => {
     const [year, month, day] = value.split("-").map(Number);
@@ -244,13 +250,17 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
   return (
     <section
       aria-label={t("readingManagement.todayAria")}
-      className="rounded-card border border-border bg-white p-5 shadow-sm sm:p-6"
+      className={
+        embedded
+          ? "mt-3 border-t border-border/70 pt-3"
+          : "rounded-card border border-border bg-white p-4 shadow-sm sm:p-5"
+      }
     >
-      <h2 className="text-xl font-semibold text-ink">
+      <h2 className="text-base font-extrabold text-ink sm:text-lg">
         {t("readingManagement.todayTitle", { childName })}
       </h2>
       {todayPlans.length === 0 && dailyGoals.length === 0 ? (
-        <p className="mt-3 text-label text-muted">
+        <p className="mt-2 text-sm text-muted">
           {nextPlan?.next_scheduled_date
             ? t("readingManagement.todayEmptyNextPlan", {
                 day: formatDay(nextPlan.next_scheduled_date),
@@ -259,7 +269,7 @@ export function TodaySummary({ childName, plans, goals }: TodaySummaryProps) {
             : t("readingManagement.todayNoActiveItems")}
         </p>
       ) : (
-        <ul className="mt-4 grid gap-3 md:grid-cols-2">
+        <ul className="mt-3 grid gap-2.5 md:grid-cols-2">
           {todayPlans.map((plan) => {
             const minutes = plan.minutes_today ?? 0;
             const percent = Math.min(

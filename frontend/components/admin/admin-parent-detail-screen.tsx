@@ -3,7 +3,6 @@
 import {
   ArrowLeft,
   CalendarDays,
-  Hash,
   Mail,
   Pencil,
   Phone,
@@ -285,15 +284,6 @@ export function AdminParentDetailScreen({ parentId }: { parentId: string }) {
                     day: "2-digit",
                     fallback: t("common.unknown"),
                   })}
-                </dd>
-              </div>
-              <div className="min-w-0 rounded-control border border-border bg-surface-subtle/40 px-3.5 py-2.5">
-                <dt className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">
-                  <Hash aria-hidden className="size-3.5" />
-                  {t("parents.detail.parentIdLabel", undefined, "Mã phụ huynh")}
-                </dt>
-                <dd className="break-all font-mono text-xs font-semibold text-ink">
-                  {parent.id}
                 </dd>
               </div>
             </dl>

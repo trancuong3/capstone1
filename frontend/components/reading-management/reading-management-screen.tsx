@@ -18,7 +18,6 @@ import {
 
 import { Button } from "@/components/common/button";
 import { FormPage } from "@/components/common/form-page";
-import { InformationField } from "@/components/common/information-field";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
@@ -685,14 +684,21 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   onChange={(event) => setPlanEnd(event.target.value)}
                 />
               </label>
-              <div className="flex flex-wrap items-end gap-2 sm:col-span-2">
-                <Button type="submit" disabled={Boolean(busyKey)}>
+              <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+                <Button
+                  fullWidth={false}
+                  size="compact"
+                  type="submit"
+                  disabled={Boolean(busyKey)}
+                >
                   {editingPlanId
                     ? t("readingManagement.modal.savePlan")
                     : t("readingManagement.modal.createPlan")}
                 </Button>
                 {editingPlanId ? (
                   <Button
+                    fullWidth={false}
+                    size="compact"
                     type="button"
                     variant="secondary"
                     onClick={() => setEditingPlanId("")}
@@ -782,7 +788,12 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                 />
               </label>
               <div className="flex items-end">
-                <Button type="submit" disabled={Boolean(busyKey)}>
+                <Button
+                  fullWidth={false}
+                  size="compact"
+                  type="submit"
+                  disabled={Boolean(busyKey)}
+                >
                   {t("readingManagement.modal.createGoal")}
                 </Button>
               </div>
@@ -885,14 +896,21 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                   </span>
                 </label>
               </fieldset>
-              <div className="flex min-w-0 flex-wrap items-end gap-2 sm:col-span-2">
-                <Button type="submit" disabled={Boolean(busyKey)}>
+              <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2">
+                <Button
+                  fullWidth={false}
+                  size="compact"
+                  type="submit"
+                  disabled={Boolean(busyKey)}
+                >
                   {editingReminderId
                     ? t("readingManagement.modal.saveChanges")
                     : t("readingManagement.modal.createReminder")}
                 </Button>
                 {editingReminderId ? (
                   <Button
+                    fullWidth={false}
+                    size="compact"
                     type="button"
                     variant="secondary"
                     onClick={() => setEditingReminderId("")}
@@ -919,62 +937,51 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     );
 
   return (
-    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-4">
-      <header className="flex flex-wrap items-end justify-between gap-5">
+    <section className="reading-organizer mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-4">
+      <header className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 lg:flex-row lg:items-end">
         <div className="min-w-0 flex-1">
-          <h1 className="text-heading font-extrabold leading-tight text-ink">
+          <h1 className="book-title text-2xl text-ink sm:text-[34px]">
             {t("readingManagement.heading")}
           </h1>
-          <p className="mt-1.5 max-w-3xl text-body leading-6 text-muted">
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted sm:text-base sm:leading-6">
             {t("readingManagement.headingSubtitle")}
           </p>
         </div>
-        <Button
-          onClick={() => setReloadKey((value) => value + 1)}
-          size="compact"
-          className="min-h-10! px-4! py-2! text-sm! sm:w-auto"
-          fullWidth={false}
-          variant="secondary"
-          disabled={isReadingDataLoading || !childId}
-        >
-          <RefreshCw aria-hidden="true" className="size-4" />{" "}
-          {t("readingManagement.reload")}
-        </Button>
-      </header>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <label
-          className="flex min-h-[72px] min-w-0 flex-col gap-1 rounded-control border border-border bg-white px-4 py-3 text-label text-muted shadow-xs"
-          htmlFor="management-child"
-        >
-          {t("readingManagement.childProfileLabel")}
-          <select
-            id="management-child"
-            className="min-h-6 w-full min-w-0 bg-white text-body text-ink focus-visible:outline-3 focus-visible:outline-primary"
-            value={childId}
-            onChange={(event) => handleSelectChild(event.target.value)}
+        <div className="flex flex-wrap items-end gap-2.5 sm:flex-nowrap">
+          <label
+            className="flex min-w-[200px] flex-1 flex-col gap-1 text-xs font-bold text-muted sm:flex-initial"
+            htmlFor="management-child"
           >
-            {children.map((child) => (
-              <option key={child.id} value={child.id}>
-                {child.alias} ·{" "}
-                {t("readingManagement.bookPicker.gradeSingle", {
-                  grade: child.grade,
-                })}
-              </option>
-            ))}
-          </select>
-        </label>
-        {selectedChild ? (
-          <dl>
-            <InformationField label={t("readingManagement.viewingLabel")}>
-              {selectedChild.alias} ·{" "}
-              {t("readingManagement.bookPicker.gradeSingle", {
-                grade: selectedChild.grade,
-              })}
-            </InformationField>
-          </dl>
-        ) : null}
-      </div>
+            {t("readingManagement.childProfileLabel")}
+            <select
+              id="management-child"
+              className="h-10 min-h-10 w-full rounded-control border border-border bg-white px-3 text-sm font-bold text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-primary"
+              value={childId}
+              onChange={(event) => handleSelectChild(event.target.value)}
+            >
+              {children.map((child) => (
+                <option key={child.id} value={child.id}>
+                  {child.alias} ·{" "}
+                  {t("readingManagement.bookPicker.gradeSingle", {
+                    grade: child.grade,
+                  })}
+                </option>
+              ))}
+            </select>
+          </label>
+          <Button
+            onClick={() => setReloadKey((value) => value + 1)}
+            size="admin"
+            className="h-10 shrink-0 whitespace-nowrap"
+            fullWidth={false}
+            variant="secondary"
+            disabled={isReadingDataLoading || !childId}
+          >
+            <RefreshCw aria-hidden="true" className="size-4 shrink-0" />{" "}
+            {t("readingManagement.reload")}
+          </Button>
+        </div>
+      </header>
       {error && !activeForm ? (
         <StatusMessage title={t("readingManagement.errorTitle")} tone="error">
           {error}
@@ -993,7 +1000,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         />
       ) : null}
       {isReadingDataLoading && childId ? (
-        <p role="status" aria-live="polite">
+        <p role="status" aria-live="polite" className="text-sm text-muted">
           {t("readingManagement.loadingChildData")}
         </p>
       ) : null}
@@ -1002,49 +1009,51 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
         <>
           <section
             aria-label={t("readingManagement.overviewAria")}
-            className="grid grid-cols-2 gap-3 lg:grid-cols-4"
+            className="grid grid-cols-2 gap-2.5 lg:grid-cols-4"
           >
             {[
               {
                 label: t("readingManagement.summaryRunningGoals"),
                 value: goals.filter(isRunningGoal).length,
                 detail: t("readingManagement.summaryRunningGoalsDetail"),
-                icon: <Target className="size-4.5" />,
+                icon: <Target className="size-4" />,
               },
               {
                 label: t("readingManagement.summaryActivePlans"),
                 value: plans.filter(isRunningPlan).length,
                 detail: t("readingManagement.summaryActivePlansDetail"),
-                icon: <CalendarDays className="size-4.5" />,
+                icon: <CalendarDays className="size-4" />,
               },
               {
                 label: t("readingManagement.summaryEnabledReminders"),
                 value: reminders.filter((reminder) => reminder.is_active)
                   .length,
                 detail: t("readingManagement.summaryEnabledRemindersDetail"),
-                icon: <BellRing className="size-4.5" />,
+                icon: <BellRing className="size-4" />,
               },
               {
                 label: t("readingManagement.summarySavedBooks"),
                 value: collections.length,
                 detail: t("readingManagement.summarySavedBooksDetail"),
-                icon: <BookHeart className="size-4.5" />,
+                icon: <BookHeart className="size-4" />,
               },
             ].map((item) => (
               <article
                 key={item.label}
-                className="rounded-card border border-border bg-white p-4 shadow-xs transition hover:border-primary/40"
+                className="flex flex-col justify-between rounded-card border border-border bg-white px-3.5 py-3 shadow-2xs transition hover:border-primary/40"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-bold text-muted">{item.label}</p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-muted sm:text-sm">
+                    {item.label}
+                  </p>
                   <span
                     aria-hidden="true"
-                    className="shrink-0 rounded-xl bg-sky/60 p-2 text-primary"
+                    className="shrink-0 rounded-lg bg-sky/60 p-1.5 text-primary"
                   >
                     {item.icon}
                   </span>
                 </div>
-                <p className="mt-2 text-heading font-extrabold tabular-nums text-primary">
+                <p className="mt-1.5 text-2xl font-extrabold tabular-nums text-primary">
                   {item.value}
                 </p>
                 <p className="mt-0.5 text-xs text-muted">{item.detail}</p>
@@ -1052,8 +1061,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
             ))}
           </section>
 
-          <details className="rounded-control border border-border bg-white px-4 py-3 shadow-xs transition hover:border-primary/40">
-            <summary className="cursor-pointer font-bold text-primary">
+          <details className="rounded-card border border-border bg-white px-4 py-3 shadow-2xs transition hover:border-primary/40">
+            <summary className="cursor-pointer text-sm font-extrabold text-primary">
               {t("readingManagement.todayTitle", {
                 childName: t("readingManagement.todayDefaultChild"),
               })}
@@ -1062,16 +1071,17 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               childName={
                 selectedChild?.alias ?? t("readingManagement.todayDefaultChild")
               }
+              embedded
               plans={plans}
               goals={goals}
             />
           </details>
 
-          <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
-            <div className="flex min-w-0 flex-col gap-6">
+          <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
+            <div className="flex min-w-0 flex-col gap-4">
               <section
                 aria-label={t("readingManagement.plansSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-2xs"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1161,16 +1171,21 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               {planStatusText(plan.status)}
                             </span>
                           </div>
-                          <div className="mt-3 flex items-center justify-between gap-3 text-sm">
-                            <span>
+                          <div className="mt-2.5 flex items-center justify-between gap-3 text-xs font-semibold">
+                            <span className="text-muted">
                               {t("readingManagement.planCompletedDaysLabel")}
                             </span>
-                            <strong className="tabular-nums">
-                              {plan.completed_days_this_week}/
-                              {plan.scheduled_days_this_week}
-                            </strong>
+                            <span className="tabular-nums text-ink">
+                              <strong>
+                                {plan.completed_days_this_week}/
+                                {plan.scheduled_days_this_week}
+                              </strong>{" "}
+                              <span className="text-primary">
+                                ({plan.progress_percent}%)
+                              </span>
+                            </span>
                           </div>
-                          <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-white">
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white">
                             <div
                               className="h-full rounded-full bg-primary transition-[width] duration-200"
                               style={{
@@ -1178,9 +1193,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               }}
                             />
                           </div>
-                          <p className="mt-1 text-end text-xs font-semibold tabular-nums text-primary">
-                            {plan.progress_percent}%
-                          </p>
                           <PlanInsights plan={plan} />
                           {plan.status === "ACTIVE" ||
                           plan.status === "PAUSED" ? (
@@ -1280,7 +1292,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label={t("readingManagement.collectionsSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-2xs"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1455,10 +1467,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
               </section>
             </div>
 
-            <div className="flex min-w-0 flex-col gap-6">
+            <div className="flex min-w-0 flex-col gap-4">
               <section
                 aria-label={t("readingManagement.goalsSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-2xs"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1532,15 +1544,20 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               : ""}{" "}
                             · {goal.timezone}
                           </p>
-                          <div className="mt-3 flex items-center justify-between text-sm">
-                            <span>
+                          <div className="mt-2.5 flex items-center justify-between text-xs font-semibold">
+                            <span className="text-muted">
                               {t("readingManagement.goalCycleProgress")}
                             </span>
-                            <strong className="tabular-nums">
-                              {goal.current_value}/{goal.target_value}
-                            </strong>
+                            <span className="tabular-nums text-ink">
+                              <strong>
+                                {goal.current_value}/{goal.target_value}
+                              </strong>{" "}
+                              <span className="text-primary">
+                                ({goal.progress_percent}%)
+                              </span>
+                            </span>
                           </div>
-                          <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-white">
+                          <div className="mt-1 h-2 overflow-hidden rounded-full bg-white">
                             <div
                               className="h-full rounded-full bg-primary transition-[width] duration-200"
                               style={{
@@ -1548,9 +1565,6 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               }}
                             />
                           </div>
-                          <p className="mt-1 text-end text-xs font-semibold tabular-nums text-primary">
-                            {goal.progress_percent}%
-                          </p>
                           <GoalInsights goal={goal} />
                           {editingGoalId === goal.id ? (
                             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1674,7 +1688,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
 
               <section
                 aria-label={t("readingManagement.remindersSectionAria")}
-                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-xs sm:px-5 sm:py-5"
+                className="min-w-0 rounded-card border border-border bg-white p-4 shadow-2xs"
               >
                 <div className="mb-3 flex flex-wrap items-start justify-between gap-3 border-b border-border/60 pb-3">
                   <div className="flex min-w-0 flex-1 items-start gap-2.5">
@@ -1803,10 +1817,10 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                           <article
                             key={reminder.id}
                             data-reminder-id={reminder.id}
-                            className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1.5 px-3 py-2 transition-colors hover:bg-white/70"
+                            className="flex min-w-0 flex-col gap-2 px-3 py-2.5 transition-colors hover:bg-white/70 sm:flex-row sm:items-center sm:justify-between"
                           >
-                            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                              <h3 className="flex items-center gap-1.5 text-sm font-extrabold tabular-nums text-ink">
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <h3 className="flex shrink-0 items-center gap-1.5 text-sm font-extrabold tabular-nums text-ink">
                                 <Clock3
                                   aria-hidden="true"
                                   className="size-4 shrink-0 text-primary"
@@ -1825,14 +1839,14 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                   : t("readingManagement.channelApp")}
                               </span>
                               <span
-                                className="truncate text-xs text-muted"
+                                className="min-w-0 truncate text-xs text-muted"
                                 title={`${fullDays} · ${reminder.timezone}`}
                               >
                                 {shortSchedule}
                               </span>
                             </div>
-                            <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                              <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 pe-1 text-xs font-semibold text-ink">
+                            <div className="flex shrink-0 items-center justify-end gap-1.5">
+                              <label className="inline-flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-control px-1.5 text-xs font-semibold text-ink hover:bg-canvas">
                                 <input
                                   type="checkbox"
                                   className="size-4 accent-primary"
@@ -1861,7 +1875,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs!"
+                                className="h-8! min-h-8! w-auto! shrink-0 whitespace-nowrap border border-border bg-white px-2.5! py-1! text-xs!"
                                 onClick={() => {
                                   setEditingReminderId(reminder.id);
                                   setActiveForm("reminder");
@@ -1879,7 +1893,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                                 variant="quiet"
                                 size="compact"
                                 fullWidth={false}
-                                className="min-h-8! w-auto! border border-border bg-white px-2.5! py-1! text-xs! text-danger"
+                                className="h-8! min-h-8! w-auto! shrink-0 whitespace-nowrap border border-border bg-white px-2.5! py-1! text-xs! text-danger"
                                 disabled={Boolean(busyKey)}
                                 onClick={() =>
                                   void (
@@ -1900,7 +1914,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
                               >
                                 <Trash2
                                   aria-hidden="true"
-                                  className="size-3.5"
+                                  className="size-3.5 shrink-0"
                                 />
                                 {t("readingManagement.delete")}
                               </Button>

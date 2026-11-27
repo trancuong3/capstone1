@@ -3,6 +3,7 @@
 import {
   ArrowDownRight,
   ArrowUpRight,
+  ChevronDown,
   Lightbulb,
   Minus,
   RefreshCw,
@@ -67,7 +68,7 @@ function TrendBadge({ delta }: { readonly delta: number | null }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-control px-2.5 py-1 text-xs font-bold tabular-nums",
+        "inline-flex items-center gap-1 whitespace-nowrap rounded-control px-2 py-0.5 text-[11px] font-bold tabular-nums",
         up
           ? "bg-success-surface text-success-ink"
           : down
@@ -97,12 +98,14 @@ function ComponentBar({
       ? t("overview.assessmentCard.scoreAriaMissing")
       : t("overview.assessmentCard.scoreAriaValue", { score });
   return (
-    <li className="space-y-1.5">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-sm font-bold text-ink">{component.label}</span>
+    <li className="space-y-1">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-bold text-ink sm:text-sm">
+          {component.label}
+        </span>
         <span
           className={cn(
-            "text-sm font-extrabold tabular-nums",
+            "text-xs font-extrabold tabular-nums sm:text-sm",
             score === null ? "text-muted" : "text-primary",
           )}
         >
@@ -119,7 +122,7 @@ function ComponentBar({
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={score ?? undefined}
-        className="h-2.5 overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
+        className="h-2 overflow-hidden rounded-full bg-canvas ring-1 ring-inset ring-border/70"
         role="progressbar"
       >
         <div
@@ -130,7 +133,12 @@ function ComponentBar({
           style={{ width: `${score ?? 0}%` }}
         />
       </div>
-      <p className="text-xs leading-5 text-muted">{component.detail}</p>
+      <p
+        className="truncate text-[11px] leading-4 text-muted"
+        title={component.detail}
+      >
+        {component.detail}
+      </p>
     </li>
   );
 }
@@ -146,60 +154,59 @@ function WeeklyChart({
   return (
     <section
       aria-labelledby="progress-weekly-title"
-      className="space-y-3 rounded-card border border-border bg-cream/60 p-4 sm:p-5"
+      className="flex h-full flex-col justify-between space-y-2 rounded-control border border-border bg-cream/60 p-3"
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-1.5">
         <h3
-          className="text-base font-extrabold text-ink"
+          className="text-xs font-extrabold text-ink sm:text-sm"
           id="progress-weekly-title"
         >
           {t("overview.assessmentCard.weeklyChartTitle")}
         </h3>
-        <span className="text-xs font-semibold text-muted">
+        <span className="text-[11px] font-semibold text-muted">
           {t("overview.assessmentCard.weeklyChartHint")}
         </span>
       </div>
-      <div
-        aria-hidden="true"
-        className="flex h-40 items-end gap-2 border-b border-border pt-2 sm:gap-4"
-      >
-        {weekly.map((week) => {
-          const barHeight =
-            week.minutes > 0
-              ? Math.max(10, Math.round((week.minutes / maxMinutes) * 92))
-              : 3;
-          return (
-            <div
-              className="flex h-full min-w-0 flex-1 flex-col justify-end text-center"
-              key={week.week_start}
-            >
-              <span className="mb-1 text-xs font-bold tabular-nums text-primary">
-                {week.accuracy_pct === null
-                  ? "–"
-                  : `${Math.round(week.accuracy_pct)}%`}
-              </span>
+      <div aria-hidden="true" className="overflow-x-auto pb-0.5">
+        <div className="flex h-24 min-w-full items-end gap-1.5 border-b border-border pt-1 sm:gap-2">
+          {weekly.map((week) => {
+            const barHeight =
+              week.minutes > 0
+                ? Math.max(8, Math.round((week.minutes / maxMinutes) * 44))
+                : 3;
+            return (
               <div
-                className={cn(
-                  "mx-auto w-full max-w-12 rounded-t-control",
-                  week.minutes > 0 ? "bg-primary/85" : "bg-border",
-                )}
-                style={{ height: `${barHeight}px` }}
-                title={t("overview.assessmentCard.weekBarTitle", {
-                  minutes: week.minutes,
-                  sessions: week.sessions,
-                })}
-              />
-              <span className="mt-1.5 text-[11px] font-bold tabular-nums text-ink">
-                {t("overview.assessmentCard.weekBarShort", {
-                  minutes: week.minutes,
-                })}
-              </span>
-              <span className="pb-1.5 text-[11px] font-semibold tabular-nums text-muted">
-                {shortDate(week.week_start)}
-              </span>
-            </div>
-          );
-        })}
+                className="flex h-full min-w-9 flex-1 flex-col justify-end text-center"
+                key={week.week_start}
+              >
+                <span className="mb-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-primary">
+                  {week.accuracy_pct === null
+                    ? "–"
+                    : `${Math.round(week.accuracy_pct)}%`}
+                </span>
+                <div
+                  className={cn(
+                    "mx-auto w-full max-w-9 rounded-t-control",
+                    week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                  )}
+                  style={{ height: `${barHeight}px` }}
+                  title={t("overview.assessmentCard.weekBarTitle", {
+                    minutes: week.minutes,
+                    sessions: week.sessions,
+                  })}
+                />
+                <span className="mt-0.5 whitespace-nowrap text-[10px] font-bold tabular-nums text-ink">
+                  {t("overview.assessmentCard.weekBarShort", {
+                    minutes: week.minutes,
+                  })}
+                </span>
+                <span className="whitespace-nowrap pb-0.5 text-[10px] font-semibold tabular-nums text-muted">
+                  {shortDate(week.week_start)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       </div>
       <ul className="sr-only">
         {weekly.map((week) => (
@@ -232,7 +239,7 @@ function InsightColumn({
   readonly children: ReactNode;
 }) {
   return (
-    <section className={cn("space-y-2.5 rounded-control border p-4", tone)}>
+    <section className={cn("space-y-2 rounded-control border p-3.5", tone)}>
       <h4 className="text-sm font-extrabold text-ink">{title}</h4>
       {children}
     </section>
@@ -326,34 +333,36 @@ export function ChildProgressAssessmentCard({
   return (
     <section
       aria-labelledby="ai-progress-title"
-      className="rounded-card border border-border bg-white p-5 sm:p-6"
+      className="rounded-card border border-border bg-white p-3 sm:p-3.5"
     >
-      <div className="flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1">
-          <p className="text-xs font-bold text-primary">
-            {t("overview.assessmentCard.sectionEyebrow")}
-          </p>
-          <h2
-            className="text-xl font-extrabold text-ink sm:text-2xl"
-            id="ai-progress-title"
-          >
-            {t("overview.assessmentCard.sectionTitle", { childName })}
-          </h2>
-          <p className="text-sm text-muted">
+      <div className="flex flex-col gap-2 border-b border-border pb-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-0.5">
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <h2
+              className="text-base font-extrabold text-ink sm:text-lg"
+              id="ai-progress-title"
+            >
+              {t("overview.assessmentCard.sectionTitle", { childName })}
+            </h2>
+            <span className="text-xs font-bold text-primary">
+              {t("overview.assessmentCard.sectionEyebrow")}
+            </span>
+          </div>
+          <p className="text-xs text-muted">
             {t("overview.assessmentCard.sectionSubtitle")}
           </p>
         </div>
 
         <div
           aria-label={t("overview.assessmentCard.windowGroupAria")}
-          className="inline-flex shrink-0 self-start rounded-control border border-border bg-canvas p-1 sm:self-auto"
+          className="inline-flex shrink-0 self-start rounded-control border border-border bg-canvas p-0.5 sm:self-auto"
           role="radiogroup"
         >
           {PERIODS.map((option) => (
             <button
               aria-checked={days === option}
               className={cn(
-                "min-h-10 rounded-control px-3.5 text-sm font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
+                "min-h-8 rounded-control px-2.5 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
                 days === option
                   ? "bg-primary text-white"
                   : "text-ink hover:bg-white",
@@ -429,8 +438,30 @@ function AssessmentBody({
   const actionsFor = (audience: "PARENT" | "CHILD") =>
     assessment.actions.filter((action) => action.audience === audience);
 
+  const hasWeekly = data.weekly.some((week) => week.minutes > 0);
+  const hasDetails =
+    assessment.strengths.length > 0 ||
+    assessment.weaknesses.length > 0 ||
+    assessment.actions.length > 0 ||
+    assessment.practice_words.length > 0;
+  const detailSummaryParts: string[] = [];
+  if (assessment.strengths.length > 0) {
+    detailSummaryParts.push(t("overview.assessmentCard.strengthsTitle"));
+  }
+  if (assessment.weaknesses.length > 0) {
+    detailSummaryParts.push(t("overview.assessmentCard.improvementsTitle"));
+  }
+  if (assessment.actions.length > 0) {
+    detailSummaryParts.push(t("overview.assessmentCard.actionsTitle"));
+  }
+  if (assessment.practice_words.length > 0) {
+    detailSummaryParts.push(
+      t("overview.assessmentCard.recommendedWordsTitle", { days: data.days }),
+    );
+  }
+
   return (
-    <div className="mt-5 space-y-6">
+    <div className="mt-2.5 space-y-2.5">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-muted">
         <p>
           {t("overview.assessmentCard.rangeSummary", {
@@ -454,20 +485,27 @@ function AssessmentBody({
         </p>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(220px,0.75fr)_minmax(0,1.25fr)] lg:items-start">
-        <div className="flex flex-col gap-3 rounded-control border border-border bg-cream/70 p-4 sm:p-5">
+      <div
+        className={cn(
+          "grid gap-2.5 lg:items-stretch",
+          hasWeekly
+            ? "lg:grid-cols-[minmax(196px,0.56fr)_minmax(0,1.2fr)_minmax(230px,0.9fr)]"
+            : "lg:grid-cols-[minmax(196px,0.56fr)_minmax(0,1.44fr)]",
+        )}
+      >
+        <div className="flex flex-col justify-between gap-1.5 rounded-control border border-border bg-cream/70 p-3">
           <p className="text-xs font-bold text-muted">
             {t("overview.assessmentCard.overallScore")}
           </p>
-          <div className="flex flex-wrap items-baseline gap-2">
-            <span className="text-4xl font-extrabold tracking-tight tabular-nums text-ink">
+          <div className="flex flex-wrap items-baseline gap-1.5">
+            <span className="text-3xl font-extrabold tracking-tight tabular-nums text-ink">
               {score.overall ?? "–"}
             </span>
-            <span className="text-sm font-bold text-muted">/ 100</span>
+            <span className="text-xs font-bold text-muted">/ 100</span>
             {score.grade_label ? (
               <span
                 className={cn(
-                  "ms-1 rounded-control px-2.5 py-0.5 text-sm font-bold",
+                  "ms-1 rounded-control px-2 py-0.5 text-xs font-bold",
                   GRADE_STYLES[score.grade ?? ""] ??
                     "bg-sky text-primary-hover",
                 )}
@@ -475,7 +513,7 @@ function AssessmentBody({
                 {score.grade_label}
               </span>
             ) : (
-              <span className="ms-1 rounded-control bg-canvas px-2.5 py-0.5 text-sm font-bold text-muted ring-1 ring-inset ring-border">
+              <span className="ms-1 rounded-control bg-canvas px-2 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
                 {t("overview.notEnoughData")}
               </span>
             )}
@@ -486,18 +524,20 @@ function AssessmentBody({
         </div>
 
         {score.components.length > 0 ? (
-          <ul className="space-y-3.5">
+          <ul className="grid content-center gap-x-3.5 gap-y-2 sm:grid-cols-2">
             {score.components.map((component) => (
               <ComponentBar component={component} key={component.key} />
             ))}
           </ul>
         ) : (
-          <p className="rounded-control border border-dashed border-border bg-canvas p-4 text-sm text-muted">
+          <p className="rounded-control border border-dashed border-border bg-canvas p-3 text-sm text-muted">
             {t("overview.assessmentCard.insufficientDetailDesc", {
               days: data.days,
             })}
           </p>
         )}
+
+        {hasWeekly ? <WeeklyChart weekly={data.weekly} /> : null}
       </div>
 
       {showReadingAssessment ? (
@@ -509,33 +549,38 @@ function AssessmentBody({
         />
       ) : null}
 
-      {data.weekly.some((week) => week.minutes > 0) ? (
-        <WeeklyChart weekly={data.weekly} />
-      ) : null}
-
-      <div className="space-y-4 border-t border-border pt-5" aria-live="polite">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <span
-            className={cn(
-              "inline-flex items-center rounded-control px-2.5 py-1 text-xs font-bold",
-              assessment.source === "AI"
-                ? "border border-primary/20 bg-sky text-primary-hover"
-                : "border border-border bg-canvas text-muted",
-            )}
-          >
-            {assessment.source === "AI"
-              ? t("overview.assessmentCard.aiCommentBadge")
-              : t("overview.assessmentCard.autoCommentBadge")}
-          </span>
+      <div
+        className="space-y-2 border-t border-border pt-2.5"
+        aria-live="polite"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "inline-flex items-center rounded-control px-2 py-0.5 text-xs font-bold",
+                assessment.source === "AI"
+                  ? "border border-primary/20 bg-sky text-primary-hover"
+                  : "border border-border bg-canvas text-muted",
+              )}
+            >
+              {assessment.source === "AI"
+                ? t("overview.assessmentCard.aiCommentBadge")
+                : t("overview.assessmentCard.autoCommentBadge")}
+            </span>
+            <h3 className="text-sm font-extrabold text-ink sm:text-base">
+              {assessment.headline}
+            </h3>
+          </div>
           {data.data_status === "OK" ? (
             <Button
-              className="min-h-11 w-auto px-3.5 text-sm"
+              className="h-8 min-h-8! w-auto px-2.5! py-0! text-xs!"
               disabled={view.ai === "writing"}
               isLoading={view.ai === "writing"}
               onClick={onRefresh}
+              size="admin"
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" className="size-4" />
+              <RefreshCw aria-hidden="true" className="size-3.5" />
               {view.ai === "writing"
                 ? t("overview.assessmentCard.aiWriting")
                 : t("overview.assessmentCard.aiRefresh")}
@@ -549,147 +594,162 @@ function AssessmentBody({
           </StatusMessage>
         ) : null}
 
-        <div className="max-w-3xl space-y-1.5">
-          <h3 className="text-lg font-extrabold text-ink">
-            {assessment.headline}
-          </h3>
-          <p className="text-body leading-relaxed text-ink">
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+          <p className="max-w-3xl text-sm leading-relaxed text-ink">
             {assessment.summary}
           </p>
+          {assessment.encouragement ? (
+            <p className="shrink-0 border-s-2 border-primary ps-2.5 text-xs font-semibold text-muted sm:max-w-xs">
+              {assessment.encouragement}
+            </p>
+          ) : null}
         </div>
 
-        {assessment.strengths.length > 0 || assessment.weaknesses.length > 0 ? (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {assessment.strengths.length > 0 ? (
-              <InsightColumn
-                title={t("overview.assessmentCard.strengthsTitle")}
-                tone="border-success-ink/20 bg-success-surface/35"
-              >
-                <ul className="list-disc space-y-1.5 ps-5 text-sm leading-relaxed text-ink">
-                  {assessment.strengths.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-              </InsightColumn>
-            ) : null}
-            {assessment.weaknesses.length > 0 ? (
-              <InsightColumn
-                title={t("overview.assessmentCard.improvementsTitle")}
-                tone="border-warning/25 bg-warning-surface/40"
-              >
-                <ul className="space-y-2.5 text-sm">
-                  {assessment.weaknesses.map((item) => (
-                    <li className="flex gap-2" key={item.area}>
-                      <TriangleAlert
-                        aria-hidden="true"
-                        className="mt-0.5 size-4 shrink-0 text-warning"
-                      />
-                      <span>
-                        <strong className="block font-bold text-ink">
-                          {item.area}
-                        </strong>
-                        <span className="text-muted">{item.detail}</span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </InsightColumn>
-            ) : null}
-          </div>
-        ) : null}
-
-        {assessment.actions.length > 0 ? (
-          <section className="space-y-3">
-            <h3 className="inline-flex items-center gap-2 text-base font-extrabold text-ink">
-              <Lightbulb aria-hidden="true" className="size-4 text-primary" />
-              {t("overview.assessmentCard.actionsTitle")}
-            </h3>
-            <div className="grid gap-3 lg:grid-cols-2">
-              {(
-                [
-                  ["PARENT", t("overview.assessmentCard.parentRole")],
-                  ["CHILD", t("overview.assessmentCard.childRole")],
-                ] as const
-              ).map(([audience, title]) =>
-                actionsFor(audience).length > 0 ? (
-                  <div
-                    className="space-y-2 rounded-control border border-border bg-cream/70 p-4"
-                    key={audience}
-                  >
-                    <h4 className="text-sm font-extrabold text-primary">
-                      {title}
-                    </h4>
-                    <ul className="space-y-2.5 text-sm">
-                      {actionsFor(audience).map((action) => (
-                        <li key={action.title}>
-                          <strong className="block font-bold text-ink">
-                            {action.title}
-                          </strong>
-                          <span className="text-muted">{action.detail}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null,
-              )}
-            </div>
-          </section>
-        ) : null}
-
-        {assessment.practice_words.length > 0 ? (
-          <section className="space-y-2">
-            <h3 className="text-sm font-extrabold text-ink">
-              {t("overview.assessmentCard.recommendedWordsTitle", {
-                days: data.days,
-              })}
-            </h3>
-            <ul className="flex flex-wrap gap-2">
-              {assessment.practice_words.map((word) => {
-                const detail = data.difficult_words.find(
-                  (item) => item.word === word,
-                );
-                return (
-                  <li
-                    className="rounded-control border border-border bg-canvas px-3 py-1.5 text-sm font-bold text-ink"
-                    key={word}
-                    title={
-                      detail?.heard_as
-                        ? t("overview.assessmentCard.heardAsCount", {
-                            heardAs: detail.heard_as,
-                            times: detail.times,
-                          })
-                        : detail
-                          ? t("overview.assessmentCard.recordedCount", {
-                              times: detail.times,
-                            })
-                          : undefined
-                    }
-                  >
-                    <span
-                      className="viread-learning-content"
-                      dir="ltr"
-                      lang="vi"
+        {hasDetails ? (
+          <details className="group rounded-control border border-border bg-canvas/45 px-3 py-2">
+            <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-xs font-extrabold text-primary sm:text-sm [&::-webkit-details-marker]:hidden">
+              <span className="truncate">{detailSummaryParts.join(" · ")}</span>
+              <ChevronDown
+                aria-hidden="true"
+                className="size-4 shrink-0 transition-transform group-open:rotate-180"
+              />
+            </summary>
+            <div className="mt-3 space-y-3 border-t border-border/70 pt-3">
+              {assessment.strengths.length > 0 ||
+              assessment.weaknesses.length > 0 ? (
+                <div className="grid gap-2.5 lg:grid-cols-2">
+                  {assessment.strengths.length > 0 ? (
+                    <InsightColumn
+                      title={t("overview.assessmentCard.strengthsTitle")}
+                      tone="border-success-ink/20 bg-success-surface/35"
                     >
-                      {word}
-                    </span>
-                    {detail?.heard_as ? (
-                      <span className="ms-1.5 text-xs font-medium text-muted">
-                        {t("overview.assessmentCard.heardAsInline", {
-                          heardAs: detail.heard_as,
-                        })}
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        ) : null}
+                      <ul className="list-disc space-y-1 ps-5 text-sm leading-relaxed text-ink">
+                        {assessment.strengths.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </InsightColumn>
+                  ) : null}
+                  {assessment.weaknesses.length > 0 ? (
+                    <InsightColumn
+                      title={t("overview.assessmentCard.improvementsTitle")}
+                      tone="border-warning/25 bg-warning-surface/40"
+                    >
+                      <ul className="space-y-1.5 text-sm">
+                        {assessment.weaknesses.map((item) => (
+                          <li className="flex gap-2" key={item.area}>
+                            <TriangleAlert
+                              aria-hidden="true"
+                              className="mt-0.5 size-4 shrink-0 text-warning"
+                            />
+                            <span>
+                              <strong className="block font-bold text-ink">
+                                {item.area}
+                              </strong>
+                              <span className="text-muted">{item.detail}</span>
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </InsightColumn>
+                  ) : null}
+                </div>
+              ) : null}
 
-        {assessment.encouragement ? (
-          <p className="border-s-2 border-primary ps-3.5 text-sm font-semibold text-muted">
-            {assessment.encouragement}
-          </p>
+              {assessment.actions.length > 0 ? (
+                <section className="space-y-2">
+                  <h3 className="inline-flex items-center gap-2 text-sm font-extrabold text-ink">
+                    <Lightbulb
+                      aria-hidden="true"
+                      className="size-4 text-primary"
+                    />
+                    {t("overview.assessmentCard.actionsTitle")}
+                  </h3>
+                  <div className="grid gap-2.5 lg:grid-cols-2">
+                    {(
+                      [
+                        ["PARENT", t("overview.assessmentCard.parentRole")],
+                        ["CHILD", t("overview.assessmentCard.childRole")],
+                      ] as const
+                    ).map(([audience, title]) =>
+                      actionsFor(audience).length > 0 ? (
+                        <div
+                          className="space-y-1.5 rounded-control border border-border bg-cream/70 p-3"
+                          key={audience}
+                        >
+                          <h4 className="text-sm font-extrabold text-primary">
+                            {title}
+                          </h4>
+                          <ul className="space-y-1.5 text-sm">
+                            {actionsFor(audience).map((action) => (
+                              <li key={action.title}>
+                                <strong className="block font-bold text-ink">
+                                  {action.title}
+                                </strong>
+                                <span className="text-muted">
+                                  {action.detail}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null,
+                    )}
+                  </div>
+                </section>
+              ) : null}
+
+              {assessment.practice_words.length > 0 ? (
+                <section className="space-y-1.5">
+                  <h3 className="text-sm font-extrabold text-ink">
+                    {t("overview.assessmentCard.recommendedWordsTitle", {
+                      days: data.days,
+                    })}
+                  </h3>
+                  <ul className="flex flex-wrap gap-1.5">
+                    {assessment.practice_words.map((word) => {
+                      const detail = data.difficult_words.find(
+                        (item) => item.word === word,
+                      );
+                      return (
+                        <li
+                          className="rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
+                          key={word}
+                          title={
+                            detail?.heard_as
+                              ? t("overview.assessmentCard.heardAsCount", {
+                                  heardAs: detail.heard_as,
+                                  times: detail.times,
+                                })
+                              : detail
+                                ? t("overview.assessmentCard.recordedCount", {
+                                    times: detail.times,
+                                  })
+                                : undefined
+                          }
+                        >
+                          <span
+                            className="viread-learning-content"
+                            dir="ltr"
+                            lang="vi"
+                          >
+                            {word}
+                          </span>
+                          {detail?.heard_as ? (
+                            <span className="ms-1.5 text-xs font-medium text-muted">
+                              {t("overview.assessmentCard.heardAsInline", {
+                                heardAs: detail.heard_as,
+                              })}
+                            </span>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ) : null}
+            </div>
+          </details>
         ) : null}
       </div>
     </div>

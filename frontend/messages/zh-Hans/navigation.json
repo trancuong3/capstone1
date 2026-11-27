@@ -37,15 +37,15 @@
     "books": "图书库",
     "metadataQuality": "图书质量",
     "auditLogs": "审计日志",
-    "training": "OCR 训练",
+    "training": "文字识别模型",
     "health": "运营",
     "moreTitle": "更多管理",
     "mobileQualityShort": "质量",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "识字",
     "mobileMoreDescriptions": {
       "auditLogs": "追踪管理审计日志",
-      "training": "训练并运行 VietOCR V2 模型",
-      "health": "系统状态、OCR worker 和语音"
+      "training": "训练与管理文字识别模型",
+      "health": "系统状态、文字识别与语音"
     }
   },
   "accountMenu": {

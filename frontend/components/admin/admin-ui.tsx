@@ -337,7 +337,7 @@ export function AdminKpiCard({
   value,
 }: AdminKpiCardProps) {
   const cardClassName = cn(
-    "flex min-w-0 flex-col justify-between gap-1.5 rounded-xl border bg-white px-4 py-3 text-start tabular-nums transition-colors",
+    "flex min-w-0 flex-col justify-start gap-1.5 rounded-xl border bg-white px-4 py-3 text-start tabular-nums transition-colors",
     active
       ? "border-primary bg-sky/25 ring-2 ring-primary/25"
       : "border-border",
@@ -351,12 +351,12 @@ export function AdminKpiCard({
 
   const content = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-semibold text-muted">
+      <div className="flex items-start justify-between gap-2">
+        <span className="line-clamp-2 text-xs font-semibold leading-snug text-muted">
           {label}
         </span>
         {icon ? (
-          <span aria-hidden="true" className="shrink-0 text-muted">
+          <span aria-hidden="true" className="mt-0.5 shrink-0 text-muted">
             {icon}
           </span>
         ) : null}

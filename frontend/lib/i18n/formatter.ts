@@ -307,10 +307,16 @@ function formatWithDateTimeIntl(
 
   const bcp47 = getLocaleMetadata(locale).bcp47;
   const { fallback, ...intlOptions } = options ?? {};
-  const mergedOptions: Intl.DateTimeFormatOptions = {
-    ...defaults,
-    ...intlOptions,
-  };
+  // Intl.DateTimeFormat throws a TypeError if dateStyle/timeStyle is combined
+  // with individual field options (year/month/day/hour/minute).
+  const usesStylePresets =
+    intlOptions.dateStyle !== undefined || intlOptions.timeStyle !== undefined;
+  const mergedOptions: Intl.DateTimeFormatOptions = usesStylePresets
+    ? { ...intlOptions }
+    : {
+        ...defaults,
+        ...intlOptions,
+      };
 
   try {
     return new Intl.DateTimeFormat(bcp47, mergedOptions).format(date);

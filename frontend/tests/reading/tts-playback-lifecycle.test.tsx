@@ -261,9 +261,7 @@ describe("TTS lifecycle & One-Session-One-Voice guarantees", () => {
     expect(speech.synthesize).not.toHaveBeenCalled();
     expect(synthesis.speak).toHaveBeenCalledTimes(1);
     expect(getVoiceEngineStatus().tts.tier).toBe("browser_default");
-    expect(getVoiceEngineStatus().tts.shortLabel).toBe(
-      "Online (Google/Trình duyệt)",
-    );
+    expect(getVoiceEngineStatus().tts.shortLabel).toBe("Trình duyệt");
   });
 
   it("auto-falls back to browser TTS immediately on 503 when Google fallback is opted-in without wasting a second Google backend call", async () => {

@@ -860,23 +860,23 @@ class VireadOcrTrainingService:
         flow2_blockers: list[str] = []
         if flow2_storage_provider_setting() == StorageProvider.GOOGLE_DRIVE:
             if not google_drive or not google_drive.get("connected"):
-                flow2_blockers.append("Google Drive cho Luồng 2 chưa kết nối hoặc phiên bridge không hợp lệ.")
+                flow2_blockers.append("Google Drive cho dữ liệu xác minh chưa kết nối hoặc phiên cầu nối không hợp lệ.")
             elif google_drive.get("connection_mode") == "drive_desktop_sync" and web_heavy_disabled:
-                flow2_blockers.append("Đang dùng Google Drive Desktop trên máy cá nhân; Cloud server cần Apps Script Bridge.")
+                flow2_blockers.append("Đang dùng Google Drive trên máy cá nhân; máy chủ đám mây cần kết nối qua Apps Script Bridge.")
         if flow2_legacy_count > 0:
             flow2_blockers.append(
-                f"Còn {flow2_legacy_count} mẫu chưa đồng bộ lên Cloud Google Drive (cần Apps Script Bridge & migrate)."
+                f"Còn {flow2_legacy_count} mẫu chưa đồng bộ lên Google Drive (cần kết nối Apps Script Bridge và đồng bộ)."
             )
         if not (flow2_train_count > 0 and flow2_validation_count > 0):
             flow2_blockers.append(
-                f"Pool sạch Luồng 2 cần mẫu ở cả train ({flow2_train_count}) và validation ({flow2_validation_count}); có thể bấm kích hoạt tạo snapshot nếu đã có ít nhất 2 nhóm sách."
+                f"Kho dữ liệu sạch cần có mẫu ở cả tập huấn luyện ({flow2_train_count}) và tập kiểm thử ({flow2_validation_count}); có thể bấm tạo bản tổng hợp nếu đã có ít nhất 2 nhóm sách."
             )
         if web_heavy_disabled and not any(
             str(j.get("profile") or "") in {"FLOW2_ADMIN_VERIFIED", "FLOW1_VERIFIED"}
             and str(j.get("status") or "") in {"WAITING_FOR_COLAB_WORKER", "COLAB_RUNNING", "QUEUED"}
             for j in jobs
         ):
-            flow2_blockers.append("Worker nền trên Web bị tắt (VIREAD_WEB_DISABLE_HEAVY_WORKERS=true); hãy bấm 'Tạo snapshot & Xếp hàng train Luồng 2' để đẩy job cho Colab.")
+            flow2_blockers.append("Tác vụ huấn luyện nền trên máy chủ web đang tắt; hãy bấm 'Tạo bản tổng hợp & Xếp hàng huấn luyện' để gửi tác vụ cho máy chủ xử lý.")
 
         storage_summary = {
             "flow2_write_provider": flow2_storage_provider_setting().value,

@@ -161,9 +161,11 @@ describe("BookScannerScreen local OCR photo upload", () => {
     expect(await screen.findByTestId("local-ocr-text")).toHaveTextContent(
       "Buổi sáng mùa thu trời trong xanh.",
     );
-    expect(screen.getByText("paddleocr_vietocr_dual")).toBeInTheDocument();
-    expect(screen.getByText("CUDA")).toBeInTheDocument();
-    expect(screen.getByText("req-local-ocr-001")).toBeInTheDocument();
+    expect(
+      screen.queryByText("paddleocr_vietocr_dual"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("CUDA")).not.toBeInTheDocument();
+    expect(screen.queryByText("req-local-ocr-001")).not.toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: /Mở Trang 2 để bắt đầu đọc/i }),
@@ -203,7 +205,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
 
     expect(
       await screen.findByText(
-        /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+        /Đang gửi ảnh tới hệ thống nhận diện trang sách tiếng Việt/i,
       ),
     ).toBeInTheDocument();
 
@@ -212,7 +214,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await waitFor(() => {
       expect(
         screen.queryByText(
-          /Đang gửi ảnh tới hệ thống nhận diện OCR tiếng Việt/i,
+          /Đang gửi ảnh tới hệ thống nhận diện trang sách tiếng Việt/i,
         ),
       ).not.toBeInTheDocument();
     });
@@ -254,7 +256,9 @@ describe("BookScannerScreen local OCR photo upload", () => {
     await user.upload(input, makePageFile());
 
     expect(
-      await screen.findByText(/OCR cục bộ xử lý quá thời gian cho phép/i),
+      await screen.findByText(
+        /Nhận diện trang sách xử lý quá thời gian cho phép/i,
+      ),
     ).toBeInTheDocument();
 
     await user.click(

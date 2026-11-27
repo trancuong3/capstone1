@@ -467,7 +467,7 @@ describe("Parent report UI through real adapters and HTTP test doubles", () => {
     );
     await user.click(screen.getByRole("button", { name: "Luyện từ" }));
     expect(
-      await screen.findByText(/chưa được khởi tạo bảng dữ liệu/i),
+      await screen.findByText(/lưu lịch sử luyện từ hiện chưa sẵn sàng/i),
     ).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/mô phỏng chữ/)).not.toBeInTheDocument();

@@ -130,7 +130,7 @@
     "loadingBook": "Buchinformationen werden geladen...",
     "bookUnavailableTitle": "Buch noch nicht bereit",
     "bookNotFoundTitle": "Buch nicht gefunden",
-    "bookUnavailableDesc": "Dieses Buch enthält noch keine AKTIVEN und VERIFIZIERTEN Inhalte für das Kind.",
+    "bookUnavailableDesc": "Dieses Buch hat noch keine lesebereiten Inhalte.",
     "bookNotFoundDesc": "Das Buch existiert nicht oder ist nicht in der aktuellen Bibliothek enthalten.",
     "backToLibrary": "Zurück zur Bibliothek",
     "loadErrorTitle": "Buchinformationen konnten nicht geladen werden",
@@ -138,9 +138,9 @@
     "micReady": "Mikrofon ist bereit",
     "micGranted": "Mikrofonberechtigung erteilt",
     "rangeSummary": "Lesebereich: Seiten {start}–{end}",
-    "ocrMatchSummary": "OCR-Seite bestätigt: Seite {page} · Zuverlässigkeit {percent}%",
+    "ocrMatchSummary": "Erkannte Seite: Seite {page} · Sicherheit {percent}%",
     "matchedPageMissingTitle": "Erkannte Seite nicht gefunden",
-    "matchedPageMissingDesc": "Die OCR-Seite ist nicht in der gültigen Seitenliste des Buches enthalten. ViRead wird nicht automatisch die Seite wechseln.",
+    "matchedPageMissingDesc": "Die erkannte Seite gehört nicht zu den gültigen Seiten dieses Buches. ViRead wechselt nicht automatisch zu einer anderen Seite.",
     "invalidRangeTitle": "Ungültiger Seitenbereich",
     "invalidRangeDesc": "Bitte kehre zu den Buchdetails zurück und wähle die Startseite, Endseite oder einen fortlaufenden Bereich erneut aus.",
     "micCheckSectionTitle": "Mikrofon prüfen",
@@ -173,7 +173,7 @@
       "unsupported": "Der Browser bietet keinen automatischen Status. Du kannst das Mikrofon weiterhin über die Schaltfläche unten überprüfen.",
       "no_device": "Kein Mikrofon am Gerät gefunden. Bitte schließe ein Mikrofon an und versuche es erneut.",
       "device_busy": "Das Mikrofon wird von einer anderen App verwendet. Bitte schließe diese App und versuche es erneut.",
-      "error": "Mikrofon kann nicht überprüft werden. Bitte verwende HTTPS oder localhost und versuche es erneut."
+      "error": "Mikrofon konnte nicht geprüft werden. Bitte prüfen Sie sichere Verbindung und Browsereinstellungen und versuchen Sie es erneut."
     }
   },
   "ready": {
@@ -260,7 +260,7 @@
     "referencePageAlt": "Referenzbild für Seite {page}",
     "scrollToCurrentWord": "Über das gelesene Wort",
     "currentWordPrefix": "Aktuelles Wort: ",
-    "overlayAria": "Aktuelles Wort per Bounding Box hervorheben"
+    "overlayAria": "Hervorhebungsbereich für das aktuelle Wort"
   },
   "pageContent": {
     "incorrectWordAria": "Nicht ganz: \"{word}\". Versuche es noch einmal.",
@@ -406,7 +406,7 @@
     "practicedWordsLabel": "in dieser Sitzung",
     "collapseDetails": "Einklappen",
     "viewSpokenWords": "Gelesene Wörter anzeigen",
-    "sttResultsTitle": "Ergebnisse der Spracherkennung (STT)",
+    "sttResultsTitle": "Ergebnisse der Spracherkennung des Kindes",
     "recognizedWordsBadge": "{count} Wörter erkannt",
     "unassessedOnlyLabel": "Erkannte Wörter; unzureichende Daten für eine korrekte Bewertung oder erfordert Aufmerksamkeit:",
     "correctWordsTitle": "Erfolgreich gelesene Wörter ({count} Wörter):",
@@ -428,7 +428,7 @@
     "versionLoadError": "Der Inhalt für diese Seitenversion konnte nicht geladen werden.",
     "pageLoadError": "Der Seiteninhalt konnte nicht geladen werden.",
     "loadingAria": "Leseinhalt wird geladen",
-    "verifiedContentTitle": "Verifizierter Seiteninhalt",
+    "verifiedContentTitle": "Inhalt der Buchseite",
     "legendAria": "Farblegende",
     "recordedTranscriptLabel": "Aufgezeichnete Sprache",
     "notRecorded": "Nicht aufgezeichnet",

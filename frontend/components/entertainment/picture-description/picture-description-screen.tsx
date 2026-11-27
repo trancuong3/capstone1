@@ -957,26 +957,28 @@ export function PictureDescriptionScreen() {
     : 0;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1130px] flex-col gap-6 pb-8">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-4 pb-6">
       <BookChildHeader
         child={selectedChild}
         mobileLabel={t("pictureDescription.mobileLabel")}
         backHref="/entertainment"
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3">
         <div>
           <Link
-            className="inline-flex items-center gap-2 text-sm font-extrabold text-primary hover:underline"
+            className="inline-flex items-center gap-2 text-xs font-extrabold text-primary hover:underline sm:text-sm"
             href="/entertainment"
           >
             <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
             {t("pictureDescription.backLink")}
           </Link>
-          <h1 className="mt-1 flex items-center gap-2 text-heading font-extrabold text-ink">
+          <h1 className="book-title mt-1 flex items-center gap-2 text-2xl text-ink sm:text-[32px]">
             {t("pictureDescription.heading")}
           </h1>
-          <p className="text-body text-muted">{t("pictureDescription.lead")}</p>
+          <p className="text-sm text-muted sm:text-base">
+            {t("pictureDescription.lead")}
+          </p>
         </div>
 
         {session ? (
@@ -1236,9 +1238,11 @@ export function PictureDescriptionScreen() {
                         type="file"
                       />
 
-                      <div className="flex flex-wrap gap-3">
+                      <div className="flex flex-wrap items-center gap-2.5">
                         <Button
+                          fullWidth={false}
                           onClick={() => fileInputRef.current?.click()}
+                          size="compact"
                           type="button"
                           variant="secondary"
                         >
@@ -1249,7 +1253,9 @@ export function PictureDescriptionScreen() {
                         </Button>
                         {uploadFile ? (
                           <Button
+                            fullWidth={false}
                             onClick={() => void handleStartUpload()}
+                            size="compact"
                             type="button"
                           >
                             <Sparkles aria-hidden="true" className="size-4" />

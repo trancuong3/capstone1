@@ -382,65 +382,65 @@ const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
   PARENT_AUTH_OPERATION_FAILED:
     "Không thể hoàn tất thao tác xác thực tài khoản phụ huynh lúc này. Vui lòng thử lại sau.",
   PROCESSING_UNAVAILABLE:
-    "Dịch vụ xử lý tài liệu và OCR đang tạm thời không khả dụng. Vui lòng thử lại sau.",
+    "Dịch vụ xử lý tài liệu đang tạm thời không khả dụng. Vui lòng thử lại sau.",
   PROVIDER_NOT_CONFIGURED:
-    "Dịch vụ tích hợp trên máy chủ chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.",
+    "Tính năng này hiện chưa được kích hoạt đầy đủ. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ.",
   REVISION_CONFLICT:
     "Phiên bản nội dung đã thay đổi trước đó. Hãy tải lại trang để cập nhật bản mới nhất.",
   DRIVE_QUOTA_EXCEEDED:
-    "Dung lượng Google Drive miễn phí sắp chạm ngưỡng an toàn. Hãy dọn Thùng rác Drive hoặc xóa snapshot/run cũ trước khi tiếp tục.",
+    "Không gian lưu trữ dữ liệu đang gần đầy. Vui lòng dọn bớt dữ liệu cũ rồi thử lại.",
   DRIVE_ACCOUNT_EMAIL_MISMATCH:
-    "Tài khoản Google vừa chọn không khớp tài khoản chủ sở hữu Drive được khóa trên server.",
+    "Tài khoản liên kết không khớp với tài khoản lưu trữ đã thiết lập trên hệ thống.",
   DRIVE_BRIDGE_ACCESS_DENIED:
-    "Apps Script Web App đang chặn truy cập. Trong script.google.com hãy Deploy lại với 'Who has access: Anyone' (bảo vệ bằng HMAC-SHA256).",
+    "Kết nối lưu trữ đám mây đang bị từ chối quyền truy cập. Vui lòng kiểm tra lại thiết lập kết nối.",
   DRIVE_BRIDGE_SECRET_NOT_SET:
-    "Chưa cài VIREAD_BRIDGE_SECRET trong Script Properties của Apps Script Bridge.",
+    "Kết nối lưu trữ đám mây chưa được thiết lập đầy đủ. Vui lòng liên hệ quản trị viên.",
   DRIVE_AUTH_FAILED:
-    "Xác thực chữ ký Apps Script Bridge hoặc phiên Google Drive thất bại. Hãy kiểm tra lại VIREAD_BRIDGE_SECRET.",
+    "Xác thực kết nối lưu trữ đám mây chưa thành công. Vui lòng thử kết nối lại.",
   DRIVE_ENCRYPTION_KEY_MISSING:
-    "Server chưa cấu hình đủ VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự).",
+    "Dịch vụ lưu trữ đám mây chưa sẵn sàng. Vui lòng liên hệ quản trị viên.",
   GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER:
-    "Cloud server (Render) không thể đọc ổ G:\\ trên máy cá nhân; hãy kết nối qua Apps Script Bridge.",
+    "Chế độ đồng bộ máy tính không khả dụng trên hệ thống trực tuyến. Vui lòng sử dụng kết nối trực tuyến.",
   GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST:
-    "Máy chủ Linux không hỗ trợ Google Drive for Desktop; hãy kết nối qua Apps Script Bridge.",
+    "Hệ thống hiện tại không hỗ trợ đồng bộ thư mục máy tính. Vui lòng sử dụng kết nối trực tuyến.",
   FLOW2_INGESTION_PAUSED:
-    "Luồng 2 đang tạm dừng thu thập (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+    "Tính năng đóng góp dữ liệu cải thiện nhận diện chữ đang tạm dừng.",
   UNRESOLVED_TRAINING_JOB_EXISTS:
-    "Đang có một job huấn luyện chưa kết thúc trong hàng đợi; hãy hoàn tất hoặc xử lý job đó trước.",
+    "Đang có một lượt cập nhật mô hình chưa hoàn tất. Vui lòng đợi hoàn tất trước khi tạo lượt mới.",
   TRAIN_AND_VALIDATION_REQUIRED:
-    "Dataset Luồng 2 cần có đồng thời cả mẫu train và validation (tối thiểu 2 nhóm sách/trang độc lập).",
+    "Dữ liệu đóng góp chưa đủ điều kiện tối thiểu để tổng hợp. Vui lòng bổ sung thêm mẫu đã kiểm duyệt.",
   NO_ELIGIBLE_FLOW2_SAMPLES:
-    "Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot huấn luyện.",
+    "Chưa có mẫu đóng góp đạt chuẩn nào để tạo bản tổng hợp.",
   "Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive":
-    "Cần áp dụng migration 20261121210000_flow2_google_drive_storage.sql trên database trước khi kết nối Google Drive.",
+    "Hệ thống lưu trữ đang được cập nhật. Vui lòng thử lại sau.",
   "A queued or running training job cannot be deleted":
-    "Không thể xóa job đang chờ worker hoặc đang chạy.",
+    "Không thể xóa tác vụ đang chờ xử lý hoặc đang chạy.",
   "Only a pre-run failure or an unbenchmarked candidate with a recoverable Colab error can be retried":
-    "Chỉ có thể thử lại job lỗi trước khi tạo run hoặc candidate Colab có lỗi có thể khôi phục.",
+    "Chỉ có thể thử lại các tác vụ gặp sự cố tạm thời trước khi đánh giá.",
   "The pinned Locked Test is missing or no longer meets its integrity requirements":
-    "Locked Test gắn với job bị thiếu hoặc không còn đạt chuẩn toàn vẹn.",
+    "Bộ dữ liệu kiểm thử chuẩn bị thiếu hoặc không còn hợp lệ.",
   "Locked Test is not ready":
-    "Locked Test chưa sẵn sàng hoặc chưa đủ số lượng mẫu/nhóm độc lập.",
+    "Bộ dữ liệu kiểm thử chuẩn chưa sẵn sàng hoặc chưa đủ số lượng mẫu.",
   "The active model has changed since this training job was created":
-    "Model active trên hệ thống đã đổi kể từ khi job này được tạo.",
+    "Mô hình đang sử dụng trên hệ thống đã thay đổi kể từ khi tác vụ này được tạo.",
   "Another training job is already active":
-    "Đang có một job huấn luyện hoặc đánh giá khác đang hoạt động.",
+    "Đang có một tác vụ cập nhật hoặc đánh giá khác đang hoạt động.",
   "Candidate evaluation is already running or queued":
-    "Job đánh giá candidate này đã được xếp hàng hoặc đang chạy.",
+    "Tác vụ đánh giá phiên bản này đã được xếp hàng hoặc đang chạy.",
   "Pilot holdout does not meet minimum samples or groups":
-    "Tập holdout sạch chưa đạt mức tối thiểu 20 mẫu và 5 nhóm sách/trang độc lập để chạy Pilot.",
+    "Dữ liệu kiểm thử chưa đạt số lượng tối thiểu để chạy đánh giá thử nghiệm.",
   "Remote OCR worker is offline; live page scan is temporarily unavailable.":
-    "Máy chủ OCR Windows hiện đang ngoại tuyến nên tính năng quét trang trực tiếp tạm thời không khả dụng. Ba mẹ hãy bật máy trạm OCR hoặc chọn sách trong Thư viện nhé.",
+    "Tính năng quét trang sách trực tiếp hiện đang tạm nghỉ. Ba mẹ hãy chọn sách trong Thư viện để đọc cùng bé hoặc thử lại sau nhé.",
   "Remote OCR worker is offline; cannot run synchronous page OCR":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy nhận diện OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng nhận diện trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker is offline; cannot run synchronous replacement OCR":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể thay ảnh và chạy OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng thay ảnh và nhận diện trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker is offline; cannot reprocess page synchronously":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy lại OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng nhận diện lại trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.":
-    "Máy chủ OCR xử lý lâu hơn thời gian chờ trực tiếp. Tác vụ đã được xếp hàng — vui lòng kiểm tra lại trạng thái sau ít giây.",
+    "Quá trình nhận diện trang sách đang xử lý lâu hơn dự kiến và đã được xếp hàng. Vui lòng kiểm tra lại trạng thái sau ít giây.",
   "Remote OCR worker failed":
-    "Máy chủ OCR gặp sự cố khi nhận diện trang. Vui lòng thử lại sau ít giây.",
+    "Hệ thống gặp sự cố khi nhận diện trang sách. Vui lòng thử lại sau ít giây.",
   "Database temporarily unavailable":
     "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
   "Database temporarily unavailable; please retry":
@@ -448,9 +448,9 @@ const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
   "Idempotency key already used for a different OCR payload.":
     "Mã gửi ảnh đã dùng cho một ảnh khác. Hãy chọn lại ảnh để quét mới.",
   "OCR inference job not found.":
-    "Không tìm thấy tác vụ OCR hoặc tác vụ đã hết hạn.",
+    "Không tìm thấy yêu cầu quét trang sách hoặc yêu cầu đã hết hạn.",
   "Scan OCR job not found":
-    "Không tìm thấy tác vụ quét trang sách hoặc tác vụ đã hết hạn.",
+    "Không tìm thấy yêu cầu quét trang sách hoặc yêu cầu đã hết hạn.",
 };
 
 const SAFE_BACKEND_PREFIX_CODES = [
@@ -617,18 +617,11 @@ export async function requestApi<T>(
         invalidateApiReadCache();
       }
       const backendMessage = await safeBackendMessage(response);
-      const messageWithCorrelation =
-        response.status >= 500 && requestId
-          ? tApiError("errors.requestWithId", {
-              message: backendMessage,
-              requestId,
-            })
-          : backendMessage;
       throw failure(
         response.status,
         requestId,
         response.status >= 500,
-        messageWithCorrelation,
+        backendMessage,
       );
     }
 

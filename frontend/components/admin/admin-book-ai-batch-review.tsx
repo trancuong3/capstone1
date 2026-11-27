@@ -335,11 +335,7 @@ export function AdminBookAiBatchReview({
         );
         if (!isActiveController() || controller.signal.aborted) break;
         if (workflow.status === "FAILED" || !workflow.proofread_text) {
-          throw new Error(
-            t("books.aiBatch.errors.workflowIncomplete", {
-              errorCode: workflow.error_code ?? "FAILED",
-            }),
-          );
+          throw new Error(t("books.aiBatch.errors.workflowIncomplete"));
         }
 
         const prepared = preparePage(

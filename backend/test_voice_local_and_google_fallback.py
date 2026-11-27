@@ -40,6 +40,7 @@ from app.providers.local_voice_provider import (
 from app.services.voice_orchestrator import (
     VoiceOrchestrator,
     VoicePolicyContext,
+    build_contrastive_vietnamese_keyterms,
     clear_voice_orchestrator_caches,
 )
 
@@ -840,6 +841,188 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
             )
         )
         self.assertTrue(fb.used_fallback_voice)
+
+    def test_contrastive_keyterms_and_local_google_logprob_propagation(self) -> None:
+        import asyncio
+        import json
+        import math
+
+        co_terms = build_contrastive_vietnamese_keyterms(["có"])
+        self.assertLessEqual(len(co_terms), 14)
+        for tone_pair in ("có", "co", "cò", "cỏ", "cõ", "cọ"):
+            self.assertIn(tone_pair, co_terms)
+
+        mot_terms = build_contrastive_vietnamese_keyterms(["một"])
+        self.assertIn("một", mot_terms)
+        self.assertIn("mốt", mot_terms)
+        self.assertIn("mộc", mot_terms)
+        self.assertIn("mộp", mot_terms)
+        self.assertLessEqual(len(mot_terms), 14)
+
+        hom_terms = build_contrastive_vietnamese_keyterms(["hôm"])
+        self.assertIn("hôn", hom_terms)
+        self.assertIn("hông", hom_terms)
+
+        dua_terms = build_contrastive_vietnamese_keyterms(["đứa"])
+        self.assertIn("dứa", dua_terms)
+
+        # VoiceOrchestrator passes contrastive keyterms into both local and google transcribe,
+        # and keeps keyterms=None when none are supplied.
+        captured_local: list[dict] = []
+        captured_google: list[dict] = []
+
+        local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+
+        async def _fake_local_transcribe(**kwargs):
+            captured_local.append(kwargs)
+            return LocalTranscription(
+                text="có",
+                language_code="vi",
+                language_probability=None,
+                words=[{"text": "có", "start": 0.0, "end": 0.25, "logprob": -0.35}],
+            )
+
+        local.transcribe = _fake_local_transcribe  # type: ignore[method-assign]
+        google = GoogleCloudVoiceProvider(stt_api_key="test-google-key")
+
+        async def _fake_google_transcribe(**kwargs):
+            captured_google.append(kwargs)
+            return LocalTranscription(
+                text="có",
+                language_code="vi",
+                language_probability=0.92,
+                words=[{"text": "có", "start": 0.0, "end": 0.25, "logprob": math.log(0.92)}],
+                provider="google",
+                fallback_used=True,
+            )
+
+        google.transcribe = _fake_google_transcribe  # type: ignore[method-assign]
+        orch = VoiceOrchestrator(local_provider=local, google_provider=google)
+
+        asyncio.run(
+            orch.transcribe(
+                audio=b"wav",
+                filename="a.wav",
+                content_type="audio/wav",
+                keyterms=["có"],
+            )
+        )
+        self.assertEqual(captured_local[-1]["keyterms"], co_terms)
+
+        # Fallback path forwards contrastive keyterms to Google
+        local.transcribe = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_STT_UNAVAILABLE")
+        )
+        asyncio.run(
+            orch.transcribe(
+                audio=b"wav",
+                filename="b.wav",
+                content_type="audio/wav",
+                keyterms=["có"],
+                policy=VoicePolicyContext(
+                    provider_mode="local_with_google_fallback",
+                    allow_google_stt=True,
+                ),
+            )
+        )
+        self.assertEqual(captured_google[-1]["keyterms"], co_terms)
+
+        # LocalVoiceProvider forwards keyterms in multipart form & maps logprob
+        posted_data: list[dict] = []
+
+        class _LocalWorkerClient:
+            is_closed = False
+
+            async def post(self, _url, **kwargs):
+                posted_data.append(kwargs.get("data") or {})
+                return httpx.Response(
+                    200,
+                    json={
+                        "text": "có",
+                        "language_code": "vi",
+                        "words": [
+                            {"text": "có", "start": 0.05, "end": 0.30, "logprob": -0.42},
+                            {"text": "nhé", "start": 0.31, "end": 0.50},
+                        ],
+                    },
+                )
+
+        real_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        real_local._client = _LocalWorkerClient()  # type: ignore[assignment]
+        local_tx = asyncio.run(
+            real_local.transcribe(
+                audio=b"RIFF-wav",
+                filename="c.wav",
+                content_type="audio/wav",
+                keyterms=co_terms,
+            )
+        )
+        self.assertEqual(json.loads(posted_data[-1]["keyterms"]), co_terms)
+        self.assertEqual(local_tx.words[0]["logprob"], -0.42)
+        self.assertIsNone(local_tx.words[1]["logprob"])
+
+        # GoogleCloudVoiceProvider sets boost=8.0, maxAlternatives=3, and maps positive confidence to logprob
+        google_payloads: list[dict] = []
+
+        class _GoogleHttpClient:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return None
+
+            async def post(self, _url, **kwargs):
+                google_payloads.append(kwargs.get("json") or {})
+                return httpx.Response(
+                    200,
+                    json={
+                        "results": [
+                            {
+                                "alternatives": [
+                                    {
+                                        "transcript": "có",
+                                        "confidence": 0.9,
+                                        "words": [
+                                            {"word": "có", "startTime": "0.1s", "endTime": "0.3s"}
+                                        ],
+                                    }
+                                ]
+                            },
+                            {
+                                "alternatives": [
+                                    {
+                                        "transcript": "nhé",
+                                        "confidence": 0.0,
+                                        "words": [
+                                            {"word": "nhé", "startTime": "0.3s", "endTime": "0.5s"}
+                                        ],
+                                    }
+                                ]
+                            },
+                        ]
+                    },
+                )
+
+        real_google = GoogleCloudVoiceProvider(stt_api_key="test-key")
+        with patch(
+            "app.providers.google_voice_provider.httpx.AsyncClient", _GoogleHttpClient
+        ):
+            g_tx = asyncio.run(
+                real_google.transcribe(
+                    audio=b"webm",
+                    filename="c.webm",
+                    content_type="audio/webm",
+                    keyterms=co_terms,
+                )
+            )
+        cfg = google_payloads[-1]["config"]
+        self.assertEqual(cfg["maxAlternatives"], 3)
+        self.assertEqual(cfg["speechContexts"], [{"phrases": co_terms, "boost": 8.0}])
+        self.assertAlmostEqual(g_tx.words[0]["logprob"], math.log(0.9), places=6)
+        self.assertIsNone(g_tx.words[1]["logprob"])
 
 
 if __name__ == "__main__":

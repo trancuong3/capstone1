@@ -132,7 +132,7 @@ class BookQualityFindingRead(BaseModel):
     excerpt_end: int
     suggested_correction: str | None
     explanation: str
-    detection_source: Literal["RULE", "OLLAMA_TEXT"]
+    detection_source: Literal["RULE", "OLLAMA_TEXT", "CLOUD_AI"]
     model_name: str | None
     confidence: float | None
     status: BookQualityFindingStatus

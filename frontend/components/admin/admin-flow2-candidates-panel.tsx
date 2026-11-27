@@ -347,8 +347,6 @@ export function AdminFlow2CandidatesPanel() {
                   <p className="mt-0.5 text-xs text-muted">
                     {t("flow2.rightsMeta", {
                       rights: selected.rights_basis_label,
-                      consentVersion: selected.consent_version,
-                      sha: selected.image_sha256.slice(0, 12),
                     })}
                   </p>
                 </div>

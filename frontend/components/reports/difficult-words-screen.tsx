@@ -102,7 +102,9 @@ export function DifficultWordsScreen({
           previous.routeKey === routeSelectionKey &&
           previous.bookKey === bookKey &&
           previous.word
-            ? [...previous.visitedWords, previous.word]
+            ? previous.visitedWords.includes(previous.word)
+              ? previous.visitedWords
+              : [...previous.visitedWords, previous.word]
             : [],
       }));
     },

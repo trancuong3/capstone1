@@ -485,7 +485,10 @@ class GlobalTasksRepository:
         async def _op() -> bool:
             row = await self.db.scalar(
                 select(OcrWorkerHeartbeat)
-                .where(OcrWorkerHeartbeat.LastHeartbeatAt >= cutoff)
+                .where(
+                    OcrWorkerHeartbeat.LastHeartbeatAt >= cutoff,
+                    OcrWorkerHeartbeat.Status.in_(("IDLE", "BUSY")),
+                )
                 .order_by(OcrWorkerHeartbeat.LastHeartbeatAt.desc())
                 .limit(1)
             )

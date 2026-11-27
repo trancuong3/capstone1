@@ -34,7 +34,7 @@
     "currentInvalid": "当前密码不正确。",
     "changeError": "无法更改密码。请检查网络连接并重试。",
     "noEmailForRecovery": "账户中没有可用于发送密码重置链接的邮箱。",
-    "recoverySent": "Supabase Auth 已收到密码重置请求。请检查您的收件箱和垃圾邮件文件夹。",
+    "recoverySent": "账户系统已收到发送密码设置链接的请求。请检查您的收件箱和垃圾邮件文件夹。",
     "recoveryError": "无法发送密码重置链接。请稍后再试。",
     "showFieldAria": "显示 {label}",
     "hideFieldAria": "隐藏 {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "显示语言",
     "description": "选择导航和设置的语言。越南语书籍内容保持不变。",
-    "learningContentNote": "更改语言仅影响导航、按钮和设置。越南语书籍、OCR、语音识别 (STT) 和语音朗读 (TTS) 仍为越南语。"
+    "learningContentNote": "更改语言仅更新导航栏、按钮和设置。越南语书籍、页面识别、语音识别和示范朗读仍保持越南语。"
   }
 }

@@ -353,7 +353,7 @@ class LocalOcrScanService:
         if not await job_service.has_online_worker():
             raise HTTPException(
                 status_code=503,
-                detail="Remote OCR worker is offline; live page scan is temporarily unavailable.",
+                detail="Dịch vụ nhận diện chữ tạm thời chưa sẵn sàng, vui lòng thử lại sau.",
             )
         await self._release_db_read_txn()
 
@@ -515,7 +515,7 @@ class LocalOcrScanService:
             )
             raise HTTPException(
                 status_code=504,
-                detail="Local OCR processing timed out; please retry",
+                detail="Quá trình nhận diện chữ mất quá nhiều thời gian, vui lòng thử lại.",
             ) from exc
         except HTTPException:
             raise
@@ -534,7 +534,7 @@ class LocalOcrScanService:
                 )
                 raise HTTPException(
                     status_code=422,
-                    detail="No usable text was detected; check the image quality",
+                    detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                 ) from exc
             if _is_ocr_exception(exc, "OcrEngineUnavailable"):
                 log_diagnostic(
@@ -549,7 +549,7 @@ class LocalOcrScanService:
                 )
                 raise HTTPException(
                     status_code=503,
-                    detail="Local OCR engine is unavailable",
+                    detail="Dịch vụ nhận diện chữ tạm thời chưa sẵn sàng, vui lòng thử lại sau.",
                 ) from exc
             log_diagnostic(
                 logger,
@@ -563,7 +563,7 @@ class LocalOcrScanService:
             )
             raise HTTPException(
                 status_code=500,
-                detail="OCR processing failed; check the local OCR configuration",
+                detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
             ) from exc
 
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -621,7 +621,7 @@ class LocalOcrScanService:
         if not ocr_text:
             raise HTTPException(
                 status_code=422,
-                detail="No usable text was detected; check the image quality",
+                detail="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
             )
 
         raw_words = ocr_result.get("words") if isinstance(ocr_result.get("words"), list) else []
@@ -716,7 +716,7 @@ class LocalOcrScanService:
                 ],
             )
             message = (
-                f"Đã nhận diện tiếng Việt bằng OCR và khớp Trang {m_page.PageNumber} "
+                f"Đã nhận diện nội dung trang sách và khớp Trang {m_page.PageNumber} "
                 f"của sách “{m_book.Title}”."
             )
         else:
@@ -785,7 +785,7 @@ class LocalOcrScanService:
                 error_code = error_code or "NO_TEXT_DETECTED"
                 error_message = (
                     error_message
-                    or "No usable text was detected; check the image quality"
+                    or "Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn."
                 )
             else:
                 ocr_meta = dict(payload.get("ocr_meta") or {})
@@ -927,7 +927,7 @@ class LocalOcrScanService:
                         "no_text_detected": not bool(text_val),
                     },
                     ErrorCode=None if text_val else "NO_TEXT_DETECTED",
-                    ErrorMessage=None if text_val else "No usable text was detected; check the image quality",
+                    ErrorMessage=None if text_val else "Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                     DurationMs=duration_ms,
                     CreatedAt=now,
                     UpdatedAt=now,
@@ -965,7 +965,7 @@ class LocalOcrScanService:
                     AttemptCount=1,
                     MaxAttempts=1,
                     ErrorCode=err_code,
-                    ErrorMessage="Local OCR processing failed.",
+                    ErrorMessage="Không thể nhận diện chữ trên trang sách này, vui lòng chụp rõ hơn.",
                     CreatedAt=now,
                     UpdatedAt=now,
                     CompletedAt=now,

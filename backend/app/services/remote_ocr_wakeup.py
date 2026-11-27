@@ -77,6 +77,12 @@ def clear_remote_ocr_wakeup_cache_for_tests() -> None:
     _PENDING_REWAKE_URLS.clear()
 
 
+def invalidate_remote_ocr_health_cache() -> None:
+    """Clear the cached remote OCR `/health` snapshot so worker transitions reflect immediately."""
+    global _HEALTH_CACHE
+    _HEALTH_CACHE = None
+
+
 def _loop_health_lock() -> asyncio.Lock:
     loop_id = id(asyncio.get_running_loop())
     lock = _HEALTH_LOCKS.get(loop_id)

@@ -45,18 +45,18 @@ export function ProgressReportFilters({
 
   return (
     <div
-      className={`grid grid-cols-1 items-end gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`}
+      className={`grid grid-cols-1 items-end gap-2 rounded-card border border-border bg-white p-2 sm:px-3 sm:py-2 ${hasMore ? "sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]" : "sm:grid-cols-2"}`}
     >
       <div className="min-w-0">
         <label
-          className="mb-1.5 block text-xs font-bold text-muted"
+          className="mb-0.5 block text-xs font-bold text-muted"
           htmlFor={childSelectId}
         >
           {tc("selector.label")}
         </label>
         <select
           aria-label={tc("selector.selectAria")}
-          className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="h-9 min-h-9 w-full cursor-pointer rounded-control border border-border bg-cream px-2.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           id={childSelectId}
           onChange={(event) => router.push(progressHref(event.target.value))}
           value={childId}
@@ -74,13 +74,13 @@ export function ProgressReportFilters({
 
       <div className="min-w-0">
         <label
-          className="mb-1.5 block text-xs font-bold text-muted"
+          className="mb-0.5 block text-xs font-bold text-muted"
           htmlFor={periodSelectId}
         >
           {t("overview.periodSelectLabel")}
         </label>
         <select
-          className="min-h-12 w-full cursor-pointer rounded-control border border-border bg-cream px-3.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="h-9 min-h-9 w-full cursor-pointer rounded-control border border-border bg-cream px-2.5 text-sm font-bold text-ink outline-none focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
           id={periodSelectId}
           onChange={(event) => {
             const value = event.target.value;
@@ -115,9 +115,10 @@ export function ProgressReportFilters({
 
       {hasMore ? (
         <Button
-          className="min-h-12 whitespace-nowrap sm:w-auto"
+          className="h-9 min-h-9! whitespace-nowrap py-0! text-xs! sm:w-auto"
           disabled={loadingMore}
           onClick={onLoadMore}
+          size="admin"
           variant="secondary"
         >
           {loadingMore

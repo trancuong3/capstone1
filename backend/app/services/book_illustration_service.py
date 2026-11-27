@@ -37,17 +37,21 @@ from app.schemas.book_assets import (
     PageIllustrationModerationRequest,
     ReadingDisplayMode,
 )
+from app.services import book_cover_service as _book_cover_service_mod
 from app.services.book_cover_service import (
     BookCoverService,
     ImageGenerateTransport,
     MAX_COVER_PIXELS,
+    _ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT,
     _default_image_generate_transport,
     _encode_optimized_webp,
     _validate_relative_storage_path,
     asset_to_dto,
     detect_image_generation_provider,
     detect_magic_image_format,
+    generate_image_via_router,
 )
+from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.book_style_bible import BookStyleBibleService
 from app.services.storage_service import delete_object, download_object, upload_object
 
@@ -771,6 +775,7 @@ class BookIllustrationService:
         self.cover_service = BookCoverService(db, image_transport=image_transport)
         self.style_bible_service = BookStyleBibleService(db)
         self._ocr_check_fn = ocr_check_fn
+        self._has_custom_image_transport = image_transport is not None
         self._image_transport = image_transport or _default_image_generate_transport
 
     async def extract_page_illustration(
@@ -1133,8 +1138,39 @@ class BookIllustrationService:
         elif callable(getattr(self.db, "rollback", None)):
             await self.db.rollback()
 
+        used_provider_name = provider.provider_name
+        used_model_id = provider.model_id
         try:
-            http_status, raw_bytes = await self._image_transport(provider, prompt)
+            if self._has_custom_image_transport:
+                http_status, raw_bytes = await self._image_transport(provider, prompt)
+            elif _default_image_generate_transport is not _ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT:
+                http_status, raw_bytes = await _default_image_generate_transport(provider, prompt)
+            elif (
+                _book_cover_service_mod._default_image_generate_transport
+                is not _ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT
+            ):
+                http_status, raw_bytes = (
+                    await _book_cover_service_mod._default_image_generate_transport(
+                        provider, prompt
+                    )
+                )
+            else:
+                allow_cloud = (
+                    not private_book
+                ) or OcrCorrectionConfig.private_book_allow_cloud_ai()
+                tenant_scope = f"private:{owner_id}" if private_book else "admin:catalog"
+                http_status, raw_bytes, routed_pid, routed_mid = await generate_image_via_router(
+                    prompt=prompt,
+                    width=1024,
+                    height=768,
+                    tenant_scope=tenant_scope,
+                    allow_cloud=allow_cloud,
+                    source_hash=input_hash,
+                )
+                if routed_pid:
+                    used_provider_name = routed_pid
+                if routed_mid:
+                    used_model_id = routed_mid
         except Exception as exc:
             logger.warning("AI illustration request failed (type=%s)", type(exc).__name__)
             http_status, raw_bytes = 503, b""
@@ -1261,8 +1297,8 @@ class BookIllustrationService:
                 text_free_verified=is_verified,
                 moderation_status="APPROVED" if is_verified else "REJECTED",
                 is_active=is_verified,
-                provider_name=provider.provider_name,
-                model_id=provider.model_id,
+                provider_name=used_provider_name,
+                model_id=used_model_id,
                 job_id=target_job_id,
                 metadata_json={
                     "text_density_score": verification.text_density_score,
@@ -1295,8 +1331,8 @@ class BookIllustrationService:
                     return PageIllustrationGenerateResponse(
                         status="STALE",
                         job_id=existing_job_id,
-                        provider_name=provider.provider_name,
-                        model_id=provider.model_id,
+                        provider_name=used_provider_name,
+                        model_id=used_model_id,
                         asset=None,
                         recommended_reading_mode="TEXT",
                         message_vi="Nội dung trang đã được cập nhật hoặc tác vụ bị hủy trước khi lưu.",
@@ -1326,8 +1362,8 @@ class BookIllustrationService:
         return PageIllustrationGenerateResponse(
             status="SUCCEEDED" if is_verified else "REJECTED_CONTAINS_TEXT",
             job_id=target_job_id,
-            provider_name=provider.provider_name,
-            model_id=provider.model_id,
+            provider_name=used_provider_name,
+            model_id=used_model_id,
             asset=asset_to_dto(asset),
             recommended_reading_mode="ILLUSTRATED" if is_verified else "TEXT",
             message_vi=(

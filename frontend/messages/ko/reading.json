@@ -130,7 +130,7 @@
     "loadingBook": "책 정보 불러오는 중...",
     "bookUnavailableTitle": "아직 준비되지 않은 도서입니다",
     "bookNotFoundTitle": "도서를 찾을 수 없습니다",
-    "bookUnavailableDesc": "이 도서는 아이가 읽을 수 있는 ACTIVE 및 VERIFIED 콘텐츠가 아직 없습니다.",
+    "bookUnavailableDesc": "이 책에는 아직 아이가 읽을 수 있는 내용이 준비되지 않았습니다.",
     "bookNotFoundDesc": "도서가 존재하지 않거나 현재 도서관에 없습니다.",
     "backToLibrary": "도서관으로 돌아가기",
     "loadErrorTitle": "책 정보를 불러올 수 없습니다",
@@ -138,9 +138,9 @@
     "micReady": "마이크 준비 완료",
     "micGranted": "마이크 권한 허용됨",
     "rangeSummary": "읽기 범위: {start}–{end} 페이지",
-    "ocrMatchSummary": "OCR 페이지 확인: {page} 페이지 · 신뢰도 {percent}%",
+    "ocrMatchSummary": "인식된 페이지: {page}쪽 · 신뢰도 {percent}%",
     "matchedPageMissingTitle": "인식된 페이지를 찾을 수 없습니다",
-    "matchedPageMissingDesc": "OCR 페이지가 책의 유효한 페이지 목록에 없습니다. ViRead가 자동으로 페이지를 넘기지 않습니다.",
+    "matchedPageMissingDesc": "인식된 페이지가 이 책의 유효한 페이지 목록에 없습니다. ViRead가 다른 페이지로 자동 전환하지 않습니다.",
     "invalidRangeTitle": "유효하지 않은 페이지 범위",
     "invalidRangeDesc": "책 상세 정보로 돌아가 시작 페이지, 끝 페이지 또는 연속 범위를 다시 선택해 주세요.",
     "micCheckSectionTitle": "마이크 확인",
@@ -173,7 +173,7 @@
       "unsupported": "브라우저에서 자동 상태를 제공하지 않습니다. 아래 버튼을 사용하여 마이크를 직접 확인해 주세요.",
       "no_device": "장치에서 마이크를 찾을 수 없습니다. 마이크를 연결하고 다시 시도해 주세요.",
       "device_busy": "다른 앱에서 마이크를 사용 중입니다. 해당 앱을 종료하고 다시 시도해 주세요.",
-      "error": "마이크를 확인할 수 없습니다. HTTPS 또는 localhost를 사용하고 다시 시도해 주세요."
+      "error": "마이크를 확인할 수 없습니다. 보안 연결과 브라우저 설정을 확인한 후 다시 시도해 주세요."
     }
   },
   "ready": {
@@ -260,7 +260,7 @@
     "referencePageAlt": "{page}페이지 참고 이미지",
     "scrollToCurrentWord": "읽고 있는 단어 정보",
     "currentWordPrefix": "현재 단어: ",
-    "overlayAria": "바운딩 박스를 통해 현재 단어 강조 표시"
+    "overlayAria": "현재 읽고 있는 단어 강조 영역"
   },
   "pageContent": {
     "incorrectWordAria": "정답이 아니에요: \"{word}\". 이 단어를 다시 읽어볼까요?",
@@ -406,7 +406,7 @@
     "practicedWordsLabel": "이번 세션에서",
     "collapseDetails": "접기",
     "viewSpokenWords": "아이가 읽은 단어 보기",
-    "sttResultsTitle": "음성 인식 결과 (STT)",
+    "sttResultsTitle": "아이 음성 인식 결과",
     "recognizedWordsBadge": "{count}개 단어 인식됨",
     "unassessedOnlyLabel": "인식된 단어입니다. 정확도를 평가하기에는 데이터가 부족하거나 주의가 필요합니다:",
     "correctWordsTitle": "아이가 성공적으로 읽은 단어 목록 ({count}개):",
@@ -428,7 +428,7 @@
     "versionLoadError": "읽은 버전의 페이지 내용을 불러올 수 없습니다.",
     "pageLoadError": "페이지 내용을 불러올 수 없습니다.",
     "loadingAria": "읽기 내용 로딩 중",
-    "verifiedContentTitle": "확인된 페이지 내용",
+    "verifiedContentTitle": "책 페이지 내용",
     "legendAria": "대조 색상 범례",
     "recordedTranscriptLabel": "녹음된 음성",
     "notRecorded": "기록되지 않음",

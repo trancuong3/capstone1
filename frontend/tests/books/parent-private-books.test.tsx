@@ -939,4 +939,66 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     expect(screen.getByText("Trang 15")).toBeInTheDocument();
     expect(screen.queryByText("Trang 1")).not.toBeInTheDocument();
   });
+
+  it("shows stage-accurate pending and technical-error notice labels when proofread fails", async () => {
+    const detail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({
+        failed_submission_count: 1,
+      }),
+      pages: [],
+      submissions: [
+        makeSubmission({
+          workflow_status: "CHECK_FAILED",
+          workflow_status_label: "Kiểm tra lỗi — có thể thử lại",
+          ocr_status: "COMPLETED",
+          proofread_status: "FAILED",
+          proofread_error_code: "ALL_PROVIDERS_FAILED",
+          tool_check_status: "PENDING",
+          tool_check_findings_count: 0,
+          tool_check_parent_notice:
+            "Quá trình kiểm tra gặp sự cố kỹ thuật. Kết quả các bước đã hoàn tất vẫn được giữ; bạn có thể bấm thử lại.",
+          can_add_to_book: false,
+          can_request_admin_review: false,
+          can_retry: true,
+        }),
+      ],
+    };
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}`) {
+        return Response.json(detail);
+      }
+      throw new Error(`Unexpected ${url.pathname}`);
+    });
+
+    render(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+        <AppServicesProvider>
+          <ParentPrivateBookManager bookId={BOOK_ID} />
+        </AppServicesProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    expect(await screen.findByText("Lỗi")).toBeInTheDocument();
+    expect(screen.queryByText(/ALL_PROVIDERS_FAILED/)).not.toBeInTheDocument();
+    expect(screen.getByText("Chờ bước trước hoàn tất")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Đang xếp hàng chờ nhận diện"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText("Quá trình kiểm tra gặp sự cố kỹ thuật."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Trang cần Admin xem xét trước khi thêm vào sách."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Thử lại kiểm tra/ }),
+    ).toBeEnabled();
+  });
 });

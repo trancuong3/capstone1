@@ -25,6 +25,7 @@ from app.services.book_quality_analyzer import (
     duplicate_page_finding,
     page_gap_finding,
 )
+from app.services.book_quality_cloud import analyse_with_cloud_ai
 from app.services.book_quality_ollama import analyse_with_ollama
 from app.services.worker_telemetry import (
     persist_worker_heartbeat_with_factory,
@@ -324,7 +325,6 @@ async def _process_page_scan(
     ai_detection_source = "OLLAMA_TEXT"
 
     from app.services.ocr_ai.config import OcrCorrectionConfig
-    from app.services.ocr_ai.child_safety import build_child_safety_orchestrator
 
     try:
         ocr_ai_cfg = OcrCorrectionConfig.from_environment()
@@ -333,48 +333,31 @@ async def _process_page_scan(
 
     has_cloud_fallback = bool(ocr_ai_cfg.gemini_enabled or ocr_ai_cfg.groq_enabled)
 
-    async def _run_cloud_quality_fallback() -> tuple[list[Any], str]:
-        safety_res = await build_child_safety_orchestrator().analyze(text_snapshot)
-        raw_findings = safety_res.get("findings") if isinstance(safety_res, dict) else []
-        mapped: list[Any] = []
-        for entry in (raw_findings or []):
-            if not isinstance(entry, dict):
+    async def _run_cloud_quality() -> None:
+        nonlocal ai_result, ai_rejected_count, ai_detection_source
+        ai_result = await analyse_with_cloud_ai(
+            text_snapshot,
+            page_number,
+            config=ocr_ai_cfg,
+        )
+        ai_detection_source = "CLOUD_AI"
+        ai_rejected_count = ai_result.rejected_excerpt_count
+        for item in ai_result.findings:
+            if (
+                item.excerpt_start < 0
+                or item.excerpt_end > len(text_snapshot)
+                or text_snapshot[item.excerpt_start:item.excerpt_end] != item.excerpt
+            ):
+                ai_rejected_count += 1
                 continue
-            excerpt = str(entry.get("evidence_text") or entry.get("excerpt") or "").strip()
-            if not excerpt:
-                continue
-            start_idx = text_snapshot.find(excerpt)
-            if start_idx < 0:
-                continue
-            end_idx = start_idx + len(excerpt)
-            sev = str(entry.get("severity") or "MEDIUM").upper()
-            if sev not in ("LOW", "MEDIUM", "HIGH"):
-                sev = "MEDIUM"
-            mapped.append(
-                type(
-                    "_CloudQualityItem",
-                    (),
-                    {
-                        "issue_type": "AGE_INAPPROPRIATE",
-                        "severity": sev,
-                        "excerpt": excerpt,
-                        "excerpt_start": start_idx,
-                        "excerpt_end": end_idx,
-                        "explanation": str(
-                            entry.get("explanation") or entry.get("reason") or "Phát hiện nội dung cần Admin xem xét."
-                        ),
-                        "suggested_correction": None,
-                        "confidence": None,
-                        "model_name": str(entry.get("model") or "cloud_ai"),
-                    },
-                )()
-            )
-        return mapped, "CLOUD_AI"
+            ai_findings.append(item)
 
     if not ocr_ai_cfg.local_enabled:
         if has_cloud_fallback:
             try:
-                ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+                await _run_cloud_quality()
+            except LocalCorrectionError as error:
+                ai_error = error
             except Exception:
                 logger.exception("Book quality cloud AI analysis failed")
                 ai_error = LocalCorrectionError(503, "Cloud content inspection is unavailable.")
@@ -396,7 +379,9 @@ async def _process_page_scan(
         except LocalCorrectionError as error:
             if error.status_code == 503 and has_cloud_fallback:
                 try:
-                    ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+                    await _run_cloud_quality()
+                except LocalCorrectionError as cloud_error:
+                    ai_error = cloud_error
                 except Exception:
                     ai_error = error
             else:
@@ -405,7 +390,9 @@ async def _process_page_scan(
             logger.exception("Book quality Ollama analysis failed")
             if has_cloud_fallback:
                 try:
-                    ai_findings, ai_detection_source = await _run_cloud_quality_fallback()
+                    await _run_cloud_quality()
+                except LocalCorrectionError as cloud_error:
+                    ai_error = cloud_error
                 except Exception:
                     ai_error = LocalCorrectionError(503, "Ollama content inspection is unavailable.")
             else:
@@ -459,11 +446,18 @@ async def _process_page_scan(
             page_scan.AIAnalysisStatus = (
                 "UNAVAILABLE" if ai_error.status_code == 503 else "FAILED"
             )
-            page_scan.ErrorCode = (
-                "OLLAMA_UNAVAILABLE"
-                if ai_error.status_code == 503
-                else "OLLAMA_INVALID_RESPONSE"
-            )
+            if not ocr_ai_cfg.local_enabled:
+                page_scan.ErrorCode = (
+                    "CLOUD_AI_UNAVAILABLE"
+                    if ai_error.status_code == 503
+                    else "CLOUD_AI_INVALID_RESPONSE"
+                )
+            else:
+                page_scan.ErrorCode = (
+                    "OLLAMA_UNAVAILABLE"
+                    if ai_error.status_code == 503
+                    else "OLLAMA_INVALID_RESPONSE"
+                )
             page_scan.ErrorSummary = ai_error.detail[:1000]
         else:
             ai_rows = [

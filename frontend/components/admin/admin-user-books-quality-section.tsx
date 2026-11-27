@@ -174,7 +174,7 @@ function UserBookDecisionPanel({
           <p className="text-xs font-bold text-ink">
             {t("userBooks.suspendTitle")}
           </p>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               aria-label={t("userBooks.suspendReasonAria")}
               className="h-10 min-h-10 flex-1 rounded-control border border-border bg-white px-3 text-xs text-ink focus-visible:border-primary focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
@@ -183,6 +183,7 @@ function UserBookDecisionPanel({
               value={suspendReason}
             />
             <Button
+              className="h-10 shrink-0 whitespace-nowrap"
               disabled={busyAction !== null}
               isLoading={busyAction === "suspend"}
               onClick={() => void handleSuspendClick()}
@@ -190,7 +191,7 @@ function UserBookDecisionPanel({
               type="button"
               variant="destructive"
             >
-              <Ban aria-hidden="true" className="size-3.5" />
+              <Ban aria-hidden="true" className="size-3.5 shrink-0" />
               {t("userBooks.suspendBtn")}
             </Button>
           </div>
@@ -498,7 +499,7 @@ export const AdminUserBooksQualitySection = memo(
             aria-controls="user-books-subpanel-moderation"
             aria-selected={subTab === "moderation"}
             className={cn(
-              "rounded-control px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+              "inline-flex min-h-9 items-center rounded-control px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
               subTab === "moderation"
                 ? "bg-white text-primary shadow-2xs ring-1 ring-border"
                 : "text-muted hover:bg-white/75 hover:text-ink",
@@ -515,7 +516,7 @@ export const AdminUserBooksQualitySection = memo(
             aria-controls="user-books-subpanel-flow2"
             aria-selected={subTab === "flow2_candidates"}
             className={cn(
-              "rounded-control px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+              "inline-flex min-h-9 items-center rounded-control px-3.5 py-2 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
               subTab === "flow2_candidates"
                 ? "bg-white text-primary shadow-2xs ring-1 ring-border"
                 : "text-muted hover:bg-white/75 hover:text-ink",
@@ -782,6 +783,7 @@ export const AdminUserBooksQualitySection = memo(
 
                         <div className="flex shrink-0 items-center">
                           <Button
+                            className="min-w-[8.5rem] whitespace-nowrap"
                             disabled={!targetSubId}
                             onClick={() => {
                               if (targetSubId) {
@@ -824,11 +826,6 @@ export const AdminUserBooksQualitySection = memo(
                 detail
                   ? t("userBooks.detailMeta", {
                       owner: detail.owner_label,
-                      version: detail.submission_version,
-                      lockVersion: detail.optimistic_lock_version,
-                      hashSuffix: detail.snapshot_hash
-                        ? ` · Hash ${detail.snapshot_hash.slice(0, 12)}`
-                        : "",
                     })
                   : undefined
               }
@@ -1017,15 +1014,27 @@ export const AdminUserBooksQualitySection = memo(
                       <div className="rounded-xl border border-border bg-surface-subtle p-3 text-xs">
                         <p className="font-bold text-ink">
                           {t("userBooks.toolCheckHeading", {
-                            status: detail.tool_check_status,
+                            status:
+                              detail.tool_check_status === "COMPLETED"
+                                ? "Hoàn tất"
+                                : detail.tool_check_status === "FAILED"
+                                  ? "Gặp lỗi"
+                                  : "Đang xử lý",
                           })}
                           {detail.tool_check_suitability
-                            ? ` (${detail.tool_check_suitability})`
+                            ? ` (${
+                                detail.tool_check_suitability === "SUITABLE"
+                                  ? "Phù hợp"
+                                  : detail.tool_check_suitability ===
+                                      "NOT_RECOMMENDED"
+                                    ? "Không khuyến nghị"
+                                    : "Cần kiểm tra"
+                              })`
                             : ""}
                         </p>
                         <p className="mt-1 text-muted">
                           {t("userBooks.toolCheckScope", {
-                            modality: detail.tool_check_scope.modality,
+                            modality: "Văn bản & hình ảnh trang sách",
                             checked: formatNumber(
                               detail.tool_check_scope.chunks_checked,
                             ),
@@ -1037,7 +1046,13 @@ export const AdminUserBooksQualitySection = memo(
                               ? t("userBooks.engineOllamaLocal")
                               : t("userBooks.engineDefaultAi"),
                             copyrightStatus:
-                              detail.tool_check_scope.copyright_scanner_status,
+                              detail.tool_check_scope
+                                .copyright_scanner_status === "CLEAR"
+                                ? "Chưa ghi nhận cảnh báo"
+                                : detail.tool_check_scope
+                                      .copyright_scanner_status === "FLAGGED"
+                                  ? "Có cảnh báo bản quyền"
+                                  : "Cần kiểm tra",
                           })}
                         </p>
                       </div>
@@ -1064,7 +1079,14 @@ export const AdminUserBooksQualitySection = memo(
                               >
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className="font-bold text-ink">
-                                    {finding.category}
+                                    {finding.category === "SEXUAL_CONTENT"
+                                      ? "Nội dung nhạy cảm"
+                                      : finding.category === "VIOLENCE"
+                                        ? "Bạo lực"
+                                        : finding.category ===
+                                            "COPYRIGHT_CONCERN"
+                                          ? "Bản quyền"
+                                          : "Nội dung cần lưu ý"}
                                   </span>
                                   <AdminBadge
                                     tone={
@@ -1073,7 +1095,11 @@ export const AdminUserBooksQualitySection = memo(
                                         : "warning"
                                     }
                                   >
-                                    {finding.severity}
+                                    {finding.severity === "HIGH"
+                                      ? "Nghiêm trọng"
+                                      : finding.severity === "MEDIUM"
+                                        ? "Trung bình"
+                                        : "Cần xem xét"}
                                   </AdminBadge>
                                 </div>
                                 {finding.explanation ? (
@@ -1141,7 +1167,16 @@ export const AdminUserBooksQualitySection = memo(
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-1">
                                   <span className="font-bold text-ink">
-                                    v{hist.submission_version} · {hist.status}
+                                    Phiên bản {hist.submission_version} ·{" "}
+                                    {hist.status === "APPROVED"
+                                      ? "Đã duyệt"
+                                      : hist.status === "REJECTED"
+                                        ? "Từ chối"
+                                        : hist.status === "CHANGES_REQUESTED"
+                                          ? "Yêu cầu sửa"
+                                          : hist.status === "SUSPENDED"
+                                            ? "Đình chỉ"
+                                            : "Chờ duyệt"}
                                     {hist.decided_by_label
                                       ? ` · ${hist.decided_by_label}`
                                       : ""}

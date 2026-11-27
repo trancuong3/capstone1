@@ -654,11 +654,11 @@ describe("real Admin adapters", () => {
     );
     await expect(createAdminBookService().list()).rejects.toMatchObject({
       status: 503,
-      message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+      message: "Hệ thống lưu trữ hình ảnh chưa sẵn sàng. Vui lòng thử lại sau.",
     });
   });
 
-  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+  it("shows the safe Storage bucket reason and preserves its request ID property", async () => {
     fetchMock.mockResolvedValue(
       Response.json(
         {
@@ -674,8 +674,7 @@ describe("real Admin adapters", () => {
     await expect(createAdminBookService().list()).rejects.toMatchObject({
       status: 503,
       request_id: "request-test-123",
-      message:
-        "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
+      message: "Không tìm thấy thư mục lưu trữ hình ảnh. Vui lòng thử lại sau.",
     });
   });
 
@@ -813,7 +812,7 @@ describe("real Admin adapters", () => {
     expect(progress[1]).toEqual({
       status: "FAILED",
       error_message:
-        "Backend thiếu SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Hãy cấu hình khóa chỉ ở môi trường Backend.",
+        "Dịch vụ lưu trữ hình ảnh đang bảo trì cấu hình. Vui lòng thử lại sau.",
     });
   });
 

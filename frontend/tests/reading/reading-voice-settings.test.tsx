@@ -286,60 +286,19 @@ describe("reading voice settings", () => {
     expect(getVoicePolicyPreferences().region).toBe("south");
     expect(getSpeechPreferences().voiceId).toBe("local_south_thuc_doan");
 
-    // Parent can explicitly enable "Máy này + Google dự phòng" -> enables BOTH STT & TTS fallbacks
-    await user.click(
-      screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
-    );
-    expect(getVoicePolicyPreferences()).toMatchObject({
-      providerMode: "local_with_google_fallback",
-      allowGoogleSttFallback: true,
-      allowGoogleTtsFallback: true,
-    });
-
-    // Switching back to "Chỉ máy này" (local_only) -> turns both Google fallbacks OFF
-    await user.click(screen.getByRole("button", { name: /Chỉ máy này/ }));
-    expect(getVoicePolicyPreferences()).toMatchObject({
-      providerMode: "local_only",
-      allowGoogleSttFallback: false,
-      allowGoogleTtsFallback: false,
-    });
-
-    // Re-enabling "Máy này + Google dự phòng" -> automatically enables BOTH STT & TTS fallbacks immediately
-    await user.click(
-      screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
-    );
-    expect(getVoicePolicyPreferences()).toMatchObject({
-      providerMode: "local_with_google_fallback",
-      allowGoogleSttFallback: true,
-      allowGoogleTtsFallback: true,
-    });
-
-    const sttCheckbox = screen.getByLabelText(
-      /Dự phòng Google cho Nhận diện giọng nói \(STT\)/,
-    );
-    const ttsCheckbox = screen.getByLabelText(
-      /Dự phòng Google cho Đọc mẫu \(TTS\)/,
-    );
-    expect(sttCheckbox).toBeChecked();
-    expect(ttsCheckbox).toBeChecked();
-
-    // Both checkboxes remain independently toggleable afterwards
-    await user.click(ttsCheckbox);
-    expect(getVoicePolicyPreferences().allowGoogleSttFallback).toBe(true);
-    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
-
-    await user.click(ttsCheckbox);
-    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(true);
-
-    // Choose Google voice while allowed, then turn off Google TTS fallback -> resets to local voice
-    setVoicePolicyPreferences({ region: "north" });
-    await user.click(screen.getByRole("button", { name: "Tất cả vùng" }));
-    await user.click(screen.getByRole("radio", { name: /Google Nữ Bắc/ }));
-    expect(getSpeechPreferences().voiceId).toBe("google_vi_vn_neural2_a");
-
-    await user.click(ttsCheckbox);
-    expect(getVoicePolicyPreferences().allowGoogleTtsFallback).toBe(false);
-    expect(getSpeechPreferences().voiceId).toBeNull();
+    // Technical provider mode toggles and STT/TTS fallback checkboxes stay hidden from parents
+    expect(
+      screen.queryByRole("button", { name: /Máy này \+ Google dự phòng/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Chỉ máy này/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Dự phòng Google cho Nhận diện giọng nói/),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByLabelText(/Dự phòng Google cho Đọc mẫu/),
+    ).not.toBeInTheDocument();
   });
 
   it("previews the voice and stops the preview when the dialog closes", async () => {

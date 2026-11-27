@@ -19,11 +19,6 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { TranslateFn } from "@/lib/i18n/types";
 import type { VireadTrainingOverview } from "@/lib/api/viread-training-service";
 
-function shortHash(value: string) {
-  if (value.length <= 16) return value;
-  return `${value.slice(0, 10)}…${value.slice(-8)}`;
-}
-
 function formatBytes(
   bytes: number,
   t: TranslateFn,
@@ -130,9 +125,6 @@ export function AdminVireadReliabilityPanel({
               <CheckCircle2 className="size-3.5" />{" "}
               {t("training.flow1.activeBadge")}
             </span>
-            <span className="rounded-control bg-sky px-2 py-0.5 font-mono text-xs font-bold text-primary-hover">
-              {activeModel.profile}
-            </span>
           </div>
           <h2 className="mt-2 text-2xl font-black">
             {activeModel.version_label ||
@@ -145,10 +137,6 @@ export function AdminVireadReliabilityPanel({
             <span className="font-semibold text-ink">
               {activeModel.weights_filename ||
                 t("training.flow1.manualWeightsFallback")}
-            </span>{" "}
-            · SHA-256:{" "}
-            <span className="font-mono text-xs">
-              {shortHash(activeModel.checkpoint_sha256)}
             </span>
           </p>
         </div>
@@ -1043,9 +1031,7 @@ export function AdminVireadFlow1Replacement({
             </p>
           ) : (
             <p className="mt-1 text-xs text-muted">
-              {t("training.flow1.step2HintPrefix")}
-              <code className="font-mono text-ink">vgg_transformer</code>
-              {t("training.flow1.step2HintSuffix")}
+              {t("training.flow1.defaultYaml")}
             </p>
           )}
         </div>

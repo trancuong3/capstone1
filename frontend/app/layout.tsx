@@ -3,6 +3,7 @@ import "@/lib/zod-config";
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { ViReadAssistantWidget } from "@/components/assistant/viread-assistant-widget";
 import { NavigationFeedbackBar } from "@/components/common/navigation-feedback";
 import { I18nProvider } from "@/components/i18n/i18n-provider";
 import { translateMessage } from "@/lib/i18n/formatter";
@@ -51,6 +52,7 @@ export default async function RootLayout({
         <I18nProvider initialLocale={locale} initialMessages={messages}>
           <NavigationFeedbackBar />
           {children}
+          <ViReadAssistantWidget />
         </I18nProvider>
       </body>
     </html>

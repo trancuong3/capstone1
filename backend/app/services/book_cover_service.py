@@ -364,6 +364,16 @@ def detect_image_generation_provider(*, is_private_book: bool) -> ImageProviderA
         os.getenv("CLOUDFLARE_IMAGE_MODEL")
         or "@cf/black-forest-labs/flux-1-schnell"
     ).strip()
+    gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+    gemini_billing = (os.getenv("GEMINI_IMAGE_BILLING_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    gemini_image_model = (
+        os.getenv("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
+    ).strip()
     cloud_allowed = (not is_private_book) or OcrCorrectionConfig.private_book_allow_cloud_ai()
 
     if cf_account and cf_token and cloud_allowed:
@@ -377,6 +387,19 @@ def detect_image_generation_provider(*, is_private_book: bool) -> ImageProviderA
             ),
             reason_code="READY",
             message_vi="Sẵn sàng tạo bìa bằng Cloudflare Workers AI (miễn phí 0 VND).",
+        )
+
+    if gemini_billing and gemini_key and cloud_allowed:
+        return ImageProviderAvailability(
+            available=True,
+            provider_name="gemini_image",
+            model_id=gemini_image_model,
+            endpoint_url=(
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{gemini_image_model}:generateContent"
+            ),
+            reason_code="READY",
+            message_vi="Sẵn sàng tạo ảnh bằng Gemini Image.",
         )
 
     local_url = flags.local_image_worker_url
@@ -395,7 +418,9 @@ def detect_image_generation_provider(*, is_private_book: bool) -> ImageProviderA
                 message_vi="Sẵn sàng tạo bìa bằng Local Image Worker trên máy chủ cục bộ.",
             )
 
-    if is_private_book and cf_account and cf_token and not cloud_allowed:
+    if is_private_book and not cloud_allowed and (
+        (cf_account and cf_token) or (gemini_billing and gemini_key)
+    ):
         return ImageProviderAvailability(
             available=False,
             provider_name=None,
@@ -502,6 +527,53 @@ async def _default_image_generate_transport(
         return 200, raw_body
 
 
+_ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT = _default_image_generate_transport
+
+
+async def generate_image_via_router(
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    tenant_scope: str,
+    allow_cloud: bool,
+    source_hash: str,
+) -> tuple[int, bytes, str | None, str | None]:
+    """Dispatch real image generation through AiCapabilityRouter (Cloudflare -> Local -> Gemini)."""
+    from app.services.ai_capability_router import (
+        AiCapability,
+        AiErrorKind,
+        AiRoutingError,
+        ImageGenerationRequest,
+        get_default_ai_router,
+        reset_default_ai_router,
+    )
+
+    router = get_default_ai_router()
+    if not router.eligible_providers(
+        AiCapability.IMAGE_GENERATION, allow_cloud=allow_cloud
+    ):
+        reset_default_ai_router()
+        router = get_default_ai_router()
+
+    request = ImageGenerationRequest(
+        prompt=prompt,
+        width=width,
+        height=height,
+        steps=4,
+        tenant_scope=tenant_scope,
+        allow_cloud=allow_cloud,
+        source_hash=source_hash,
+    )
+    try:
+        result = await router.generate_image(request)
+        return 200, result.image_bytes, result.provider_id, result.model_id
+    except AiRoutingError as exc:
+        if exc.kind in (AiErrorKind.QUOTA_EXHAUSTED, AiErrorKind.RATE_LIMIT):
+            return 429, b"", None, None
+        return 503, b"", None, None
+
+
 def asset_to_dto(asset: BookPresentationAsset) -> BookPresentationAssetRead:
     return BookPresentationAssetRead(
         id=asset.Id,
@@ -561,6 +633,7 @@ class BookCoverService:
         self.db = db
         self.repo = BookAssetsRepository(db)
         self.style_bible_service = BookStyleBibleService(db)
+        self._has_custom_image_transport = image_transport is not None
         self._image_transport = image_transport or _default_image_generate_transport
 
     async def _is_catalog_book_eligible(self, book: Book) -> bool:
@@ -1040,8 +1113,31 @@ class BookCoverService:
         elif callable(getattr(self.db, "rollback", None)):
             await self.db.rollback()
 
+        used_provider_name = provider.provider_name
+        used_model_id = provider.model_id
         try:
-            http_status, raw_bytes = await self._image_transport(provider, prompt)
+            if self._has_custom_image_transport:
+                http_status, raw_bytes = await self._image_transport(provider, prompt)
+            elif _default_image_generate_transport is not _ORIGINAL_DEFAULT_IMAGE_GENERATE_TRANSPORT:
+                http_status, raw_bytes = await _default_image_generate_transport(provider, prompt)
+            else:
+                private_book = is_book_private(book)
+                allow_cloud = (not private_book) or OcrCorrectionConfig.private_book_allow_cloud_ai()
+                tenant_scope = (
+                    f"private:{book.OwnerParentId}" if private_book else "admin:catalog"
+                )
+                http_status, raw_bytes, routed_pid, routed_mid = await generate_image_via_router(
+                    prompt=prompt,
+                    width=768,
+                    height=1024,
+                    tenant_scope=tenant_scope,
+                    allow_cloud=allow_cloud,
+                    source_hash=input_hash,
+                )
+                if routed_pid:
+                    used_provider_name = routed_pid
+                if routed_mid:
+                    used_model_id = routed_mid
         except Exception as exc:
             logger.warning("AI cover generation request failed (type=%s)", type(exc).__name__)
             http_status, raw_bytes = 503, b""
@@ -1096,8 +1192,8 @@ class BookCoverService:
         asset, superseded = await self.commit_generated_cover_bytes(
             book=book,
             image_bytes=raw_bytes,
-            provider_name=provider.provider_name or "ai_image",
-            model_id=provider.model_id,
+            provider_name=used_provider_name or "ai_image",
+            model_id=used_model_id,
             job_id=target_job_id,
             lease_token=existing_lease_token if managed_by_worker else None,
             prompt_summary=prompt,
@@ -1112,8 +1208,8 @@ class BookCoverService:
             return BookCoverGenerateResponse(
                 status="SUPERSEDED_BY_USER_UPLOAD",
                 job_id=target_job_id,
-                provider_name=provider.provider_name,
-                model_id=provider.model_id,
+                provider_name=used_provider_name,
+                model_id=used_model_id,
                 message_vi="Ảnh bìa do người dùng tải lên được ưu tiên hơn bìa AI vừa tạo.",
                 cover=asset_to_dto(effective_cover) if effective_cover is not None else None,
                 metadata_fallback=fallback,
@@ -1157,8 +1253,8 @@ class BookCoverService:
                 return BookCoverGenerateResponse(
                     status="SUPERSEDED_BY_USER_UPLOAD",
                     job_id=existing_job_id,
-                    provider_name=provider.provider_name,
-                    model_id=provider.model_id,
+                    provider_name=used_provider_name,
+                    model_id=used_model_id,
                     message_vi="Tác vụ tạo bìa AI đã bị hủy hoặc thay thế trước khi lưu.",
                     cover=None,
                     metadata_fallback=fallback,
@@ -1179,8 +1275,8 @@ class BookCoverService:
         return BookCoverGenerateResponse(
             status="SUCCEEDED",
             job_id=target_job_id,
-            provider_name=provider.provider_name,
-            model_id=provider.model_id,
+            provider_name=used_provider_name,
+            model_id=used_model_id,
             message_vi="Đã tạo và lưu ảnh bìa AI thành công.",
             cover=asset_to_dto(asset),
             metadata_fallback=fallback,

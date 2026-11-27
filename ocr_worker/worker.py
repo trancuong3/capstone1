@@ -124,8 +124,16 @@ class BackendOcrClient:
         self._client.close()
         self._storage_client.close()
 
-    def send_worker_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        resp = self._client.post("/internal/ocr-jobs/worker-heartbeat", json=payload)
+    def send_worker_heartbeat(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {"json": payload}
+        if timeout_seconds is not None:
+            kwargs["timeout"] = float(timeout_seconds)
+        resp = self._client.post("/internal/ocr-jobs/worker-heartbeat", **kwargs)
         resp.raise_for_status()
         return dict(resp.json())
 
@@ -726,8 +734,9 @@ def run_worker_forever(
         runtime.wake_event.set()
         server.should_exit = True
 
-    signal.signal(signal.SIGINT, _handle_stop)
-    signal.signal(signal.SIGTERM, _handle_stop)
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, _handle_stop)
+        signal.signal(signal.SIGTERM, _handle_stop)
 
     if not runtime.is_draining():
         if use_scale_to_zero:
@@ -764,6 +773,31 @@ def run_worker_forever(
 
     warmup_recovery_attempts = 0
     try:
+        if client is not None and not stop_event.is_set():
+            try:
+                startup_hb = runtime.heartbeat_payload()
+                if runtime.is_ready():
+                    startup_hb["status"] = "IDLE"
+                client.send_worker_heartbeat(startup_hb, timeout_seconds=5.0)
+                last_hb = time.monotonic()
+            except Exception as exc:
+                logger.warning("Startup worker heartbeat failed: %s", type(exc).__name__)
+            if runtime.is_ready() and not stop_event.is_set():
+                try:
+                    drained_on_start = drain_queue_synchronously(
+                        client,
+                        runtime,
+                        lease_seconds=lease_seconds,
+                        heartbeat_seconds=heartbeat_seconds,
+                        straggler_wait_seconds=0.0,
+                        stop_event=stop_event,
+                    )
+                    last_hb = time.monotonic()
+                    if drained_on_start > 0:
+                        last_activity_at = time.monotonic()
+                except Exception as exc:
+                    logger.warning("Startup queue drain failed: %s", type(exc).__name__)
+
         while not stop_event.is_set():
             now = time.monotonic()
 
@@ -902,14 +936,15 @@ def run_worker_forever(
                 last_activity_at = time.monotonic()
     finally:
         server.should_exit = True
-        if client is not None and not use_quiet_standby:
+        if client is not None:
             try:
                 off = runtime.heartbeat_payload()
                 off["status"] = "OFFLINE"
-                client.send_worker_heartbeat(off)
+                off["active_job_id"] = None
+                off["active_job_count"] = 0
+                client.send_worker_heartbeat(off, timeout_seconds=2.0)
             except Exception:
                 pass
-        if client is not None:
             client.close()
 
 

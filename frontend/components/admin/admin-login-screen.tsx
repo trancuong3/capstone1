@@ -125,6 +125,7 @@ export function AdminLoginScreen({
                   errors.email ? "border-danger" : "border-border",
                 )}
                 id={emailId}
+                placeholder="admin@viread.vn"
                 type="email"
                 {...register("email")}
               />

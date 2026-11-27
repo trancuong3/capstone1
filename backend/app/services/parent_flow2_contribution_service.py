@@ -278,21 +278,21 @@ def _build_contribution_status_notice(
     if not enabled:
         if status_val == "REVOKED":
             return (
-                "Đóng góp mẫu OCR đã bị thu hồi. Sách này hiện không được dùng cho các đợt "
-                "huấn luyện mới; quyền đọc sách và tiến độ của bé không bị ảnh hưởng."
+                "Đóng góp cải thiện nhận diện chữ đã bị thu hồi. Sách này hiện không được dùng cho các đợt "
+                "cải thiện mới; quyền đọc sách và tiến độ của bé không bị ảnh hưởng."
             )
         return (
-            "Sách này hiện không được dùng để huấn luyện OCR. Bạn có thể chủ động bật đóng góp "
-            "ảnh cắt dòng chữ và nhãn đã xác minh cho Luồng 2 bất kỳ lúc nào."
+            "Sách này hiện không được dùng để đóng góp cải thiện nhận diện chữ. Bạn có thể chủ động bật đóng góp "
+            "ảnh cắt dòng chữ và nhãn đã xác minh bất kỳ lúc nào."
         )
     if not rights_eligible:
         label = SOURCE_TYPE_LABELS.get(rights_basis, rights_basis)
         return (
             f"Bạn đã bật đóng góp, nhưng nguồn sách hiện tại ({label}) chưa đủ căn cứ quyền "
-            "huấn luyện OCR. Chỉ sách tự biên soạn, phạm vi công cộng hoặc có giấy phép mới được tuyển mẫu."
+            "đóng góp cải thiện nhận diện chữ. Chỉ sách tự biên soạn, phạm vi công cộng hoặc có giấy phép mới được tuyển mẫu."
         )
     return (
-        "Đang bật đóng góp mẫu OCR (Luồng 2 · Admin xác minh). Các trang đủ điều kiện sẽ tự động "
+        "Đang bật đóng góp cải thiện nhận diện chữ (Admin xác minh). Các trang đủ điều kiện sẽ tự động "
         "đưa vào hàng đợi Admin đối chiếu từng dòng chữ trước khi đồng bộ. Bạn có thể ngừng đóng góp bất kỳ lúc nào."
     )
 
@@ -308,7 +308,7 @@ class ParentFlow2ContributionService:
         if await self.repo.role(actor_id) != "parent":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Chỉ phụ huynh chủ sách mới được thay đổi quyền đóng góp mẫu OCR.",
+                detail="Chỉ phụ huynh chủ sách mới được thay đổi quyền đóng góp cải thiện nhận diện chữ.",
             )
 
     async def _require_admin(self, actor_id: UUID) -> None:
@@ -331,7 +331,7 @@ class ParentFlow2ContributionService:
         rights_ineligible_reason = (
             None
             if rights_eligible
-            else "Nguồn sách hiện tại chưa có căn cứ quyền huấn luyện (cần Tự biên soạn, Phạm vi công cộng hoặc Có giấy phép)."
+            else "Nguồn sách hiện tại chưa có căn cứ quyền đóng góp cải thiện nhận diện chữ (cần Tự biên soạn, Phạm vi công cộng hoặc Có giấy phép)."
         )
         enabled = bool(
             consent is not None
@@ -399,12 +399,12 @@ class ParentFlow2ContributionService:
             if book_snap.LifecycleStatus != "ACTIVE" or book_snap.ModerationStatus != MODERATION_ACTIVE:
                 raise HTTPException(
                     status_code=409,
-                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp mẫu OCR.",
+                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp cải thiện nhận diện chữ.",
                 )
             if not payload.rights_confirmed:
                 raise HTTPException(
                     status_code=422,
-                    detail="Bạn cần xác nhận có quyền cho phép sử dụng ảnh cắt dòng chữ và nhãn cho huấn luyện OCR Flow 2.",
+                    detail="Bạn cần xác nhận có quyền cho phép sử dụng ảnh cắt dòng chữ và nhãn để đóng góp cải thiện nhận diện chữ.",
                 )
 
             pages_snap = await self.repo.list_active_committed_pages(book_snap.Id)
@@ -472,7 +472,7 @@ class ParentFlow2ContributionService:
             if book.LifecycleStatus != "ACTIVE" or book.ModerationStatus != MODERATION_ACTIVE:
                 raise HTTPException(
                     status_code=409,
-                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp mẫu OCR.",
+                    detail="Sách riêng đang bị đình chỉ hoặc không còn hoạt động nên không thể bật đóng góp cải thiện nhận diện chữ.",
                 )
 
             now = datetime.now(timezone.utc)

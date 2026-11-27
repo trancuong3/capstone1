@@ -109,14 +109,14 @@ function ReportCard({
 
   return (
     <article
-      className="flex flex-col gap-5"
+      className="flex flex-col gap-3"
       data-active-report-id={activeReport.report_id}
       data-report-group={group.key}
     >
-      <div className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-2 border-b border-border pb-2.5 sm:flex-row sm:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-extrabold text-ink sm:text-xl">
+            <h3 className="text-base font-extrabold text-ink sm:text-lg">
               {resolvedPage
                 ? t("sessions.readingReports.pageLabel", {
                     page: resolvedPage.page_number,
@@ -125,7 +125,7 @@ function ReportCard({
                     page: pageNumber,
                   })}
             </h3>
-            <span className="rounded-control bg-canvas px-2.5 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
+            <span className="rounded-control bg-canvas px-2 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
               {isImmutable
                 ? t("sessions.readingReports.firstPassTag")
                 : isPrimary
@@ -149,7 +149,7 @@ function ReportCard({
           >
             <button
               aria-label={t("sessions.readingReports.prevReportAria")}
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={pageNumber <= 1}
               onClick={onPrevious}
               type="button"
@@ -175,7 +175,7 @@ function ReportCard({
                       page: pageNum,
                     })}
                     className={cn(
-                      "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "h-9 min-h-9 min-w-9 rounded-control px-2.5 text-xs font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "bg-primary text-white"
                         : "border border-border bg-white text-ink hover:bg-canvas",
@@ -191,7 +191,7 @@ function ReportCard({
             </div>
             <button
               aria-label={t("sessions.readingReports.nextReportAria")}
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={pageNumber >= pageCount}
               onClick={onNext}
               type="button"
@@ -206,26 +206,26 @@ function ReportCard({
         ) : null}
       </div>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(290px,1fr)]">
-        <div className="flex flex-col gap-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+      <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+        <div className="flex flex-col gap-2">
+          <div className="rounded-card border border-border bg-cream p-2.5 sm:p-3.5">
             {pageEntry.status === "loading" ? (
               <div
                 aria-busy="true"
                 aria-label={t("sessions.readingReports.loadingPageAria")}
-                className="space-y-3 p-3"
+                className="space-y-2.5 p-2.5"
               >
                 <Skeleton className="h-5 w-44" />
-                <Skeleton className="h-36 rounded-control" />
+                <Skeleton className="h-28 rounded-control" />
               </div>
             ) : resolvedPage ? (
               <article
-                className="relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[280px] sm:p-6"
+                className="relative mx-auto flex min-h-[140px] w-full flex-col rounded-control bg-[#fffdfa] p-3 sm:min-h-[170px] sm:p-4"
                 data-page-id={resolvedPage.page_id}
                 data-page-revision-id={resolvedPage.page_revision_id}
               >
                 <header className="mb-2 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2 py-0.5 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
                     {t("sessions.readingReports.verifiedPageTitle")}
                   </span>
@@ -244,7 +244,7 @@ function ReportCard({
                   readOnly
                 />
                 {(activeReport.self_corrected_word_ids?.length ?? 0) > 0 ? (
-                  <p className="mt-3 inline-flex items-center gap-1.5 self-start rounded-control border border-green-600/30 bg-green-100 px-3 py-1 text-xs font-bold text-green-900">
+                  <p className="mt-2.5 inline-flex items-center gap-1.5 self-start rounded-control border border-green-600/30 bg-green-100 px-2.5 py-0.5 text-xs font-bold text-green-900">
                     <span aria-hidden="true">↺</span>
                     {t("sessions.readingReports.selfCorrectedCount", {
                       count: activeReport.self_corrected_word_ids?.length ?? 0,
@@ -253,7 +253,7 @@ function ReportCard({
                 ) : null}
               </article>
             ) : (
-              <div className="flex min-h-44 items-center justify-center rounded-control bg-white/80 p-5 text-center text-sm text-muted">
+              <div className="flex min-h-36 items-center justify-center rounded-control bg-white/80 p-4 text-center text-sm text-muted">
                 {t("sessions.readingReports.pageMissingContentNote")}
               </div>
             )}
@@ -265,7 +265,7 @@ function ReportCard({
           >
             {REPORT_WORD_LEGEND.map((legend) => (
               <li
-                className={`rounded-control border px-2.5 py-1 ${legend.swatchClassName}`}
+                className={`rounded-control border px-2 py-0.5 ${legend.swatchClassName}`}
                 key={legend.key}
               >
                 {t(`sessions.readingReports.legend.${legend.key}`)}
@@ -274,8 +274,8 @@ function ReportCard({
           </ul>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <div className="space-y-2">
+        <div className="flex flex-col gap-3">
+          <div className="space-y-1.5">
             <p className="text-xs font-bold text-muted">
               {t("sessions.readingReports.wordBreakdownTitle")}
             </p>
@@ -289,7 +289,7 @@ function ReportCard({
                   <button
                     aria-expanded={isSelected}
                     className={cn(
-                      "min-h-18 rounded-control border p-3 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "flex min-h-14 flex-col justify-between rounded-control border p-2.5 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "border-primary bg-sky"
                         : "border-border bg-white hover:bg-canvas",
@@ -299,11 +299,11 @@ function ReportCard({
                     type="button"
                   >
                     <span
-                      className={`block text-xs font-bold ${metric.accentClassName}`}
+                      className={`block text-xs font-bold leading-snug ${metric.accentClassName}`}
                     >
                       {metricLabel}
                     </span>
-                    <span className="mt-1 block text-2xl font-extrabold tabular-nums text-ink">
+                    <span className="mt-1 block text-xl font-extrabold tabular-nums text-ink">
                       {metric.count}
                     </span>
                   </button>
@@ -366,8 +366,8 @@ function ReportCard({
       </div>
 
       {group.additionalReports.length > 0 ? (
-        <details className="group rounded-control border border-border bg-canvas/60 px-4 py-3">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
+        <details className="group rounded-control border border-border bg-canvas/60 px-3.5 py-2.5">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink [&::-webkit-details-marker]:hidden">
             <span>
               {t("sessions.readingReports.otherComparisonsTitle", {
                 count: group.additionalReports.length,
@@ -431,9 +431,10 @@ function ReportCard({
                   <div className="flex flex-wrap items-center gap-2">
                     {!selected ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="h-9 min-h-9! px-3! py-0! text-xs!"
                         fullWidth={false}
                         onClick={() => onSelectReport(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="secondary"
                       >
@@ -446,11 +447,12 @@ function ReportCard({
                       </span>
                     ) : onRequestDelete ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="h-9 min-h-9! px-3! py-0! text-xs!"
                         disabled={deletingId !== null}
                         fullWidth={false}
                         isLoading={deletingId === entry.report_id}
                         onClick={() => onRequestDelete(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="destructive"
                       >
@@ -654,21 +656,22 @@ export function SessionReadingReports({
   return (
     <section
       aria-labelledby="session-reading-reports-title"
-      className="flex flex-col gap-5 rounded-card border border-border bg-white p-4 sm:p-6"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4"
       data-testid="session-primary-reading-report"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
-          className="book-title text-2xl text-ink"
+          className="book-title text-xl text-ink sm:text-2xl"
           id="session-reading-reports-title"
         >
           {t("sessions.readingReports.pageHeading")}
         </h2>
         {state.status !== "loading" && state.status !== "empty" ? (
           <Button
-            className="min-h-10 px-3 py-1.5 text-xs"
+            className="h-9 min-h-9! px-3! py-0! text-xs!"
             fullWidth={false}
             onClick={() => setRequestKey((key) => key + 1)}
+            size="admin"
             variant="quiet"
           >
             <RefreshCw aria-hidden="true" className="size-3.5" />

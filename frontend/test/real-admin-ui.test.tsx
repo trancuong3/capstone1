@@ -584,7 +584,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       screen.getByRole("heading", { name: "Kiểm tra OCR · R3" }),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/Đã tạo revision nháp từ nội dung đã xác minh/),
+      await screen.findByText(/Đã tạo bản nháp từ nội dung đã xác minh/),
     ).toBeInTheDocument();
   });
 
@@ -714,8 +714,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       screen.getByRole("button", { name: "XÁC NHẬN & CHẠY AI" }),
     );
 
-    expect(await screen.findByText("SEXUAL CONTENT")).toBeInTheDocument();
-    expect(screen.getByText("HIGH", { exact: true })).toHaveClass("bg-red-700");
+    expect(await screen.findByText("Nội dung nhạy cảm")).toBeInTheDocument();
+    expect(screen.getByText("Nghiêm trọng", { exact: true })).toHaveClass(
+      "bg-red-700",
+    );
     expect(
       screen.getByText("Mở chi tiết").closest("details"),
     ).toBeInTheDocument();
@@ -830,10 +832,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "AI trả về evidence không thể đối chiếu chính xác với Candidate",
+      "AI trả về bằng chứng không khớp chính xác với nội dung hiện tại",
     );
-    expect(screen.getByRole("alert")).toHaveTextContent("INVALID_EVIDENCE");
-    expect(screen.getByRole("alert")).toHaveTextContent("gemini_primary");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("INVALID_EVIDENCE");
+    expect(screen.getByRole("alert")).not.toHaveTextContent("gemini_primary");
     expect(
       screen.getByRole("button", { name: "Thử lại Child Safety" }),
     ).toBeInTheDocument();
@@ -1001,12 +1003,12 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(await screen.findByText("book.read")).toBeInTheDocument();
-    expect(screen.getByText(actorId)).toBeInTheDocument();
-    expect(
-      screen.getByText(new RegExp(`book · ${resourceId}`)),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(actorId)).not.toBeInTheDocument();
+    expect(screen.queryByText(resourceId)).not.toBeInTheDocument();
+    expect(screen.getByText("Sách")).toBeInTheDocument();
+    expect(screen.getByText("Quản trị viên")).toBeInTheDocument();
     expect(screen.queryByText(/Không thể tải nhật ký/)).not.toBeInTheDocument();
-    expect(screen.getByText("{}")).toBeInTheDocument();
+    expect(screen.getByText("Không có thông tin bổ sung")).toBeInTheDocument();
   });
   it("displays real audit nullable actors and deduplicates pagination", async () => {
     const user = userEvent.setup();
@@ -1017,7 +1019,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     );
     await screen.findByText("book.read");
     expect(screen.getByText("Hệ thống")).toBeInTheDocument();
-    expect(screen.getByText("{}")).toBeInTheDocument();
+    expect(screen.getByText("Không có thông tin bổ sung")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Tải thêm" }));
     await waitFor(() =>
       expect(
@@ -1064,10 +1066,10 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(
-      await screen.findByRole("heading", { name: "Database" }),
+      await screen.findByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Database đã phản hồi truy vấn đọc."),
+      screen.getByText("Cơ sở dữ liệu đã phản hồi truy vấn đọc."),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "OCR" }),
@@ -1157,26 +1159,31 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(
-      await screen.findByRole("heading", { name: "VietOCR" }),
+      await screen.findByRole("heading", { name: "Nhận diện chữ tiếng Việt" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Tesseract tiếng Việt" }),
+      screen.getByRole("heading", {
+        name: "Nhận diện chữ tiếng Việt chuẩn",
+      }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Trạng thái kỹ thuật: Đã cài")).toBeInTheDocument();
+    expect(screen.getByText("Trạng thái dịch vụ: Đã cài")).toBeInTheDocument();
     expect(
-      screen.getByText("Trạng thái kỹ thuật: Chưa chạy"),
+      screen.getByText("Trạng thái dịch vụ: Chưa chạy"),
     ).toBeInTheDocument();
     expect(
       screen.getByText("Thiếu dữ liệu nhận diện tiếng Việt (vie)."),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Storage phản hồi kiểm tra bucket (không đọc file)."),
+      screen.getByText("Lưu trữ phản hồi kiểm tra bucket (không đọc file)."),
     ).toBeInTheDocument();
     expect(screen.getByText("3 tác vụ")).toBeInTheDocument();
     expect(screen.getByText("2 phút 5 giây")).toBeInTheDocument();
     expect(screen.getByText("7 tác vụ")).toBeInTheDocument();
     expect(screen.getByText("1 giờ 2 phút")).toBeInTheDocument();
-    expect(screen.getByText("WORKER_TIMEOUT")).toBeInTheDocument();
+    expect(
+      screen.getByText("Đã ghi nhận sự cố kết nối gần đây."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("WORKER_TIMEOUT")).not.toBeInTheDocument();
     expect(screen.getByText("Chưa ghi nhận")).toBeInTheDocument();
     expect(
       screen.getByTestId("operational-state-ocr_worker"),
@@ -1214,7 +1221,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     fetchMock.mockImplementation(async (url: string) => readyResponse(url));
     await user.click(screen.getByRole("button", { name: "Kiểm tra lại" }));
     expect(
-      await screen.findByRole("heading", { name: "Database" }),
+      await screen.findByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
   });
 
@@ -1226,7 +1233,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(
-      await screen.findByRole("heading", { name: "Database" }),
+      await screen.findByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
 
     // Refresh fails with 503 + x-request-id: prior snapshot must stay visible!
@@ -1242,12 +1249,13 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     await user.click(screen.getByRole("button", { name: "Kiểm tra lại" }));
 
     const warning = await screen.findByTestId("health-refresh-warning");
-    expect(warning).toHaveTextContent("Mã HTTP 503");
-    expect(warning).toHaveTextContent("req-health-503");
+    expect(warning).toBeInTheDocument();
+    expect(warning).not.toHaveTextContent("Mã HTTP 503");
+    expect(warning).not.toHaveTextContent("req-health-503");
     expect(screen.queryByText("secret sql")).not.toBeInTheDocument();
     // Prior snapshot remains intact!
     expect(
-      screen.getByRole("heading", { name: "Database" }),
+      screen.getByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
 
     // Dismiss the warning banner cleanly.
@@ -1286,7 +1294,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     await waitFor(() => expect(callCount).toBe(2));
     expect(firstSignal?.aborted).toBe(true);
     expect(
-      screen.getByRole("heading", { name: "Database" }),
+      screen.getByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
   });
 
@@ -1497,7 +1505,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
 
     // Core infrastructure expanded with semantic <h3> headings and zero boilerplate worker metrics.
     expect(
-      await screen.findByRole("heading", { level: 3, name: "Database" }),
+      await screen.findByRole("heading", { level: 3, name: "Cơ sở dữ liệu" }),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("worker-metrics-api")).not.toBeInTheDocument();
     expect(
@@ -1517,12 +1525,12 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       "75",
     );
     expect(screen.getByTestId("admin-audio-cache-error")).toHaveTextContent(
-      "AUDIO_CACHE_PROBE_TIMEOUT",
+      "Vui lòng kiểm tra lại kết nối dịch vụ âm thanh đọc mẫu.",
     );
 
     // Group 4B (local-only / remote-delegated) is collapsed by default when healthy.
     expect(
-      screen.queryByRole("heading", { name: "Local trainer process" }),
+      screen.queryByRole("heading", { name: "Tiến trình huấn luyện cục bộ" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("health-group-local-only")).toHaveTextContent(
       "3 mục",
@@ -1531,24 +1539,24 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
     // Filtering by "Chỉ cục bộ" auto-expands Group 4B and hides core services.
     await user.click(screen.getByTestId("health-kpi-local-only"));
     expect(
-      screen.getByRole("heading", { name: "Local trainer process" }),
+      screen.getByRole("heading", { name: "Tiến trình huấn luyện cục bộ" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Karaoke processing worker" }),
+      screen.getByRole("heading", { name: "Tiến trình xử lý bài hát" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Database" }),
+      screen.queryByRole("heading", { name: "Cơ sở dữ liệu" }),
     ).not.toBeInTheDocument();
 
     // Reset filter to All and test OCR worker wakeup CTA.
     await user.click(screen.getByTestId("health-filter-all"));
     const wakeBtn = screen.getByRole("button", {
-      name: "Đánh thức OCR worker",
+      name: "Kích hoạt dịch vụ nhận diện chữ",
     });
     await user.click(wakeBtn);
     await waitFor(() => expect(wakeupCalls).toBe(1));
     expect(await screen.findByTestId("ocr-wakeup-notice")).toHaveTextContent(
-      "Đã gửi lệnh đánh thức OCR worker từ xa thành công.",
+      "Đã gửi lệnh đánh thức dịch vụ nhận diện chữ từ xa thành công.",
     );
   });
 
@@ -1580,7 +1588,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         </AdminServicesProvider>,
       );
       expect(
-        await screen.findByRole("heading", { name: "Database" }),
+        await screen.findByRole("heading", { name: "Cơ sở dữ liệu" }),
       ).toBeInTheDocument();
 
       const devicePanel = await screen.findByTestId(

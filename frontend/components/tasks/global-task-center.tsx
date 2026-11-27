@@ -222,6 +222,7 @@ export function GlobalTaskCenter({
   className,
 }: GlobalTaskCenterProps) {
   const t = useTranslations("admin");
+  const tOcr = useTranslations("ocr");
   const pathname = usePathname() ?? "/";
   const taskCenter = useOptionalAiTaskCenter();
   const [clockMs, setClockMs] = useState<number>(() => Date.now());
@@ -390,12 +391,15 @@ export function GlobalTaskCenter({
           aria-hidden="true"
           className={cn(
             "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums",
-            activeCount > 0
-              ? "bg-primary text-white"
-              : failedCount > 0
-                ? "bg-danger text-white"
-                : "bg-amber-600 text-white",
+            allActiveWaitingForWorker
+              ? "bg-amber-600 text-white"
+              : activeCount > 0
+                ? "bg-primary text-white"
+                : failedCount > 0
+                  ? "bg-danger text-white"
+                  : "bg-amber-600 text-white",
           )}
+          data-testid="global-task-center-sidebar-count"
         >
           {highlightCount}
         </span>
@@ -483,9 +487,10 @@ export function GlobalTaskCenter({
               </div>
             </div>
 
-            {workerOnline === false && activeCount > 0 ? (
+            {workerOnline === false ? (
               <div
                 className="mx-4 mt-3 flex items-start gap-2.5 rounded-control border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-medium text-amber-900 sm:mx-5"
+                data-testid="global-task-center-worker-offline-banner"
                 role="status"
               >
                 <WifiOff
@@ -493,11 +498,17 @@ export function GlobalTaskCenter({
                   className="mt-0.5 size-4 shrink-0"
                 />
                 <span>
-                  {t(
-                    "taskCenter.workerOfflineBanner",
-                    undefined,
-                    "Máy chủ OCR đang tạm tắt — Các tác vụ đã lưu trong hàng chờ và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại.",
-                  )}
+                  {activeCount > 0
+                    ? t(
+                        "taskCenter.workerOfflineBanner",
+                        undefined,
+                        "Máy chủ OCR đang tạm tắt — Các tác vụ đã lưu trong hàng chờ và sẽ tự động nhận diện ngay khi máy chủ OCR bật lại.",
+                      )
+                    : tOcr(
+                        "serviceStatus.taskCenterOfflineIdleBanner",
+                        undefined,
+                        "Dịch vụ OCR hiện chưa sẵn sàng — Các trang mới tải lên sẽ được lưu an toàn vào hàng chờ và tự động xử lý ngay khi OCR hoạt động trở lại.",
+                      )}
                 </span>
               </div>
             ) : null}

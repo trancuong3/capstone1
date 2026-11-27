@@ -34,7 +34,7 @@
     "currentInvalid": "Das aktuelle Passwort ist falsch.",
     "changeError": "Passwort konnte nicht geändert werden. Bitte überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
     "noEmailForRecovery": "Keine E-Mail-Adresse hinterlegt, um einen Link zum Zurücksetzen des Passworts zu senden.",
-    "recoverySent": "Supabase Auth hat die Anfrage zum Zurücksetzen des Passworts erhalten. Bitte überprüfen Sie Ihren Posteingang und Spam-Ordner.",
+    "recoverySent": "Das Kontosystem hat Ihre Anfrage für einen Link zum Festlegen des Passworts erhalten. Bitte prüfen Sie Posteingang und Spam.",
     "recoveryError": "Passwort-Zurücksetzen-Link konnte nicht gesendet werden. Bitte versuchen Sie es später noch einmal.",
     "showFieldAria": "{label} anzeigen",
     "hideFieldAria": "{label} ausblenden"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "Anzeigesprache",
     "description": "Wählen Sie die Sprache für Navigation und Einstellungen. Der vietnamesische Buchinhalt bleibt unverändert.",
-    "learningContentNote": "Das Ändern der Sprache betrifft nur die Navigation, Schaltflächen und Einstellungen. Vietnamesische Bücher, OCR, Spracherkennung (STT) und Vorlesestimmen (TTS) bleiben auf Vietnamesisch."
+    "learningContentNote": "Das Ändern der Sprache betrifft nur Navigation, Schaltflächen und Einstellungen. Vietnamesische Bücher, Seitenerkennung, Spracherkennung und Vorlesestimmen bleiben auf Vietnamesisch."
   }
 }

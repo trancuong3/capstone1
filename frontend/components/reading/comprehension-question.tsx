@@ -18,6 +18,8 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import { invalidateApiReadCacheByPrefix } from "@/lib/api/read-cache";
+import { isServiceError } from "@/lib/api/service-error";
 import { createSpeechService } from "@/lib/api/speech-service";
 import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
@@ -29,6 +31,7 @@ import {
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
 import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { parseVoiceIntent } from "@/lib/reading/voice-intent";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
@@ -92,7 +95,41 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
 }
 
 const REMIND_SILENCE_MS = 10_000;
+const SECOND_REMIND_SILENCE_MS = 12_000;
+const MAX_SILENCE_REMINDERS = 2;
 const BARE_LETTER_SETTLE_MS = 850;
+
+function hasQuizVoiceCapabilities(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    Boolean(getSpeechRecognitionCtor()) ||
+    isAndroidNativeSpeechAvailable() ||
+    typeof window.AudioContext === "function" ||
+    Boolean(window.speechSynthesis?.getVoices?.().length)
+  );
+}
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return Boolean(
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches,
+  );
+}
+
+function isSkipQuestionVoiceCommand(transcript: string): boolean {
+  if (parseVoiceIntent(transcript).type === "SKIP") {
+    return true;
+  }
+  const normalized = transcript
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /^(?:(?:cô|thầy)\s+)?(?:ơi\s+)?(?:cho\s+(?:con|bé|em)\s+)?bỏ\s+qua(?:\s+câu(?:\s+này)?)?(?:\s+(?:ạ|nhé|nha|đi))?$/u.test(
+    normalized,
+  );
+}
 
 export function ComprehensionQuestion({
   child,
@@ -125,6 +162,11 @@ export function ComprehensionQuestion({
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voicePausedByUser, setVoicePausedByUser] = useState(false);
   const [feedbackNote, setFeedbackNote] = useState<string | null>(null);
+  const [wrongCount, setWrongCount] = useState(0);
+  const [eliminatedValues, setEliminatedValues] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const [revealedHint, setRevealedHint] = useState<string | null>(null);
 
   const mountedRef = useRef(false);
   const flowGenRef = useRef(0);
@@ -134,9 +176,14 @@ export function ComprehensionQuestion({
   const remindTimerRef = useRef<number | null>(null);
   const voiceSettleTimerRef = useRef<number | null>(null);
   const restartTimerRef = useRef<number | null>(null);
-  const remindedForQuestionRef = useRef(false);
+  const silenceReminderCountRef = useRef(0);
   const isSubmittingRef = useRef(false);
   const solvedQuestionIdRef = useRef<string | null>(null);
+  const advancingQuestionIdRef = useRef<string | null>(null);
+  const wrongCountRef = useRef(0);
+  const eliminatedValuesRef = useRef<Set<string>>(new Set());
+  const choiceButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const feedbackRef = useRef<HTMLDivElement | null>(null);
   const voicePausedRef = useRef(false);
   const activeQuestionRef = useRef<ComprehensionQuestionViewModelUI | null>(
     null,
@@ -272,19 +319,40 @@ export function ComprehensionQuestion({
     questionTotal !== undefined &&
     questionPosition < questionTotal;
 
-  const advanceToNextQuestion = useCallback(() => {
-    stopAllVoice();
-    if (!hasNextQuestionRef.current) {
-      onCompleteRef.current();
-      return;
-    }
-    solvedQuestionIdRef.current = null;
-    setSelectedAnswer(null);
-    setResult(null);
-    setFeedbackNote(null);
-    setLoadState({ status: "loading" });
-    setLoadKey((key) => key + 1);
-  }, [stopAllVoice]);
+  const advanceToNextQuestion = useCallback(
+    (expectedQuestionId?: string) => {
+      if (
+        expectedQuestionId &&
+        advancingQuestionIdRef.current === expectedQuestionId
+      ) {
+        return;
+      }
+      if (expectedQuestionId) {
+        advancingQuestionIdRef.current = expectedQuestionId;
+      }
+      stopAllVoice();
+      if (!hasNextQuestionRef.current) {
+        onCompleteRef.current();
+        return;
+      }
+      solvedQuestionIdRef.current = null;
+      wrongCountRef.current = 0;
+      eliminatedValuesRef.current = new Set();
+      silenceReminderCountRef.current = 0;
+      setWrongCount(0);
+      setEliminatedValues(new Set());
+      setRevealedHint(null);
+      setSelectedAnswer(null);
+      setResult(null);
+      setFeedbackNote(null);
+      invalidateApiReadCacheByPrefix(
+        `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
+      );
+      setLoadState({ status: "loading" });
+      setLoadKey((key) => key + 1);
+    },
+    [sessionId, stopAllVoice],
+  );
 
   const startVoiceListenRef = useRef<
     (value: ComprehensionQuestionViewModelUI, gen: number) => void
@@ -333,6 +401,19 @@ export function ComprehensionQuestion({
           }
           setResult(nextResult);
         }
+      } catch (error) {
+        if (
+          mountedRef.current &&
+          activeQuestionRef.current?.question.id === submittedQuestionId
+        ) {
+          setSelectedAnswer(null);
+          setResult(null);
+          setFeedbackNote(
+            isServiceError(error)
+              ? error.message
+              : "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+          );
+        }
       } finally {
         isSubmittingRef.current = false;
         if (mountedRef.current) setIsSubmitting(false);
@@ -347,21 +428,101 @@ export function ComprehensionQuestion({
       }
 
       const storyHint = nextResult.story_hint?.trim() || null;
+      const canUseVoice =
+        hasQuizVoiceCapabilities() &&
+        gen === flowGenRef.current &&
+        !voicePausedRef.current;
+
+      if (nextResult.is_correct) {
+        if (source === "voice" || canUseVoice) {
+          const praise = prompts.next("quizCorrect");
+          setFeedbackNote(praise);
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(praise, gen);
+          if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
+            advanceToNextQuestion(submittedQuestionId);
+          }
+        }
+        return;
+      }
+
+      // Wrong answer: 3-step anti-stuck ladder
+      const nextWrongCount = wrongCountRef.current + 1;
+      wrongCountRef.current = nextWrongCount;
+      setWrongCount(nextWrongCount);
+      const nextEliminated = new Set(eliminatedValuesRef.current);
+      nextEliminated.add(answer);
+      eliminatedValuesRef.current = nextEliminated;
+      setEliminatedValues(nextEliminated);
+
+      const remainingChoices = activeValue.choices.filter(
+        (c) => !nextEliminated.has(c.value),
+      );
+
+      if (nextWrongCount >= 3) {
+        solvedQuestionIdRef.current = submittedQuestionId;
+        const explainText =
+          remainingChoices.length === 1
+            ? `Không sao đâu con! Đáp án đúng là ${remainingChoices[0].id}: “${remainingChoices[0].label}”.${storyHint ? ` ${storyHint}` : ""} Mình sang câu tiếp theo nhé!`
+            : storyHint
+              ? `Không sao đâu con! Gợi ý từ bài đọc: ${storyHint} Mình sang câu tiếp theo nhé!`
+              : "Không sao đâu con! Mình cùng sang câu tiếp theo nhé!";
+        setFeedbackNote(explainText);
+        setRevealedHint(explainText);
+        if (source === "voice" || canUseVoice) {
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(explainText, gen, {
+            adaptPersona: !storyHint,
+          });
+          if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
+            advanceToNextQuestion(submittedQuestionId);
+          }
+        } else {
+          advanceToNextQuestion(submittedQuestionId);
+        }
+        return;
+      }
+
+      if (nextWrongCount === 2) {
+        const narrowPrefix =
+          remainingChoices.length === 1
+            ? `Mình loại bớt đáp án chưa đúng nhé. Chỉ còn đáp án ${remainingChoices[0].id}: “${remainingChoices[0].label}” thôi!`
+            : `Mình loại bớt đáp án chưa đúng nhé. Con xem ${remainingChoices.length} lựa chọn còn lại nha!`;
+        const step2Text = storyHint
+          ? `${narrowPrefix} ${storyHint}`
+          : narrowPrefix;
+        setFeedbackNote(step2Text);
+        setRevealedHint(step2Text);
+        if (source === "voice" || canUseVoice) {
+          setVoicePhase("reading");
+          const stillCurrent = await speakGuarded(step2Text, gen, {
+            adaptPersona: !storyHint,
+          });
+          if (
+            stillCurrent &&
+            mountedRef.current &&
+            !voicePausedRef.current &&
+            activeQuestionRef.current?.question.id === submittedQuestionId
+          ) {
+            if (source === "voice") {
+              startVoiceListenRef.current(activeValue, gen);
+            } else {
+              setVoicePhase("idle");
+            }
+          }
+        }
+        return;
+      }
+
+      // Wrong #1 -> story_hint
       if (source !== "voice") {
-        if (!nextResult.is_correct && storyHint) {
+        if (storyHint) {
           // Keep story_hint verbatim so book characters ("Cô Tấm", "cô tiên") are never altered.
           setFeedbackNote(storyHint);
+          setRevealedHint(storyHint);
           // Read story_hint aloud even on touch mistakes so Grade-1 readers hear
           // the clue immediately; tapping any other choice barges in via stopAllVoice().
-          if (
-            gen === flowGenRef.current &&
-            !voicePausedRef.current &&
-            typeof window !== "undefined" &&
-            (Boolean(getSpeechRecognitionCtor()) ||
-              isAndroidNativeSpeechAvailable() ||
-              typeof window.AudioContext === "function" ||
-              Boolean(window.speechSynthesis?.getVoices?.().length))
-          ) {
+          if (canUseVoice) {
             setVoicePhase("reading");
             const stillCurrent = await speakGuarded(storyHint, gen, {
               adaptPersona: false,
@@ -383,47 +544,38 @@ export function ComprehensionQuestion({
         return;
       }
 
-      if (nextResult.is_correct) {
-        const praise = prompts.next("quizCorrect");
-        setFeedbackNote(praise);
-        setVoicePhase("reading");
-        const stillCurrent = await speakGuarded(praise, gen);
-        if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
-          advanceToNextQuestion();
-        }
-      } else {
-        const chosen = activeValue.choices.find((c) => c.value === answer);
-        const encourage = storyHint
+      const chosen = activeValue.choices.find((c) => c.value === answer);
+      const encourage = storyHint
+        ? adaptTextToTeacherPersona(
+            chosen
+              ? t("comprehension.chosenCorrectFeedback", {
+                  label: chosen.label,
+                  hint: storyHint,
+                })
+              : storyHint,
+            teacherPersona.gender,
+          )
+        : chosen
           ? adaptTextToTeacherPersona(
-              chosen
-                ? t("comprehension.chosenCorrectFeedback", {
-                    label: chosen.label,
-                    hint: storyHint,
-                  })
-                : storyHint,
+              t("comprehension.chosenWrongFeedback", {
+                label: chosen.label,
+              }),
               teacherPersona.gender,
             )
-          : chosen
-            ? adaptTextToTeacherPersona(
-                t("comprehension.chosenWrongFeedback", {
-                  label: chosen.label,
-                }),
-                teacherPersona.gender,
-              )
-            : prompts.next("quizTryAgain");
-        setFeedbackNote(encourage);
-        setVoicePhase("reading");
-        const stillCurrent = await speakGuarded(encourage, gen, {
-          adaptPersona: !storyHint && !chosen,
-        });
-        if (
-          stillCurrent &&
-          mountedRef.current &&
-          !voicePausedRef.current &&
-          activeQuestionRef.current?.question.id === submittedQuestionId
-        ) {
-          startVoiceListenRef.current(activeValue, gen);
-        }
+          : prompts.next("quizTryAgain");
+      if (storyHint) setRevealedHint(storyHint);
+      setFeedbackNote(encourage);
+      setVoicePhase("reading");
+      const stillCurrent = await speakGuarded(encourage, gen, {
+        adaptPersona: !storyHint && !chosen,
+      });
+      if (
+        stillCurrent &&
+        mountedRef.current &&
+        !voicePausedRef.current &&
+        activeQuestionRef.current?.question.id === submittedQuestionId
+      ) {
+        startVoiceListenRef.current(activeValue, gen);
       }
     },
     [
@@ -520,7 +672,11 @@ export function ComprehensionQuestion({
 
       const armReminder = () => {
         clearRemindTimer();
-        if (remindedForQuestionRef.current) return;
+        if (silenceReminderCountRef.current >= MAX_SILENCE_REMINDERS) return;
+        const delayMs =
+          silenceReminderCountRef.current === 0
+            ? REMIND_SILENCE_MS
+            : SECOND_REMIND_SILENCE_MS;
         remindTimerRef.current = window.setTimeout(() => {
           if (
             !mountedRef.current ||
@@ -532,7 +688,7 @@ export function ComprehensionQuestion({
           ) {
             return;
           }
-          remindedForQuestionRef.current = true;
+          silenceReminderCountRef.current += 1;
           stopVoiceRecognition();
           setVoicePhase("reading");
           void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
@@ -545,7 +701,7 @@ export function ComprehensionQuestion({
               startVoiceListenRef.current(value, gen);
             }
           });
-        }, REMIND_SILENCE_MS);
+        }, delayMs);
       };
 
       armReminder();
@@ -629,6 +785,26 @@ export function ComprehensionQuestion({
           consecutiveRestarts = 0;
           networkErrorStreak = 0;
 
+          if (isSkipQuestionVoiceCommand(transcript)) {
+            setPreviewChoiceId(null);
+            stopVoiceRecognition();
+            solvedQuestionIdRef.current = boundQuestionId;
+            const remainingChoices = value.choices.filter(
+              (c) => !eliminatedValuesRef.current.has(c.value),
+            );
+            const skipExplain =
+              remainingChoices.length === 1
+                ? `Được rồi con nhé! Đáp án là ${remainingChoices[0].id}: “${remainingChoices[0].label}”. Mình sang câu tiếp theo nhé!`
+                : "Được rồi con nhé! Mình cùng sang câu tiếp theo nhé!";
+            setFeedbackNote(skipExplain);
+            setVoicePhase("reading");
+            void speakGuarded(skipExplain, gen).then((ok) => {
+              if (ok && mountedRef.current && !voicePausedRef.current) {
+                advanceToNextQuestion(boundQuestionId);
+              }
+            });
+            return;
+          }
           const analysis = analyzeComprehensionVoiceInput(
             transcript,
             value.choices,
@@ -794,6 +970,7 @@ export function ComprehensionQuestion({
       }
     },
     [
+      advanceToNextQuestion,
       clearRemindTimer,
       clearRestartTimer,
       clearVoiceSettleTimer,
@@ -824,7 +1001,7 @@ export function ComprehensionQuestion({
 
       stopAllVoice();
       const gen = flowGenRef.current;
-      remindedForQuestionRef.current = false;
+      silenceReminderCountRef.current = 0;
       setVoicePhase("reading");
 
       // Start the question prompt first so it gets first priority on the local voice
@@ -942,11 +1119,18 @@ export function ComprehensionQuestion({
   useEffect(() => {
     let active = true;
     solvedQuestionIdRef.current = null;
+    advancingQuestionIdRef.current = null;
+    wrongCountRef.current = 0;
+    eliminatedValuesRef.current = new Set();
+    silenceReminderCountRef.current = 0;
     void comprehensionService
       .getQuestion(sessionId)
       .then((value) => {
         if (!active) return;
         activeQuestionRef.current = value;
+        setWrongCount(0);
+        setEliminatedValues(new Set());
+        setRevealedHint(null);
         setProgress({ position: value.position, total: value.total });
         setLoadState({ status: "ready", value });
         if (!voicePausedRef.current) {
@@ -987,6 +1171,28 @@ export function ComprehensionQuestion({
       );
     };
   }, [stopAllVoice]);
+
+  useEffect(() => {
+    if (!readingChoiceId) return;
+    const node = choiceButtonRefs.current.get(readingChoiceId);
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({
+        block: "nearest",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    }
+  }, [readingChoiceId]);
+
+  useEffect(() => {
+    if (!result || result.is_correct) return;
+    const node = feedbackRef.current;
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({
+        block: "nearest",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    }
+  }, [result, feedbackNote, revealedHint]);
 
   const handleToggleVoicePause = () => {
     if (voicePausedByUser) {
@@ -1047,6 +1253,9 @@ export function ComprehensionQuestion({
             </StatusMessage>
             <Button
               onClick={() => {
+                invalidateApiReadCacheByPrefix(
+                  `/tutor/sessions/${encodeURIComponent(sessionId)}/questions`,
+                );
                 setLoadState({ status: "loading" });
                 setLoadKey((key) => key + 1);
               }}
@@ -1112,11 +1321,18 @@ export function ComprehensionQuestion({
                   !selected && previewChoiceId === choice.id && !result;
                 const correct = selected && result?.is_correct === true;
                 const beingRead = readingChoiceId === choice.id;
+                const isEliminated =
+                  wrongCount >= 2 && eliminatedValues.has(choice.value);
                 return (
                   <button
+                    ref={(node) => {
+                      if (node) choiceButtonRefs.current.set(choice.id, node);
+                      else choiceButtonRefs.current.delete(choice.id);
+                    }}
                     aria-pressed={selected}
                     data-reading-choice={beingRead ? "true" : undefined}
                     data-preview-choice={previewing ? "true" : undefined}
+                    data-eliminated-choice={isEliminated ? "true" : undefined}
                     className={cn(
                       "flex min-h-18 w-full items-center gap-6 rounded-card border-2 p-4 text-start text-body font-semibold text-ink transition duration-150 ease-out focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
                       // Hover only applies to answers that can still be chosen.
@@ -1125,19 +1341,27 @@ export function ComprehensionQuestion({
                         !(selected && result) &&
                         !beingRead &&
                         !previewing &&
+                        !isEliminated &&
                         "bg-white",
+                      isEliminated &&
+                        "border-border bg-slate-100 text-muted line-through opacity-55",
                       beingRead &&
                         "border-primary bg-sky/50 ring-2 ring-primary/40",
                       previewing &&
                         "border-dashed border-emerald-600 bg-emerald-50 ring-2 ring-emerald-400/50",
-                      selected && "border-primary",
+                      selected && !isEliminated && "border-primary",
                       selected &&
+                        !isEliminated &&
                         result?.is_correct === false &&
                         "border-warning bg-warning-surface",
                       correct &&
                         "border-success-ink bg-success-surface font-semibold text-success-ink",
                     )}
-                    disabled={isSubmitting || result?.is_correct === true}
+                    disabled={
+                      isSubmitting ||
+                      result?.is_correct === true ||
+                      isEliminated
+                    }
                     key={choice.id}
                     onClick={() => void submitAnswer(choice.value, "click")}
                     type="button"
@@ -1169,15 +1393,17 @@ export function ComprehensionQuestion({
             </div>
 
             {result ? (
-              <StatusMessage tone={result.is_correct ? "success" : "warning"}>
-                {adaptTextToTeacherPersona(
-                  feedbackNote ??
-                    (result.is_correct
-                      ? t("comprehension.correctPraise")
-                      : t("comprehension.tryAgainHint")),
-                  teacherPersona.gender,
-                )}
-              </StatusMessage>
+              <div ref={feedbackRef}>
+                <StatusMessage tone={result.is_correct ? "success" : "warning"}>
+                  {adaptTextToTeacherPersona(
+                    feedbackNote ??
+                      (result.is_correct
+                        ? t("comprehension.correctPraise")
+                        : t("comprehension.tryAgainHint")),
+                    teacherPersona.gender,
+                  )}
+                </StatusMessage>
+              </div>
             ) : (
               <p
                 role="status"
@@ -1205,7 +1431,9 @@ export function ComprehensionQuestion({
             {result?.is_correct ? (
               <Button
                 className="mx-auto max-w-[360px]"
-                onClick={advanceToNextQuestion}
+                onClick={() =>
+                  advanceToNextQuestion(loadState.value.question.id)
+                }
               >
                 {questionTotal !== undefined && !hasNextQuestion
                   ? t("comprehension.finish")

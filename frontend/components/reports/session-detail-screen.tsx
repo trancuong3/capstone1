@@ -373,9 +373,9 @@ export function SessionDetailScreen({
   );
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4">
-      <header className="flex flex-col justify-between gap-4 border-b border-border pb-5 lg:flex-row lg:items-end">
-        <div className="min-w-0 max-w-3xl space-y-2">
+    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-4">
+      <header className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 lg:flex-row lg:items-end">
+        <div className="min-w-0 max-w-3xl space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${statePresentation.badgeClassName}`}
@@ -388,10 +388,10 @@ export function SessionDetailScreen({
               </span>
             ) : null}
           </div>
-          <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+          <h1 className="book-title text-2xl text-ink sm:text-[34px]">
             {pageTitle}
           </h1>
-          <p className="text-base font-bold text-ink">
+          <p className="text-sm font-bold text-ink sm:text-base">
             <span className="viread-learning-content" dir="ltr" lang="vi">
               {state.book.title}
             </span>
@@ -400,7 +400,7 @@ export function SessionDetailScreen({
               · {state.child.alias}
             </span>
           </p>
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 text-xs font-semibold text-muted">
+          <dl className="flex flex-wrap gap-x-5 gap-y-1 text-xs font-semibold text-muted">
             <div className="flex gap-1.5">
               <dt>{t("sessions.detail.startedLabel")}</dt>
               <dd className="tabular-nums text-ink">
@@ -420,8 +420,9 @@ export function SessionDetailScreen({
 
         <div className="flex shrink-0 flex-wrap gap-2">
           <ButtonLink
-            className="sm:w-auto"
+            className="h-10 min-h-10! py-0! sm:w-auto"
             href={returnHref}
+            size="admin"
             variant="secondary"
           >
             <ArrowLeft aria-hidden="true" className="viread-rtl-flip size-4" />
@@ -461,9 +462,9 @@ export function SessionDetailScreen({
         aria-labelledby="session-overview-heading"
         className="rounded-card border border-border bg-white"
       >
-        <div className="border-b border-border px-4 py-3.5 sm:px-6">
+        <div className="border-b border-border px-4 py-2.5 sm:px-5">
           <h2
-            className="text-lg font-extrabold text-ink"
+            className="text-base font-extrabold text-ink"
             id="session-overview-heading"
           >
             {t("sessions.detail.summaryTitle")}
@@ -472,22 +473,36 @@ export function SessionDetailScreen({
 
         {availability.fluency === "unsupported" ||
         availability.fluency === "partial" ? (
-          <div className="px-4 pt-4 sm:px-6">
+          <div className="px-4 pt-3 sm:px-5">
             <StatusMessage tone="info">
               {t("sessions.detail.summaryPartialDesc")}
             </StatusMessage>
           </div>
         ) : null}
 
-        <dl className="grid grid-cols-2 sm:grid-cols-3">
+        <dl
+          className={
+            summaryItems.length === 4
+              ? "grid grid-cols-2 sm:grid-cols-4"
+              : "grid grid-cols-2 sm:grid-cols-3"
+          }
+        >
           {summaryItems.map(({ label, value, isMissing }, index) => {
+            const isFourGrid = summaryItems.length === 4;
             const cellBorders = [
-              "border-border p-3.5 sm:px-6 sm:py-4",
+              "flex flex-col justify-between border-border p-3 sm:px-4 sm:py-2.5",
               index % 2 === 0 ? "border-e sm:border-e-0" : "",
               index >= 2 ? "border-t" : "",
-              index === 2 ? "sm:border-t-0" : "",
-              index >= 3 ? "sm:border-t" : "",
-              index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
+              isFourGrid
+                ? [
+                    index >= 2 ? "sm:border-t-0" : "",
+                    index < 3 ? "sm:border-e" : "sm:border-e-0",
+                  ].join(" ")
+                : [
+                    index === 2 ? "sm:border-t-0" : "",
+                    index >= 3 ? "sm:border-t" : "",
+                    index % 3 !== 2 ? "sm:border-e" : "sm:border-e-0",
+                  ].join(" "),
             ]
               .filter(Boolean)
               .join(" ");
@@ -498,7 +513,7 @@ export function SessionDetailScreen({
                   className={
                     isMissing
                       ? "mt-1 text-sm font-semibold text-muted"
-                      : "mt-1 text-xl font-extrabold leading-snug tabular-nums text-primary"
+                      : "mt-1 text-lg font-extrabold leading-snug tabular-nums text-primary sm:text-xl"
                   }
                 >
                   {value}
@@ -513,8 +528,8 @@ export function SessionDetailScreen({
 
       {showComprehensionSectionDirectly ? comprehensionSection : null}
 
-      <details className="group rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary">
+      <details className="group rounded-card border border-border bg-white p-3.5 sm:p-4">
+        <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 font-extrabold text-primary [&::-webkit-details-marker]:hidden">
           <span>{t("sessions.detail.otherInfoTitle")}</span>
           <ChevronDown
             aria-hidden="true"

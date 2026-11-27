@@ -303,7 +303,7 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     });
     expect(
       screen.getByTestId("ocr-worker-offline-banner").textContent,
-    ).toContain("ngoại tuyến");
+    ).toContain("tạm nghỉ");
   });
 
   it("DEF-H07: real ServiceError from LOCAL_VOICE_UNCONFIGURED is detected and immediately switches to WASM", () => {
@@ -669,7 +669,7 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     });
     expect(
       screen.getByTestId("voice-offline-cache-notice").textContent,
-    ).toContain("Wi-Fi tự lập");
+    ).toContain("chuẩn bị trước");
   });
 
   it("ReadingVoiceSettings shows Wi-Fi badges and lists all cached regional voices when offline", async () => {

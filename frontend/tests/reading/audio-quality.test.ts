@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AudioQualityMonitor,
+  hasShortWordBlockingAudioIssue,
   hasUnusableAudio,
 } from "@/lib/reading/audio-quality";
 
@@ -87,5 +88,32 @@ describe("audio quality and adaptive activity", () => {
       feed(new AudioQualityMonitor({ mode: "child-passage" }), 0.15, 0, 2000)
         .status,
     ).toBe("BACKGROUND_NOISE");
+  });
+
+  it("ignores float32 overshoot 1.0001 and does not block STT on clipping when speechDurationMs >= minSpeechDurationMs", () => {
+    const overshootMonitor = new AudioQualityMonitor({ mode: "short-word" });
+    feed(overshootMonitor, 0.001, 0, 40);
+    for (let t = 60; t <= 220; t += 20) {
+      overshootMonitor.addFrame(frame(1.0001), t);
+    }
+    const overshootSnap = overshootMonitor.getSnapshot();
+    expect(overshootSnap.clipped).toBe(true);
+    expect(overshootSnap.speechDurationMs).toBeGreaterThanOrEqual(40);
+    expect(hasShortWordBlockingAudioIssue(overshootSnap)).toBe(false);
+
+    // Real NaN invalid audio MUST still block STT
+    const nanMonitor = new AudioQualityMonitor({ mode: "short-word" });
+    const nanSnap = nanMonitor.addFrame(frame(Number.NaN), 0);
+    expect(nanSnap.status).toBe("INVALID_AUDIO");
+    expect(nanSnap.clipped).toBe(false);
+    expect(hasShortWordBlockingAudioIssue(nanSnap)).toBe(true);
+  });
+
+  it("short-word profile detects 40ms onset quickly with onsetMultiplier=1.8", () => {
+    const m = new AudioQualityMonitor({ mode: "short-word" });
+    feed(m, 0.001, 0, 40);
+    const snap = feed(m, 0.006, 60, 200);
+    expect(snap.status).toBe("SPEECH_DETECTED");
+    expect(snap.speechDurationMs).toBeGreaterThanOrEqual(40);
   });
 });

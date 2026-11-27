@@ -69,11 +69,7 @@ export function getAdminParentMutationErrorMessage(
         return t("parents.modal.errors.validation");
       case 500:
       case 503:
-        return error.request_id
-          ? t("parents.modal.errors.serviceErrorWithRequest", {
-              requestId: error.request_id,
-            })
-          : t("parents.modal.errors.serviceError");
+        return t("parents.modal.errors.serviceError");
       default:
         return error.status === 0
           ? t("parents.modal.errors.networkError")

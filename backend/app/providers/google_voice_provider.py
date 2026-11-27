@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import binascii
 import io
+import math
 import os
 import struct
 import time
@@ -260,12 +261,12 @@ class GoogleCloudVoiceProvider:
             "languageCode": lang,
             "enableWordTimeOffsets": True,
             "enableAutomaticPunctuation": False,
-            "maxAlternatives": 1,
+            "maxAlternatives": 3,
         }
         if keyterms:
             clean_phrases = [k.strip()[:64] for k in keyterms[:30] if k and k.strip()]
             if clean_phrases:
-                config["speechContexts"] = [{"phrases": clean_phrases}]
+                config["speechContexts"] = [{"phrases": clean_phrases, "boost": 8.0}]
 
         body = {
             "config": config,
@@ -332,16 +333,39 @@ class GoogleCloudVoiceProvider:
             if txt:
                 transcript_parts.append(txt)
             conf = top.get("confidence")
-            if isinstance(conf, (int, float)) and 0.0 <= conf <= 1.0:
-                confidences.append(float(conf))
+            real_conf: float | None = None
+            if (
+                isinstance(conf, (int, float))
+                and not isinstance(conf, bool)
+                and math.isfinite(float(conf))
+                and 0.0 <= float(conf) <= 1.0
+            ):
+                conf_val = float(conf)
+                confidences.append(conf_val)
+                if conf_val > 0.0:
+                    real_conf = conf_val
             for w in top.get("words") or []:
                 wtxt = unicodedata.normalize("NFC", str(w.get("word") or "").strip().lower())
                 if not wtxt:
                     continue
                 start = _parse_google_duration_seconds(w.get("startTime"))
                 end = max(start, _parse_google_duration_seconds(w.get("endTime")))
+                w_conf = w.get("confidence")
+                effective_conf: float | None = (
+                    float(w_conf)
+                    if isinstance(w_conf, (int, float))
+                    and not isinstance(w_conf, bool)
+                    and math.isfinite(float(w_conf))
+                    and 0.0 < float(w_conf) <= 1.0
+                    else real_conf
+                )
+                word_logprob = (
+                    math.log(max(effective_conf, 1e-4))
+                    if effective_conf is not None and effective_conf > 0.0
+                    else None
+                )
                 words_out.append(
-                    {"text": wtxt, "start": round(start, 3), "end": round(end, 3), "logprob": None}
+                    {"text": wtxt, "start": round(start, 3), "end": round(end, 3), "logprob": word_logprob}
                 )
 
         avg_conf = (

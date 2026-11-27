@@ -130,7 +130,7 @@
     "loadingBook": "Loading book info...",
     "bookUnavailableTitle": "Book not ready yet",
     "bookNotFoundTitle": "Book not found",
-    "bookUnavailableDesc": "This book does not have ACTIVE and VERIFIED content for the child to read yet.",
+    "bookUnavailableDesc": "This book does not have ready content for the child to read yet.",
     "bookNotFoundDesc": "This book does not exist or is not in the current library.",
     "backToLibrary": "Back to Library",
     "loadErrorTitle": "Could not load book info",
@@ -138,9 +138,9 @@
     "micReady": "Microphone is ready",
     "micGranted": "Microphone permission granted",
     "rangeSummary": "Reading range: Pages {start}–{end}",
-    "ocrMatchSummary": "OCR page confirmed: Page {page} · Confidence {percent}%",
+    "ocrMatchSummary": "Recognized page: Page {page} · Confidence {percent}%",
     "matchedPageMissingTitle": "Recognized page not found",
-    "matchedPageMissingDesc": "OCR page is not in the book's valid page list. ViRead will not auto-switch pages.",
+    "matchedPageMissingDesc": "The recognized page is not in the book's list of valid pages. ViRead will not automatically switch to another page.",
     "invalidRangeTitle": "Invalid page range",
     "invalidRangeDesc": "Please return to book details and reselect the start page, end page, or continuous range.",
     "micCheckSectionTitle": "Check microphone",
@@ -173,7 +173,7 @@
       "unsupported": "Browser does not provide automatic status. You can still check the microphone using the button below.",
       "no_device": "No microphone found on device. Please connect a microphone and try again.",
       "device_busy": "Microphone is being used by another app. Please close it and try again.",
-      "error": "Cannot check microphone. Please use HTTPS or localhost and try again."
+      "error": "Unable to check microphone. Please check your secure connection and browser settings, then try again."
     }
   },
   "ready": {
@@ -260,7 +260,7 @@
     "referencePageAlt": "Reference image for page {page}",
     "scrollToCurrentWord": "About the word being read",
     "currentWordPrefix": "Current word: ",
-    "overlayAria": "Highlight current word via bounding box"
+    "overlayAria": "Current word highlight region"
   },
   "pageContent": {
     "incorrectWordAria": "Not quite: \"{word}\". Let's try reading this word again.",
@@ -406,7 +406,7 @@
     "practicedWordsLabel": "in this session",
     "collapseDetails": "Collapse",
     "viewSpokenWords": "View words read",
-    "sttResultsTitle": "Speech recognition results (STT)",
+    "sttResultsTitle": "Child's speech recognition results",
     "recognizedWordsBadge": "{count} words recognized",
     "unassessedOnlyLabel": "Recognized words; insufficient data for assessment or needs attention:",
     "correctWordsTitle": "Words read successfully ({count} words):",
@@ -428,7 +428,7 @@
     "versionLoadError": "Could not load the content for this page version.",
     "pageLoadError": "Could not load the page content.",
     "loadingAria": "Loading reading content",
-    "verifiedContentTitle": "Verified page content",
+    "verifiedContentTitle": "Book page content",
     "legendAria": "Color legend",
     "recordedTranscriptLabel": "Recorded speech",
     "notRecorded": "Not recorded",

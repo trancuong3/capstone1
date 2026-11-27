@@ -4,6 +4,10 @@ from __future__ import annotations
 class OcrConfigurationError(RuntimeError):
     """A safe, server-side OCR provider configuration error."""
 
+    def __init__(self, code: str = "OCR_CONFIGURATION_ERROR") -> None:
+        super().__init__(code)
+        self.code = code
+
 
 class OcrProviderError(RuntimeError):
     """A classified provider failure with no provider response/body attached."""

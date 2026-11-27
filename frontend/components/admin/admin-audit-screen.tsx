@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, FileJson2, RefreshCw, X } from "lucide-react";
+import { Eye, FileText, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AdminBadge,
@@ -41,10 +41,126 @@ function resolveAuditActionTone(action: string): AdminBadgeTone {
   return "info";
 }
 
+const UUID_LIKE_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX_HASH_PATTERN = /^[0-9a-f]{32,}$/i;
+const SENSITIVE_META_KEY_PATTERN =
+  /(^|_)(id|uuid|hash|sha|sha256|token|secret|key|signature|request_id|actor_id|resource_id|revision_id|workflow_id|cursor|nonce)$/i;
+
+const AUDIT_RESOURCE_LABELS: Record<string, string> = {
+  book: "Sách",
+  books: "Kho sách",
+  page: "Trang sách",
+  page_revision: "Bản chữ trang sách",
+  parent: "Tài khoản phụ huynh",
+  child: "Hồ sơ trẻ em",
+  song: "Bài hát karaoke",
+  karaoke_song: "Bài hát karaoke",
+  report: "Báo cáo nội dung",
+  content_report: "Báo cáo nội dung",
+  user_book: "Sách người dùng",
+  training: "Huấn luyện mô hình",
+  model: "Mô hình nhận diện",
+  system: "Hệ thống",
+};
+
+const AUDIT_META_KEY_LABELS: Record<string, string> = {
+  title: "Tiêu đề",
+  book_title: "Tên sách",
+  name: "Tên",
+  display_name: "Tên hiển thị",
+  email: "Email",
+  page_number: "Trang số",
+  status: "Trạng thái",
+  reason: "Lý do",
+  note: "Ghi chú",
+  action: "Thao tác",
+  count: "Số lượng",
+  scope: "Phạm vi",
+  mode: "Chế độ",
+  provider: "Dịch vụ xử lý",
+  result: "Kết quả",
+};
+
+function formatAuditResourceLabel(resourceType: string): string {
+  const key = resourceType.trim().toLowerCase();
+  if (AUDIT_RESOURCE_LABELS[key]) return AUDIT_RESOURCE_LABELS[key];
+  return resourceType.replace(/_/g, " ");
+}
+
+function formatAuditMetadataKey(key: string): string {
+  const normalized = key.trim().toLowerCase();
+  if (AUDIT_META_KEY_LABELS[normalized]) {
+    return AUDIT_META_KEY_LABELS[normalized];
+  }
+  return key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function formatAuditMetadataValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value ? "Có" : "Không";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (UUID_LIKE_PATTERN.test(trimmed) || HEX_HASH_PATTERN.test(trimmed)) {
+      return null;
+    }
+    return trimmed;
+  }
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((item) => formatAuditMetadataValue(item))
+      .filter((item): item is string => Boolean(item));
+    return parts.length > 0 ? parts.join(", ") : null;
+  }
+  return null;
+}
+
+function extractReadableMetadataEntries(
+  metadata: Record<string, unknown>,
+): readonly { readonly label: string; readonly value: string }[] {
+  const entries: { readonly label: string; readonly value: string }[] = [];
+  for (const [key, rawValue] of Object.entries(metadata)) {
+    if (SENSITIVE_META_KEY_PATTERN.test(key)) continue;
+    if (rawValue && typeof rawValue === "object" && !Array.isArray(rawValue)) {
+      for (const [nestedKey, nestedVal] of Object.entries(
+        rawValue as Record<string, unknown>,
+      )) {
+        if (SENSITIVE_META_KEY_PATTERN.test(nestedKey)) continue;
+        const formatted = formatAuditMetadataValue(nestedVal);
+        if (formatted) {
+          entries.push({
+            label: formatAuditMetadataKey(nestedKey),
+            value: formatted,
+          });
+        }
+      }
+      continue;
+    }
+    const formatted = formatAuditMetadataValue(rawValue);
+    if (formatted) {
+      entries.push({
+        label: formatAuditMetadataKey(key),
+        value: formatted,
+      });
+    }
+  }
+  return entries;
+}
+
 function summarizeMetadata(metadata: Record<string, unknown>): string {
-  const serialized = JSON.stringify(metadata);
-  if (serialized.length <= 72) return serialized;
-  return `${serialized.slice(0, 72)}…`;
+  const entries = extractReadableMetadataEntries(metadata);
+  if (entries.length === 0) return "Không có thông tin bổ sung";
+  const text = entries
+    .slice(0, 3)
+    .map((entry) => `${entry.label}: ${entry.value}`)
+    .join(" · ");
+  if (text.length <= 72) return text;
+  return `${text.slice(0, 72)}…`;
 }
 
 export function AdminAuditScreen() {
@@ -214,7 +330,7 @@ export function AdminAuditScreen() {
         </StatusMessage>
       ) : items.length === 0 ? (
         <EmptyState
-          icon={<FileJson2 aria-hidden className="size-8 text-primary" />}
+          icon={<FileText aria-hidden className="size-8 text-primary" />}
           title={t("auditLogs.emptyFilteredTitle")}
           description={t("auditLogs.emptyFilteredDescription")}
           action={
@@ -291,11 +407,10 @@ export function AdminAuditScreen() {
                     </div>
 
                     <div className="min-w-0 space-y-1">
-                      <p className="break-all text-sm font-medium text-ink">
-                        {item.resource_type} ·{" "}
-                        {item.resource_id ?? t("auditLogs.noResourceId")}
+                      <p className="break-words text-sm font-medium text-ink">
+                        {formatAuditResourceLabel(item.resource_type)}
                       </p>
-                      <p className="truncate font-mono text-xs text-muted">
+                      <p className="truncate text-xs text-muted">
                         {metadataPreview}
                       </p>
                     </div>
@@ -304,8 +419,10 @@ export function AdminAuditScreen() {
                       <span className="me-1.5 text-xs font-semibold text-muted md:hidden">
                         {t("auditLogs.actorLabel")}:
                       </span>
-                      <span className="break-all font-mono text-xs font-medium text-muted md:text-ink">
-                        {item.actor_id ?? t("auditLogs.systemActor")}
+                      <span className="text-xs font-medium text-muted md:text-ink">
+                        {item.actor_id
+                          ? "Quản trị viên"
+                          : t("auditLogs.systemActor")}
                       </span>
                     </div>
 
@@ -316,6 +433,7 @@ export function AdminAuditScreen() {
                           { action: item.action },
                           "Xem chi tiết sự kiện {action}",
                         )}
+                        className="min-w-[6.25rem] whitespace-nowrap"
                         fullWidth={false}
                         onClick={() => setSelectedEvent(item)}
                         size="admin"
@@ -399,7 +517,7 @@ export function AdminAuditScreen() {
                 {selectedEvent.action}
               </AdminBadge>
               <AdminBadge tone="neutral">
-                {selectedEvent.resource_type}
+                {formatAuditResourceLabel(selectedEvent.resource_type)}
               </AdminBadge>
             </div>
 
@@ -408,33 +526,18 @@ export function AdminAuditScreen() {
                 <dt className="text-xs font-semibold text-muted">
                   {t("auditLogs.columns.resource", undefined, "Tài nguyên")}
                 </dt>
-                <dd className="mt-1 break-all font-mono text-xs font-semibold text-ink">
-                  {selectedEvent.resource_type} ·{" "}
-                  {selectedEvent.resource_id ?? t("auditLogs.noResourceId")}
+                <dd className="mt-1 text-xs font-semibold text-ink">
+                  {formatAuditResourceLabel(selectedEvent.resource_type)}
                 </dd>
               </div>
               <div className="rounded-control border border-border bg-surface-subtle/50 px-3.5 py-2.5">
                 <dt className="text-xs font-semibold text-muted">
                   {t("auditLogs.actorLabel")}
                 </dt>
-                <dd className="mt-1 break-all font-mono text-xs font-semibold text-ink">
-                  {selectedEvent.actor_id ?? t("auditLogs.systemActor")}
-                </dd>
-              </div>
-              <div className="rounded-control border border-border bg-surface-subtle/50 px-3.5 py-2.5">
-                <dt className="text-xs font-semibold text-muted">
-                  {t("auditLogs.requestIdLabel")}
-                </dt>
-                <dd className="mt-1 break-all font-mono text-xs font-semibold text-ink">
-                  {selectedEvent.request_id ?? t("common.emptyDash")}
-                </dd>
-              </div>
-              <div className="rounded-control border border-border bg-surface-subtle/50 px-3.5 py-2.5">
-                <dt className="text-xs font-semibold text-muted">
-                  {t("auditLogs.eventIdLabel", undefined, "Mã sự kiện")}
-                </dt>
-                <dd className="mt-1 break-all font-mono text-xs font-semibold text-ink">
-                  {selectedEvent.id}
+                <dd className="mt-1 text-xs font-semibold text-ink">
+                  {selectedEvent.actor_id
+                    ? "Quản trị viên"
+                    : t("auditLogs.systemActor")}
                 </dd>
               </div>
             </dl>
@@ -443,9 +546,35 @@ export function AdminAuditScreen() {
               <h3 className="text-sm font-extrabold text-ink">
                 {t("auditLogs.safeMetadataLabel")}
               </h3>
-              <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-primary/20 bg-sky/30 p-3.5 font-mono text-xs leading-relaxed text-ink">
-                {JSON.stringify(selectedEvent.metadata, null, 2)}
-              </pre>
+              {(() => {
+                const entries = extractReadableMetadataEntries(
+                  selectedEvent.metadata,
+                );
+                if (entries.length === 0) {
+                  return (
+                    <p className="rounded-xl border border-border bg-surface-subtle/50 p-3.5 text-xs text-muted">
+                      {t("auditLogs.noResourceId")}
+                    </p>
+                  );
+                }
+                return (
+                  <dl className="grid gap-2 rounded-xl border border-primary/20 bg-sky/30 p-3.5 text-xs">
+                    {entries.map((entry, idx) => (
+                      <div
+                        className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/50 pb-1.5 last:border-b-0 last:pb-0"
+                        key={`${entry.label}-${idx}`}
+                      >
+                        <dt className="font-semibold text-muted">
+                          {entry.label}
+                        </dt>
+                        <dd className="font-medium text-ink break-words">
+                          {entry.value}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                );
+              })()}
             </section>
           </div>
         ) : null}

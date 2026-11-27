@@ -13,7 +13,6 @@ import {
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
 import { ReadingAutomationSettings } from "@/components/reading/reading-automation-settings";
-import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPreferences } from "@/hooks/use-speech-preferences";
 import {
@@ -29,7 +28,6 @@ import {
   lockSessionVoice,
   setVoicePolicyPreferences,
   subscribeVoicePolicy,
-  type VoiceProviderMode,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import {
@@ -39,10 +37,6 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
 } from "@/lib/reading/speech-preferences";
-import {
-  fetchVoiceEngineHealth,
-  type VoiceEngineHealthSnapshot,
-} from "@/lib/reading/voice-engine-status";
 import {
   adaptTextToTeacherPersona,
   resolveVoiceGender,
@@ -138,7 +132,6 @@ function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
         ? t(ageKeys[ageKey])
         : voice.age.replaceAll("_", " ")
       : null,
-    voice.provider === "google" ? t("settings.googleProviderLabel") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -169,33 +162,17 @@ export function ReadingVoiceSettings({
   const [removedVoiceNotice, setRemovedVoiceNotice] = useState<string | null>(
     null,
   );
-  const [voiceHealth, setVoiceHealth] =
-    useState<VoiceEngineHealthSnapshot | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const mountedRef = useRef(true);
   const previewGenerationRef = useRef(0);
   const loadControllerRef = useRef<AbortController | null>(null);
-  const healthControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
       loadControllerRef.current?.abort();
-      healthControllerRef.current?.abort();
     };
-  }, []);
-
-  const loadVoiceHealth = useCallback(() => {
-    healthControllerRef.current?.abort();
-    const controller = new AbortController();
-    healthControllerRef.current = controller;
-    void fetchVoiceEngineHealth(controller.signal).then((snapshot) => {
-      if (!mountedRef.current || controller.signal.aborted) return;
-      if (snapshot) {
-        setVoiceHealth(snapshot);
-      }
-    });
   }, []);
 
   const syncPausedSessionLock = useCallback(
@@ -267,32 +244,6 @@ export function ReadingVoiceSettings({
     );
   }
 
-  function changeProviderPolicy(
-    nextPolicy: Partial<{
-      providerMode: VoiceProviderMode;
-      allowGoogleSttFallback: boolean;
-      allowGoogleTtsFallback: boolean;
-    }>,
-  ) {
-    previewGenerationRef.current += 1;
-    onStopPreview();
-    setPreviewError(false);
-    const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice
-    const currentVoiceId = getSpeechPreferences().voiceId;
-    if (
-      currentVoiceId?.startsWith("google_") &&
-      (updated.providerMode !== "local_with_google_fallback" ||
-        !updated.allowGoogleTtsFallback)
-    ) {
-      update({ voiceId: null });
-      syncPausedSessionLock(null);
-    }
-    if (isOpen) {
-      loadVoices();
-    }
-  }
-
   function selectRegionTab(nextTab: "all" | VoiceRegion) {
     setRegionTab(nextTab);
     if (nextTab === "all") return;
@@ -322,7 +273,6 @@ export function ReadingVoiceSettings({
 
   function open() {
     setIsOpen(true);
-    loadVoiceHealth();
     if (loadState.status === "idle" || loadState.status === "error") {
       loadVoices();
     }
@@ -333,7 +283,6 @@ export function ReadingVoiceSettings({
     setPreviewError(false);
     onStopPreview();
     loadControllerRef.current?.abort();
-    healthControllerRef.current?.abort();
     if (loadState.status === "loading") setLoadState({ status: "idle" });
     setIsOpen(false);
   }
@@ -475,10 +424,7 @@ export function ReadingVoiceSettings({
               : preferences.voiceId
                 ? t("settings.savedVoice")
                 : t("settings.defaultVoice")}{" "}
-            · {activeRegionLabel} · {formatSpeed(preferences.speed)} ·{" "}
-            {policy.providerMode === "local_only"
-              ? t("settings.localOnlyMode")
-              : t("settings.localWithGoogleMode")}
+            · {activeRegionLabel} · {formatSpeed(preferences.speed)}
           </div>
 
           {removedVoiceNotice ? (
@@ -715,185 +661,14 @@ export function ReadingVoiceSettings({
                       data-testid="voice-offline-cache-notice"
                     >
                       {cachedNames.length > 1
-                        ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho: ${cachedNames.join(", ")}; các giọng khác cần bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
+                        ? `Một số giọng đọc đang tạm nghỉ. Hiện có sẵn âm thanh chuẩn bị trước cho: ${cachedNames.join(", ")}.`
                         : cachedNames.length === 1
-                          ? `Máy trạm giọng đọc đang ngoại tuyến. Chế độ Wi-Fi tự lập hiện có sẵn âm thanh dựng trước cho giọng ${cachedNames[0]}; để nghe trực tiếp các giọng vùng miền khác hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới.`
-                          : "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu."}
+                          ? `Một số giọng đọc đang tạm nghỉ. Hiện có sẵn âm thanh chuẩn bị trước cho giọng ${cachedNames[0]}.`
+                          : "Giọng đọc trực tuyến hiện đang tạm nghỉ. Bé vẫn có thể luyện đọc và nghe lại sau ít phút."}
                     </p>
                   );
                 })()
               : null}
-          </section>
-
-          <section
-            aria-labelledby="voice-provider-policy-heading"
-            className="space-y-2.5 rounded-control border border-border bg-white p-3"
-          >
-            <h3
-              className="text-label font-semibold text-ink"
-              id="voice-provider-policy-heading"
-            >
-              {t("settings.parentModeTitle")}
-            </h3>
-            <VoiceEngineBadge />
-            {voiceHealth ? (
-              <div
-                data-testid="voice-health-status-pills"
-                className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold"
-              >
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
-                    voiceHealth.local.available
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                      : "border-rose-200 bg-rose-50 text-rose-900",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      voiceHealth.local.available
-                        ? "bg-emerald-500"
-                        : "bg-rose-500",
-                    )}
-                    aria-hidden="true"
-                  />
-                  Local Worker:{" "}
-                  {voiceHealth.local.available
-                    ? t("settings.localAvailable")
-                    : t("settings.localUnavailable")}
-                </span>
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5",
-                    voiceHealth.google.stt_configured ||
-                      voiceHealth.google.tts_configured
-                      ? "border-sky-200 bg-sky-50 text-sky-900"
-                      : "border-amber-200 bg-amber-50 text-amber-900",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "h-1.5 w-1.5 rounded-full",
-                      voiceHealth.google.stt_configured ||
-                        voiceHealth.google.tts_configured
-                        ? "bg-sky-500"
-                        : "bg-amber-500",
-                    )}
-                    aria-hidden="true"
-                  />
-                  Google Cloud API:{" "}
-                  {voiceHealth.google.stt_configured ||
-                  voiceHealth.google.tts_configured
-                    ? t("settings.googleConfigured")
-                    : t("settings.googleUnconfigured")}
-                </span>
-              </div>
-            ) : null}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <button
-                aria-pressed={policy.providerMode === "local_only"}
-                className={cn(
-                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
-                  policy.providerMode === "local_only"
-                    ? "border-primary bg-primary text-white"
-                    : "border-border bg-cream/60 text-ink hover:border-primary",
-                )}
-                onClick={() =>
-                  changeProviderPolicy({
-                    providerMode: "local_only",
-                    allowGoogleSttFallback: false,
-                    allowGoogleTtsFallback: false,
-                  })
-                }
-                type="button"
-              >
-                {t("settings.localOnlyTitle")}
-                <span
-                  className={cn(
-                    "mt-0.5 block font-normal",
-                    policy.providerMode === "local_only"
-                      ? "text-white/90"
-                      : "text-muted",
-                  )}
-                >
-                  {t("settings.localOnlyDesc")}
-                </span>
-              </button>
-              <button
-                aria-pressed={
-                  policy.providerMode === "local_with_google_fallback"
-                }
-                className={cn(
-                  "rounded-control border-2 px-3 py-2 text-start text-xs font-bold transition",
-                  policy.providerMode === "local_with_google_fallback"
-                    ? "border-primary bg-primary text-white"
-                    : "border-border bg-cream/60 text-ink hover:border-primary",
-                )}
-                onClick={() =>
-                  changeProviderPolicy(
-                    policy.providerMode === "local_with_google_fallback"
-                      ? { providerMode: "local_with_google_fallback" }
-                      : {
-                          providerMode: "local_with_google_fallback",
-                          allowGoogleSttFallback: true,
-                          allowGoogleTtsFallback: true,
-                        },
-                  )
-                }
-                type="button"
-              >
-                {t("settings.localWithGoogleTitle")}
-                <span
-                  className={cn(
-                    "mt-0.5 block font-normal",
-                    policy.providerMode === "local_with_google_fallback"
-                      ? "text-white/90"
-                      : "text-muted",
-                  )}
-                >
-                  {t("settings.localWithGoogleDesc")}
-                </span>
-              </button>
-            </div>
-
-            {policy.providerMode === "local_with_google_fallback" ? (
-              <div className="space-y-2 rounded-lg bg-cream/70 p-2.5 text-xs">
-                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
-                  <span>{t("settings.googleSttFallback")}</span>
-                  <input
-                    checked={policy.allowGoogleSttFallback}
-                    className="size-4 accent-primary"
-                    onChange={(e) =>
-                      changeProviderPolicy({
-                        allowGoogleSttFallback: e.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center justify-between gap-2 font-medium text-ink">
-                  <span>{t("settings.googleTtsFallback")}</span>
-                  <input
-                    checked={policy.allowGoogleTtsFallback}
-                    className="size-4 accent-primary"
-                    onChange={(e) =>
-                      changeProviderPolicy({
-                        allowGoogleTtsFallback: e.target.checked,
-                      })
-                    }
-                    type="checkbox"
-                  />
-                </label>
-                {!voiceHealth ||
-                (!voiceHealth.google.stt_configured &&
-                  !voiceHealth.google.tts_configured) ? (
-                  <p className="text-[11px] leading-relaxed text-muted">
-                    {t("settings.missingGoogleKeyHint")}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
           </section>
 
           <ReadingAutomationSettings />

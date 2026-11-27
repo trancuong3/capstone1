@@ -175,7 +175,9 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
         code: "TTS_UNAVAILABLE",
         retryable: true,
         request_id: testCase.requestId,
-        message: expect.stringContaining(`Mã yêu cầu: ${testCase.requestId}.`),
+        message: expect.not.stringContaining(
+          `Mã yêu cầu: ${testCase.requestId}`,
+        ),
       });
 
       fetchMock.mockResolvedValueOnce(
@@ -205,7 +207,7 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
       code: "STT_TIMEOUT",
       retryable: true,
       request_id: "req-stt-timeout-9",
-      message: expect.stringContaining("Mã yêu cầu: req-stt-timeout-9."),
+      message: expect.not.stringContaining("Mã yêu cầu: req-stt-timeout-9"),
     });
   });
 });

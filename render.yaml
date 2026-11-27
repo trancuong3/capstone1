@@ -58,6 +58,16 @@ services:
         value: "10.0"
       - key: VIREAD_HEALTH_OCR_TIMEOUT_SECONDS
         value: "8.0"
+      - key: OCR_CLOUD_CORRECTION_ENABLED
+        value: "true"
+      - key: PRIVATE_BOOK_ALLOW_CLOUD_AI
+        value: "true"
+      - key: LOCAL_OCR_ENABLED
+        value: "false"
+      - key: PICTURE_DESC_OLLAMA_ENABLED
+        value: "false"
+      - key: GEMINI_IMAGE_BILLING_ENABLED
+        value: "false"
       # Secrets and environment-specific URLs (configure in Render Dashboard only)
       - key: DATABASE_URL
         sync: false
@@ -86,6 +96,10 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: GROQ_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
         sync: false
       - key: SMTP_USERNAME
         sync: false

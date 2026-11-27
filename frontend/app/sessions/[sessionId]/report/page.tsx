@@ -140,7 +140,7 @@ export default function ReadingReportPage() {
   }, [reloadKey, sessionId, t]);
 
   const reportHeading = (
-    <header className="flex flex-col justify-between gap-3 border-b border-border pb-5 sm:flex-row sm:items-end">
+    <header className="flex flex-col justify-between gap-2.5 border-b border-border pb-3.5 sm:flex-row sm:items-end">
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-4">
           <Link
@@ -161,12 +161,12 @@ export default function ReadingReportPage() {
             {t("sessions.title")}
           </Link>
         </div>
-        <h1 className="book-title text-3xl text-ink sm:text-[38px]">
+        <h1 className="book-title text-2xl text-ink sm:text-[34px]">
           {t("sessions.readingReports.pageHeading")}
         </h1>
       </div>
       {!loading && !error && reports.length > 0 ? (
-        <p className="text-sm font-semibold text-muted tabular-nums">
+        <p className="text-xs font-semibold text-muted tabular-nums sm:text-sm">
           {t("sessions.readingReports.reportsCountSummary", {
             count: reports.length,
           })}
@@ -248,7 +248,7 @@ export default function ReadingReportPage() {
 
   return (
     <section
-      className="mx-auto flex w-full max-w-[1120px] flex-col gap-5 pb-4"
+      className="mx-auto flex w-full max-w-[1120px] flex-col gap-3.5 pb-4"
       data-testid="standalone-session-report"
     >
       {reportHeading}
@@ -267,9 +267,9 @@ export default function ReadingReportPage() {
       {pageGroups.length > 1 ? (
         <nav
           aria-label={t("sessions.readingReports.pageNavAria")}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-border bg-white p-3.5 sm:px-5"
+          className="flex flex-wrap items-center justify-between gap-2.5 rounded-card border border-border bg-white px-3.5 py-2.5 sm:px-4"
         >
-          <p className="text-sm font-bold text-ink tabular-nums">
+          <p className="text-xs font-bold text-ink tabular-nums sm:text-sm">
             {t("sessions.readingReports.pageNavGroupSummary", {
               current: safeGroupIndex + 1,
               total: pageGroups.length,
@@ -278,7 +278,7 @@ export default function ReadingReportPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               aria-label={t("sessions.previousPage")}
-              className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40"
               disabled={safeGroupIndex <= 0}
               onClick={() => {
                 setSelectedGroupIndex((current) => Math.max(0, current - 1));
@@ -299,7 +299,7 @@ export default function ReadingReportPage() {
                   page: idx + 1,
                 })}
                 className={cn(
-                  "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums sm:px-3",
+                  "h-9 min-h-9 min-w-9 rounded-control px-2.5 text-xs font-bold tabular-nums",
                   idx === safeGroupIndex
                     ? "bg-primary text-white"
                     : "border border-border bg-white text-ink hover:bg-canvas",
@@ -319,7 +319,7 @@ export default function ReadingReportPage() {
             ))}
             <button
               aria-label={t("sessions.nextPage")}
-              className="inline-flex min-h-11 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky disabled:cursor-not-allowed disabled:opacity-40"
               disabled={safeGroupIndex >= pageGroups.length - 1}
               onClick={() => {
                 setSelectedGroupIndex((current) =>
@@ -339,10 +339,10 @@ export default function ReadingReportPage() {
         </nav>
       ) : null}
 
-      <section className="space-y-2.5" data-testid="standalone-primary-report">
+      <section className="space-y-2" data-testid="standalone-primary-report">
         <div className="flex flex-wrap items-center justify-between gap-2 px-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-base font-extrabold text-ink">
+            <h2 className="text-sm font-extrabold text-ink sm:text-base">
               {primaryImmutable
                 ? t("sessions.readingReports.firstPassSavedTitle")
                 : t("sessions.readingReports.primarySavedTitle")}
@@ -352,10 +352,10 @@ export default function ReadingReportPage() {
             </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             {!primaryImmutable ? (
               <Button
-                className="min-h-11 px-3 py-2 text-sm"
+                className="h-9 min-h-9! px-3! py-0! text-xs!"
                 disabled={deletingId !== null}
                 fullWidth={false}
                 isLoading={deletingId === primaryReport.report_id}
@@ -363,10 +363,11 @@ export default function ReadingReportPage() {
                   setDeleteError(null);
                   setPendingDeleteId(primaryReport.report_id);
                 }}
+                size="admin"
                 type="button"
                 variant="destructive"
               >
-                <Trash2 aria-hidden="true" className="size-4" />
+                <Trash2 aria-hidden="true" className="size-3.5" />
                 {t("sessions.readingReports.deleteReportAction")}
               </Button>
             ) : (
@@ -381,8 +382,8 @@ export default function ReadingReportPage() {
       </section>
 
       {additionalReports.length > 0 ? (
-        <details className="group rounded-card border border-border bg-white p-4 sm:p-5">
-          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-sm font-extrabold text-ink">
+        <details className="group rounded-card border border-border bg-white p-3.5 sm:p-4">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-3 text-sm font-extrabold text-ink [&::-webkit-details-marker]:hidden">
             <span>
               {t("sessions.readingReports.otherComparisonsTitle", {
                 count: additionalReports.length,
@@ -396,12 +397,12 @@ export default function ReadingReportPage() {
           <p className="mt-1 text-xs text-muted">
             {t("sessions.readingReports.standaloneOtherComparisonsDesc")}
           </p>
-          <div className="mt-4 flex flex-col gap-5">
+          <div className="mt-3 flex flex-col gap-4">
             {visibleAdditional.map((report, index) => {
               const immutable = isImmutableFirstPassReport(report);
               return (
                 <section
-                  className="space-y-2.5 border-t border-border pt-4 first:border-t-0 first:pt-0"
+                  className="space-y-2.5 border-t border-border pt-3.5 first:border-t-0 first:pt-0"
                   key={report.report_id}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 px-1">
@@ -419,10 +420,10 @@ export default function ReadingReportPage() {
                       </span>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2">
                       {!immutable ? (
                         <Button
-                          className="min-h-11 px-3 py-2 text-sm"
+                          className="h-9 min-h-9! px-3! py-0! text-xs!"
                           disabled={deletingId !== null}
                           fullWidth={false}
                           isLoading={deletingId === report.report_id}
@@ -430,10 +431,11 @@ export default function ReadingReportPage() {
                             setDeleteError(null);
                             setPendingDeleteId(report.report_id);
                           }}
+                          size="admin"
                           type="button"
                           variant="destructive"
                         >
-                          <Trash2 aria-hidden="true" className="size-4" />
+                          <Trash2 aria-hidden="true" className="size-3.5" />
                           {t("sessions.readingReports.deleteReportAction")}
                         </Button>
                       ) : (

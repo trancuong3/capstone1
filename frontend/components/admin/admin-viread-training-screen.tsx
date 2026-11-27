@@ -39,8 +39,32 @@ import { cn } from "@/lib/utils/cn";
 
 type TrainingTabKey = "overview" | "drive" | "flow1" | "flow2";
 
-function hash(value: string) {
-  return `${value.slice(0, 12)}…${value.slice(-8)}`;
+function formatTrainingStatusLabel(status: string): string {
+  const map: Record<string, string> = {
+    WAITING_FOR_COLAB_WORKER: "Đang chờ hệ thống huấn luyện",
+    FALLBACK_QUEUED_COLAB: "Đang chờ hệ thống huấn luyện từ xa",
+    COLAB_SUBMITTED: "Đã gửi yêu cầu huấn luyện",
+    COLAB_EXECUTING: "Đang huấn luyện",
+    RUNNING: "Đang chạy",
+    COMPLETED: "Hoàn tất",
+    SUCCEEDED: "Hoàn tất",
+    FAILED: "Gặp lỗi",
+    BLOCKED: "Đang tạm dừng",
+    BLOCKED_CONFIGURATION: "Chưa đủ cấu hình",
+    QUALITY_GATE_REJECTED: "Chưa đạt ngưỡng chất lượng",
+    CANDIDATE: "Ứng viên",
+    BENCHMARKED: "Đã kiểm định",
+    ACTIVATED: "Đang hoạt động",
+    QUEUED: "Đang xếp hàng",
+    PENDING: "Đang chờ",
+    V2_WIN: "Đạt chuẩn vượt trội",
+    V2_LOST: "Chưa vượt mô hình hiện tại",
+    INSUFFICIENT_EVIDENCE: "Chưa đủ dữ liệu kiểm định",
+    TRAINING: "Đang huấn luyện",
+    EVALUATING: "Đang kiểm định",
+    PREPARING: "Đang chuẩn bị",
+  };
+  return map[status] ?? status.replaceAll("_", " ").toLowerCase();
 }
 
 function trainingProfileName(profile: string, t: TranslateFn) {
@@ -99,7 +123,7 @@ export function AdminVireadTrainingScreen() {
         t(
           "training.errors.serviceUnavailable",
           undefined,
-          "Dịch vụ quản trị huấn luyện VietOCR chưa sẵn sàng.",
+          "Dịch vụ quản trị huấn luyện hiện chưa sẵn sàng.",
         ),
       );
       return;
@@ -120,7 +144,7 @@ export function AdminVireadTrainingScreen() {
           : t(
               "training.errors.loadFailed",
               undefined,
-              "Chưa thể tải trạng thái huấn luyện. Kiểm tra quyền Admin và migration VietOCR V2.",
+              "Chưa thể tải trạng thái huấn luyện. Vui lòng kiểm tra quyền quản trị và thử lại.",
             ),
       );
     }
@@ -300,70 +324,30 @@ export function AdminVireadTrainingScreen() {
       }
       if (result.scheduled > 0) {
         setMessage(
-          t(
-            "training.notices.flow2Scheduled",
-            {
-              train: formatNumber(result.train_count ?? 0),
-              validation: formatNumber(result.validation_count ?? 0),
-              jobId: result.job_id ?? "",
-              status: result.status ?? "WAITING_FOR_COLAB_WORKER",
-            },
-            "Đã tạo snapshot Luồng 2 ({train} train / {validation} validation) và xếp hàng job {jobId} ({status}).",
-          ),
+          t("training.notices.flow2Scheduled", {
+            train: formatNumber(result.train_count ?? 0),
+            validation: formatNumber(result.validation_count ?? 0),
+          }),
         );
       } else if (result.reason === "UNRESOLVED_TRAINING_JOB_EXISTS") {
-        setMessage(
-          t(
-            "training.notices.flow2UnresolvedJob",
-            undefined,
-            "Đang có job huấn luyện chưa kết thúc trong hàng đợi; chưa tạo thêm job mới.",
-          ),
-        );
+        setMessage(t("training.notices.flow2UnresolvedJob"));
       } else if (
         result.reason === "ALREADY_TRAINED_FOR_CURRENT_DATASET_AND_CONFIG"
       ) {
-        setMessage(
-          t(
-            "training.notices.flow2AlreadyTrained",
-            undefined,
-            "Dataset và cấu hình Luồng 2 hiện tại đã có kết quả train trước đó. Thêm mẫu VERIFIED mới hoặc đánh giá candidate hiện có.",
-          ),
-        );
+        setMessage(t("training.notices.flow2AlreadyTrained"));
       } else if (result.reason === "TRAIN_AND_VALIDATION_REQUIRED") {
         setMessage(
-          t(
-            "training.notices.flow2TrainValRequired",
-            {
-              train: formatNumber(result.train_count ?? 0),
-              validation: formatNumber(result.validation_count ?? 0),
-            },
-            "Snapshot hiện có {train} train và {validation} validation; cần cả 2 tập mới có thể xếp hàng Colab.",
-          ),
+          t("training.notices.flow2TrainValRequired", {
+            train: formatNumber(result.train_count ?? 0),
+            validation: formatNumber(result.validation_count ?? 0),
+          }),
         );
       } else if (result.reason === "NO_ELIGIBLE_FLOW2_SAMPLES") {
-        setMessage(
-          t(
-            "training.notices.flow2NoEligibleSamples",
-            undefined,
-            "Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot.",
-          ),
-        );
+        setMessage(t("training.notices.flow2NoEligibleSamples"));
       } else if (result.reason === "FLOW2_INGESTION_PAUSED") {
-        setMessage(
-          t(
-            "training.notices.flow2Paused",
-            undefined,
-            "Luồng 2 đang tạm dừng (VIREAD_FLOW2_INGESTION_PAUSED=true).",
-          ),
-        );
+        setMessage(t("training.notices.flow2Paused"));
       } else {
-        setMessage(
-          t(
-            "training.notices.flow2ScheduleBlocked",
-            { reason: result.reason },
-            "Không thể xếp hàng Luồng 2 ({reason}).",
-          ),
-        );
+        setMessage(t("training.notices.flow2ScheduleBlocked"));
       }
       await load();
     } catch (err) {
@@ -376,7 +360,7 @@ export function AdminVireadTrainingScreen() {
           : t(
               "training.notices.flow2TriggerFailed",
               undefined,
-              "Không thể tạo snapshot hoặc xếp hàng train Luồng 2.",
+              "Không thể tạo đợt dữ liệu hoặc xếp hàng huấn luyện.",
             ),
       );
     } finally {
@@ -607,7 +591,7 @@ export function AdminVireadTrainingScreen() {
     },
     {
       id: "drive",
-      label: t("training.tabs.drive", undefined, "Google Drive"),
+      label: t("training.tabs.drive", undefined, "Kho lưu trữ"),
       icon: HardDrive,
       alert: Boolean(
         data?.google_drive &&
@@ -618,16 +602,12 @@ export function AdminVireadTrainingScreen() {
     },
     {
       id: "flow1",
-      label: t("training.tabs.flow1", undefined, "Thay model Flow 1"),
+      label: t("training.tabs.flow1", undefined, "Cập nhật mô hình"),
       icon: UploadCloud,
     },
     {
       id: "flow2",
-      label: t(
-        "training.tabs.flow2",
-        undefined,
-        "Huấn luyện & Đánh giá Flow 2",
-      ),
+      label: t("training.tabs.flow2", undefined, "Huấn luyện & Đánh giá"),
       icon: Layers,
       badge:
         data && data.jobs.length > 0
@@ -744,23 +724,16 @@ export function AdminVireadTrainingScreen() {
               >
                 <AdminKpiCard
                   detail={
-                    <span className="block space-y-1">
-                      <span className="block break-all font-mono text-xs text-muted">
-                        {data.active_model
-                          ? hash(data.active_model.checkpoint_sha256)
-                          : t("common.emptyDash")}
-                      </span>
-                      <span className="block text-xs text-muted">
-                        {t("training.storagePrefix")}{" "}
-                        <strong className="text-ink">
-                          {data.active_model?.profile === "ORIGINAL"
-                            ? t("training.defaultOriginal")
-                            : data.active_model?.storage_provider ===
-                                "google_drive"
-                              ? t("training.drive.statuses.CONNECTED")
-                              : t("training.storageSupabaseLegacy")}
-                        </strong>
-                      </span>
+                    <span className="block text-xs text-muted">
+                      {t("training.storagePrefix")}{" "}
+                      <strong className="text-ink">
+                        {data.active_model?.profile === "ORIGINAL"
+                          ? t("training.defaultOriginal")
+                          : data.active_model?.storage_provider ===
+                              "google_drive"
+                            ? t("training.drive.statuses.CONNECTED")
+                            : t("training.storageSupabaseLegacy")}
+                      </strong>
                     </span>
                   }
                   label={t("training.activeModelHeading")}
@@ -852,11 +825,12 @@ export function AdminVireadTrainingScreen() {
                       </h2>
                     </div>
                     <AdminBadge
-                      className="font-mono"
                       dot
                       tone={runtimeModel.matches_desired ? "success" : "danger"}
                     >
-                      {runtimeModel.status_label}
+                      {runtimeModel.matches_desired
+                        ? "Đang hoạt động đúng cấu hình"
+                        : "Đang dùng mô hình dự phòng"}
                     </AdminBadge>
                   </div>
                   <div className="mt-3 grid gap-3 text-xs md:grid-cols-2">
@@ -867,9 +841,6 @@ export function AdminVireadTrainingScreen() {
                       <p className="mt-1 text-sm font-extrabold text-ink">
                         {trainingProfileName(runtimeModel.desired_profile, t)}
                       </p>
-                      <p className="mt-1 break-all font-mono text-muted">
-                        SHA-256: {hash(runtimeModel.desired_checkpoint_sha256)}
-                      </p>
                     </div>
                     <div className="rounded-control border border-border bg-white p-3.5">
                       <p className="font-bold text-muted">
@@ -879,12 +850,6 @@ export function AdminVireadTrainingScreen() {
                         {runtimeModel.initialized && runtimeModel.loaded_profile
                           ? trainingProfileName(runtimeModel.loaded_profile, t)
                           : t("training.notLoadedRam")}
-                      </p>
-                      <p className="mt-1 break-all font-mono text-muted">
-                        SHA-256:{" "}
-                        {runtimeModel.loaded_checkpoint_sha256
-                          ? hash(runtimeModel.loaded_checkpoint_sha256)
-                          : t("common.emptyDash")}
                       </p>
                     </div>
                   </div>
@@ -918,7 +883,7 @@ export function AdminVireadTrainingScreen() {
                   description={t(
                     "training.driveUnavailableDesc",
                     undefined,
-                    "Backend hiện chưa trả về thông tin trạng thái kết nối Google Drive cho Luồng 2.",
+                    "Hệ thống hiện chưa có thông tin cấu hình kho lưu trữ đám mây.",
                   )}
                   icon={
                     <HardDrive aria-hidden className="size-8 text-primary" />
@@ -926,7 +891,7 @@ export function AdminVireadTrainingScreen() {
                   title={t(
                     "training.driveUnavailableTitle",
                     undefined,
-                    "Chưa có cấu hình Google Drive",
+                    "Chưa có cấu hình kho lưu trữ",
                   )}
                 />
               )}
@@ -1062,13 +1027,17 @@ export function AdminVireadTrainingScreen() {
                         "Chế độ chạy:",
                       )}{" "}
                       <strong className="text-ink">
-                        {data.worker_status.execution_mode}
+                        {data.worker_status.execution_mode === "COLAB"
+                          ? "Từ xa"
+                          : data.worker_status.execution_mode === "LOCAL"
+                            ? "Cục bộ"
+                            : "Tự động"}
                       </strong>{" "}
                       ·{" "}
                       {t(
                         "training.workerWebHeavyLabel",
                         undefined,
-                        "Worker nền Web:",
+                        "Tiến trình nền:",
                       )}{" "}
                       <strong className="text-ink">
                         {data.worker_status.web_heavy_workers_disabled
@@ -1104,7 +1073,7 @@ export function AdminVireadTrainingScreen() {
                         {t(
                           "training.triggerFlow2Btn",
                           undefined,
-                          "Tạo snapshot & Xếp hàng train Luồng 2",
+                          "Tạo đợt dữ liệu & Xếp hàng huấn luyện",
                         )}
                       </Button>
                     </div>
@@ -1115,36 +1084,13 @@ export function AdminVireadTrainingScreen() {
                         {t(
                           "training.colabGuideTitle",
                           undefined,
-                          "Hướng dẫn chạy Colab Free GPU T4 (0 VNĐ)",
+                          "Hướng dẫn vận hành hệ thống huấn luyện",
                         )}
                       </p>
                       <p className="mt-1 leading-relaxed">
-                        {t(
-                          "training.colabGuidePrefix",
-                          undefined,
-                          "Mở notebook",
-                        )}{" "}
-                        <code className="font-mono">
-                          ai/vietocr_v2/viread_vietocr_v2_colab_worker.ipynb
-                        </code>
-                        {t(
-                          "training.colabGuideMid1",
-                          undefined,
-                          ", chọn Runtime",
-                        )}{" "}
-                        <strong>Change runtime type → T4 GPU</strong>
-                        {t(
-                          "training.colabGuideMid2",
-                          undefined,
-                          ", bật 2 Colab Secrets",
-                        )}{" "}
-                        <code className="font-mono">VIREAD_API_BASE</code>{" "}
-                        {t("training.colabGuideAnd", undefined, "và")}{" "}
-                        <code className="font-mono">
-                          VIREAD_TRAINING_WORKER_TOKEN
-                        </code>
-                        {t("training.colabGuideSuffix", undefined, ", rồi bấm")}{" "}
-                        <strong>Runtime → Run all</strong>.
+                        Hệ thống sẽ tự động gửi tác vụ khi kết nối huấn luyện từ
+                        xa sẵn sàng. Hãy đảm bảo phiên xử lý đang hoạt động và
+                        đã bật khóa bảo mật huấn luyện.
                       </p>
                     </div>
                   ) : null}
@@ -1164,22 +1110,12 @@ export function AdminVireadTrainingScreen() {
                       {t("training.lockedTestAutoHeading")}
                     </p>
                     {data.locked_test.status === "READY" ? (
-                      <>
-                        <p className="mt-1.5 text-sm text-ink tabular-nums">
-                          {t("training.lockedTestReady", {
-                            samples: formatNumber(
-                              data.locked_test.sample_count,
-                            ),
-                            groups: formatNumber(data.locked_test.group_count),
-                          })}
-                        </p>
-                        <p className="mt-1 break-all font-mono text-xs text-muted">
-                          Manifest{" "}
-                          {data.locked_test.manifest_sha256
-                            ? hash(data.locked_test.manifest_sha256)
-                            : t("common.emptyDash")}
-                        </p>
-                      </>
+                      <p className="mt-1.5 text-sm text-ink tabular-nums">
+                        {t("training.lockedTestReady", {
+                          samples: formatNumber(data.locked_test.sample_count),
+                          groups: formatNumber(data.locked_test.group_count),
+                        })}
+                      </p>
                     ) : (
                       <p className="mt-1.5 text-sm text-muted tabular-nums">
                         {t("training.lockedTestInsufficient", {
@@ -1265,24 +1201,34 @@ export function AdminVireadTrainingScreen() {
                             <h3 className="text-base font-extrabold text-ink">
                               {job.metadata.operation === "BENCHMARK_ONLY"
                                 ? t("training.evalBenchmarkTitle", {
-                                    type: String(
-                                      job.metadata.evaluation_type ??
-                                        t("training.evaluationFallbackType"),
+                                    type:
+                                      job.metadata.evaluation_type === "PILOT"
+                                        ? "Kiểm thử nhanh"
+                                        : job.metadata.evaluation_type ===
+                                            "PRODUCTION"
+                                          ? "Kiểm định chính thức"
+                                          : t(
+                                              "training.evaluationFallbackType",
+                                            ),
+                                    status: formatTrainingStatusLabel(
+                                      job.status,
                                     ),
-                                    status: job.status,
                                   })
                                 : t("training.profileStatusTitle", {
                                     profile: trainingProfileName(
                                       job.profile,
                                       t,
                                     ),
-                                    status: job.status,
+                                    status: formatTrainingStatusLabel(
+                                      job.status,
+                                    ),
                                   })}
                             </h3>
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="text-xs font-semibold text-muted tabular-nums">
                                 {t("training.jobTargetAttempts", {
-                                  target: job.target,
+                                  target:
+                                    job.target === "COLAB" ? "Từ xa" : "Cục bộ",
                                   attempts: formatNumber(job.attempts),
                                 })}
                               </span>
@@ -1315,16 +1261,10 @@ export function AdminVireadTrainingScreen() {
                             </div>
                           </div>
 
-                          <p className="mt-2.5 break-all font-mono text-xs text-muted">
-                            {t("training.jobIdManifest", {
-                              jobId: job.job_id,
-                              manifest: hash(job.manifest_sha256),
-                            })}
-                          </p>
-                          <p className="mt-1 text-sm text-ink tabular-nums">
+                          <p className="mt-2.5 text-sm text-ink tabular-nums">
                             {t("training.stageLabel")}{" "}
                             {typeof stage === "string"
-                              ? stage
+                              ? formatTrainingStatusLabel(stage)
                               : t("training.stageWaiting")}
                             {typeof job.progress.completed_steps === "number" &&
                             typeof job.progress.total_steps === "number"
@@ -1353,24 +1293,16 @@ export function AdminVireadTrainingScreen() {
                                   })
                                 : workerStatus?.status === "WAITING_FOR_GPU"
                                   ? t("training.workerWaitingGpu", {
-                                      reason:
-                                        typeof workerStatus.reason_code ===
-                                        "string"
-                                          ? workerStatus.reason_code
-                                          : t(
-                                              "training.workerWaitingGpuFallback",
-                                            ),
+                                      reason: t(
+                                        "training.workerWaitingGpuFallback",
+                                      ),
                                     })
                                   : workerStatus?.status ===
                                       "WAITING_FOR_RESOURCES"
                                     ? t("training.workerWaitingRam", {
-                                        reason:
-                                          typeof workerStatus.reason_code ===
-                                          "string"
-                                            ? workerStatus.reason_code
-                                            : t(
-                                                "training.workerWaitingRamFallback",
-                                              ),
+                                        reason: t(
+                                          "training.workerWaitingRamFallback",
+                                        ),
                                       })
                                     : t("training.noColabWorker")}
                             </p>
@@ -1386,16 +1318,7 @@ export function AdminVireadTrainingScreen() {
                           {job.status === "BLOCKED_CONFIGURATION" ? (
                             <p className="mt-1 text-sm text-danger">
                               {t("training.jobNotDispatchedPrefix")}{" "}
-                              {job.last_error_code ??
-                                t("training.notConfiguredFallback")}
-                              . {t("training.jobNotDispatchedHint")}
-                            </p>
-                          ) : null}
-                          {job.colab_execution_resource_name ? (
-                            <p className="mt-1 break-all font-mono text-xs text-muted">
-                              {t("training.jobExecutionPrefix", {
-                                id: job.colab_execution_resource_name,
-                              })}
+                              {t("training.jobNotDispatchedHint")}
                             </p>
                           ) : null}
                           {job.status === "QUALITY_GATE_REJECTED" ? (
@@ -1407,7 +1330,7 @@ export function AdminVireadTrainingScreen() {
                           typeof localUnavailable === "string" ? (
                             <p className="mt-1 text-sm text-muted">
                               {t("training.localFallback", {
-                                reason: localUnavailable,
+                                reason: "Hệ thống chuyển sang xử lý từ xa",
                               })}
                             </p>
                           ) : null}
@@ -1418,9 +1341,8 @@ export function AdminVireadTrainingScreen() {
                           ) : null}
                           {job.last_error_code ? (
                             <p className="mt-1 text-sm text-danger">
-                              {t("training.errorCodeLine", {
-                                code: job.last_error_code,
-                              })}
+                              Tác vụ gặp sự cố khi xử lý. Vui lòng kiểm tra cấu
+                              hình hoặc thử lại.
                             </p>
                           ) : null}
                           {(job.status === "FAILED" ||
@@ -1560,61 +1482,63 @@ export function AdminVireadTrainingScreen() {
                           ) : null}
                           {job.run_id ? (
                             <>
-                              <p className="mt-1 break-all font-mono text-xs text-muted">
-                                {t("training.jobRunPrefix", { id: job.run_id })}
-                              </p>
                               {job.run_status === "CANDIDATE" ||
                               job.run_status === "BENCHMARKED" ? (
-                                <div className="mt-3 grid gap-3 md:grid-cols-2">
-                                  <section className="rounded-control border border-border bg-surface-subtle/30 p-3.5">
+                                <div className="mt-3 grid items-stretch gap-3 md:grid-cols-2">
+                                  <section className="flex flex-col rounded-control border border-border bg-surface-subtle/30 p-3.5">
                                     <h4 className="text-sm font-bold text-ink">
                                       {t("training.pilotHeading")}
                                     </h4>
                                     <p className="mt-1 text-xs text-muted">
                                       {t("training.pilotDescriptionShort")}
                                     </p>
-                                    <Button
-                                      className="mt-2.5"
-                                      disabled={busy}
-                                      fullWidth={false}
-                                      onClick={() =>
-                                        void evaluateCandidate(
-                                          job.job_id,
-                                          "PILOT",
-                                        )
-                                      }
-                                      size="admin"
-                                      variant="secondary"
-                                    >
-                                      {t("training.runPilotBtn")}
-                                    </Button>
+                                    <div className="mt-auto pt-3">
+                                      <Button
+                                        disabled={busy}
+                                        fullWidth={false}
+                                        onClick={() =>
+                                          void evaluateCandidate(
+                                            job.job_id,
+                                            "PILOT",
+                                          )
+                                        }
+                                        size="admin"
+                                        variant="secondary"
+                                      >
+                                        {t("training.runPilotBtn")}
+                                      </Button>
+                                    </div>
                                   </section>
-                                  <section className="rounded-control border border-border bg-surface-subtle/30 p-3.5">
+                                  <section className="flex flex-col rounded-control border border-border bg-surface-subtle/30 p-3.5">
                                     <h4 className="text-sm font-bold text-ink">
                                       {t("training.productionHeading")}
                                     </h4>
                                     <p className="mt-1 text-xs text-muted">
                                       {t("training.productionDescriptionShort")}
                                     </p>
-                                    <Button
-                                      className="mt-2.5"
-                                      disabled={
-                                        busy ||
-                                        !["READY", "READY_TO_CREATE"].includes(
-                                          data.locked_test?.status ?? "",
-                                        )
-                                      }
-                                      fullWidth={false}
-                                      onClick={() =>
-                                        void evaluateCandidate(
-                                          job.job_id,
-                                          "PRODUCTION",
-                                        )
-                                      }
-                                      size="admin"
-                                    >
-                                      {t("training.runProductionBtn")}
-                                    </Button>
+                                    <div className="mt-auto pt-3">
+                                      <Button
+                                        disabled={
+                                          busy ||
+                                          ![
+                                            "READY",
+                                            "READY_TO_CREATE",
+                                          ].includes(
+                                            data.locked_test?.status ?? "",
+                                          )
+                                        }
+                                        fullWidth={false}
+                                        onClick={() =>
+                                          void evaluateCandidate(
+                                            job.job_id,
+                                            "PRODUCTION",
+                                          )
+                                        }
+                                        size="admin"
+                                      >
+                                        {t("training.runProductionBtn")}
+                                      </Button>
+                                    </div>
                                   </section>
                                 </div>
                               ) : null}
@@ -1622,16 +1546,24 @@ export function AdminVireadTrainingScreen() {
                               "string" ? (
                                 <p className="mt-2 text-sm text-muted">
                                   {t("training.evalSummaryLine", {
-                                    type: String(
-                                      job.metadata.evaluation_type ?? "",
-                                    ),
-                                    status: String(
-                                      job.metadata.evaluation_status,
+                                    type:
+                                      job.metadata.evaluation_type === "PILOT"
+                                        ? "Kiểm thử nhanh"
+                                        : job.metadata.evaluation_type ===
+                                            "PRODUCTION"
+                                          ? "Kiểm định chính thức"
+                                          : "Đánh giá",
+                                    status: formatTrainingStatusLabel(
+                                      String(job.metadata.evaluation_status),
                                     ),
                                   })}
                                   {typeof job.metadata
                                     .evaluation_gate_status === "string"
-                                    ? ` · ${String(job.metadata.evaluation_gate_status)}`
+                                    ? ` · ${formatTrainingStatusLabel(
+                                        String(
+                                          job.metadata.evaluation_gate_status,
+                                        ),
+                                      )}`
                                     : ""}
                                 </p>
                               ) : null}
@@ -1706,7 +1638,7 @@ export function AdminVireadTrainingScreen() {
                             <h3 className="text-base font-extrabold text-ink">
                               {t("training.profileStatusTitle", {
                                 profile: trainingProfileName(run.profile, t),
-                                status: run.status,
+                                status: formatTrainingStatusLabel(run.status),
                               })}
                             </h3>
                             <span className="text-xs font-semibold text-muted tabular-nums">
@@ -1715,20 +1647,19 @@ export function AdminVireadTrainingScreen() {
                               })}
                             </span>
                           </div>
-                          <p className="mt-2 break-all font-mono text-xs text-muted">
-                            {t("training.jobRunPrefix", { id: run.run_id })}
-                          </p>
-                          <p className="mt-1 break-all font-mono text-xs text-muted">
-                            {t("training.jobCheckpointPrefix")}{" "}
+                          <p className="mt-2 text-xs text-muted">
+                            {t("training.jobCheckpointPrefix")}:{" "}
                             {run.checkpoint_sha256
-                              ? hash(run.checkpoint_sha256)
+                              ? "Đã sẵn sàng"
                               : t("training.notFinished")}
                           </p>
                           <p className="mt-2 text-sm text-ink tabular-nums">
                             {t("training.benchmarkLinePrefix")}{" "}
                             {benchmark
                               ? t("training.benchmarkGateLine", {
-                                  gateStatus: benchmark.gate_status,
+                                  gateStatus: formatTrainingStatusLabel(
+                                    benchmark.gate_status,
+                                  ),
                                   samples: formatNumber(benchmark.sample_count),
                                   groups: formatNumber(benchmark.group_count),
                                 })

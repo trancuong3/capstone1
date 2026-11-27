@@ -23,8 +23,8 @@
     "modalTitle": "サンプル音声",
     "savedVoice": "保存済み音声",
     "defaultVoice": "デフォルト音声",
-    "localOnlyMode": "このデバイスのみ",
-    "localWithGoogleMode": "デバイス + Googleバックアップ",
+    "localOnlyMode": "端末内",
+    "localWithGoogleMode": "自動",
     "speedLabel": "読み上げ速度",
     "regionAndVoiceTitle": "地域と音声を選択",
     "regionAria": "地域を選択",
@@ -39,18 +39,18 @@
     "retry": "再試行",
     "emptyVoices": "利用可能な音声がありません。デバイスのデフォルト音声を使用してください。",
     "emptyFiltered": "条件に一致する音声はありません。",
-    "parentModeTitle": "音声設定（保護者モード）",
+    "parentModeTitle": "音声設定",
     "localAvailable": "準備完了",
-    "localUnavailable": "無効",
-    "googleConfigured": "設定済み",
-    "googleUnconfigured": "APIキー未設定",
-    "localOnlyTitle": "このデバイスのみ",
-    "localOnlyDesc": "100%ローカル処理（サーバー+ブラウザ）、Google通信なし",
-    "localWithGoogleTitle": "デバイス + Googleバックアップ",
-    "localWithGoogleDesc": "ローカル優先、オンラインバックアップへ自動切り替え",
-    "googleSttFallback": "音声認識 (STT) のGoogleバックアップ",
-    "googleTtsFallback": "読み上げ (TTS) のGoogleバックアップ",
-    "missingGoogleKeyHint": "サーバーにGoogle Cloud APIキーが設定されていない場合、ViReadは自動的にGoogle/ブラウザオンラインをフォールバックとして使用します。",
+    "localUnavailable": "一時停止",
+    "googleConfigured": "準備完了",
+    "googleUnconfigured": "未有効",
+    "localOnlyTitle": "端末内を優先",
+    "localOnlyDesc": "直接・安定・プライバシー保護処理",
+    "localWithGoogleTitle": "自動切り替え",
+    "localWithGoogleDesc": "必要に応じてオンラインモードへ自動切替",
+    "googleSttFallback": "オンライン音声認識サポート",
+    "googleTtsFallback": "オンラインお手本音声サポート",
+    "missingGoogleKeyHint": "オンラインモードが利用できない場合、ViReadは端末上で最適な音声を自動選択します。",
     "useDefaultVoice": "デフォルトの音声を使用",
     "preview": "試聴",
     "stopPreview": "試聴を停止",
@@ -79,31 +79,33 @@
       "american": "アメリカ英語アクセント",
       "british": "イギリス英語アクセント"
     },
-    "googleProviderLabel": "Googleフォールバック"
+    "googleProviderLabel": "オンライン"
   },
   "engineBadge": {
-    "ariaLabel": "音声ソース: STT {stt}, TTS {tts}",
+    "ariaLabel": "音声状態: 聞き取り {stt}、読み上げ {tts}",
     "fallbackDetail": "{base} (フォールバック: {reason})",
-    "androidDetail": "{base} (デバイス · Android vi-VN音声)",
-    "catalogCacheDetail": "{base} (標準キャッシュ · 遅延なしTTS)",
-    "googleCloudDetail": "{base} (オンライン · Google Cloud APIフォールバック使用中)",
-    "browserDefaultDetail": "{base} (オンライン · Google/ブラウザフォールバック)",
-    "wasmDetail": "{base} (オフライン · WASMによるデバイス内認識)",
-    "localDetail": "{base} (オフライン · このデバイスで直接実行)",
+    "androidDetail": "{base} (端末音声)",
+    "catalogCacheDetail": "{base} (事前準備音声)",
+    "googleCloudDetail": "{base} (オンライン音声)",
+    "browserDefaultDetail": "{base} (ブラウザ音声)",
+    "wasmDetail": "{base} (端末内認識)",
+    "localDetail": "{base} (端末で直接実行)",
     "shortLabels": {
-      "local_offline": "オフライン",
-      "browser_wasm": "オフライン (WASM)",
-      "catalog_cache": "標準キャッシュ",
-      "android_native": "Android (vi-VN)",
-      "google_cloud": "オンライン (Google API)",
-      "browser_default": "オンライン (Google/ブラウザ)"
-    }
+      "local_offline": "ViRead",
+      "browser_wasm": "端末",
+      "catalog_cache": "標準",
+      "android_native": "端末",
+      "google_cloud": "オンライン",
+      "browser_default": "ブラウザ"
+    },
+    "listenPrefix": "聞き取り",
+    "speakPrefix": "読み上げ"
   },
   "playback": {
     "unavailable": "デバイス上の音声が準備できていません。画面のテキストを確認し、「再試行」をタップしてください。",
     "lockedVoiceUnavailableNotice": "選択した音声は現在ビジー状態です。別の音声に切り替わらないよう、ViReadは現在のテキストガイドを維持します。「再試行」をタップしてください。",
     "serverFallbackNotice": "選択した音声は現在利用できません。システムはフォールバック音声で読み上げています。",
-    "androidNativeFallbackNotice": "サーバー音声が無効です — Androidデバイスのベトナム語音声を使用しています。",
+    "androidNativeFallbackNotice": "オンライン音声は一時停止中です。端末のベトナム語音声を使用しています。",
     "browserFallbackNotice": "デバイス音声が無効です — ブラウザのオンライン音声を使用しています。",
     "autoplayBlocked": "ブラウザは、音声再生を有効にするための操作を待機しています。「もう一度聞く」をタップしてください。",
     "partialPlayback": "音声が中断されました。最初から聞き直すことができます。"
@@ -112,6 +114,6 @@
     "workerUnavailable": "Web Workerが利用できません",
     "wasmUnavailable": "WebAssemblyが利用できません",
     "cryptoUnavailable": "Web Crypto APIが利用できません",
-    "deviceUnsupported": "このデバイスではWASM STTが利用できません。"
+    "deviceUnsupported": "この端末では端末内音声認識を利用できません。"
   }
 }

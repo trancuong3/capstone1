@@ -59,14 +59,14 @@ export function SiteHeader({ className, variant = "auth" }: SiteHeaderProps) {
                 href="/login"
                 size="compact"
                 variant="quiet"
-                className="w-auto whitespace-nowrap border border-border px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
+                className="h-11 min-h-11! w-auto whitespace-nowrap border border-border px-3 py-0! text-sm sm:min-w-32 sm:px-4 sm:text-label"
               >
                 {tAuth("login.submit")}
               </ButtonLink>
               <ButtonLink
                 href="/register"
                 size="compact"
-                className="w-auto whitespace-nowrap px-3 text-sm sm:min-w-32 sm:px-4 sm:text-label"
+                className="h-11 min-h-11! w-auto whitespace-nowrap px-3 py-0! text-sm sm:min-w-32 sm:px-4 sm:text-label"
               >
                 {tAuth("register.submit")}
               </ButtonLink>

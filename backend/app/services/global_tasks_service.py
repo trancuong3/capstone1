@@ -802,6 +802,17 @@ class GlobalTasksService:
             if actor_role == "parent"
             else []
         )
+        parent_submission_ids: set[str] = {str(sub.Id) for sub in parent_submissions}
+        deduped_ocr_jobs: list[OcrInferenceJob] = []
+        for ocr_job in ocr_jobs:
+            if str(ocr_job.JobKind or "") == "PARENT_BOOK_SUBMISSION":
+                sub_id_val = getattr(ocr_job, "SubmissionId", None)
+                if sub_id_val is None and isinstance(getattr(ocr_job, "ProcessingMeta", None), dict):
+                    sub_id_val = ocr_job.ProcessingMeta.get("submission_id")
+                if sub_id_val is not None and str(sub_id_val) in parent_submission_ids:
+                    continue
+            deduped_ocr_jobs.append(ocr_job)
+        ocr_jobs = deduped_ocr_jobs
 
         book_ids: set[UUID] = set()
         page_ids: set[UUID] = set()
@@ -1000,7 +1011,7 @@ class GlobalTasksService:
         elif raw_status in ("CLAIMED", "RUNNING"):
             mapped_status = "RUNNING"
         elif raw_status == "FAILED_RETRYABLE":
-            mapped_status = "RETRY_SCHEDULED"
+            mapped_status = "WAITING_FOR_WORKER" if worker_online is False else "RETRY_SCHEDULED"
         elif raw_status == "SUCCEEDED":
             mapped_status = "SUCCEEDED"
         elif raw_status in ("DEAD_LETTER", "FAILED"):

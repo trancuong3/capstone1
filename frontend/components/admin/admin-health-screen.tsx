@@ -425,6 +425,50 @@ interface ServiceCardProps {
   readonly extraFooter?: React.ReactNode;
 }
 
+function sanitizeHealthCopy(text: string): string {
+  return text
+    .replace(/\bFastAPI\b/gi, "Hệ thống xử lý chính")
+    .replace(/\bSupabase Storage\b/gi, "Lưu trữ tệp tin")
+    .replace(/\bSupabase\b/gi, "Lưu trữ")
+    .replace(/\bStorage\b/g, "Lưu trữ")
+    .replace(/\bPostgreSQL\b/gi, "Cơ sở dữ liệu")
+    .replace(/\bDatabase\b/g, "Cơ sở dữ liệu")
+    .replace(/\bdatabase\b/g, "cơ sở dữ liệu")
+    .replace(/\bTesseract tiếng Việt\b/gi, "Nhận diện chữ tiếng Việt chuẩn")
+    .replace(/\bTesseract\b/gi, "Nhận diện chữ chuẩn")
+    .replace(/\bPaddleOCR\b/gi, "Nhận diện chữ đa dòng")
+    .replace(/\bVietOCR\b/gi, "Nhận diện chữ tiếng Việt")
+    .replace(/\bĐánh thức OCR worker\b/gi, "Kích hoạt dịch vụ nhận diện chữ")
+    .replace(/\bRemote OCR worker\b/gi, "Dịch vụ nhận diện chữ từ xa")
+    .replace(/\bOCR worker\b/gi, "dịch vụ nhận diện chữ")
+    .replace(/\bruntime OCR\b/gi, "hệ thống nhận diện chữ")
+    .replace(/\bLocal trainer process\b/gi, "Tiến trình huấn luyện cục bộ")
+    .replace(/\bKaraoke processing worker\b/gi, "Tiến trình xử lý bài hát");
+}
+
+function getSanitizedServiceLabel(service: HealthServiceItemUI): string {
+  const byId: Record<string, string> = {
+    api: "Hệ thống xử lý chính",
+    database: "Cơ sở dữ liệu",
+    storage: "Lưu trữ tệp tin",
+    ocr_worker: "Dịch vụ nhận diện chữ",
+    paddleocr: "Nhận diện chữ đa dòng",
+    vietocr: "Nhận diện chữ tiếng Việt",
+    tesseract: "Nhận diện chữ chuẩn",
+    tesseract_vie: "Nhận diện chữ tiếng Việt chuẩn",
+    tts: "Giọng đọc mẫu",
+    stt: "Nhận diện giọng nói",
+    tts_audio_cache: "Kho âm thanh đọc mẫu",
+    local_trainer: "Tiến trình huấn luyện cục bộ",
+    karaoke_worker: "Tiến trình xử lý bài hát",
+    viread_ocr_outbox: "Hàng đợi đồng bộ dữ liệu",
+    viread_ocr_training: "Tiến trình huấn luyện mô hình",
+    book_quality: "Kiểm tra chất lượng sách",
+    admin_ai_workflow: "Kiểm duyệt AI trang sách",
+  };
+  return byId[service.id] ?? sanitizeHealthCopy(service.label);
+}
+
 function ServiceStatusCard({
   service,
   snapshotCheckedAt,
@@ -446,6 +490,11 @@ function ServiceStatusCard({
   const showCardCheckedAt =
     Boolean(service.checked_at) && service.checked_at !== snapshotCheckedAt;
   const bucket = classifyServiceBucket(service);
+  const displayLabel = getSanitizedServiceLabel(service);
+  const displaySafeMessage = sanitizeHealthCopy(service.safe_message);
+  const displayActionHint = service.action_hint
+    ? sanitizeHealthCopy(service.action_hint)
+    : null;
 
   return (
     <article
@@ -462,7 +511,7 @@ function ServiceStatusCard({
             compact ? "text-sm leading-snug" : "text-base leading-snug",
           )}
         >
-          {service.label}
+          {displayLabel}
         </h3>
         <span
           className={cn(
@@ -488,10 +537,10 @@ function ServiceStatusCard({
       ) : null}
 
       <p className="text-sm leading-relaxed text-muted break-words">
-        {service.safe_message}
+        {displaySafeMessage}
       </p>
 
-      {service.action_hint ? (
+      {displayActionHint ? (
         <div className="flex items-start gap-2 rounded-control border border-border/80 bg-surface-subtle/80 px-2.5 py-2 text-xs leading-relaxed text-ink">
           <Info
             aria-hidden="true"
@@ -501,7 +550,7 @@ function ServiceStatusCard({
             <span className="font-bold">
               {t("health.actionHintLabel", undefined, "Gợi ý xử lý")}:{" "}
             </span>
-            {service.action_hint}
+            {displayActionHint}
           </p>
         </div>
       ) : null}
@@ -546,8 +595,8 @@ function ServiceStatusCard({
           {service.last_error ? (
             <div className="min-w-0 rounded-control border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-rose-900 sm:col-span-2">
               <dt className="font-bold">{t("health.lastErrorLabel")}</dt>
-              <dd className="mt-0.5 font-mono text-[11px] break-words">
-                {service.last_error}
+              <dd className="mt-0.5 text-[11px] font-semibold break-words">
+                Đã ghi nhận sự cố kết nối gần đây.
               </dd>
             </div>
           ) : null}
@@ -1089,9 +1138,12 @@ export function AdminHealthScreen() {
           undefined,
           "Tự động kiểm tra lại sau vài giây…",
         );
+        const safeDetail = response.detail
+          ? sanitizeHealthCopy(response.detail)
+          : "";
         setWakeNotice({
           tone: "success",
-          message: response.detail ? `${response.detail} ${suffix}` : suffix,
+          message: safeDetail ? `${safeDetail} ${suffix}` : suffix,
         });
         clearWakeRecheckTimer();
         wakeRecheckTimerRef.current = globalThis.setTimeout(() => {
@@ -1104,18 +1156,20 @@ export function AdminHealthScreen() {
         setWakeNotice({
           tone: "warning",
           message:
-            response.detail ||
+            (response.detail ? sanitizeHealthCopy(response.detail) : "") ||
             t(
               "health.wakeOcrError",
               undefined,
-              "Không thể gửi lệnh đánh thức OCR worker. Vui lòng thử lại.",
+              "Không thể gửi lệnh kích hoạt dịch vụ nhận diện chữ. Vui lòng thử lại.",
             ),
         });
       }
     } catch (err) {
       if (!mountedRef.current || controller.signal.aborted) return;
       const safeDetail =
-        isServiceError(err) && err.message ? err.message : null;
+        isServiceError(err) && err.message
+          ? sanitizeHealthCopy(err.message)
+          : null;
       setWakeNotice({
         tone: "error",
         message:
@@ -1123,7 +1177,7 @@ export function AdminHealthScreen() {
           t(
             "health.wakeOcrError",
             undefined,
-            "Không thể gửi lệnh đánh thức OCR worker. Vui lòng thử lại.",
+            "Không thể gửi lệnh kích hoạt dịch vụ nhận diện chữ. Vui lòng thử lại.",
           ),
       });
     } finally {
@@ -1386,34 +1440,11 @@ export function AdminHealthScreen() {
 
   const errorDiagnosticParts = useMemo(() => {
     if (!fetchError) return [];
-    const parts: string[] = [];
-    if (fetchError.status !== null) {
-      parts.push(
-        t(
-          "health.errorHttpStatus",
-          { status: fetchError.status },
-          "Mã HTTP {status}",
-        ),
-      );
-    }
-    if (
-      fetchError.requestId &&
-      (!fetchError.message ||
-        !fetchError.message.includes(fetchError.requestId))
-    ) {
-      parts.push(
-        t(
-          "health.errorRequestId",
-          { requestId: fetchError.requestId },
-          "Mã yêu cầu: {requestId}",
-        ),
-      );
-    }
     if (fetchError.message) {
-      parts.push(fetchError.message);
+      return [sanitizeHealthCopy(fetchError.message)];
     }
-    return parts;
-  }, [fetchError, t]);
+    return [];
+  }, [fetchError]);
 
   const filterPills: readonly {
     readonly key: HealthFilterKey;
@@ -1499,7 +1530,7 @@ export function AdminHealthScreen() {
           <div className="flex flex-wrap items-center gap-2">
             <div
               aria-label={t("health.autoRefreshLabel", undefined, "Tự làm mới")}
-              className="inline-flex items-center rounded-control border border-border bg-white p-0.5 text-xs font-semibold"
+              className="inline-flex h-10 items-center rounded-control border border-border bg-white p-1 text-xs font-semibold"
               role="group"
             >
               <span className="hidden px-2 text-muted sm:inline">
@@ -1526,7 +1557,7 @@ export function AdminHealthScreen() {
                   <button
                     aria-pressed={selected}
                     className={cn(
-                      "min-h-8 rounded-[6px] px-2.5 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+                      "inline-flex h-8 items-center justify-center rounded-[6px] px-2.5 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-primary",
                       selected
                         ? "bg-primary text-white"
                         : "text-muted hover:bg-surface-subtle hover:text-ink",
@@ -1628,7 +1659,7 @@ export function AdminHealthScreen() {
                       undefined,
                       "Đóng thông báo lỗi",
                     )}
-                    className="inline-flex size-9 items-center justify-center rounded-control text-warning transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-primary"
+                    className="inline-flex size-10 items-center justify-center rounded-control text-warning transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-primary"
                     onClick={() => setErrorDismissed(true)}
                     type="button"
                   >
@@ -1831,7 +1862,7 @@ export function AdminHealthScreen() {
                 description={t(
                   "health.groups.coreDesc",
                   undefined,
-                  "API, cơ sở dữ liệu và lưu trữ đối tượng thiết yếu cho toàn hệ thống.",
+                  "Dịch vụ nền tảng, cơ sở dữ liệu và lưu trữ thiết yếu cho toàn hệ thống.",
                 )}
                 icon={<Server className="size-4" />}
                 title={t("health.groups.core", undefined, "Hạ tầng lõi")}
@@ -1856,7 +1887,7 @@ export function AdminHealthScreen() {
                 description={t(
                   "health.groups.voiceDesc",
                   undefined,
-                  "Text-to-Speech, Speech-to-Text và kho âm thanh đọc mẫu dựng sẵn.",
+                  "Đọc mẫu, nhận diện giọng nói và kho âm thanh dựng sẵn.",
                 )}
                 icon={<Volume2 className="size-4" />}
                 title={t(
@@ -1888,12 +1919,8 @@ export function AdminHealthScreen() {
                   )}
                   tone="warning"
                 >
-                  <p className="text-xs font-mono">
-                    {t(
-                      "health.audioCacheErrorDetail",
-                      { code: snapshot.audio_cache_error },
-                      "Mã chẩn đoán: {code}",
-                    )}
+                  <p className="text-xs">
+                    Vui lòng kiểm tra lại kết nối dịch vụ âm thanh đọc mẫu.
                   </p>
                 </StatusMessage>
               ) : null}
@@ -1914,13 +1941,13 @@ export function AdminHealthScreen() {
                 description={t(
                   "health.groups.ocrDesc",
                   undefined,
-                  "OCR worker từ xa, 4 engine nhận diện chữ và AI hậu kiểm chính tả.",
+                  "Dịch vụ nhận diện chữ và hỗ trợ kiểm tra chính tả.",
                 )}
                 icon={<Cpu className="size-4" />}
                 title={t(
                   "health.groups.ocr",
                   undefined,
-                  "Pipeline OCR & AI Engines",
+                  "Hệ thống nhận diện chữ & hỗ trợ chính tả",
                 )}
               />
 
@@ -1949,12 +1976,12 @@ export function AdminHealthScreen() {
                                 ? t(
                                     "health.wakingOcrWorker",
                                     undefined,
-                                    "Đang đánh thức…",
+                                    "Đang kích hoạt…",
                                   )
                                 : t(
                                     "health.wakeOcrWorker",
                                     undefined,
-                                    "Đánh thức OCR worker",
+                                    "Kích hoạt dịch vụ nhận diện chữ",
                                   )}
                             </Button>
                           </div>
@@ -1984,7 +2011,7 @@ export function AdminHealthScreen() {
                     {t(
                       "health.ocrEnginesSubheading",
                       undefined,
-                      "Các engine nhận diện OCR",
+                      "Các bộ phận nhận diện chữ",
                     )}
                   </p>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -2030,7 +2057,7 @@ export function AdminHealthScreen() {
                 title={t(
                   "health.groups.workers",
                   undefined,
-                  "Tiến trình nền & Cron",
+                  "Tiến trình nền & Lịch định kỳ",
                 )}
               />
 
@@ -2179,7 +2206,7 @@ export function AdminHealthScreen() {
                       {t(
                         "health.sttInsecureContextWarning",
                         undefined,
-                        "Kết nối chưa phải HTTPS (Secure Context); micro và một số API trình duyệt có thể bị chặn.",
+                        "Kết nối hiện tại chưa được bảo mật; micro và một số tính năng trình duyệt có thể bị chặn.",
                       )}
                     </span>
                   </div>
@@ -2194,7 +2221,7 @@ export function AdminHealthScreen() {
                       {t(
                         "health.sttNoIndexedDbWarning",
                         undefined,
-                        "IndexedDB không khả dụng; không thể lưu model STT hoặc cache TTS cục bộ.",
+                        "Bộ nhớ đệm trình duyệt không khả dụng; không thể lưu dữ liệu giọng nói cục bộ.",
                       )}
                     </span>
                   </div>
@@ -2202,7 +2229,7 @@ export function AdminHealthScreen() {
               </div>
             ) : null}
 
-            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-5">
+            <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
               <div className="flex min-w-0 flex-col gap-1.5 rounded-control border border-border/70 bg-surface-subtle/40 p-3">
                 <dt className="flex items-center gap-1.5 text-xs font-semibold text-muted">
                   <Sparkles aria-hidden="true" className="size-3.5 shrink-0" />
@@ -2232,7 +2259,7 @@ export function AdminHealthScreen() {
                       ? t(
                           "health.sttModelCacheError",
                           { code: clientCaps.wasmCache.error },
-                          "Lỗi đọc IndexedDB ({code})",
+                          "Không thể đọc bộ nhớ đệm trình duyệt",
                         )
                       : clientCaps.wasmCache.ready
                         ? t("health.sttCachedLoaded", {
@@ -2279,11 +2306,10 @@ export function AdminHealthScreen() {
                   ) : null}
                 </div>
                 <Button
-                  className="mt-1 justify-center text-xs"
+                  className="mt-1 w-full justify-center whitespace-nowrap text-xs"
                   disabled={
                     isClearingWasm || clientCaps.wasmCache.supported === false
                   }
-                  fullWidth={false}
                   isLoading={isClearingWasm}
                   onClick={() => void handleClearWasmCache()}
                   size="admin"
@@ -2364,9 +2390,8 @@ export function AdminHealthScreen() {
                   ) : null}
                 </div>
                 <Button
-                  className="mt-1 justify-center text-xs"
+                  className="mt-1 w-full justify-center whitespace-nowrap text-xs"
                   disabled={isClearingTts || !clientCaps.ttsCache.supported}
-                  fullWidth={false}
                   isLoading={isClearingTts}
                   onClick={() => void handleClearTtsCache()}
                   size="admin"
@@ -2400,7 +2425,7 @@ export function AdminHealthScreen() {
                     {t(
                       "health.sttMicNeedsHttps",
                       undefined,
-                      "Cần HTTPS để ghi âm",
+                      "Cần kết nối bảo mật để ghi âm",
                     )}
                   </p>
                 ) : !clientCaps.hasMediaDevices ? (
@@ -2408,7 +2433,7 @@ export function AdminHealthScreen() {
                     {t(
                       "health.sttMicNoMediaDevices",
                       undefined,
-                      "Không hỗ trợ getUserMedia",
+                      "Thiết bị không hỗ trợ ghi âm",
                     )}
                   </p>
                 ) : null}
@@ -2429,7 +2454,9 @@ export function AdminHealthScreen() {
                       : ("info" as AdminBadgeTone)
                   }
                 >
-                  {clientCaps.wasmCaps.isSecureContext ? "HTTPS" : "HTTP"}
+                  {clientCaps.wasmCaps.isSecureContext
+                    ? "Kết nối bảo mật"
+                    : "Kết nối thường"}
                 </AdminBadge>
               </div>
             </dl>
