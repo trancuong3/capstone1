@@ -543,6 +543,26 @@ async function safeBackendMessage(response: Response): Promise<string> {
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
 
+const COLD_START_RETRY_STATUSES = new Set([502, 504]);
+const COLD_START_RETRY_DELAY_MS = 600;
+
+function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
   readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -578,7 +598,7 @@ export async function requestApi<T>(
 
   const method = requestOptions.method ?? "GET";
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
-    let response: Response;
+    let response!: Response;
     const isFormDataBody =
       typeof FormData !== "undefined" &&
       requestOptions.body instanceof FormData;
@@ -607,42 +627,62 @@ export async function requestApi<T>(
         : isFormDataBody
           ? DEFAULT_UPLOAD_TIMEOUT_MS
           : DEFAULT_REQUEST_TIMEOUT_MS;
-    const timeoutController = fetchSignal ? null : new AbortController();
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+    const canColdStartRetry = method === "GET";
+    const maxAttempts = canColdStartRetry ? 2 : 1;
 
-    try {
-      const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: body as BodyInit } : {}),
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: effectiveSignal,
-      });
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const timeoutController = fetchSignal ? null : new AbortController();
+      let timedOut = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const effectiveSignal = fetchSignal ?? timeoutController!.signal;
 
-      if (timeoutController) {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          timeoutController.abort();
-        }, effectiveTimeoutMs);
-        response = await fetchPromise;
-      } else {
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
+      try {
+        const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: body as BodyInit } : {}),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: effectiveSignal,
+        });
+
+        if (timeoutController) {
           timeoutId = setTimeout(() => {
             timedOut = true;
-            reject(failure(0, "", true));
+            timeoutController.abort();
           }, effectiveTimeoutMs);
-        });
-        response = await Promise.race([fetchPromise, timeoutPromise]);
+          response = await fetchPromise;
+        } else {
+          const timeoutPromise = new Promise<never>((_resolve, reject) => {
+            timeoutId = setTimeout(() => {
+              timedOut = true;
+              reject(failure(0, "", true));
+            }, effectiveTimeoutMs);
+          });
+          response = await Promise.race([fetchPromise, timeoutPromise]);
+        }
+      } catch (error) {
+        if (fetchSignal?.aborted && !timedOut) throw error;
+        if (attempt === 0 && canColdStartRetry && !timedOut) {
+          await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+          continue;
+        }
+        throw failure(0, "", true);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
-    } catch (error) {
-      if (fetchSignal?.aborted && !timedOut) throw error;
-      throw failure(0, "", true);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+      if (
+        attempt === 0 &&
+        canColdStartRetry &&
+        COLD_START_RETRY_STATUSES.has(response.status) &&
+        !fetchSignal?.aborted
+      ) {
+        await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+        continue;
+      }
+      break;
     }
 
     const requestId = response.headers.get("x-request-id") ?? "";
