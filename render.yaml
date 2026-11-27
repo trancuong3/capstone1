@@ -87,6 +87,12 @@ services:
         sync: false
       - key: GROQ_API_KEY
         sync: false
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        value: "xeRzNgA5BGMAmllSnOuF"
+      - key: ELEVENLABS_MODEL_ID
+        value: "eleven_flash_v2_5"
       - key: SMTP_USERNAME
         sync: false
       - key: SMTP_APP_PASSWORD

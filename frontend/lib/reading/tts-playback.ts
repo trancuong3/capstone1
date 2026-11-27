@@ -341,6 +341,7 @@ function shouldSkipBackendTtsForVoice(
   }
   const health = getFreshVoiceEngineHealth();
   if (!health) return false;
+  if (health.elevenlabs?.tts_configured) return false;
   return (
     (!health.local.available || !health.local.tts_ready) &&
     (!health.google.tts_configured || health.google.tts_cooldown)
@@ -2516,11 +2517,11 @@ export class TtsPlayback {
                 }
               }
               if (!synthesized) {
-                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
-                  return;
-                }
                 if (canUseAllowedDeviceFallbackTts(operation, error)) {
                   await playPhonicsViaBrowser();
+                  return;
+                }
+                if (await tryPlayPhonicsViaCachedWordSynthesize()) {
                   return;
                 }
                 this.setFallbackNotice(getLockedVoiceUnavailableNotice());

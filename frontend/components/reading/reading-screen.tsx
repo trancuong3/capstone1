@@ -7451,33 +7451,21 @@ function ReadingSessionScreen({
           </div>
         </div>
       ) : null}
-      {(pageNavigationError && pickerIndex === null) ||
-      speechPlayer.fallbackNotice ? (
+      {pageNavigationError && pickerIndex === null ? (
         <div
           data-topbar-notice-overlay="true"
-          className="pointer-events-none absolute inset-x-0 top-full z-20 mt-1 flex flex-col gap-1"
+          className="mt-1 flex flex-wrap items-center gap-2 rounded-control bg-white/95"
         >
-          {pageNavigationError && pickerIndex === null ? (
-            <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-control bg-white/95 shadow-sm backdrop-blur-xs">
-              <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
-              {retryMode ? (
-                <Button
-                  className="h-11! w-auto! px-3! py-1! text-sm!"
-                  disabled={isBusy}
-                  onClick={() => void beginRetryWord(retryPositionRef.current)}
-                  variant="secondary"
-                >
-                  {t("session.retryOpenPage")}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-          {speechPlayer.fallbackNotice ? (
-            <div className="pointer-events-auto rounded-control bg-white/95 shadow-sm backdrop-blur-xs">
-              <StatusMessage tone="warning">
-                {speechPlayer.fallbackNotice}
-              </StatusMessage>
-            </div>
+          <StatusMessage tone="info">{pageNavigationError}</StatusMessage>
+          {retryMode ? (
+            <Button
+              className="h-11! w-auto! px-3! py-1! text-sm!"
+              disabled={isBusy}
+              onClick={() => void beginRetryWord(retryPositionRef.current)}
+              variant="secondary"
+            >
+              {t("session.retryOpenPage")}
+            </Button>
           ) : null}
         </div>
       ) : null}

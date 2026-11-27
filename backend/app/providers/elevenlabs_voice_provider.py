@@ -188,6 +188,49 @@ class ElevenLabsVoiceProvider:
             raise VoiceProviderUnavailable()
         return {"xi-api-key": self._api_key}
 
+    def is_configured(self) -> bool:
+        return bool(self._api_key)
+
+    def get_configured_voice_id(self) -> str:
+        return self._voice_id(None)
+
+    def get_configured_model_id(self) -> str:
+        configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
+        return (
+            configured_model
+            if configured_model in VIETNAMESE_TTS_MODELS
+            else DEFAULT_MODEL_ID
+        )
+
+    @staticmethod
+    def _strip_mp3_tags(data: bytes) -> bytes:
+        if not data:
+            return b""
+        start = 0
+        if len(data) >= 10 and data[:3] == b"ID3":
+            tag_size = (
+                ((data[6] & 0x7F) << 21)
+                | ((data[7] & 0x7F) << 14)
+                | ((data[8] & 0x7F) << 7)
+                | (data[9] & 0x7F)
+            )
+            has_footer = bool(data[5] & 0x10)
+            candidate = 10 + tag_size + (10 if has_footer else 0)
+            if candidate < len(data):
+                start = candidate
+        end = len(data)
+        if end - start >= 128 and data[end - 128 : end - 125] == b"TAG":
+            end -= 128
+        return data[start:end]
+
+    @classmethod
+    def _estimate_mp3_duration_seconds(cls, data: bytes) -> float:
+        frames = cls._strip_mp3_tags(data)
+        if not frames:
+            return 0.08
+        # mp3_44100_128 is CBR 128 kbps = 16,000 bytes/sec
+        return max(0.08, round((len(frames) * 8.0) / 128_000.0, 3))
+
     @staticmethod
     def _voice_id(requested_voice_id: str | None) -> str:
         return (
@@ -473,13 +516,129 @@ class ElevenLabsVoiceProvider:
 
     @staticmethod
     def _tts_voice_settings(model_id: str, speed: float) -> dict[str, float]:
-        if isinstance(speed, bool) or not isinstance(speed, (float, int)) or not math.isfinite(speed) or not 0.7 <= speed <= 1.2:
+        if isinstance(speed, bool) or not isinstance(speed, (float, int)) or not math.isfinite(speed):
             raise VoiceProviderError()
+        clamped_speed = round(min(1.2, max(0.7, float(speed))), 2)
         # Keep the deployed Flash v2.5 range. Models without speed support must
         # fail safely instead of silently discarding the reader's preference.
-        if model_id.startswith(("eleven_v3", "eleven_v4")) and speed != 1.0:
+        if model_id.startswith(("eleven_v3", "eleven_v4")) and clamped_speed != 1.0:
             raise VoiceProviderUnavailable()
-        return {"stability": 0.6, "similarity_boost": 0.8, "speed": round(speed, 2)}
+        return {"stability": 0.6, "similarity_boost": 0.8, "speed": clamped_speed}
+
+    async def synthesize_timed(
+        self,
+        *,
+        words: list[str],
+        requested_voice_id: str | None = None,
+        speed: float = 1.0,
+    ) -> Any:
+        from app.providers.local_voice_provider import (
+            LocalTimedSpeech,
+            LocalTimedWord,
+        )
+        from app.services.vietnamese_tts_normalizer import (
+            normalize_vietnamese_tts_text,
+            project_chunk_spans_to_surface_words,
+        )
+
+        passage = " ".join(words).strip()
+        normalized_passage = normalize_vietnamese_tts_text(passage) or passage
+        audio = await self.synthesize(
+            text=normalized_passage,
+            requested_voice_id=requested_voice_id,
+            speed=speed,
+        )
+        duration = self._estimate_mp3_duration_seconds(audio.content)
+        projected = project_chunk_spans_to_surface_words(
+            words,
+            [(normalized_passage, 0.0, duration)],
+            duration,
+        )
+        timed_words = [
+            LocalTimedWord(
+                index=idx,
+                start=float(item["start"]),
+                end=float(item["end"]),
+            )
+            for idx, item in enumerate(projected)
+        ]
+        return LocalTimedSpeech(
+            audio=audio.content,
+            content_type=audio.content_type or "audio/mpeg",
+            duration_seconds=duration,
+            words=timed_words,
+            resolved_voice_id=audio.resolved_voice_id or self.get_configured_voice_id(),
+            region="north",
+            model_version=self.get_configured_model_id(),
+            provider="elevenlabs",
+            used_fallback_voice=False,
+        )
+
+    async def synthesize_phonics(
+        self,
+        *,
+        steps: list[dict[str, Any]],
+        requested_voice_id: str | None = None,
+        speed: float = 1.0,
+    ) -> Any:
+        from app.providers.local_voice_provider import (
+            LocalPhonicsSpeech,
+            LocalPhonicsStepTiming,
+        )
+        from app.services.vietnamese_tts_normalizer import normalize_vietnamese_tts_text
+
+        if not steps:
+            raise VoiceProviderError(status_code=422, code="PHONICS_EMPTY")
+
+        async def _synth_step(step: dict[str, Any]) -> SynthesizedAudio:
+            raw_text = str(step.get("spoken_text") or "").strip()
+            spoken = (
+                normalize_vietnamese_tts_text(raw_text, for_phonics_step=True)
+                or unicodedata.normalize("NFC", raw_text)
+            )
+            return await self.synthesize(
+                text=spoken,
+                requested_voice_id=requested_voice_id,
+                speed=speed,
+            )
+
+        synthesized_steps = await asyncio.gather(*(_synth_step(step) for step in steps))
+
+        combined_frames = bytearray()
+        timings: list[LocalPhonicsStepTiming] = []
+        cursor = 0.0
+        resolved_voice = self.get_configured_voice_id()
+
+        for idx, (step, audio) in enumerate(zip(steps, synthesized_steps)):
+            if audio.resolved_voice_id:
+                resolved_voice = audio.resolved_voice_id
+            frames = self._strip_mp3_tags(audio.content)
+            step_dur = self._estimate_mp3_duration_seconds(audio.content)
+            start = round(cursor, 3)
+            end = round(cursor + step_dur, 3)
+            timings.append(
+                LocalPhonicsStepTiming(
+                    id=str(step.get("id") or f"step_{idx}"),
+                    index=idx,
+                    start=start,
+                    end=end,
+                )
+            )
+            combined_frames.extend(frames)
+            cursor += step_dur
+
+        total_duration = max(0.08, round(cursor, 3))
+        return LocalPhonicsSpeech(
+            audio=bytes(combined_frames),
+            content_type="audio/mpeg",
+            duration_seconds=total_duration,
+            step_timings=timings,
+            resolved_voice_id=resolved_voice,
+            region="north",
+            model_version=self.get_configured_model_id(),
+            provider="elevenlabs",
+            used_fallback_voice=False,
+        )
 
     async def transcribe(
         self,

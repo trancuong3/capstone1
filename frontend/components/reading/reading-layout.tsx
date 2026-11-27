@@ -184,10 +184,7 @@ export function ReadingLayout({
     isPlayingSample ||
     isReadingWord ||
     (isMicRecording &&
-      (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
-    Boolean(latestTranscript);
-  const hasDockedFeedbackPanel =
-    retryMode || Boolean(sentenceReinforcementPanel) || Boolean(phonicsPanel);
+      (isCurrentWordMispronounced || Boolean(latestTranscript)));
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
@@ -319,12 +316,7 @@ export function ReadingLayout({
         {hasFeedbackPanel ? (
           <div
             data-reading-feedback="true"
-            data-feedback-overlay={hasDockedFeedbackPanel ? undefined : "true"}
-            className={
-              hasDockedFeedbackPanel
-                ? "mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-2 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[26dvh]"
-                : "pointer-events-none absolute inset-x-0 bottom-full z-20 mx-auto max-h-[20dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain px-3 pb-1.5 sm:max-h-[24dvh] sm:px-6 sm:pb-2 [&>*]:pointer-events-auto [&>*]:shadow-sm"
-            }
+            className="mx-auto mb-1.5 max-h-[20dvh] w-full max-w-[1104px] space-y-1.5 overflow-y-auto overscroll-contain sm:mb-2 sm:max-h-[24dvh] sm:space-y-2"
           >
             {retryMode ? (
               <div
@@ -549,26 +541,13 @@ export function ReadingLayout({
                   ) : null}
                 </div>
               ) : latestTranscript ? (
-                <p className="mx-auto line-clamp-2 w-full max-w-[1008px] rounded-control border border-border/80 bg-white/95 px-3 py-1.5 text-sm text-muted backdrop-blur-xs sm:text-body">
+                <p className="mx-auto line-clamp-1 w-full max-w-[1008px] rounded-control border border-border/70 bg-white px-3 py-1 text-xs text-muted sm:text-sm">
                   {t("layout.childJustReadPrefix")}{" "}
                   <span className="viread-learning-content" dir="ltr" lang="vi">
                     “{latestTranscript}”
                   </span>
                 </p>
               ) : null
-            ) : latestTranscript ? (
-              <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-2">
-                <span className="shrink-0 text-sm font-semibold text-purple-ink">
-                  {t("layout.latestRecording")}
-                </span>
-                <p
-                  className="viread-learning-content min-w-0 flex-1 truncate text-sm font-semibold italic text-ink"
-                  dir="ltr"
-                  lang="vi"
-                >
-                  &ldquo;{latestTranscript}&rdquo;
-                </p>
-              </div>
             ) : null}
 
             {sentenceReinforcementPanel ? (
