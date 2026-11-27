@@ -450,6 +450,7 @@ public final class MainActivity extends Activity {
                     }
                 });
         nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+        nativeSpeechBridge.warmUpTts();
     }
 
     String resolveInitialStartupUrl() {

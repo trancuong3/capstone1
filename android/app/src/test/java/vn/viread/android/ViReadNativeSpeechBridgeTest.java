@@ -580,13 +580,13 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(session.startedIntent.getBooleanExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false));
         assertEquals(3, session.startedIntent.getIntExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 0));
         assertEquals(
-                1500L,
-                session.startedIntent.getLongExtra(
-                        RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
+                1500,
+                session.startedIntent.getIntExtra(
+                        RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 0));
         assertEquals(
-                1000L,
-                session.startedIntent.getLongExtra(
-                        RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 0L));
+                1000,
+                session.startedIntent.getIntExtra(
+                        RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 0));
 
         // Drive full SpeechRecognizer event stream
         session.callback.onReadyForSpeech();
@@ -999,5 +999,29 @@ public final class ViReadNativeSpeechBridgeTest {
         assertFalse(h3.bridge.isAudioSessionActive());
         h3.scheduler.advanceBy(400L);
         assertEquals(sessionsBeforeHostStop, h3.sttFactory.createdSessions.size());
+    }
+
+    @Test
+    public void warmUpTtsPreBindsEngineOnceAndSharesPendingInitWithCapabilities() throws Exception {
+        BridgeHarness h = new BridgeHarness();
+        h.tts.autoCompleteInit = false;
+
+        h.bridge.warmUpTts();
+        assertEquals(1, h.tts.initCount);
+
+        // Repeated warmUpTts or getCapabilities while init is pending must reuse the active bind
+        h.bridge.warmUpTts();
+        h.sendTrusted("{\"action\":\"getCapabilities\",\"requestId\":\"cap-warm-share\"}");
+        assertEquals(1, h.tts.initCount);
+        assertTrue(h.events.isEmpty());
+
+        h.tts.completeInit(true);
+        assertEquals(1, h.events.size());
+        assertEquals("cap-warm-share", h.events.get(0).getString("requestId"));
+        assertTrue(h.events.get(0).getBoolean("ttsAvailable"));
+
+        // Subsequent warmUpTts after completion must be a no-op
+        h.bridge.warmUpTts();
+        assertEquals(1, h.tts.initCount);
     }
 }

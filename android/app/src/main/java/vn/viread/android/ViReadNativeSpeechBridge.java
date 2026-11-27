@@ -65,11 +65,11 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
     public static final float MIN_SPEECH_PITCH = 0.5f;
     public static final float MAX_SPEECH_PITCH = 2.0f;
     public static final long STT_TO_TTS_SETTLE_MS = 150L;
-    public static final long TTS_INIT_TIMEOUT_MS = 4_000L;
+    public static final long TTS_INIT_TIMEOUT_MS = 8_000L;
     public static final long TTS_INIT_RETRY_COOLDOWN_MS = 3_000L;
     public static final long STT_STOP_FALLBACK_TIMEOUT_MS = 2_000L;
-    public static final long COMPLETE_SILENCE_LENGTH_MS = 1_500L;
-    public static final long POSSIBLY_COMPLETE_SILENCE_LENGTH_MS = 1_000L;
+    public static final int COMPLETE_SILENCE_LENGTH_MS = 1_500;
+    public static final int POSSIBLY_COMPLETE_SILENCE_LENGTH_MS = 1_000;
     public static final int DEFAULT_MAX_RESULTS = 3;
     public static final int MIN_MAX_RESULTS = 1;
     public static final int MAX_MAX_RESULTS = 5;
@@ -1388,6 +1388,19 @@ public final class ViReadNativeSpeechBridge implements WebViewCompat.WebMessageL
                 && activeSttRequest != null
                 && activeSttRequest.generation == request.generation
                 && activeSttSession != null;
+    }
+
+    /**
+     * Pre-warms the Android {@link TextToSpeech} service binding during Activity startup so the
+     * first {@code getCapabilities} or {@code speak} request does not stall on cold service bind.
+     */
+    void warmUpTts() {
+        scheduler.post(() -> {
+            if (destroyed || ttsInitInProgress || ttsInitCompleted) {
+                return;
+            }
+            ensureTtsInitialized(false);
+        });
     }
 
     /**

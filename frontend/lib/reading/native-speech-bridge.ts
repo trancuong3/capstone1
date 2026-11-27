@@ -77,7 +77,7 @@ export interface NativeSpeechIncomingEvent {
 type BridgeEventListener = (event: NativeSpeechIncomingEvent) => void;
 
 const MAX_TTS_TEXT_CHARS = 2_500;
-const DEFAULT_CAPABILITIES_TIMEOUT_MS = 4_500;
+const DEFAULT_CAPABILITIES_TIMEOUT_MS = 8_500;
 const DEGRADED_CAPABILITIES_TTL_MS = 5_000;
 const DEFAULT_TTS_TIMEOUT_MS = 60_000;
 const DEFAULT_SETTINGS_TIMEOUT_MS = 2_500;
