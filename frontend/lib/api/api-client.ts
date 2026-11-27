@@ -513,13 +513,27 @@ function resolveSafeMessageText(rawCodeOrText: string): string {
     : tApiError("errors.generic");
 }
 
-async function safeBackendMessage(response: Response): Promise<string> {
+function isKnownBackendDetail(rawCodeOrText: string): boolean {
+  if (
+    Boolean(safeBackendMessageKeys[rawCodeOrText]) ||
+    Boolean(safeFlow2BackendMessages[rawCodeOrText])
+  ) {
+    return true;
+  }
+  return SAFE_BACKEND_PREFIX_CODES.some(
+    (code) => rawCodeOrText === code || rawCodeOrText.startsWith(`${code}:`),
+  );
+}
+
+async function extractBackendDetail(
+  response: Response,
+): Promise<string | null> {
   try {
     const payload: unknown = await response.clone().json();
     if (typeof payload === "object" && payload !== null) {
       if ("detail" in payload) {
         if (typeof payload.detail === "string") {
-          return resolveSafeMessageText(payload.detail);
+          return payload.detail;
         }
         if (
           typeof payload.detail === "object" &&
@@ -527,17 +541,36 @@ async function safeBackendMessage(response: Response): Promise<string> {
           "code" in payload.detail &&
           typeof payload.detail.code === "string"
         ) {
-          return resolveSafeMessageText(payload.detail.code);
+          return payload.detail.code;
         }
       }
       if ("code" in payload && typeof payload.code === "string") {
-        return resolveSafeMessageText(payload.code);
+        return payload.code;
       }
     }
   } catch {
     // A non-JSON error body must not be reflected to the browser.
   }
-  return tApiError("errors.generic");
+  return null;
+}
+
+async function safeBackendMessage(response: Response): Promise<string> {
+  const detail = await extractBackendDetail(response);
+  return detail !== null
+    ? resolveSafeMessageText(detail)
+    : tApiError("errors.generic");
+}
+
+async function shouldRetryColdStartResponse(
+  response: Response,
+): Promise<boolean> {
+  if (!COLD_START_RETRY_STATUSES.has(response.status)) {
+    return false;
+  }
+  const detail = await extractBackendDetail(response);
+  // Only treat unstructured/gateway 502/504 responses as cold starts; never
+  // retry structured application domain errors such as async OCR 504 responses.
+  return detail === null || !isKnownBackendDetail(detail);
 }
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -676,8 +709,8 @@ export async function requestApi<T>(
       if (
         attempt === 0 &&
         canColdStartRetry &&
-        COLD_START_RETRY_STATUSES.has(response.status) &&
-        !fetchSignal?.aborted
+        !fetchSignal?.aborted &&
+        (await shouldRetryColdStartResponse(response))
       ) {
         await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
         continue;
