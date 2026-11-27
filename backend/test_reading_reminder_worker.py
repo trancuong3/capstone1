@@ -315,6 +315,44 @@ class ReadingReminderWorkerTests(unittest.TestCase):
         self.assertEqual(lookup_count, 1)
         self.assertEqual(repo.claim_due.await_args.kwargs.get("limit"), 5)
 
+    def test_deliver_claimed_occurrences_dispatches_multiple_emails_concurrently(self):
+        import time as _time
+
+        repo = FakeRepository()
+        parent_id = UUID("22222222-2222-4222-8222-222222222222")
+        claims = []
+        for idx in range(3):
+            occ, rem, child = claim()
+            occ.Id = UUID(f"77777777-7777-4777-8777-77777777777{idx}")
+            child.ParentId = parent_id
+            claims.append((occ, rem, child))
+
+        async def _resolve(_pid):
+            return "parent@example.com"
+
+        def _slow_sender(**_kwargs):
+            _time.sleep(0.25)
+
+        t0 = _time.monotonic()
+        delivered = asyncio.run(
+            deliver_claimed_occurrences(
+                repo,
+                claims,
+                datetime(2026, 11, 4, 12, tzinfo=timezone.utc),
+                recipient_resolver=_resolve,
+                email_sender=_slow_sender,
+            )
+        )
+        elapsed = _time.monotonic() - t0
+        self.assertEqual(delivered, 3)
+        self.assertEqual(len(repo.updates), 3)
+        self.assertTrue(all(u[1]["status"] == "SENT" for u in repo.updates))
+        self.assertLess(
+            elapsed,
+            0.55,
+            f"3 x 0.25s emails should run concurrently (~0.25s), not sequentially (~0.75s); got {elapsed:.2f}s",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

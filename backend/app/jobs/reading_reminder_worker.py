@@ -157,6 +157,16 @@ async def deliver_claimed_occurrences(
     lookup_failed_parents: set[UUID] = set()
     locale_cache: dict[UUID, str | None] = {}
 
+    if not claim_snapshots:
+        return 0
+
+    # Release the open DB read transaction once before any external HTTP/SMTP calls.
+    await _release_repository_db(repository)
+
+    # Phase 1: Resolve memoized recipients & locales for every claimed occurrence.
+    resolved_items: list[
+        tuple[UUID, int, dict[str, object] | None, BaseException | None]
+    ] = []
     for (
         occurrence_id,
         attempts,
@@ -167,7 +177,6 @@ async def deliver_claimed_occurrences(
         child_alias,
         explicit_locale,
     ) in claim_snapshots:
-        await _release_repository_db(repository)
         try:
             if parent_id in recipient_cache:
                 recipient = recipient_cache[parent_id]
@@ -208,22 +217,49 @@ async def deliver_claimed_occurrences(
                     if cached_locale:
                         claim_locale = cached_locale
                 send_kwargs["locale"] = claim_locale
-            await asyncio.to_thread(email_sender, **send_kwargs)
-        except ParentEmailUnavailable as error:
+            resolved_items.append((occurrence_id, attempts, send_kwargs, None))
+        except (ParentEmailUnavailable, ParentEmailLookupFailed) as error:
+            resolved_items.append((occurrence_id, attempts, None, error))
+
+    # Phase 2: Send all ready emails concurrently in worker threads so a batch of
+    # up to 5 reminders completes in ~1x relay/SMTP RTT instead of 5x sequential RTTs.
+    ready_indices = [
+        idx for idx, item in enumerate(resolved_items) if item[2] is not None
+    ]
+    send_outcomes: dict[int, BaseException | None] = {}
+    if ready_indices:
+        raw_results = await asyncio.gather(
+            *(
+                asyncio.to_thread(email_sender, **resolved_items[idx][2])  # type: ignore[arg-type]
+                for idx in ready_indices
+            ),
+            return_exceptions=True,
+        )
+        for idx, outcome in zip(ready_indices, raw_results):
+            if isinstance(outcome, asyncio.CancelledError):
+                raise outcome
+            send_outcomes[idx] = outcome if isinstance(outcome, BaseException) else None
+
+    # Phase 3: Sequentially persist each delivery outcome on the single AsyncSession.
+    for idx, (occurrence_id, attempts, _send_kwargs, lookup_error) in enumerate(
+        resolved_items
+    ):
+        error = lookup_error if lookup_error is not None else send_outcomes.get(idx)
+        if isinstance(error, ParentEmailUnavailable):
             await repository.update_email_delivery(
                 occurrence_id,
                 status="FAILED",
                 now=now,
                 error_code=error.code,
             )
-        except EmailDeliveryNotConfigured:
+        elif isinstance(error, EmailDeliveryNotConfigured):
             await repository.update_email_delivery(
                 occurrence_id,
                 status="FAILED",
                 now=now,
                 error_code="EMAIL_NOT_CONFIGURED",
             )
-        except ParentEmailLookupFailed as error:
+        elif isinstance(error, ParentEmailLookupFailed):
             terminal = attempts >= max_attempts
             delay_minutes = min(60, 2 ** max(0, attempts - 1))
             await repository.update_email_delivery(
@@ -231,7 +267,9 @@ async def deliver_claimed_occurrences(
                 status="FAILED" if terminal else "RETRY",
                 now=now,
                 error_code="PARENT_EMAIL_LOOKUP_FAILED",
-                next_attempt_at=None if terminal else now + timedelta(minutes=delay_minutes),
+                next_attempt_at=(
+                    None if terminal else now + timedelta(minutes=delay_minutes)
+                ),
             )
             log_diagnostic(
                 logger,
@@ -242,7 +280,7 @@ async def deliver_claimed_occurrences(
                 attempt=attempts,
                 terminal=terminal,
             )
-        except Exception as error:
+        elif error is not None:
             terminal = attempts >= max_attempts
             delay_minutes = min(60, 2 ** max(0, attempts - 1))
             await repository.update_email_delivery(
@@ -250,7 +288,9 @@ async def deliver_claimed_occurrences(
                 status="FAILED" if terminal else "RETRY",
                 now=now,
                 error_code="SMTP_UNAVAILABLE",
-                next_attempt_at=None if terminal else now + timedelta(minutes=delay_minutes),
+                next_attempt_at=(
+                    None if terminal else now + timedelta(minutes=delay_minutes)
+                ),
             )
             log_diagnostic(
                 logger,

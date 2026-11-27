@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 _WORKER_KEY = "parent_email_dispatcher"
 DEFAULT_ENGAGEMENT_MAX_EMAILS = 5
 DEFAULT_ENGAGEMENT_MAX_SECONDS = 10.0
-DISPATCH_SUBTASK_TIMEOUT_SECONDS = 15.0
+DISPATCH_SUBTASK_TIMEOUT_SECONDS = 25.0
 
 
 def _worker_ready() -> tuple[bool, str]:

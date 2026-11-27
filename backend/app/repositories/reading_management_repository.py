@@ -314,7 +314,7 @@ class ReadingManagementRepository:
         *,
         limit: int = 5,
         max_attempts: int = 5,
-        stale_after: timedelta = timedelta(minutes=15),
+        stale_after: timedelta = timedelta(minutes=5),
     ) -> list[tuple[ReadingReminderOccurrence, ReadingReminder, ChildProfile]]:
         stale_before = now - stale_after
         stale_cutoff = now - timedelta(hours=STALE_REMINDER_HOURS)
