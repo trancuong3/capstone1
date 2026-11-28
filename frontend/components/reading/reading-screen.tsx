@@ -4986,27 +4986,27 @@ function ReadingSessionScreen({
     const sttStatus = getVoiceEngineStatus().stt;
     const freshSttHealth = getVoiceEngineHealthForRouting();
     const sttPolicy = getVoicePolicyPreferences();
-    const sttCloudAllowed =
+    const cloudSttAllowedByPolicy =
       sttPolicy.providerMode === "local_with_google_fallback" &&
       sttPolicy.allowGoogleSttFallback;
     const elevenLabsSttUsable = Boolean(
-      sttCloudAllowed &&
+      cloudSttAllowedByPolicy &&
       freshSttHealth?.elevenlabs?.stt_configured &&
       !freshSttHealth?.elevenlabs?.stt_cooldown,
     );
     const googleSttUsable = Boolean(
-      sttCloudAllowed &&
+      cloudSttAllowedByPolicy &&
       freshSttHealth?.google.stt_configured &&
       !freshSttHealth.google.stt_cooldown,
     );
+    const cloudSttUsable =
+      (cloudSttAllowedByPolicy && elevenLabsSttUsable) || googleSttUsable;
     const backendSttUnavailable =
       (isPermanentlyHostedLocalUnconfigured(freshSttHealth) &&
-        !elevenLabsSttUsable &&
-        !googleSttUsable) ||
+        !cloudSttUsable) ||
       (freshSttHealth !== null &&
         (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
-        !elevenLabsSttUsable &&
-        !googleSttUsable);
+        !cloudSttUsable);
     const alreadyUsingEmergencyBrowserStt =
       sttStatus.tier === "android_native" ||
       sttStatus.tier === "browser_wasm" ||
@@ -7582,8 +7582,8 @@ function ReadingSessionScreen({
         "provider" in transcription && transcription.provider === "wasm";
       if (
         !localSttConfirmedDown &&
-        !usedWasmProvider &&
         !isPermanentlyHostedLocalUnconfigured() &&
+        !usedWasmProvider &&
         (!nonViLanguage || browserStatus === "CORRECT") &&
         shouldAttemptShortWordKeytermPass2({
           status,

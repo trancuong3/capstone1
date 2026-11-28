@@ -1176,7 +1176,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         results: [{ isFinal: false, 0: { transcript: "Bé mèo" } }],
       });
     });
-    expect(screen.getByText("“Bé mèo”")).toBeInTheDocument();
+    const readingSection = document.querySelector(
+      "section[data-reading-focus]",
+    );
+    expect(readingSection).toHaveAttribute("data-latest-transcript", "Bé mèo");
 
     act(() => {
       recognition.onresult?.({
@@ -1184,8 +1187,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         results: [{ isFinal: true, 0: { transcript: "Bé mèo" } }],
       });
     });
-    expect(screen.getByText("“Bé mèo”")).toBeInTheDocument();
-    expect(screen.queryByText(/Bé mèo Bé mèo/)).not.toBeInTheDocument();
+    expect(readingSection).toHaveAttribute("data-latest-transcript", "Bé mèo");
+    expect(readingSection?.getAttribute("data-latest-transcript")).not.toMatch(
+      /Bé mèo Bé mèo/,
+    );
 
     act(() => {
       recognition.onresult?.({
@@ -1196,7 +1201,10 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         ],
       });
     });
-    expect(screen.getByText("“Bé mèo nhỏ”")).toBeInTheDocument();
+    expect(readingSection).toHaveAttribute(
+      "data-latest-transcript",
+      "Bé mèo nhỏ",
+    );
 
     act(() => {
       recognition.onresult?.({
@@ -1207,8 +1215,13 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         ],
       });
     });
-    expect(screen.getByText("“Bé mèo nhỏ”")).toBeInTheDocument();
-    expect(screen.queryByText(/nhỏ nhỏ/)).not.toBeInTheDocument();
+    expect(readingSection).toHaveAttribute(
+      "data-latest-transcript",
+      "Bé mèo nhỏ",
+    );
+    expect(readingSection?.getAttribute("data-latest-transcript")).not.toMatch(
+      /nhỏ nhỏ/,
+    );
   });
 
   it.each([
