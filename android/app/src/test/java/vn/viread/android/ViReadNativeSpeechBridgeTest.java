@@ -1180,4 +1180,50 @@ public final class ViReadNativeSpeechBridgeTest {
         assertTrue(startEvent.optBoolean("voiceGenderMismatch", false));
         assertEquals("vi-vn-x-vie-local", startEvent.optString("resolvedVoiceName"));
     }
+
+    @Test
+    public void androidTtsEngineDoesNotPoisonVoiceCacheWhenColdGetVoicesHasNoVietnamese() {
+        ViReadNativeSpeechBridge.AndroidTtsEngine engine =
+                new ViReadNativeSpeechBridge.AndroidTtsEngine(
+                        androidx.test.core.app.ApplicationProvider.getApplicationContext());
+        Voice englishOnly = new Voice(
+                "en-us-x-sfg-local",
+                Locale.US,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+
+        // Cold boot: getVoices returns non-empty English voice set without vi-VN packs yet
+        engine.cacheFetchedVoicesIfViReady(Collections.singleton(englishOnly));
+        assertEquals(-1, engine.getCachedViVoicesCountForTest());
+        assertFalse(engine.hasMaleFromCacheOrEmpty());
+        assertTrue(
+                "When Vi voices aren't cached yet, female availability must still follow isVietnameseAvailable()",
+                engine.hasFemaleFromCacheOrAvailability(true));
+        assertFalse(engine.hasFemaleFromCacheOrAvailability(false));
+
+        // Subsequent query after Google TTS finishes loading vi-VN packs populates cache cleanly
+        Locale viVn = Locale.forLanguageTag("vi-VN");
+        Voice femaleVi = new Voice(
+                "vi-vn-x-gft-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+        Voice maleVi = new Voice(
+                "vi-vn-x-vid-local",
+                viVn,
+                Voice.QUALITY_HIGH,
+                Voice.LATENCY_LOW,
+                false,
+                Collections.emptySet());
+        Set<Voice> readyVoices = new HashSet<>(Arrays.asList(englishOnly, femaleVi, maleVi));
+        engine.cacheFetchedVoicesIfViReady(readyVoices);
+
+        assertEquals(2, engine.getCachedViVoicesCountForTest());
+        assertTrue(engine.hasMaleFromCacheOrEmpty());
+        assertTrue(engine.hasFemaleFromCacheOrAvailability(true));
+    }
 }
