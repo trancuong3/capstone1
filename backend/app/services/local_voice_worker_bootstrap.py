@@ -28,9 +28,9 @@ logger = logging.getLogger("viread.local_voice_bootstrap")
 
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 _FAILURE_COOLDOWN_SECONDS = 30.0
-_HEALTH_TIMEOUT_SECONDS = 1.5
+_HEALTH_TIMEOUT_SECONDS = 0.6
 _STARTUP_TIMEOUT_SECONDS = 90
-_INLINE_WAIT_SECONDS = 1.5
+_INLINE_WAIT_SECONDS = 0.25
 
 _autostart_armed = False
 _bootstrap_lock: asyncio.Lock | None = None
@@ -318,7 +318,7 @@ async def ensure_local_voice_worker_running(
         if inline_nonblocking:
             try:
                 inline_budget = max(
-                    0.6,
+                    0.2,
                     float(
                         os.getenv(
                             "VIREAD_BOOTSTRAP_INLINE_WAIT_SECONDS",
@@ -362,7 +362,7 @@ async def ensure_local_voice_worker_running(
                     except TimeoutError:
                         pass
                 else:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.2 if inline_nonblocking else 0.5)
         except asyncio.CancelledError:
             if not inline_nonblocking:
                 _terminate_bootstrap_process(proc)

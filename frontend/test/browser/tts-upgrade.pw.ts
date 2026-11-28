@@ -824,6 +824,86 @@ test("Pure-offline cross-feature Male Teacher sync: Dashboard -> Difficult Words
       "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback,x-voice-gender",
   };
 
+  await page.route("http://127.0.0.1:8000/reading/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    }
+    const path = new URL(route.request().url()).pathname;
+    const base = `/reading/sessions/${ids.session}`;
+    const respondJson = (body: unknown, status = 200) =>
+      route.fulfill({
+        status,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === `${base}/practice-state`) {
+      return respondJson({
+        session_id: ids.session,
+        legacy_evidence_present: false,
+        pages: [],
+        words: [],
+      });
+    }
+    if (path === base) {
+      return respondJson({
+        id: ids.session,
+        child_id: ids.child,
+        book_id: ids.book,
+        state: "PAGE_READY",
+        started_at: "2026-11-11T00:00:00Z",
+        ended_at: null,
+        duration_ms: null,
+      });
+    }
+    if (path === `${base}/page`) {
+      return respondJson({
+        page_id: ids.page,
+        page_revision_id: ids.revision,
+        page_number: 1,
+        confidence: null,
+        width: 800,
+        height: 1000,
+        image_url: null,
+        text: "Bé mèo nhỏ đọc sách.",
+        words: ["Bé", "mèo", "nhỏ", "đọc", "sách."].map((w, idx) => ({
+          word_id: `90000000-0000-4000-8000-${String(idx + 1).padStart(12, "0")}`,
+          word_index: idx,
+          text: w,
+          bbox: [0.05 + idx * 0.16, 0.1, 0.14, 0.05],
+          line_index: 0,
+        })),
+      });
+    }
+    if (path === `${base}/progress`) {
+      return respondJson({
+        session_id: ids.session,
+        persisted: true,
+        start_page_id: ids.page,
+        end_page_id: ids.page,
+        current_page_id: ids.page,
+        start_page_number: 1,
+        end_page_number: 1,
+        current_page_number: 1,
+        current_index: 0,
+        total_pages: 1,
+        completed_pages: 0,
+        pages: [
+          {
+            page_id: ids.page,
+            page_revision_id: ids.revision,
+            page_number: 1,
+            page_order: 0,
+            status: "IN_PROGRESS",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+      });
+    }
+    return route.fallback();
+  });
+
   // Simulate pure offline / worker-down hosted environment where /voice/text-to-speech ALWAYS returns 503 LOCAL_VOICE_UNCONFIGURED
   await page.route("http://127.0.0.1:8000/voice/**", async (route) => {
     if (route.request().method() === "OPTIONS") {
@@ -862,7 +942,8 @@ test("Pure-offline cross-feature Male Teacher sync: Dashboard -> Difficult Words
       });
     }
     if (
-      path === "/voice/text-to-speech" &&
+      (path === "/voice/text-to-speech" ||
+        path === "/voice/text-to-speech/timed") &&
       route.request().method() === "POST"
     ) {
       return route.fulfill({
@@ -898,12 +979,17 @@ test("Pure-offline cross-feature Male Teacher sync: Dashboard -> Difficult Words
     });
   });
 
-  // 1. Select Thầy giáo AI on Dashboard: even with 503 from backend, bundled static VieNeu MP3 plays immediately with ZERO error!
+  // 1. Select Thầy giáo AI on Dashboard BEFORE clicking child card, then click child card:
+  // bundled static VieNeu MP3 plays immediately with ZERO error and pre-child Male selection is preserved!
   await page.goto("/dashboard");
   const section = page.getByTestId("ai-teacher-voice-section");
   await expect(section).toBeVisible();
-  await page.getByRole("button", { name: /Bé API, lớp 2/ }).click();
   await page.getByTestId("teacher-card-male").click();
+  await page.getByRole("button", { name: /Bé API, lớp 2/ }).click();
+  await expect(page.getByTestId("teacher-card-male")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
   await expect
     .poll(() =>
       page.evaluate(
@@ -929,7 +1015,40 @@ test("Pure-offline cross-feature Male Teacher sync: Dashboard -> Difficult Words
     dwDialog.getByText(/Đang kiểm tra nhận diện giọng nói/),
   ).toHaveCount(0);
 
-  // 3. Navigate to /entertainment/sentence-shooter (exact route from user screenshot):
+  // 3. Navigate to Story Reading (/reading/:sessionId) and verify ReadingScreen keeps Thầy giáo AI
+  // and plays bundled static MP3 via playWithWordTimings with zero error!
+  await page.goto(`/reading/${ids.session}?state=reading`);
+  await expect(
+    page.getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+  const readingDialog = page.getByRole("dialog");
+  await expect(
+    readingDialog.getByRole("heading", {
+      name: /Giọng đọc mẫu · Thầy giáo AI/,
+    }),
+  ).toBeVisible();
+  const beforeReadingPreviewCount = await page.evaluate(
+    () => window.__ttsProbe.audios.length,
+  );
+  await readingDialog
+    .getByRole("button", { name: "Nghe thử", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (prev) =>
+          window.__ttsProbe.audios.length > prev &&
+          window.__ttsProbe.audios.at(-1)?.paused === false,
+        beforeReadingPreviewCount,
+      ),
+    )
+    .toBe(true);
+  await expect(readingDialog.getByText(/Chưa phát được giọng đọc/)).toHaveCount(
+    0,
+  );
+
+  // 4. Navigate to /entertainment/sentence-shooter (exact route from user screenshot):
   await page.goto("/entertainment/sentence-shooter");
   await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
   const shooterDialog = page.getByRole("dialog");

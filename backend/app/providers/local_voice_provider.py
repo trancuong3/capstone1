@@ -10,8 +10,10 @@ import json
 import logging
 import math
 import os
+from pathlib import Path
 import re
 import struct
+import sys
 import time
 import unicodedata
 import weakref
@@ -522,11 +524,37 @@ class LocalVoiceProvider:
     def _get_token(self) -> str:
         if self._explicit_token is not None:
             return self._explicit_token
-        return (
+        token = (
             os.getenv("VIREAD_VOICE_WORKER_TOKEN")
             or os.getenv("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
             or ""
         ).strip()
+        if token:
+            return token
+        is_test_runtime = (
+            (os.getenv("APP_ENVIRONMENT") or "").strip().lower() == "test"
+            or "unittest" in sys.modules
+            or "pytest" in sys.modules
+        )
+        if not is_test_runtime:
+            workspace_root = Path(__file__).resolve().parents[4]
+            workers_env = workspace_root / "tools" / "viread-workers.env"
+            if workers_env.is_file():
+                try:
+                    from dotenv import dotenv_values
+
+                    vals = dotenv_values(workers_env)
+                    fallback_tok = (
+                        vals.get("VIREAD_VOICE_WORKER_TOKEN")
+                        or vals.get("VIREAD_LOCAL_VOICE_WORKER_TOKEN")
+                        or ""
+                    ).strip()
+                    if fallback_tok:
+                        os.environ.setdefault("VIREAD_VOICE_WORKER_TOKEN", fallback_tok)
+                        return fallback_tok
+                except Exception:
+                    pass
+        return ""
 
     def _request_headers(self, *, include_auth: bool = True) -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -715,6 +743,8 @@ class LocalVoiceProvider:
                     )
                     if recovered:
                         continue
+                    self._trip_remote_circuit(client, "LOCAL_VOICE_UNAVAILABLE")
+                    raise
                 await asyncio.sleep(backoff_s)
                 continue
             except (httpx.RemoteProtocolError, httpx.ReadError) as exc:
@@ -819,7 +849,10 @@ class LocalVoiceProvider:
                 client.get(
                     f"{self.base_url}/health",
                     headers=self._request_headers(include_auth=self.is_loopback),
-                    timeout=self._make_timeout(2.0, 2.0),
+                    timeout=self._make_timeout(
+                        2.0,
+                        LOOPBACK_CONNECT_TIMEOUT_SECONDS if self.is_loopback else 2.0,
+                    ),
                 ),
                 timeout=2.5,
             )

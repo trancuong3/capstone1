@@ -96,7 +96,7 @@ export function DifficultWordsScreen({
   const BOOK_GROUPS_PAGE_SIZE = 6;
   const loadRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
-  const routeSelectionKey = `${requestedChildId ?? ""}|${requestedPracticeWord ?? ""}`;
+  const routeSelectionKey = `${preferredChildId ?? ""}|${requestedPracticeWord ?? ""}`;
   const [practiceSelection, setPracticeSelection] = useState<{
     readonly routeKey: string;
     readonly word: string | null;
@@ -572,7 +572,7 @@ export function DifficultWordsScreen({
               : undefined
           }
           child={state.child}
-          key={selectedPracticeWord.normalized_word}
+          key={`${state.child.id}:${selectedPracticeWord.normalized_word}`}
           onAttemptCompleted={applyAttemptToLocalState}
           onClose={() => {
             openPracticeSession(null, null, false);

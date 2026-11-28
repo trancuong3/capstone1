@@ -55,8 +55,8 @@ export const SHORT_WORD_CAPTURE_CONFIG = {
   mode: "short-word" as const,
   pollIntervalMs: 60,
   acousticSettleMs: 45,
-  minCaptureMs: 800,
-  postSpeechSilenceMs: 950,
+  minCaptureMs: 480,
+  postSpeechSilenceMs: 520,
   noSpeechTimeoutMs: 4500,
   maxCaptureMs: 6500,
   softSpeechRmsThreshold: 0.015,
@@ -169,7 +169,7 @@ export function hasShortWordSpeechActivity(
   const speechDurationGrew =
     input.previousSpeechDurationMs !== undefined &&
     speechDurationMs > input.previousSpeechDurationMs;
-  const minEnergyFloor = input.speechObserved ? 0.008 : 0.0038;
+  const minEnergyFloor = input.speechObserved ? 0.008 : 0.0032;
   const hasRelativeEnergy =
     liveRms >= Math.max(minEnergyFloor, noiseFloor * 1.6) &&
     (Boolean(input.speechObserved) ||

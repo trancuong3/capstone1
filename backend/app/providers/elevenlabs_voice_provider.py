@@ -411,6 +411,8 @@ class ElevenLabsVoiceProvider:
         fp = self._key_fingerprint or ""
         if not allow_default_fallback:
             if requested == DEFAULT_VOICE_ID or (fp, requested) in _unavailable_voices:
+                if requested == DEFAULT_VOICE_ID:
+                    _unavailable_voices.add((fp, DEFAULT_VOICE_ID))
                 raise VoiceProviderUnavailable()
             return requested, False
         if (expected_gender or "").strip().lower() == "male":

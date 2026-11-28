@@ -31,6 +31,7 @@ import {
 import {
   applyGlobalTeacherVoiceSelection,
   clearPendingSessionVoiceSwitch,
+  DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
@@ -39,6 +40,7 @@ import {
   inferRegionFromVoiceId,
   lockSessionVoice,
   setVoicePolicyPreferences,
+  STATIC_LOCAL_VOICES,
   subscribeVoiceLock,
   subscribeVoicePolicy,
   type VoiceProviderMode,
@@ -211,6 +213,8 @@ export function ReadingVoiceSettings({
   );
   const [isOpen, setIsOpen] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>({ status: "idle" });
+  const [showOptimisticStaticVoices, setShowOptimisticStaticVoices] =
+    useState(false);
   const [regionTab, setRegionTab] = useState<"all" | VoiceRegion>("all");
   const [filter, setFilter] = useState("all");
   const [removedVoiceNotice, setRemovedVoiceNotice] = useState<string | null>(
@@ -249,6 +253,18 @@ export function ReadingVoiceSettings({
       healthControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isOpen || loadState.status !== "loading") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (mountedRef.current) {
+        setShowOptimisticStaticVoices(true);
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, loadState.status]);
 
   const loadVoiceHealth = useCallback(() => {
     healthControllerRef.current?.abort();
@@ -304,6 +320,7 @@ export function ReadingVoiceSettings({
     const controller = new AbortController();
     loadControllerRef.current = controller;
     const contextKey = buildVoiceContextKey();
+    setShowOptimisticStaticVoices(false);
     setLoadState({ status: "loading" });
     voiceStudio
       .listVoices(controller.signal)
@@ -353,6 +370,34 @@ export function ReadingVoiceSettings({
       });
   }, [voiceStudio, update, syncPausedSessionLock, t, buildVoiceContextKey]);
 
+  function triggerPreviewPlayback(targetGender: VoiceGender) {
+    const generation = ++previewGenerationRef.current;
+    setPreviewError(false);
+    setIsSynthesizingPreview(true);
+    const previewText = adaptTextToTeacherPersona(PREVIEW_TEXT, targetGender);
+    void Promise.resolve()
+      .then(() => onPreview(previewText))
+      .catch((error: unknown) => {
+        const isAbortError =
+          typeof error === "object" &&
+          error !== null &&
+          "name" in error &&
+          (error as { name?: unknown }).name === "AbortError";
+        if (
+          mountedRef.current &&
+          generation === previewGenerationRef.current &&
+          !isAbortError
+        ) {
+          setPreviewError(true);
+        }
+      })
+      .finally(() => {
+        if (mountedRef.current && generation === previewGenerationRef.current) {
+          setIsSynthesizingPreview(false);
+        }
+      });
+  }
+
   function change(
     value: Parameters<typeof update>[0],
     selectedOption?: VoiceOption,
@@ -366,12 +411,16 @@ export function ReadingVoiceSettings({
       ? (resolveVoiceRegion(selectedOption) ?? undefined)
       : undefined;
     const isDefaultOrReset = value.voiceId === null;
+    const preservedResetGender: VoiceGender =
+      hasRegionalMetadata && !selectedOption ? teacherPersona.gender : "female";
     const explicitVoiceId =
       value.voiceId !== undefined
         ? value.voiceId === null
-          ? loadState.status === "ready"
-            ? loadState.data.default_voice_id
-            : "local_north_truc_ly"
+          ? hasRegionalMetadata && !selectedOption
+            ? getDefaultVoiceIdForRegionAndGender("north", preservedResetGender)
+            : activeVoiceData
+              ? activeVoiceData.default_voice_id
+              : "local_north_truc_ly"
           : value.voiceId
         : undefined;
     const storedVoiceId =
@@ -390,7 +439,7 @@ export function ReadingVoiceSettings({
             ),
           }
         : value.voiceId === null
-          ? { gender: "female" }
+          ? { gender: preservedResetGender }
           : {}),
       ...(resolvedRegion ? { region: resolvedRegion } : {}),
       ...(value.speed !== undefined ? { speed: value.speed } : {}),
@@ -412,7 +461,7 @@ export function ReadingVoiceSettings({
     const targetGender = selectedOption
       ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
       : value.voiceId === null
-        ? "female"
+        ? preservedResetGender
         : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
     void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
   }
@@ -426,8 +475,8 @@ export function ReadingVoiceSettings({
     const targetRegion: VoiceRegion =
       regionTab !== "all" ? regionTab : activeRegionKey;
     let pickedVoice: VoiceOption | undefined;
-    if (loadState.status === "ready") {
-      const sameRegionSameGender = loadState.data.voices.filter(
+    if (activeVoiceData) {
+      const sameRegionSameGender = activeVoiceData.voices.filter(
         (v) =>
           resolveVoiceRegion(v) === targetRegion &&
           resolveVoiceGender(v.voice_id, v.gender) === nextGender,
@@ -439,7 +488,7 @@ export function ReadingVoiceSettings({
       pickedVoice =
         sameRegionSameGender.find((v) => v.voice_id === defaultForPair) ??
         sameRegionSameGender[0] ??
-        loadState.data.voices.find(
+        activeVoiceData.voices.find(
           (v) => resolveVoiceGender(v.voice_id, v.gender) === nextGender,
         );
     }
@@ -464,6 +513,7 @@ export function ReadingVoiceSettings({
           : undefined,
     });
     void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
+    triggerPreviewPlayback(nextGender);
   }
 
   function changeProviderPolicy(
@@ -532,13 +582,12 @@ export function ReadingVoiceSettings({
       return;
     }
     setVoicePolicyPreferences({ region: nextTab });
-    if (loadState.status === "ready") {
-      const regionVoices = loadState.data.voices.filter(
+    if (activeVoiceData) {
+      const regionVoices = activeVoiceData.voices.filter(
         (v) => resolveVoiceRegion(v) === nextTab,
       );
       if (regionVoices.length > 0) {
-        const currentId =
-          preferences.voiceId ?? loadState.data.default_voice_id;
+        const currentId = selectedVoiceId ?? activeVoiceData.default_voice_id;
         const currentGender = resolveVoiceGender(
           currentId,
           teacherPersona.gender,
@@ -586,11 +635,29 @@ export function ReadingVoiceSettings({
     setIsOpen(false);
   }
 
-  const hasRegionalMetadata =
-    loadState.status === "ready" &&
-    loadState.data.voices.some((v) => resolveVoiceRegion(v) !== null);
-  const defaultVoiceId =
-    loadState.status === "ready" ? loadState.data.default_voice_id : null;
+  const optimisticStaticData = useMemo<VoiceList>(
+    () => ({
+      voices: [...STATIC_LOCAL_VOICES],
+      default_voice_id: DEFAULT_LOCAL_VOICE_ID,
+      local_worker_ready: false,
+      google_tts_available: false,
+      cached_voice_ids: ["local_north_truc_ly", "local_north_thien_minh"],
+    }),
+    [],
+  );
+  const activeVoiceData: VoiceList | null =
+    loadState.status === "ready"
+      ? loadState.data
+      : loadState.status === "loading" && showOptimisticStaticVoices
+        ? optimisticStaticData
+        : null;
+
+  const hasRegionalMetadata = Boolean(
+    activeVoiceData?.voices.some((v) => resolveVoiceRegion(v) !== null),
+  );
+  const defaultVoiceId = activeVoiceData
+    ? activeVoiceData.default_voice_id
+    : null;
   const selectedVoiceId =
     preferences.voiceId ??
     (hasRegionalMetadata && teacherPersona.gender === "male"
@@ -620,16 +687,12 @@ export function ReadingVoiceSettings({
     );
   };
 
-  const selectedVoice =
-    loadState.status === "ready"
-      ? loadState.data.voices.find(
-          (voice) => voice.voice_id === selectedVoiceId,
-        )
-      : undefined;
-  const filteredVoices =
-    loadState.status === "ready"
-      ? loadState.data.voices.filter(matchesFilter)
-      : [];
+  const selectedVoice = activeVoiceData
+    ? activeVoiceData.voices.find((voice) => voice.voice_id === selectedVoiceId)
+    : undefined;
+  const filteredVoices = activeVoiceData
+    ? activeVoiceData.voices.filter(matchesFilter)
+    : [];
 
   const activeRegionKey = selectedVoice
     ? (resolveVoiceRegion(selectedVoice) ??
@@ -675,44 +738,18 @@ export function ReadingVoiceSettings({
                 className="w-auto!"
                 size="compact"
                 onClick={() => {
-                  const generation = ++previewGenerationRef.current;
                   if (isPreviewing || isSynthesizingPreview) {
+                    previewGenerationRef.current += 1;
                     setIsSynthesizingPreview(false);
                     onStopPreview();
                     return;
                   }
-                  setPreviewError(false);
-                  setIsSynthesizingPreview(true);
-                  const previewText = adaptTextToTeacherPersona(
-                    PREVIEW_TEXT,
+                  triggerPreviewPlayback(
                     resolveVoiceGender(
                       selectedVoiceId,
                       selectedVoice?.gender ?? teacherPersona.gender,
                     ),
                   );
-                  void Promise.resolve()
-                    .then(() => onPreview(previewText))
-                    .catch((error: unknown) => {
-                      const isAbortError =
-                        typeof error === "object" &&
-                        error !== null &&
-                        "name" in error &&
-                        (error as { name?: unknown }).name === "AbortError";
-                      if (
-                        mountedRef.current &&
-                        generation === previewGenerationRef.current &&
-                        !isAbortError
-                      )
-                        setPreviewError(true);
-                    })
-                    .finally(() => {
-                      if (
-                        mountedRef.current &&
-                        generation === previewGenerationRef.current
-                      ) {
-                        setIsSynthesizingPreview(false);
-                      }
-                    });
                 }}
                 variant="primary"
               >
@@ -939,8 +976,7 @@ export function ReadingVoiceSettings({
               </div>
             ) : null}
 
-            {loadState.status === "ready" &&
-            loadState.data.voices.length > 0 ? (
+            {activeVoiceData && activeVoiceData.voices.length > 0 ? (
               <select
                 aria-label={t("settings.filterAria")}
                 className="min-h-11 w-full rounded-control border border-border bg-white px-3 text-body"
@@ -948,26 +984,27 @@ export function ReadingVoiceSettings({
                 onChange={(event) => setFilter(event.target.value)}
               >
                 <option value="all">{t("settings.allVoices")}</option>
-                {loadState.data.voices.some(
+                {activeVoiceData.voices.some(
                   (voice) => voice.gender?.toLowerCase() === "male",
                 ) ? (
                   <option value="male">{t("settings.maleVoice")}</option>
                 ) : null}
-                {loadState.data.voices.some(
+                {activeVoiceData.voices.some(
                   (voice) => voice.gender?.toLowerCase() === "female",
                 ) ? (
                   <option value="female">{t("settings.femaleVoice")}</option>
                 ) : null}
-                {loadState.data.voices.some(isYouthful) ? (
+                {activeVoiceData.voices.some(isYouthful) ? (
                   <option value="young">{t("settings.youngVoice")}</option>
                 ) : null}
-                {loadState.data.voices.some(isChildVoice) ? (
+                {activeVoiceData.voices.some(isChildVoice) ? (
                   <option value="child">{t("settings.childVoice")}</option>
                 ) : null}
               </select>
             ) : null}
 
-            {loadState.status === "loading" || loadState.status === "idle" ? (
+            {(loadState.status === "loading" || loadState.status === "idle") &&
+            !activeVoiceData ? (
               <div className="space-y-2">
                 <p className="text-body text-muted">
                   {t("settings.loadingVoices")}
@@ -995,84 +1032,95 @@ export function ReadingVoiceSettings({
                   {t("settings.retry")}
                 </Button>
               </div>
-            ) : loadState.data.voices.length === 0 ? (
+            ) : !activeVoiceData || activeVoiceData.voices.length === 0 ? (
               <p className="text-body text-muted">
                 {t("settings.emptyVoices")}
               </p>
             ) : (
-              <div
-                aria-labelledby="voice-choice-heading"
-                className="max-h-[min(24dvh,220px)] divide-y divide-border overflow-y-auto overscroll-contain rounded-control border border-border bg-white p-1"
-                role="radiogroup"
-              >
-                {filteredVoices.length === 0 ? (
-                  <p className="px-3 py-2 text-sm text-muted">
-                    {t("settings.emptyFiltered")}
-                  </p>
+              <div className="space-y-2">
+                {loadState.status === "loading" ? (
+                  <AiProgressBar
+                    active
+                    label={
+                      voiceListProgress.stageLabel ??
+                      tCommon("aiProgress.connecting")
+                    }
+                    percent={voiceListProgress.percent}
+                    size="compact"
+                    testId="voice-list-loading-progress"
+                  />
                 ) : null}
-                {filteredVoices.map((voice) => {
-                  const selected = voice.voice_id === selectedVoiceId;
-                  const cachedVoiceIds =
-                    loadState.status === "ready"
-                      ? loadState.data.cached_voice_ids !== undefined
-                        ? loadState.data.cached_voice_ids
+                <div
+                  aria-labelledby="voice-choice-heading"
+                  className="max-h-[min(24dvh,220px)] divide-y divide-border overflow-y-auto overscroll-contain rounded-control border border-border bg-white p-1"
+                  role="radiogroup"
+                >
+                  {filteredVoices.length === 0 ? (
+                    <p className="px-3 py-2 text-sm text-muted">
+                      {t("settings.emptyFiltered")}
+                    </p>
+                  ) : null}
+                  {filteredVoices.map((voice) => {
+                    const selected = voice.voice_id === selectedVoiceId;
+                    const cachedVoiceIds =
+                      activeVoiceData.cached_voice_ids !== undefined
+                        ? activeVoiceData.cached_voice_ids
                         : defaultVoiceId
                           ? [defaultVoiceId]
-                          : []
-                      : [];
-                  const isLocalWorkerOffline = voiceHealth
-                    ? !voiceHealth.local.available
-                    : loadState.status === "ready" &&
-                      loadState.data.local_worker_ready === false;
-                  const isCachedOffline =
-                    isLocalWorkerOffline &&
-                    cachedVoiceIds.includes(voice.voice_id);
-                  return (
-                    <label
-                      key={voice.voice_id}
-                      className={cn(
-                        "flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2",
-                        selected ? "bg-sky" : "bg-white hover:bg-cream",
-                      )}
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="flex flex-wrap items-center gap-1.5 break-words text-sm font-bold text-ink">
-                          <span>{voiceTitle(voice)}</span>
-                          {isCachedOffline ? (
-                            <span
-                              className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
-                              data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
-                            >
-                              {t("settings.wifiReadyBadge")}
+                          : [];
+                    const isLocalWorkerOffline = voiceHealth
+                      ? !voiceHealth.local.available
+                      : activeVoiceData.local_worker_ready === false;
+                    const isCachedOffline =
+                      isLocalWorkerOffline &&
+                      cachedVoiceIds.includes(voice.voice_id);
+                    return (
+                      <label
+                        key={voice.voice_id}
+                        className={cn(
+                          "flex min-h-12 cursor-pointer items-center gap-3 px-3 py-2",
+                          selected ? "bg-sky" : "bg-white hover:bg-cream",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-1.5 break-words text-sm font-bold text-ink">
+                            <span>{voiceTitle(voice)}</span>
+                            {isCachedOffline ? (
+                              <span
+                                className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                                data-testid={`voice-wifi-ready-badge-${voice.voice_id}`}
+                              >
+                                {t("settings.wifiReadyBadge")}
+                              </span>
+                            ) : null}
+                          </span>
+                          {voiceDetails(voice, t) ? (
+                            <span className="block break-words text-sm text-muted">
+                              {voiceDetails(voice, t)}
                             </span>
                           ) : null}
                         </span>
-                        {voiceDetails(voice, t) ? (
-                          <span className="block break-words text-sm text-muted">
-                            {voiceDetails(voice, t)}
-                          </span>
-                        ) : null}
-                      </span>
-                      <input
-                        type="radio"
-                        name="viread-voice"
-                        className="size-4 shrink-0 accent-primary"
-                        checked={selected}
-                        onChange={() =>
-                          change(
-                            {
-                              voiceId:
-                                voice.voice_id === defaultVoiceId
-                                  ? null
-                                  : voice.voice_id,
-                            },
-                            voice,
-                          )
-                        }
-                      />
-                    </label>
-                  );
-                })}
+                        <input
+                          type="radio"
+                          name="viread-voice"
+                          className="size-4 shrink-0 accent-primary"
+                          checked={selected}
+                          onChange={() =>
+                            change(
+                              {
+                                voiceId:
+                                  voice.voice_id === defaultVoiceId
+                                    ? null
+                                    : voice.voice_id,
+                              },
+                              voice,
+                            )
+                          }
+                        />
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             )}
             {loadState.status === "ready" &&

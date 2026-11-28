@@ -25,7 +25,12 @@ def _load_missing_dotenv_values() -> None:
         WORKSPACE_ROOT / ".env",
     ]
     if not is_test_runtime:
-        candidate_paths.append(WORKSPACE_ROOT / "capstone1" / "backend" / ".env")
+        candidate_paths.extend(
+            [
+                WORKSPACE_ROOT / "capstone1" / "backend" / ".env",
+                WORKSPACE_ROOT / "tools" / "viread-workers.env",
+            ]
+        )
     for dotenv_path in candidate_paths:
         if not dotenv_path.is_file():
             continue

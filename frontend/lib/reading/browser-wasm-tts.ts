@@ -343,6 +343,13 @@ export class BrowserWasmTtsClient {
         message?: string;
       };
       if (!msg) return;
+      if (
+        msg.type === "evicted" &&
+        (msg.gender === "female" || msg.gender === "male")
+      ) {
+        this.readyGenders.delete(msg.gender);
+        return;
+      }
       if (msg.type === "progress") {
         const progressEvent: WasmTtsProgressEvent = {
           stage: msg.stage ?? "loading-tts-model",

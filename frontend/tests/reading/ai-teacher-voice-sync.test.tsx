@@ -1891,8 +1891,166 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
       ),
       expect.anything(),
     );
+    // Tier-0 static preview MUST NOT wait on backend /voice/text-to-speech!
+    expect(speechMock.synthesize).not.toHaveBeenCalled();
     expect(playedSrcs).toHaveLength(1);
+
+    // Also verify ReadingScreen's playWithWordTimings(sample.split(" "), { utteranceKind: "voice_preview", bypassSessionLock: true })
+    // plays the bundled static MP3 at Tier 0 without hitting synthesizeTimed!
+    const studioTimedSpy = vi.fn();
+    const timedPlayer = new TtsPlayback(speechMock, {
+      listVoices: vi.fn(),
+      synthesizeTimed: studioTimedSpy,
+    } as unknown as VoiceStudioService);
+    const previewWords =
+      "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.".split(
+        " ",
+      );
+    await expect(
+      timedPlayer.playWithWordTimings(previewWords, {
+        cacheScope: "COACHING",
+        isPrivateBook: false,
+        bypassSessionLock: true,
+        utteranceKind: "voice_preview",
+      }),
+    ).resolves.toBeUndefined();
+    expect(studioTimedSpy).not.toHaveBeenCalled();
+    expect(playedSrcs).toHaveLength(2);
+
     fetchSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves and persists pre-child Dashboard Thầy giáo selection even when child profile has an older saved Cô giáo preference", async () => {
+    const updateVoicePrefsMock = vi.fn().mockResolvedValue(CHILD_1);
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePrefsMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    // 1. User picks Thầy giáo AI on Dashboard BEFORE selecting any child (childId: null)
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+      updatedAt: 2_000_000_000_000,
+      childId: null,
+    });
+
+    const childWithOldFemalePref: ChildProfileDTO = {
+      ...CHILD_1,
+      settings: {
+        voice_preferences: {
+          voice_id: "local_north_truc_ly",
+          gender: "female",
+          region: "north",
+          speed: 0.9,
+          updated_at: 1_500_000_000_000,
+        },
+      },
+    };
+
+    // 2. DashboardScreen onSelect calls hydrateTeacherVoiceFromChildProfile(child, { force: true })
+    hydrateTeacherVoiceFromChildProfile(childWithOldFemalePref, {
+      force: true,
+    });
+    expect(getEffectiveVoiceId()).toBe("local_north_thien_minh");
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+
+    // 3. AiTeacherVoiceSection mounts/updates with selectedChild -> persists Thầy giáo to backend!
+    render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={childWithOldFemalePref} />
+      </AppServicesContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(updateVoicePrefsMock).toHaveBeenCalledWith(
+        CHILD_1.id,
+        expect.objectContaining({
+          voice_id: "local_north_thien_minh",
+          gender: "male",
+          region: "north",
+        }),
+      ),
+    );
+  });
+
+  it("ReadingVoiceSettings 'Dùng giọng mặc định' preserves active Thầy giáo gender and quick persona buttons play instant preview", async () => {
+    const user = userEvent.setup();
+    const onPreview = vi.fn();
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_central_quang_son",
+      gender: "male",
+      region: "central",
+    });
+
+    render(
+      <ReadingVoiceSettings onPreview={onPreview} onStopPreview={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    await screen.findByRole("radio", { name: /Thầy Quang Sơn/ });
+
+    // Clicking "Dùng giọng mặc định" resets region to north while keeping Thầy giáo AI (male)!
+    await user.click(
+      screen.getByRole("button", { name: "Dùng giọng mặc định" }),
+    );
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+    expect(getEffectiveVoiceId()).toBe("local_north_thien_minh");
+
+    // Clicking quick persona button immediately triggers adapted preview audio
+    onPreview.mockClear();
+    await user.click(screen.getByTestId("voice-modal-teacher-female"));
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith(
+        expect.stringContaining("cô trò mình"),
+      ),
+    );
+    onPreview.mockClear();
+    await user.click(screen.getByTestId("voice-modal-teacher-male"));
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith(
+        expect.stringContaining("thầy trò mình"),
+      ),
+    );
+  });
+
+  it("BrowserWasmTtsClient updates readyGenders when worker posts low-memory eviction event", async () => {
+    let workerInstance: {
+      onmessage: ((ev: MessageEvent) => void) | null;
+    } | null = null;
+    class EvictingWorker {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: ErrorEvent) => void) | null = null;
+      constructor() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        workerInstance = this;
+      }
+      postMessage(msg: { type?: string; id?: string; gender?: string }) {
+        queueMicrotask(() => {
+          if (msg.type === "init" && msg.gender === "male") {
+            this.onmessage?.({
+              data: { type: "evicted", gender: "female" },
+            } as MessageEvent);
+          }
+          this.onmessage?.({
+            data: { type: "ready", id: msg.id, gender: msg.gender },
+          } as MessageEvent);
+        });
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", EvictingWorker);
+    const client = new BrowserWasmTtsClient();
+    await client.init({ gender: "female" });
+    expect(client.isReady("female")).toBe(true);
+    await client.init({ gender: "male" });
+    expect(workerInstance).not.toBeNull();
+    expect(client.isReady("male")).toBe(true);
+    expect(client.isReady("female")).toBe(false);
+    client.dispose();
     vi.unstubAllGlobals();
   });
 });

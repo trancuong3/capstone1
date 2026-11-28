@@ -645,10 +645,13 @@ export function DifficultWordPracticePanel({
     ) => {
       if (!mountedRef.current || generation !== flowGenerationRef.current)
         return false;
-      // Pause/release mic before TTS playback so Android restores loudspeaker
-      // USAGE_MEDIA and EchoGuard blocks speaker bleed (Bug 5a & 5c).
+      // Pause recorder nodes before TTS playback so EchoGuard blocks speaker bleed,
+      // while retaining the Web MediaStream across cues/retries for 0ms mic reopen
+      // (releasing fully only on Android APK where HAL mic forces earpiece routing).
       stopBrowserRecognition();
-      speechRecorder.cancel({ retainStream: false });
+      speechRecorder.cancel({
+        retainStream: !isAndroidNativeSpeechAvailable(),
+      });
       const adaptedText =
         wordSample || options?.preserveBookText
           ? text
@@ -708,7 +711,9 @@ export function DifficultWordPracticePanel({
       if (!mountedRef.current || generation !== flowGenerationRef.current)
         return;
       stopBrowserRecognition();
-      speechRecorder.cancel();
+      speechRecorder.cancel({
+        retainStream: !isAndroidNativeSpeechAvailable(),
+      });
       stopSelfPlayback();
       setSampleError(null);
       setFailureLabel(null);
@@ -1554,7 +1559,7 @@ export function DifficultWordPracticePanel({
         try {
           await speechRecorder.start({
             mode: SHORT_WORD_CAPTURE_CONFIG.mode,
-            retainStream: false,
+            retainStream: !isAndroidNativeSpeechAvailable(),
           });
         } catch (error) {
           if (!mountedRef.current || generation !== flowGenerationRef.current) {
@@ -1971,7 +1976,9 @@ export function DifficultWordPracticePanel({
     const generation = ++flowGenerationRef.current;
     clearTimers();
     stopBrowserRecognition();
-    speechRecorder.cancel({ retainStream: false });
+    speechRecorder.cancel({
+      retainStream: !isAndroidNativeSpeechAvailable(),
+    });
     setSampleError(null);
     stopSelfPlayback();
     usedHintRef.current = true;

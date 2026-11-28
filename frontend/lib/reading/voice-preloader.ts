@@ -668,7 +668,7 @@ export async function awaitSttReadyBeforeListening(
     return true;
   }
   const startedAt = Date.now();
-  let health = getFreshVoiceEngineHealth();
+  let health = getVoiceEngineHealthForRouting();
   const permanentlyUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
   if (!health && !permanentlyUnconfigured && maxWaitMs > 0) {
     const healthBudgetMs = Math.min(1_500, maxWaitMs);
@@ -733,7 +733,7 @@ export async function awaitVoiceEnginesReadyBeforeListening(
     await getAndroidSpeechCapabilities().catch(() => null);
     return { sttReady: true, ttsReady: true };
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   const needWasmTts =
     detectBrowserWasmTtsSupport().supported &&
     (!health ||

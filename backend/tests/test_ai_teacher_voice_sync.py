@@ -892,3 +892,92 @@ class OfflineZeroErrorVoiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
             kwargs_plain = real_repo.get_best_active_entries.await_args.kwargs
             self.assertIs(kwargs_plain["include_coaching_fallback"], False)
+
+    async def test_elevenlabs_unconfigured_default_voice_marks_unavailable_and_trips_status_cooldown(
+        self,
+    ) -> None:
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+            VoiceProviderUnavailable,
+            clear_caches,
+        )
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+        from app.providers.local_voice_provider import LocalVoiceProvider
+        from app.services.voice_orchestrator import (
+            VoiceOrchestrator,
+            clear_voice_orchestrator_caches,
+        )
+
+        clear_caches()
+        clear_voice_orchestrator_caches()
+        with patch.dict(
+            "os.environ",
+            {
+                "ELEVENLABS_API_KEY": "test-only-key-no-vi-voice",
+                "ELEVENLABS_VOICE_ID": "",
+                "ELEVENLABS_FEMALE_VOICE_ID": "",
+                "ELEVENLABS_MALE_VOICE_ID": "",
+            },
+            clear=False,
+        ):
+            el = ElevenLabsVoiceProvider(api_key="test-only-key-no-vi-voice")
+            with self.assertRaises(VoiceProviderUnavailable):
+                await el.synthesize(
+                    text="Cô chào con.",
+                    requested_voice_id=DEFAULT_VOICE_ID,
+                    allow_default_fallback=False,
+                )
+            orch = VoiceOrchestrator(
+                local_provider=LocalVoiceProvider(base_url=""),
+                google_provider=GoogleCloudVoiceProvider(stt_api_key="", tts_api_key=""),
+                elevenlabs_provider=el,
+            )
+            status = orch._elevenlabs_status()
+            self.assertTrue(status["tts_cooldown"])
+        clear_caches()
+
+    def test_config_and_local_provider_discover_shared_workers_env_token_outside_test_runtime(
+        self,
+    ) -> None:
+        import tempfile
+        from pathlib import Path
+        import sys
+        from app.database import config as db_config
+        from app.providers import local_voice_provider as lvp
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            ws_root = Path(tmp_dir)
+            tools_dir = ws_root / "tools"
+            tools_dir.mkdir(parents=True, exist_ok=True)
+            (tools_dir / "viread-workers.env").write_text(
+                "VIREAD_VOICE_WORKER_TOKEN=shared-worker-tok-123\n",
+                encoding="utf-8",
+            )
+            fake_modules = {
+                k: v
+                for k, v in sys.modules.items()
+                if k not in ("unittest", "pytest")
+            }
+            with (
+                patch.object(db_config, "BACKEND_ROOT", ws_root / "wt" / "backend"),
+                patch.object(db_config, "REPOSITORY_ROOT", ws_root / "wt"),
+                patch.object(db_config, "WORKSPACE_ROOT", ws_root),
+                patch.dict("sys.modules", fake_modules, clear=True),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "APP_ENVIRONMENT": "development",
+                        "VIREAD_VOICE_WORKER_TOKEN": "",
+                        "VIREAD_LOCAL_VOICE_WORKER_TOKEN": "",
+                    },
+                    clear=False,
+                ),
+            ):
+                db_config._load_missing_dotenv_values()
+                self.assertEqual(
+                    os.environ.get("VIREAD_VOICE_WORKER_TOKEN"),
+                    "shared-worker-tok-123",
+                )
+                provider = lvp.LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+                self.assertEqual(provider._get_token(), "shared-worker-tok-123")

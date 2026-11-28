@@ -77,7 +77,6 @@ import {
 } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
-  getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isPermanentlyHostedLocalUnconfigured,
@@ -1392,7 +1391,7 @@ function ReadingSessionScreen({
     mountedRef.current = true;
     // Wait for /voice/status before locking session when health is not cached yet;
     // if fresh health is already available, lock immediately with the right voice.
-    const cachedHealth = getFreshVoiceEngineHealth();
+    const cachedHealth = getVoiceEngineHealthForRouting();
     if (cachedHealth) {
       const policy = getVoicePolicyPreferences();
       const ttsAllowsFallback =
@@ -3446,7 +3445,7 @@ function ReadingSessionScreen({
       detectBrowserWasmSttSupport().supported &&
       !getBrowserWasmSttClient().isReady()
     ) {
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
       const localSttReady = Boolean(
         !isPermanentlyHostedLocalUnconfigured(freshHealth) &&
         freshHealth?.local.available &&
@@ -6975,7 +6974,7 @@ function ReadingSessionScreen({
 
       // Lần 1: STT bình thường, không dùng keyterms (tự chuyển sang Browser WASM khi Voice Worker offline).
       const submittedAt = getRetryCaptureTimeMs();
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth = getVoiceEngineHealthForRouting();
       const permanentlyUnconfigured =
         isPermanentlyHostedLocalUnconfigured(freshHealth);
       const localSttConfirmedDown =

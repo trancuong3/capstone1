@@ -194,7 +194,7 @@ describe("DifficultWordPracticePanel hands-free pre-warm + auto-retry + loop bre
     ]);
     expect(speechRecorderMock.start).toHaveBeenCalledWith({
       mode: "short-word",
-      retainStream: false,
+      retainStream: true,
     });
     expect(screen.getByText("Đang nghe bé")).toBeInTheDocument();
 

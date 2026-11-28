@@ -24,6 +24,7 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   applyGlobalTeacherVoiceSelection,
+  consumePendingUnboundVoicePersist,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getEffectiveVoiceId,
@@ -365,26 +366,41 @@ export function AiTeacherVoiceSection({
   );
 
   const syncedPreChildSelectionRef = useRef<string | null>(null);
-  const savedChildVoiceId = (() => {
+  const { savedChildVoiceId, savedChildUpdatedAt } = (() => {
     const prefsRecord = selectedChild?.settings?.voice_preferences as
-      { readonly voice_id?: unknown } | undefined;
-    return typeof prefsRecord?.voice_id === "string"
-      ? prefsRecord.voice_id.trim()
-      : "";
+      | { readonly voice_id?: unknown; readonly updated_at?: unknown }
+      | undefined;
+    return {
+      savedChildVoiceId:
+        typeof prefsRecord?.voice_id === "string"
+          ? prefsRecord.voice_id.trim()
+          : "",
+      savedChildUpdatedAt:
+        typeof prefsRecord?.updated_at === "number" &&
+        Number.isFinite(prefsRecord.updated_at) &&
+        prefsRecord.updated_at > 0
+          ? Math.floor(prefsRecord.updated_at)
+          : 0,
+    };
   })();
   useEffect(() => {
     const childId = selectedChild?.id;
     if (!childId) return;
-    if (savedChildVoiceId) {
-      syncedPreChildSelectionRef.current = childId;
-      return;
-    }
     const meta = getSpeechPreferencesMeta();
+    const boundByHydrator = consumePendingUnboundVoicePersist(childId);
+    const hasNewerUnbound =
+      meta.globalSelectionUpdatedAt > 0 &&
+      meta.childId === null &&
+      (!savedChildVoiceId ||
+        savedChildUpdatedAt === 0 ||
+        meta.globalSelectionUpdatedAt > savedChildUpdatedAt);
     if (
-      meta.globalSelectionUpdatedAt <= 0 ||
-      meta.childId !== null ||
+      (!boundByHydrator && !hasNewerUnbound) ||
       syncedPreChildSelectionRef.current === childId
     ) {
+      if (savedChildVoiceId) {
+        syncedPreChildSelectionRef.current = childId;
+      }
       return;
     }
     syncedPreChildSelectionRef.current = childId;
@@ -403,6 +419,7 @@ export function AiTeacherVoiceSection({
     activeGender,
     activeRegion,
     persistChildVoice,
+    savedChildUpdatedAt,
     savedChildVoiceId,
     selectedChild?.id,
   ]);

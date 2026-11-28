@@ -120,8 +120,9 @@ let piperModule = null;
 let ttsRuntimePromise = null;
 let ttsRuntimeModule = null;
 const ttsInstancesByGender = { female: null, male: null };
-let loadPromise = null;
-let loadingGender = null;
+const loadPromisesByGender = { female: null, male: null };
+let espeakAssetsPromise = null;
+let wasmCreateChain = Promise.resolve();
 let loadEpoch = 0;
 const activeFetchControllers = new Set();
 const cancelledIds = new Set();
@@ -433,24 +434,75 @@ async function ensureTtsRuntimeReady(epoch) {
   return ttsRuntimePromise;
 }
 
+async function ensureSharedEspeakAssets(epoch, genderForProgress) {
+  if (piperModule) return [];
+  if (espeakAssetsPromise) return espeakAssetsPromise;
+  const p = (async () => {
+    const db = await openModelsDb();
+    try {
+      let idx = 0;
+      const assets = await Promise.all(
+        ESPEAK_FILES.map(async (ef) => {
+          const bytes = await loadOrFetchVerifiedFile(
+            db,
+            `espeak-ng-data/${ef.rel}`,
+            "espeak-ng-data-vi-v1",
+            `${ESPEAK_HF_BASE_URL}/${ef.rel}`,
+            ef.expectedBytes,
+            ef.sha256,
+            epoch,
+          );
+          self.postMessage({
+            type: "progress",
+            stage: "loading-tts-model",
+            gender: genderForProgress,
+            file: ef.rel,
+            index: Math.min(idx++, ESPEAK_FILES.length),
+            total: ESPEAK_FILES.length + 2,
+          });
+          return { rel: ef.rel, bytes };
+        }),
+      );
+      if (epoch === loadEpoch) {
+        await writeVerifiedManifest(
+          db,
+          "espeak-ng-data-vi-v1",
+          ESPEAK_FILES.map((f) => ({
+            name: f.rel,
+            expectedBytes: f.expectedBytes,
+            sha256: f.sha256,
+          })),
+        );
+      }
+      return assets;
+    } finally {
+      if (db && typeof db.close === "function") {
+        try {
+          db.close();
+        } catch {
+          // Ignore close error
+        }
+      }
+    }
+  })().finally(() => {
+    if (espeakAssetsPromise === p) {
+      espeakAssetsPromise = null;
+    }
+  });
+  espeakAssetsPromise = p;
+  return p;
+}
+
 async function ensureTtsReadyForGender(rawGender) {
   const gender = normalizeGender(rawGender);
   if (ttsInstancesByGender[gender] && piperModule) {
     return { piper: piperModule, tts: ttsInstancesByGender[gender], gender };
   }
-  if (loadPromise && loadingGender === gender) {
-    return loadPromise;
-  }
-  if (loadPromise && loadingGender !== gender) {
-    // Wait for in-flight model load to settle before loading the other gender.
-    await loadPromise.catch(() => undefined);
-    if (ttsInstancesByGender[gender] && piperModule) {
-      return { piper: piperModule, tts: ttsInstancesByGender[gender], gender };
-    }
+  if (loadPromisesByGender[gender]) {
+    return loadPromisesByGender[gender];
   }
 
   const epoch = loadEpoch;
-  loadingGender = gender;
   const spec = VOICE_MODEL_CONFIGS[gender];
 
   const pending = (async () => {
@@ -458,35 +510,9 @@ async function ensureTtsReadyForGender(rawGender) {
     let espeakAssets = [];
     let modelAssets = [];
     try {
-      const needsEspeak = !piperModule;
       const totalSteps =
-        (needsEspeak ? ESPEAK_FILES.length : 0) + spec.files.length;
-      let progressIndex = 0;
-
-      const espeakPromise = needsEspeak
-        ? Promise.all(
-            ESPEAK_FILES.map(async (ef) => {
-              const bytes = await loadOrFetchVerifiedFile(
-                db,
-                `espeak-ng-data/${ef.rel}`,
-                "espeak-ng-data-vi-v1",
-                `${ESPEAK_HF_BASE_URL}/${ef.rel}`,
-                ef.expectedBytes,
-                ef.sha256,
-                epoch,
-              );
-              self.postMessage({
-                type: "progress",
-                stage: "loading-tts-model",
-                gender,
-                file: ef.rel,
-                index: Math.min(progressIndex++, totalSteps),
-                total: totalSteps,
-              });
-              return { rel: ef.rel, bytes };
-            }),
-          )
-        : Promise.resolve([]);
+        (!piperModule ? ESPEAK_FILES.length : 0) + spec.files.length;
+      let progressIndex = !piperModule ? ESPEAK_FILES.length : 0;
 
       const modelPromise = Promise.all(
         spec.files.map(async (mf) => {
@@ -512,7 +538,7 @@ async function ensureTtsReadyForGender(rawGender) {
       );
 
       [espeakAssets, modelAssets] = await Promise.all([
-        espeakPromise,
+        ensureSharedEspeakAssets(epoch, gender),
         modelPromise,
       ]);
 
@@ -520,17 +546,6 @@ async function ensureTtsReadyForGender(rawGender) {
         throw new Error("WASM TTS init disposed");
       }
 
-      if (needsEspeak) {
-        await writeVerifiedManifest(
-          db,
-          "espeak-ng-data-vi-v1",
-          ESPEAK_FILES.map((f) => ({
-            name: f.rel,
-            expectedBytes: f.expectedBytes,
-            sha256: f.sha256,
-          })),
-        );
-      }
       await writeVerifiedManifest(
         db,
         spec.version,
@@ -563,126 +578,143 @@ async function ensureTtsReadyForGender(rawGender) {
       throw new Error("WASM TTS init disposed");
     }
 
-    const FS = M.__exposeFS || M.FS;
-    const modelMemPath = `./model-${gender}.onnx`;
-    const tokensMemPath = `./tokens-${gender}.txt`;
-    for (const { spec: mf, bytes } of modelAssets) {
-      const targetMemPath = mf.localName.endsWith(".onnx")
-        ? modelMemPath
-        : tokensMemPath;
-      try {
-        FS.unlink(targetMemPath);
-      } catch {
-        // Ignore if missing
-      }
-      FS.writeFile(targetMemPath, bytes);
-    }
-
-    const emptyModelPart = {
-      model: "",
-      voices: "",
-      tokens: "",
-      dataDir: "",
-      lexicon: "",
-      acousticModel: "",
-      vocoder: "",
-      encoder: "",
-      decoder: "",
-      lmFlow: "",
-      lmMain: "",
-      textConditioner: "",
-      vocabJson: "",
-      tokenScoresJson: "",
-      durationPredictor: "",
-      textEncoder: "",
-      vectorEstimator: "",
-      ttsJson: "",
-      unicodeIndexer: "",
-      voiceStyle: "",
-      noiseScale: 0.667,
-      noiseScaleW: 0.8,
-      lengthScale: 1.0,
-      featScale: 0.1,
-      tShift: 0.5,
-      targetRMS: 0.1,
-      guidanceScale: 1.0,
-      lang: "",
-      voiceEmbeddingCacheCapacity: 50,
-    };
-
-    const customConfig = {
-      offlineTtsModelConfig: {
-        offlineTtsVitsModelConfig: {
-          model: modelMemPath,
-          lexicon: "",
-          tokens: tokensMemPath,
-          dataDir: "",
-          noiseScale: spec.noiseScale,
-          noiseScaleW: spec.noiseScaleW,
-          lengthScale: 1.0,
-        },
-        offlineTtsMatchaModelConfig: emptyModelPart,
-        offlineTtsKokoroModelConfig: emptyModelPart,
-        offlineTtsKittenModelConfig: emptyModelPart,
-        offlineTtsZipVoiceModelConfig: emptyModelPart,
-        offlineTtsPocketModelConfig: emptyModelPart,
-        offlineTtsSupertonicModelConfig: emptyModelPart,
-        numThreads: 1,
-        debug: 0,
-        provider: "cpu",
-      },
-      ruleFsts: "",
-      ruleFars: "",
-      maxNumSentences: 1,
-    };
+    let releaseLock = null;
+    const prevChain = wasmCreateChain;
+    wasmCreateChain = new Promise((resolve) => {
+      releaseLock = resolve;
+    });
+    await prevChain;
 
     let instance = null;
     try {
-      instance = self.createOfflineTts(M, customConfig);
-    } catch (allocErr) {
-      // Low-memory fallback: evict opposite gender ONNX session if resident and retry once.
-      const otherGender = gender === "male" ? "female" : "male";
-      if (ttsInstancesByGender[otherGender]) {
-        try {
-          ttsInstancesByGender[otherGender].free();
-        } catch {
-          // Ignore free error
-        }
-        ttsInstancesByGender[otherGender] = null;
-        instance = self.createOfflineTts(M, customConfig);
-      } else {
-        throw allocErr;
+      if (epoch !== loadEpoch) {
+        throw new Error("WASM TTS init disposed");
       }
-    } finally {
-      // Free ~63 MB weights copy from MEMFS immediately after ONNX Runtime session loads them.
-      for (const memPath of [modelMemPath, tokensMemPath]) {
+      if (ttsInstancesByGender[gender]) {
+        return { piper, tts: ttsInstancesByGender[gender], gender };
+      }
+      const FS = M.__exposeFS || M.FS;
+      const modelMemPath = `./model-${gender}.onnx`;
+      const tokensMemPath = `./tokens-${gender}.txt`;
+      for (const { spec: mf, bytes } of modelAssets) {
+        const targetMemPath = mf.localName.endsWith(".onnx")
+          ? modelMemPath
+          : tokensMemPath;
         try {
-          FS.unlink(memPath);
+          FS.unlink(targetMemPath);
+        } catch {
+          // Ignore if missing
+        }
+        FS.writeFile(targetMemPath, bytes);
+      }
+
+      const emptyModelPart = {
+        model: "",
+        voices: "",
+        tokens: "",
+        dataDir: "",
+        lexicon: "",
+        acousticModel: "",
+        vocoder: "",
+        encoder: "",
+        decoder: "",
+        lmFlow: "",
+        lmMain: "",
+        textConditioner: "",
+        vocabJson: "",
+        tokenScoresJson: "",
+        durationPredictor: "",
+        textEncoder: "",
+        vectorEstimator: "",
+        ttsJson: "",
+        unicodeIndexer: "",
+        voiceStyle: "",
+        noiseScale: 0.667,
+        noiseScaleW: 0.8,
+        lengthScale: 1.0,
+        featScale: 0.1,
+        tShift: 0.5,
+        targetRMS: 0.1,
+        guidanceScale: 1.0,
+        lang: "",
+        voiceEmbeddingCacheCapacity: 50,
+      };
+
+      const customConfig = {
+        offlineTtsModelConfig: {
+          offlineTtsVitsModelConfig: {
+            model: modelMemPath,
+            lexicon: "",
+            tokens: tokensMemPath,
+            dataDir: "",
+            noiseScale: spec.noiseScale,
+            noiseScaleW: spec.noiseScaleW,
+            lengthScale: 1.0,
+          },
+          offlineTtsMatchaModelConfig: emptyModelPart,
+          offlineTtsKokoroModelConfig: emptyModelPart,
+          offlineTtsKittenModelConfig: emptyModelPart,
+          offlineTtsZipVoiceModelConfig: emptyModelPart,
+          offlineTtsPocketModelConfig: emptyModelPart,
+          offlineTtsSupertonicModelConfig: emptyModelPart,
+          numThreads: 1,
+          debug: 0,
+          provider: "cpu",
+        },
+        ruleFsts: "",
+        ruleFars: "",
+        maxNumSentences: 1,
+      };
+
+      try {
+        instance = self.createOfflineTts(M, customConfig);
+      } catch (allocErr) {
+        // Low-memory fallback: evict opposite gender ONNX session if resident and retry once.
+        const otherGender = gender === "male" ? "female" : "male";
+        if (ttsInstancesByGender[otherGender]) {
+          try {
+            ttsInstancesByGender[otherGender].free();
+          } catch {
+            // Ignore free error
+          }
+          ttsInstancesByGender[otherGender] = null;
+          self.postMessage({ type: "evicted", gender: otherGender });
+          instance = self.createOfflineTts(M, customConfig);
+        } else {
+          throw allocErr;
+        }
+      } finally {
+        // Free ~63 MB weights copy from MEMFS immediately after ONNX Runtime session loads them.
+        for (const memPath of [modelMemPath, tokensMemPath]) {
+          try {
+            FS.unlink(memPath);
+          } catch {
+            // Ignore cleanup failure
+          }
+        }
+      }
+
+      if (epoch !== loadEpoch) {
+        try {
+          instance.free();
         } catch {
           // Ignore cleanup failure
         }
+        throw new Error("WASM TTS init disposed");
       }
-    }
 
-    if (epoch !== loadEpoch) {
-      try {
-        instance.free();
-      } catch {
-        // Ignore cleanup failure
-      }
-      throw new Error("WASM TTS init disposed");
+      ttsInstancesByGender[gender] = instance;
+      return { piper, tts: instance, gender };
+    } finally {
+      if (releaseLock) releaseLock();
     }
-
-    ttsInstancesByGender[gender] = instance;
-    return { piper, tts: instance, gender };
   })().finally(() => {
-    if (loadPromise === pending) {
-      loadPromise = null;
-      loadingGender = null;
+    if (loadPromisesByGender[gender] === pending) {
+      loadPromisesByGender[gender] = null;
     }
   });
 
-  loadPromise = pending;
+  loadPromisesByGender[gender] = pending;
   return pending;
 }
 
@@ -784,8 +816,9 @@ self.onmessage = async (event) => {
         ttsInstancesByGender[gKey] = null;
       }
     }
-    loadPromise = null;
-    loadingGender = null;
+    loadPromisesByGender.female = null;
+    loadPromisesByGender.male = null;
+    espeakAssetsPromise = null;
     self.postMessage({ type: "disposed", id: msg.id });
     return;
   }

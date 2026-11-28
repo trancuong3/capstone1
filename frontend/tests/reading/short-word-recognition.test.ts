@@ -87,21 +87,22 @@ describe("Short-word AudioQualityMonitor preset & capture timing", () => {
 
   it("stops promptly after a full quiet tail and guards 1-poll energy spikes", () => {
     expect(SHORT_WORD_CONTEXT_RETRY_THRESHOLD).toBe(1);
-    expect(SHORT_WORD_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(950);
+    expect(SHORT_WORD_CAPTURE_CONFIG.minCaptureMs).toBe(480);
+    expect(SHORT_WORD_CAPTURE_CONFIG.postSpeechSilenceMs).toBe(520);
 
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 500,
+        elapsedMs: 420,
         speechObserved: true,
-        silenceElapsedMs: 800,
+        silenceElapsedMs: 520,
       }),
     ).toBe(false);
 
     expect(
       shouldAutoStopShortWordCapture({
-        elapsedMs: 1050,
+        elapsedMs: 540,
         speechObserved: true,
-        silenceElapsedMs: 950,
+        silenceElapsedMs: 520,
       }),
     ).toBe(true);
 

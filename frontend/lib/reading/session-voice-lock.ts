@@ -1174,6 +1174,7 @@ export function hydrateTeacherVoiceFromChildProfile(
       });
     }
     if (currentMeta.globalSelectionUpdatedAt > 0 && !currentMeta.childId) {
+      pendingUnboundVoicePersistForChildId = child.id;
       setSpeechPreferencesMeta({
         ...currentMeta,
         childId: child.id,
@@ -1207,6 +1208,21 @@ export function hydrateTeacherVoiceFromChildProfile(
 
   const key = `${child.id}:${rawVoiceId}:${rawGender}:${rawRegion}:${rawSpeed}:${rawUpdatedAt}`;
   if (!options?.force && lastHydratedChildVoiceKey === key) {
+    return null;
+  }
+
+  // If the user just explicitly chose a voice on Dashboard BEFORE selecting any child,
+  // bind that newer pre-child selection to this child instead of overwriting it with an older DB preference.
+  if (
+    !currentMeta.childId &&
+    currentMeta.globalSelectionUpdatedAt > 0 &&
+    (rawUpdatedAt === 0 || currentMeta.globalSelectionUpdatedAt > rawUpdatedAt)
+  ) {
+    pendingUnboundVoicePersistForChildId = child.id;
+    setSpeechPreferencesMeta({
+      ...currentMeta,
+      childId: child.id,
+    });
     return null;
   }
 
@@ -1346,11 +1362,25 @@ export function hasPendingSessionVoiceSwitch(
   return clean ? voiceSwitchedSessions.has(clean) : false;
 }
 
+let pendingUnboundVoicePersistForChildId: string | null = null;
+
+export function consumePendingUnboundVoicePersist(
+  childId: string | null | undefined,
+): boolean {
+  const clean = (childId ?? "").trim();
+  if (!clean || pendingUnboundVoicePersistForChildId !== clean) {
+    return false;
+  }
+  pendingUnboundVoicePersistForChildId = null;
+  return true;
+}
+
 export function resetVoiceLockAndPolicyForTests(): void {
   cachedPolicy = null;
   activeSessionId = null;
   previousSessionIds.length = 0;
   lastHydratedChildVoiceKey = null;
+  pendingUnboundVoicePersistForChildId = null;
   memoryLocks.clear();
   voiceSwitchedSessions.clear();
   utteranceAudits.clear();
