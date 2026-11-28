@@ -712,7 +712,6 @@ function ParentPrivateBookManagerContent({
   }, []);
 
   useEffect(() => {
-    clearPrivateMediaMemoryCache();
     submissionSignatureRef.current = null;
     const requestId = ++detailRequestIdRef.current;
     const controller = new AbortController();

@@ -315,7 +315,7 @@ describe("voice studio service", () => {
         new Promise<Response>((resolve) => {
           setTimeout(
             () => resolve(new Response("Cloudflare 524", { status: 524 })),
-            14_600,
+            3_800,
           );
         }),
     );
@@ -323,7 +323,7 @@ describe("voice studio service", () => {
     const pending = createVoiceStudioService()
       .listVoices()
       .catch((error: unknown) => error);
-    await vi.advanceTimersByTimeAsync(14_600);
+    await vi.advanceTimersByTimeAsync(3_800);
     const err = await pending;
     expect(err).toMatchObject({
       code: "TTS_UNAVAILABLE",
