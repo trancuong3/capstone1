@@ -824,6 +824,7 @@ export async function requestApi<T>(
 
       let response: Response | null = null;
       let attemptError: ServiceError | null = null;
+      let allowColdStartAutoRetry = false;
 
       try {
         timeoutId = setTimeout(() => {
@@ -841,6 +842,7 @@ export async function requestApi<T>(
         });
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
+        allowColdStartAutoRetry = true;
         attemptError = failure(0, "", true);
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -858,10 +860,13 @@ export async function requestApi<T>(
           const coldStartGateway =
             !COLD_START_RETRY_STATUSES.has(response.status) ||
             (await shouldRetryColdStartResponse(response));
+          allowColdStartAutoRetry =
+            COLD_START_RETRY_STATUSES.has(response.status) && coldStartGateway;
           attemptError = failure(
             response.status,
             requestId,
-            response.status >= 500 && coldStartGateway,
+            response.status >= 500 &&
+              (response.status === 503 || coldStartGateway),
             backendMessage,
           );
         } else if (response.status === 204 || response.status === 205) {
@@ -896,6 +901,7 @@ export async function requestApi<T>(
         method === "GET" &&
         attempt < maxRetries &&
         !fetchSignal?.aborted &&
+        allowColdStartAutoRetry &&
         isColdStartRetryableGetError(lastError)
       ) {
         const remainingAfterAttempt = deadlineAt - Date.now();
