@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "OCR-Textblöcke für Seite {page} anzeigen",
     "closePageOcrBlocksAria": "OCR-Textblöcke für Seite {page} schließen",
     "openPageOcrBlocksAction": "OCR-Textblöcke",
-    "closePageOcrBlocksAction": "OCR-Blöcke schließen"
+    "closePageOcrBlocksAction": "OCR-Blöcke schließen",
+    "retryAllFailedAction": "Alle fehlerhaften Seiten erneut prüfen ({count})",
+    "retryingAllFailedButton": "Fehlerhafte Seiten werden eingereiht…",
+    "retryAllSuccessNotice": "{count} fehlerhafte Seite(n) zur erneuten Prüfung eingereiht (abgeschlossene Schritte bleiben erhalten).",
+    "retryAllQueuedOfflineNotice": "Wiederholungsanfragen für {count} fehlerhafte Seite(n) in der OCR-Warteschlange gespeichert. Sie werden automatisch verarbeitet, sobald OCR wieder verfügbar ist.",
+    "retryAllPartialQueueFullNotice": "{retried} fehlerhafte Seite(n) eingereiht; {skipped} weitere Seite(n) pausiert, da die OCR-Warteschlange voll ist. Bitte versuche es in {seconds} Sekunden erneut.",
+    "retryAllPartialFailedNotice": "{retried} fehlerhafte Seite(n) eingereiht; {failed} Seite(n) konnten derzeit nicht eingereiht werden.",
+    "retryAllNoneNotice": "Derzeit gibt es keine fehlerhaften Seiten zum Wiederholen.",
+    "queueFullNotice": "Die OCR-Warteschlange ist derzeit voll. Bitte versuche es in etwa {seconds} Sekunden erneut."
   },
   "ocrContribution": {
     "cardAria": "Beiträge zur Verbesserung der Texterkennung für {title}",

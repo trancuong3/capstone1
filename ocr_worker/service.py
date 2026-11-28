@@ -78,15 +78,19 @@ HIGH_PRIORITY_CLASS = 0x00000080
 
 
 def configure_cpu_thread_caps() -> int:
-    """Apply conservative CPU BLAS/OpenMP thread caps before importing ML runtimes."""
+    """Apply conservative CPU BLAS/OpenMP thread caps before importing ML runtimes.
+
+    Pin OMP_NUM_THREADS=1 and OPENBLAS_NUM_THREADS=1 for PaddlePaddle CPU OpenBLAS
+    thread safety while keeping torch.set_num_threads(CPU_THREADS).
+    """
     raw = (os.getenv("VIREAD_OCR_CPU_THREADS") or "2").strip()
     try:
         threads = max(1, min(4, int(raw)))
     except ValueError:
         threads = 2
+    for key in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+        os.environ[key] = "1"
     for key in (
-        "OMP_NUM_THREADS",
-        "OPENBLAS_NUM_THREADS",
         "MKL_NUM_THREADS",
         "NUMEXPR_NUM_THREADS",
         "VECLIB_MAXIMUM_THREADS",
@@ -491,6 +495,55 @@ def import_ml_modules_safe_order() -> tuple[Any, Any]:
     return torch, paddle
 
 
+_CUDA_ERROR_MARKERS = (
+    "cuda error",
+    "device-side assert",
+    "illegal memory access",
+    "cuda out of memory",
+    "cublas_status",
+    "cudnn_status",
+)
+
+
+def is_cuda_oom_error(exc: BaseException) -> bool:
+    """Return True when exc is a PyTorch CUDA out-of-memory error."""
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is not None:
+        oom_cls = getattr(getattr(torch_mod, "cuda", None), "OutOfMemoryError", None)
+        if isinstance(oom_cls, type) and isinstance(exc, oom_cls):
+            return True
+    if any(cls.__name__ == "OutOfMemoryError" for cls in type(exc).__mro__):
+        return True
+    msg = str(exc).lower()
+    return "cuda out of memory" in msg or ("out of memory" in msg and "cuda" in msg)
+
+
+def is_cuda_runtime_error(exc: BaseException) -> bool:
+    """Return True when exc indicates a CUDA OOM or CUDA device/context failure."""
+    if is_cuda_oom_error(exc):
+        return True
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _CUDA_ERROR_MARKERS)
+
+
+def verify_cuda_health(torch_mod: Any | None = None) -> bool:
+    """Probe CUDA context health with a tiny 1-element allocation + sync (.item())."""
+    mod = torch_mod if torch_mod is not None else sys.modules.get("torch")
+    if mod is None:
+        return True
+    try:
+        cuda = getattr(mod, "cuda", None)
+        if cuda is None or not cuda.is_available():
+            return True
+        probe = mod.zeros(1, device="cuda")
+        val = probe.item()
+        del probe
+        return val == 0 or val == 0.0
+    except Exception as exc:
+        logger.error("CUDA health probe failed: %s: %s", type(exc).__name__, exc)
+        return False
+
+
 def _get_cached_cuda_memory_stats(
     *, allow_cuda_query: bool = True
 ) -> tuple[bool, float | None, float | None]:
@@ -710,6 +763,8 @@ class OcrRuntimeManager:
         self._state_lock = threading.Lock()
         self._wake_event = threading.Event()
         self._initializing: bool = False
+        self._resyncing: bool = False
+        self._cuda_poisoned: bool = False
         self._draining: bool = False
         self._pending_redrain: bool = False
         self._burst_until_monotonic: float = 0.0
@@ -718,6 +773,7 @@ class OcrRuntimeManager:
         self._last_wakeup_reason: str | None = None
         self._pending_model_resync: bool = False
         self._last_model_sync_check_monotonic: float = 0.0
+        self._claimed_job_id: str | None = None
         self._active_job_id: str | None = None
         self._active_job_count: int = 0
         self._last_error: str | None = None
@@ -732,6 +788,11 @@ class OcrRuntimeManager:
             "tesseract_vie": EngineState(),
         }
         self._ocr_engine_mod: Any | None = None
+        self._stats_stop_event = threading.Event()
+        self._stats_thread: threading.Thread | None = None
+        self._cached_system_stats: dict[str, Any] = dict(
+            get_system_memory_stats(allow_cuda_query=False)
+        )
         self.probe_installed()
 
     @property
@@ -875,21 +936,21 @@ class OcrRuntimeManager:
         }
 
     def probe_installed(self) -> dict[str, dict[str, Any]]:
-        paddle_ok = (
-            importlib.util.find_spec("paddleocr") is not None
-            and importlib.util.find_spec("paddle") is not None
-        )
-        viet_ok = (
-            importlib.util.find_spec("vietocr") is not None
-            and importlib.util.find_spec("torch") is not None
-        )
+        def _has_module(name: str) -> bool:
+            try:
+                return importlib.util.find_spec(name) is not None
+            except ValueError:
+                return sys.modules.get(name) is not None
+
+        paddle_ok = _has_module("paddleocr") and _has_module("paddle")
+        viet_ok = _has_module("vietocr") and _has_module("torch")
         tess_ok = False
         tess_binary = shutil.which("tesseract") or (
             r"C:\Program Files\Tesseract-OCR\tesseract.exe"
             if os.path.isfile(r"C:\Program Files\Tesseract-OCR\tesseract.exe")
             else None
         )
-        if tess_binary and importlib.util.find_spec("pytesseract") is not None:
+        if tess_binary and _has_module("pytesseract"):
             try:
                 proc = subprocess.run(
                     [tess_binary, "--list-langs"],
@@ -913,6 +974,8 @@ class OcrRuntimeManager:
         return {name: state.to_dict() for name, state in self._engines.items()}
 
     def _is_ready_unlocked(self) -> bool:
+        if self._cuda_poisoned:
+            return False
         paddle_st = self._engines["paddleocr"]
         viet_st = self._engines["vietocr"]
         return bool(
@@ -927,6 +990,74 @@ class OcrRuntimeManager:
     def is_initializing(self) -> bool:
         with self._state_lock:
             return self._initializing
+
+    def mark_job_claimed(self, job_id: str) -> None:
+        with self._state_lock:
+            self._claimed_job_id = str(job_id)
+
+    def clear_job_claimed(self, job_id: str | None = None) -> None:
+        with self._state_lock:
+            if job_id is None or self._claimed_job_id == str(job_id):
+                self._claimed_job_id = None
+
+    def is_resyncing(self) -> bool:
+        with self._state_lock:
+            return self._resyncing
+
+    def is_cuda_poisoned(self) -> bool:
+        with self._state_lock:
+            return self._cuda_poisoned
+
+    def mark_cuda_poisoned(self, reason: str = "CUDA_CONTEXT_CORRUPTED") -> None:
+        with self._state_lock:
+            self._cuda_poisoned = True
+            self._last_error = str(reason)
+
+    def refresh_system_stats(self, *, allow_cuda_query: bool | None = None) -> dict[str, Any]:
+        """Refresh the immutable in-memory system stats snapshot outside request handlers."""
+        if self._inference_lock.locked():
+            with self._state_lock:
+                return dict(self._cached_system_stats)
+        query_cuda = True if allow_cuda_query is None else bool(allow_cuda_query)
+        fresh = dict(get_system_memory_stats(allow_cuda_query=query_cuda))
+        with self._state_lock:
+            self._cached_system_stats = fresh
+            return dict(self._cached_system_stats)
+
+    def start_system_stats_updater(self, interval_seconds: float = 15.0) -> None:
+        """Start background daemon thread refreshing RAM/pagefile/VRAM every interval_seconds."""
+        with self._state_lock:
+            if self._stats_thread is not None and self._stats_thread.is_alive():
+                return
+            self._stats_stop_event.clear()
+            interval = max(0.05, float(interval_seconds))
+
+            def _stats_loop() -> None:
+                while not self._stats_stop_event.is_set():
+                    try:
+                        if not self._inference_lock.locked():
+                            self.refresh_system_stats(allow_cuda_query=True)
+                    except Exception:
+                        pass
+                    if self._stats_stop_event.wait(timeout=interval):
+                        break
+
+            t = threading.Thread(
+                target=_stats_loop,
+                daemon=True,
+                name="ocr_worker_sys_stats",
+            )
+            self._stats_thread = t
+            t.start()
+
+    def stop_system_stats_updater(self, timeout: float = 2.0) -> None:
+        """Cleanly stop the background system stats updater thread."""
+        self._stats_stop_event.set()
+        with self._state_lock:
+            t = self._stats_thread
+            self._stats_thread = None
+        if t is not None and t.is_alive():
+            t.join(timeout=timeout)
 
     def sync_active_model(
         self,
@@ -1211,6 +1342,7 @@ class OcrRuntimeManager:
         finally:
             with self._state_lock:
                 self._initializing = False
+        self.refresh_system_stats(allow_cuda_query=True)
         return self.health_payload()
 
     def _sync_engine_load_states(
@@ -1311,55 +1443,61 @@ class OcrRuntimeManager:
             desired_sha[:12],
         )
         os.environ["VIREAD_OCR_WORKER_PROCESS"] = "1"
-        with self._inference_lock:
-            sync_info = self.sync_active_model(
-                manifest_fetcher=lambda: manifest,
-                artifact_fetcher=artifact_fetcher,
-                direct_url_fetcher=direct_url_fetcher,
-            )
-            if self._ocr_engine_mod is None:
-                with self._state_lock:
-                    self._pending_model_resync = False
-                return True
-            ocr_engine = self._ocr_engine_mod
-            self._install_local_artifact_resolver(ocr_engine)
-            ocr_engine.set_active_viread_model_cache(
-                {
-                    "profile": sync_info["profile"],
-                    "checkpoint_sha256": sync_info["checkpoint_sha256"],
-                    "storage_path": sync_info.get("storage_path")
-                    or (
-                        f"worker-cache/viread-vietocr-v2-{sync_info['checkpoint_sha256']}.pth"
-                        if sync_info["checkpoint_sha256"] != ORIGINAL_VIETOCR_SHA256
-                        else None
-                    ),
-                }
-            )
-            warmup_result = ocr_engine.warmup_ocr_engines()
-            warmup_map = warmup_result if isinstance(warmup_result, dict) else {}
-            runtime_status = ocr_engine.get_loaded_vietocr_runtime_status()
-            if not isinstance(runtime_status, dict):
-                runtime_status = {}
-            loaded_sha = str(
-                runtime_status.get("loaded_checkpoint_sha256")
-                or runtime_status.get("active_model_sha256")
-                or sync_info["checkpoint_sha256"]
-            ).lower()
-            loaded_profile = str(
-                runtime_status.get("loaded_profile")
-                or runtime_status.get("active_model_profile")
-                or sync_info["profile"]
-            )
-            paddle_loaded, viet_loaded = self._sync_engine_load_states(
-                ocr_engine,
-                warmup_map=warmup_map,
-                loaded_profile=loaded_profile,
-                loaded_sha=loaded_sha,
-            )
-            if paddle_loaded and viet_loaded:
-                with self._state_lock:
-                    if self._is_ready_unlocked():
-                        self._last_error = None
+        with self._state_lock:
+            self._resyncing = True
+        try:
+            with self._inference_lock:
+                sync_info = self.sync_active_model(
+                    manifest_fetcher=lambda: manifest,
+                    artifact_fetcher=artifact_fetcher,
+                    direct_url_fetcher=direct_url_fetcher,
+                )
+                if self._ocr_engine_mod is None:
+                    with self._state_lock:
+                        self._pending_model_resync = False
+                    return True
+                ocr_engine = self._ocr_engine_mod
+                self._install_local_artifact_resolver(ocr_engine)
+                ocr_engine.set_active_viread_model_cache(
+                    {
+                        "profile": sync_info["profile"],
+                        "checkpoint_sha256": sync_info["checkpoint_sha256"],
+                        "storage_path": sync_info.get("storage_path")
+                        or (
+                            f"worker-cache/viread-vietocr-v2-{sync_info['checkpoint_sha256']}.pth"
+                            if sync_info["checkpoint_sha256"] != ORIGINAL_VIETOCR_SHA256
+                            else None
+                        ),
+                    }
+                )
+                warmup_result = ocr_engine.warmup_ocr_engines()
+                warmup_map = warmup_result if isinstance(warmup_result, dict) else {}
+                runtime_status = ocr_engine.get_loaded_vietocr_runtime_status()
+                if not isinstance(runtime_status, dict):
+                    runtime_status = {}
+                loaded_sha = str(
+                    runtime_status.get("loaded_checkpoint_sha256")
+                    or runtime_status.get("active_model_sha256")
+                    or sync_info["checkpoint_sha256"]
+                ).lower()
+                loaded_profile = str(
+                    runtime_status.get("loaded_profile")
+                    or runtime_status.get("active_model_profile")
+                    or sync_info["profile"]
+                )
+                paddle_loaded, viet_loaded = self._sync_engine_load_states(
+                    ocr_engine,
+                    warmup_map=warmup_map,
+                    loaded_profile=loaded_profile,
+                    loaded_sha=loaded_sha,
+                )
+                if paddle_loaded and viet_loaded:
+                    with self._state_lock:
+                        if self._is_ready_unlocked():
+                            self._last_error = None
+        finally:
+            with self._state_lock:
+                self._resyncing = False
         return True
 
     def _run_smoke_verification(self, ocr_engine: Any) -> None:
@@ -1411,7 +1549,7 @@ class OcrRuntimeManager:
             import pytesseract
 
             with Image.open(io.BytesIO(image_bytes)) as img:
-                txt = pytesseract.image_to_string(img, lang="vie")
+                txt = pytesseract.image_to_string(img, lang="vie", timeout=15)
             return bool(txt and txt.strip())
         except Exception:
             return False
@@ -1447,6 +1585,23 @@ class OcrRuntimeManager:
         with self._active_job_scope(job_id):
             try:
                 result = ocr_engine.extract_text_and_boxes(image_bytes)
+            except Exception as exc:
+                if is_cuda_runtime_error(exc):
+                    gc.collect()
+                    if torch_mod is not None:
+                        try:
+                            if torch_mod.cuda.is_available():
+                                torch_mod.cuda.empty_cache()
+                        except Exception:
+                            pass
+                    if not verify_cuda_health(torch_mod):
+                        logger.error(
+                            "CUDA context corrupted after %s on job %s; quarantining runtime as DEGRADED.",
+                            type(exc).__name__,
+                            job_id,
+                        )
+                        self.mark_cuda_poisoned("CUDA_CONTEXT_CORRUPTED")
+                raise
             finally:
                 gc.collect()
                 if torch_mod is not None:
@@ -1512,21 +1667,23 @@ class OcrRuntimeManager:
         }
 
     def health_payload(self) -> dict[str, Any]:
-        ready = self.is_ready()
         with self._state_lock:
+            ready = self._is_ready_unlocked()
             engines = self.engines_snapshot()
-            active_id = self._active_job_id
-            active_count = self._active_job_count
+            active_id = self._active_job_id or self._claimed_job_id
+            active_count = max(self._active_job_count, 1 if self._claimed_job_id else 0)
+            resyncing = self._resyncing
+            cuda_poisoned = self._cuda_poisoned
             profile = self._model_profile
             sha = self._model_sha256
             last_error = self._last_error
             standby_mode = self._standby_mode
             wakeup_count = self._wakeup_count
             initializing = self._initializing
-        sys_stats = get_system_memory_stats(
-            allow_cuda_query=not self._inference_lock.locked()
-        )
-        if active_count > 0:
+            sys_stats = dict(self._cached_system_stats)
+        if cuda_poisoned:
+            worker_status = "DEGRADED"
+        elif active_count > 0 or resyncing:
             worker_status = "BUSY"
         elif ready:
             worker_status = "IDLE"
@@ -1558,6 +1715,8 @@ class OcrRuntimeManager:
         }
 
     def version_payload(self) -> dict[str, Any]:
+        with self._state_lock:
+            proc_priority = self._cached_system_stats.get("process_priority")
         return {
             "app_version": self.app_version,
             "git_sha": self.git_sha,
@@ -1568,17 +1727,26 @@ class OcrRuntimeManager:
             "torch_version": self._torch_version,
             "paddle_version": self._paddle_version,
             "cpu_threads": CPU_THREADS,
-            "process_priority": get_windows_priority_name(),
+            "process_priority": proc_priority or get_windows_priority_name(),
         }
 
     def heartbeat_payload(self) -> dict[str, Any]:
         health = self.health_payload()
+        hb_status = (
+            health["worker_status"]
+            if (
+                self._ocr_engine_mod is not None
+                or health["worker_status"] == "BUSY"
+                or self.is_cuda_poisoned()
+            )
+            else "STARTING"
+        )
         return {
             "worker_id": self.worker_id,
             "hostname": socket.gethostname(),
             "app_version": self.app_version,
             "git_sha": self.git_sha,
-            "status": health["worker_status"] if self._ocr_engine_mod is not None else "STARTING",
+            "status": hb_status,
             "active_job_id": health["active_job_id"],
             "active_job_count": health["active_job_count"],
             "concurrency_limit": 1,

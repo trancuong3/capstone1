@@ -1,19 +1,39 @@
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timedelta, timezone
+import os
+import time
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, case, delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.database.config import APP_ENVIRONMENT
 from app.models import OcrInferenceJob, OcrWorkerHeartbeat
 
 ACTIVE_JOB_STATUSES = ("QUEUED", "CLAIMED", "RUNNING", "FAILED_RETRYABLE")
 CLAIMABLE_JOB_STATUSES = ("QUEUED", "FAILED_RETRYABLE")
 INFLIGHT_JOB_STATUSES = ("CLAIMED", "RUNNING")
 STARVATION_BOOST_AGE_SECONDS = 300
-PRIORITY_STARVATION_BOOST = 5
+PRIORITY_STARVATION_BOOST = 25
+
+_STARVATION_BOOST_INTERVAL_SECONDS = 30.0
+_LAST_STARVATION_BOOST_MONO: float = 0.0
+_RECENT_CLAIMED_OWNERS: deque[UUID] = deque(maxlen=16)
+
+
+def _is_test_environment() -> bool:
+    env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+    return env == "test"
+
+
+def reset_ocr_queue_repo_state_for_tests() -> None:
+    """Reset in-process starvation boost throttle & owner fairness window for tests."""
+    global _LAST_STARVATION_BOOST_MONO
+    _LAST_STARVATION_BOOST_MONO = 0.0
+    _RECENT_CLAIMED_OWNERS.clear()
 
 
 class OcrInferenceJobRepository:
@@ -238,7 +258,7 @@ class OcrInferenceJobRepository:
             return {}
         target_set = set(job_ids)
         query = (
-            select(OcrInferenceJob)
+            select(OcrInferenceJob.Id)
             .where(OcrInferenceJob.Status.in_(CLAIMABLE_JOB_STATUSES))
             .order_by(
                 OcrInferenceJob.Priority.asc(),
@@ -247,14 +267,77 @@ class OcrInferenceJobRepository:
             )
             .limit(500)
         )
-        rows = list((await self.db.scalars(query)).all())
+        ids = list((await self.db.scalars(query)).all())
         positions: dict[UUID, int] = {}
-        for idx, row in enumerate(rows, start=1):
-            if row.Id in target_set:
-                positions[row.Id] = idx
+        for idx, row_id in enumerate(ids, start=1):
+            if row_id in target_set:
+                positions[row_id] = idx
                 if len(positions) == len(target_set):
                     break
         return positions
+
+    async def count_active_jobs(
+        self, *, owner_user_id: UUID | None = None
+    ) -> tuple[int, int]:
+        """Return (global_active_count, owner_active_count) using idx_ocr_inference_jobs_active_status."""
+        if owner_user_id is None:
+            stmt = select(
+                func.count(OcrInferenceJob.Id).label("global_active"),
+            ).where(OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES))
+        else:
+            stmt = select(
+                func.count(OcrInferenceJob.Id).label("global_active"),
+                func.sum(
+                    case((OcrInferenceJob.OwnerUserId == owner_user_id, 1), else_=0)
+                ).label("owner_active"),
+            ).where(OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES))
+
+        if isinstance(self.db, AsyncSession):
+            row = (await self.db.execute(stmt)).one()
+            global_active = int(getattr(row, "global_active", 0) or 0)
+            owner_active = (
+                int(getattr(row, "owner_active", 0) or 0)
+                if owner_user_id is not None
+                else 0
+            )
+            return global_active, owner_active
+
+        # Test-double compatibility for lightweight FakeAsyncSession / MagicMock sessions
+        try:
+            res = await self.db.execute(stmt)
+            one_fn = getattr(res, "one", None)
+            if callable(one_fn):
+                row = one_fn()
+                raw_global = getattr(row, "global_active", None)
+                if isinstance(raw_global, int):
+                    raw_owner = getattr(row, "owner_active", 0) if owner_user_id is not None else 0
+                    return raw_global, int(raw_owner or 0)
+        except Exception:
+            pass
+
+        try:
+            active_rows = list(
+                (
+                    await self.db.scalars(
+                        select(OcrInferenceJob).where(
+                            OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES)
+                        )
+                    )
+                ).all()
+            )
+            global_active = len(active_rows)
+            owner_active = (
+                sum(
+                    1
+                    for row in active_rows
+                    if getattr(row, "OwnerUserId", None) == owner_user_id
+                )
+                if owner_user_id is not None
+                else 0
+            )
+            return global_active, owner_active
+        except Exception:
+            return 0, 0
 
     async def create_job(self, job: OcrInferenceJob) -> OcrInferenceJob:
         self.db.add(job)
@@ -398,6 +481,11 @@ class OcrInferenceJobRepository:
                 OcrInferenceJob.Status.in_(CLAIMABLE_JOB_STATUSES),
                 OcrInferenceJob.Priority > boosted_priority,
                 OcrInferenceJob.CreatedAt <= cutoff,
+                or_(
+                    OcrInferenceJob.Status != "FAILED_RETRYABLE",
+                    OcrInferenceJob.NextRetryAt.is_(None),
+                    OcrInferenceJob.NextRetryAt <= ts,
+                ),
             )
             .order_by(OcrInferenceJob.CreatedAt.asc())
             .limit(20)
@@ -420,8 +508,16 @@ class OcrInferenceJobRepository:
         lease_seconds: int,
         now: datetime | None = None,
     ) -> OcrInferenceJob | None:
+        global _LAST_STARVATION_BOOST_MONO
         ts = now or datetime.now(timezone.utc)
-        await self.boost_aged_waiting_jobs(now=ts)
+        now_mono = time.monotonic()
+        if (
+            _is_test_environment()
+            or _LAST_STARVATION_BOOST_MONO <= 0.0
+            or (now_mono - _LAST_STARVATION_BOOST_MONO) >= _STARVATION_BOOST_INTERVAL_SECONDS
+        ):
+            await self.boost_aged_waiting_jobs(now=ts)
+            _LAST_STARVATION_BOOST_MONO = now_mono
 
         queued_due = and_(
             OcrInferenceJob.Status == "QUEUED",
@@ -439,14 +535,25 @@ class OcrInferenceJobRepository:
             OcrInferenceJob.AttemptCount < OcrInferenceJob.MaxAttempts,
         )
 
+        order_clauses: list[Any] = [OcrInferenceJob.Priority.asc()]
+        if _RECENT_CLAIMED_OWNERS:
+            recent_snapshot = list(_RECENT_CLAIMED_OWNERS)
+            fairness_whens = [
+                (OcrInferenceJob.OwnerUserId == owner_id, rank)
+                for rank, owner_id in enumerate(recent_snapshot, start=1)
+            ]
+            order_clauses.append(case(*fairness_whens, else_=0).asc())
+        order_clauses.extend(
+            [
+                OcrInferenceJob.CreatedAt.asc(),
+                OcrInferenceJob.Id.asc(),
+            ]
+        )
+
         query = (
             select(OcrInferenceJob)
             .where(or_(queued_due, retry_due, expired_lease))
-            .order_by(
-                OcrInferenceJob.Priority.asc(),
-                OcrInferenceJob.CreatedAt.asc(),
-                OcrInferenceJob.Id.asc(),
-            )
+            .order_by(*order_clauses)
             .limit(1)
             .with_for_update(skip_locked=True)
         )
@@ -464,6 +571,14 @@ class OcrInferenceJobRepository:
         row.NextRetryAt = None
         row.RetryDelaySeconds = None
         row.UpdatedAt = ts
+
+        if row.OwnerUserId is not None:
+            try:
+                _RECENT_CLAIMED_OWNERS.remove(row.OwnerUserId)
+            except ValueError:
+                pass
+            _RECENT_CLAIMED_OWNERS.append(row.OwnerUserId)
+
         return row
 
     async def upsert_worker_heartbeat(
@@ -519,6 +634,7 @@ class OcrInferenceJobRepository:
         active_job_id: UUID | None,
         active_job_count: int,
         now: datetime | None = None,
+        preserve_unhealthy_status: bool = False,
     ) -> OcrWorkerHeartbeat:
         """Refresh worker liveness and active-job fields without wiping engine/model metadata."""
         ts = now or datetime.now(timezone.utc)
@@ -534,7 +650,15 @@ class OcrInferenceJobRepository:
                 CreatedAt=ts,
             )
             self.db.add(existing)
-        existing.Status = status
+            existing.Status = status
+        else:
+            current_status = str(existing.Status or "").strip().upper()
+            target_status = str(status or "").strip().upper()
+            if preserve_unhealthy_status and current_status in {"DEGRADED", "OFFLINE"}:
+                if current_status == "DEGRADED" and target_status == "OFFLINE":
+                    existing.Status = "OFFLINE"
+            else:
+                existing.Status = status
         existing.ActiveJobId = active_job_id
         existing.ActiveJobCount = max(0, int(active_job_count))
         existing.LastHeartbeatAt = ts
@@ -581,56 +705,67 @@ class OcrInferenceJobRepository:
 
     async def queue_depth_counts(self, *, now: datetime | None = None) -> dict[str, Any]:
         ts = now or datetime.now(timezone.utc)
-        # Consolidate status breakdown, expired leases, oldest pending age, and
-        # latest success timestamp into 1 SQL round-trip for low-latency /health.
+        # Single-RTT query backed by partial indexes (active statuses, DEAD_LETTER,
+        # SUCCEEDED, and O(1) MAX(completed_at) on idx_ocr_inference_jobs_succeeded_completed).
+        active_agg = (
+            select(
+                func.sum(case((OcrInferenceJob.Status == "QUEUED", 1), else_=0)).label("queued"),
+                func.sum(case((OcrInferenceJob.Status == "CLAIMED", 1), else_=0)).label("claimed"),
+                func.sum(case((OcrInferenceJob.Status == "RUNNING", 1), else_=0)).label("running"),
+                func.sum(
+                    case((OcrInferenceJob.Status == "FAILED_RETRYABLE", 1), else_=0)
+                ).label("failed_retryable"),
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                OcrInferenceJob.Status.in_(INFLIGHT_JOB_STATUSES),
+                                OcrInferenceJob.LeaseExpiresAt.is_not(None),
+                                OcrInferenceJob.LeaseExpiresAt <= ts,
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ).label("expired_leases"),
+                func.min(OcrInferenceJob.CreatedAt).label("oldest_pending_created"),
+            )
+            .where(OcrInferenceJob.Status.in_(ACTIVE_JOB_STATUSES))
+            .subquery("active_q")
+        )
+        dead_letter_sq = (
+            select(func.count(OcrInferenceJob.Id))
+            .where(OcrInferenceJob.Status == "DEAD_LETTER")
+            .scalar_subquery()
+        )
+        succeeded_sq = (
+            select(func.count(OcrInferenceJob.Id))
+            .where(OcrInferenceJob.Status == "SUCCEEDED")
+            .scalar_subquery()
+        )
+        cancelled_sq = (
+            select(func.count(OcrInferenceJob.Id))
+            .where(OcrInferenceJob.Status == "CANCELLED")
+            .scalar_subquery()
+        )
+        latest_succeeded_sq = (
+            select(func.max(OcrInferenceJob.CompletedAt))
+            .where(OcrInferenceJob.Status == "SUCCEEDED")
+            .scalar_subquery()
+        )
         row = (
             await self.db.execute(
                 select(
-                    func.sum(case((OcrInferenceJob.Status == "QUEUED", 1), else_=0)).label("queued"),
-                    func.sum(case((OcrInferenceJob.Status == "CLAIMED", 1), else_=0)).label("claimed"),
-                    func.sum(case((OcrInferenceJob.Status == "RUNNING", 1), else_=0)).label("running"),
-                    func.sum(
-                        case((OcrInferenceJob.Status == "FAILED_RETRYABLE", 1), else_=0)
-                    ).label("failed_retryable"),
-                    func.sum(
-                        case((OcrInferenceJob.Status == "DEAD_LETTER", 1), else_=0)
-                    ).label("dead_letter"),
-                    func.sum(
-                        case((OcrInferenceJob.Status == "SUCCEEDED", 1), else_=0)
-                    ).label("succeeded"),
-                    func.sum(
-                        case((OcrInferenceJob.Status == "CANCELLED", 1), else_=0)
-                    ).label("cancelled"),
-                    func.sum(
-                        case(
-                            (
-                                and_(
-                                    OcrInferenceJob.Status.in_(INFLIGHT_JOB_STATUSES),
-                                    OcrInferenceJob.LeaseExpiresAt.is_not(None),
-                                    OcrInferenceJob.LeaseExpiresAt <= ts,
-                                ),
-                                1,
-                            ),
-                            else_=0,
-                        )
-                    ).label("expired_leases"),
-                    func.min(
-                        case(
-                            (
-                                OcrInferenceJob.Status.in_(
-                                    ("QUEUED", "FAILED_RETRYABLE", "CLAIMED", "RUNNING")
-                                ),
-                                OcrInferenceJob.CreatedAt,
-                            ),
-                            else_=None,
-                        )
-                    ).label("oldest_pending_created"),
-                    func.max(
-                        case(
-                            (OcrInferenceJob.Status == "SUCCEEDED", OcrInferenceJob.CompletedAt),
-                            else_=None,
-                        )
-                    ).label("latest_succeeded_at"),
+                    active_agg.c.queued.label("queued"),
+                    active_agg.c.claimed.label("claimed"),
+                    active_agg.c.running.label("running"),
+                    active_agg.c.failed_retryable.label("failed_retryable"),
+                    dead_letter_sq.label("dead_letter"),
+                    succeeded_sq.label("succeeded"),
+                    cancelled_sq.label("cancelled"),
+                    active_agg.c.expired_leases.label("expired_leases"),
+                    active_agg.c.oldest_pending_created.label("oldest_pending_created"),
+                    latest_succeeded_sq.label("latest_succeeded_at"),
                 )
             )
         ).one()

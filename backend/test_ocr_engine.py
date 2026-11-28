@@ -817,6 +817,118 @@ class DualEngineOcrTests(unittest.TestCase):
                 sys.modules.pop(key, None)
             sys.modules.update(saved_lmdb)
 
+    def test_giant_image_downscale_guard_and_fast_background_normalization(self):
+        """Giant 4000x4000 images are downscaled to max edge 2600 while preserving aspect ratio and fast blur."""
+        giant_sq_bytes = sample_png_bytes(4000, 4000)
+        decoded_sq = ocr_engine._decode_image_bytes(giant_sq_bytes)
+        self.assertEqual(decoded_sq.shape, (2600, 2600, 3))
+
+        giant_rect_bytes = sample_png_bytes(4000, 2000)
+        decoded_rect = ocr_engine._decode_image_bytes(giant_rect_bytes)
+        self.assertEqual(decoded_rect.shape, (1300, 2600, 3))
+
+        captured_shapes: list[tuple[int, ...]] = []
+        quad = [[260.0, 260.0], [1040.0, 260.0], [1040.0, 390.0], [260.0, 390.0]]
+
+        def fake_paddle_ocr(img, **_kwargs):
+            captured_shapes.append(tuple(img.shape))
+            return [[[quad, ("Xin chao", 0.96)]]]
+
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.side_effect = fake_paddle_ocr
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "Xin chào"
+
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+        ):
+            result = ocr_engine.extract_text_and_boxes(giant_sq_bytes)
+
+        self.assertEqual(captured_shapes[0], (2600, 2600, 3))
+        self.assertEqual(result["text"], "Xin chào")
+        for word in result["words"]:
+            x, y, w, h = word["bbox"]
+            self.assertTrue(0.0 <= x <= 1.0 and 0.0 <= y <= 1.0)
+            self.assertTrue(x + w <= 1.0 and y + h <= 1.0)
+
+        # Verify _normalize_text_background downscales 4x before GaussianBlur on large pages
+        large_gray = np.full((2600, 2600), 230, dtype=np.uint8)
+        large_gray[200:260, 200:600] = 30
+        blur_input_shapes: list[tuple[int, ...]] = []
+        real_blur = cv2.GaussianBlur
+
+        def spy_blur(src, ksize, *args, **kwargs):
+            blur_input_shapes.append(tuple(src.shape))
+            return real_blur(src, ksize, *args, **kwargs)
+
+        t0 = time.perf_counter()
+        with patch.object(ocr_engine.cv2, "GaussianBlur", side_effect=spy_blur):
+            normalized = ocr_engine._normalize_text_background(large_gray)
+        elapsed_s = time.perf_counter() - t0
+        self.assertEqual(normalized.shape, (2600, 2600))
+        self.assertEqual(normalized.dtype, np.uint8)
+        self.assertEqual(blur_input_shapes, [(650, 650)])
+        self.assertLess(elapsed_s, 3.0)
+
+    def test_tesseract_timeouts_and_dual_engine_page_time_budget(self):
+        """Tesseract calls carry hard timeouts and dual-engine respects soft/hard per-page budgets."""
+        data = {
+            "text": ["Xin"],
+            "left": [10],
+            "top": [20],
+            "width": [40],
+            "height": [20],
+            "conf": ["90"],
+            "line_num": [1],
+        }
+        with patch.object(ocr_engine.pytesseract, "image_to_data", return_value=data) as mock_tess:
+            ocr_engine._extract_text_and_boxes_tesseract(sample_png_bytes())
+        self.assertEqual(mock_tess.call_args.kwargs.get("timeout"), 30)
+
+        # Soft budget (45s) skips secondary crop refinement & adjudication
+        quad = [[40.0, 30.0], [260.0, 30.0], [260.0, 70.0], [40.0, 70.0]]
+        mock_paddle = MagicMock()
+        mock_paddle.ocr.return_value = [[[quad, ("Chu meo", 0.95)]]]
+        mock_viet = MagicMock()
+        mock_viet.predict.return_value = "Chú mèo"
+
+        ticks = iter([100.0, 101.0, 146.0, 147.0, 148.0, 149.0])
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle, mock_viet)),
+            patch.object(ocr_engine, "_recognize_uncertain_word_crops") as crop_spy,
+            patch.object(ocr_engine, "_adjudicate_disputed_words") as adj_spy,
+            patch.object(ocr_engine.time, "monotonic", side_effect=lambda: next(ticks, 149.0)),
+        ):
+            soft_res = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+        crop_spy.assert_not_called()
+        adj_spy.assert_not_called()
+        self.assertTrue(soft_res["metadata"]["selective_crop_stats"]["skipped_by_time_budget"])
+        self.assertTrue(soft_res["metadata"]["page_time_budget"]["soft_skipped"])
+        self.assertEqual(soft_res["text"], "Chú mèo")
+
+        # Hard budget (90s) aborts remaining VietOCR lines and returns best lines
+        quad2 = [[40.0, 90.0], [260.0, 90.0], [260.0, 130.0], [40.0, 130.0]]
+        mock_paddle2 = MagicMock()
+        mock_paddle2.ocr.return_value = [[[quad, ("Dong mot", 0.95)], [quad2, ("Dong hai", 0.95)]]]
+        mock_viet2 = MagicMock()
+        mock_viet2.predict.return_value = "Dòng một"
+        hard_ticks = iter([200.0, 201.0, 295.0, 296.0, 297.0, 298.0])
+        with (
+            patch.dict(os.environ, {"OCR_DEBUG_BOXES_PATH": ""}),
+            patch.object(ocr_engine.cv2, "imwrite"),
+            patch.object(ocr_engine, "_get_ocr_engines", return_value=(mock_paddle2, mock_viet2)),
+            patch.object(ocr_engine.time, "monotonic", side_effect=lambda: next(hard_ticks, 298.0)),
+        ):
+            hard_res = ocr_engine.extract_text_and_boxes(sample_png_bytes(400, 200))
+        self.assertEqual(mock_viet2.predict.call_count, 1)
+        self.assertTrue(hard_res["metadata"]["page_time_budget"]["hard_aborted"])
+        self.assertIn("Dòng một", hard_res["text"])
+        self.assertIn("Dong hai", hard_res["text"])
+
 
 if __name__ == "__main__":
     unittest.main()

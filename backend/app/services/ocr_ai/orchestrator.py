@@ -331,9 +331,9 @@ class OcrCorrectionOrchestrator:
                 if cloud_timeout is not None and cloud_timeout <= 0:
                     raise OcrProviderError(
                         provider=provider.name,
-                        code="PROVIDER_TIMEOUT",
+                        code="BUDGET_EXHAUSTED",
                         status_code=504,
-                        disables_family=True,
+                        disables_family=False,
                     )
                 coro = provider.correct_chunk(
                     chunk=request_chunk,
@@ -353,7 +353,7 @@ class OcrCorrectionOrchestrator:
                 else:
                     result = await coro
             except OcrProviderError as exc:
-                if cb is not None and provider_key is not None:
+                if cb is not None and provider_key is not None and exc.code != "BUDGET_EXHAUSTED":
                     kind, trips_quota = classify_ocr_provider_error(
                         exc.code, exc.upstream_status_code
                     )
@@ -366,30 +366,29 @@ class OcrCorrectionOrchestrator:
                             retry_after_seconds=exc.retry_after_seconds,
                         )
                         prov_probe_acquired = False
-                        if trips_quota and quota_key is not None:
+                        # Isolate per-model daily `limit: 0` caps to `provider:*` so healthy
+                        # sibling models in the same family are never locked out for 6 hours.
+                        if trips_quota and quota_key is not None and not exc.limit_zero:
                             cb.record_failure(
                                 quota_key,
                                 kind=kind,
                                 http_status=exc.upstream_status_code,
-                                limit_zero=exc.limit_zero,
+                                limit_zero=False,
                                 retry_after_seconds=exc.retry_after_seconds,
                             )
                             quota_probe_acquired = False
                 if exc.disables_family:
                     is_family_wide_error = (
-                        exc.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}
-                        or exc.upstream_status_code in {401, 403, 429}
+                        not exc.limit_zero
+                        and (
+                            exc.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}
+                            or exc.upstream_status_code in {401, 403, 429}
+                        )
                     )
-                    has_healthy_sibling = any(
-                        candidate.family == provider.family
-                        and candidate.name != provider.name
-                        and candidate.name in healthy_providers
-                        for candidate in self.providers
-                    )
-                    if has_healthy_sibling and not is_family_wide_error:
-                        disabled_providers.add(provider.name)
-                    else:
+                    if is_family_wide_error:
                         disabled_families.add(provider.family)
+                    else:
+                        disabled_providers.add(provider.name)
                 elapsed_ms = int((time.perf_counter() - started) * 1000)
                 self._emit_provider_event(
                     on_provider_event,

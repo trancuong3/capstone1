@@ -245,6 +245,7 @@ class CircuitBreakerRegistry:
         auth_cooldown_seconds: float = 3600.0,
         limit_zero_cooldown_seconds: float = 21600.0,
         deprecated_cooldown_seconds: float = 86400.0,
+        transient_failure_threshold: int = 2,
     ) -> None:
         self._clock = clock
         self._base_cooldown = max(0.01, float(base_cooldown_seconds))
@@ -252,6 +253,7 @@ class CircuitBreakerRegistry:
         self._auth_cooldown = max(self._base_cooldown, float(auth_cooldown_seconds))
         self._limit_zero_cooldown = max(self._base_cooldown, float(limit_zero_cooldown_seconds))
         self._deprecated_cooldown = max(self._base_cooldown, float(deprecated_cooldown_seconds))
+        self._transient_failure_threshold = max(1, int(transient_failure_threshold))
         self._lock = threading.Lock()
         self._entries: dict[str, _CircuitEntry] = {}
 
@@ -321,11 +323,26 @@ class CircuitBreakerRegistry:
         now = self._clock()
         with self._lock:
             entry = self._entry(key)
+            was_half_open = entry.state == CircuitState.HALF_OPEN
             entry.consecutive_failures += 1
             entry.last_error_kind = kind
             entry.last_http_status = http_status
             entry.last_failure_at = now
             entry.half_open_probe_in_flight = False
+
+            is_transient = (
+                not limit_zero
+                and http_status != 404
+                and kind in (AiErrorKind.TIMEOUT, AiErrorKind.NETWORK_ERROR)
+            )
+            if (
+                is_transient
+                and not was_half_open
+                and entry.consecutive_failures < self._transient_failure_threshold
+            ):
+                entry.state = CircuitState.CLOSED
+                entry.open_until = 0.0
+                return 0.0
 
             if limit_zero:
                 cooldown = self._limit_zero_cooldown
@@ -334,7 +351,9 @@ class CircuitBreakerRegistry:
             elif kind == AiErrorKind.UNSUPPORTED_CAPABILITY or http_status == 404:
                 cooldown = self._deprecated_cooldown
             else:
-                exp_cooldown = self._base_cooldown * (2 ** max(0, entry.consecutive_failures - 1))
+                threshold_offset = self._transient_failure_threshold if is_transient else 1
+                exp_step = max(0, entry.consecutive_failures - threshold_offset)
+                exp_cooldown = self._base_cooldown * (2 ** exp_step)
                 cooldown = min(self._max_cooldown, exp_cooldown)
                 if retry_after_seconds is not None and retry_after_seconds > 0:
                     cooldown = max(cooldown, min(self._max_cooldown, float(retry_after_seconds)))
@@ -342,6 +361,43 @@ class CircuitBreakerRegistry:
             entry.state = CircuitState.OPEN
             entry.open_until = now + cooldown
             return cooldown
+
+    def remaining_cooldown_seconds(self, key: str) -> float:
+        now = self._clock()
+        with self._lock:
+            entry = self._entries.get(key)
+            if entry is None or entry.state != CircuitState.OPEN:
+                return 0.0
+            return max(0.0, entry.open_until - now)
+
+    def max_cloud_cooldown_seconds(
+        self,
+        keys: Sequence[str] | None = None,
+        *,
+        cap_seconds: float | None = None,
+    ) -> float:
+        """Return longest active short-term cloud cooldown (excludes local providers and multi-hour locks)."""
+        now = self._clock()
+        max_remaining = 0.0
+        with self._lock:
+            target_keys = tuple(keys) if keys is not None else tuple(self._entries.keys())
+            for key in target_keys:
+                if keys is None and (
+                    key.startswith("provider:ollama")
+                    or key.startswith("provider:local_")
+                ):
+                    continue
+                entry = self._entries.get(key)
+                if entry is None or entry.state != CircuitState.OPEN:
+                    continue
+                remaining = max(0.0, entry.open_until - now)
+                if keys is None and remaining > self._max_cooldown:
+                    continue
+                if remaining > max_remaining:
+                    max_remaining = remaining
+        if cap_seconds is not None:
+            return min(max(0.0, float(cap_seconds)), max_remaining)
+        return max_remaining
 
     def reset(self, key: str | None = None) -> None:
         with self._lock:
@@ -1185,25 +1241,25 @@ class AiCapabilityRouter:
                 quota_tripped = False
 
                 if classified.kind in PROVIDER_CIRCUIT_TRIPPING_ERRORS:
-                    self.circuit_breaker.record_failure(
+                    cooldown = self.circuit_breaker.record_failure(
                         provider_key,
                         kind=classified.kind,
                         http_status=classified.http_status,
                         limit_zero=classified.limit_zero,
                         retry_after_seconds=classified.retry_after_seconds,
                     )
-                    circuit_tripped = True
+                    circuit_tripped = cooldown > 0.0
                     prov_finalized = True
 
                 if quota_key is not None and classified.trips_quota_group:
-                    self.circuit_breaker.record_failure(
+                    quota_cooldown = self.circuit_breaker.record_failure(
                         quota_key,
                         kind=classified.kind,
                         http_status=classified.http_status,
                         limit_zero=classified.limit_zero,
                         retry_after_seconds=classified.retry_after_seconds,
                     )
-                    quota_tripped = True
+                    quota_tripped = quota_cooldown > 0.0
                     quota_finalized = True
 
                 attempts.append(
@@ -1636,6 +1692,16 @@ def reset_shared_ai_circuit_breaker() -> None:
         if _SHARED_CIRCUIT_BREAKER is not None:
             _SHARED_CIRCUIT_BREAKER.reset()
         _SHARED_CIRCUIT_BREAKER = None
+
+
+def max_cloud_cooldown_seconds(
+    registry: CircuitBreakerRegistry | None = None,
+    *,
+    cap_seconds: float | None = None,
+) -> float:
+    """Return longest active short-term cloud cooldown from the shared or given registry."""
+    cb = registry if registry is not None else get_shared_ai_circuit_breaker()
+    return cb.max_cloud_cooldown_seconds(cap_seconds=cap_seconds)
 
 
 def get_default_ai_router() -> AiCapabilityRouter:

@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "View OCR text blocks for page {page}",
     "closePageOcrBlocksAria": "Close OCR text blocks for page {page}",
     "openPageOcrBlocksAction": "OCR text blocks",
-    "closePageOcrBlocksAction": "Close OCR blocks"
+    "closePageOcrBlocksAction": "Close OCR blocks",
+    "retryAllFailedAction": "Retry all failed pages ({count})",
+    "retryingAllFailedButton": "Queuing failed pages for retry…",
+    "retryAllSuccessNotice": "Queued {count} failed page(s) for retry (earlier completed steps preserved).",
+    "retryAllQueuedOfflineNotice": "Saved retry requests for {count} failed page(s) to the OCR queue. They will process automatically once OCR is back online.",
+    "retryAllPartialQueueFullNotice": "Queued {retried} failed page(s) for retry; {skipped} remaining page(s) were paused because the OCR queue is full. Please try again in {seconds} seconds.",
+    "retryAllPartialFailedNotice": "Queued {retried} failed page(s) for retry; {failed} page(s) could not be queued right now.",
+    "retryAllNoneNotice": "There are no failed pages left to retry right now.",
+    "queueFullNotice": "The OCR queue is currently full. Please try again in about {seconds} seconds."
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead page reading for {title}",

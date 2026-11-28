@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "{page}페이지 OCR 텍스트 블록 보기",
     "closePageOcrBlocksAria": "{page}페이지 OCR 텍스트 블록 닫기",
     "openPageOcrBlocksAction": "OCR 텍스트 블록",
-    "closePageOcrBlocksAction": "OCR 블록 닫기"
+    "closePageOcrBlocksAction": "OCR 블록 닫기",
+    "retryAllFailedAction": "실패한 페이지 모두 다시 시도 ({count})",
+    "retryingAllFailedButton": "실패한 페이지를 재시도 대기열에 추가하는 중…",
+    "retryAllSuccessNotice": "실패한 {count}개 페이지를 재시도 대기열에 추가했습니다(이미 완료된 단계는 유지됩니다).",
+    "retryAllQueuedOfflineNotice": "실패한 {count}개 페이지의 재시도 요청을 OCR 대기열에 저장했습니다. OCR 서비스가 복구되면 자동으로 처리됩니다.",
+    "retryAllPartialQueueFullNotice": "{retried}개 페이지를 재시도 대기열에 추가했습니다. OCR 대기열이 가득 차 나머지 {skipped}개 페이지는 잠시 보류되었습니다. 약 {seconds}초 후 다시 시도해 주세요.",
+    "retryAllPartialFailedNotice": "{retried}개 페이지를 재시도 대기열에 추가했습니다. {failed}개 페이지는 지금 대기열에 추가할 수 없었습니다.",
+    "retryAllNoneNotice": "지금 다시 시도할 실패 페이지가 없습니다.",
+    "queueFullNotice": "현재 OCR 대기열이 가득 찼습니다. 약 {seconds}초 후에 다시 시도해 주세요."
   },
   "ocrContribution": {
     "cardAria": "{title}의 글자 인식 개선을 위한 샘플 기여",

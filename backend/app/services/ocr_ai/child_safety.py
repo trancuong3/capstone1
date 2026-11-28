@@ -703,11 +703,18 @@ class ChildSafetyOrchestrator:
                 else [(0, source)]
             )
             hit_document_deadline = False
+            skipped_due_to_budget = False
             retry_after_seconds: float | None = None
             limit_zero = False
             try:
                 if provider_timeout <= 0:
-                    raise httpx.TimeoutException("Cloud safety budget reserved for local fallback")
+                    skipped_due_to_budget = True
+                    raise ChildSafetyError(
+                        "BUDGET_EXHAUSTED",
+                        [],
+                        output_mode=output_mode,
+                        retry_count=retry_count,
+                    )
                 combined_suitability = "SUITABLE"
                 combined_findings: list[dict[str, Any]] = []
                 last_status_code: int | None = None
@@ -821,7 +828,7 @@ class ChildSafetyOrchestrator:
                         cb.release_half_open_probe(provider_key)
                     if quota_probe_acquired and quota_key is not None:
                         cb.release_half_open_probe(quota_key)
-            if cb is not None and provider_key is not None:
+            if cb is not None and provider_key is not None and not skipped_due_to_budget:
                 kind, trips_quota = classify_ocr_provider_error(code, status_code)
                 if kind is not None:
                     cb.record_failure(
@@ -831,15 +838,21 @@ class ChildSafetyOrchestrator:
                         limit_zero=limit_zero,
                         retry_after_seconds=retry_after_seconds,
                     )
-                    if trips_quota and quota_key is not None:
+                    # Isolate per-model daily `limit: 0` caps to `provider:*` so healthy
+                    # sibling models in the same family are never locked out for 6 hours.
+                    if trips_quota and quota_key is not None and not limit_zero:
                         cb.record_failure(
                             quota_key,
                             kind=kind,
                             http_status=status_code,
-                            limit_zero=limit_zero,
+                            limit_zero=False,
                             retry_after_seconds=retry_after_seconds,
                         )
-            if self.transport is None and provider.family in {"google", "groq"}:
+            if (
+                self.transport is None
+                and provider.family in {"google", "groq"}
+                and not skipped_due_to_budget
+            ):
                 record_cloud_ai_outcome(
                     "child_safety",
                     "gemini" if provider.family == "google" else "groq",
@@ -860,20 +873,20 @@ class ChildSafetyOrchestrator:
                 or (isinstance(status_code, int) and status_code >= 500)
                 or code in {"PROVIDER_TIMEOUT", "PROVIDER_NETWORK"}
             ):
-                is_family_wide_error = status_code in {401, 403, 429} or code in {
-                    "PROVIDER_AUTHENTICATION",
-                    "PROVIDER_QUOTA",
-                }
-                has_healthy_sibling = any(
-                    candidate.family == provider.family
-                    and candidate.name != provider.name
-                    and candidate.name in healthy_providers
-                    for candidate in self.providers
+                is_family_wide_error = (
+                    not limit_zero
+                    and (
+                        status_code in {401, 403, 429}
+                        or code in {
+                            "PROVIDER_AUTHENTICATION",
+                            "PROVIDER_QUOTA",
+                        }
+                    )
                 )
-                if has_healthy_sibling and not is_family_wide_error:
-                    disabled_providers.add(provider.name)
-                else:
+                if is_family_wide_error:
                     disabled_families.add(provider.family)
+                else:
+                    disabled_providers.add(provider.name)
         if not attempted and skipped_by_circuit:
             raise ChildSafetyError("ALL_PROVIDERS_SKIPPED", events)
         raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)

@@ -64,8 +64,8 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
         threads = configure_cpu_thread_caps()
         self.assertEqual(threads, 2)
         self.assertEqual(CPU_THREADS, 2)
-        self.assertEqual(os.environ.get("OMP_NUM_THREADS"), "2")
-        self.assertEqual(os.environ.get("OPENBLAS_NUM_THREADS"), "2")
+        self.assertEqual(os.environ.get("OMP_NUM_THREADS"), "1")
+        self.assertEqual(os.environ.get("OPENBLAS_NUM_THREADS"), "1")
         self.assertEqual(os.environ.get("MKL_NUM_THREADS"), "2")
 
         with patch.dict(
@@ -1838,7 +1838,13 @@ sys.exit(2)
 
         try:
             with patch.dict(sys.modules, {"torch": fake_torch}):
-                # 1. Initial unlocked call queries CUDA once and caches VRAM stats.
+                # 1. health_payload() is purely in-memory and never queries CUDA directly.
+                h_before_refresh = runtime.health_payload()
+                self.assertEqual(mem_get_info_calls, 0)
+                self.assertEqual(h_before_refresh["worker_status"], "DEGRADED")
+
+                # 2. Explicit unlocked refresh_system_stats() queries CUDA once and updates snapshot.
+                runtime.refresh_system_stats()
                 h1 = runtime.health_payload()
                 self.assertEqual(mem_get_info_calls, 1)
                 self.assertTrue(h1["system"]["cuda_available"])
@@ -1846,13 +1852,15 @@ sys.exit(2)
                 self.assertEqual(h1["system"]["vram_total_mb"], 6144.0)
                 self.assertEqual(h1["worker_status"], "DEGRADED")
 
-                # 2. Second call within 30s TTL must NOT re-query torch.cuda.mem_get_info.
+                # 3. Second refresh within 30s TTL must NOT re-query torch.cuda.mem_get_info.
+                runtime.refresh_system_stats()
                 h2 = runtime.health_payload()
                 self.assertEqual(mem_get_info_calls, 1)
                 self.assertEqual(h2["system"]["vram_free_mb"], 4096.0)
 
-                # 3. Expire cache TTL, hold _inference_lock, and mark _initializing=True:
-                #    health_payload() must NOT invoke mem_get_info and must report STARTING.
+                # 4. Expire cache TTL, hold _inference_lock, and mark _initializing=True:
+                #    neither health_payload() nor refresh_system_stats() invokes mem_get_info,
+                #    and worker_status reports STARTING.
                 with _CUDA_STATS_CACHE_LOCK:
                     _CUDA_STATS_CACHE["updated_at"] = 0.0
 
@@ -1861,6 +1869,7 @@ sys.exit(2)
                         runtime._initializing = True
                     try:
                         self.assertTrue(runtime.is_initializing())
+                        runtime.refresh_system_stats()
                         h_locked = runtime.health_payload()
                         hb_locked = runtime.heartbeat_payload()
                     finally:
@@ -1875,7 +1884,7 @@ sys.exit(2)
                 self.assertEqual(h_locked["system"]["vram_total_mb"], 6144.0)
                 self.assertEqual(hb_locked["status"], "STARTING")
 
-                # 4. Verify initialize_and_verify_engines sets STARTING during warmup and clears in finally.
+                # 5. Verify initialize_and_verify_engines sets STARTING during warmup and clears in finally.
                 observed_during_warmup: dict[str, object] = {}
                 fake_ocr_mod = ModuleType("app.services.ocr_engine")
                 fake_ocr_mod._paddle_engine = object()
@@ -1927,7 +1936,7 @@ sys.exit(2)
                 self.assertFalse(runtime.is_initializing())
                 self.assertTrue(after_init["ready"])
                 self.assertEqual(after_init["worker_status"], "IDLE")
-                # After lock released and TTL expired, post-init health_payload refreshes cache once.
+                # After lock released and TTL expired, post-init refresh updates cache once.
                 self.assertEqual(mem_get_info_calls, 2)
         finally:
             with _CUDA_STATS_CACHE_LOCK:
@@ -2102,6 +2111,426 @@ sys.exit(2)
                 self.assertEqual(res_below["requested"], "BelowNormal")
                 self.assertEqual(res_below["priority_class"], "BelowNormal")
                 self.assertEqual(applied_classes[-1], BELOW_NORMAL_PRIORITY_CLASS)
+
+    def test_in_memory_health_snapshot_zero_syscalls_and_stats_updater_thread(self):
+        import threading
+
+        runtime = OcrRuntimeManager(worker_id="w-mem-health")
+        app = build_worker_http_app(runtime)
+        http_client = TestClient(app)
+
+        # GET /health and health_payload() must NEVER invoke get_system_memory_stats().
+        with patch(
+            "ocr_worker.service.get_system_memory_stats",
+            side_effect=AssertionError("get_system_memory_stats must not run in /health"),
+        ):
+            payload = runtime.health_payload()
+            resp = http_client.get("/health")
+            self.assertEqual(resp.status_code, 200)
+            self.assertEqual(payload["worker_id"], "w-mem-health")
+            self.assertIn("ram_total_mb", resp.json()["system"])
+
+        # Background stats updater refreshes cached snapshot and stops cleanly.
+        tick_event = threading.Event()
+        fake_stats = {
+            "ram_total_mb": 16384.0,
+            "ram_available_mb": 8192.0,
+            "pagefile_total_mb": 24576.0,
+            "pagefile_available_mb": 12288.0,
+            "vram_total_mb": 6144.0,
+            "vram_free_mb": 5120.0,
+            "cuda_available": True,
+            "cpu_threads": 2,
+            "process_priority": "Normal",
+            "pid": os.getpid(),
+        }
+
+        def fake_get_stats(*, allow_cuda_query: bool = True):
+            tick_event.set()
+            return dict(fake_stats)
+
+        with patch("ocr_worker.service.get_system_memory_stats", side_effect=fake_get_stats):
+            runtime.start_system_stats_updater(interval_seconds=0.05)
+            try:
+                self.assertTrue(tick_event.wait(timeout=2.0))
+            finally:
+                runtime.stop_system_stats_updater(timeout=2.0)
+
+        snap = runtime.health_payload()["system"]
+        self.assertEqual(snap["ram_available_mb"], 8192.0)
+        self.assertEqual(snap["vram_free_mb"], 5120.0)
+        self.assertFalse(
+            any(t.name == "ocr_worker_sys_stats" and t.is_alive() for t in threading.enumerate())
+        )
+
+    def test_backend_client_thread_local_httpx_clients_and_clean_close(self):
+        import threading
+
+        token = "l" * 40
+
+        def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"ok": True})
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(handler),
+            storage_transport=httpx.MockTransport(handler),
+        )
+        seen_clients: list[httpx.Client] = []
+        seen_lock = threading.Lock()
+
+        def worker_fn() -> None:
+            cli = client._client
+            client.send_worker_heartbeat({"worker_id": "t"})
+            with seen_lock:
+                seen_clients.append(cli)
+
+        t1 = threading.Thread(target=worker_fn)
+        t2 = threading.Thread(target=worker_fn)
+        t1.start()
+        t2.start()
+        t1.join(timeout=3.0)
+        t2.join(timeout=3.0)
+        main_cli = client._client
+        seen_clients.append(main_cli)
+
+        self.assertEqual(len({id(c) for c in seen_clients}), 3)
+        client.close()
+        for c in seen_clients:
+            self.assertTrue(c.is_closed)
+
+    def test_cloudflare_522_retries_and_download_job_source_fallback_to_source(self):
+        token = "f" * 40
+        img_bytes = b"verified-page-image-payload"
+        img_sha = hashlib.sha256(img_bytes).hexdigest()
+
+        hb_calls = 0
+        complete_calls = 0
+        signed_calls = 0
+        fallback_calls = 0
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal hb_calls, complete_calls, fallback_calls
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                hb_calls += 1
+                if hb_calls == 1:
+                    return httpx.Response(522, text="cloudflare connection timed out")
+                return httpx.Response(200, json={"ok": True})
+            if request.url.path == "/internal/ocr-jobs/job-cf/complete":
+                complete_calls += 1
+                if complete_calls < 4:
+                    return httpx.Response(524 if complete_calls == 1 else 522, text="edge timeout")
+                return httpx.Response(200, json={"status": "SUCCEEDED"})
+            if request.url.path == "/internal/ocr-jobs/job-cf/source":
+                fallback_calls += 1
+                if fallback_calls == 1:
+                    return httpx.Response(522, text="transient cf error")
+                return httpx.Response(200, content=img_bytes)
+            return httpx.Response(404)
+
+        def storage_handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal signed_calls
+            signed_calls += 1
+            return httpx.Response(522, text="cloudflare origin timeout")
+
+        default_client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+        )
+        try:
+            self.assertEqual(default_client._completion_retry_attempts, 8)
+        finally:
+            default_client.close()
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+            storage_transport=httpx.MockTransport(storage_handler),
+            completion_retry_base_delay=0.001,
+        )
+        try:
+            self.assertEqual(client.send_worker_heartbeat({"worker_id": "w"}), {"ok": True})
+            self.assertEqual(hb_calls, 2)
+
+            code, body = client.complete_job("job-cf", {"worker_id": "w", "fencing_token": 1})
+            self.assertEqual(code, 200)
+            self.assertEqual(body["status"], "SUCCEEDED")
+            self.assertEqual(complete_calls, 4)
+
+            downloaded = client.download_job_source(
+                {
+                    "job_id": "job-cf",
+                    "fencing_token": 1,
+                    "image_sha256": img_sha,
+                    "source_url": "https://storage.example/signed-522",
+                    "source_fallback_path": "/internal/ocr-jobs/job-cf/source",
+                },
+                worker_id="w",
+            )
+            self.assertEqual(downloaded, img_bytes)
+            self.assertEqual(signed_calls, 3)
+            self.assertEqual(fallback_calls, 2)
+        finally:
+            client.close()
+
+    def test_cuda_oom_retry_delay_30_and_corrupted_cuda_context_quarantine_exit_code_3(self):
+        import importlib.machinery
+        import json
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        class FakeCudaOutOfMemoryError(RuntimeError):
+            pass
+
+        FakeCudaOutOfMemoryError.__name__ = "OutOfMemoryError"
+
+        token = "o" * 40
+        img_bytes = b"gpu-page-bytes"
+        img_sha = hashlib.sha256(img_bytes).hexdigest()
+        fail_payloads: list[dict] = []
+        hb_statuses: list[str] = []
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/source"):
+                return httpx.Response(200, content=img_bytes)
+            if request.url.path.endswith("/fail"):
+                fail_payloads.append(json.loads(request.content.decode("utf-8")))
+                return httpx.Response(200, json={"status": "FAILED_RETRYABLE"})
+            if request.url.path == "/internal/ocr-jobs/worker-heartbeat":
+                body = json.loads(request.content.decode("utf-8"))
+                hb_statuses.append(str(body.get("status")))
+                return httpx.Response(200, json={"ok": True})
+            if request.url.path == "/internal/ocr-jobs/claim":
+                return httpx.Response(
+                    200,
+                    json={
+                        "job": {
+                            "job_id": "job-poison",
+                            "job_kind": "ADMIN_PAGE_UPLOAD",
+                            "fencing_token": 2,
+                            "image_sha256": img_sha,
+                            "source_url": None,
+                            "source_fallback_path": "/internal/ocr-jobs/job-poison/source",
+                        }
+                    },
+                )
+            return httpx.Response(404)
+
+        # Case 1: Recoverable CUDA OOM -> CUDA_OOM + retry_delay_seconds=30, runtime stays ready
+        empty_cache_calls = 0
+
+        def fake_empty_cache() -> None:
+            nonlocal empty_cache_calls
+            empty_cache_calls += 1
+
+        fake_torch_ok = SimpleNamespace(
+            __spec__=importlib.machinery.ModuleSpec("torch", loader=None),
+            cuda=SimpleNamespace(
+                is_available=lambda: True,
+                empty_cache=fake_empty_cache,
+                OutOfMemoryError=FakeCudaOutOfMemoryError,
+            ),
+            set_num_threads=lambda _n: None,
+            zeros=lambda *_a, **_kw: SimpleNamespace(item=lambda: 0.0),
+        )
+        fake_ocr_oom = SimpleNamespace(
+            extract_text_and_boxes=MagicMock(side_effect=FakeCudaOutOfMemoryError("CUDA out of memory"))
+        )
+
+        rt_oom = OcrRuntimeManager(worker_id="w-cuda-oom")
+        with rt_oom._state_lock:
+            rt_oom._ocr_engine_mod = fake_ocr_oom
+            rt_oom._engines["paddleocr"].loaded = True
+            rt_oom._engines["vietocr"].loaded = True
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+        )
+        try:
+            with patch.dict(sys.modules, {"torch": fake_torch_ok}):
+                res_oom = process_claimed_job(
+                    client,
+                    rt_oom,
+                    {
+                        "job_id": "job-oom",
+                        "job_kind": "ADMIN_PAGE_UPLOAD",
+                        "fencing_token": 1,
+                        "image_sha256": img_sha,
+                        "source_url": None,
+                        "source_fallback_path": "/internal/ocr-jobs/job-oom/source",
+                    },
+                )
+            self.assertEqual(res_oom["error_code"], "CUDA_OOM")
+            self.assertFalse(rt_oom.is_cuda_poisoned())
+            self.assertTrue(rt_oom.is_ready())
+            self.assertGreaterEqual(empty_cache_calls, 1)
+            self.assertEqual(fail_payloads[-1]["error_code"], "CUDA_OOM")
+            self.assertTrue(fail_payloads[-1]["retryable"])
+            self.assertEqual(fail_payloads[-1]["retry_delay_seconds"], 30)
+
+            # Case 2: Corrupted CUDA context -> runtime quarantined DEGRADED + run_worker_forever exits 3
+            fake_torch_dead = SimpleNamespace(
+                __spec__=importlib.machinery.ModuleSpec("torch", loader=None),
+                cuda=SimpleNamespace(
+                    is_available=lambda: True,
+                    empty_cache=fake_empty_cache,
+                    OutOfMemoryError=FakeCudaOutOfMemoryError,
+                ),
+                set_num_threads=lambda _n: None,
+                zeros=MagicMock(side_effect=RuntimeError("CUDA error: device-side assert triggered")),
+            )
+            fake_ocr_dead = SimpleNamespace(
+                extract_text_and_boxes=MagicMock(
+                    side_effect=RuntimeError("CUDA error: illegal memory access")
+                )
+            )
+
+            class _PoisoningRuntime(OcrRuntimeManager):
+                def __post_init__(self) -> None:
+                    super().__post_init__()
+                    with self._state_lock:
+                        self._ocr_engine_mod = fake_ocr_dead
+                        self._engines["paddleocr"].installed = True
+                        self._engines["paddleocr"].loaded = True
+                        self._engines["vietocr"].installed = True
+                        self._engines["vietocr"].loaded = True
+
+                def initialize_and_verify_engines(self, **_kwargs):
+                    return self.health_payload()
+
+            fake_server = MagicMock()
+            fake_server.run = lambda: None
+
+            def make_client(backend_url: str, worker_token: str) -> BackendOcrClient:
+                return BackendOcrClient(
+                    backend_url,
+                    worker_token,
+                    transport=httpx.MockTransport(backend_handler),
+                )
+
+            with (
+                patch.dict(sys.modules, {"torch": fake_torch_dead}),
+                patch("ocr_worker.worker.OcrRuntimeManager", _PoisoningRuntime),
+                patch("ocr_worker.worker.BackendOcrClient", side_effect=make_client),
+                patch("ocr_worker.worker.uvicorn.Server", return_value=fake_server),
+                patch("ocr_worker.worker.drain_queue_synchronously", return_value=0),
+            ):
+                rc = run_worker_forever(
+                    backend_url="https://api.example",
+                    worker_token=token,
+                    bind_host="127.0.0.1",
+                    bind_port=18025,
+                    poll_seconds=0.05,
+                    heartbeat_seconds=15.0,
+                    apply_priority=False,
+                    quiet_standby=False,
+                )
+
+            self.assertEqual(rc, 3)
+            self.assertEqual(fail_payloads[-1]["error_code"], "CUDA_CONTEXT_CORRUPTED")
+            self.assertTrue(fail_payloads[-1]["retryable"])
+            self.assertEqual(fail_payloads[-1]["retry_delay_seconds"], 30)
+            self.assertIn("DEGRADED", hb_statuses)
+            self.assertEqual(hb_statuses[-1], "OFFLINE")
+        finally:
+            client.close()
+
+    def test_claimed_job_id_and_resyncing_keep_worker_status_busy(self):
+        token = "c" * 40
+        img_bytes = b"busy-check-bytes"
+        img_sha = hashlib.sha256(img_bytes).hexdigest()
+        observed_during_download: dict[str, object] = {}
+
+        runtime = OcrRuntimeManager(worker_id="w-busy-state")
+        with runtime._state_lock:
+            runtime._ocr_engine_mod = object()
+            runtime._engines["paddleocr"].loaded = True
+            runtime._engines["vietocr"].loaded = True
+
+        self.assertEqual(runtime.health_payload()["worker_status"], "IDLE")
+
+        def backend_handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/source"):
+                # Snapshot health/heartbeat right during download BEFORE _active_job_scope!
+                observed_during_download["health"] = runtime.health_payload()
+                observed_during_download["hb"] = runtime.heartbeat_payload()
+                return httpx.Response(200, content=img_bytes)
+            if request.url.path.endswith("/complete"):
+                return httpx.Response(200, json={"status": "SUCCEEDED"})
+            return httpx.Response(404)
+
+        client = BackendOcrClient(
+            "https://api.example",
+            token,
+            transport=httpx.MockTransport(backend_handler),
+        )
+        try:
+            with patch.object(
+                runtime,
+                "run_ocr_for_job",
+                return_value={
+                    "full_text": "Xin chào",
+                    "words": [],
+                    "ocr_meta": {},
+                    "model_profile": "ORIGINAL",
+                    "model_sha256": ORIGINAL_VIETOCR_SHA256,
+                    "engine_diagnostics": {},
+                    "duration_ms": 10,
+                },
+            ):
+                process_claimed_job(
+                    client,
+                    runtime,
+                    {
+                        "job_id": "job-busy-1",
+                        "job_kind": "LOCAL_PAGE_SCAN",
+                        "fencing_token": 1,
+                        "image_sha256": img_sha,
+                        "source_url": None,
+                        "source_fallback_path": "/internal/ocr-jobs/job-busy-1/source",
+                    },
+                )
+            self.assertEqual(observed_during_download["health"]["worker_status"], "BUSY")
+            self.assertEqual(observed_during_download["health"]["active_job_id"], "job-busy-1")
+            self.assertEqual(observed_during_download["health"]["active_job_count"], 1)
+            self.assertEqual(observed_during_download["hb"]["status"], "BUSY")
+            self.assertEqual(runtime.health_payload()["worker_status"], "IDLE")
+
+            # Verify maybe_resync_active_model keeps worker_status BUSY during reload
+            observed_during_resync: dict[str, object] = {}
+
+            def spy_sync(**_kwargs):
+                observed_during_resync["is_resyncing"] = runtime.is_resyncing()
+                observed_during_resync["worker_status"] = runtime.health_payload()["worker_status"]
+                return {
+                    "profile": "FLOW1_EXTERNAL_TRDG",
+                    "checkpoint_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+                    "storage_path": "models/x.json",
+                    "local_pth_exists": True,
+                    "local_yml_exists": False,
+                    "prebaked_hit": True,
+                }
+
+            runtime._ocr_engine_mod = None
+            with patch.object(runtime, "sync_active_model", side_effect=spy_sync):
+                runtime.maybe_resync_active_model(
+                    manifest_fetcher=lambda: {
+                        "profile": "FLOW1_EXTERNAL_TRDG",
+                        "checkpoint_sha256": EXPECTED_FLOW1_TRDG_SHA256,
+                    },
+                    artifact_fetcher=lambda _k, _i: b"",
+                    force=True,
+                )
+            self.assertTrue(observed_during_resync["is_resyncing"])
+            self.assertEqual(observed_during_resync["worker_status"], "BUSY")
+            self.assertFalse(runtime.is_resyncing())
+        finally:
+            client.close()
 
 
 if __name__ == "__main__":

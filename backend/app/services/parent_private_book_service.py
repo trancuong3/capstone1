@@ -78,6 +78,7 @@ from app.services.document_rasterizer_service import (
     MAX_SINGLE_IMAGE_BYTES,
     RasterizedDocumentPage,
     iter_rasterized_spooled_document,
+    rasterizer_concurrency_gate,
     spool_upload_file,
 )
 from app.services.ocr_ai.child_safety import content_hash as safety_content_hash
@@ -900,7 +901,7 @@ class ParentPrivateBookService:
                     )
         finally:
             spooled.close()
-            gc.collect()
+            await asyncio.to_thread(gc.collect)
 
         img_sha = hashlib.sha256(page_img.image_bytes).hexdigest()
         cand_hash = compute_candidate_hash(
@@ -1264,7 +1265,12 @@ class ParentPrivateBookService:
         )
 
     async def get_book(
-        self, actor_id: UUID, book_id: UUID, *, base_url: str | None = None
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        *,
+        base_url: str | None = None,
+        summary_only: bool = False,
     ) -> ParentPrivateBookDetailRead:
         await self._require_parent(actor_id)
         book = await self.repo.get_owned_private_book(book_id, actor_id)
@@ -1294,14 +1300,24 @@ class ParentPrivateBookService:
                 reason="parent_book_poll_nudge",
             )
 
-        from app.schemas.parent_private_book import VietnameseReadabilityRead
-        from app.services.vietnamese_readability import analyse_vietnamese_readability
+        VietnameseReadabilityRead = None
+        analyse_vietnamese_readability = None
+        if not summary_only:
+            from app.schemas.parent_private_book import (
+                VietnameseReadabilityRead as _VietnameseReadabilityRead,
+            )
+            from app.services.vietnamese_readability import (
+                analyse_vietnamese_readability as _analyse_vietnamese_readability,
+            )
+
+            VietnameseReadabilityRead = _VietnameseReadabilityRead
+            analyse_vietnamese_readability = _analyse_vietnamese_readability
 
         pages_dto = []
         committed_texts: list[str] = []
         for page, rev in pages_rows:
             v_text = (rev.VerifiedText or "") if rev else ""
-            if v_text.strip():
+            if not summary_only and v_text.strip():
                 committed_texts.append(v_text)
             page_readability = (
                 VietnameseReadabilityRead(
@@ -1311,7 +1327,12 @@ class ParentPrivateBookService:
                         max_grade=int(book.MaxGrade),
                     ).to_dict()
                 )
-                if v_text.strip()
+                if (
+                    not summary_only
+                    and VietnameseReadabilityRead is not None
+                    and analyse_vietnamese_readability is not None
+                    and v_text.strip()
+                )
                 else None
             )
             pages_dto.append(
@@ -1341,7 +1362,12 @@ class ParentPrivateBookService:
                     max_grade=int(book.MaxGrade),
                 ).to_dict()
             )
-            if committed_texts
+            if (
+                not summary_only
+                and VietnameseReadabilityRead is not None
+                and analyse_vietnamese_readability is not None
+                and committed_texts
+            )
             else None
         )
         summary = self._serialize_book_summary(
@@ -2006,7 +2032,7 @@ class ParentPrivateBookService:
             return file_name, source_format, first_page
         finally:
             spooled.close()
-            gc.collect()
+            await asyncio.to_thread(gc.collect)
 
     async def replace_committed_page_file(
         self,
@@ -2282,79 +2308,79 @@ class ParentPrivateBookService:
         source_format: str = "IMAGE"
 
         try:
-            with iter_rasterized_spooled_document(spooled) as (
-                file_name,
-                source_format,
-                _source_sha256,
-                page_iter,
-            ):
-                def _next_page(it):
-                    return next(it, None)
+            async with rasterizer_concurrency_gate():
+                with iter_rasterized_spooled_document(spooled) as (
+                    file_name,
+                    source_format,
+                    _source_sha256,
+                    page_iter,
+                ):
+                    def _next_page(it):
+                        return next(it, None)
 
-                idx = 0
-                while True:
-                    page = await asyncio.to_thread(_next_page, page_iter)
-                    if page is None:
-                        break
-                    idx += 1
-                    page_target = (
-                        (target_page_number + idx - 1)
-                        if target_page_number is not None
-                        else None
-                    )
-                    if page_target is not None and page_target > 32767:
-                        raise HTTPException(
-                            status_code=422,
-                            detail="Số trang đích của lô tài liệu vượt quá giới hạn tối đa (32767).",
+                    idx = 0
+                    while True:
+                        page = await asyncio.to_thread(_next_page, page_iter)
+                        if page is None:
+                            break
+                        idx += 1
+                        page_target = (
+                            (target_page_number + idx - 1)
+                            if target_page_number is not None
+                            else None
                         )
-                    try:
-                        sub_id = uuid4()
-                        page_sha = hashlib.sha256(page.image_bytes).hexdigest()
-                        storage_path = (
-                            f"private-books/{actor_id}/{book_id}/staging/{sub_id}/"
-                            f"page-{page.source_page}.{page.extension}"
-                        )
-                        await asyncio.to_thread(
-                            upload_object,
-                            storage_path,
-                            page.image_bytes,
-                            page.content_type,
-                            bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
-                            upsert=False,
-                        )
-                        uploaded_paths.append(storage_path)
-                        created_rows.append(
-                            ParentBookPageSubmission(
-                                Id=sub_id,
-                                BookId=book_id,
-                                OwnerParentId=actor_id,
-                                BatchId=batch_id,
-                                BatchTotalPages=1,
-                                SourcePageNumber=page.source_page,
-                                TargetPageNumber=page_target,
-                                IdempotencyKey=normalized_key,
-                                SourceFileName=file_name,
-                                SourceFormat=source_format,
-                                SourceStoragePath=storage_path,
-                                SourceSha256=page_sha,
-                                ImageWidth=page.width,
-                                ImageHeight=page.height,
-                                SourceType=source_type,
-                                SourceNote=clean_note,
-                                SubmissionVersion=1,
-                                OptimisticLockVersion=1,
-                                WorkflowStatus="CHECKING",
-                                OcrStatus="PENDING",
-                                ProofreadStatus="PENDING",
-                                ToolCheckStatus="PENDING",
-                                TempExpiresAt=expires_at,
-                                CreatedAt=now,
-                                UpdatedAt=now,
+                        if page_target is not None and page_target > 32767:
+                            raise HTTPException(
+                                status_code=422,
+                                detail="Số trang đích của lô tài liệu vượt quá giới hạn tối đa (32767).",
                             )
-                        )
-                    finally:
-                        del page
-                        gc.collect()
+                        try:
+                            sub_id = uuid4()
+                            page_sha = hashlib.sha256(page.image_bytes).hexdigest()
+                            storage_path = (
+                                f"private-books/{actor_id}/{book_id}/staging/{sub_id}/"
+                                f"page-{page.source_page}.{page.extension}"
+                            )
+                            await asyncio.to_thread(
+                                upload_object,
+                                storage_path,
+                                page.image_bytes,
+                                page.content_type,
+                                bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET,
+                                upsert=False,
+                            )
+                            uploaded_paths.append(storage_path)
+                            created_rows.append(
+                                ParentBookPageSubmission(
+                                    Id=sub_id,
+                                    BookId=book_id,
+                                    OwnerParentId=actor_id,
+                                    BatchId=batch_id,
+                                    BatchTotalPages=1,
+                                    SourcePageNumber=page.source_page,
+                                    TargetPageNumber=page_target,
+                                    IdempotencyKey=normalized_key,
+                                    SourceFileName=file_name,
+                                    SourceFormat=source_format,
+                                    SourceStoragePath=storage_path,
+                                    SourceSha256=page_sha,
+                                    ImageWidth=page.width,
+                                    ImageHeight=page.height,
+                                    SourceType=source_type,
+                                    SourceNote=clean_note,
+                                    SubmissionVersion=1,
+                                    OptimisticLockVersion=1,
+                                    WorkflowStatus="CHECKING",
+                                    OcrStatus="PENDING",
+                                    ProofreadStatus="PENDING",
+                                    ToolCheckStatus="PENDING",
+                                    TempExpiresAt=expires_at,
+                                    CreatedAt=now,
+                                    UpdatedAt=now,
+                                )
+                            )
+                        finally:
+                            del page
 
             total_batch_pages = len(created_rows)
             for row in created_rows:
@@ -2409,6 +2435,7 @@ class ParentPrivateBookService:
             raise
         finally:
             spooled.close()
+            await asyncio.to_thread(gc.collect)
 
         for row in created_rows:
             await self.db.refresh(row)
@@ -2719,34 +2746,14 @@ class ParentPrivateBookService:
                 pass
         return response_dto
 
-    async def retry_submission(
-        self,
-        actor_id: UUID,
-        book_id: UUID,
-        submission_id: UUID,
-        payload: ParentRetrySubmissionRequest,
+    @staticmethod
+    def _prepare_submission_for_retry(
+        sub: ParentBookPageSubmission,
         *,
-        base_url: str | None = None,
-    ) -> ParentPageSubmissionRead:
-        """Retry ONLY the failed/pending stage while preserving already-completed earlier stages."""
-        await self._require_parent(actor_id)
-        book = await self.repo.get_owned_private_book(book_id, actor_id)
-        if book is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
-            raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
-
-        sub = await self.repo.get_owned_submission(book_id, submission_id, actor_id, lock=True)
-        if sub is None:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if sub.WorkflowStatus not in ("CHECK_FAILED", "NEEDS_RECHECK"):
-            raise HTTPException(
-                status_code=409,
-                detail="Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.",
-            )
-
-        now = datetime.now(timezone.utc)
-        stage = payload.stage
+        stage: str,
+        now: datetime,
+    ) -> None:
+        """Reset only the failed/pending stage while preserving completed earlier stages."""
         if (
             stage == "OCR"
             or (
@@ -2783,13 +2790,134 @@ class ParentPrivateBookService:
         sub.TempExpiresAt = now + timedelta(days=STAGING_TTL_DAYS)
         sub.OptimisticLockVersion = int(sub.OptimisticLockVersion or 1) + 1
         sub.UpdatedAt = now
-        await self._sync_remote_ocr_for_submissions(
+
+    async def retry_submission(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+        submission_id: UUID,
+        payload: ParentRetrySubmissionRequest,
+        *,
+        base_url: str | None = None,
+    ) -> ParentPageSubmissionRead:
+        """Retry ONLY the failed/pending stage while preserving already-completed earlier stages."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+
+        sub = await self.repo.get_owned_submission(book_id, submission_id, actor_id, lock=True)
+        if sub is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if sub.WorkflowStatus not in ("CHECK_FAILED", "NEEDS_RECHECK"):
+            raise HTTPException(
+                status_code=409,
+                detail="Chỉ có thể thử lại các trang đang ở trạng thái kiểm tra lỗi hoặc cần kiểm tra lại.",
+            )
+
+        now = datetime.now(timezone.utc)
+        self._prepare_submission_for_retry(sub, stage=payload.stage, now=now)
+        post_ocr_ready = await self._sync_remote_ocr_for_submissions(
             [sub], reason="SUPERSEDED_BY_PARENT_RETRY"
         )
         await self.repo.commit()
         await self.db.refresh(sub)
-        self._dispatch_post_ocr_if_ready([sub])
+        self._dispatch_post_ocr_if_ready(post_ocr_ready or [sub])
         return self._serialize_submission(book, sub, base_url=base_url)
+
+    async def retry_failed_submissions(
+        self,
+        actor_id: UUID,
+        book_id: UUID,
+    ) -> dict[str, int | None]:
+        """Batch-retry all CHECK_FAILED submissions for a parent's private book gracefully."""
+        await self._require_parent(actor_id)
+        book = await self.repo.get_owned_private_book(book_id, actor_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        if book.ModerationStatus != MODERATION_ACTIVE or book.LifecycleStatus != "ACTIVE":
+            raise HTTPException(status_code=409, detail="Sách riêng đang bị đình chỉ hoặc ngừng hoạt động.")
+
+        submissions = await self.repo.list_submissions_for_book(book_id)
+        candidate_ids = [
+            sub.Id
+            for sub in submissions
+            if sub.OwnerParentId == actor_id and sub.WorkflowStatus == "CHECK_FAILED"
+        ]
+        if not candidate_ids:
+            return {
+                "retried_count": 0,
+                "skipped_count": 0,
+                "failed_count": 0,
+                "queue_full_retry_after_seconds": None,
+            }
+
+        retried_count = 0
+        skipped_count = 0
+        failed_count = 0
+        queue_full_retry_after_seconds: int | None = None
+
+        for idx, sub_id in enumerate(candidate_ids):
+            try:
+                sub = await self.repo.get_owned_submission(
+                    book_id, sub_id, actor_id, lock=True
+                )
+                if sub is None or sub.WorkflowStatus != "CHECK_FAILED":
+                    await self.repo.rollback()
+                    skipped_count += 1
+                    continue
+
+                now = datetime.now(timezone.utc)
+                self._prepare_submission_for_retry(sub, stage="AUTO", now=now)
+                post_ocr_ready = await self._sync_remote_ocr_for_submissions(
+                    [sub], reason="SUPERSEDED_BY_PARENT_BATCH_RETRY"
+                )
+                await self.repo.commit()
+                self._dispatch_post_ocr_if_ready(post_ocr_ready or [sub])
+                retried_count += 1
+            except HTTPException as exc:
+                await self.repo.rollback()
+                if exc.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                    retry_after = 30
+                    if isinstance(exc.detail, dict):
+                        raw_retry = exc.detail.get("retry_after_seconds")
+                        if isinstance(raw_retry, (int, float)) and raw_retry > 0:
+                            retry_after = int(math.ceil(raw_retry))
+                    queue_full_retry_after_seconds = retry_after
+                    skipped_count += len(candidate_ids) - idx
+                    break
+                failed_count += 1
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_batch_retry_submission_http_failed",
+                    stage="parent_batch_retry",
+                    book_id=str(book_id),
+                    submission_id=str(sub_id),
+                    http_status=exc.status_code,
+                    exception=exc,
+                )
+            except Exception as exc:
+                await self.repo.rollback()
+                failed_count += 1
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_batch_retry_submission_failed",
+                    stage="parent_batch_retry",
+                    book_id=str(book_id),
+                    submission_id=str(sub_id),
+                    exception=exc,
+                )
+
+        return {
+            "retried_count": retried_count,
+            "skipped_count": skipped_count,
+            "failed_count": failed_count,
+            "queue_full_retry_after_seconds": queue_full_retry_after_seconds,
+        }
 
     async def cancel_submission(
         self, actor_id: UUID, book_id: UUID, submission_id: UUID

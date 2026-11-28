@@ -380,20 +380,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
   useEffect(() => {
     return () => {
-      // Stop local polling cleanly on unmount. Keep offline-queued jobs durably
-      // saved across reloads/navigation; only cancel an abandoned live interactive
-      // scan when the OCR worker is online.
+      // Stop local polling cleanly on unmount. Keep queued jobs durably tracked
+      // in GlobalTaskCenter across reloads/navigation whether the worker is
+      // online or offline; users cancel explicitly via the Cancel button.
       ocrGenerationRef.current += 1;
       ocrAbortRef.current?.abort();
       ocrAbortRef.current = null;
       pollWakeRef.current = null;
-      const jobIdToCancel = activeJobIdRef.current;
-      const wasWorkerOnline = activeJobWorkerOnlineRef.current;
       activeJobIdRef.current = null;
       activeJobWorkerOnlineRef.current = false;
-      if (jobIdToCancel && wasWorkerOnline) {
-        void cancelScanPageOcrJob(jobIdToCancel).catch(() => undefined);
-      }
     };
   }, []);
 
@@ -428,6 +423,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
       let currentJob = initialJob;
       let onlineAttempts = 0;
       let offlineAttempts = 0;
+      let prevStatus = initialJob.status;
+      let prevWorkerPhase = initialJob.worker_phase ?? null;
+      let prevQueuePosition = initialJob.queue_position ?? null;
+      let lastQueuedListRefreshAt = Date.now();
+      const QUEUED_LIST_REFRESH_INTERVAL_MS = 30_000;
 
       while (true) {
         if (
@@ -569,12 +569,39 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         let transientFailures = 0;
         while (true) {
           try {
-            currentJob = await getScanPageOcrJob(
+            const nextJob = await getScanPageOcrJob(
               currentJob.job_id,
               controller.signal,
             );
             setCheckingQueueNow(false);
-            void refreshQueuedJobs();
+
+            const nextQueuePos = nextJob.queue_position ?? null;
+            const nextPhase = nextJob.worker_phase ?? null;
+            const statusChanged = nextJob.status !== prevStatus;
+            const queueAdvanced =
+              typeof nextQueuePos === "number" &&
+              (prevQueuePosition === null || nextQueuePos < prevQueuePosition);
+            const phaseOrStatusChanged =
+              statusChanged || nextPhase !== prevWorkerPhase;
+
+            if (queueAdvanced || phaseOrStatusChanged) {
+              onlineAttempts = 0;
+            }
+            prevStatus = nextJob.status;
+            prevWorkerPhase = nextPhase;
+            prevQueuePosition = nextQueuePos;
+            currentJob = nextJob;
+
+            const nowMs = Date.now();
+            if (
+              isActiveScanJobStatus(nextJob.status) &&
+              (statusChanged ||
+                nowMs - lastQueuedListRefreshAt >=
+                  QUEUED_LIST_REFRESH_INTERVAL_MS)
+            ) {
+              lastQueuedListRefreshAt = nowMs;
+              void refreshQueuedJobs();
+            }
             break;
           } catch (pollErr) {
             if (

@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "Xem khối chữ OCR trang {page}",
     "closePageOcrBlocksAria": "Đóng khối chữ OCR trang {page}",
     "openPageOcrBlocksAction": "Khối chữ OCR",
-    "closePageOcrBlocksAction": "Đóng khối OCR"
+    "closePageOcrBlocksAction": "Đóng khối OCR",
+    "retryAllFailedAction": "Thử lại tất cả trang lỗi ({count})",
+    "retryingAllFailedButton": "Đang xếp hàng thử lại các trang lỗi…",
+    "retryAllSuccessNotice": "Đã xếp hàng thử lại {count} trang lỗi (giữ nguyên các bước đã hoàn tất trước đó).",
+    "retryAllQueuedOfflineNotice": "Đã lưu yêu cầu thử lại cho {count} trang lỗi vào hàng chờ OCR. Các trang sẽ tự động xử lý khi dịch vụ OCR hoạt động trở lại.",
+    "retryAllPartialQueueFullNotice": "Đã xếp hàng thử lại {retried} trang lỗi; còn {skipped} trang đang tạm dừng vì hàng chờ OCR đầy. Vui lòng thử lại sau {seconds} giây.",
+    "retryAllPartialFailedNotice": "Đã xếp hàng thử lại {retried} trang lỗi; {failed} trang chưa thể xếp hàng lúc này.",
+    "retryAllNoneNotice": "Hiện không còn trang lỗi nào cần thử lại.",
+    "queueFullNotice": "Hàng chờ OCR đang đầy. Vui lòng thử lại sau khoảng {seconds} giây."
   },
   "ocrContribution": {
     "cardAria": "Đóng góp mẫu cải thiện khả năng nhận diện chữ cho {title}",
