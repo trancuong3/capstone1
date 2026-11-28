@@ -10,7 +10,7 @@ import signal
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 import uvicorn
@@ -18,6 +18,7 @@ import uvicorn
 from ocr_worker.service import (
     CPU_THREADS,
     OcrRuntimeManager,
+    apply_windows_process_priority,
     build_worker_http_app,
     is_scale_to_zero_enabled,
     set_windows_below_normal_priority,
@@ -26,6 +27,7 @@ from ocr_worker.service import (
 logger = logging.getLogger("ocr_worker.worker")
 
 DEFAULT_BACKEND_TIMEOUT_SECONDS = 75.0
+DEFAULT_HEARTBEAT_SECONDS = 15.0
 DEFAULT_WAKE_BURST_SECONDS = 90.0
 DEFAULT_DRAIN_STRAGGLER_SECONDS = 3.0
 DEFAULT_MAX_DEGRADED_SECONDS = 180.0
@@ -148,7 +150,7 @@ def _sleep_degraded_backoff(
     *,
     client: Any | None = None,
     runtime: OcrRuntimeManager | None = None,
-    heartbeat_seconds: float = 25.0,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
 ) -> float:
     """Wait during degraded retry backoff while keeping periodic heartbeats alive."""
     last_hb = 0.0
@@ -534,7 +536,7 @@ def process_claimed_job(
     job: dict[str, Any],
     *,
     lease_seconds: int = 120,
-    heartbeat_interval_seconds: float = 25.0,
+    heartbeat_interval_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
 ) -> dict[str, Any]:
     job_id = str(job["job_id"])
     job_kind = str(job["job_kind"])
@@ -719,7 +721,7 @@ def drain_queue_synchronously(
     runtime: OcrRuntimeManager,
     *,
     lease_seconds: int = 120,
-    heartbeat_seconds: float = 25.0,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
     straggler_wait_seconds: float | None = None,
     stop_event: threading.Event | None = None,
 ) -> int:
@@ -859,6 +861,7 @@ def _run_claimed_job_cycle(
     heartbeat_seconds: float,
     use_quiet_standby: bool,
     resolved_burst_seconds: float,
+    on_heartbeat_sent: Callable[[float], Any] | None = None,
 ) -> float:
     """Execute one claimed OCR job with BUSY/IDLE heartbeats and burst renewal."""
     if use_quiet_standby:
@@ -871,6 +874,8 @@ def _run_claimed_job_cycle(
         busy_hb["active_job_count"] = 1
         client.send_worker_heartbeat(busy_hb)
         last_hb = time.monotonic()
+        if on_heartbeat_sent is not None:
+            on_heartbeat_sent(last_hb)
     except Exception:
         pass
     process_claimed_job(
@@ -893,6 +898,8 @@ def _run_claimed_job_cycle(
         idle_hb["active_job_count"] = 0
         client.send_worker_heartbeat(idle_hb)
         last_hb = time.monotonic()
+        if on_heartbeat_sent is not None:
+            on_heartbeat_sent(last_hb)
     except Exception:
         pass
     return last_hb
@@ -905,7 +912,7 @@ def run_worker_forever(
     bind_host: str = "127.0.0.1",
     bind_port: int = 8020,
     poll_seconds: float = 2.0,
-    heartbeat_seconds: float = 25.0,
+    heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
     lease_seconds: int = 120,
     apply_priority: bool = True,
     quiet_standby: bool | None = None,
@@ -914,7 +921,14 @@ def run_worker_forever(
     max_degraded_seconds: float | None = None,
 ) -> int:
     if apply_priority:
-        set_windows_below_normal_priority()
+        prio_result = apply_windows_process_priority()
+        if prio_result.get("supported"):
+            logger.info(
+                "Windows OCR worker priority configured (requested=%s, actual=%s, applied=%s)",
+                prio_result.get("requested"),
+                prio_result.get("priority_class"),
+                prio_result.get("applied"),
+            )
 
     runtime = OcrRuntimeManager()
     use_scale_to_zero = is_scale_to_zero_enabled()
@@ -1046,7 +1060,58 @@ def run_worker_forever(
         use_scale_to_zero,
     )
 
-    last_hb = 0.0
+    hb_state_lock = threading.Lock()
+    last_hb_monotonic: list[float] = [0.0]
+
+    def _get_last_hb() -> float:
+        with hb_state_lock:
+            return last_hb_monotonic[0]
+
+    def _record_hb(ts: float | None = None) -> float:
+        val = time.monotonic() if ts is None else float(ts)
+        with hb_state_lock:
+            if val > last_hb_monotonic[0]:
+                last_hb_monotonic[0] = val
+            return last_hb_monotonic[0]
+
+    hb_interval = max(0.05, float(heartbeat_seconds))
+    zero_request_standby = use_scale_to_zero or (
+        use_quiet_standby and keepalive_seconds <= 0.0
+    )
+    hb_thread: threading.Thread | None = None
+
+    def _worker_heartbeat_loop() -> None:
+        assert client is not None
+        next_wait = hb_interval
+        while not stop_event.wait(timeout=next_wait):
+            next_wait = hb_interval
+            if stop_event.is_set():
+                break
+            if not runtime.is_ready() and runtime.is_initializing():
+                continue
+            if zero_request_standby and not runtime.is_draining():
+                with runtime._state_lock:
+                    in_quiet_idle = (
+                        runtime._active_job_count == 0
+                        and runtime._standby_mode in ("quiet_standby", "scale_to_zero")
+                    )
+                if in_quiet_idle:
+                    continue
+            last_sent = _get_last_hb()
+            if last_sent > 0.0:
+                since_last = time.monotonic() - last_sent
+                if 0.0 <= since_last < (hb_interval * 0.6):
+                    next_wait = min(hb_interval, max(0.01, hb_interval - since_last))
+                    continue
+            try:
+                payload = runtime.heartbeat_payload()
+                if stop_event.is_set():
+                    break
+                client.send_worker_heartbeat(payload, timeout_seconds=10.0)
+                _record_hb()
+            except Exception as exc:
+                logger.warning("Background worker heartbeat failed: %s", type(exc).__name__)
+
     last_activity_at = time.monotonic()
     last_model_check = time.monotonic()
     poll_error_streak = 0
@@ -1071,9 +1136,15 @@ def run_worker_forever(
                 if runtime.is_ready():
                     startup_hb["status"] = "IDLE"
                 client.send_worker_heartbeat(startup_hb, timeout_seconds=5.0)
-                last_hb = time.monotonic()
+                _record_hb()
             except Exception as exc:
                 logger.warning("Startup worker heartbeat failed: %s", type(exc).__name__)
+            hb_thread = threading.Thread(
+                target=_worker_heartbeat_loop,
+                daemon=True,
+                name="ocr_worker_heartbeat",
+            )
+            hb_thread.start()
             if runtime.is_ready() and not stop_event.is_set():
                 try:
                     drained_on_start = drain_queue_synchronously(
@@ -1084,7 +1155,7 @@ def run_worker_forever(
                         straggler_wait_seconds=0.0,
                         stop_event=stop_event,
                     )
-                    last_hb = time.monotonic()
+                    _record_hb()
                     if drained_on_start > 0:
                         last_activity_at = time.monotonic()
                 except Exception as exc:
@@ -1118,10 +1189,10 @@ def run_worker_forever(
                     exit_code = 2
                     break
 
-                if client is not None and (now - last_hb) >= heartbeat_seconds:
+                if client is not None and (now - _get_last_hb()) >= heartbeat_seconds:
                     try:
                         client.send_worker_heartbeat(runtime.heartbeat_payload())
-                        last_hb = time.monotonic()
+                        _record_hb()
                     except Exception as exc:
                         logger.warning("Worker heartbeat failed: %s", type(exc).__name__)
 
@@ -1142,7 +1213,7 @@ def run_worker_forever(
                     heartbeat_seconds=heartbeat_seconds,
                 )
                 if hb_sent > 0.0:
-                    last_hb = hb_sent
+                    _record_hb(hb_sent)
                 if stop_event.is_set():
                     break
 
@@ -1190,7 +1261,7 @@ def run_worker_forever(
                             recovered_hb = runtime.heartbeat_payload()
                             recovered_hb["status"] = "IDLE"
                             client.send_worker_heartbeat(recovered_hb)
-                            last_hb = time.monotonic()
+                            _record_hb()
                         except Exception as exc:
                             logger.warning(
                                 "Recovered worker heartbeat failed: %s", type(exc).__name__
@@ -1258,7 +1329,7 @@ def run_worker_forever(
                                         type(exc).__name__,
                                     )
                             client.send_worker_heartbeat(runtime.heartbeat_payload())
-                            last_hb = time.monotonic()
+                            _record_hb()
                             job = (
                                 client.claim_next_job(
                                     runtime.worker_id, lease_seconds=lease_seconds
@@ -1275,9 +1346,10 @@ def run_worker_forever(
                                     heartbeat_seconds=heartbeat_seconds,
                                     use_quiet_standby=use_quiet_standby,
                                     resolved_burst_seconds=resolved_burst_seconds,
+                                    on_heartbeat_sent=_record_hb,
                                 )
                                 if hb_at > 0.0:
-                                    last_hb = hb_at
+                                    _record_hb(hb_at)
                                 last_activity_at = time.monotonic()
                     except Exception as exc:
                         logger.warning(
@@ -1286,10 +1358,10 @@ def run_worker_forever(
                         )
                 continue
 
-            if client is not None and (now - last_hb) >= heartbeat_seconds:
+            if client is not None and (now - _get_last_hb()) >= heartbeat_seconds:
                 try:
                     client.send_worker_heartbeat(runtime.heartbeat_payload())
-                    last_hb = time.monotonic()
+                    _record_hb()
                 except Exception as exc:
                     logger.warning("Worker heartbeat failed: %s", type(exc).__name__)
 
@@ -1314,7 +1386,7 @@ def run_worker_forever(
                             if resynced or forced_resync:
                                 try:
                                     client.send_worker_heartbeat(runtime.heartbeat_payload())
-                                    last_hb = time.monotonic()
+                                    _record_hb()
                                 except Exception:
                                     pass
 
@@ -1334,9 +1406,10 @@ def run_worker_forever(
                                 heartbeat_seconds=heartbeat_seconds,
                                 use_quiet_standby=use_quiet_standby,
                                 resolved_burst_seconds=resolved_burst_seconds,
+                                on_heartbeat_sent=_record_hb,
                             )
                             if hb_at > 0.0:
-                                last_hb = hb_at
+                                _record_hb(hb_at)
                             last_activity_at = time.monotonic()
                             did_work = True
                         poll_error_streak = 0
@@ -1372,7 +1445,11 @@ def run_worker_forever(
             if _wait_for_wake_or_stop(stop_event, runtime.wake_event, delay):
                 last_activity_at = time.monotonic()
     finally:
+        stop_event.set()
+        runtime.wake_event.set()
         server.should_exit = True
+        if hb_thread is not None:
+            hb_thread.join(timeout=2.0)
         if client is not None:
             try:
                 off = runtime.heartbeat_payload()
@@ -1394,6 +1471,15 @@ def main(argv: list[str] | None = None) -> int:
     default_port = int(
         (os.getenv("VIREAD_OCR_WORKER_PORT") or os.getenv("PORT") or "8020").strip()
     )
+    try:
+        default_heartbeat = float(
+            (
+                os.getenv("VIREAD_OCR_HEARTBEAT_SECONDS")
+                or str(DEFAULT_HEARTBEAT_SECONDS)
+            ).strip()
+        )
+    except ValueError:
+        default_heartbeat = DEFAULT_HEARTBEAT_SECONDS
     parser = argparse.ArgumentParser(description="ViRead Remote OCR Worker")
     parser.add_argument("--host", default=os.getenv("VIREAD_OCR_WORKER_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=default_port)
@@ -1405,6 +1491,12 @@ def main(argv: list[str] | None = None) -> int:
         "--poll-seconds",
         type=float,
         default=float(os.getenv("VIREAD_OCR_POLL_SECONDS", "2.0")),
+    )
+    parser.add_argument(
+        "--heartbeat-seconds",
+        type=float,
+        default=default_heartbeat,
+        help="Worker heartbeat interval in seconds (default 15.0)",
     )
     parser.add_argument(
         "--no-priority",
@@ -1439,6 +1531,7 @@ def main(argv: list[str] | None = None) -> int:
             bind_host=args.host,
             bind_port=args.port,
             poll_seconds=args.poll_seconds,
+            heartbeat_seconds=args.heartbeat_seconds,
             apply_priority=not args.no_priority,
             quiet_standby=args.quiet_standby,
             quiet_standby_keepalive_seconds=args.quiet_standby_keepalive_seconds,

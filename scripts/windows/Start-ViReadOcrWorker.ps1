@@ -1,4 +1,4 @@
-# Start the standalone ViRead Remote OCR Worker on 127.0.0.1:8020 (idempotent, BelowNormal priority).
+# Start the standalone ViRead Remote OCR Worker on 127.0.0.1:8020 (idempotent, configurable priority default Normal).
 param(
     [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
     [string]$PythonExe = $(if (Test-Path -LiteralPath "F:\c1\capstone1\.venv\Scripts\python.exe") { "F:\c1\capstone1\.venv\Scripts\python.exe" } else { "C:\Users\cuong\AppData\Local\Programs\Python\Python312\python.exe" }),
@@ -8,8 +8,8 @@ param(
     [int]$StartupTimeoutSeconds = 240,
     [string]$BackendUrl = "",
     [string]$OcrWorkerToken = "",
-    [ValidateSet("BelowNormal", "Idle", "Normal")]
-    [string]$Priority = "BelowNormal",
+    [ValidateSet("Idle", "BelowNormal", "Normal", "AboveNormal", "High")]
+    [string]$Priority = "Normal",
     [string]$QuietStandby = "",
     [int]$QuietStandbyKeepaliveSeconds = 0,
     [int]$MaxIdlePollSeconds = 15,
@@ -147,9 +147,85 @@ function Clear-UnhealthyOcrPort([int]$p) {
     return (-not [bool](Test-PortListening $p))
 }
 
+function Invoke-LocalOcrHealthProbe {
+    param(
+        [string]$TargetHost,
+        [int]$TargetPort,
+        [int]$TimeoutSec = 15
+    )
+    $httpResp = $null
+    $stream = $null
+    $reader = $null
+    try {
+        $url = "http://${TargetHost}:${TargetPort}/health"
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        $req.Method = "GET"
+        $req.Proxy = $null
+        $req.Timeout = $TimeoutSec * 1000
+        $req.ReadWriteTimeout = $TimeoutSec * 1000
+        $req.KeepAlive = $false
+        $req.Accept = "application/json"
+
+        $httpResp = $req.GetResponse()
+        $stream = $httpResp.GetResponseStream()
+        if ($null -eq $stream) { return $null }
+        $reader = New-Object System.IO.StreamReader($stream, [System.Text.Encoding]::UTF8)
+        $body = $reader.ReadToEnd()
+        if ([string]::IsNullOrWhiteSpace($body)) { return $null }
+        return ($body | ConvertFrom-Json)
+    } catch [System.Net.WebException] {
+        $errResp = $_.Exception.Response
+        if ($null -ne $errResp) {
+            $errStream = $null
+            $errReader = $null
+            try {
+                $errStream = $errResp.GetResponseStream()
+                if ($null -ne $errStream) {
+                    $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
+                    $errBody = $errReader.ReadToEnd()
+                    if (-not [string]::IsNullOrWhiteSpace($errBody)) {
+                        return ($errBody | ConvertFrom-Json)
+                    }
+                }
+            } catch {
+                return $null
+            } finally {
+                if ($null -ne $errReader) { try { $errReader.Dispose() } catch { } }
+                if ($null -ne $errStream) { try { $errStream.Dispose() } catch { } }
+                try { $errResp.Close() } catch { }
+            }
+        }
+        return $null
+    } catch {
+        return $null
+    } finally {
+        if ($null -ne $reader) { try { $reader.Dispose() } catch { } }
+        if ($null -ne $stream) { try { $stream.Dispose() } catch { } }
+        if ($null -ne $httpResp) { try { $httpResp.Close() } catch { } }
+    }
+}
+
 $effectiveBackendUrl = Resolve-BackendSetting $BackendUrl "VIREAD_OCR_BACKEND_URL" "VIREAD_BACKEND_URL"
 $effectiveToken = Resolve-BackendSetting $OcrWorkerToken "VIREAD_OCR_WORKER_TOKEN"
 $boundedThreads = [Math]::Max(1, [Math]::Min(4, $CpuThreads))
+$effectivePriority = $Priority
+if (-not $PSBoundParameters.ContainsKey("Priority")) {
+    $resolvedPriorityEnv = Resolve-BackendSetting "" "VIREAD_OCR_PROCESS_PRIORITY"
+    if ($resolvedPriorityEnv) {
+        switch ($resolvedPriorityEnv.Trim().ToLowerInvariant()) {
+            "idle"         { $effectivePriority = "Idle" }
+            "belownormal"  { $effectivePriority = "BelowNormal" }
+            "below_normal" { $effectivePriority = "BelowNormal" }
+            "below-normal" { $effectivePriority = "BelowNormal" }
+            "normal"       { $effectivePriority = "Normal" }
+            "abovenormal"  { $effectivePriority = "AboveNormal" }
+            "above_normal" { $effectivePriority = "AboveNormal" }
+            "above-normal" { $effectivePriority = "AboveNormal" }
+            "high"         { $effectivePriority = "High" }
+            default        { $effectivePriority = "Normal" }
+        }
+    }
+}
 $isLoopbackHost = ($BindHost -in @("127.0.0.1", "localhost", "::1"))
 $resolvedQuietStandby = Resolve-BackendSetting $QuietStandby "VIREAD_OCR_QUIET_STANDBY"
 if (-not $resolvedQuietStandby) {
@@ -173,17 +249,17 @@ $effectiveKeepaliveSeconds = if ($PSBoundParameters.ContainsKey("QuietStandbyKee
 }
 $effectiveMaxIdlePollSeconds = [Math]::Max(5, [Math]::Min(60, $MaxIdlePollSeconds))
 $resolvedHeartbeatEnv = Resolve-BackendSetting "" "VIREAD_OCR_HEARTBEAT_SECONDS"
-$effectiveHeartbeatSeconds = if ($resolvedHeartbeatEnv) { [Math]::Max(5, [int]$resolvedHeartbeatEnv) } else { 25 }
+$effectiveHeartbeatSeconds = if ($resolvedHeartbeatEnv) { [Math]::Max(5, [int]$resolvedHeartbeatEnv) } else { 15 }
 
 # Idempotent check
 try {
-    $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -TimeoutSec 3
+    $health = Invoke-LocalOcrHealthProbe -TargetHost $BindHost -TargetPort $Port -TimeoutSec 15
     if ($health -and ($health.ready -eq $true -or ($AllowDegradedStart -and $health.status -eq "degraded"))) {
         $existingConn = Test-PortListening $Port
         if ($existingConn) {
-            Set-ProcessTreePriority ([int]$existingConn.OwningProcess) $Priority
+            Set-ProcessTreePriority ([int]$existingConn.OwningProcess) $effectivePriority
         }
-        Write-Host "ViRead Remote OCR Worker is already healthy on http://${BindHost}:${Port} (priority=$Priority, ready=$($health.ready))"
+        Write-Host "ViRead Remote OCR Worker is already healthy on http://${BindHost}:${Port} (priority=$effectivePriority, ready=$($health.ready))"
         exit 0
     }
 } catch { }
@@ -208,6 +284,7 @@ $envKeys = @(
     "MKL_NUM_THREADS",
     "NUMEXPR_NUM_THREADS",
     "VIREAD_OCR_CPU_THREADS",
+    "VIREAD_OCR_PROCESS_PRIORITY",
     "VIREAD_OCR_WORKER_HOST",
     "VIREAD_OCR_WORKER_PORT",
     "VIREAD_BACKEND_URL",
@@ -236,6 +313,7 @@ try {
     [Environment]::SetEnvironmentVariable("MKL_NUM_THREADS", "$boundedThreads", "Process")
     [Environment]::SetEnvironmentVariable("NUMEXPR_NUM_THREADS", "$boundedThreads", "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_CPU_THREADS", "$boundedThreads", "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_OCR_PROCESS_PRIORITY", $effectivePriority, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_WORKER_HOST", $BindHost, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_WORKER_PORT", "$Port", "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_BACKEND_URL", $effectiveBackendUrl, "Process")
@@ -263,7 +341,7 @@ try {
         -ArgumentList @("-m", "ocr_worker.worker", "--host", $BindHost, "--port", "$Port") `
         -WorkingDirectory $repoRoot -WindowStyle Hidden `
         -RedirectStandardOutput $stdoutLog -RedirectStandardError $stderrLog -PassThru
-    Set-ProcessTreePriority $proc.Id $Priority
+    Set-ProcessTreePriority $proc.Id $effectivePriority
 } finally {
     foreach ($kv in $savedEnv.GetEnumerator()) {
         [Environment]::SetEnvironmentVariable($kv.Key, $kv.Value, "Process")
@@ -281,7 +359,7 @@ while ((Get-Date) -lt $deadline) {
         exit 5
     }
     try {
-        $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -TimeoutSec 3
+        $health = Invoke-LocalOcrHealthProbe -TargetHost $BindHost -TargetPort $Port -TimeoutSec 15
         if ($health) {
             $lastHealth = $health
             if ($health.ready -eq $true -or ($AllowDegradedStart -and $health.status)) {
@@ -302,8 +380,8 @@ if (-not $ready) {
 
 $listenConn = Test-PortListening $Port
 $listenPid = if ($listenConn) { [int]$listenConn.OwningProcess } else { $proc.Id }
-Set-ProcessTreePriority $proc.Id $Priority
-Set-ProcessTreePriority $listenPid $Priority
+Set-ProcessTreePriority $proc.Id $effectivePriority
+Set-ProcessTreePriority $listenPid $effectivePriority
 $listenProc = Get-Process -Id $listenPid -ErrorAction SilentlyContinue
 $listenStart = if ($listenProc) { $listenProc.StartTime.ToUniversalTime().ToString("o") } else { "" }
 
@@ -316,8 +394,9 @@ $listenStart = if ($listenProc) { $listenProc.StartTime.ToUniversalTime().ToStri
     port               = $Port
     pythonExe          = $PythonExe
     repoRoot           = $repoRoot
-    priorityClass      = $Priority
+    priorityClass      = $effectivePriority
     cpuThreads         = $boundedThreads
+    heartbeatSeconds   = $effectiveHeartbeatSeconds
     backendConfigured  = [bool]$effectiveBackendUrl
     tokenConfigured    = [bool]$effectiveToken
     quietStandby       = $resolvedQuietStandby
@@ -327,5 +406,5 @@ $listenStart = if ($listenProc) { $listenProc.StartTime.ToUniversalTime().ToStri
     startedAt          = (Get-Date).ToUniversalTime().ToString("o")
 } | ConvertTo-Json | Set-Content -Encoding UTF8 $stateFile
 
-Write-Host "ViRead Remote OCR Worker ready on http://${BindHost}:${Port} (PID=$listenPid, priority=$Priority, threads=$boundedThreads, ready=$($lastHealth.ready))."
+Write-Host "ViRead Remote OCR Worker ready on http://${BindHost}:${Port} (PID=$listenPid, priority=$effectivePriority, threads=$boundedThreads, heartbeat=${effectiveHeartbeatSeconds}s, ready=$($lastHealth.ready))."
 exit 0
