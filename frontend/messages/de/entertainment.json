@@ -552,6 +552,7 @@
       "where": "Wo und welche Farbe?"
     },
     "practicingWordsBadge": "Aktuelle Übungswörter",
+    "cardDifficultWordsTag": "Übungswörter: {words}",
     "matchedDifficultWordBanner": "Geübte Wörter: {words}",
     "autoPlayOn": "Automatik-Modus",
     "autoPlayOff": "Automatik-Modus (Aus)",

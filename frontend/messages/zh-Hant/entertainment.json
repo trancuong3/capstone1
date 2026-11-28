@@ -552,6 +552,7 @@
       "where": "在哪裡 / 什麼顏色？"
     },
     "practicingWordsBadge": "正在複習的詞",
+    "cardDifficultWordsTag": "練習生詞：{words}",
     "matchedDifficultWordBanner": "已複習生詞：{words}",
     "autoPlayOn": "自動暢玩",
     "autoPlayOff": "自動暢玩（已關）",

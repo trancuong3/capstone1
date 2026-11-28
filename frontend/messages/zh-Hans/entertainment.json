@@ -552,6 +552,7 @@
       "where": "在哪里 / 什么颜色？"
     },
     "practicingWordsBadge": "正在复习的词",
+    "cardDifficultWordsTag": "练习生词：{words}",
     "matchedDifficultWordBanner": "已复习生词：{words}",
     "autoPlayOn": "自动畅玩",
     "autoPlayOff": "自动畅玩（已关）",

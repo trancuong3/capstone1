@@ -890,14 +890,24 @@ def recommend_theme_for_words(
     words: list[str] | None,
     child_grade: int = 2,
     seed: int = 0,
+    *,
+    exclude_theme: str | None = None,
 ) -> ThemeKey:
     """Select the Memory Game theme whose sprites or story setting best reinforce difficult words."""
+    candidate_themes = (
+        tuple(t for t in THEMES if t.theme_key != exclude_theme)
+        if exclude_theme in THEME_BY_KEY and len(THEMES) > 1
+        else THEMES
+    )
     normalized_focus = _normalize_focus_words(words)
     if not normalized_focus:
+        if exclude_theme in THEME_BY_KEY and len(candidate_themes) > 0:
+            digest = hashlib.sha256(f"theme:{seed}".encode("utf-8")).digest()
+            return candidate_themes[int.from_bytes(digest[:4], "big") % len(candidate_themes)].theme_key
         return resolve_theme_key("random", seed)
 
     scored: list[tuple[int, int, ThemeKey]] = []
-    for idx, theme in enumerate(THEMES):
+    for idx, theme in enumerate(candidate_themes):
         sprites = SPRITES_BY_THEME[theme.theme_key]
         sprite_hits = sum(
             1
@@ -921,6 +931,9 @@ def recommend_theme_for_words(
             scored.append((score, grade_affinity, theme.theme_key))
 
     if not scored:
+        if exclude_theme in THEME_BY_KEY and len(candidate_themes) > 0:
+            digest = hashlib.sha256(f"theme:{seed}".encode("utf-8")).digest()
+            return candidate_themes[int.from_bytes(digest[:4], "big") % len(candidate_themes)].theme_key
         return resolve_theme_key("random", seed)
 
     top_score = max(item[0] for item in scored)

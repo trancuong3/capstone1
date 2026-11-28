@@ -62,6 +62,7 @@ const recorderStopMock = vi.fn<() => Promise<Blob | null>>(
   async () => new Blob(["audio"], { type: "audio/webm" }),
 );
 const recorderCancelMock = vi.fn();
+const mockRecorderState = { isSpeaking: false };
 
 const speechTranscribeMock = vi.fn<
   (...args: unknown[]) => Promise<{ text: string; provider: string }>
@@ -111,14 +112,14 @@ vi.mock("@/hooks/use-speech-player", () => ({
 vi.mock("@/hooks/use-speech-recorder", () => ({
   useSpeechRecorder: () => ({
     isRecording: false,
-    isSpeaking: false,
-    audioLevel: 0,
+    isSpeaking: mockRecorderState.isSpeaking,
+    audioLevel: mockRecorderState.isSpeaking ? 45 : 0,
     prepare: vi.fn(async () => undefined),
     start: recorderStartMock,
     stop: recorderStopMock,
     cancel: recorderCancelMock,
     getStream: () => null,
-    getIsSpeaking: () => false,
+    getIsSpeaking: () => mockRecorderState.isSpeaking,
   }),
 }));
 
@@ -568,6 +569,7 @@ describe("Child Autopilot UX V4.1", () => {
       autoPlayFlow: true,
     });
     vi.clearAllMocks();
+    mockRecorderState.isSpeaking = false;
     FakeSpeechRecognition.instances = [];
     adaptiveGetRecommendationsMock.mockResolvedValue(makeRecommendations());
     speechPlayMock.mockResolvedValue(undefined);
@@ -834,7 +836,7 @@ describe("Child Autopilot UX V4.1", () => {
     });
 
     expect(pictureServiceMock.createSession).toHaveBeenCalledWith(
-      { child_id: CHILD_ID, auto_select: true },
+      { child_id: CHILD_ID, auto_select: true, teacher_gender: "female" },
       expect.any(AbortSignal),
     );
     expect(speechPlayMock).toHaveBeenCalledWith(
@@ -1150,5 +1152,302 @@ describe("Child Autopilot UX V4.1", () => {
       timer_mode: "20S",
       recall_mode: "FREE_RECALL",
     });
+  });
+
+  it("H1: Picture Description triggers 2.2s VAD silence auto-submit on web browsers without SpeechRecognition", async () => {
+    vi.stubGlobal("SpeechRecognition", undefined);
+    vi.stubGlobal("webkitSpeechRecognition", undefined);
+    const picCatalog = makePictureCatalog();
+    const picSession = makePictureSession();
+    const evalResp = makePictureEvalResponse(picSession);
+
+    vi.mocked(pictureServiceMock.getCatalog).mockResolvedValue(picCatalog);
+    vi.mocked(pictureServiceMock.listSessions).mockResolvedValue([]);
+    vi.mocked(pictureServiceMock.createSession).mockResolvedValue(picSession);
+    vi.mocked(pictureServiceMock.evaluate).mockResolvedValue(evalResp);
+    speechTranscribeMock.mockResolvedValue({
+      text: "con mèo đang ngủ dưới nắng",
+      provider: "elevenlabs",
+    });
+
+    vi.useFakeTimers();
+    const view = render(<PictureDescriptionScreen autoPlay={true} />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+      await Promise.resolve();
+    });
+    expect(recorderStartMock).toHaveBeenCalledTimes(1);
+
+    // Child speaks (Web Audio VAD detects speech)
+    mockRecorderState.isSpeaking = true;
+    await act(async () => {
+      view.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    expect(screen.getByTestId("live-voice-transcript")).toHaveTextContent(
+      "Đang nhận diện giọng bé",
+    );
+    expect(
+      screen.queryByTestId("picture-auto-submit-bar"),
+    ).not.toBeInTheDocument();
+
+    // Child pauses -> VAD goes quiet -> 2.2s countdown starts
+    mockRecorderState.isSpeaking = false;
+    await act(async () => {
+      view.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(screen.getByTestId("picture-auto-submit-bar")).toHaveTextContent(
+      "Tự gửi sau",
+    );
+
+    // Child speaks again after 1s -> timer cancels & hides countdown bar
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    mockRecorderState.isSpeaking = true;
+    await act(async () => {
+      view.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    expect(
+      screen.queryByTestId("picture-auto-submit-bar"),
+    ).not.toBeInTheDocument();
+    expect(pictureServiceMock.evaluate).not.toHaveBeenCalled();
+
+    // Child finishes speaking -> full 2.2s silence -> stops recorder, transcribes, auto-evaluates
+    mockRecorderState.isSpeaking = false;
+    await act(async () => {
+      view.rerender(<PictureDescriptionScreen autoPlay={true} />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    expect(screen.getByTestId("picture-auto-submit-bar")).toHaveTextContent(
+      "Tự gửi sau",
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2300);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(speechTranscribeMock).toHaveBeenCalledTimes(1);
+    expect(pictureServiceMock.evaluate).toHaveBeenCalledWith(
+      picSession.session_id,
+      expect.objectContaining({
+        transcript_text: "con mèo đang ngủ dưới nắng",
+        input_mode: "VOICE",
+      }),
+      expect.any(AbortSignal),
+    );
+  });
+
+  it("H3 + H6 + 409 fallback: forwards mode/difficulty/recall_mode, waits for book_id listBooks, and steps down on 409", async () => {
+    const book: SentenceShooterBookDTO = {
+      id: BOOK_ID,
+      name: "Chú mèo con",
+      title: "Chú mèo con",
+      author: "ViRead",
+      min_grade: 1,
+      max_grade: 3,
+      available_rounds: 3,
+      matched_difficult_words: ["con mèo"],
+    };
+    const shooterSession = makeShooterSession(1);
+    let resolveBooks!: (books: SentenceShooterBookDTO[]) => void;
+    const booksPromise = new Promise<SentenceShooterBookDTO[]>((resolve) => {
+      resolveBooks = resolve;
+    });
+    vi.mocked(shooterServiceMock.listBooks).mockReturnValueOnce(booksPromise);
+    vi.mocked(shooterServiceMock.createSession)
+      .mockRejectedValueOnce({ status: 409, message: "INSUFFICIENT_CONTENT" })
+      .mockResolvedValueOnce(shooterSession);
+
+    const shooterView = render(
+      <SentenceShooterScreen
+        autoPlay={true}
+        initialBookId={BOOK_ID}
+        initialDifficulty="challenge"
+        initialLearningMode="FILL_BLANK"
+      />,
+    );
+
+    // Before books resolve, createSession must NOT fire prematurely
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(shooterServiceMock.createSession).not.toHaveBeenCalled();
+
+    // Once books resolve, auto-start fires with book_id, FILL_BLANK, challenge -> falls back to medium on 409
+    await act(async () => {
+      resolveBooks([book]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(shooterServiceMock.createSession).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          child_id: CHILD_ID,
+          book_id: BOOK_ID,
+          difficulty: "challenge",
+          learning_mode: "FILL_BLANK",
+        }),
+        expect.any(AbortSignal),
+      );
+      expect(shooterServiceMock.createSession).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          child_id: CHILD_ID,
+          book_id: BOOK_ID,
+          difficulty: "medium",
+          learning_mode: "FILL_BLANK",
+        }),
+        expect.any(AbortSignal),
+      );
+    });
+    shooterView.unmount();
+
+    // Picture Description forwards initialTeachingMode="VOCABULARY" + teacher_gender
+    const picCatalog = makePictureCatalog();
+    const picSession = makePictureSession();
+    vi.mocked(pictureServiceMock.getCatalog).mockResolvedValue(picCatalog);
+    vi.mocked(pictureServiceMock.listSessions).mockResolvedValue([]);
+    vi.mocked(pictureServiceMock.createSession).mockResolvedValue(picSession);
+    const picView = render(
+      <PictureDescriptionScreen
+        autoPlay={true}
+        initialTeachingMode="VOCABULARY"
+      />,
+    );
+    await waitFor(() => {
+      expect(pictureServiceMock.createSession).toHaveBeenCalledWith(
+        {
+          child_id: CHILD_ID,
+          auto_select: true,
+          teaching_mode: "VOCABULARY",
+          teacher_gender: "female",
+        },
+        expect.any(AbortSignal),
+      );
+    });
+    picView.unmount();
+
+    // Memory Game forwards initialRecallMode="GUIDED_RECALL" overriding grade default FREE_RECALL
+    const memSession = makeMemorySession(2);
+    const memoryMock = createMemoryServiceMock(memSession);
+    render(
+      <MemoryGameScreen
+        autoPlay={true}
+        initialRecallMode="GUIDED_RECALL"
+        service={memoryMock}
+      />,
+    );
+    await waitFor(() => {
+      expect(memoryMock.createSessionMock).toHaveBeenCalledWith({
+        child_id: CHILD_ID,
+        theme_key: undefined,
+        timer_mode: "20S",
+        recall_mode: "GUIDED_RECALL",
+      });
+    });
+  });
+
+  it("M1: Memory Game REVEAL hides practiced-words celebration when used_focus_words is empty", async () => {
+    const memSession = makeMemorySession(2);
+    const memoryMock = createMemoryServiceMock(memSession);
+    const emptyFocusEval: MemoryEvaluationDTO = {
+      ...makeMemoryEvaluation(),
+      used_focus_words: [],
+      practiced_difficult_words: [],
+      focus_word_feedback_vi: null,
+    };
+    memoryMock.submitAttemptMock.mockResolvedValueOnce({
+      attempt: {
+        id: "att-2",
+        session_id: memSession.id,
+        attempt_number: 1,
+        stage: "RECALL" as const,
+        input_mode: "TEXT" as const,
+        response_text: "bầu trời xanh",
+        factual_score: 40,
+        creative_score: 0,
+        stars: 1,
+        evaluation: emptyFocusEval,
+        ai_provider: "deterministic-v4",
+        created_at: "2026-01-01T00:01:00Z",
+      },
+      session: {
+        ...memSession,
+        best_factual_score: 40,
+        stars: 1,
+        attempts_count: 1,
+      },
+    });
+
+    render(<MemoryGameScreen autoPlay={true} service={memoryMock} />);
+    await screen.findByTestId("observe-stage");
+    fireEvent.click(screen.getByRole("button", { name: /Bé đã nhớ rồi/i }));
+    const textarea = await screen.findByTestId("recall-textarea");
+    fireEvent.change(textarea, { target: { value: "bầu trời xanh" } });
+    fireEvent.click(screen.getByRole("button", { name: /Mở tranh/i }));
+
+    await screen.findByTestId("reveal-stage");
+    expect(
+      screen.queryByTestId("reveal-practiced-words"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("M4: respects autoPlayFlow=false on ?autoplay=1 across Sentence Shooter, Picture Description, and Memory Game", async () => {
+    setEntertainmentPreferences({
+      reducedMotion: false,
+      calmSound: true,
+      autoPlayFlow: false,
+    });
+
+    const book: SentenceShooterBookDTO = {
+      id: BOOK_ID,
+      name: "Chú mèo con",
+      title: "Chú mèo con",
+      author: "ViRead",
+      min_grade: 1,
+      max_grade: 3,
+      available_rounds: 3,
+      matched_difficult_words: ["con mèo"],
+    };
+    vi.mocked(shooterServiceMock.listBooks).mockResolvedValue([book]);
+    const shooterView = render(<SentenceShooterScreen autoPlay={true} />);
+    await screen.findByTestId("shooter-quick-start-btn");
+    expect(shooterServiceMock.createSession).not.toHaveBeenCalled();
+    shooterView.unmount();
+
+    vi.mocked(pictureServiceMock.getCatalog).mockResolvedValue(
+      makePictureCatalog(),
+    );
+    vi.mocked(pictureServiceMock.listSessions).mockResolvedValue([]);
+    const picView = render(<PictureDescriptionScreen autoPlay={true} />);
+    await screen.findByTestId("picture-quick-play-btn");
+    expect(pictureServiceMock.createSession).not.toHaveBeenCalled();
+    // Low item: unplayed sample cards show present-tense "Ôn từ khó: ..." instead of past-tense "Từ bé vừa ôn:"
+    expect(screen.getByText(/Ôn từ khó: con mèo, vườn hoa/)).toBeVisible();
+    picView.unmount();
+
+    const memSession = makeMemorySession(2);
+    const memoryMock = createMemoryServiceMock(memSession);
+    render(<MemoryGameScreen autoPlay={true} service={memoryMock} />);
+    await screen.findByTestId("memory-quick-play-btn");
+    expect(memoryMock.createSessionMock).not.toHaveBeenCalled();
   });
 });

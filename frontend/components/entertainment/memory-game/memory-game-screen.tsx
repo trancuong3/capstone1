@@ -46,6 +46,7 @@ import {
   TTS_MIC_COOLDOWN_MS,
   countMeaningfulWords,
   formatCountdownSeconds,
+  resolveAllowedQueryParam,
   resolveAutoPlayFlag,
 } from "@/lib/entertainment/autopilot";
 import { createSpeechService } from "@/lib/api/speech-service";
@@ -201,19 +202,35 @@ function renderStars(count: number, ariaLabel: string) {
   );
 }
 
+const VALID_RECALL_MODES: readonly MemoryRecallMode[] = [
+  "FREE_RECALL",
+  "GUIDED_RECALL",
+];
+
 export interface MemoryGameScreenProps {
   readonly service?: MemoryGameService;
   readonly autoPlay?: boolean;
+  readonly initialRecallMode?: MemoryRecallMode;
 }
 
 export function MemoryGameScreen({
   service,
   autoPlay,
+  initialRecallMode,
 }: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
   const tCommon = useTranslations("common");
   const defaultErrorMessage = t("memoryGame.defaultError");
   const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
+  const resolvedInitialRecallMode = useMemo(
+    () =>
+      resolveAllowedQueryParam(
+        initialRecallMode,
+        "recall_mode",
+        VALID_RECALL_MODES,
+      ),
+    [initialRecallMode],
+  );
   const memoryService = useMemo(
     () => service ?? createMemoryGameService(),
     [service],
@@ -256,7 +273,9 @@ export function MemoryGameScreen({
   const [selectedTheme, setSelectedTheme] =
     useState<MemoryThemeSelection>("random");
   const [timerMode, setTimerMode] = useState<MemoryTimerMode>("30S");
-  const [recallMode, setRecallMode] = useState<MemoryRecallMode>("FREE_RECALL");
+  const [recallMode, setRecallMode] = useState<MemoryRecallMode>(
+    () => resolvedInitialRecallMode ?? "FREE_RECALL",
+  );
   const [showObservationGuide, setShowObservationGuide] = useState(true);
   const [showColorCues, setShowColorCues] = useState(true);
   const [hasCustomizedGradeDefaults, setHasCustomizedGradeDefaults] =
@@ -267,8 +286,9 @@ export function MemoryGameScreen({
   const [session, setSession] = useState<MemorySessionDTO | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [autopilotSessionActive, setAutopilotSessionActive] =
-    useState<boolean>(autoPlayRequested);
+  const [autopilotSessionActive, setAutopilotSessionActive] = useState<boolean>(
+    autoPlayRequested && autoPlayFlow,
+  );
   const [autoRecallPaused, setAutoRecallPaused] = useState(false);
   const [recallSilenceCountdown, setRecallSilenceCountdown] = useState<{
     text: string;
@@ -767,7 +787,9 @@ export function MemoryGameScreen({
           );
           if (rec) {
             setTimerMode(rec.recommended_timer);
-            setRecallMode(rec.recommended_recall_mode);
+            if (!resolvedInitialRecallMode) {
+              setRecallMode(rec.recommended_recall_mode);
+            }
           }
         }
       })
@@ -786,6 +808,7 @@ export function MemoryGameScreen({
     defaultErrorMessage,
     hasCustomizedGradeDefaults,
     memoryService,
+    resolvedInitialRecallMode,
   ]);
 
   // History is optional and must never delay loading the playable catalog.
@@ -863,7 +886,9 @@ export function MemoryGameScreen({
         ? (gradeDefault?.recommended_timer ?? timerMode)
         : timerMode;
       const effectiveRecall = options?.autoSelect
-        ? (gradeDefault?.recommended_recall_mode ?? recallMode)
+        ? (resolvedInitialRecallMode ??
+          gradeDefault?.recommended_recall_mode ??
+          recallMode)
         : recallMode;
 
       try {
@@ -891,6 +916,7 @@ export function MemoryGameScreen({
       isStarting,
       memoryService,
       recallMode,
+      resolvedInitialRecallMode,
       selectedTheme,
       stopAllTts,
       stopMicCapture,
@@ -1089,9 +1115,13 @@ export function MemoryGameScreen({
     speakVietnamesePromptRef.current = speakVietnamesePrompt;
   }, [speakVietnamesePrompt]);
 
-  // ?autoplay=1: auto-start with theme_key=undefined + grade-recommended timer
+  // ?autoplay=1: auto-start with theme_key=undefined + grade-recommended timer (respecting autoPlayFlow=false)
   useEffect(() => {
     if (!autoPlayRequested || autoStartedFromQueryRef.current) return;
+    if (!autoPlayFlow) {
+      autoStartedFromQueryRef.current = true;
+      return;
+    }
     if (!childId || (catalog === null && catalogError === null)) return;
     if (stage !== "SETUP" || session || isStarting) return;
     let active = true;
@@ -1107,6 +1137,7 @@ export function MemoryGameScreen({
       active = false;
     };
   }, [
+    autoPlayFlow,
     autoPlayRequested,
     catalog,
     catalogError,
@@ -2359,7 +2390,6 @@ export function MemoryGameScreen({
               new Set([
                 ...(recallEvaluation.practiced_difficult_words ?? []),
                 ...(recallEvaluation.used_focus_words ?? []),
-                ...(session.scene_spec.matched_focus_words ?? []),
               ]),
             );
             const focusFeedback = recallEvaluation.focus_word_feedback_vi;

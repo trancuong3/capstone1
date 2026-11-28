@@ -23,6 +23,17 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function Page() {
-  return <KaraokeLibraryScreen />;
+interface KaraokeLibraryPageProps {
+  readonly searchParams: Promise<{
+    autoplay?: string | string[];
+  }>;
+}
+
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function Page({ searchParams }: KaraokeLibraryPageProps) {
+  const query = await searchParams;
+  return <KaraokeLibraryScreen autoPlay={firstValue(query.autoplay) === "1"} />;
 }

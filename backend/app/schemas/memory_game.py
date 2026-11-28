@@ -127,6 +127,8 @@ class MemoryThemesCatalogRead(BaseModel):
     timer_options: list[TimerOptionRead]
     grade_recommendations: list[GradeRecommendationRead]
     total_sprites: int
+    focus_difficult_words: list[str] = Field(default_factory=list)
+    recommended_theme_key: ThemeKey | None = None
 
 
 class MemorySessionCreate(BaseModel):

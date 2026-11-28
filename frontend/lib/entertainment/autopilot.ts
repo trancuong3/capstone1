@@ -17,13 +17,36 @@ export function appendAutoplayParam(href: string): string {
  * Avoids `useSearchParams()` so client components remain compatible with lightweight mocks.
  */
 export function resolveAutoPlayFlag(propAutoPlay?: boolean): boolean {
-  if (propAutoPlay) return true;
+  if (propAutoPlay !== undefined) return Boolean(propAutoPlay);
   if (typeof window === "undefined") return false;
   try {
     return new URLSearchParams(window.location.search).get("autoplay") === "1";
   } catch {
     return false;
   }
+}
+
+/**
+ * Resolve an enumerated query parameter from an optional server-passed prop or `window.location.search`.
+ */
+export function resolveAllowedQueryParam<T extends string>(
+  propValue: T | undefined,
+  paramName: string,
+  allowed: readonly T[],
+): T | undefined {
+  if (propValue !== undefined && allowed.includes(propValue)) {
+    return propValue;
+  }
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = new URLSearchParams(window.location.search).get(paramName);
+    if (raw && (allowed as readonly string[]).includes(raw)) {
+      return raw as T;
+    }
+  } catch {
+    // Ignore restricted/invalid URL state.
+  }
+  return undefined;
 }
 
 /**

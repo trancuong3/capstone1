@@ -552,6 +552,7 @@
       "where": "어디 / 무슨 색인가요?"
     },
     "practicingWordsBadge": "복습 중인 낱말",
+    "cardDifficultWordsTag": "연습할 낱말: {words}",
     "matchedDifficultWordBanner": "연습한 낱말: {words}",
     "autoPlayOn": "자동 진행",
     "autoPlayOff": "자동 진행 (끔)",

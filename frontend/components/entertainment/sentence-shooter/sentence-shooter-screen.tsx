@@ -53,8 +53,10 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { isServiceError } from "@/lib/api/service-error";
 import {
   formatCountdownSeconds,
+  resolveAllowedQueryParam,
   resolveAutoPlayFlag,
 } from "@/lib/entertainment/autopilot";
 import {
@@ -145,10 +147,43 @@ const MAX_ACTIVE_PROJECTILES = 6;
 const AUTO_ADVANCE_DURATION_MS = 2500;
 const AUTO_ADVANCE_TICK_MS = 250;
 
+const VALID_DIFFICULTIES: readonly SentenceShooterDifficulty[] = [
+  "easy",
+  "medium",
+  "challenge",
+];
+const VALID_LEARNING_MODES: readonly SentenceShooterLearningMode[] = [
+  "WORD_ORDER",
+  "FILL_BLANK",
+  "GRAMMAR_FOCUS",
+];
+
 interface SentenceShooterScreenProps {
   autoPlay?: boolean;
   initialBookId?: string;
+  initialDifficulty?: SentenceShooterDifficulty;
+  initialLearningMode?: SentenceShooterLearningMode;
   readingSessionId?: string;
+}
+
+function isInsufficientContentError(error: unknown): boolean {
+  if (isServiceError(error)) {
+    return error.status === 409;
+  }
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 409
+  );
+}
+
+function buildDifficultyFallbackChain(
+  start: SentenceShooterDifficulty,
+): SentenceShooterDifficulty[] {
+  if (start === "challenge") return ["challenge", "medium", "easy"];
+  if (start === "medium") return ["medium", "easy"];
+  return ["easy"];
 }
 
 function resolveAdaptiveDifficultyForGrade(
@@ -407,6 +442,8 @@ function SentenceShooterResultView({
 export function SentenceShooterScreen({
   autoPlay,
   initialBookId,
+  initialDifficulty,
+  initialLearningMode,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
@@ -443,11 +480,31 @@ export function SentenceShooterScreen({
     () => resolveAutoPlayFlag(autoPlay),
     [autoPlay],
   );
+  const resolvedInitialDifficulty = useMemo(
+    () =>
+      resolveAllowedQueryParam(
+        initialDifficulty,
+        "difficulty",
+        VALID_DIFFICULTIES,
+      ),
+    [initialDifficulty],
+  );
+  const resolvedInitialLearningMode = useMemo(
+    () =>
+      resolveAllowedQueryParam(
+        initialLearningMode,
+        "mode",
+        VALID_LEARNING_MODES,
+      ),
+    [initialLearningMode],
+  );
 
-  const [difficulty, setDifficulty] =
-    useState<SentenceShooterDifficulty>("easy");
-  const [learningMode, setLearningMode] =
-    useState<SentenceShooterLearningMode>("WORD_ORDER");
+  const [difficulty, setDifficulty] = useState<SentenceShooterDifficulty>(
+    () => resolvedInitialDifficulty ?? "easy",
+  );
+  const [learningMode, setLearningMode] = useState<SentenceShooterLearningMode>(
+    () => resolvedInitialLearningMode ?? "WORD_ORDER",
+  );
   const [totalRounds, setTotalRounds] = useState<3 | 5>(3);
   const [bookState, setBookState] = useState<BookLoadState>({
     status: "loading",
@@ -948,14 +1005,22 @@ export function SentenceShooterScreen({
 
   async function startGame(options?: {
     autoSelectBook?: boolean;
+    bookIdOverride?: string;
     difficultyOverride?: SentenceShooterDifficulty;
+    learningModeOverride?: SentenceShooterLearningMode;
+    fallbackOnInsufficientContent?: boolean;
   }) {
     if (!child || isStartingSession) return;
     const autoSelectBook = Boolean(options?.autoSelectBook);
-    if (!autoSelectBook && !selectedBook) return;
+    const resolvedBookId = options?.bookIdOverride ?? selectedBook?.id;
+    if (!autoSelectBook && !resolvedBookId) return;
     const targetDifficulty = options?.difficultyOverride ?? difficulty;
+    const targetLearningMode = options?.learningModeOverride ?? learningMode;
     if (options?.difficultyOverride) {
       setDifficulty(options.difficultyOverride);
+    }
+    if (options?.learningModeOverride) {
+      setLearningMode(options.learningModeOverride);
     }
     sessionEpochRef.current += 1;
     const epoch = sessionEpochRef.current;
@@ -970,19 +1035,44 @@ export function SentenceShooterScreen({
     setIsStartingSession(true);
     setError("");
     try {
-      const created = await shooterService.createSession(
-        {
-          child_id: child.id,
-          ...(autoSelectBook
-            ? { auto_select_book: true }
-            : { book_id: selectedBook?.id }),
-          difficulty: targetDifficulty,
-          total_rounds: totalRounds,
-          learning_mode: learningMode,
-        },
-        controller.signal,
-      );
-      if (epoch !== sessionEpochRef.current) return;
+      const difficultyCandidates = options?.fallbackOnInsufficientContent
+        ? buildDifficultyFallbackChain(targetDifficulty)
+        : [targetDifficulty];
+      let created: SentenceShooterSessionDTO | null = null;
+      let resolvedDifficulty = targetDifficulty;
+      for (let idx = 0; idx < difficultyCandidates.length; idx += 1) {
+        const candidateDiff = difficultyCandidates[idx];
+        try {
+          created = await shooterService.createSession(
+            {
+              child_id: child.id,
+              ...(autoSelectBook
+                ? { auto_select_book: true }
+                : { book_id: resolvedBookId }),
+              difficulty: candidateDiff,
+              total_rounds: totalRounds,
+              learning_mode: targetLearningMode,
+            },
+            controller.signal,
+          );
+          resolvedDifficulty = candidateDiff;
+          break;
+        } catch (attemptError: unknown) {
+          const hasNextFallback = idx < difficultyCandidates.length - 1;
+          if (
+            hasNextFallback &&
+            !controller.signal.aborted &&
+            isInsufficientContentError(attemptError)
+          ) {
+            continue;
+          }
+          throw attemptError;
+        }
+      }
+      if (!created || epoch !== sessionEpochRef.current) return;
+      if (resolvedDifficulty !== targetDifficulty) {
+        setDifficulty(resolvedDifficulty);
+      }
       clearProjectileTimers();
       layoutCache.clearTokens();
       roundCompletedRef.current = false;
@@ -1236,7 +1326,8 @@ export function SentenceShooterScreen({
     continueToNextRoundRef.current = continueToNextRound;
   });
 
-  // V4.1 ?autoplay=1: immediately auto-start with adaptive difficulty & best book (0 setup clicks).
+  // V4.1 ?autoplay=1: immediately auto-start with adaptive/URL difficulty & best book (0 setup clicks),
+  // while respecting autoPlayFlow=false and waiting for bookState when an explicit book_id is supplied.
   useEffect(() => {
     if (
       !autoPlayRequested ||
@@ -1246,20 +1337,51 @@ export function SentenceShooterScreen({
     ) {
       return;
     }
+    if (!autoPlayFlow) {
+      autoStartedRef.current = true;
+      return;
+    }
+    if (initialBookId) {
+      if (bookState.status === "loading") {
+        return;
+      }
+      if (bookState.status !== "ready" || !selectedBook) {
+        autoStartedRef.current = true;
+        return;
+      }
+    }
     let active = true;
-    const adaptiveDiff = resolveAdaptiveDifficultyForGrade(child.grade);
+    const targetDifficulty =
+      resolvedInitialDifficulty ??
+      resolveAdaptiveDifficultyForGrade(child.grade);
+    const targetLearningMode = resolvedInitialLearningMode ?? learningMode;
+    const targetBookId = initialBookId ? selectedBook?.id : undefined;
     void Promise.resolve().then(() => {
       if (!active || autoStartedRef.current) return;
       autoStartedRef.current = true;
       void startGameRef.current({
         autoSelectBook: !initialBookId,
-        difficultyOverride: adaptiveDiff,
+        bookIdOverride: targetBookId,
+        difficultyOverride: targetDifficulty,
+        learningModeOverride: targetLearningMode,
+        fallbackOnInsufficientContent: true,
       });
     });
     return () => {
       active = false;
     };
-  }, [autoPlayRequested, child, initialBookId, mode]);
+  }, [
+    autoPlayFlow,
+    autoPlayRequested,
+    bookState.status,
+    child,
+    initialBookId,
+    learningMode,
+    mode,
+    resolvedInitialDifficulty,
+    resolvedInitialLearningMode,
+    selectedBook,
+  ]);
 
   const isRoundCompletedReady =
     mode === "playing" &&

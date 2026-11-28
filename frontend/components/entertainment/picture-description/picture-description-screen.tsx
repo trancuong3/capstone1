@@ -87,6 +87,7 @@ import {
   TTS_MIC_COOLDOWN_MS,
   countMeaningfulWords,
   formatCountdownSeconds,
+  resolveAllowedQueryParam,
   resolveAutoPlayFlag,
 } from "@/lib/entertainment/autopilot";
 import type {
@@ -382,17 +383,37 @@ function renderStars(count: number, ariaLabel: string) {
   );
 }
 
+const VALID_TEACHING_MODES: readonly PictureTeachingMode[] = [
+  "OBSERVE",
+  "VOCABULARY",
+  "SENTENCE",
+  "STORY",
+  "INFER",
+  "CREATE",
+];
+
 export interface PictureDescriptionScreenProps {
   readonly autoPlay?: boolean;
+  readonly initialTeachingMode?: PictureTeachingMode;
 }
 
 export function PictureDescriptionScreen({
   autoPlay,
+  initialTeachingMode,
 }: PictureDescriptionScreenProps = {}) {
   const t = useTranslations("entertainment");
   const tCommon = useTranslations("common");
   const defaultGameError = t("pictureDescription.defaultError");
   const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
+  const resolvedInitialTeachingMode = useMemo(
+    () =>
+      resolveAllowedQueryParam(
+        initialTeachingMode,
+        "mode",
+        VALID_TEACHING_MODES,
+      ),
+    [initialTeachingMode],
+  );
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
@@ -418,19 +439,23 @@ export function PictureDescriptionScreen({
   const [activeTab, setActiveTab] = useState<SourceTab>("SAMPLE");
   const [practiceTab, setPracticeTab] = useState<PracticeTab>("PRACTICE");
   const [session, setSession] = useState<PictureSessionDTO | null>(null);
-  const [autopilotSessionActive, setAutopilotSessionActive] =
-    useState<boolean>(autoPlayRequested);
+  const [autopilotSessionActive, setAutopilotSessionActive] = useState<boolean>(
+    autoPlayRequested && autoPlayFlow,
+  );
   const [autoVoicePaused, setAutoVoicePaused] = useState(false);
   const [autoSubmitPaused, setAutoSubmitPaused] = useState(false);
+  const [hasLiveSpeechRecognition, setHasLiveSpeechRecognition] =
+    useState(false);
   const [silenceCountdown, setSilenceCountdown] = useState<{
-    transcript: string;
+    key: string;
     remainingMs: number;
   } | null>(null);
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(
     null,
   );
-  const [teachingMode, setTeachingMode] =
-    useState<PictureTeachingMode>("OBSERVE");
+  const [teachingMode, setTeachingMode] = useState<PictureTeachingMode>(
+    () => resolvedInitialTeachingMode ?? "OBSERVE",
+  );
   const [activeFollowUpQuestion, setActiveFollowUpQuestion] = useState<
     string | null
   >(null);
@@ -501,6 +526,7 @@ export function PictureDescriptionScreen({
     null,
   );
   const silenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const vadSpeechDetectedRef = useRef(false);
   const autopilotRunIdRef = useRef(0);
   const autopilotTurnKeyRef = useRef<string | null>(null);
   const autoStartedFromQueryRef = useRef(false);
@@ -527,6 +553,7 @@ export function PictureDescriptionScreen({
   const unmountActionsRef = useRef({
     cancelRecorder: recorder.cancel,
     stopSpeech: speechPlayer.stop,
+    getIsSpeaking: recorder.getIsSpeaking,
   });
 
   const childId = childState.status === "ready" ? childState.child.id : null;
@@ -577,6 +604,7 @@ export function PictureDescriptionScreen({
     unmountActionsRef.current = {
       cancelRecorder: recorder.cancel,
       stopSpeech: speechPlayer.stop,
+      getIsSpeaking: recorder.getIsSpeaking,
     };
   });
 
@@ -607,6 +635,8 @@ export function PictureDescriptionScreen({
         sttControllerRef.current !== null;
       isRecordingVoiceRef.current = false;
       usingExternalNativeSttRef.current = false;
+      vadSpeechDetectedRef.current = false;
+      setHasLiveSpeechRecognition(false);
       setIsRecordingVoice(false);
       setIsTranscribing(false);
       sttControllerRef.current?.abort();
@@ -900,7 +930,10 @@ export function PictureDescriptionScreen({
   );
 
   const handleAutoSelectSession = useCallback(
-    async (options?: { enableAutopilot?: boolean }) => {
+    async (options?: {
+      enableAutopilot?: boolean;
+      teachingMode?: PictureTeachingMode;
+    }) => {
       if (!childId || !pictureService || isAnalyzing) return;
       requestControllerRef.current?.abort();
       const controller = new AbortController();
@@ -909,10 +942,14 @@ export function PictureDescriptionScreen({
       setActionError(null);
       setIsAnalyzing(true);
       try {
+        const selectedMode =
+          options?.teachingMode ?? resolvedInitialTeachingMode;
         const created = await pictureService.createSession(
           {
             child_id: childId,
             auto_select: true,
+            ...(selectedMode ? { teaching_mode: selectedMode } : {}),
+            teacher_gender: teacherPersona.gender,
           },
           controller.signal,
         );
@@ -930,26 +967,43 @@ export function PictureDescriptionScreen({
         setIsAnalyzing(false);
       }
     },
-    [childId, defaultGameError, isAnalyzing, openSession, pictureService],
+    [
+      childId,
+      defaultGameError,
+      isAnalyzing,
+      openSession,
+      pictureService,
+      resolvedInitialTeachingMode,
+      teacherPersona.gender,
+    ],
   );
 
   useEffect(() => {
     if (!autoPlayRequested || autoStartedFromQueryRef.current) return;
+    if (!autoPlayFlow) {
+      autoStartedFromQueryRef.current = true;
+      return;
+    }
     if (!childId || session || isAnalyzing) return;
     let active = true;
     void Promise.resolve().then(() => {
       if (!active || autoStartedFromQueryRef.current) return;
       autoStartedFromQueryRef.current = true;
-      void handleAutoSelectSession({ enableAutopilot: true });
+      void handleAutoSelectSession({
+        enableAutopilot: true,
+        teachingMode: resolvedInitialTeachingMode,
+      });
     });
     return () => {
       active = false;
     };
   }, [
+    autoPlayFlow,
     autoPlayRequested,
     childId,
     handleAutoSelectSession,
     isAnalyzing,
+    resolvedInitialTeachingMode,
     session,
   ]);
 
@@ -998,6 +1052,9 @@ export function PictureDescriptionScreen({
           child_id: childId,
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
+          ...(resolvedInitialTeachingMode
+            ? { teaching_mode: resolvedInitialTeachingMode }
+            : {}),
           refresh_ai_guide: options?.refreshAiGuide,
           teacher_gender: teacherPersona.gender,
         },
@@ -1040,6 +1097,9 @@ export function PictureDescriptionScreen({
           child_id: childId,
           source_type: "BOOK_PAGE",
           book_page_id: page.page_id,
+          ...(resolvedInitialTeachingMode
+            ? { teaching_mode: resolvedInitialTeachingMode }
+            : {}),
           teacher_gender: teacherPersona.gender,
         },
         controller.signal,
@@ -1213,6 +1273,8 @@ export function PictureDescriptionScreen({
       }
 
       isRecordingVoiceRef.current = true;
+      vadSpeechDetectedRef.current = false;
+      setHasLiveSpeechRecognition(false);
       setIsRecordingVoice(true);
       setVoiceMessage(t("pictureDescription.micListening"));
 
@@ -1277,8 +1339,10 @@ export function PictureDescriptionScreen({
           };
           browserRecognitionRef.current = recognition;
           recognition.start();
+          setHasLiveSpeechRecognition(true);
         } catch {
           browserRecognitionRef.current = null;
+          setHasLiveSpeechRecognition(false);
         }
       }
     },
@@ -1303,6 +1367,8 @@ export function PictureDescriptionScreen({
     clearSilenceTimer();
     setSilenceCountdown(null);
     isRecordingVoiceRef.current = false;
+    vadSpeechDetectedRef.current = false;
+    setHasLiveSpeechRecognition(false);
     setIsRecordingVoice(false);
     setIsTranscribing(true);
     setVoiceMessage(t("pictureDescription.transcribingSpeech"));
@@ -1606,7 +1672,7 @@ export function PictureDescriptionScreen({
     const promptText =
       activeFollowUpQuestion?.trim() ||
       session.guide.guiding_questions[0]?.trim() ||
-      t("pictureDescription.openingAutopilotPrompt");
+      adaptTeacherText(t("pictureDescription.openingAutopilotPrompt"));
 
     void (async () => {
       if (calmSoundRef.current && promptText) {
@@ -1626,6 +1692,7 @@ export function PictureDescriptionScreen({
     })();
   }, [
     activeFollowUpQuestion,
+    adaptTeacherText,
     autoPlayFlow,
     autoVoicePaused,
     autopilotSessionActive,
@@ -1672,33 +1739,60 @@ export function PictureDescriptionScreen({
     }
   }, [autoPlayFlow, autopilotSessionActive, calmSound, practiceTab, session]);
 
-  // Silence Auto-Submit: once live transcript has >= 2 words and stops changing for 2.2s, auto-stop mic & evaluate
+  // Silence Auto-Submit:
+  // - With live SpeechRecognition (Android native or test mock): starts 2.2s countdown once live transcript has >= 2 words and stops changing.
+  // - On real web browsers without SpeechRecognition (MediaRecorder + ElevenLabs/WASM STT): uses recorder.isSpeaking Web Audio VAD
+  //   so after speech is detected and the child stays quiet for 2.2s, recording stops, transcribes, and evaluates automatically.
   useEffect(() => {
     clearSilenceTimer();
-    if (
-      !isRecordingVoice ||
-      !autoPlayFlow ||
-      autoSubmitPaused ||
-      isEvaluating ||
-      isTranscribing ||
-      countMeaningfulWords(liveTranscript) < 2
-    ) {
+    if (!isRecordingVoice) {
+      vadSpeechDetectedRef.current = false;
+      return;
+    }
+    if (recorder.isSpeaking) {
+      vadSpeechDetectedRef.current = true;
+      return;
+    }
+    if (!autoPlayFlow || autoSubmitPaused || isEvaluating || isTranscribing) {
       return;
     }
 
-    const transcriptSnapshot = liveTranscript;
+    const hasLiveWords = countMeaningfulWords(liveTranscript) >= 2;
+    const hasVadSpeechFinished =
+      !hasLiveSpeechRecognition && vadSpeechDetectedRef.current;
+    if (!hasLiveWords && !hasVadSpeechFinished) {
+      return;
+    }
+
+    const silenceKey = hasLiveWords ? `stt:${liveTranscript}` : "vad-silence";
     const deadline = Date.now() + SILENCE_AUTO_SUBMIT_MS;
+    const initialTick = hasVadSpeechFinished
+      ? setTimeout(() => {
+          if (
+            mountedRef.current &&
+            isRecordingVoiceRef.current &&
+            !unmountActionsRef.current.getIsSpeaking()
+          ) {
+            setSilenceCountdown({
+              key: silenceKey,
+              remainingMs: Math.max(0, deadline - Date.now()),
+            });
+          }
+        }, 0)
+      : null;
+
     const timer = setInterval(() => {
       if (
         !mountedRef.current ||
         !isRecordingVoiceRef.current ||
+        unmountActionsRef.current.getIsSpeaking() ||
         (typeof document !== "undefined" && document.hidden)
       ) {
         clearSilenceTimer();
         return;
       }
       const remainingMs = Math.max(0, deadline - Date.now());
-      setSilenceCountdown({ transcript: transcriptSnapshot, remainingMs });
+      setSilenceCountdown({ key: silenceKey, remainingMs });
       if (remainingMs <= 0) {
         clearSilenceTimer();
         void triggerAutoVoiceSubmit();
@@ -1707,6 +1801,7 @@ export function PictureDescriptionScreen({
 
     silenceTimerRef.current = timer;
     return () => {
+      if (initialTick !== null) clearTimeout(initialTick);
       clearInterval(timer);
       if (silenceTimerRef.current === timer) {
         silenceTimerRef.current = null;
@@ -1716,10 +1811,12 @@ export function PictureDescriptionScreen({
     autoPlayFlow,
     autoSubmitPaused,
     clearSilenceTimer,
+    hasLiveSpeechRecognition,
     isEvaluating,
     isRecordingVoice,
     isTranscribing,
     liveTranscript,
+    recorder.isSpeaking,
     triggerAutoVoiceSubmit,
   ]);
 
@@ -1801,15 +1898,22 @@ export function PictureDescriptionScreen({
         descriptionContainsTerm(descriptionText, item.word),
       ).length
     : 0;
+  const liveTranscriptReady = countMeaningfulWords(liveTranscript) >= 2;
+  const activeSilenceKey = liveTranscriptReady
+    ? `stt:${liveTranscript}`
+    : !hasLiveSpeechRecognition && silenceCountdown?.key === "vad-silence"
+      ? "vad-silence"
+      : null;
   const silenceAutoEligible =
     isRecordingVoice &&
     autoPlayFlow &&
     !autoSubmitPaused &&
     !isEvaluating &&
     !isTranscribing &&
-    countMeaningfulWords(liveTranscript) >= 2;
+    !recorder.isSpeaking &&
+    activeSilenceKey !== null;
   const effectiveSilenceRemainingMs = silenceAutoEligible
-    ? silenceCountdown?.transcript === liveTranscript
+    ? silenceCountdown?.key === activeSilenceKey
       ? silenceCountdown.remainingMs
       : SILENCE_AUTO_SUBMIT_MS
     : null;
@@ -1861,6 +1965,7 @@ export function PictureDescriptionScreen({
             aria-pressed={autoPlayFlow}
             className="min-h-11"
             data-testid="picture-autoplay-toggle"
+            fullWidth={false}
             onClick={() => {
               if (autoPlayFlow) {
                 autopilotRunIdRef.current += 1;
@@ -1881,6 +1986,7 @@ export function PictureDescriptionScreen({
           <Button
             aria-pressed={!calmSound}
             className="min-h-11"
+            fullWidth={false}
             onClick={toggleCalmSound}
             size="compact"
             type="button"
@@ -1895,6 +2001,7 @@ export function PictureDescriptionScreen({
           </Button>
           {session ? (
             <Button
+              fullWidth={false}
               onClick={() => {
                 autopilotRunIdRef.current += 1;
                 stopSpeechPlayback();
@@ -1991,7 +2098,9 @@ export function PictureDescriptionScreen({
                   </div>
                 ) : (
                   <p className="text-sm font-bold text-ink">
-                    {t("pictureDescription.openingAutopilotPrompt")}
+                    {adaptTeacherText(
+                      t("pictureDescription.openingAutopilotPrompt"),
+                    )}
                   </p>
                 )}
               </div>
@@ -2161,7 +2270,7 @@ export function PictureDescriptionScreen({
                                       lang="vi"
                                     >
                                       {t(
-                                        "pictureDescription.matchedDifficultWordBanner",
+                                        "pictureDescription.cardDifficultWordsTag",
                                         {
                                           words:
                                             sample.matched_difficult_words.join(
@@ -2370,7 +2479,7 @@ export function PictureDescriptionScreen({
                                         lang="vi"
                                       >
                                         {t(
-                                          "pictureDescription.matchedDifficultWordBanner",
+                                          "pictureDescription.cardDifficultWordsTag",
                                           {
                                             words:
                                               page.matched_difficult_words.join(
@@ -2978,6 +3087,7 @@ export function PictureDescriptionScreen({
                             disabled={
                               isRecordingVoice || isTranscribing || isEvaluating
                             }
+                            fullWidth={false}
                             onClick={handleClearDraft}
                             size="compact"
                             type="button"
@@ -2988,6 +3098,7 @@ export function PictureDescriptionScreen({
                           </Button>
                           <Button
                             disabled={isRecordingVoice || isTranscribing}
+                            fullWidth={false}
                             onClick={() =>
                               void speakVietnamese(
                                 descriptionText,
@@ -3022,6 +3133,7 @@ export function PictureDescriptionScreen({
                       {!isRecordingVoice ? (
                         <Button
                           disabled={isTranscribing || isEvaluating}
+                          fullWidth={false}
                           onClick={() => void startVoiceRecording()}
                           size="compact"
                           type="button"
@@ -3032,6 +3144,7 @@ export function PictureDescriptionScreen({
                         </Button>
                       ) : (
                         <Button
+                          fullWidth={false}
                           onClick={() => void stopVoiceRecording()}
                           size="compact"
                           type="button"
@@ -3151,7 +3264,9 @@ export function PictureDescriptionScreen({
                                 setSilenceCountdown(null);
                                 setAutoSubmitPaused(true);
                                 setVoiceMessage(
-                                  t("pictureDescription.autoPausedNotice"),
+                                  adaptTeacherText(
+                                    t("pictureDescription.autoPausedNotice"),
+                                  ),
                                 );
                               }}
                               size="compact"
@@ -3167,7 +3282,9 @@ export function PictureDescriptionScreen({
                           className="text-xs font-semibold text-muted"
                           data-testid="picture-auto-paused-note"
                         >
-                          {t("pictureDescription.autoPausedNotice")}
+                          {adaptTeacherText(
+                            t("pictureDescription.autoPausedNotice"),
+                          )}
                         </p>
                       ) : null}
                     </div>

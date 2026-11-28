@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Music2 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { KaraokeChildBoundary } from "@/components/karaoke/karaoke-child-boundary";
 import { useKaraokeService } from "@/components/karaoke/karaoke-services-provider";
 import { SongCard } from "@/components/karaoke/song-card";
@@ -10,21 +11,43 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
   karaokeParentErrorMessage,
   type KaraokeCatalog,
 } from "@/lib/api/karaoke-service";
+import { resolveAutoPlayFlag } from "@/lib/entertainment/autopilot";
 import type { ChildProfileDTO } from "@/types/child";
 
-export function KaraokeLibraryScreen() {
+export function KaraokeLibraryScreen({
+  autoPlay,
+}: {
+  readonly autoPlay?: boolean;
+} = {}) {
+  const { autoPlayFlow } = useEntertainmentPreferences();
+  const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
+  const shouldAutoLaunch = autoPlayRequested && autoPlayFlow;
+
   return (
     <KaraokeChildBoundary>
-      {(child) => <Library key={`${child.id}:${child.grade}`} child={child} />}
+      {(child) => (
+        <Library
+          key={`${child.id}:${child.grade}`}
+          autoPlay={shouldAutoLaunch}
+          child={child}
+        />
+      )}
     </KaraokeChildBoundary>
   );
 }
-function Library({ child }: { child: ChildProfileDTO }) {
+function Library({
+  child,
+  autoPlay,
+}: {
+  child: ChildProfileDTO;
+  autoPlay: boolean;
+}) {
   const t = useTranslations("entertainment");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState({ search: "", offset: 0, refresh: 0 });
@@ -70,6 +93,7 @@ function Library({ child }: { child: ChildProfileDTO }) {
       </form>
       <Catalog
         key={`${query.search}:${query.offset}:${query.refresh}`}
+        autoPlay={autoPlay}
         childId={child.id}
         query={query}
         onRetry={() => setQuery({ ...query, refresh: query.refresh + 1 })}
@@ -79,18 +103,22 @@ function Library({ child }: { child: ChildProfileDTO }) {
   );
 }
 function Catalog({
+  autoPlay,
   childId,
   query,
   onRetry,
   onPage,
 }: {
+  autoPlay: boolean;
   childId: string;
   query: { search: string; offset: number };
   onRetry: () => void;
   onPage: (offset: number) => void;
 }) {
   const t = useTranslations("entertainment");
+  const router = useRouter();
   const service = useKaraokeService();
+  const redirectedRef = useRef(false);
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "ready"; data: KaraokeCatalog }
@@ -116,10 +144,36 @@ function Catalog({
       });
     return () => controller.abort();
   }, [childId, service, query.search, query.offset]);
-  if (state.status === "loading")
+
+  const autoLaunchSong =
+    autoPlay &&
+    query.search === "" &&
+    query.offset === 0 &&
+    state.status === "ready" &&
+    state.data.items.length > 0
+      ? state.data.items[0]
+      : null;
+
+  useEffect(() => {
+    if (!autoLaunchSong || redirectedRef.current) return;
+    redirectedRef.current = true;
+    router.replace(
+      `/karaoke/${autoLaunchSong.song_id}?version=${autoLaunchSong.version_id}&autoplay=1&scored=1`,
+    );
+  }, [autoLaunchSong, router]);
+
+  if (state.status === "loading" || autoLaunchSong)
     return (
-      <p className="rounded-card bg-sky p-6" role="status">
-        {t("karaoke.library.loading")}
+      <p
+        className="rounded-card bg-sky p-6"
+        data-testid={
+          autoLaunchSong ? "karaoke-autoplay-redirecting" : undefined
+        }
+        role="status"
+      >
+        {autoLaunchSong
+          ? t("karaoke.stage.autoplayPreparing")
+          : t("karaoke.library.loading")}
       </p>
     );
   if (state.status === "error")

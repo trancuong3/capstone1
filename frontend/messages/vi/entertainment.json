@@ -552,6 +552,7 @@
       "where": "Ở đâu / màu gì?"
     },
     "practicingWordsBadge": "Từ bé đang ôn",
+    "cardDifficultWordsTag": "Ôn từ khó: {words}",
     "matchedDifficultWordBanner": "Từ bé vừa ôn: {words}",
     "autoPlayOn": "Tự động chơi",
     "autoPlayOff": "Tự động chơi (Tắt)",

@@ -17,7 +17,10 @@ from fastapi import HTTPException, status
 from sqlalchemy.exc import IntegrityError
 
 from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
-from app.services.child_difficult_word_feed import DifficultWordTarget
+from app.services.child_difficult_word_feed import (
+    MIN_REINFORCEMENT_SCORE_NORMALIZED,
+    DifficultWordTarget,
+)
 from app.services.difficult_words_service import normalize_vietnamese_practice_word
 from app.schemas.adaptive_learning import (
     AdaptiveProfileRead,
@@ -303,6 +306,13 @@ def compute_spaced_difficult_words(
             if not norm:
                 continue
             feed_norms.add(norm)
+            reading_errors = (
+                int(target.reading_error_count)
+                if target.reading_error_count is not None
+                else int(target.error_count)
+            )
+            practice_errors = int(getattr(target, "practice_error_count", 0) or 0)
+            has_reading_evidence = reading_errors > 0
             existing = grouped.get(norm)
             if existing is None:
                 grouped[norm] = {
@@ -311,16 +321,20 @@ def compute_spaced_difficult_words(
                     "correct": 0,
                     "incorrect": int(target.error_count),
                     "last_at": target.last_seen_at,
-                    "from_reading": True,
+                    "from_reading": has_reading_evidence,
                     "heard_as": target.heard_as,
                     "feed_priority": float(target.priority_score),
                     "reinforced_count": int(target.reinforced_count),
                 }
             else:
-                existing["from_reading"] = True
+                if has_reading_evidence:
+                    existing["from_reading"] = True
                 existing["heard_as"] = existing["heard_as"] or target.heard_as
                 existing["feed_priority"] = max(existing["feed_priority"], float(target.priority_score))
-                existing["incorrect"] += int(target.error_count)
+                if target.reading_error_count is not None:
+                    existing["incorrect"] = max(existing["incorrect"], practice_errors) + reading_errors
+                else:
+                    existing["incorrect"] += reading_errors
                 existing["reinforced_count"] = max(
                     existing["reinforced_count"], int(target.reinforced_count)
                 )
@@ -902,6 +916,11 @@ class AdaptiveLearningService:
         reinforced_norms: set[str] = set()
         for row in explicit_rows:
             if getattr(row, "SkillKey", None) == "difficult_word_mastery":
+                score_raw = float(getattr(row, "ScoreNormalized", 0.0) or 0.0)
+                if score_raw > 1.0:
+                    score_raw = score_raw / 100.0
+                if score_raw < MIN_REINFORCEMENT_SCORE_NORMALIZED:
+                    continue
                 for word in getattr(row, "PracticeWords", None) or []:
                     norm = normalize_vietnamese_practice_word(word)
                     if norm:

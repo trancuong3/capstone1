@@ -1,6 +1,7 @@
 """Business logic for Musical Karaoke practice persistence, evidence & profiles."""
 
 from datetime import datetime, timezone
+import inspect
 from statistics import median
 from typing import Any
 from uuid import UUID, uuid4
@@ -22,6 +23,7 @@ from app.schemas.karaoke_practice import (
     MusicalProfileRead,
     PitchContourPointRead,
 )
+from app.services.karaoke_service import _match_song_difficult_words
 
 
 def _utcnow() -> datetime:
@@ -120,9 +122,96 @@ def _session_to_read(
     )
 
 
+def _filter_lyrics_for_practice(
+    published_lyrics: Any,
+    report_payload: dict[str, Any] | None,
+    segment_start_ms: int | None,
+    segment_end_ms: int | None,
+) -> dict[str, Any]:
+    """Scope lyric lines to what the child actually sang in this practice session."""
+    if isinstance(report_payload, dict):
+        raw_segments = report_payload.get("segments")
+        if isinstance(raw_segments, list) and raw_segments:
+            dict_segments = [seg for seg in raw_segments if isinstance(seg, dict)]
+            has_per_segment_lyric_scores = any(
+                isinstance(seg.get("lyrics_score"), (int, float))
+                for seg in dict_segments
+            )
+            selected_lines: list[dict[str, Any]] = []
+            for seg in dict_segments:
+                text = seg.get("text")
+                if not isinstance(text, str) or not text.strip():
+                    continue
+                if has_per_segment_lyric_scores:
+                    seg_score = seg.get("lyrics_score")
+                    if isinstance(seg_score, (int, float)):
+                        if seg_score < 60:
+                            continue
+                    elif seg.get("status") not in ("GREAT", "GOOD"):
+                        continue
+                selected_lines.append({"text": text})
+            return {"lines": selected_lines}
+
+    if not isinstance(published_lyrics, dict):
+        return {"lines": []}
+    lines = published_lyrics.get("lines")
+    if not isinstance(lines, list):
+        return {"lines": []}
+    if (
+        segment_start_ms is not None
+        and segment_end_ms is not None
+        and segment_end_ms > segment_start_ms
+    ):
+        scoped: list[Any] = []
+        for line in lines:
+            if not isinstance(line, dict):
+                continue
+            start_ms = line.get("start_ms")
+            end_ms = line.get("end_ms")
+            if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)):
+                if end_ms <= segment_start_ms or start_ms >= segment_end_ms:
+                    continue
+            scoped.append(line)
+        return {"lines": scoped}
+    return published_lyrics
+
+
 class KaraokePracticeService:
     def __init__(self, repository: KaraokePracticeRepository):
         self.repository = repository
+
+    async def _load_child_difficult_words(
+        self,
+        parent_id: UUID,
+        child_id: UUID,
+        *,
+        limit: int = 12,
+    ) -> list[str]:
+        custom_fn = getattr(self.repository, "list_difficult_words", None) or getattr(
+            self.repository, "difficult_words", None
+        )
+        if callable(custom_fn):
+            try:
+                maybe_words = custom_fn(child_id, parent_id, limit=limit)
+                if inspect.isawaitable(maybe_words):
+                    maybe_words = await maybe_words
+                if isinstance(maybe_words, (list, tuple)):
+                    return [str(word) for word in maybe_words if str(word).strip()]
+            except Exception:
+                return []
+        db = getattr(self.repository, "db", None)
+        if db is None:
+            return []
+        try:
+            from app.services.child_difficult_word_feed import ChildDifficultWordFeed
+
+            return await ChildDifficultWordFeed(db).list_words(
+                child_id,
+                parent_id,
+                limit=limit,
+            )
+        except Exception:
+            return []
 
     async def _require_owned_child(self, parent_id: UUID, child_id: UUID):
         child = await self.repository.get_child_for_parent(parent_id, child_id)
@@ -181,6 +270,34 @@ class KaraokePracticeService:
                 and payload.practice_mode == "FULL_SONG"
                 else "ESTIMATED"
             )
+            practiced_words: list[str] = []
+            if (
+                payload.practice_mode != "RHYTHM_TAP"
+                and payload.lyrics_score is not None
+            ):
+                difficult_words = await self._load_child_difficult_words(
+                    parent_id,
+                    payload.child_id,
+                    limit=12,
+                )
+                if difficult_words:
+                    scoped_lyrics = _filter_lyrics_for_practice(
+                        getattr(published, "lyrics", None),
+                        payload.report_payload,
+                        payload.segment_start_ms,
+                        payload.segment_end_ms,
+                    )
+                    practiced_words = _match_song_difficult_words(
+                        scoped_lyrics,
+                        difficult_words,
+                    )[:6]
+            metadata_json = {
+                "song_id": str(payload.song_id),
+                "practice_mode": payload.practice_mode,
+                "scoring_mode": payload.scoring_mode,
+                "playback_rate": payload.playback_rate,
+                "headphone_mode": payload.headphone_mode,
+            }
             skill_entries = (
                 (
                     "rhythm_timing",
@@ -209,14 +326,34 @@ class KaraokePracticeService:
                         ScoreNormalized=round(float(score_val) / 100.0, 4),
                         Confidence=confidence,
                         DifficultyLevel=difficulty,
-                        PracticeWords=[],
-                        MetadataJson={
-                            "song_id": str(payload.song_id),
-                            "practice_mode": payload.practice_mode,
-                            "scoring_mode": payload.scoring_mode,
-                            "playback_rate": payload.playback_rate,
-                            "headphone_mode": payload.headphone_mode,
-                        },
+                        PracticeWords=(
+                            list(practiced_words)
+                            if skill_key == "lyric_delivery"
+                            else []
+                        ),
+                        MetadataJson=dict(metadata_json),
+                        CreatedAt=now,
+                    )
+                )
+            if (
+                practiced_words
+                and payload.practice_mode != "RHYTHM_TAP"
+                and payload.lyrics_score is not None
+            ):
+                evidence_rows.append(
+                    LearningSkillEvidence(
+                        Id=uuid4(),
+                        ChildId=payload.child_id,
+                        ParentId=parent_id,
+                        SkillKey="difficult_word_mastery",
+                        SourceModule="KARAOKE",
+                        SourceRecordId=str(session_id),
+                        EvidenceType=evidence_type,
+                        ScoreNormalized=round(float(payload.lyrics_score) / 100.0, 4),
+                        Confidence=0.80,
+                        DifficultyLevel=difficulty,
+                        PracticeWords=list(practiced_words),
+                        MetadataJson=dict(metadata_json),
                         CreatedAt=now,
                     )
                 )

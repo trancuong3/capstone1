@@ -322,6 +322,61 @@ describe("Karaoke V4.1 difficult-word badges & 1-tap Autopilot", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("H4 + M4: /karaoke?autoplay=1 redirects to top song when autoPlayFlow=true and stays in library when autoPlayFlow=false or empty", async () => {
+    const view1 = render(
+      <Harness>
+        <KaraokeLibraryScreen autoPlay />
+      </Harness>,
+    );
+    await vi.waitFor(() => {
+      expect(replace).toHaveBeenCalledWith(
+        `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+      );
+    });
+    view1.unmount();
+
+    replace.mockReset();
+    window.localStorage.setItem(
+      ENTERTAINMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        reducedMotion: false,
+        calmSound: true,
+        autoPlayFlow: false,
+      }),
+    );
+    const view2 = render(
+      <Harness>
+        <KaraokeLibraryScreen autoPlay />
+      </Harness>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: songCardWithWords.title }),
+    ).toBeVisible();
+    expect(replace).not.toHaveBeenCalled();
+    view2.unmount();
+
+    replace.mockReset();
+    window.localStorage.setItem(
+      ENTERTAINMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        reducedMotion: false,
+        calmSound: true,
+        autoPlayFlow: true,
+      }),
+    );
+    fetchMock.mockImplementationOnce(async () => Response.json(childProfile));
+    fetchMock.mockImplementationOnce(async () =>
+      Response.json({ items: [], total: 0, limit: 12, offset: 0 }),
+    );
+    render(
+      <Harness>
+        <KaraokeLibraryScreen autoPlay />
+      </Harness>,
+    );
+    expect(await screen.findByText("Chưa có bài hát phù hợp")).toBeVisible();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it("never auto-starts countdown when ?autoplay=1 is missing from URL", async () => {
     installRecognition();
     searchParamsState.current = new URLSearchParams(`version=${versionId}`);

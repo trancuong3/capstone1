@@ -31,6 +31,7 @@ from app.services.games.memory_game_evaluator import (
 )
 from app.services.games.memory_scene_generator import (
     THEME_BY_KEY,
+    THEME_KEYS,
     default_difficulty_for_grade,
     generate_scene_spec,
     get_themes_catalog,
@@ -135,6 +136,33 @@ class MemoryGameService:
     def get_themes(self) -> MemoryThemesCatalogRead:
         return get_themes_catalog()
 
+    async def get_themes_for_child(
+        self,
+        parent_id: UUID | None = None,
+        child_id: UUID | None = None,
+    ) -> MemoryThemesCatalogRead:
+        catalog = get_themes_catalog()
+        if child_id is None or parent_id is None:
+            return catalog
+        child = await self.repo.child_owned_by(child_id, parent_id)
+        if child is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="CHILD_NOT_FOUND",
+            )
+        focus_words = await self.repo.recent_difficult_words(child.Id, parent_id, limit=6)
+        recommended_theme = (
+            recommend_theme_for_words(focus_words, child.Grade, seed=0)
+            if focus_words
+            else None
+        )
+        return catalog.model_copy(
+            update={
+                "focus_difficult_words": list(focus_words),
+                "recommended_theme_key": recommended_theme,
+            }
+        )
+
     async def create_session(
         self,
         parent_id: UUID,
@@ -163,12 +191,34 @@ class MemoryGameService:
         if not focus_words:
             focus_words = await self.repo.recent_difficult_words(child.Id, parent_id, limit=8)
 
+        last_theme: str | None = None
+        if payload.scene_seed is None and payload.theme_key in (None, "random"):
+            try:
+                recent = await self.repo.list_sessions_for_child(child.Id, parent_id, limit=1)
+                if recent:
+                    last_theme = recent[0].ThemeKey
+            except Exception:
+                last_theme = None
+
         if payload.theme_key in THEME_BY_KEY:
             theme_key = resolve_theme_key(payload.theme_key, seed)
+        elif payload.theme_key == "random":
+            theme_key = resolve_theme_key("random", seed)
+            if last_theme == theme_key and len(THEME_KEYS) > 1:
+                alt_themes = [key for key in THEME_KEYS if key != last_theme]
+                theme_key = alt_themes[seed % len(alt_themes)]
         elif focus_words:
-            theme_key = recommend_theme_for_words(focus_words, child.Grade, seed)
+            theme_key = recommend_theme_for_words(
+                focus_words,
+                child.Grade,
+                seed,
+                exclude_theme=last_theme,
+            )
         else:
-            theme_key = resolve_theme_key(payload.theme_key, seed)
+            theme_key = resolve_theme_key(None, seed)
+            if last_theme == theme_key and len(THEME_KEYS) > 1:
+                alt_themes = [key for key in THEME_KEYS if key != last_theme]
+                theme_key = alt_themes[seed % len(alt_themes)]
 
         scene_spec = generate_scene_spec(
             theme_key=theme_key,
@@ -472,10 +522,20 @@ class MemoryGameService:
                 )
 
         if evaluation.used_focus_words:
+            stage_score_norm = (
+                evaluation.factual_score / 100.0
+                if attempt.Stage == "RECALL"
+                else evaluation.creative_score / 100.0
+            )
+            word_multiplier = 0.85 + min(0.15, 0.08 * len(evaluation.used_focus_words))
+            mastery_score = round(
+                max(0.0, min(1.0, stage_score_norm * word_multiplier)),
+                4,
+            )
             evidence_items.append(
                 {
                     "skill_key": "difficult_word_mastery",
-                    "score_normalized": min(1.0, 0.75 + 0.08 * len(evaluation.used_focus_words)),
+                    "score_normalized": mastery_score,
                     "confidence": 0.8,
                     "practice_words": evaluation.used_focus_words[:6],
                     "metadata_json": metadata,

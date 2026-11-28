@@ -32,6 +32,7 @@ from app.models import (
 from app.services.child_progress.metrics import (
     ReportRow,
     analyze_alignment,
+    analyze_first_pass,
     first_pass_reports,
     local_date,
     normalize_word,
@@ -40,6 +41,7 @@ from app.services.difficult_words_service import (
     clean_difficult_word_display_text,
     normalize_vietnamese_practice_word,
 )
+from app.services.reading_assessment import initial_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,8 @@ class DifficultWordTarget:
     priority_score: float = 0.0
     last_seen_at: datetime | None = None
     reinforced_count: int = 0
+    reading_error_count: int | None = None
+    practice_error_count: int = 0
 
 
 @dataclass
@@ -98,11 +102,14 @@ class _TargetAccumulator:
     normalized_word: str
     display_counts: Counter[str] = field(default_factory=Counter)
     error_count: int = 0
+    reading_error_count: int = 0
+    practice_error_count: int = 0
     weighted_errors: float = 0.0
     heard_counts: Counter[str] = field(default_factory=Counter)
     book_ids: list[UUID] = field(default_factory=list)
     page_ids: list[UUID] = field(default_factory=list)
     last_seen_at: datetime | None = None
+    last_reading_error_at: datetime | None = None
     has_active_incorrect: bool = False
 
     def observe(
@@ -111,6 +118,7 @@ class _TargetAccumulator:
         display_text: str,
         weight: float,
         error_increment: int = 1,
+        from_reading: bool = False,
         heard_as: str | None = None,
         book_id: UUID | None = None,
         page_id: UUID | None = None,
@@ -119,6 +127,10 @@ class _TargetAccumulator:
         cleaned = clean_difficult_word_display_text(display_text) or self.normalized_word
         self.display_counts[cleaned] += 1
         self.error_count += error_increment
+        if from_reading:
+            self.reading_error_count += error_increment
+        else:
+            self.practice_error_count += error_increment
         self.weighted_errors += weight
         if heard_as:
             clean_heard = clean_difficult_word_display_text(heard_as)
@@ -133,6 +145,10 @@ class _TargetAccumulator:
             self.last_seen_at is None or seen_utc > self.last_seen_at
         ):
             self.last_seen_at = seen_utc
+        if from_reading and seen_utc is not None and (
+            self.last_reading_error_at is None or seen_utc > self.last_reading_error_at
+        ):
+            self.last_reading_error_at = seen_utc
 
 
 class ChildDifficultWordFeed:
@@ -289,10 +305,10 @@ class ChildDifficultWordFeed:
             if parent_id is not None:
                 stmt = stmt.where(DifficultWordPracticeAttempt.ParentId == parent_id)
             stmt = stmt.order_by(
-                desc(DifficultWordPracticeAttempt.CompletedAt),
-                desc(DifficultWordPracticeAttempt.StartedAt),
-                desc(DifficultWordPracticeAttempt.CreatedAt),
-                desc(DifficultWordPracticeAttempt.AttemptNumber),
+                desc(DifficultWordPracticeAttempt.CompletedAt).nulls_last(),
+                desc(DifficultWordPracticeAttempt.StartedAt).nulls_last(),
+                desc(DifficultWordPracticeAttempt.CreatedAt).nulls_last(),
+                desc(DifficultWordPracticeAttempt.AttemptNumber).nulls_last(),
             ).limit(500)
             result = await self.db.execute(stmt)
             return list(result.all())
@@ -372,15 +388,32 @@ class ChildDifficultWordFeed:
             )
 
         for report in first_pass_reports(raw_reports):
-            analysis = analyze_alignment(report.alignment)
+            analysis = analyze_first_pass(report)
             if analysis is None:
                 continue
             errors = analysis.get("errors") or {}
             heard_map = analysis.get("heard") or {}
+            if not heard_map and report.alignment:
+                alignment_analysis = analyze_alignment(report.alignment)
+                if alignment_analysis is not None:
+                    heard_map = alignment_analysis.get("heard") or {}
             if not errors:
                 continue
 
             raw_display_by_norm: dict[str, str] = {}
+            snapshot_words = initial_snapshot(report.summary)
+            if isinstance(snapshot_words, list):
+                for entry in snapshot_words:
+                    if not isinstance(entry, dict):
+                        continue
+                    if entry.get("status") not in ("MISPRONUNCIATION", "OMISSION"):
+                        continue
+                    raw_text = entry.get("text")
+                    key = normalize_word(raw_text)
+                    if key and key not in raw_display_by_norm and isinstance(raw_text, str):
+                        cleaned = clean_difficult_word_display_text(raw_text)
+                        if cleaned:
+                            raw_display_by_norm[key] = cleaned
             if isinstance(report.alignment, list):
                 for entry in report.alignment:
                     if not isinstance(entry, dict):
@@ -408,6 +441,7 @@ class ChildDifficultWordFeed:
                     display_text=display,
                     weight=2.0 * int(count),
                     error_increment=int(count),
+                    from_reading=True,
                     heard_as=top_heard,
                     book_id=report_book_id,
                     page_id=report.page_id,
@@ -417,6 +451,22 @@ class ChildDifficultWordFeed:
         # 2. ReadingEvent (WORD_RETRY FAILED/UNCERTAIN + legacy reading error events)
         for row in event_rows:
             ev_type, ev_status, metadata, created_at, page_id, book_id, word_text = row
+            if ev_type == "WORD_RETRY":
+                if ev_status not in ("FAILED", "UNCERTAIN"):
+                    continue
+                weight = 2.5 if ev_status == "FAILED" else 1.5
+            elif ev_type in _LEGACY_DIFFICULT_EVENT_TYPES:
+                if ev_status in _IGNORED_EVENT_STATUSES:
+                    continue
+                if ev_type in ("OMISSION", "MISPRONUNCIATION", "SUBSTITUTION"):
+                    weight = 2.0
+                elif ev_type == "REPETITION":
+                    weight = 1.5
+                else:
+                    weight = 1.0
+            else:
+                continue
+
             meta = metadata if isinstance(metadata, dict) else {}
             raw_word = (
                 word_text
@@ -431,21 +481,13 @@ class ChildDifficultWordFeed:
             if not _is_usable_target_word(norm):
                 continue
 
-            if ev_type == "WORD_RETRY":
-                weight = 2.5 if ev_status == "FAILED" else 1.5
-            elif ev_type in ("OMISSION", "MISPRONUNCIATION", "SUBSTITUTION"):
-                weight = 2.0
-            elif ev_type == "REPETITION":
-                weight = 1.5
-            else:
-                weight = 1.0
-
             heard_raw = meta.get("recognized_text") or meta.get("spoken_word")
             heard_as = heard_raw if isinstance(heard_raw, str) else None
             _acc(norm).observe(
                 display_text=raw_word,
                 weight=weight,
                 error_increment=1,
+                from_reading=True,
                 heard_as=heard_as,
                 book_id=book_id,
                 page_id=page_id,
@@ -488,12 +530,12 @@ class ChildDifficultWordFeed:
                 )
             )
 
-        mastered_words: set[str] = set()
+        mastered_at: dict[str, datetime] = {}
         for norm, items in attempts_by_word.items():
             items.sort(key=lambda item: (item[0], item[1]), reverse=True)
             recent_two = [item[2] for item in items[:2]]
             if len(recent_two) >= 2 and all(status == "CORRECT" for status in recent_two):
-                mastered_words.add(norm)
+                mastered_at[norm] = items[0][0]
                 continue
 
             incorrect_n = sum(1 for item in items if item[2] == "INCORRECT")
@@ -507,6 +549,7 @@ class ChildDifficultWordFeed:
                     display_text=latest_display,
                     weight=incorrect_n * 2.5 + uncertain_n * 1.5 - correct_n * 0.3,
                     error_increment=incorrect_n + uncertain_n,
+                    from_reading=False,
                     book_id=book_id,
                     page_id=page_id,
                     seen_at=latest_ts if latest_ts.year > 1900 else None,
@@ -544,8 +587,16 @@ class ChildDifficultWordFeed:
 
         targets: list[DifficultWordTarget] = []
         for norm, acc in accumulators.items():
-            if norm in mastered_words or acc.error_count <= 0:
+            if acc.error_count <= 0:
                 continue
+            mastery_ts = mastered_at.get(norm)
+            if mastery_ts is not None:
+                relapsed_after_mastery = (
+                    acc.last_reading_error_at is not None
+                    and acc.last_reading_error_at > mastery_ts
+                )
+                if not relapsed_after_mastery:
+                    continue
 
             recency_bonus = 0.0
             if acc.last_seen_at is not None:
@@ -582,6 +633,8 @@ class ChildDifficultWordFeed:
                     priority_score=priority,
                     last_seen_at=acc.last_seen_at,
                     reinforced_count=rc,
+                    reading_error_count=acc.reading_error_count,
+                    practice_error_count=acc.practice_error_count,
                 )
             )
 

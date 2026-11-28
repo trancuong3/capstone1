@@ -552,6 +552,7 @@
       "where": "Où et quelle couleur ?"
     },
     "practicingWordsBadge": "Mots en révision",
+    "cardDifficultWordsTag": "Mots à pratiquer : {words}",
     "matchedDifficultWordBanner": "Mots révisés : {words}",
     "autoPlayOn": "Lecture auto",
     "autoPlayOff": "Lecture auto (Désactivée)",

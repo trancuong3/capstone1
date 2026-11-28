@@ -552,6 +552,7 @@
       "where": "¿Dónde y de qué color?"
     },
     "practicingWordsBadge": "Palabras en repaso",
+    "cardDifficultWordsTag": "Palabras para practicar: {words}",
     "matchedDifficultWordBanner": "Palabras repasadas: {words}",
     "autoPlayOn": "Juego automático",
     "autoPlayOff": "Juego automático (No)",

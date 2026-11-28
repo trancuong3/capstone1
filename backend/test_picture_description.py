@@ -2140,3 +2140,65 @@ class TestPictureDescriptionV41DifficultWordLoop(unittest.IsolatedAsyncioTestCas
         self.assertIn("hướng dương", evaluated.latest_attempt.practiced_difficult_words)
         self.assertIn("hướng dương", evaluated.latest_attempt.feedback.praise_message)
         self.assertIn("difficult_word_mastery", inserted_skills)
+
+        # M6: male teacher gender appends "Thầy khen bé..." instead of "Cô khen bé..."
+        inserted_skills.clear()
+        evaluated_male = await service.evaluate_attempt(
+            parent_id,
+            session_id,
+            PictureEvaluateRequest(
+                transcript_text="Bông hoa hướng dương nở vàng rực rỡ.",
+                input_mode="VOICE",
+                teacher_gender="male",
+            ),
+        )
+        self.assertIn("Thầy khen bé đã vận dụng tự nhiên từ", evaluated_male.latest_attempt.feedback.praise_message)
+
+        # M5: irrelevant attempt must NOT record difficult_word_mastery or claim practiced_difficult_words
+        inserted_skills.clear()
+
+        async def fake_irrelevant_json(**_kwargs):
+            return {
+                "is_relevant": False,
+                "score_out_of_10": 2,
+                "matched_details": [],
+                "missed_details": ["Bông hoa hướng dương"],
+                "praise_message": "Bé hãy quan sát kỹ tranh nhé!",
+                "improvement_tip": "Kể điều bé thấy trong tranh.",
+                "upgraded_sentences": ["Bông hoa hướng dương đang nở."],
+                "vocabulary_highlights": [],
+                "scaffolding_step": "PROMPT",
+                "next_prompt_question": "Bé thấy gì trong tranh nào?",
+            }, DEFAULT_PRIMARY_MODEL
+
+        ai_client._generate_json = AsyncMock(side_effect=fake_irrelevant_json)  # type: ignore[method-assign]
+        irrelevant = await service.evaluate_attempt(
+            parent_id,
+            session_id,
+            PictureEvaluateRequest(
+                transcript_text="Hôm nay đi chơi hướng dương quá vui.",
+                input_mode="VOICE",
+            ),
+        )
+        self.assertEqual(irrelevant.practiced_difficult_words, [])
+        self.assertNotIn("difficult_word_mastery", inserted_skills)
+
+        # M7: auto-selected BOOK_PAGE download failure falls back gracefully to curated SAMPLE
+        def failing_download(_path: str) -> bytes:
+            raise RuntimeError("storage unavailable")
+
+        fallback_service = PictureDescriptionService(
+            repo,
+            ai_client=ai_client,
+            download_fn=failing_download,
+            sign_url_fn=lambda path: f"https://signed.example/{path}",
+        )
+        fallback_created = await fallback_service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type=None,
+            auto_select=True,
+        )
+        self.assertEqual(fallback_created.source_type, "SAMPLE")
+        self.assertIsNotNone(fallback_created.sample_key)
+        self.assertIsNone(fallback_created.book_page_id)

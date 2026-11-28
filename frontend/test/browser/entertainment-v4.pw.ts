@@ -3515,13 +3515,24 @@ test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=
     });
 
   await selectChildAndEnterEntertainment(page, false);
-  await page.getByTestId("quick-play-karaoke").click();
-  await expect(page).toHaveURL(/\/karaoke\?autoplay=1/, { timeout: 30_000 });
 
+  // 1) Library route (/karaoke without ?autoplay=1) shows difficult-word chips and 1-tap Hát ngay link
+  await page.locator('main a[href="/karaoke"]').first().click();
+  await expect(page).toHaveURL(/\/karaoke$/, { timeout: 30_000 });
   await expect(page.getByTestId("karaoke-song-difficult-words")).toContainText(
     "trường",
   );
-  await page.getByRole("link", { name: "Hát ngay", exact: true }).click();
+  await expect(
+    page.getByRole("link", { name: "Hát ngay", exact: true }),
+  ).toHaveAttribute(
+    "href",
+    `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+  );
+
+  // 2) Hub Quick Play (/karaoke?autoplay=1) skips the library and enters the top recommended song directly (0 extra taps)
+  await page.goBack();
+  await expect(page).toHaveURL(/\/entertainment/, { timeout: 30_000 });
+  await page.getByTestId("quick-play-karaoke").click();
   await expect(page).toHaveURL(
     new RegExp(`/karaoke/${songId}\\?version=${versionId}&autoplay=1&scored=1`),
     { timeout: 30_000 },

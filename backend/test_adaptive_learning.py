@@ -296,7 +296,7 @@ class AdaptiveLearningV41FeedIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 word="chăm chỉ",
                 normalized_word="chăm chỉ",
                 error_count=3,
-                heard_as=["chậm chạp"],
+                heard_as="chậm chạp",
                 source_book_ids=[uuid4()],
                 source_page_ids=[uuid4()],
                 priority_score=8.5,
@@ -342,6 +342,83 @@ class AdaptiveLearningV41FeedIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
         analytics = await service.get_parent_analytics(child_id, parent_id, window_days=30)
         self.assertEqual(analytics.reading_misread_words_reinforced, 2)
+
+    async def test_m3_no_double_count_practice_only_and_m5_reinforced_threshold(self) -> None:
+        from app.services.child_difficult_word_feed import DifficultWordTarget
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        now = datetime.now(timezone.utc)
+        child = SimpleNamespace(Id=child_id, ParentId=parent_id, Alias="Bé Na", Grade=2)
+        word_attempts = [
+            SimpleNamespace(
+                Id=uuid4(),
+                NormalizedWord="kỳ diệu",
+                DisplayText="kỳ diệu",
+                AssessmentStatus="INCORRECT",
+                CompletedAt=now - timedelta(hours=2),
+                CreatedAt=now - timedelta(hours=2),
+            ),
+        ]
+        # Practice-only target from ChildDifficultWordFeed (reading_error_count=0, practice_error_count=1)
+        practice_only_target = DifficultWordTarget(
+            word="kỳ diệu",
+            normalized_word="kỳ diệu",
+            error_count=1,
+            heard_as=None,
+            priority_score=4.0,
+            last_seen_at=now - timedelta(hours=2),
+            reinforced_count=0,
+            reading_error_count=0,
+            practice_error_count=1,
+        )
+        spaced = compute_spaced_difficult_words(
+            word_attempts,
+            feed_targets=[practice_only_target],
+            now=now,
+        )
+        self.assertEqual(len(spaced), 1)
+        # Must NOT claim "khi đọc sách" for a practice-only word with 0 reading errors
+        self.assertNotIn("khi đọc sách", spaced[0].reason_vi)
+        # Must NOT double-count incorrect=2 (1*0.8 + 1 + 4*0.3 = 3.0; if double-counted would be 3.8 -> 5.7)
+        self.assertAlmostEqual(spaced[0].priority_score, round((1.0 + 1 * 0.8 + 4.0 * 0.3) * 0.5, 2), places=2)
+
+        # M5: difficult_word_mastery rows below 0.75 must NOT count into reading_misread_words_reinforced
+        evidence = [
+            SimpleNamespace(
+                Id=uuid4(),
+                ChildId=child_id,
+                ParentId=parent_id,
+                SkillKey="difficult_word_mastery",
+                SourceModule="MEMORY_GAME",
+                SourceRecordId=str(uuid4()),
+                EvidenceType="OBSERVED",
+                ScoreNormalized=0.40,
+                Confidence=0.8,
+                DifficultyLevel=2,
+                PracticeWords=["từ yếu"],
+                CreatedAt=now - timedelta(hours=1),
+            ),
+            SimpleNamespace(
+                Id=uuid4(),
+                ChildId=child_id,
+                ParentId=parent_id,
+                SkillKey="difficult_word_mastery",
+                SourceModule="KARAOKE",
+                SourceRecordId=str(uuid4()),
+                EvidenceType="OBSERVED",
+                ScoreNormalized=0.85,
+                Confidence=0.8,
+                DifficultyLevel=2,
+                PracticeWords=["từ vững"],
+                CreatedAt=now - timedelta(hours=1),
+            ),
+        ]
+        repo = _FakeAdaptiveRepo(child=child, evidence=evidence)
+        repo.list_difficult_word_targets = AsyncMock(return_value=[])
+        service = AdaptiveLearningService(repo)
+        analytics = await service.get_parent_analytics(child_id, parent_id, window_days=30)
+        self.assertEqual(analytics.reading_misread_words_reinforced, 1)
 
 
 if __name__ == "__main__":

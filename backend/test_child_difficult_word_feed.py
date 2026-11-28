@@ -170,6 +170,8 @@ class ChildDifficultWordFeedTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("khủng long", by_norm)
         self.assertIn("truyện", by_norm)
         self.assertIn("rực rỡ", by_norm)
+        # CONFIRMED retry must be filtered out even if returned by a raw/fake DB result
+        self.assertNotIn("mèo", by_norm)
 
         self.assertEqual(by_norm["nghiêng"].heard_as, "nghiên")
         self.assertEqual(by_norm["nghiêng"].source_book_ids, [book_1])
@@ -261,6 +263,71 @@ class ChildDifficultWordFeedTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(db.outer_rollbacks, 0)
         # Verify ReadingEvent query uses valid `readingevents.type` column
         self.assertTrue(any("readingevents.type" in q for q in db.queries_seen))
+
+    async def test_relapse_after_mastery_and_first_pass_initial_assessment_and_nulls_last(self):
+        now = datetime(2026, 11, 28, 10, 0, tzinfo=timezone.utc)
+        child_id = uuid4()
+        parent_id = uuid4()
+        book_1 = uuid4()
+        page_1 = uuid4()
+        rev_1 = uuid4()
+        sess_1 = uuid4()
+
+        # Report with assessment_version == 1 initial_assessment snapshot (alignment already retried to MATCH)
+        reports = [
+            (
+                sess_1,
+                now - timedelta(hours=1),
+                [
+                    {"status": "MATCH", "book_index": 0, "book_word": "nghiêng", "spoken_word": "nghiêng"},
+                    {"status": "MATCH", "book_index": 1, "book_word": "bướm", "spoken_word": "bướm"},
+                ],
+                {
+                    "assessment_version": 1,
+                    "initial_assessment": [
+                        {"word_id": "w1", "word_index": 0, "text": "nghiêng", "status": "MISPRONUNCIATION"},
+                        {"word_id": "w2", "word_index": 1, "text": "bướm", "status": "OMISSION"},
+                        {"word_id": "w3", "word_index": 2, "text": "xanh", "status": "CORRECT"},
+                    ],
+                },
+                page_1,
+                rev_1,
+                "nghiêng bướm xanh",
+                book_1,
+            )
+        ]
+        # Both "nghiêng" (relapsed 1h ago) and "hoa" (no relapse) were mastered 2 days ago;
+        # "kỳ diệu" only has an INCORRECT practice attempt (0 reading errors).
+        attempts = [
+            ("nghiêng", "nghiêng", "CORRECT", "COMPLETED", 2, book_1, page_1, now - timedelta(days=2), now - timedelta(days=2), now - timedelta(days=2)),
+            ("nghiêng", "nghiêng", "CORRECT", "COMPLETED", 1, book_1, page_1, now - timedelta(days=3), now - timedelta(days=3), now - timedelta(days=3)),
+            ("hoa", "hoa", "CORRECT", "COMPLETED", 2, book_1, page_1, now - timedelta(days=2), now - timedelta(days=2), now - timedelta(days=2)),
+            ("hoa", "hoa", "CORRECT", "COMPLETED", 1, book_1, page_1, now - timedelta(days=3), now - timedelta(days=3), now - timedelta(days=3)),
+            ("kỳ diệu", "kỳ diệu", "INCORRECT", "COMPLETED", 1, book_1, page_1, now - timedelta(hours=3), now - timedelta(hours=3), now - timedelta(hours=3)),
+        ]
+        # Old reading error for "hoa" BEFORE mastery must remain suppressed
+        events = [
+            ("WORD_RETRY", "FAILED", {"target_word": "hoa"}, now - timedelta(days=5), page_1, book_1, None),
+        ]
+
+        db = _FakeFeedDB(reports=reports, events=events, attempts=attempts, evidence=[])
+        targets = await ChildDifficultWordFeed(db).list_targets(child_id, parent_id, limit=10, now=now)
+        by_norm = {t.normalized_word: t for t in targets}
+
+        # Relapsed word "nghiêng" and first-pass snapshot word "bướm" must be present
+        self.assertIn("nghiêng", by_norm)
+        self.assertIn("bướm", by_norm)
+        self.assertEqual(by_norm["nghiêng"].reading_error_count, 1)
+        self.assertEqual(by_norm["nghiêng"].practice_error_count, 0)
+        # Mastered word with no post-mastery relapse remains excluded
+        self.assertNotIn("hoa", by_norm)
+        # Practice-only word records reading_error_count=0, practice_error_count=1
+        self.assertIn("kỳ diệu", by_norm)
+        self.assertEqual(by_norm["kỳ diệu"].reading_error_count, 0)
+        self.assertEqual(by_norm["kỳ diệu"].practice_error_count, 1)
+        # PostgreSQL NULLS LAST ordering on practice attempts
+        practice_sql = next(q for q in db.queries_seen if "difficult_word_practice_attempts" in q)
+        self.assertIn("nulls last", practice_sql)
 
 
 if __name__ == "__main__":

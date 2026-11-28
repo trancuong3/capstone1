@@ -552,6 +552,7 @@
       "where": "أين وما اللون؟"
     },
     "practicingWordsBadge": "كلمات قيد المراجعة",
+    "cardDifficultWordsTag": "كلمات للتدريب: {words}",
     "matchedDifficultWordBanner": "كلمات تمت مراجعتها: {words}",
     "autoPlayOn": "التشغيل التلقائي",
     "autoPlayOff": "التشغيل التلقائي (متوقف)",

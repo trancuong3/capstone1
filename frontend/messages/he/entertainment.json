@@ -552,6 +552,7 @@
       "where": "היכן ובאיזה צבע?"
     },
     "practicingWordsBadge": "מילים בתרגול",
+    "cardDifficultWordsTag": "מילים לתרגול: {words}",
     "matchedDifficultWordBanner": "מילים שתורגלו: {words}",
     "autoPlayOn": "הפעלה אוטומטית",
     "autoPlayOff": "הפעלה אוטומטית (כבוי)",

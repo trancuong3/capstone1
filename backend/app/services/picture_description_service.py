@@ -716,7 +716,7 @@ class PictureDescriptionService:
             for skill_key in skill_keys
         ]
         cleaned_practiced = [w for w in (practiced_difficult_words or []) if w]
-        if cleaned_practiced:
+        if cleaned_practiced and feedback.is_relevant:
             rows.append(
                 {
                     "Id": uuid4(),
@@ -811,6 +811,7 @@ class PictureDescriptionService:
         resolved_sample_key_input = sample_key
         resolved_book_page_id_input = book_page_id
         preloaded_candidate: BookPageCandidateProjection | None = None
+        auto_selected_book_page = False
 
         if resolved_source_type is None and auto_select:
             candidates = await self._safe_book_pages_for_grade(child_grade)
@@ -828,6 +829,7 @@ class PictureDescriptionService:
                 resolved_source_type = "BOOK_PAGE"
                 resolved_book_page_id_input = best_page.PageId
                 preloaded_candidate = best_page
+                auto_selected_book_page = True
             else:
                 best_sample = _best_sample_for_child(child_grade, focus_words)
                 resolved_source_type = "SAMPLE"
@@ -906,8 +908,36 @@ class PictureDescriptionService:
                 for part in (candidate.BookTitle, getattr(candidate, "VerifiedText", None))
                 if part
             )
-            raw_bytes = await asyncio.to_thread(self._download_fn, storage_path)
-            image_bytes, image_mime = await asyncio.to_thread(_normalize_mime_type, raw_bytes)
+            try:
+                raw_bytes = await asyncio.to_thread(self._download_fn, storage_path)
+                image_bytes, image_mime = await asyncio.to_thread(_normalize_mime_type, raw_bytes)
+            except Exception as exc:
+                if not auto_selected_book_page:
+                    raise
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="picture_auto_select_book_page_download_fallback",
+                    stage="picture_auto_select",
+                    exception=exc,
+                    reason_code="BOOK_PAGE_DOWNLOAD_FAILED",
+                    book_page_id=str(candidate.PageId),
+                )
+                best_sample = _best_sample_for_child(child_grade, focus_words)
+                resolved_source_type = "SAMPLE"
+                sample_spec = best_sample
+                resolved_book_id = None
+                resolved_book_page_id = None
+                resolved_sample_key = best_sample.sample_key
+                image_mime = "image/jpeg"
+                storage_path = best_sample.storage_ref
+                context_hint = f"{best_sample.title}: {best_sample.description}"
+                scene_match_text = _sample_searchable_text(best_sample)
+                image_bytes = (
+                    await asyncio.to_thread(_load_sample_bytes, best_sample)
+                    if refresh_ai_guide
+                    else None
+                )
 
         elif resolved_source_type == "CUSTOM_UPLOAD":
             await self.repository.db.rollback()
@@ -1182,7 +1212,7 @@ class PictureDescriptionService:
         used_target_words = _normalize_target_words(
             [*(feedback.used_target_words or ()), *detected_targets]
         )
-        practiced_difficult_words = list(used_target_words)
+        practiced_difficult_words = list(used_target_words) if feedback.is_relevant else []
         praise_message = feedback.praise_message
         if (
             practiced_difficult_words
@@ -1190,7 +1220,10 @@ class PictureDescriptionService:
             and not any(w.casefold() in praise_message.casefold() for w in practiced_difficult_words)
         ):
             words_preview = ", ".join(f"“{w}”" for w in practiced_difficult_words[:3])
-            praise_addition = f" Cô khen bé đã vận dụng tự nhiên từ {words_preview}!"
+            teacher_pronoun = "Thầy" if resolved_teacher_gender == "male" else "Cô"
+            praise_addition = (
+                f" {teacher_pronoun} khen bé đã vận dụng tự nhiên từ {words_preview}!"
+            )
             if len(praise_message) + len(praise_addition) <= 360:
                 praise_message = f"{praise_message.rstrip()}{praise_addition}"
 

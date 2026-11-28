@@ -552,6 +552,7 @@
       "where": "どこ・なにいろ？"
     },
     "practicingWordsBadge": "復習中のことば",
+    "cardDifficultWordsTag": "練習することば：{words}",
     "matchedDifficultWordBanner": "復習できたことば: {words}",
     "autoPlayOn": "おまかせ進行",
     "autoPlayOff": "おまかせ進行（オフ）",

@@ -552,6 +552,7 @@
       "where": "Where & what color?"
     },
     "practicingWordsBadge": "Words you're practicing",
+    "cardDifficultWordsTag": "Words to practice: {words}",
     "matchedDifficultWordBanner": "Words reviewed: {words}",
     "autoPlayOn": "Auto-play",
     "autoPlayOff": "Auto-play (Off)",
