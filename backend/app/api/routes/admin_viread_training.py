@@ -83,8 +83,11 @@ def _require_training_worker_token(token: str | None = Header(default=None, alia
     expected = os.getenv("VIREAD_TRAINING_WORKER_TOKEN", "")
     if len(expected) < 32:
         raise HTTPException(status_code=503, detail="Colab worker authentication is not configured")
-    if not token or not hmac.compare_digest(hashlib.sha256(token.encode()).digest(),
-                                             hashlib.sha256(expected.encode()).digest()):
+    resolved_token = token if isinstance(token, str) else None
+    if not resolved_token or not hmac.compare_digest(
+        hashlib.sha256(resolved_token.encode()).digest(),
+        hashlib.sha256(expected.encode()).digest(),
+    ):
         raise HTTPException(status_code=401, detail="Invalid training worker credential")
 
 
@@ -790,20 +793,25 @@ async def activate_viread_flow1_model(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_config_file = (
+        config_file if config_file is not None and not isinstance(config_file, bool) and hasattr(config_file, "read") else None
+    )
+    resolved_model_version = model_version if isinstance(model_version, str) else None
+    resolved_reason = reason if isinstance(reason, str) else None
     try:
         comparison_bytes = await comparison_file.read(2 * 1024 * 1024 + 1)
         if len(comparison_bytes) > 2 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="Comparison file exceeds 2 MiB")
         config_bytes = None
         config_filename = None
-        if config_file is not None and config_file.filename:
-            config_bytes = await config_file.read(1024 * 1024 + 1)
+        if resolved_config_file is not None and getattr(resolved_config_file, "filename", None):
+            config_bytes = await resolved_config_file.read(1024 * 1024 + 1)
             if len(config_bytes) > 1024 * 1024:
                 raise HTTPException(status_code=413, detail="Configuration file exceeds 1 MiB")
-            config_filename = config_file.filename
+            config_filename = resolved_config_file.filename
     finally:
         await _close_upload_file(comparison_file)
-        await _close_upload_file(config_file)
+        await _close_upload_file(resolved_config_file)
 
     return await VireadOcrTrainingService(db).activate_flow1_model(
         actor_id=actor_id,
@@ -813,8 +821,8 @@ async def activate_viread_flow1_model(
         comparison_bytes=comparison_bytes,
         config_bytes=config_bytes,
         config_filename=config_filename,
-        model_version=model_version,
-        reason=reason,
+        model_version=resolved_model_version,
+        reason=resolved_reason,
     )
 
 
@@ -1629,11 +1637,12 @@ async def upload_viread_colab_resume_object(
         await _close_upload_file(file)
     if len(data) > MAX_SHARD_BYTES:
         raise HTTPException(status_code=413, detail="Resume state object exceeds 40 MiB chunk limit")
+    resolved_expected_sha256 = expected_sha256 if isinstance(expected_sha256, str) else None
     return await VireadDriveConnectionService(db).put_job_resume_file(
         job_id,
         object_path,
         data,
-        expected_sha256=(expected_sha256 or "").strip().lower() or None,
+        expected_sha256=(resolved_expected_sha256 or "").strip().lower() or None,
     )
 
 

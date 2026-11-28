@@ -419,7 +419,7 @@
     "errorTitle": "問題が発生しました",
     "savedTitle": "保存済み",
     "loadChildFailed": "お子様のプロフィールを読み込めませんでした。もう一度お試しください。",
-    "loadManagementFailed": "読書管理データを読み込めませんでした。バックエンドとReading Managementのマイグレーションを確認してから再試行してください。",
+    "loadManagementFailed": "読書管理データを読み込めませんでした。しばらくしてからもう一度お試しください。",
     "mutationUnconfirmed": "操作を完了できませんでした。データが保存されたか確認できません。もう一度お試しください。",
     "overviewAria": "読書習慣の概要",
     "summaryRunningGoals": "実行中の目標",

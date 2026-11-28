@@ -419,7 +419,7 @@
     "errorTitle": "Something went wrong",
     "savedTitle": "Saved",
     "loadChildFailed": "Could not load child profile. Please try again.",
-    "loadManagementFailed": "Could not load reading management data. Check the backend and Reading Management migrations, then try again.",
+    "loadManagementFailed": "Could not load reading management data. Please try again in a moment.",
     "mutationUnconfirmed": "Action could not be completed. Data was not confirmed as saved; please try again.",
     "overviewAria": "Reading habits overview",
     "summaryRunningGoals": "Active goals",
