@@ -33,9 +33,12 @@ import numpy as np
 
 try:
     from scipy.io import wavfile
-    from scipy.signal import butter, medfilt, resample_poly, sosfiltfilt
-except ImportError:  # Lightweight web runtime (requirements-web.txt omits scipy)
+except ImportError:  # pragma: no cover - lightweight web runtime without scipy
     wavfile = None  # type: ignore[assignment]
+
+try:
+    from scipy.signal import butter, medfilt, resample_poly, sosfiltfilt
+except ImportError:  # pragma: no cover - lightweight web runtime without scipy
     butter = None  # type: ignore[assignment]
     medfilt = None  # type: ignore[assignment]
     resample_poly = None  # type: ignore[assignment]
@@ -277,9 +280,7 @@ def decode_speech_audio(
 
 
 def _highpass_vocal(samples: np.ndarray, sr: int) -> np.ndarray:
-    if samples.size < 32 or sr <= 400:
-        return samples
-    if butter is None or sosfiltfilt is None:
+    if samples.size < 32 or sr <= 400 or butter is None or sosfiltfilt is None:
         return samples
     try:
         sos = butter(2, 75.0 / (0.5 * sr), btype="highpass", output="sos")
@@ -402,7 +403,8 @@ def _suppress_octave_jumps(f0_hz: np.ndarray) -> np.ndarray:
     elif voiced_vals.size >= 3:
         padded = np.pad(voiced_vals, (1, 1), mode="edge")
         smoothed = np.median(
-            np.stack([padded[:-2], padded[1:-1], padded[2:]], axis=0), axis=0
+            np.stack([padded[:-2], padded[1:-1], padded[2:]], axis=0),
+            axis=0,
         )
     else:
         smoothed = voiced_vals

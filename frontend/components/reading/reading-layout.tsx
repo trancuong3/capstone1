@@ -628,6 +628,11 @@ export function ReadingLayout({
               ).length
             }
             currentWord={currentWordText}
+            latestTranscript={
+              !retryMode && !suppressSecondaryBanners && !isReadingWord
+                ? latestTranscript
+                : null
+            }
           />
         </div>
       </div>

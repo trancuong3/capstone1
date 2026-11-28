@@ -848,6 +848,42 @@ class ChildSafetyTimeoutAndCircuitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second_exc.exception.code, "ALL_PROVIDERS_SKIPPED")
         self.assertEqual(http_calls, 1)
 
+    async def test_sibling_503_does_not_disable_healthy_google_primary_on_later_chunks(self):
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            local_enabled=False,
+        )
+        orch = ChildSafetyOrchestrator(cfg)
+        calls: list[str] = []
+
+        async def fake_request(provider, _source: str):
+            calls.append(provider.name)
+            if provider.name == "gemini_primary":
+                if len(calls) == 1:
+                    return {"suitability": "SUITABLE", "findings": []}, 200, "json_schema", 0
+                if len(calls) == 2:
+                    raise ChildSafetyError("INVALID_OUTPUT_SCHEMA", [])
+                return {"suitability": "SUITABLE", "findings": []}, 200, "json_schema", 0
+            if provider.name == "gemini_fallback":
+                err = ChildSafetyError("PROVIDER_UNAVAILABLE", [])
+                err.status_code = 503
+                raise err
+            return {"suitability": "SUITABLE", "findings": []}, 200, "json_object", 0
+
+        orch._request = fake_request  # type: ignore[method-assign]
+        # Build 3 chunks (> 2 * CHUNK_CHARS=8000) to exercise chunk 0 -> chunk 1 -> chunk 2.
+        long_text = ("Bé đọc sách rất vui vẻ mỗi ngày. " * 700).strip()
+        res = await orch.analyze(long_text)
+        self.assertEqual(res["suitability"], "SUITABLE")
+        # Chunk 0: gemini_primary succeeds -> healthy_providers={'gemini_primary'}.
+        # Chunk 1: gemini_primary returns schema error -> gemini_fallback hits 503 (only disables gemini_fallback, NOT google family!) -> groq_qwen succeeds.
+        # Chunk 2: gemini_primary MUST still be called and succeed!
+        self.assertGreaterEqual(res["chunks_total"], 3)
+        self.assertIn("gemini_primary", calls[4:])
+        self.assertEqual(calls.count("gemini_fallback"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

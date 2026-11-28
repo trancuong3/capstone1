@@ -1457,6 +1457,87 @@ class OcrAiRuntimeAndCircuitBreakerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNot(fresh, shared)
         await aclose_ocr_ai_http_clients()
 
+    async def test_fallback_sibling_503_does_not_disable_healthy_primary_gemini_on_next_chunk(self):
+        """Regression for ALL_PROVIDERS_SKIPPED on multi-chunk parent book pages:
+        Chunk 0: gemini_3_5 succeeds with uncertain tokens, gemini_3_1 returns 503
+        (disables_family=True), groq_qwen returns 429 (PROVIDER_QUOTA).
+        Chunks 1..3 MUST still run on healthy gemini_3_5 instead of raising ALL_PROVIDERS_SKIPPED.
+        """
+        from app.services.ai_capability_router import CircuitBreakerRegistry
+
+        now = [5000.0]
+        cb = CircuitBreakerRegistry(clock=lambda: now[0], base_cooldown_seconds=30.0)
+        cfg = OcrCorrectionConfig(
+            cloud_enabled=True,
+            gemini_api_key="g-key",
+            groq_api_key="q-key",
+            local_enabled=False,
+            local=LocalOcrConfig(
+                chunking=ChunkingConfig(
+                    max_bytes=100,
+                    max_words=2,
+                    max_chunks=10,
+                    context_bytes=20,
+                    max_document_bytes=1000,
+                )
+            ),
+        )
+        calls: list[tuple[str, int]] = []
+
+        class _SiblingAwareProvider:
+            def __init__(self, name: str, family: str):
+                self.name = name
+                self.family = family
+                self.model = name
+
+            async def correct_chunk(self, *, chunk, image_bytes, image_mime_type):
+                calls.append((self.name, chunk.chunk_id))
+                if self.name == "gemini_3_5":
+                    # Chunk 0 has one uncertain token, triggering fallback checks.
+                    uncertain = (0,) if chunk.chunk_id == 0 else ()
+                    return ChunkCorrectionResult(
+                        chunk.chunk_id,
+                        tuple(t.text for t in chunk.tokens),
+                        uncertain,
+                    )
+                if self.name == "gemini_3_1":
+                    raise OcrProviderError(
+                        provider=self.name,
+                        code="PROVIDER_UNAVAILABLE",
+                        status_code=503,
+                        upstream_status_code=503,
+                        disables_family=True,
+                    )
+                raise OcrProviderError(
+                    provider=self.name,
+                    code="PROVIDER_QUOTA",
+                    status_code=503,
+                    upstream_status_code=429,
+                    disables_family=True,
+                )
+
+        providers = [
+            _SiblingAwareProvider("gemini_3_5", "google"),
+            _SiblingAwareProvider("gemini_3_1", "google"),
+            _SiblingAwareProvider("groq_qwen", "groq"),
+        ]
+        result = await OcrCorrectionOrchestrator(
+            cfg, providers=providers, circuit_breaker=cb
+        ).correct("một hai ba bốn năm sáu", _image(), _boxes(6))
+        self.assertEqual(result, "một hai ba bốn năm sáu")
+        # Chunk 0 tries gemini_3_5 -> gemini_3_1 (503) -> groq_qwen (429);
+        # Chunks 1 & 2 MUST succeed on gemini_3_5 without touching gemini_3_1 or groq_qwen again.
+        self.assertEqual(
+            calls,
+            [
+                ("gemini_3_5", 0),
+                ("gemini_3_1", 0),
+                ("groq_qwen", 0),
+                ("gemini_3_5", 1),
+                ("gemini_3_5", 2),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

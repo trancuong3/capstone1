@@ -334,7 +334,9 @@ function describeStageErrorHint(
   if (
     upper.includes("BUSY") ||
     upper.includes("RATE") ||
-    upper.includes("429")
+    upper.includes("429") ||
+    upper.includes("QUOTA") ||
+    upper.includes("ALL_PROVIDERS_SKIPPED")
   ) {
     return t("privateManager.workerErrorOverloaded");
   }
@@ -2268,6 +2270,27 @@ function ParentPrivateBookManagerContent({
                                       {sub.tool_check_parent_notice}
                                     </p>
                                   ) : null}
+                                  {sub.workflow_status === "CHECK_FAILED" &&
+                                  sub.can_retry ? (
+                                    <div className="mt-2.5">
+                                      <Button
+                                        className="min-h-10 w-auto px-3.5 text-xs"
+                                        disabled={isSubBusy || isSuspended}
+                                        isLoading={
+                                          busyKey === `retry:${sub.id}`
+                                        }
+                                        onClick={() => void handleRetry(sub)}
+                                        type="button"
+                                        variant="secondary"
+                                      >
+                                        <RotateCcw
+                                          aria-hidden="true"
+                                          className="size-3.5"
+                                        />
+                                        {t("privateManager.retryCheckAction")}
+                                      </Button>
+                                    </div>
+                                  ) : null}
                                 </div>
                               );
                             })()
@@ -2591,8 +2614,13 @@ function ParentPrivateBookManagerContent({
                             </Button>
                           ) : null}
 
-                          {/* Stage-preserving Retry */}
-                          {sub.can_retry ? (
+                          {/* Stage-preserving Retry (avoid duplicating when already shown in the top error notice) */}
+                          {sub.can_retry &&
+                          !(
+                            sub.workflow_status === "CHECK_FAILED" &&
+                            (sub.tool_check_parent_notice ||
+                              sub.tool_check_findings_count > 0)
+                          ) ? (
                             <Button
                               className="min-h-11 w-auto px-4 text-sm"
                               disabled={isSubBusy || isSuspended}

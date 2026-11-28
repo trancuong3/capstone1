@@ -793,6 +793,46 @@ def is_ocr_engine_ready_status(detail_status: object) -> bool:
     return str(detail_status or "").strip().lower() in READY_OCR_DETAIL_STATUSES
 
 
+def _is_single_ocr_engine_ready(info: Any) -> bool:
+    if not isinstance(info, dict):
+        return False
+    if info.get("error"):
+        return False
+    status_upper = str(info.get("status") or "").strip().upper()
+    if status_upper in {"UNAVAILABLE", "FAILED"}:
+        return False
+    detail = str(info.get("detail_status") or "").strip().lower()
+    verified = info.get("inference_verified") is True
+    raw_loaded = info.get("loaded")
+    loaded = raw_loaded is True
+    if verified:
+        return True
+    if raw_loaded is False:
+        return False
+    if detail in {"failed", "unavailable", "not_installed", "installed", "disabled"}:
+        return False
+    if loaded:
+        return True
+    return is_ocr_engine_ready_status(detail)
+
+
+def _worker_has_ready_engine(raw_engines: Any) -> bool:
+    """Require every present primary neural engine (paddleocr, vietocr) to be ready."""
+    if not isinstance(raw_engines, dict) or not raw_engines:
+        return True
+    primary_ids = ("paddleocr", "vietocr")
+    if any(eng_id in raw_engines for eng_id in primary_ids):
+        for eng_id in primary_ids:
+            if eng_id in raw_engines and not _is_single_ocr_engine_ready(raw_engines.get(eng_id)):
+                return False
+        return True
+    return any(
+        _is_single_ocr_engine_ready(info)
+        for info in raw_engines.values()
+        if isinstance(info, dict)
+    )
+
+
 async def collect_remote_ocr_health() -> dict[str, Any]:
     """Collect remote Windows OCR worker heartbeats, engine states, and durable queue depth."""
     from datetime import datetime, timedelta, timezone
@@ -949,7 +989,6 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
 
         raw_engines = dict(worker.Engines or {})
         engine_summary: dict[str, dict[str, Any]] = {}
-        worker_has_ready_engine = False
         for eng_id in ("paddleocr", "vietocr", "tesseract_vie"):
             info = raw_engines.get(eng_id)
             if isinstance(info, dict):
@@ -963,8 +1002,7 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                     "loaded": loaded,
                     "inference_verified": verified,
                 }
-                if (is_ocr_engine_ready_status(detail) and (loaded or verified or detail == "healthy")) or verified:
-                    worker_has_ready_engine = True
+        worker_has_ready_engine = _worker_has_ready_engine(raw_engines)
 
         worker_entry = {
             "worker_id": worker.WorkerId,
@@ -1021,7 +1059,7 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                     serialized_workers[existing_idx] = passive_probe
 
             probe_engines = dict(passive_probe.get("engines") or {})
-            if bool(passive_probe.get("ready")):
+            if bool(passive_probe.get("ready")) and _worker_has_ready_engine(probe_engines):
                 any_online_ready = True
                 if not latest_online_engines and probe_engines:
                     latest_online_engines = probe_engines

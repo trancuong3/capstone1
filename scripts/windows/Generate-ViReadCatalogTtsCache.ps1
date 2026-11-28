@@ -38,9 +38,10 @@ function Resolve-EnvSetting([string]$key) {
     $val = [Environment]::GetEnvironmentVariable($key, "Process")
     if ($val -and $val.Trim()) { return $val.Trim() }
     $backendEnv = Join-Path $repoRoot "backend\.env"
-    if (Test-Path $backendEnv) {
-        foreach ($line in (Get-Content $backendEnv -Encoding UTF8)) {
-            $trimmed = $line.Trim()
+    if (Test-Path -LiteralPath $backendEnv) {
+        foreach ($line in [System.IO.File]::ReadAllLines($backendEnv, [System.Text.Encoding]::UTF8)) {
+            if ($null -eq $line) { continue }
+            $trimmed = $line.TrimStart([char]0xFEFF).Trim()
             if (-not $trimmed -or $trimmed.StartsWith("#")) { continue }
             if ($trimmed -match "^$([regex]::Escape($key))\s*=\s*(.*)$") {
                 $parsed = $Matches[1].Trim()
