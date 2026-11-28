@@ -5,7 +5,7 @@
 .DESCRIPTION
     - Enforces single-instance execution via Local\ViReadOcrWorkerAutostart mutex.
     - Supports -RespectStopSentinel for periodic Task Scheduler watchdog runs while clearing pre-session stale sentinels on logon.
-    - Dynamically loads VIREAD_OCR_BACKEND_URL (fallback VIREAD_BACKEND_URL) and VIREAD_OCR_WORKER_TOKEN from F:\c1\tools\viread-workers.env (UTF-8 BOM safe).
+    - Dynamically loads VIREAD_OCR_BACKEND_URL (fallback VIREAD_BACKEND_URL) and VIREAD_OCR_WORKER_TOKEN from <workspace>\tools\viread-workers.env (UTF-8 BOM safe).
     - Prioritizes CUDA .venv Python and validates ocr_worker\worker.py presence before selecting repoRoot.
     - Manages .venv child process trees, configurable process priority propagation (default Normal), port 8020 orphan cleanup, and proxy-free 30s health watchdog.
     - Strips DB/Supabase secrets from the child worker environment and never logs secret values.
@@ -13,8 +13,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$EnvFile = "F:\c1\tools\viread-workers.env",
-    [string]$RuntimeDir = "F:\c1\tools\ocr-runtime",
+    [string]$EnvFile = "",
+    [string]$RuntimeDir = "",
     [string]$PythonExe = "",
     [string]$BindHost = "127.0.0.1",
     [int]$BindPort = 8020,
@@ -32,6 +32,22 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+$ScriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+$CandidateTwoUp = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+if (Test-Path -LiteralPath (Join-Path $CandidateTwoUp "scripts\windows")) {
+    $RepoRoot = $CandidateTwoUp
+    $WorkspaceParent = Split-Path -Parent $RepoRoot
+} else {
+    $WorkspaceParent = $CandidateTwoUp
+    $RepoRoot = Join-Path $WorkspaceParent "capstone1"
+}
+if ([string]::IsNullOrWhiteSpace($EnvFile)) {
+    $EnvFile = Join-Path $WorkspaceParent "tools\viread-workers.env"
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
 $HasExplicitProcessPriority = $PSBoundParameters.ContainsKey("ProcessPriority")
 
@@ -188,15 +204,19 @@ function Resolve-PythonExe {
             $candidates.Add($envPy)
         }
     }
-    $candidates.Add("F:\c1\capstone1\.venv\Scripts\python.exe")
-    $candidates.Add("C:\Users\cuong\AppData\Local\Programs\Python\Python312\python.exe")
+    $candidates.Add((Join-Path $RepoRoot "backend\.venv\Scripts\python.exe"))
+    $candidates.Add((Join-Path $RepoRoot ".venv\Scripts\python.exe"))
+    $candidates.Add((Join-Path $WorkspaceParent ".venv\Scripts\python.exe"))
+    if ($env:LOCALAPPDATA) {
+        $candidates.Add("$env:LOCALAPPDATA\Programs\Python\Python312\python.exe")
+    }
 
     foreach ($cand in $candidates) {
         if (-not [string]::IsNullOrWhiteSpace($cand) -and (Test-Path -LiteralPath $cand)) {
             return $cand
         }
     }
-    return "F:\c1\capstone1\.venv\Scripts\python.exe"
+    return (Join-Path $RepoRoot "backend\.venv\Scripts\python.exe")
 }
 
 function Resolve-RepoRoot {
@@ -221,9 +241,10 @@ function Resolve-RepoRoot {
     } catch {
         # Best effort
     }
-    $candidates.Add("F:\c1\capstone1-main-acceptance")
-    $candidates.Add("F:\c1\capstone1")
-    $candidates.Add("F:\c1\capstone1-hf-ocr-zero-cost")
+    $candidates.Add($RepoRoot)
+    $candidates.Add((Join-Path $WorkspaceParent "capstone1-main-acceptance"))
+    $candidates.Add((Join-Path $WorkspaceParent "capstone1"))
+    $candidates.Add((Join-Path $WorkspaceParent "capstone1-hf-ocr-zero-cost"))
 
     foreach ($candidate in $candidates) {
         if ([string]::IsNullOrWhiteSpace($candidate)) { continue }

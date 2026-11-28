@@ -1,14 +1,31 @@
 # Stop all ViRead Windows workers (OCR Worker :8020 + autostart supervisor, Cloudflare Tunnels, and Voice Worker :8010).
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
-    [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
-    [string]$TunnelRuntimeDir = "F:\c1\viread-staging-tunnels",
+    [string]$VoiceRuntimeDir = "",
+    [string]$OcrRuntimeDir = "",
+    [string]$TunnelRuntimeDir = "",
     [int]$VoicePort = 8010,
     [int]$OcrPort = 8020
 )
 
 $ErrorActionPreference = "Continue"
 $scriptDir = $PSScriptRoot
+$RepoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $WorkspaceParent "tools\voice-runtime"
+    }
+}
+if ([string]::IsNullOrWhiteSpace($OcrRuntimeDir)) {
+    $OcrRuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
+if ([string]::IsNullOrWhiteSpace($TunnelRuntimeDir)) {
+    $TunnelRuntimeDir = Join-Path $WorkspaceParent "viread-staging-tunnels"
+}
 
 Write-Host "=== Stopping ViRead Windows Workers ===" -ForegroundColor Cyan
 

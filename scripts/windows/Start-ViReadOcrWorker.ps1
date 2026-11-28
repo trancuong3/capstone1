@@ -1,7 +1,7 @@
 # Start the standalone ViRead Remote OCR Worker on 127.0.0.1:8020 (idempotent, configurable priority default Normal).
 param(
-    [string]$OcrRuntimeDir = "F:\c1\tools\ocr-runtime",
-    [string]$PythonExe = $(if (Test-Path -LiteralPath "F:\c1\capstone1\.venv\Scripts\python.exe") { "F:\c1\capstone1\.venv\Scripts\python.exe" } else { "C:\Users\cuong\AppData\Local\Programs\Python\Python312\python.exe" }),
+    [string]$OcrRuntimeDir = "",
+    [string]$PythonExe = "",
     [string]$BindHost = "127.0.0.1",
     [int]$Port = 8020,
     [int]$CpuThreads = 2,
@@ -20,6 +20,10 @@ $ErrorActionPreference = "Stop"
 
 $scriptDir = $PSScriptRoot
 $repoRoot = (Resolve-Path (Join-Path $scriptDir "..\..")).Path
+$workspaceParent = Split-Path -Parent $repoRoot
+if ([string]::IsNullOrWhiteSpace($OcrRuntimeDir)) {
+    $OcrRuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $workspaceParent "tools\ocr-runtime" }
+}
 $logsDir = Join-Path $OcrRuntimeDir "logs"
 $stateFile = Join-Path $OcrRuntimeDir "ocr-worker-state.json"
 
@@ -36,8 +40,7 @@ function Resolve-BackendSetting([string]$explicitVal, [string]$envKey, [string]$
     }
     $envFiles = @(
         (Join-Path $repoRoot "backend\.env"),
-        "F:\c1\tools\viread-workers.env",
-        "F:\c1\capstone1\backend\.env"
+        (Join-Path $workspaceParent "tools\viread-workers.env")
     ) | Select-Object -Unique
     foreach ($candidateKey in @($envKey, $fallbackEnvKey)) {
         if (-not $candidateKey) { continue }
@@ -61,10 +64,19 @@ function Resolve-BackendSetting([string]$explicitVal, [string]$envKey, [string]$
     return ""
 }
 
-if (-not $PSBoundParameters.ContainsKey("PythonExe")) {
+if (-not $PSBoundParameters.ContainsKey("PythonExe") -or [string]::IsNullOrWhiteSpace($PythonExe)) {
     $configuredPython = Resolve-BackendSetting "" "VIREAD_OCR_PYTHON_EXE"
     if ($configuredPython -and (Test-Path -LiteralPath $configuredPython)) {
         $PythonExe = $configuredPython
+    } else {
+        $PythonExe = @(
+            (Join-Path $repoRoot "backend\.venv\Scripts\python.exe"),
+            (Join-Path $repoRoot ".venv\Scripts\python.exe"),
+            (Join-Path $workspaceParent ".venv\Scripts\python.exe")
+        ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+            $PythonExe = "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe"
+        }
     }
 }
 

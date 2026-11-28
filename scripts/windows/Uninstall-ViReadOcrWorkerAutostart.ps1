@@ -6,12 +6,25 @@
 
 [CmdletBinding()]
 param(
-    [string]$RuntimeDir = "F:\c1\tools\ocr-runtime",
+    [string]$RuntimeDir = "",
     [string]$TaskName = "ViRead-OcrWorker-AutoStart"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
+
+$ScriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+$CandidateTwoUp = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+if (Test-Path -LiteralPath (Join-Path $CandidateTwoUp "scripts\windows")) {
+    $RepoRoot = $CandidateTwoUp
+    $WorkspaceParent = Split-Path -Parent $RepoRoot
+} else {
+    $WorkspaceParent = $CandidateTwoUp
+    $RepoRoot = Join-Path $WorkspaceParent "capstone1"
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
 $StopScript = Join-Path $RuntimeDir "Stop-ViReadOcrWorkerAutostart.ps1"
 if (-not (Test-Path -LiteralPath $StopScript) -and -not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {

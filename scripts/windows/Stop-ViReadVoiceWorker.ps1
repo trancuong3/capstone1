@@ -1,10 +1,22 @@
 # Safely stop the ViRead Local Voice Worker started by Start-ViReadVoiceWorker.ps1.
 param(
-    [string]$VoiceRuntimeDir = "F:\c1\tools\voice-runtime",
+    [string]$VoiceRuntimeDir = "",
     [int]$Port = 8010
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($VoiceRuntimeDir)) {
+    $VoiceRuntimeDir = if ($env:VIREAD_VOICE_RUNTIME_DIR) {
+        $env:VIREAD_VOICE_RUNTIME_DIR
+    } elseif ($env:VIREAD_VOICE_RUNTIME_ROOT) {
+        $env:VIREAD_VOICE_RUNTIME_ROOT
+    } else {
+        Join-Path $WorkspaceParent "tools\voice-runtime"
+    }
+}
 
 $stateFile = Join-Path $VoiceRuntimeDir "worker-state.json"
 if (-not (Test-Path $stateFile)) {

@@ -20,6 +20,10 @@ import { DifficultWordsScreen } from "@/components/reports/difficult-words-scree
 import { createSpeechService } from "@/lib/api/speech-service";
 import { BrowserWasmTtsClient } from "@/lib/reading/browser-wasm-tts";
 import {
+  detectBrowserWasmTtsSupport,
+  resetBrowserWasmTtsForTests,
+} from "@/lib/reading/browser-wasm-tts";
+import {
   applyGlobalTeacherVoiceSelection,
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
@@ -40,6 +44,7 @@ import {
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
+import { resetVoicePreloaderForTests } from "@/lib/reading/voice-preloader";
 import {
   getSpeechPreferences,
   resetSpeechPreferencesCache,
@@ -213,6 +218,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetVoiceEngineStatus();
+  resetBrowserWasmTtsForTests();
+  resetVoicePreloaderForTests();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
@@ -2657,5 +2664,150 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     );
     unmount();
     expect(getActiveSessionVoiceLock()).toBeNull();
+  });
+
+  it("hides teacher-voice-worker-offline-hint and warms WASM TTS immediately on Dashboard in Chỉ máy này mode when Browser WASM TTS is supported", async () => {
+    const initGenders: string[] = [];
+    class StubWasmWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type: string; id: string; gender?: string }) {
+        if (msg.type === "init") {
+          const gender = msg.gender ?? "female";
+          initGenders.push(gender);
+          queueMicrotask(() => {
+            this.onmessage?.({
+              data: {
+                type: "ready",
+                id: msg.id,
+                gender,
+                modelVersion: "test-wasm-v1",
+              },
+            } as MessageEvent);
+          });
+        }
+      }
+      terminate() {}
+    }
+
+    vi.stubGlobal("Worker", StubWasmWorker);
+    expect(detectBrowserWasmTtsSupport().supported).toBe(true);
+
+    listVoicesMock.mockResolvedValue({
+      voices: [...STATIC_LOCAL_VOICES],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: false,
+      google_tts_available: false,
+    });
+
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePreferencesMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={CHILD_1} />
+      </AppServicesContext.Provider>,
+    );
+
+    expect(screen.getByTestId("teacher-policy-local-only")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await waitFor(() => {
+      expect(listVoicesMock).toHaveBeenCalled();
+      expect(initGenders).toContain("female");
+    });
+    expect(
+      screen.queryByTestId("teacher-voice-worker-offline-hint"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders Sẵn sàng pill (not Tạm nghỉ), hides voice-offline-cache-notice, and warms WASM TTS in ReadingVoiceSettings when local worker is unavailable and WASM TTS is supported", async () => {
+    const user = userEvent.setup();
+    const initGenders: string[] = [];
+    class StubWasmWorker {
+      onmessage: ((e: MessageEvent) => void) | null = null;
+      onerror: ((e: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type: string; id: string; gender?: string }) {
+        if (msg.type === "init") {
+          const gender = msg.gender ?? "female";
+          initGenders.push(gender);
+          queueMicrotask(() => {
+            this.onmessage?.({
+              data: {
+                type: "ready",
+                id: msg.id,
+                gender,
+                modelVersion: "test-wasm-v1",
+              },
+            } as MessageEvent);
+          });
+        }
+      }
+      terminate() {}
+    }
+
+    vi.stubGlobal("Worker", StubWasmWorker);
+    expect(detectBrowserWasmTtsSupport().supported).toBe(true);
+
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: true,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+        error_code: "LOCAL_VOICE_UNAVAILABLE",
+        tts_error_code: "LOCAL_TTS_UNAVAILABLE",
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    listVoicesMock.mockResolvedValue({
+      voices: [...STATIC_LOCAL_VOICES],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: false,
+      google_tts_available: false,
+      cached_voice_ids: ["local_north_truc_ly"],
+    });
+
+    render(
+      <ReadingVoiceSettings onPreview={vi.fn()} onStopPreview={vi.fn()} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    expect(
+      await screen.findByRole("radio", { name: /Trúc Ly/ }),
+    ).toBeInTheDocument();
+
+    const pills = screen.getByTestId("voice-health-status-pills");
+    expect(pills).toHaveTextContent("Sẵn sàng");
+    expect(pills).not.toHaveTextContent("Tạm nghỉ");
+    const localPill = Array.from(pills.querySelectorAll("span")).find((el) =>
+      el.textContent?.includes("Máy trạm giọng đọc:"),
+    );
+    expect(localPill).toBeDefined();
+    expect(localPill?.className).toContain("border-emerald-200");
+    expect(localPill?.className).toContain("bg-emerald-50");
+    expect(localPill?.className).toContain("text-emerald-900");
+
+    expect(
+      screen.queryByTestId("voice-offline-cache-notice"),
+    ).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(initGenders).toContain("female");
+    });
   });
 });

@@ -6,12 +6,25 @@
 
 [CmdletBinding()]
 param(
-    [string]$RuntimeDir = "F:\c1\tools\ocr-runtime",
+    [string]$RuntimeDir = "",
     [int]$BindPort = 8020
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "SilentlyContinue"
+
+$ScriptDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) { $PSScriptRoot } else { (Get-Location).Path }
+$CandidateTwoUp = (Resolve-Path (Join-Path $ScriptDir "..\..")).Path
+if (Test-Path -LiteralPath (Join-Path $CandidateTwoUp "scripts\windows")) {
+    $RepoRoot = $CandidateTwoUp
+    $WorkspaceParent = Split-Path -Parent $RepoRoot
+} else {
+    $WorkspaceParent = $CandidateTwoUp
+    $RepoRoot = Join-Path $WorkspaceParent "capstone1"
+}
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = if ($env:VIREAD_OCR_RUNTIME_DIR) { $env:VIREAD_OCR_RUNTIME_DIR } else { Join-Path $WorkspaceParent "tools\ocr-runtime" }
+}
 
 $StateFile = Join-Path $RuntimeDir "autostart-state.json"
 $StandaloneStateFile = Join-Path $RuntimeDir "ocr-worker-state.json"

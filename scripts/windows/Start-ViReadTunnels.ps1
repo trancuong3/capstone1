@@ -1,7 +1,7 @@
 # Start 0-VND Cloudflare HTTPS tunnels for ViRead Voice Worker (8010) and staging services (idempotent).
 param(
     [string]$CloudflaredExe = "C:\Program Files (x86)\cloudflared\cloudflared.exe",
-    [string]$RuntimeDir = "F:\c1\viread-staging-tunnels",
+    [string]$RuntimeDir = "",
     [int]$VoicePort = 8010,
     [int]$BackendPort = 8002,
     [int]$FrontendPort = 3002,
@@ -12,6 +12,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+$WorkspaceParent = Split-Path -Parent $RepoRoot
+if ([string]::IsNullOrWhiteSpace($RuntimeDir)) {
+    $RuntimeDir = Join-Path $WorkspaceParent "viread-staging-tunnels"
+}
 
 if (-not (Test-Path $CloudflaredExe)) {
     $cmd = Get-Command cloudflared -ErrorAction SilentlyContinue
