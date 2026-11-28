@@ -1293,7 +1293,24 @@
       "rejected": "Esta versión de página ha sido rechazada.",
       "suspendedWithTitle": "Libro privado \"{title}\" suspendido. La familia propietaria no puede leerlo inmediatamente."
     },
-    "kpiAria": "Resumen de moderación de libros de usuarios"
+    "kpiAria": "Resumen de moderación de libros de usuarios",
+    "subtabHardRadar": "Radar de muestras dificiles OCR",
+    "hardRadar": {
+      "heading": "Radar de muestras dificiles OCR (Lectura -> Flow 2)",
+      "privacyNotice": "Solo incluye libros de catalogo y libros privados con consentimiento activo de Flow 2 (filtrado de PII y totalmente anonimizado).",
+      "loading": "Correlacionando confianza OCR y senales de lectura…",
+      "loadError": "No se pudo cargar el radar de muestras dificiles OCR.",
+      "totalCandidates": "Palabras priorizadas",
+      "catalogCount": "En catalogo publico",
+      "consentedPrivateCount": "Con consentimiento Flow 2",
+      "empty": "Aun no hay palabras OCR de baja confianza con tropiezos de lectura.",
+      "scopeCatalog": "Catalogo",
+      "scopeConsentedPrivate": "Flow 2 autorizado",
+      "scoreLabel": "Prioridad {score}/100",
+      "pageLineMeta": "Pagina {page} · Linea {line}",
+      "signalSummary": "Confianza OCR: {conf}% · Reintentos fallidos: {retries} · Desajustes: {mismatches} · Sesiones anonimas: {sessions}",
+      "inspectOcrAction": "Revisar pagina OCR"
+    }
   },
   "flow2": {
     "filters": {

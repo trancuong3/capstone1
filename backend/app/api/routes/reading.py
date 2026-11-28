@@ -1107,9 +1107,19 @@ async def match_book_page_from_camera(
             word_index=w.WordIndex,
             text=w.Text,
             bbox=_normalize_bbox_tuple(w.BoundingBox),
+            line_index=max(0, int(getattr(w, "LineIndex", 0) or 0)),
         )
         for w in words_orm
     ]
+
+    from app.services.vision_page_matcher import project_page_lines_to_camera
+
+    spotlight_proj = project_page_lines_to_camera(
+        match_res.get("homography_cam_to_db"),
+        cam_size=match_res.get("cam_resized_size"),
+        db_size=match_res.get("db_resized_size"),
+        words=[w.model_dump() for w in words_dto],
+    )
 
     page_dto = ReadingPageRead(
         page_id=matched_orm.Id,
@@ -1129,6 +1139,9 @@ async def match_book_page_from_camera(
         message=f"Tuyệt vời! ViRead Vision đã nhận ra Trang {matched_orm.PageNumber}.",
         confidence=match_res["confidence"],
         matched_page=page_dto,
+        homography_matrix=spotlight_proj["homography_matrix"],
+        page_quad=spotlight_proj["page_quad"],
+        spotlight_lines=spotlight_proj["spotlight_lines"],
     )
 
 @router.post("/match-page", response_model=CameraPageMatchRead)
@@ -1247,9 +1260,19 @@ async def match_page_global_from_camera(
             word_index=w.WordIndex,
             text=w.Text,
             bbox=_normalize_bbox_tuple(w.BoundingBox),
+            line_index=max(0, int(getattr(w, "LineIndex", 0) or 0)),
         )
         for w in words_orm
     ]
+
+    from app.services.vision_page_matcher import project_page_lines_to_camera
+
+    spotlight_proj = project_page_lines_to_camera(
+        match_res.get("homography_cam_to_db"),
+        cam_size=match_res.get("cam_resized_size"),
+        db_size=match_res.get("db_resized_size"),
+        words=[w.model_dump() for w in words_dto],
+    )
 
     page_dto = ReadingPageRead(
         page_id=matched_orm.Id,
@@ -1269,7 +1292,53 @@ async def match_page_global_from_camera(
         message=f"Tuyệt vời! ViRead Vision đã nhận ra Trang {matched_orm.PageNumber}.",
         confidence=match_res["confidence"],
         matched_page=page_dto,
+        homography_matrix=spotlight_proj["homography_matrix"],
+        page_quad=spotlight_proj["page_quad"],
+        spotlight_lines=spotlight_proj["spotlight_lines"],
     )
+
+
+from app.schemas.reading import (
+    OfflineReadingPackResponse,
+    OfflineReadingSyncRequest,
+    OfflineReadingSyncResponse,
+)
+from app.services.offline_reading_service import OfflineReadingService
+
+
+@router.get("/books/{book_id}/offline-pack", response_model=OfflineReadingPackResponse)
+async def get_book_offline_reading_pack(
+    book_id: UUID,
+    request: Request,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("reading_offline_pack", default_max=20, default_window=60.0)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Build a self-contained offline reading pack for all verified pages of a readable book."""
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    response.headers["Vary"] = "Authorization"
+    base_url = str(getattr(request, "base_url", "") or "") or None
+    return await OfflineReadingService(db).build_offline_pack(
+        actor_id, book_id, base_url=base_url
+    )
+
+
+@router.post("/offline-sync", response_model=OfflineReadingSyncResponse)
+async def sync_offline_reading_session(
+    payload: OfflineReadingSyncRequest,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    _rate_limited: None = Depends(
+        rate_limit("reading_offline_sync", default_max=30, default_window=60.0)
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """Idempotently synchronize a deferred offline reading session via deterministic uuid5 PK."""
+    response.headers["Cache-Control"] = "private, no-store, max-age=0"
+    return await OfflineReadingService(db).sync_offline_session(actor_id, payload)
 
 
 from fastapi import Form, Header, Request

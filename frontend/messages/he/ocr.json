@@ -102,7 +102,12 @@
     "captureAndScan": "צלם וסרוק עכשיו",
     "autoScanOn": "סריקה אוטומטית: פעילה",
     "autoScanOff": "סריקה אוטומטית: כבויה",
-    "fallbackUploadAction": "צלם במצלמה / בחר תמונה חדה"
+    "fallbackUploadAction": "צלם במצלמה / בחר תמונה חדה",
+    "spotlightModeOn": "זרקור שורות בספר מודפס: פעיל",
+    "spotlightModeOff": "זרקור שורות בספר מודפס: כבוי",
+    "spotlightLineBadge": "שורה {current}/{total}",
+    "spotlightPrevLine": "שורה קודמת",
+    "spotlightNextLine": "שורה הבאה"
   },
   "review": {
     "title": "בדיקת טקסט העמוד",

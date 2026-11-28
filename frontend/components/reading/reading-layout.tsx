@@ -18,6 +18,7 @@ import { ReadingProgress } from "@/components/reading/reading-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { ReadingPageDTO, ReadingPageWordDTO } from "@/types/reading";
 import type { ComparisonResult } from "@/lib/api/comparison-service";
+import type { LucBatWordAnnotation } from "@/lib/reading/luc-bat-cadence";
 import type { RealtimeAlignmentSnapshot } from "@/lib/reading/realtime-alignment";
 import { cn } from "@/lib/utils/cn";
 
@@ -100,6 +101,7 @@ interface ReadingLayoutProps {
   onDismissCompanion?: () => void;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
+  lucBatAnnotations?: ReadonlyMap<string, LucBatWordAnnotation> | null;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
   topBar?: ReactNode;
 }
@@ -167,6 +169,7 @@ export function ReadingLayout({
   onDismissCompanion,
   readingMode,
   onReadingModeChange,
+  lucBatAnnotations = null,
   previewSnapshot,
   topBar,
 }: ReadingLayoutProps) {
@@ -323,6 +326,7 @@ export function ReadingLayout({
           hesitationWordIds={hesitationWordIds}
           assistedWordIds={assistedWordIds}
           comparisonResult={comparisonResult}
+          lucBatAnnotations={lucBatAnnotations}
         />
       </section>
 

@@ -102,7 +102,12 @@
     "captureAndScan": "지금 촬영 및 스캔",
     "autoScanOn": "자동 스캔: 켜짐",
     "autoScanOff": "자동 스캔: 꺼짐",
-    "fallbackUploadAction": "카메라로 촬영 / 선명한 이미지 선택"
+    "fallbackUploadAction": "카메라로 촬영 / 선명한 이미지 선택",
+    "spotlightModeOn": "종이책 줄 스포트라이트: 켜짐",
+    "spotlightModeOff": "종이책 줄 스포트라이트: 꺼짐",
+    "spotlightLineBadge": "{current}/{total}줄 조명",
+    "spotlightPrevLine": "이전 줄",
+    "spotlightNextLine": "다음 줄"
   },
   "review": {
     "title": "페이지 내용 검토",

@@ -102,7 +102,12 @@
     "captureAndScan": "Capture & Scan now",
     "autoScanOn": "Auto-scan: ON",
     "autoScanOff": "Auto-scan: OFF",
-    "fallbackUploadAction": "Take Photo / Choose Clear Image"
+    "fallbackUploadAction": "Take Photo / Choose Clear Image",
+    "spotlightModeOn": "Physical-book line spotlight: ON",
+    "spotlightModeOff": "Physical-book line spotlight: OFF",
+    "spotlightLineBadge": "Line spotlight {current}/{total}",
+    "spotlightPrevLine": "Prev line",
+    "spotlightNextLine": "Next line"
   },
   "review": {
     "title": "Review page text",

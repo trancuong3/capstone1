@@ -496,5 +496,12 @@
     "subtitle": "今読んだページから語彙や文づくりを楽しく広げましょう。",
     "pictureCta": "ページの絵を説明する",
     "shooterCta": "ページの文を並べ替える"
+  },
+  "lucBat": {
+    "toggleLabel": "六八詩（6-8調）リズムガイド",
+    "toggleActive": "六八詩リズム表示中",
+    "coupletBadge": "6-8対句 {count}組",
+    "beatGuide": "拍子ガイド 2/2/2（6音句）・ 2/2/2/2（8音句）",
+    "rhymePairLabel": "第6音節の脚韻・腰韻: 「{sixthLuc}」↔「{sixthBat}」"
   }
 }

@@ -1293,7 +1293,24 @@
       "rejected": "このページバージョンを拒否しました。",
       "suspendedWithTitle": "プライベートブック「{title}」を停止しました。所有する家族はすぐに読むことができません。"
     },
-    "kpiAria": "ユーザー書籍審査キュー概要"
+    "kpiAria": "ユーザー書籍審査キュー概要",
+    "subtabHardRadar": "OCR難読サンプルレーダー",
+    "hardRadar": {
+      "heading": "OCR難読サンプルレーダー（音読つまずき → Flow 2）",
+      "privacyNotice": "公開カタログ本およびFlow 2同意済みプライベート本のみを集計します（個人情報を除外し完全匿名化）。",
+      "loading": "OCR信頼度と音読リトライ信号を照合中…",
+      "loadError": "OCR難読サンプルレーダーを読み込めませんでした。",
+      "totalCandidates": "優先確認ワード総数",
+      "catalogCount": "カタログ本ワード",
+      "consentedPrivateCount": "Flow 2同意済みワード",
+      "empty": "低信頼度OCRと音読つまずきが重なるサンプルはまだありません。",
+      "scopeCatalog": "公開カタログ",
+      "scopeConsentedPrivate": "Flow 2同意済み",
+      "scoreLabel": "優先度 {score}/100",
+      "pageLineMeta": "{page}ページ · {line}行目",
+      "signalSummary": "OCR信頼度: {conf}% · 再試行失敗: {retries} · 照合不一致: {mismatches} · 匿名セッション: {sessions}",
+      "inspectOcrAction": "OCRページを開く"
+    }
   },
   "flow2": {
     "filters": {

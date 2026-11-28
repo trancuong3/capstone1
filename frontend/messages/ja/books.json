@@ -576,5 +576,35 @@
     "tooEasy": "やさしい導入（{min}〜{max}年生相当）",
     "estimatedGrade": "推定 {min}〜{max}年生",
     "phonicsScore": "フォニックス適合 {score}%"
+  },
+  "offlinePack": {
+    "heading": "オフライン読書パックと印刷用QRカード",
+    "description": "確認済みのページを端末に保存してオフラインで読むか、紙の本に挟めるQRカードを印刷できます。",
+    "readyBadge": "保存済み ({count}ページ)",
+    "downloadButton": "オフラインパックを保存",
+    "openOfflineReader": "オフラインで読む",
+    "removeButton": "パックを削除",
+    "syncPendingButton": "同期 ({count})",
+    "stageDownloadingPages": "確認済みページとお手本音声を取得中…",
+    "stageSavingDevice": "端末ストレージへ安全に保存中…",
+    "savedNotice": "オフライン読書パック（{count}ページ）を端末に保存しました。",
+    "removedNotice": "この本のオフラインパックを削除しました。",
+    "downloadError": "現在オフラインパックを保存できません。通信環境の良い場所で再試行してください。",
+    "syncedNotice": "{count}件のオフライン読書記録を同期しました。",
+    "syncDeferredNotice": "通信が不安定です。記録は安全に保持され、オンライン復帰後に自動同期されます。",
+    "queuedOfflineNotice": "読書記録を端末に保存しました。オンライン時に自動同期されます。",
+    "readerHeaderBadge": "オフラインモード · {page}/{total}ページ",
+    "listenCachedAudio": "お手本を聞く",
+    "tapWordsHint": "正しく読めた単語をタップしてオフライン学習を記録しましょう：",
+    "prevPage": "前のページ",
+    "nextPage": "次のページ",
+    "finishAndQueueSync": "完了して同期予約"
+  },
+  "qrCard": {
+    "openButton": "印刷用QRカード",
+    "modalTitle": "ViRead 印刷用QR読書カード",
+    "eyebrow": "紙の本用QRしおり",
+    "scanInstruction": "スマートフォンのカメラでこのQRコードを読み取ると、ViReadでこの本をすぐに開けます。",
+    "printButton": "QRカードを印刷"
   }
 }

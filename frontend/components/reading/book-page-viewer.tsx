@@ -28,6 +28,7 @@ import {
   type PageWordEvidence,
   wordStateForPage,
 } from "@/lib/reading/word-presentation";
+import type { LucBatWordAnnotation } from "@/lib/reading/luc-bat-cadence";
 import { cn } from "@/lib/utils/cn";
 import type { ReadingDisplayMode } from "@/types/book-assets";
 import type { ReadingPageWordDTO } from "@/types/reading";
@@ -46,6 +47,7 @@ interface BookPageViewerProps extends PageWordEvidence {
   retryFocusKey?: string | null;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
+  lucBatAnnotations?: ReadonlyMap<string, LucBatWordAnnotation> | null;
 }
 
 const OVERLAY_COLORS: Record<WordPresentationState, string> = {
