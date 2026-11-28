@@ -14,7 +14,7 @@ import logging
 import os
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, time as day_time, timedelta, timezone
 from io import BytesIO
 from typing import Any, Callable, Literal
 from uuid import UUID, uuid4
@@ -27,6 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET
 from app.models import Book, BookPage, ChildProfile, PageRevision, PageRevisionWord, Profile
+from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
+from app.repositories.child_progress_repository import ChildProgressRepository
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
 from app.schemas.parent_private_book import (
     ParentPrivateBookDetailRead,
@@ -34,8 +36,10 @@ from app.schemas.parent_private_book import (
     ParentStoryweaverResponse,
     VietnameseReadabilityRead,
 )
+from app.services.adaptive_learning_service import compute_spaced_difficult_words
 from app.services.book_quality_analyzer import analyse_verified_text
 from app.services.book_style_bible import analyze_book_style_deterministic
+from app.services.child_progress.metrics import VIETNAM_TZ, compute_window, top_difficult_words
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_inference_job_service import (
     align_edited_text_to_words,
@@ -50,7 +54,6 @@ from app.services.parent_private_book_service import (
 )
 from app.services.storage_service import delete_object, upload_object
 from app.services.vietnamese_readability import analyse_vietnamese_readability
-from app.services.warmup_micro_story_service import WarmupMicroStoryService
 
 logger = logging.getLogger(__name__)
 HTTP_422 = getattr(status, "HTTP_422_UNPROCESSABLE_CONTENT", 422)
@@ -261,6 +264,52 @@ class FamilyStoryweaverService:
             logger.info("Storyweaver cloud generation fell back to deterministic template: %s", exc)
             return None
 
+    async def _collect_due_words(self, child_id: UUID) -> list[str]:
+        adaptive_repo = AdaptiveLearningRepository(self.db)
+        word_attempts = await adaptive_repo.list_difficult_word_attempts(
+            child_id, window_days=90
+        )
+        spaced = compute_spaced_difficult_words(word_attempts, limit=4)
+        chosen: list[str] = []
+        seen: set[str] = set()
+        for item in spaced:
+            norm = unicodedata.normalize("NFC", item.display_text.strip())
+            key = norm.lower()
+            if norm and key not in seen:
+                seen.add(key)
+                chosen.append(norm)
+            if len(chosen) >= 3:
+                break
+
+        if len(chosen) < 2:
+            today = datetime.now(VIETNAM_TZ).date()
+            since_dt = datetime.combine(
+                today - timedelta(days=59), day_time.min, tzinfo=VIETNAM_TZ
+            )
+            progress_repo = ChildProgressRepository(self.db)
+            sessions = await progress_repo.sessions(child_id, since_dt)
+            reports = await progress_repo.reports(child_id, since_dt)
+            retries = await progress_repo.word_retries(child_id, since_dt)
+            answers = await progress_repo.answers(child_id, since_dt)
+            window = compute_window(
+                start=today - timedelta(days=59),
+                end=today,
+                sessions=sessions,
+                reports=reports,
+                retries=retries,
+                answers=answers,
+            )
+            for stat in top_difficult_words(window, limit=4):
+                w = unicodedata.normalize("NFC", str(stat.get("word") or "").strip())
+                key = w.lower()
+                if w and key not in seen:
+                    seen.add(key)
+                    chosen.append(w)
+                if len(chosen) >= 3:
+                    break
+
+        return chosen[:3]
+
     async def create_storyweaver_book(
         self,
         actor_id: UUID,
@@ -307,8 +356,7 @@ class FamilyStoryweaverService:
                 raise HTTPException(status_code=404, detail="Resource not found")
             resolved_grade = payload.target_grade or max(1, min(5, int(child.Grade or 1)))
             try:
-                due_tuples = await WarmupMicroStoryService(self.db)._collect_due_words(payload.child_id)
-                due_words = [w for w, _ in due_tuples if w]
+                due_words = [w for w in await self._collect_due_words(payload.child_id) if w]
             except Exception:
                 due_words = []
 

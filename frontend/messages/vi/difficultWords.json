@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "Đã mở lượt luyện #{attempt} cho từ \"{word}\".",
     "unknownBookSource": "Chưa xác định nguồn sách"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "Khởi động ngữ âm 60 giây",
-    "title": "Xưởng cặp từ tối thiểu & Gương soi thanh điệu",
-    "subtitle": "Giúp {alias} lắng nghe và phân biệt các cặp thanh điệu, phụ âm đầu hoặc âm cuối dễ nhầm.",
-    "openButton": "Mở xưởng 60s",
-    "collapseButton": "Thu gọn",
-    "unavailableHint": "Chưa tải được bài tập cặp từ lúc này. Ba mẹ và bé có thể thử lại sau nhé.",
-    "pairCounter": "Cặp từ {current}/{total}",
-    "listenWord": "Nghe",
-    "speakWord": "Đọc thử",
-    "listening": "Đang nghe...",
-    "spokenMatch": "Tuyệt vời! Bé phát âm đúng từ mục tiêu rõ ràng rồi!",
-    "spokenContrast": "Máy nghe gần giống \"{heard}\" — bé nghe mẫu rồi đọc chậm lại nhé!",
-    "spokenRetry": "Máy chưa nghe thật rõ. Bé lại gần micro và đọc chậm từng tiếng nhé!",
-    "earChallengeButton": "Đố tai tinh",
-    "earCorrect": "Chính xác! Tai nghe rất tinh!",
-    "earRetry": "Gần đúng rồi, nghe lại một lần nữa nhé!",
-    "nextPairButton": "Cặp tiếp theo",
-    "nonClinicalDisclaimer": "Gợi ý luyện tập ngữ âm hỗ trợ đọc sách (không phải chẩn đoán y khoa hay âm ngữ trị liệu)."
   }
 }

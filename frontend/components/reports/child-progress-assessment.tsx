@@ -20,7 +20,7 @@ import {
 
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
-import { Button, ButtonLink } from "@/components/common/button";
+import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -776,22 +776,13 @@ function AssessmentBody({
             className="space-y-3 rounded-control border border-primary/25 bg-gradient-to-r from-cream/85 via-white to-sky/45 p-4"
             data-testid="child-progress-phonology-patterns"
           >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="space-y-0.5">
-                <h3 className="text-sm font-extrabold text-ink">
-                  {t("overview.assessmentCard.phonologyTitle")}
-                </h3>
-                <p className="text-xs text-muted">
-                  {t("overview.assessmentCard.phonologyDisclaimer")}
-                </p>
-              </div>
-              <ButtonLink
-                href={`/reports/difficult-words?childId=${encodeURIComponent(data.child_id)}&sandbox=1`}
-                size="compact"
-                variant="secondary"
-              >
-                {t("overview.assessmentCard.openMinimalPairSandbox")}
-              </ButtonLink>
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-extrabold text-ink">
+                {t("overview.assessmentCard.phonologyTitle")}
+              </h3>
+              <p className="text-xs text-muted">
+                {t("overview.assessmentCard.phonologyDisclaimer")}
+              </p>
             </div>
             <div className="grid gap-2.5 sm:grid-cols-2">
               {data.phonological_patterns.map((pattern) => (

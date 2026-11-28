@@ -123,17 +123,6 @@ class PhonologicalPatternRead(BaseModel):
     minimal_pairs: list[MinimalPairExerciseRead] = Field(default_factory=list)
 
 
-class PhonologySandboxRead(BaseModel):
-    child_id: UUID
-    days: int = Field(ge=7, le=90)
-    is_diagnostic: bool = False
-    disclaimer_vi: str
-    has_recurring_patterns: bool = False
-    patterns: list[PhonologicalPatternRead] = Field(default_factory=list)
-    recommended_pairs: list[MinimalPairExerciseRead] = Field(default_factory=list)
-    duration_seconds: int = Field(default=60, ge=30, le=180)
-
-
 class WeaknessRead(BaseModel):
     area: str
     detail: str

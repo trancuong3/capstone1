@@ -172,25 +172,5 @@
   "runtime": {
     "practiceOpened": "\"{word}\" 단어의 #{attempt}번째 연습을 시작했습니다.",
     "unknownBookSource": "책 출처가 지정되지 않았습니다"
-  },
-  "minimalPairSandbox": {
-    "eyebrow": "60초 발음 워밍업",
-    "title": "최소대립쌍 연습실 & 성조 거울",
-    "subtitle": "{alias} 어린이가 헷갈리기 쉬운 성조와 첫소리·끝소리를 듣고 구분하도록 돕습니다.",
-    "openButton": "60초 연습 열기",
-    "collapseButton": "접기",
-    "unavailableHint": "지금은 최소대립쌍 연습을 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.",
-    "pairCounter": "단어 쌍 {current}/{total}",
-    "listenWord": "듣기",
-    "speakWord": "읽어보기",
-    "listening": "듣는 중...",
-    "spokenMatch": "참 잘했어요! 목표 단어를 또렷하게 발음했어요!",
-    "spokenContrast": "\"{heard}\"와 비슷하게 들렸어요. 예시 음성을 듣고 천천히 다시 읽어 보세요!",
-    "spokenRetry": "소리가 잘 들리지 않았어요. 마이크에 가까이 대고 천천히 읽어 보세요!",
-    "earChallengeButton": "귀 기울이기 퀴즈",
-    "earCorrect": "정답이에요! 아주 잘 들었어요!",
-    "earRetry": "아까워요! 한 번 더 들어 볼까요?",
-    "nextPairButton": "다음 쌍",
-    "nonClinicalDisclaimer": "음성 인식 기록에 기반한 읽기 연습 안내이며 의학적·언어치료적 진단이 아닙니다."
   }
 }

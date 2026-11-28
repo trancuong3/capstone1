@@ -10,7 +10,6 @@ from app.repositories.child_progress_repository import ChildProgressRepository
 from app.schemas.child_progress import (
     AssessmentRequest,
     ChildProgressAssessmentRead,
-    PhonologySandboxRead,
 )
 from app.services.child_progress_service import ChildProgressService
 from app.services.rate_limiter import rate_limit
@@ -73,21 +72,3 @@ async def create_progress_assessment(
         refresh=payload.refresh,
         teacher_gender=payload.teacher_gender,
     )
-
-
-@router.get(
-    "/children/{child_id}/phonology-sandbox",
-    response_model=PhonologySandboxRead,
-)
-async def get_phonology_sandbox(
-    child_id: UUID,
-    days: int = Query(default=30, ge=7, le=90),
-    actor_id: UUID = Depends(get_current_parent_id),
-    _rate_limited: None = Depends(
-        rate_limit("child_phonology_sandbox", default_max=60, default_window=60.0)
-    ),
-    db: AsyncSession = Depends(get_db),
-) -> PhonologySandboxRead:
-    """Deterministic Vietnamese minimal-pair warm-up exercises for recurring tone/onset/coda contrasts."""
-    safe_days = days if isinstance(days, int) and not isinstance(days, bool) else 30
-    return await _service(db).get_phonology_sandbox(child_id, actor_id, days=safe_days)
