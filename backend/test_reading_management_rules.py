@@ -5,7 +5,9 @@ import os
 import unittest
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@127.0.0.1:1/test")
 os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
@@ -298,6 +300,27 @@ class GoalServiceTests(unittest.TestCase):
             run(service.create_goal(ACTOR, payload, NOW))
         self.assertEqual(caught.exception.reason, "GOAL_ALREADY_EXPIRED")
 
+    def test_goal_dict_handles_naive_preloaded_sessions_and_caps_multi_day_span(self):
+        # Naive UTC session timestamps inside today's cycle must not crash with TypeError.
+        naive_short = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=datetime(2026, 11, 9, 1, 0),
+            EndedAt=datetime(2026, 11, 9, 1, 20),
+        )
+        naive_abandoned = SimpleNamespace(
+            State="COMPLETED",
+            StartedAt=datetime(2026, 11, 8, 18, 0),  # Mon 01:00 VN
+            EndedAt=datetime(2026, 11, 9, 4, 0),     # Mon 11:00 VN (10h -> 90m cap)
+        )
+        row = run(
+            ReadingManagementService(FakeRepository()).goal_dict(
+                goal(TargetValue=150),
+                datetime(2026, 11, 9, 5, 0),  # naive UTC now
+                preloaded_sessions=[naive_short, naive_abandoned],
+            )
+        )
+        self.assertEqual(row["current_value"], 110)
+
 
 class PlanServiceTests(unittest.TestCase):
     def test_running_plan_reports_today_and_the_week(self):
@@ -336,6 +359,158 @@ class PlanServiceTests(unittest.TestCase):
         row = run(ReadingManagementService(FakeRepository()).plan_dict(plan(Status="PAUSED"), NOW))
         self.assertFalse(row["is_scheduled_today"])
         self.assertIsNone(row["next_scheduled_date"])
+
+    def test_plan_caps_multi_day_idle_and_same_day_abandoned_sessions(self):
+        # Mon 08:00 VN started, resumed/closed Wed 10:00 VN (50h wall clock)
+        # must cap at MAX_SESSION_MINUTES (90m) on Monday and never inflate minutes.
+        mon_start = vn(9, 8)
+        wed_now = vn(11, 12)
+        abandoned_multi_day = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=mon_start,
+            EndedAt=vn(11, 10),
+        )
+        # Same-day 6-hour forgotten session on Wednesday (today) caps at 90m.
+        abandoned_today = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=vn(11, 5),
+            EndedAt=vn(11, 11),
+        )
+        high_target_plan = plan(TargetMinutes=120, Weekdays=[0, 2, 4])
+        service = ReadingManagementService(
+            FakeRepository(plan_sessions=[abandoned_multi_day, abandoned_today])
+        )
+        row = run(service.plan_dict(high_target_plan, wed_now))
+        self.assertEqual(row["minutes_today"], 90)
+        # Neither Monday (90m < 120m) nor Wednesday (90m < 120m) should falsely pass.
+        self.assertEqual(row["completed_days_this_week"], 0)
+
+        # Preloaded path enforces the exact same cap and ignores non-completed/inverted sessions.
+        preloaded = [
+            abandoned_multi_day,
+            abandoned_today,
+            SimpleNamespace(State="ABORTED", BookId=None, StartedAt=vn(11, 1), EndedAt=vn(11, 2)),
+            SimpleNamespace(State="COMPLETED", BookId=None, StartedAt=vn(11, 11, 30), EndedAt=vn(11, 11, 10)),
+            SimpleNamespace(State="COMPLETED", BookId=None, StartedAt=vn(11, 11, 30), EndedAt=vn(11, 13, 0)),
+        ]
+        preloaded_row = run(
+            ReadingManagementService(FakeRepository()).plan_dict(
+                high_target_plan, wed_now, preloaded_sessions=preloaded
+            )
+        )
+        self.assertEqual(preloaded_row["minutes_today"], 90)
+        self.assertEqual(preloaded_row["completed_days_this_week"], 0)
+
+    def test_plan_bounds_midnight_crossing_abandoned_session_and_allows_multiple_legit_sessions(self):
+        # Mon 23:30 VN -> Wed 10:00 VN: capped at 90m (Tue 01:00) AND clipped to Mon day end (24:00) -> 30m.
+        late_abandoned = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=vn(9, 23, 30),
+            EndedAt=vn(11, 10, 0),
+        )
+        # Two legitimate 60m sessions on Wednesday reach a 120m daily plan target.
+        legit_wed_1 = read(vn(11, 8), 60)
+        legit_wed_2 = read(vn(11, 10), 60)
+        wed_now = vn(11, 12)
+        row = run(
+            ReadingManagementService(
+                FakeRepository(plan_sessions=[late_abandoned, legit_wed_1, legit_wed_2])
+            ).plan_dict(plan(TargetMinutes=120, Weekdays=[0, 2, 4]), wed_now)
+        )
+        self.assertEqual(row["minutes_today"], 120)
+        self.assertEqual(row["completed_days_this_week"], 1)
+
+    def test_list_plans_and_plan_dict_normalize_naive_utc_now_consistently(self):
+        from app.repositories.reading_management_repository import ReadingManagementRepository
+
+        # Sun 2026-11-08 20:00 naive UTC == Mon 2026-11-09 03:00 Asia/Ho_Chi_Minh (week of Nov 9).
+        naive_utc_now = datetime(2026, 11, 8, 20, 0)
+        mon_session = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=datetime(2026, 11, 8, 18, 0, tzinfo=timezone.utc),
+            EndedAt=datetime(2026, 11, 8, 18, 30, tzinfo=timezone.utc),
+        )
+        captured_calls = []
+
+        async def fake_completed_plan_sessions(child_id, starts_at, ends_at, now, book_id=None):
+            captured_calls.append((starts_at, ends_at, now))
+            return [s for s in [mon_session] if starts_at <= s.StartedAt < ends_at and s.EndedAt <= now]
+
+        repo = ReadingManagementRepository(MagicMock())
+        repo.role = AsyncMock(return_value="parent")
+        repo.owned_child = AsyncMock(return_value=SimpleNamespace(Id=CHILD))
+        repo.plans = AsyncMock(return_value=[plan(Weekdays=[0], TargetMinutes=20)])
+        repo.completed_plan_sessions = AsyncMock(side_effect=fake_completed_plan_sessions)
+
+        service = ReadingManagementService(repo)
+        [listed] = run(service.list_plans(ACTOR, CHILD, now=naive_utc_now))
+        self.assertEqual(listed["minutes_today"], 30)
+        self.assertEqual(listed["completed_days_this_week"], 1)
+        self.assertEqual(len(captured_calls), 1)
+        self.assertEqual(captured_calls[0][2].tzinfo, timezone.utc)
+
+        # Direct plan_dict call with naive now must also pass UTC-aware now to the repository.
+        direct = run(service.plan_dict(plan(Weekdays=[0], TargetMinutes=20), naive_utc_now))
+        self.assertEqual(direct["minutes_today"], 30)
+        self.assertEqual(captured_calls[1][2].tzinfo, timezone.utc)
+
+    def test_plan_dict_handles_dst_spring_forward_and_fall_back_days(self):
+        ny = ZoneInfo("America/New_York")
+        # Spring-forward Sunday 2026-03-08 (23-hour local day):
+        # 01:30 EST -> 03:30 EDT is 60 real minutes; an abandoned session caps at 90 real minutes.
+        sf_now = datetime(2026, 3, 8, 18, 0, tzinfo=ny)
+        sf_normal = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=datetime(2026, 3, 8, 1, 30, tzinfo=ny),
+            EndedAt=datetime(2026, 3, 8, 3, 30, tzinfo=ny),
+        )
+        sf_plan = plan(
+            Timezone="America/New_York",
+            StartsOn=date(2026, 3, 1),
+            Weekdays=[6],
+            TargetMinutes=60,
+        )
+        sf_row = run(
+            ReadingManagementService(FakeRepository(plan_sessions=[sf_normal])).plan_dict(
+                sf_plan, sf_now
+            )
+        )
+        self.assertEqual(sf_row["minutes_today"], 60)
+        self.assertEqual(sf_row["completed_days_this_week"], 1)
+
+        # Fall-back Sunday 2026-11-01 (25-hour local day):
+        # 01:30 EDT (fold=0) -> 01:30 EST (fold=1) is 60 real minutes (must not collapse to 0).
+        fb_now = datetime(2026, 11, 1, 18, 0, tzinfo=ny)
+        fb_normal = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=datetime(2026, 11, 1, 1, 30, fold=0, tzinfo=ny),
+            EndedAt=datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny),
+        )
+        fb_abandoned = SimpleNamespace(
+            State="COMPLETED",
+            BookId=None,
+            StartedAt=datetime(2026, 11, 1, 10, 0, tzinfo=ny),
+            EndedAt=datetime(2026, 11, 1, 17, 0, tzinfo=ny),  # 7h -> capped at 90m
+        )
+        fb_plan = plan(
+            Timezone="America/New_York",
+            StartsOn=date(2026, 10, 1),
+            Weekdays=[6],
+            TargetMinutes=150,
+        )
+        fb_row = run(
+            ReadingManagementService(
+                FakeRepository(plan_sessions=[fb_normal, fb_abandoned])
+            ).plan_dict(fb_plan, fb_now)
+        )
+        self.assertEqual(fb_row["minutes_today"], 150)
+        self.assertEqual(fb_row["completed_days_this_week"], 1)
 
     def _plan_payload(self, **overrides):
         values = dict(
