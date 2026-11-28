@@ -1467,6 +1467,61 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         visibility: "PARENT_PRIVATE",
       });
     }
+    const phonemeGardenMatch =
+      request.method() === "GET"
+        ? /^\/phoneme-garden\/children\/([^/]+)\/summary$/.exec(path)
+        : null;
+    if (phonemeGardenMatch) {
+      const targetChildId = decodeURIComponent(phonemeGardenMatch[1]);
+      const bedSpecs = [
+        ["l_n", "Âm đầu l / n", "Hoa sen", "lotus"],
+        ["s_x", "Âm đầu s / x", "Hoa mai", "apricot"],
+        ["tr_ch", "Âm đầu tr / ch", "Tre xanh", "bamboo"],
+        ["r_d_gi", "Âm đầu r / d / gi", "Hoa hướng dương", "sunflower"],
+        ["hoi_nga", "Thanh hỏi / ngã", "Hoa cúc", "chrysanthemum"],
+        ["coda_n_ng_t_c", "Âm cuối n / ng / t / c", "Hoa đào", "peach"],
+        [
+          "compound_reduplicative",
+          "Từ ghép & từ láy",
+          "Hoa phượng",
+          "flamboyant",
+        ],
+      ] as const;
+      return respond(route, {
+        visibility: "PARENT_PRIVATE",
+        child_id: targetChildId,
+        child_alias: child.alias,
+        child_grade: child.grade,
+        beds: bedSpecs.map(
+          ([bed_key, phonics_label_vi, plant_name_vi, plant_symbol]) => ({
+            bed_key,
+            phonics_label_vi,
+            plant_name_vi,
+            plant_symbol,
+            stage: "SEED",
+            stage_index: 0,
+            practiced_words_count: 0,
+            mastered_words_count: 0,
+            mastered_words: [],
+            practiced_words: [],
+            next_stage: "SPROUT",
+            words_to_next_stage: 3,
+            encouragement_vi: "Mầm nhỏ đang chờ bé luyện đọc mỗi ngày.",
+          }),
+        ),
+        book_stamps: [],
+        milestone_stamps: [],
+        bloomed_beds_count: 0,
+        total_practiced_words: 0,
+        total_mastered_words: 0,
+        total_completed_books: 0,
+        total_completed_sessions: 0,
+        unlocked_milestone_stamps_count: 0,
+        gentle_message_vi: "Khu vườn âm vần của bé đang lớn dần mỗi ngày.",
+        calm_pedagogy_note_vi:
+          "Mỗi lần đọc lại từ khó là một giọt nước ấm cho khu vườn.",
+      });
+    }
     if (
       request.method() === "GET" &&
       path === "/games/picture-description/catalog"

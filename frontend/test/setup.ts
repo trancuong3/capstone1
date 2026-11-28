@@ -10,6 +10,29 @@ import viAdminMessages from "@/messages/vi/admin.json";
 
 registerPersistentTestNamespace(DEFAULT_LOCALE, "admin", viAdminMessages);
 
+if (
+  typeof Blob !== "undefined" &&
+  typeof Blob.prototype.stream !== "function"
+) {
+  Object.defineProperty(Blob.prototype, "stream", {
+    configurable: true,
+    writable: true,
+    value: function stream(this: Blob): ReadableStream<Uint8Array> {
+      return new ReadableStream<Uint8Array>({
+        start: async (controller) => {
+          try {
+            const buffer = await this.arrayBuffer();
+            controller.enqueue(new Uint8Array(buffer));
+            controller.close();
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+      });
+    },
+  });
+}
+
 vi.mock("next/link", async () => {
   const { createElement } = await import("react");
   return {

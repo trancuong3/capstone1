@@ -117,6 +117,12 @@ let lastBackgroundRefreshAt = 0;
 let inFlightHealthPromise: Promise<VoiceEngineHealthSnapshot | null> | null =
   null;
 let permanentlyHostedLocalUnconfigured = false;
+let lastPolicyRoutingKey = "";
+
+function getPolicyRoutingKey(): string {
+  const policy = getVoicePolicyPreferences();
+  return `${policy.providerMode}|${policy.allowGoogleSttFallback}|${policy.allowGoogleTtsFallback}`;
+}
 
 const listeners = new Set<() => void>();
 const healthListeners = new Set<() => void>();
@@ -419,6 +425,8 @@ function seedIdleStatusFromHealth(
     changed = true;
   }
 
+  lastPolicyRoutingKey = getPolicyRoutingKey();
+
   if (changed) {
     state = { stt: nextStt, tts: nextTts };
     emit();
@@ -426,8 +434,16 @@ function seedIdleStatusFromHealth(
 }
 
 subscribeVoicePolicy(() => {
+  const nextKey = getPolicyRoutingKey();
+  const policyRoutingChanged = nextKey !== lastPolicyRoutingKey;
+  lastPolicyRoutingKey = nextKey;
   if (cachedHealth) {
-    seedIdleStatusFromHealth(cachedHealth, state.stt.tier === "idle");
+    seedIdleStatusFromHealth(
+      cachedHealth,
+      policyRoutingChanged ||
+        state.stt.tier === "idle" ||
+        state.tts.tier === "idle",
+    );
   }
 });
 
@@ -491,6 +507,7 @@ export function resetVoiceEngineStatus(): void {
   lastBackgroundRefreshAt = 0;
   inFlightHealthPromise = null;
   permanentlyHostedLocalUnconfigured = false;
+  lastPolicyRoutingKey = "";
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),

@@ -520,7 +520,11 @@ function hasVietnameseBrowserVoice(): boolean {
 function isTransientBusyTtsError(err: unknown): boolean {
   if (!err) return false;
   const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
+  const status = typeof rec.status === "number" ? rec.status : NaN;
   const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${err instanceof Error ? err.message : String(err)}`;
+  if (status === 409 && !/SESSION_VOICE_LOCKED/i.test(combined)) {
+    return true;
+  }
   return /VOICE_WORKER_BUSY|LOCAL_VOICE_BUSY|LOCAL_TTS_BUSY|LOCAL_STT_BUSY/i.test(
     combined,
   );
@@ -587,16 +591,6 @@ function canUseAllowedDeviceFallbackTts(
   const isSessionLocked = voice?.bypassSessionLock
     ? false
     : Boolean(voice?.sessionId ?? getActiveSessionVoiceLock());
-  const isTransientBusyError = (err: unknown): boolean => {
-    if (!err) return false;
-    const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
-    const status = typeof rec.status === "number" ? rec.status : NaN;
-    const combined = `${String(rec.code ?? "")} ${String(rec.providerCode ?? "")} ${String(rec.provider_code ?? "")} ${err instanceof Error ? err.message : String(err)}`;
-    if (status === 409 && !/SESSION_VOICE_LOCKED/i.test(combined)) {
-      return true;
-    }
-    return isTransientBusyTtsError(err);
-  };
   const optedInUnconfiguredFallback =
     canUseGoogleTtsFallback() &&
     (isTechnicalServerOutage(error) ||
@@ -621,7 +615,7 @@ function canUseAllowedDeviceFallbackTts(
     isHostedNoLiveServerTts(error, voice) &&
     (androidAvailable || wasmAvailable || hasVietnameseBrowserVoice());
   const wasmBusyFallback =
-    wasmAvailable && !androidAvailable && isTransientBusyError(error);
+    wasmAvailable && !androidAvailable && isTransientBusyTtsError(error);
   // When local server TTS is unavailable (`local.available === false`) without
   // `LOCAL_VOICE_UNCONFIGURED`, allow locked `local_only` device fallback ONLY
   // for real on-device neural engines (`wasmAvailable || androidAvailable`) —
@@ -630,9 +624,9 @@ function canUseAllowedDeviceFallbackTts(
     (wasmAvailable || androidAvailable) &&
     (isNoLiveServerTtsAvailable(error, voice) ||
       isTechnicalServerOutage(error) ||
+      wasmBusyFallback ||
       Boolean(alreadyPinnedDevice === "wasm_tts") ||
-      isNoLiveServerTtsKnown(voice) ||
-      wasmBusyFallback);
+      isNoLiveServerTtsKnown(voice));
 
   if (
     isSessionLocked &&
@@ -844,7 +838,7 @@ function stripRegionTokensForGenderMatch(raw: string): string {
   return raw
     .normalize("NFC")
     .replace(/\b(?:miền|mien)\s+(?:bắc|bac|trung|nam)\b/giu, " ")
-    .replace(/\b(?:việt\s*nam|viet\s*nam|vietnamese|vietnam)\b/giu, " ");
+    .replace(/\b(?:việt\s*nam|viet\s*nam|vietnam|vietnamese)\b/giu, " ");
 }
 
 function inferBrowserVoiceGender(
@@ -2300,10 +2294,26 @@ export class TtsPlayback {
     if (!normalizedSpoken.trim()) throw unavailable();
 
     const isUnconfiguredHosted = isPermanentlyHostedLocalUnconfigured();
-    const clauses = splitSpokenIntoStreamingClauses(
-      normalizedSpoken,
-      options.words,
-    );
+    const markWasmUsage = () => {
+      recordTtsEngineUsage({
+        provider: "wasm_tts",
+        fallbackUsed: !isUnconfiguredHosted,
+        fallbackReason: isUnconfiguredHosted ? null : "LOCAL_TTS_UNAVAILABLE",
+        voiceId: operation.voice.requestedVoiceId,
+        voiceGender: preferredGender,
+      });
+      this.setFallbackNotice(null);
+    };
+
+    const clauses = options.wordSample
+      ? [
+          {
+            text: normalizedSpoken,
+            words: options.words,
+            wordStartIndex: 0,
+          },
+        ]
+      : splitSpokenIntoStreamingClauses(normalizedSpoken, options.words);
 
     const synthesizeClause = async (clause: WasmStreamingClause) => {
       const clauseText = clause.text.trim();
@@ -2367,14 +2377,7 @@ export class TtsPlayback {
           timings,
         );
       }
-      recordTtsEngineUsage({
-        provider: "wasm_tts",
-        fallbackUsed: !isUnconfiguredHosted,
-        fallbackReason: isUnconfiguredHosted ? null : "LOCAL_TTS_UNAVAILABLE",
-        voiceId: operation.voice.requestedVoiceId,
-        voiceGender: preferredGender,
-      });
-      this.setFallbackNotice(null);
+      markWasmUsage();
 
       return this.playAudio(
         operation,
@@ -2388,14 +2391,7 @@ export class TtsPlayback {
       );
     }
 
-    recordTtsEngineUsage({
-      provider: "wasm_tts",
-      fallbackUsed: !isUnconfiguredHosted,
-      fallbackReason: isUnconfiguredHosted ? null : "LOCAL_TTS_UNAVAILABLE",
-      voiceId: operation.voice.requestedVoiceId,
-      voiceGender: preferredGender,
-    });
-    this.setFallbackNotice(null);
+    markWasmUsage();
 
     let totalElapsedSec = 0;
     let nextClausePromise: ReturnType<typeof synthesizeClause> | null =
@@ -3862,10 +3858,7 @@ export class TtsPlayback {
               });
               return;
             }
-            if (
-              completedChunks === 0 &&
-              canUseAllowedDeviceFallbackTts(operation, error)
-            ) {
+            if (canUseAllowedDeviceFallbackTts(operation, error)) {
               useBrowserFallback = true;
               this.pinSessionToDeviceTts(operation);
               elapsed += await this.playDeviceFallbackSpeech(
@@ -5649,7 +5642,6 @@ export class TtsPlayback {
               return;
             }
             if (
-              completedChunks === 0 &&
               (!synthesizedTimedOk || !fallback || isDeadLocalWorkerNoCloud) &&
               canUseAllowedDeviceFallbackTts(operation, error)
             ) {
