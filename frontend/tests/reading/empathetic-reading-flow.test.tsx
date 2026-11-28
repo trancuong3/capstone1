@@ -478,10 +478,7 @@ describe("Empathetic Grade-1 teacher comfort, mistake classification & phonics m
         ([text]) => typeof text === "string" && text.includes("tờ... ê... tê!"),
       ),
     ).toBe(true);
-    expect(step2Calls).toContainEqual([
-      "Tê",
-      { wordSample: true, speedScale: 0.75 },
-    ]);
+    expect(step2Calls).toContainEqual(["Tê", { wordSample: true }]);
     expect(step2Calls.map(([t]) => String(t))).toContain("Tê ăn cỏ.");
     expect(screen.getByTestId("reading-companion-bubble")).toHaveAttribute(
       "data-companion-mood",

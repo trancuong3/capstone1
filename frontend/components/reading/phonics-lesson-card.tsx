@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils/cn";
 export interface PhonicsLessonCardProps {
   readonly lesson: PhonicsLessonPlan;
   readonly activeStepIndex: number | null;
+  readonly isAnalyzingAi?: boolean;
   readonly isPlayingPhonics?: boolean;
   readonly isPlayingWord?: boolean;
   readonly isListeningRetry?: boolean;
@@ -25,6 +26,7 @@ export interface PhonicsLessonCardProps {
 export function PhonicsLessonCard({
   lesson,
   activeStepIndex,
+  isAnalyzingAi = false,
   isPlayingPhonics = false,
   isPlayingWord = false,
   isListeningRetry = false,
@@ -49,11 +51,17 @@ export function PhonicsLessonCard({
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-bold text-amber-950">{lesson.message}</p>
+            <p className="text-sm font-bold text-amber-950">
+              {isAnalyzingAi
+                ? "AI đang phân tích cách đánh vần..."
+                : lesson.message}
+            </p>
             <p className="text-xs text-amber-900/80">
-              {t("phonics.unsupportedNotice", {
-                word: lesson.cleanPhrase || lesson.rawText,
-              })}
+              {isAnalyzingAi
+                ? `Đang tách vần và dấu cho từ “${lesson.cleanPhrase || lesson.rawText}”...`
+                : t("phonics.unsupportedNotice", {
+                    word: lesson.cleanPhrase || lesson.rawText,
+                  })}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -118,19 +126,33 @@ export function PhonicsLessonCard({
       )}
       data-testid="phonics-lesson-card"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-bold text-primary">
-            <Sparkles aria-hidden="true" className="size-3.5" />
-            {t("phonics.title")}
-          </span>
-          <span
-            className="viread-learning-content rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950"
-            dir="ltr"
-            lang="vi"
-          >
-            {lesson.tone.label}
-          </span>
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-bold text-primary">
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              {t("phonics.title")}
+            </span>
+            <span
+              className="viread-learning-content rounded-full border border-amber-300 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-950"
+              dir="ltr"
+              lang="vi"
+            >
+              {lesson.tone.label}
+            </span>
+          </div>
+
+          {onClose ? (
+            <button
+              type="button"
+              aria-label={t("phonics.closeAria")}
+              onClick={onClose}
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <X aria-hidden="true" className="size-4" />
+              <span className="sr-only">{t("phonics.closeSr")}</span>
+            </button>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -191,18 +213,6 @@ export function PhonicsLessonCard({
                 </>
               )}
             </Button>
-          ) : null}
-
-          {onClose ? (
-            <button
-              type="button"
-              aria-label={t("phonics.closeAria")}
-              onClick={onClose}
-              className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-border bg-white px-2.5 text-xs font-semibold text-ink hover:bg-canvas focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            >
-              <X aria-hidden="true" className="size-4" />
-              <span className="sr-only">{t("phonics.closeSr")}</span>
-            </button>
           ) : null}
         </div>
       </div>

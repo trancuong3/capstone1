@@ -15,23 +15,41 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { createSpeechService } from "@/lib/api/speech-service";
-import { resolveLocalFirstSpeechRecognitionConstructor } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import {
+  isInjectedTestSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+} from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
-import { lockSessionVoice } from "@/lib/reading/session-voice-lock";
+import {
+  getActiveSessionVoiceLock,
+  getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
+  lockSessionVoice,
+} from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   analyzeComprehensionVoiceInput,
   choiceLetterForSpeech,
 } from "@/lib/reading/comprehension-voice-matcher";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
+import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
@@ -93,6 +111,21 @@ function getSpeechRecognitionCtor(): BrowserSpeechRecognitionCtor | null {
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 }
 
+function hasBrowserAudioOrVoiceApi(): boolean {
+  if (typeof window === "undefined") return false;
+  const win = window as unknown as {
+    AudioContext?: unknown;
+    webkitAudioContext?: unknown;
+  };
+  return (
+    Boolean(getSpeechRecognitionCtor()) ||
+    isAndroidNativeSpeechAvailable() ||
+    typeof win.AudioContext === "function" ||
+    typeof win.webkitAudioContext === "function" ||
+    Boolean(window.speechSynthesis?.getVoices?.().length)
+  );
+}
+
 const REMIND_SILENCE_MS = 10_000;
 const BARE_LETTER_SETTLE_MS = 850;
 
@@ -145,6 +178,8 @@ export function ComprehensionQuestion({
   const [voicePhase, setVoicePhase] = useState<VoicePhase>("idle");
   const [voicePausedByUser, setVoicePausedByUser] = useState(false);
   const [feedbackNote, setFeedbackNote] = useState<string | null>(null);
+  const [feedbackPreserveVerbatim, setFeedbackPreserveVerbatim] =
+    useState(false);
 
   const mountedRef = useRef(false);
   const flowGenRef = useRef(0);
@@ -220,6 +255,8 @@ export function ComprehensionQuestion({
 
   useEffect(() => {
     mountedRef.current = true;
+    lockSessionVoice(sessionId);
+    void preloadReadingVoiceEngines();
     const cleanupVoice = () => {
       flowGenRef.current += 1;
       prefetchAbortRef.current?.abort();
@@ -254,7 +291,7 @@ export function ComprehensionQuestion({
       window.removeEventListener("pagehide", handlePageHide);
       cleanupVoice();
     };
-  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer]);
+  }, [clearRemindTimer, clearRestartTimer, clearVoiceSettleTimer, sessionId]);
 
   const speakGuarded = useCallback(
     async (
@@ -302,6 +339,7 @@ export function ComprehensionQuestion({
     setSelectedAnswer(null);
     setResult(null);
     setFeedbackNote(null);
+    setFeedbackPreserveVerbatim(false);
     setLoadState({ status: "loading" });
     setLoadKey((key) => key + 1);
   }, [stopAllVoice]);
@@ -336,6 +374,7 @@ export function ComprehensionQuestion({
       setIsSubmitting(true);
       setResult(null);
       setFeedbackNote(null);
+      setFeedbackPreserveVerbatim(false);
 
       let nextResult: ComprehensionAnswerResultDTO | null = null;
       try {
@@ -371,17 +410,15 @@ export function ComprehensionQuestion({
         if (!nextResult.is_correct && storyHint) {
           // Keep story_hint verbatim so book characters ("Cô Tấm", "cô tiên") are never altered.
           setFeedbackNote(storyHint);
+          setFeedbackPreserveVerbatim(true);
           // Read story_hint aloud even on touch mistakes so Grade-1 readers hear
           // the clue immediately; tapping any other choice barges in via stopAllVoice().
           if (
             gen === flowGenRef.current &&
             !voicePausedRef.current &&
-            typeof window !== "undefined" &&
-            (Boolean(getSpeechRecognitionCtor()) ||
-              isAndroidNativeSpeechAvailable() ||
-              typeof window.AudioContext === "function" ||
-              Boolean(window.speechSynthesis?.getVoices?.().length))
+            hasBrowserAudioOrVoiceApi()
           ) {
+            lockSessionVoice(sessionId);
             setVoicePhase("reading");
             const stillCurrent = await speakGuarded(storyHint, gen, {
               adaptPersona: false,
@@ -406,6 +443,7 @@ export function ComprehensionQuestion({
       if (nextResult.is_correct) {
         const praise = prompts.next("quizCorrect");
         setFeedbackNote(praise);
+        setFeedbackPreserveVerbatim(false);
         setVoicePhase("reading");
         const stillCurrent = await speakGuarded(praise, gen);
         if (stillCurrent && mountedRef.current && !voicePausedRef.current) {
@@ -413,28 +451,47 @@ export function ComprehensionQuestion({
         }
       } else {
         const chosen = activeValue.choices.find((c) => c.value === answer);
-        const encourage = storyHint
-          ? adaptTextToTeacherPersona(
-              chosen
-                ? t("comprehension.chosenCorrectFeedback", {
-                    label: chosen.label,
-                    hint: storyHint,
-                  })
-                : storyHint,
-              teacherPersona.gender,
-            )
-          : chosen
-            ? adaptTextToTeacherPersona(
-                t("comprehension.chosenWrongFeedback", {
-                  label: chosen.label,
-                }),
-                teacherPersona.gender,
-              )
-            : prompts.next("quizTryAgain");
+        const activeGender = getEffectiveTeacherPersona().gender;
+        let encourage: string;
+        let preserveVerbatim = false;
+        if (storyHint) {
+          preserveVerbatim = true;
+          if (chosen) {
+            // Adapt ONLY the framing template BEFORE interpolating story text
+            // so book characters ("Cô Tấm", "cô tiên") in label or storyHint are NEVER rewritten.
+            const adaptedFrame = adaptTextToTeacherPersona(
+              t("comprehension.chosenCorrectFeedback", {
+                label: "__VIREAD_CHOICE_LABEL__",
+                hint: "__VIREAD_STORY_HINT__",
+              }),
+              activeGender,
+            );
+            encourage = adaptedFrame
+              .replace("__VIREAD_CHOICE_LABEL__", chosen.label)
+              .replace("__VIREAD_STORY_HINT__", storyHint);
+          } else {
+            encourage = storyHint;
+          }
+        } else if (chosen) {
+          preserveVerbatim = true;
+          const adaptedFrame = adaptTextToTeacherPersona(
+            t("comprehension.chosenWrongFeedback", {
+              label: "__VIREAD_CHOICE_LABEL__",
+            }),
+            activeGender,
+          );
+          encourage = adaptedFrame.replace(
+            "__VIREAD_CHOICE_LABEL__",
+            chosen.label,
+          );
+        } else {
+          encourage = prompts.next("quizTryAgain");
+        }
         setFeedbackNote(encourage);
+        setFeedbackPreserveVerbatim(preserveVerbatim);
         setVoicePhase("reading");
         const stillCurrent = await speakGuarded(encourage, gen, {
-          adaptPersona: !storyHint && !chosen,
+          adaptPersona: !preserveVerbatim,
         });
         if (
           stillCurrent &&
@@ -456,7 +513,6 @@ export function ComprehensionQuestion({
       speakGuarded,
       stopAllVoice,
       t,
-      teacherPersona.gender,
     ],
   );
 
@@ -469,217 +525,113 @@ export function ComprehensionQuestion({
       ) {
         return;
       }
-      const boundQuestionId = value.question.id;
-      const boundPageId = `quiz:${boundQuestionId}`;
-      lockSessionVoice(sessionId);
-      const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
-        window as unknown as {
-          SpeechRecognition?: BrowserSpeechRecognitionCtor;
-          webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
-          AudioContext?: typeof AudioContext;
-          webkitAudioContext?: typeof AudioContext;
-        },
-        speechService,
-        () => ({ sessionId, pageId: boundPageId }),
-      ) as BrowserSpeechRecognitionCtor | undefined;
-      if (!Ctor) {
-        setVoicePhase("idle");
-        return;
-      }
-      stopVoiceRecognition();
+      const rawCtor = getSpeechRecognitionCtor();
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttReady = Boolean(
+        freshHealth?.local.available && freshHealth.local.stt_ready,
+      );
+      const needsWasmWarmup =
+        !isAndroidNativeSpeechAvailable() &&
+        !isInjectedTestSpeechRecognition(rawCtor) &&
+        !localSttReady &&
+        detectBrowserWasmSttSupport().supported &&
+        !getBrowserWasmSttClient().isReady();
 
-      let rec: BrowserSpeechRecognition;
-      try {
-        rec = new Ctor();
-      } catch {
-        setVoicePhase("idle");
-        return;
-      }
-
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = "vi-VN";
-      rec.maxAlternatives = 1;
-      recognitionRef.current = rec;
-      setVoicePhase("listening");
-
-      let processedUpTo = -1;
-      let fatalError = false;
-      let consecutiveRestarts = 0;
-      let networkErrorStreak = 0;
-      let maxEpochSeen = -1;
-      const seenFinalTurnIds = new Set<string>();
-      const SETTLE_IGNORED_POLITE = new Set([
-        "ạ",
-        "nhé",
-        "nha",
-        "ơi",
-        "à",
-        "ờ",
-        "ừ",
-        "ừm",
-        "nhỉ",
-        "ha",
-        "dạ",
-        "vâng",
-        "thưa",
-      ]);
-
-      const isItemFencedIn = (
-        item: BrowserSpeechRecognitionResult,
-      ): boolean => {
-        if (item.sessionId != null && item.sessionId !== sessionId)
-          return false;
-        if (item.pageId != null && item.pageId !== boundPageId) return false;
-        if (typeof item.epoch === "number") {
-          if (item.epoch < maxEpochSeen) return false;
-          maxEpochSeen = item.epoch;
-        }
-        return true;
-      };
-
-      const armReminder = () => {
-        clearRemindTimer();
-        if (remindedForQuestionRef.current) return;
-        remindTimerRef.current = window.setTimeout(() => {
-          if (
-            !mountedRef.current ||
-            gen !== flowGenRef.current ||
-            voicePausedRef.current ||
-            isSubmittingRef.current ||
-            solvedQuestionIdRef.current === boundQuestionId ||
-            activeQuestionRef.current?.question.id !== boundQuestionId
-          ) {
-            return;
-          }
-          remindedForQuestionRef.current = true;
-          stopVoiceRecognition();
-          setVoicePhase("reading");
-          void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
-            if (
-              ok &&
-              mountedRef.current &&
-              !voicePausedRef.current &&
-              activeQuestionRef.current?.question.id === boundQuestionId
-            ) {
-              startVoiceListenRef.current(value, gen);
-            }
-          });
-        }, REMIND_SILENCE_MS);
-      };
-
-      armReminder();
-
-      rec.onresult = (event) => {
+      const beginRecognition = () => {
         if (
           !mountedRef.current ||
           gen !== flowGenRef.current ||
-          recognitionRef.current !== rec ||
-          isSubmittingRef.current ||
-          solvedQuestionIdRef.current === boundQuestionId ||
-          activeQuestionRef.current?.question.id !== boundQuestionId
+          voicePausedRef.current
         ) {
           return;
         }
-        // Check interim provisional highlight (only previews, NEVER submits!)
-        for (let idx = event.results.length - 1; idx >= 0; idx -= 1) {
-          const item = event.results[idx];
-          if (!item || item.isFinal) continue;
-          if (!isItemFencedIn(item)) continue;
-          const interimText = item[0]?.transcript?.trim() ?? "";
-          if (interimText) {
-            // Cancel any pending bare-letter settle timer as soon as the child speaks again
-            clearVoiceSettleTimer();
-            armReminder();
-            const interimAnalysis = analyzeComprehensionVoiceInput(
-              interimText,
-              value.choices,
-            );
-            setPreviewChoiceId(
-              interimAnalysis.type === "CHOICE"
-                ? interimAnalysis.choice.id
-                : null,
-            );
-          } else {
-            setPreviewChoiceId(null);
-          }
-          break;
+        const boundQuestionId = value.question.id;
+        const boundPageId = `quiz:${boundQuestionId}`;
+        lockSessionVoice(sessionId);
+        const Ctor = resolveLocalFirstSpeechRecognitionConstructor(
+          window as unknown as {
+            SpeechRecognition?: BrowserSpeechRecognitionCtor;
+            webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+            AudioContext?: typeof AudioContext;
+            webkitAudioContext?: typeof AudioContext;
+          },
+          speechService,
+          () => ({ sessionId, pageId: boundPageId }),
+        ) as BrowserSpeechRecognitionCtor | undefined;
+        if (!Ctor) {
+          setVoicePhase("idle");
+          return;
+        }
+        stopVoiceRecognition();
+
+        let rec: BrowserSpeechRecognition;
+        try {
+          rec = new Ctor();
+        } catch {
+          setVoicePhase("idle");
+          return;
         }
 
-        const start = Math.max(event.resultIndex ?? 0, processedUpTo + 1);
-        for (let idx = start; idx < event.results.length; idx += 1) {
-          const item = event.results[idx];
-          if (!item?.isFinal) continue;
-          processedUpTo = idx;
-          if (!isItemFencedIn(item)) continue;
-          const turnKey = item.turnId ?? item.segmentId;
-          if (turnKey) {
-            if (seenFinalTurnIds.has(turnKey)) continue;
-            seenFinalTurnIds.add(turnKey);
-          }
-          clearVoiceSettleTimer();
-          const transcript = (item[0]?.transcript ?? "")
-            .normalize("NFC")
-            .trim();
-          if (!transcript) continue;
-          armReminder();
-          const confidence = item[0]?.confidence;
-          if (
-            typeof confidence === "number" &&
-            confidence > 0 &&
-            confidence < 0.35
-          ) {
-            continue;
-          }
+        rec.continuous = true;
+        rec.interimResults = true;
+        rec.lang = "vi-VN";
+        rec.maxAlternatives = 1;
+        recognitionRef.current = rec;
+        setVoicePhase("listening");
 
-          // Block echo from our own question / option TTS using real VAD onsetAt!
-          const onsetAt =
-            typeof item.onsetAt === "number" && Number.isFinite(item.onsetAt)
-              ? item.onsetAt
-              : null;
-          if (
-            !echoGuard.evaluate({
-              text: transcript,
-              receivedAt: performance.now(),
-              onsetAt,
-            }).accept
-          ) {
-            continue;
-          }
-          consecutiveRestarts = 0;
-          networkErrorStreak = 0;
+        let processedUpTo = -1;
+        let fatalError = false;
+        let consecutiveRestarts = 0;
+        let networkErrorStreak = 0;
+        let maxEpochSeen = -1;
+        const seenFinalTurnIds = new Set<string>();
+        const SETTLE_IGNORED_POLITE = new Set([
+          "ạ",
+          "nhé",
+          "nha",
+          "ơi",
+          "à",
+          "ờ",
+          "ừ",
+          "ừm",
+          "nhỉ",
+          "ha",
+          "dạ",
+          "vâng",
+          "thưa",
+        ]);
 
-          const analysis = analyzeComprehensionVoiceInput(
-            transcript,
-            value.choices,
-          );
-          if (analysis.type === "STOP") {
-            setPreviewChoiceId(null);
-            voicePausedRef.current = true;
-            setVoicePausedByUser(true);
-            setVoicePhase("paused");
-            stopAllVoice();
-            return;
+        const isItemFencedIn = (
+          item: BrowserSpeechRecognitionResult,
+        ): boolean => {
+          if (item.sessionId != null && item.sessionId !== sessionId)
+            return false;
+          if (item.pageId != null && item.pageId !== boundPageId) return false;
+          if (typeof item.epoch === "number") {
+            if (item.epoch < maxEpochSeen) return false;
+            maxEpochSeen = item.epoch;
           }
-          if (analysis.type === "REPLAY") {
-            setPreviewChoiceId(null);
-            void readQuestionAloudRef.current(value);
-            return;
-          }
-          if (
-            analysis.type === "CONFLICT" ||
-            analysis.type === "AMBIGUOUS" ||
-            analysis.type === "NEGATED"
-          ) {
-            setPreviewChoiceId(null);
-            const promptMsg = adaptTextToTeacherPersona(
-              analysis.clarificationPrompt,
-              getEffectiveTeacherPersona().gender,
-            );
-            setFeedbackNote(promptMsg);
+          return true;
+        };
+
+        const armReminder = () => {
+          clearRemindTimer();
+          if (remindedForQuestionRef.current) return;
+          remindTimerRef.current = window.setTimeout(() => {
+            if (
+              !mountedRef.current ||
+              gen !== flowGenRef.current ||
+              voicePausedRef.current ||
+              isSubmittingRef.current ||
+              solvedQuestionIdRef.current === boundQuestionId ||
+              activeQuestionRef.current?.question.id !== boundQuestionId
+            ) {
+              return;
+            }
+            remindedForQuestionRef.current = true;
             stopVoiceRecognition();
             setVoicePhase("reading");
-            void speakGuarded(promptMsg, gen).then((ok) => {
+            void speakGuarded(prompts.next("quizRemind"), gen).then((ok) => {
               if (
                 ok &&
                 mountedRef.current &&
@@ -689,129 +641,263 @@ export function ComprehensionQuestion({
                 startVoiceListenRef.current(value, gen);
               }
             });
-            return;
-          }
-          if (analysis.type === "CHOICE") {
-            setPreviewChoiceId(analysis.choice.id);
-            const meaningfulWords = transcript
-              .toLowerCase()
-              .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
-              .split(/\s+/u)
-              .filter((w) => w && !SETTLE_IGNORED_POLITE.has(w));
-            // Bare single-letter utterance ("A", "A ạ") waits 850ms so cross-segment
-            // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
-            const settleMs =
-              analysis.matchedBy === "letter" && meaningfulWords.length <= 1
-                ? BARE_LETTER_SETTLE_MS
-                : 0;
-            if (settleMs > 0) {
-              const targetVal = analysis.choice.value;
-              voiceSettleTimerRef.current = window.setTimeout(() => {
-                voiceSettleTimerRef.current = null;
-                if (
-                  !mountedRef.current ||
-                  gen !== flowGenRef.current ||
-                  isSubmittingRef.current ||
-                  solvedQuestionIdRef.current === boundQuestionId ||
-                  activeQuestionRef.current?.question.id !== boundQuestionId
-                ) {
-                  return;
-                }
-                void submitAnswer(targetVal, "voice");
-              }, settleMs);
-            } else {
-              void submitAnswer(analysis.choice.value, "voice");
-            }
-            return;
-          }
-          setPreviewChoiceId(null);
-        }
-      };
+          }, REMIND_SILENCE_MS);
+        };
 
-      rec.onerror = (event) => {
-        if (recognitionRef.current !== rec) return;
-        if (
-          event.error === "not-allowed" ||
-          event.error === "service-not-allowed" ||
-          event.error === "stt-unavailable" ||
-          event.error === "local-stt-unavailable" ||
-          event.error === "audio-capture" ||
-          event.error === "language-not-supported"
-        ) {
-          fatalError = true;
-          stopVoiceRecognition();
-          setVoicePhase("idle");
-        } else if (event.error === "network") {
-          networkErrorStreak += 1;
-          if (networkErrorStreak >= 3) {
+        armReminder();
+
+        rec.onresult = (event) => {
+          if (
+            !mountedRef.current ||
+            gen !== flowGenRef.current ||
+            recognitionRef.current !== rec ||
+            isSubmittingRef.current ||
+            solvedQuestionIdRef.current === boundQuestionId ||
+            activeQuestionRef.current?.question.id !== boundQuestionId
+          ) {
+            return;
+          }
+          // Check interim provisional highlight (only previews, NEVER submits!)
+          for (let idx = event.results.length - 1; idx >= 0; idx -= 1) {
+            const item = event.results[idx];
+            if (!item || item.isFinal) continue;
+            if (!isItemFencedIn(item)) continue;
+            const interimText = item[0]?.transcript?.trim() ?? "";
+            if (interimText) {
+              // Cancel any pending bare-letter settle timer as soon as the child speaks again
+              clearVoiceSettleTimer();
+              armReminder();
+              const interimAnalysis = analyzeComprehensionVoiceInput(
+                interimText,
+                value.choices,
+              );
+              setPreviewChoiceId(
+                interimAnalysis.type === "CHOICE"
+                  ? interimAnalysis.choice.id
+                  : null,
+              );
+            } else {
+              setPreviewChoiceId(null);
+            }
+            break;
+          }
+
+          const start = Math.max(event.resultIndex ?? 0, processedUpTo + 1);
+          for (let idx = start; idx < event.results.length; idx += 1) {
+            const item = event.results[idx];
+            if (!item?.isFinal) continue;
+            processedUpTo = idx;
+            if (!isItemFencedIn(item)) continue;
+            const turnKey = item.turnId ?? item.segmentId;
+            if (turnKey) {
+              if (seenFinalTurnIds.has(turnKey)) continue;
+              seenFinalTurnIds.add(turnKey);
+            }
+            clearVoiceSettleTimer();
+            const transcript = (item[0]?.transcript ?? "")
+              .normalize("NFC")
+              .trim();
+            if (!transcript) continue;
+            armReminder();
+            const confidence = item[0]?.confidence;
+            if (
+              typeof confidence === "number" &&
+              confidence > 0 &&
+              confidence < 0.35
+            ) {
+              continue;
+            }
+
+            // Block echo from our own question / option TTS using real VAD onsetAt!
+            const onsetAt =
+              typeof item.onsetAt === "number" && Number.isFinite(item.onsetAt)
+                ? item.onsetAt
+                : null;
+            if (
+              !echoGuard.evaluate({
+                text: transcript,
+                receivedAt: performance.now(),
+                onsetAt,
+              }).accept
+            ) {
+              continue;
+            }
+            consecutiveRestarts = 0;
+            networkErrorStreak = 0;
+
+            const analysis = analyzeComprehensionVoiceInput(
+              transcript,
+              value.choices,
+            );
+            if (analysis.type === "STOP") {
+              setPreviewChoiceId(null);
+              voicePausedRef.current = true;
+              setVoicePausedByUser(true);
+              setVoicePhase("paused");
+              stopAllVoice();
+              return;
+            }
+            if (analysis.type === "REPLAY") {
+              setPreviewChoiceId(null);
+              void readQuestionAloudRef.current(value);
+              return;
+            }
+            if (
+              analysis.type === "CONFLICT" ||
+              analysis.type === "AMBIGUOUS" ||
+              analysis.type === "NEGATED"
+            ) {
+              setPreviewChoiceId(null);
+              const promptMsg = adaptTextToTeacherPersona(
+                analysis.clarificationPrompt,
+                getEffectiveTeacherPersona().gender,
+              );
+              setFeedbackNote(promptMsg);
+              setFeedbackPreserveVerbatim(false);
+              stopVoiceRecognition();
+              setVoicePhase("reading");
+              void speakGuarded(promptMsg, gen).then((ok) => {
+                if (
+                  ok &&
+                  mountedRef.current &&
+                  !voicePausedRef.current &&
+                  activeQuestionRef.current?.question.id === boundQuestionId
+                ) {
+                  startVoiceListenRef.current(value, gen);
+                }
+              });
+              return;
+            }
+            if (analysis.type === "CHOICE") {
+              setPreviewChoiceId(analysis.choice.id);
+              const meaningfulWords = transcript
+                .toLowerCase()
+                .replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ")
+                .split(/\s+/u)
+                .filter((w) => w && !SETTLE_IGNORED_POLITE.has(w));
+              // Bare single-letter utterance ("A", "A ạ") waits 850ms so cross-segment
+              // self-correction ("A" -> "à không, con chọn B") can retract cleanly.
+              const settleMs =
+                analysis.matchedBy === "letter" && meaningfulWords.length <= 1
+                  ? BARE_LETTER_SETTLE_MS
+                  : 0;
+              if (settleMs > 0) {
+                const targetVal = analysis.choice.value;
+                voiceSettleTimerRef.current = window.setTimeout(() => {
+                  voiceSettleTimerRef.current = null;
+                  if (
+                    !mountedRef.current ||
+                    gen !== flowGenRef.current ||
+                    isSubmittingRef.current ||
+                    solvedQuestionIdRef.current === boundQuestionId ||
+                    activeQuestionRef.current?.question.id !== boundQuestionId
+                  ) {
+                    return;
+                  }
+                  void submitAnswer(targetVal, "voice");
+                }, settleMs);
+              } else {
+                void submitAnswer(analysis.choice.value, "voice");
+              }
+              return;
+            }
+            setPreviewChoiceId(null);
+          }
+        };
+
+        rec.onerror = (event) => {
+          if (recognitionRef.current !== rec) return;
+          if (
+            event.error === "not-allowed" ||
+            event.error === "service-not-allowed" ||
+            event.error === "stt-unavailable" ||
+            event.error === "local-stt-unavailable" ||
+            event.error === "audio-capture" ||
+            event.error === "language-not-supported"
+          ) {
             fatalError = true;
             stopVoiceRecognition();
             setVoicePhase("idle");
+          } else if (event.error === "network") {
+            networkErrorStreak += 1;
+            if (networkErrorStreak >= 3) {
+              fatalError = true;
+              stopVoiceRecognition();
+              setVoicePhase("idle");
+            }
           }
-        }
-      };
+        };
 
-      rec.onend = () => {
-        if (recognitionRef.current !== rec) return;
-        if (fatalError) {
-          stopVoiceRecognition();
-          setVoicePhase("idle");
-          return;
-        }
-        if (
-          mountedRef.current &&
-          gen === flowGenRef.current &&
-          !voicePausedRef.current &&
-          !isSubmittingRef.current
-        ) {
-          if (consecutiveRestarts >= 5) {
+        rec.onend = () => {
+          if (recognitionRef.current !== rec) return;
+          if (fatalError) {
             stopVoiceRecognition();
             setVoicePhase("idle");
             return;
           }
-          consecutiveRestarts += 1;
-          // Reset index cursor for the new recognition cycle so results starting
-          // at resultIndex=0 after restart are never skipped.
-          processedUpTo = -1;
-          const backoffMs =
-            networkErrorStreak > 0
-              ? Math.min(4_000, 500 * 2 ** (networkErrorStreak - 1))
-              : 0;
-          const restartNow = () => {
-            if (
-              recognitionRef.current !== rec ||
-              !mountedRef.current ||
-              gen !== flowGenRef.current ||
-              voicePausedRef.current ||
-              isSubmittingRef.current
-            ) {
-              return;
-            }
-            try {
-              rec.start();
-            } catch {
+          if (
+            mountedRef.current &&
+            gen === flowGenRef.current &&
+            !voicePausedRef.current &&
+            !isSubmittingRef.current
+          ) {
+            if (consecutiveRestarts >= 5) {
               stopVoiceRecognition();
               setVoicePhase("idle");
+              return;
             }
-          };
-          if (backoffMs > 0) {
-            clearRestartTimer();
-            restartTimerRef.current = window.setTimeout(() => {
-              restartTimerRef.current = null;
+            consecutiveRestarts += 1;
+            // Reset index cursor for the new recognition cycle so results starting
+            // at resultIndex=0 after restart are never skipped.
+            processedUpTo = -1;
+            const backoffMs =
+              networkErrorStreak > 0
+                ? Math.min(4_000, 500 * 2 ** (networkErrorStreak - 1))
+                : 0;
+            const restartNow = () => {
+              if (
+                recognitionRef.current !== rec ||
+                !mountedRef.current ||
+                gen !== flowGenRef.current ||
+                voicePausedRef.current ||
+                isSubmittingRef.current
+              ) {
+                return;
+              }
+              try {
+                rec.start();
+              } catch {
+                stopVoiceRecognition();
+                setVoicePhase("idle");
+              }
+            };
+            if (backoffMs > 0) {
+              clearRestartTimer();
+              restartTimerRef.current = window.setTimeout(() => {
+                restartTimerRef.current = null;
+                restartNow();
+              }, backoffMs);
+            } else {
               restartNow();
-            }, backoffMs);
-          } else {
-            restartNow();
+            }
           }
+        };
+
+        try {
+          rec.start();
+        } catch {
+          recognitionRef.current = null;
+          setVoicePhase("idle");
         }
       };
 
-      try {
-        rec.start();
-      } catch {
-        recognitionRef.current = null;
-        setVoicePhase("idle");
+      if (needsWasmWarmup) {
+        void awaitSttReadyBeforeListening(4_000)
+          .catch(() => false)
+          .then(() => beginRecognition());
+        return;
       }
+      beginRecognition();
     },
     [
       clearRemindTimer,
@@ -833,13 +919,7 @@ export function ComprehensionQuestion({
       if (!mountedRef.current || voicePausedRef.current) return;
       // Only auto-start voice walkthrough when the browser supports voice
       // recognition or speech synthesis (keeps non-audio unit environments calm).
-      const hasVoiceApi =
-        Boolean(getSpeechRecognitionCtor()) ||
-        isAndroidNativeSpeechAvailable() ||
-        (typeof window !== "undefined" &&
-          (typeof window.AudioContext === "function" ||
-            Boolean(window.speechSynthesis?.getVoices?.().length)));
-      if (!hasVoiceApi) return;
+      if (!hasBrowserAudioOrVoiceApi()) return;
       lockSessionVoice(sessionId);
 
       stopAllVoice();
@@ -910,8 +990,11 @@ export function ComprehensionQuestion({
                 break;
               }
               try {
+                const locked = getActiveSessionVoiceLock();
                 await speechService.synthesize(phrase, {
                   sessionId,
+                  voiceId: locked?.voiceId ?? getEffectiveVoiceId(),
+                  speed: locked?.speed ?? getSpeechPreferences().speed,
                   signal: prefetchController.signal,
                 });
               } catch {
@@ -1111,7 +1194,19 @@ export function ComprehensionQuestion({
                 <p className="text-label font-semibold text-purple-ink">
                   {loadState.value.progress_label}
                 </p>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <ReadingVoiceSettings
+                    disabled={voicePhase === "listening"}
+                    fallbackNotice={speechPlayer.fallbackNotice}
+                    isPreviewing={speechPlayer.isPlaying}
+                    onPreview={(sample) => {
+                      stopAllVoice();
+                      return speechPlayer.play(sample, {
+                        bypassSessionLock: true,
+                      });
+                    }}
+                    onStopPreview={stopAllVoice}
+                  />
                   <button
                     type="button"
                     onClick={() => {
@@ -1231,13 +1326,19 @@ export function ComprehensionQuestion({
 
             {result ? (
               <StatusMessage tone={result.is_correct ? "success" : "warning"}>
-                {adaptTextToTeacherPersona(
-                  feedbackNote ??
-                    (result.is_correct
-                      ? t("comprehension.correctPraise")
-                      : t("comprehension.tryAgainHint")),
-                  teacherPersona.gender,
-                )}
+                {feedbackNote !== null
+                  ? feedbackPreserveVerbatim
+                    ? feedbackNote
+                    : adaptTextToTeacherPersona(
+                        feedbackNote,
+                        teacherPersona.gender,
+                      )
+                  : adaptTextToTeacherPersona(
+                      result.is_correct
+                        ? t("comprehension.correctPraise")
+                        : t("comprehension.tryAgainHint"),
+                      teacherPersona.gender,
+                    )}
               </StatusMessage>
             ) : (
               <p

@@ -10,6 +10,7 @@ import re
 import shutil
 import unicodedata
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -342,6 +343,8 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
     if not getattr(current_data_gen, "_viread_partial_bucket_batches", False):
         def data_gen(trainer, lmdb_path, data_root, annotation,
                      masked_language_model=True, transform=None):
+            if lmdb_path and data_root and not Path(lmdb_path).is_absolute():
+                lmdb_path = str(Path(data_root) / lmdb_path)
             dataset = vietocr_dataloader.OCRDataset(
                 lmdb_path=lmdb_path,
                 root_dir=data_root,
@@ -362,6 +365,66 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
 
         data_gen._viread_partial_bucket_batches = True
         vietocr_trainer.Trainer.data_gen = data_gen
+
+
+_install_vietocr_compatibility = _install_vietocr_numpy_bytes_compatibility
+
+
+@contextmanager
+def _vietocr_sdpa_math_context(torch: Any, enabled: bool = True):
+    """Force PyTorch 2.x MATH SDPA kernel under CUDA AMP for Turing GPUs (sm_75).
+
+    VietOCR's ``LanguageTransformer.forward`` mixes a ``float32`` ``tgt_mask`` and
+    a ``bool`` ``tgt_key_padding_mask`` under ``torch.autocast`` FP16, which
+    triggers SDPA kernel ``AcceleratorError`` on Turing GPUs unless routed through
+    ``SDPBackend.MATH``.
+    """
+    if not enabled:
+        yield
+        return
+    attention_mod = getattr(getattr(torch, "nn", None), "attention", None)
+    sdpa_kernel = getattr(attention_mod, "sdpa_kernel", None)
+    sdp_backend = getattr(attention_mod, "SDPBackend", None)
+    math_backend = getattr(sdp_backend, "MATH", None)
+    if callable(sdpa_kernel) and math_backend is not None:
+        with sdpa_kernel(math_backend):
+            yield
+        return
+    yield
+
+
+def _is_cuda_accelerator_error(torch: Any, exc: BaseException) -> bool:
+    oom_cls = getattr(getattr(torch, "cuda", None), "OutOfMemoryError", None)
+    if isinstance(oom_cls, type) and issubclass(oom_cls, BaseException) and isinstance(exc, oom_cls):
+        return False
+    accel_cls = getattr(torch, "AcceleratorError", None)
+    if isinstance(accel_cls, type) and issubclass(accel_cls, BaseException) and isinstance(exc, accel_cls):
+        return True
+    if isinstance(exc, RuntimeError):
+        detail = f"{type(exc).__name__}: {exc}".lower()
+        if "acceleratorerror" in detail or "cuda error" in detail:
+            return True
+    return False
+
+
+def _recover_cuda_after_amp_error(torch: Any) -> None:
+    cuda_mod = getattr(torch, "cuda", None)
+    if cuda_mod is None:
+        return
+    is_available = getattr(cuda_mod, "is_available", None)
+    if callable(is_available):
+        try:
+            if not is_available():
+                return
+        except Exception:
+            pass
+    for method_name in ("synchronize", "empty_cache"):
+        fn = getattr(cuda_mod, method_name, None)
+        if callable(fn):
+            try:
+                fn()
+            except Exception:
+                pass
 
 
 def _store_best_model(torch, model, run_dir: Path) -> tuple[Path, str]:
@@ -640,7 +703,10 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
             trainer.scheduler = scheduler
         trainer.optimizer.load_state_dict(saved["optimizer_state"])
         trainer.scheduler.load_state_dict(saved["scheduler_state"])
-        if saved.get("scaler_state"):
+        if saved.get("amp_enabled") is False:
+            amp_enabled = False
+            scaler = torch.amp.GradScaler("cuda", enabled=False)
+        elif saved.get("scaler_state"):
             scaler.load_state_dict(saved["scaler_state"])
         validation_loss = saved.get("validation_loss")
         stored_step0_loss = saved.get("step0_validation_loss")
@@ -675,7 +741,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         else:
             # Older resumable checkpoints did not save a best model. Revalidate
             # the exact resumed weights and use them as the starting best.
-            validation_loss = float(trainer.validate())
+            with _vietocr_sdpa_math_context(torch, enabled=(cfg["device"] == "cuda")):
+                validation_loss = float(trainer.validate())
             if not __import__("math").isfinite(validation_loss):
                 raise ValueError("resumed model validation loss is non-finite")
             best_validation_loss = validation_loss
@@ -692,7 +759,8 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     if not resume:
         # Evaluate the untouched parent at step=0 so best-checkpoint selection
         # never exports weights worse on validation loss than the parent.
-        validation_loss = float(trainer.validate())
+        with _vietocr_sdpa_math_context(torch, enabled=(cfg["device"] == "cuda")):
+            validation_loss = float(trainer.validate())
         if not __import__("math").isfinite(validation_loss):
             raise ValueError("initial parent model validation loss is non-finite")
         step0_validation_loss = validation_loss
@@ -714,27 +782,52 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
         except StopIteration:
             iterator = iter(trainer.train_gen)
             batch = next(iterator)
-        trainer.model.train()
-        if stage == "freeze_vgg":
-            trainer.model.cnn.eval()
         batch = trainer.batch_to_device(batch)
-        with torch.autocast(device_type=cfg["device"], dtype=torch.float16, enabled=amp_enabled):
-            outputs = trainer.model(batch["img"], batch["tgt_input"], tgt_key_padding_mask=batch["tgt_padding_mask"])
-            outputs = outputs.reshape(-1, outputs.size(2))
-            targets = batch["tgt_output"].reshape(-1)
-            loss = trainer.criterion(outputs, targets)
-        trainer.optimizer.zero_grad(set_to_none=True)
-        scaler.scale(loss).backward()
-        scaler.unscale_(trainer.optimizer)
-        torch.nn.utils.clip_grad_norm_((p for p in trainer.model.parameters() if p.requires_grad), 1.0)
-        scaler.step(trainer.optimizer)
-        scaler.update()
+        while True:
+            trainer.model.train()
+            if stage == "freeze_vgg":
+                trainer.model.cnn.eval()
+            trainer.optimizer.zero_grad(set_to_none=True)
+            try:
+                with (
+                    _vietocr_sdpa_math_context(torch, enabled=amp_enabled),
+                    torch.autocast(device_type=cfg["device"], dtype=torch.float16, enabled=amp_enabled),
+                ):
+                    outputs = trainer.model(
+                        batch["img"],
+                        batch["tgt_input"],
+                        tgt_key_padding_mask=batch["tgt_padding_mask"],
+                    )
+                    outputs = outputs.reshape(-1, outputs.size(2))
+                    targets = batch["tgt_output"].reshape(-1)
+                    loss = trainer.criterion(outputs, targets)
+                scaler.scale(loss).backward()
+                scaler.unscale_(trainer.optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    (p for p in trainer.model.parameters() if p.requires_grad), 1.0
+                )
+                scaler.step(trainer.optimizer)
+                scaler.update()
+                break
+            except BaseException as exc:
+                if not (amp_enabled and _is_cuda_accelerator_error(torch, exc)):
+                    raise
+                logger.warning(
+                    "CUDA AMP FP16 encountered %s (%s); disabling AMP and retrying current batch in FP32",
+                    type(exc).__name__,
+                    exc,
+                )
+                trainer.optimizer.zero_grad(set_to_none=True)
+                amp_enabled = False
+                scaler = torch.amp.GradScaler("cuda", enabled=False)
+                _recover_cuda_after_amp_error(torch)
         trainer.scheduler.step()
         step += 1
         trainer.iter = step
         validated = step % int(cfg["trainer"]["valid_every"]) == 0 or step == total_steps
         if validated:
-            validation_loss = float(trainer.validate())
+            with _vietocr_sdpa_math_context(torch, enabled=(cfg["device"] == "cuda")):
+                validation_loss = float(trainer.validate())
             if not __import__("math").isfinite(validation_loss):
                 raise ValueError("validation loss became non-finite; candidate training stopped")
             if best_validation_loss is None or validation_loss < best_validation_loss:
@@ -748,7 +841,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                     early_stopped = True
         if step % 100 == 0 or step == total_steps or validated:
             state = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "step": step,
-                     "stage": stage,
+                     "stage": stage, "amp_enabled": amp_enabled,
                      "parent_checkpoint_sha256": parent_hash, "manifest_sha256": dataset_version_sha256.lower(),
                      "local_manifest_sha256": sha256_file(manifest),
                      "config_sha256": effective_config_sha, "architecture_sha256": architecture_sha,

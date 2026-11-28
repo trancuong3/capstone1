@@ -1052,6 +1052,109 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
         google.synthesize.assert_not_called()
         google.transcribe.assert_not_called()
 
+    def test_elevenlabs_fallback_preserves_male_central_metadata_and_never_poisons_local_cache(
+        self,
+    ) -> None:
+        from app.providers.elevenlabs_voice_provider import (
+            ElevenLabsVoiceProvider,
+            SynthesizedAudio,
+        )
+        from app.services.tts_audio_cache_service import TtsAudioCacheService
+
+        down_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        down_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_timed = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+        down_local.synthesize_phonics = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_TTS_UNAVAILABLE")
+        )
+
+        fake_mp3 = b"\xff\xfb\x90\x00" + (b"\x00" * 3996)
+        el = ElevenLabsVoiceProvider(api_key="sk_test_elevenlabs_key")
+        el.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=SynthesizedAudio(
+                content=fake_mp3,
+                content_type="audio/mpeg",
+                resolved_voice_id="el_male_voice_central_test",
+                used_fallback_voice=False,
+            )
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="", tts_api_key="")
+        orch = VoiceOrchestrator(
+            local_provider=down_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+
+        with patch.dict(
+            os.environ,
+            {"ELEVENLABS_MALE_VOICE_ID": "el_male_voice_central_test"},
+        ), patch.object(
+            TtsAudioCacheService,
+            "lookup_cached_audio",
+            AsyncMock(return_value=None),
+        ), patch.object(
+            TtsAudioCacheService,
+            "schedule_store_cached_audio",
+        ) as mock_store_cache:
+            with _make_app(orch) as client:
+                tts_resp = client.post(
+                    "/voice/text-to-speech",
+                    json={
+                        "text": "Thầy đọc mẫu cho con nghe nhé.",
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.9,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(tts_resp.status_code, 200)
+                self.assertEqual(tts_resp.headers["x-voice-provider"], "elevenlabs")
+                self.assertEqual(tts_resp.headers["x-voice-gender"], "male")
+                self.assertEqual(tts_resp.headers["x-voice-region"], "central")
+
+                timed_resp = client.post(
+                    "/voice/text-to-speech/timed",
+                    json={
+                        "words": ["Chào", "con"],
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.9,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(timed_resp.status_code, 200)
+                timed_json = timed_resp.json()
+                self.assertEqual(timed_json["provider"], "elevenlabs")
+                self.assertEqual(timed_json["region"], "central")
+
+                phonics_resp = client.post(
+                    "/voice/text-to-speech/phonics",
+                    json={
+                        "steps": [
+                            {"id": "rhyme", "spoken_text": "ô, tờ, ốt.", "pause_after_ms": 200},
+                            {"id": "whole", "spoken_text": "mốt.", "pause_after_ms": 200},
+                        ],
+                        "voice_id": "local_central_quang_son",
+                        "speed": 0.85,
+                        "provider_mode": "local_with_google_fallback",
+                        "allow_google_tts": True,
+                        "cache_scope": "COACHING",
+                    },
+                )
+                self.assertEqual(phonics_resp.status_code, 200)
+                phonics_json = phonics_resp.json()
+                self.assertEqual(phonics_json["provider"], "elevenlabs")
+                self.assertEqual(phonics_json["region"], "central")
+
+            # CRITICAL: ElevenLabs fallback audio must NEVER be stored under local_* cache keys!
+            mock_store_cache.assert_not_called()
+
     def test_get_status_reports_elevenlabs_configuration_and_cooldown(self) -> None:
         import asyncio
         from unittest.mock import MagicMock

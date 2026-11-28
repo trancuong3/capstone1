@@ -489,7 +489,20 @@
     "workerOfflineUploadNotice": "OCRサーバーは一時的にオフラインです — 画像やPDF/DOCXを引き続きアップロードしてキューに保存でき、サーバー復旧後に自動認識されます。",
     "queuedWaitingWorkerBadge": "OCR待機キューに保存済み — サーバー起動待ち",
     "queuedWaitingWorkerShort": "OCR待機キューに保存済み — 起動後に自動認識",
-    "reasonQueuedOffline": "このページはOCR待機キューに安全に保存されており、OCRサーバーが再起動すると自動的に認識されます。"
+    "reasonQueuedOffline": "このページはOCR待機キューに安全に保存されており、OCRサーバーが再起動すると自動的に認識されます。",
+    "toolScopeCloudAi": "セキュアなクラウドAIサービスによるスペル校正と子ども向け安全性チェック",
+    "taskCenterLink": "タスクセンター",
+    "changeCoverAction": "表紙を変更",
+    "closeCoverStudio": "表紙設定を閉じる",
+    "uploadPrivacyTransparency": "プライバシーに関するご案内：マイブックはご家族のアカウント内でのみ表示されます。アップロードされたページの本文はスペルと子ども向け安全性の自動チェック（サーバー設定に応じたローカルモデルまたはセキュアなクラウドAI）を受け、初期設定ではOCR学習に使用されません。",
+    "openPageIllustrationAria": "{page}ページの挿絵を開く",
+    "closePageIllustrationAria": "{page}ページの挿絵を閉じる",
+    "pageIllustrationAction": "ページの挿絵",
+    "closePageIllustrationAction": "挿絵を閉じる",
+    "openPageOcrBlocksAria": "{page}ページのOCRテキストブロックを表示",
+    "closePageOcrBlocksAria": "{page}ページのOCRテキストブロックを閉じる",
+    "openPageOcrBlocksAction": "OCRテキスト枠",
+    "closePageOcrBlocksAction": "OCR枠を閉じる"
   },
   "ocrContribution": {
     "cardAria": "{title} の ViRead OCR 向上にサンプルを共有する",

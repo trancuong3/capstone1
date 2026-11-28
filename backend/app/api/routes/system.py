@@ -407,6 +407,8 @@ async def get_audit_logs(
     db: AsyncSession = Depends(get_db),
 ):
     """Raw audit records are restricted to active administrators."""
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 100
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     result = await db.execute(
         select(AuditLog)
         .order_by(AuditLog.CreatedAt.desc(), AuditLog.Id.desc())
@@ -807,6 +809,8 @@ async def get_difficult_word_practice_history(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    normalized_word = normalized_word if isinstance(normalized_word, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
     return await _difficult_words_service(db).practice_history(
         child_id,
         actor_id,
@@ -2827,6 +2831,10 @@ async def get_admin_audit_logs(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    action = action if isinstance(action, str) else None
+    resource_type = resource_type if isinstance(resource_type, str) else None
+    cursor = cursor if isinstance(cursor, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     service = AdminSystemService(AdminSystemRepository(db))
     await service.require_admin(actor_id)
     return await service.logs(action, resource_type, cursor, limit)

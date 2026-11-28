@@ -354,6 +354,29 @@ function createFetchResponder() {
     if (path === `/profiles/children/${TEST_CHILD_ID}`) {
       return Response.json(childFixture);
     }
+    if (path === "/voice/status") {
+      return Response.json({
+        default_mode: "local_only",
+        default_voice_id: "local_north_truc_ly",
+        local: {
+          available: true,
+          stt_ready: true,
+          tts_ready: true,
+        },
+        google: {
+          stt_configured: false,
+          tts_configured: false,
+          stt_cooldown: false,
+          tts_cooldown: false,
+        },
+      });
+    }
+    if (path === "/voice/text-to-speech") {
+      return Response.json(
+        { detail: { code: "LOCAL_TTS_UNAVAILABLE" } },
+        { status: 503 },
+      );
+    }
     if (path === "/games/memory/themes") {
       return Response.json(sampleCatalog);
     }
@@ -768,7 +791,10 @@ describe("MemoryGameScreen", () => {
     await user.click(screen.getByRole("button", { name: /Nghe hướng dẫn/i }));
     expect(abortSpy).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(ttsRequests).toHaveLength(1);
+      const promptRequests = ttsRequests.filter(
+        (req) => req.text !== "Đến lượt con đọc nhé.",
+      );
+      expect(promptRequests).toHaveLength(1);
       expect(audioPlaySpy).toHaveBeenCalledTimes(1);
     });
     expect(speakTtsSpy).not.toHaveBeenCalled();

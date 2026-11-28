@@ -46,6 +46,7 @@ import {
 } from "@/components/entertainment/sentence-shooter/sound-engine";
 import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
@@ -56,6 +57,11 @@ import {
   formatCountdownSeconds,
   resolveAutoPlayFlag,
 } from "@/lib/entertainment/autopilot";
+import {
+  lockSessionVoice,
+  releaseSessionVoiceLock,
+} from "@/lib/reading/session-voice-lock";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
 import type {
@@ -413,6 +419,17 @@ export function SentenceShooterScreen({
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
+  const shooterVoiceSessionId = childId
+    ? `game_shooter_${childId}`
+    : "game_shooter";
+
+  useEffect(() => {
+    lockSessionVoice(shooterVoiceSessionId);
+    void preloadReadingVoiceEngines({ warmWasmStt: false });
+    return () => {
+      releaseSessionVoiceLock(shooterVoiceSessionId);
+    };
+  }, [shooterVoiceSessionId]);
 
   const {
     reducedMotion,
@@ -1518,6 +1535,15 @@ export function SentenceShooterScreen({
               ) : null}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <ReadingVoiceSettings
+                fallbackNotice={speechPlayer.fallbackNotice}
+                isPreviewing={speechPlayer.isPlaying}
+                onPreview={(sample) => {
+                  speechPlayer.stop();
+                  return speechPlayer.play(sample, { bypassSessionLock: true });
+                }}
+                onStopPreview={speechPlayer.stop}
+              />
               <button
                 aria-label={
                   soundEnabled
@@ -2096,7 +2122,7 @@ export function SentenceShooterScreen({
         }
       />
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5">
-        <div>
+        <div className="flex flex-col gap-2">
           <p className="font-extrabold text-primary">
             {t("sentenceShooter.eyebrow")}
           </p>
@@ -2107,21 +2133,32 @@ export function SentenceShooterScreen({
             {t("sentenceShooter.lobbySubtitle")}
           </p>
         </div>
-        <Button
-          aria-pressed={autoPlayFlow}
-          className="min-h-11 shrink-0"
-          data-testid="shooter-autoplay-toggle"
-          fullWidth={false}
-          onClick={toggleAutoPlayFlow}
-          size="compact"
-          type="button"
-          variant={autoPlayFlow ? "secondary" : "quiet"}
-        >
-          <Play aria-hidden="true" className="size-4" />
-          {autoPlayFlow
-            ? t("sentenceShooter.autoPlayFlowToggleOn")
-            : t("sentenceShooter.autoPlayFlowToggleOff")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <ReadingVoiceSettings
+            fallbackNotice={speechPlayer.fallbackNotice}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={(sample) => {
+              speechPlayer.stop();
+              return speechPlayer.play(sample, { bypassSessionLock: true });
+            }}
+            onStopPreview={speechPlayer.stop}
+          />
+          <Button
+            aria-pressed={autoPlayFlow}
+            className="min-h-11 shrink-0"
+            data-testid="shooter-autoplay-toggle"
+            fullWidth={false}
+            onClick={toggleAutoPlayFlow}
+            size="compact"
+            type="button"
+            variant={autoPlayFlow ? "secondary" : "quiet"}
+          >
+            <Play aria-hidden="true" className="size-4" />
+            {autoPlayFlow
+              ? t("sentenceShooter.autoPlayFlowToggleOn")
+              : t("sentenceShooter.autoPlayFlowToggleOff")}
+          </Button>
+        </div>
       </header>
 
       {autoPlayRequested && isStartingSession ? (

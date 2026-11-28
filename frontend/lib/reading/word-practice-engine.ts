@@ -19,6 +19,10 @@ import {
   getBrowserWasmSttClient,
 } from "@/lib/reading/browser-wasm-stt";
 import {
+  getFreshVoiceEngineHealth,
+  recordSttEngineUsage,
+} from "@/lib/reading/voice-engine-status";
+import {
   hasHighConfidenceKeytermResult,
   hasUsableBrowserConfidence,
   hasUsableTranscript,
@@ -258,6 +262,52 @@ export async function evaluateRecordedShortWord({
     };
   }
 
+  const freshHealth = getFreshVoiceEngineHealth();
+  const localSttUnavailable =
+    freshHealth !== null &&
+    (!freshHealth.local.available || !freshHealth.local.stt_ready);
+  const canUseWasm = detectBrowserWasmSttSupport().supported;
+  let triedWasmFirst = false;
+
+  // Strict Offline-First STT priority: when Local Worker STT is known unavailable,
+  // try On-Device Offline Browser WASM BEFORE falling back to Cloud backend STT.
+  if (localSttUnavailable && canUseWasm) {
+    triedWasmFirst = true;
+    try {
+      const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
+        audioBlob,
+        {
+          timeoutMs: 12_000,
+          voicedDurationMs: audioQuality?.speechDurationMs,
+        },
+      );
+      const wasmText = wasmResult.text.normalize("NFC").trim();
+      if (wasmText) {
+        recordSttEngineUsage({
+          provider: "wasm",
+          fallbackUsed: freshHealth.local.configured !== false,
+          fallbackReason:
+            freshHealth.local.configured === false
+              ? null
+              : "LOCAL_STT_UNAVAILABLE",
+        });
+        const wasmStatus = classifyPracticePhraseTranscript(
+          expectedWord,
+          wasmText,
+          { contextPhrase },
+        );
+        return {
+          status: wasmStatus,
+          source: "BROWSER_WASM",
+          transcript: wasmText,
+          sttDurationMs: elapsedMs(),
+        };
+      }
+    } catch {
+      // Fall through cleanly to backend / browser fallback when WASM fails.
+    }
+  }
+
   try {
     const firstPass = await speechService.transcribe(audioBlob, {
       filename,
@@ -333,7 +383,7 @@ export async function evaluateRecordedShortWord({
       sttDurationMs: elapsedMs(),
     };
   } catch {
-    if (detectBrowserWasmSttSupport().supported) {
+    if (!triedWasmFirst && canUseWasm) {
       try {
         const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
           audioBlob,
