@@ -164,7 +164,10 @@
     "childEmptyDesc": "子どもプロフィールがまだありません。本や音声、進捗を保存するために作成しましょう！",
     "childCreateBtn": "子どもプロフィールを作成",
     "childPickerPrompt": "どのお子さまのためにこのページを開きますか？",
-    "quickActionGateIntro": "**{label}** を開く前に、選択中の子どもプロフィールを確認します。"
+    "quickActionGateIntro": "**{label}** を開く前に、選択中の子どもプロフィールを確認します。",
+    "scopePublic": "ゲストサポート",
+    "scopeParent": "保護者サポート",
+    "scopeAdmin": "管理者サポート"
   },
   "taskCenter": {
     "backgroundProcessing": "バックグラウンド処理中…",
