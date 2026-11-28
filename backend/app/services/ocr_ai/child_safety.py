@@ -16,6 +16,12 @@ from app.services.ai_capability_router import (
     CircuitState,
     get_shared_ai_circuit_breaker,
 )
+from app.services.cloud_ai_defaults import (
+    extract_gemini_text,
+    gemini_thinking_config,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_ai.runtime import (
@@ -469,6 +475,8 @@ class ChildSafetyOrchestrator:
         normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
+        if not self.providers:
+            raise ChildSafetyError("NO_AI_PROVIDER_CONFIGURED", [])
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )
@@ -742,6 +750,14 @@ class ChildSafetyOrchestrator:
                     if quota_key is not None:
                         cb.record_success(quota_key)
                         quota_probe_acquired = False
+                if self.transport is None and provider.family in {"google", "groq"}:
+                    record_cloud_ai_outcome(
+                        "child_safety",
+                        "gemini" if provider.family == "google" else "groq",
+                        provider.model,
+                        ok=True,
+                        http_status=last_status_code or 200,
+                    )
                 events.append(self._event(
                     provider, chunk_id, True, last_status_code, None, started,
                     output_mode=output_mode, retry_count=retry_count,
@@ -808,6 +824,15 @@ class ChildSafetyOrchestrator:
                             limit_zero=limit_zero,
                             retry_after_seconds=retry_after_seconds,
                         )
+            if self.transport is None and provider.family in {"google", "groq"}:
+                record_cloud_ai_outcome(
+                    "child_safety",
+                    "gemini" if provider.family == "google" else "groq",
+                    provider.model,
+                    ok=False,
+                    error_code=code,
+                    http_status=status_code,
+                )
             errors.append(code)
             events.append(self._event(
                 provider, chunk_id, False, status_code, code, started,
@@ -860,17 +885,22 @@ class ChildSafetyOrchestrator:
         self, provider: SafetyProvider, source: str
     ) -> tuple[object, int, str, int]:
         request_data = json.dumps({"untrusted_ocr_text": source}, ensure_ascii=False)
+        thinking_cfg: dict[str, str] | None = None
         if provider.family == "google":
             if not self.config.gemini_api_key:
                 raise ChildSafetyError("MISSING_CREDENTIAL", [])
+            generation_config: dict[str, Any] = {
+                "temperature": 0,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": _OUTPUT_SCHEMA,
+            }
+            thinking_cfg = gemini_thinking_config(provider.model)
+            if thinking_cfg is not None:
+                generation_config["thinkingConfig"] = thinking_cfg
             payload = {
                 "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
                 "contents": [{"role": "user", "parts": [{"text": request_data}]}],
-                "generationConfig": {
-                    "temperature": 0,
-                    "responseMimeType": "application/json",
-                    "responseJsonSchema": _OUTPUT_SCHEMA,
-                },
+                "generationConfig": generation_config,
             }
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{provider.model}:generateContent"
             headers = {"x-goog-api-key": self.config.gemini_api_key}
@@ -919,6 +949,12 @@ class ChildSafetyOrchestrator:
             resp = await active_client.post(
                 url, headers=headers, json=payload, timeout=req_timeout
             )
+            if provider.family == "google" and resp.status_code == 400 and thinking_cfg is not None:
+                payload["generationConfig"].pop("thinkingConfig", None)
+                resp = await active_client.post(
+                    url, headers=headers, json=payload, timeout=req_timeout
+                )
+                retry_count = 1
             # Older Ollama servers may reject JSON Schema in `format`. Retry
             # once in JSON mode with the explicit field/enum contract; the
             # application validator remains authoritative.
@@ -965,11 +1001,7 @@ class ChildSafetyOrchestrator:
         try:
             payload = response.json()
             if provider.family == "google":
-                candidates = payload.get("candidates") if isinstance(payload, dict) else None
-                candidate = candidates[0] if isinstance(candidates, list) and candidates else None
-                content = candidate.get("content") if isinstance(candidate, dict) else None
-                parts = content.get("parts") if isinstance(content, dict) else None
-                content = parts[0].get("text") if isinstance(parts, list) and parts else None
+                content = extract_gemini_text(payload)
             elif provider.family == "groq":
                 choices = payload.get("choices") if isinstance(payload, dict) else None
                 choice = choices[0] if isinstance(choices, list) and choices else None
@@ -980,7 +1012,10 @@ class ChildSafetyOrchestrator:
                 content = message.get("content") if isinstance(message, dict) else None
             if not isinstance(content, str):
                 raise ValueError
-            result = json.loads(content)
+            cleaned_content = strip_think_tags(content)
+            if not cleaned_content:
+                raise ValueError
+            result = json.loads(cleaned_content)
         except (AttributeError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ChildSafetyError(
                 "INVALID_JSON", [], output_mode=output_mode, retry_count=retry_count

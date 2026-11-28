@@ -189,7 +189,7 @@
     "submitFeedback": "Enviar comentarios",
     "charCount": "{count}/{max}",
     "privacyNote": "Esta información se utiliza para recibir y procesar las solicitudes de soporte. No envíes contraseñas ni códigos OTP en el contenido de tus comentarios.",
-    "sentSuccessDetail": "El servidor de correo ha recibido sus comentarios. ViRead utilizará su correo electrónico de contacto para informarle cuando haya actualizaciones.",
+    "sentSuccessDetail": "ViRead ha recibido tus comentarios. Usaremos tu correo de contacto para responder cuando haya novedades.",
     "submitError": "No se pudo enviar el comentario. Por favor, inténtelo de nuevo más tarde.",
     "categories": {
       "technical_issue": "Reportar un error técnico",
@@ -220,8 +220,8 @@
         "title": "Libros y reconocimiento",
         "q1": "¿Cómo seleccionar un libro?",
         "a1": "Abre el catálogo de libros, selecciona un libro disponible en el catálogo y sigue las instrucciones en pantalla para comenzar.",
-        "q2": "¿Qué debo hacer si el contenido de OCR no es correcto?",
-        "a2": "Los padres pueden enviar comentarios en esta página. Por favor, especifique el título del libro, el número de página y describa el contenido de OCR que no se reconoció correctamente. El contenido de OCR debe ser verificado antes de usarse en las sesiones de lectura."
+        "q2": "¿Qué hago si el texto reconocido de la página no es preciso?",
+        "a2": "Puedes enviar comentarios aquí indicando el título del libro, el número de página y el error para que ViRead lo revise y actualice."
       },
       "reading": {
         "title": "Sesión de lectura",
@@ -249,6 +249,11 @@
     "selectedBadge": "Seleccionado",
     "regionLabel": "Región",
     "voiceListLabel": "Voz específica",
-    "voiceListAria": "Voces disponibles por docente y región"
+    "voiceListAria": "Voces disponibles por docente y región",
+    "policyLabel": "Modo del motor de voz",
+    "policyAria": "Elegir modo del motor de voz",
+    "policyLocalOnly": "Solo este dispositivo",
+    "policyOnlineBackup": "Este dispositivo + Respaldo en línea",
+    "workerOfflineHint": "El motor de voz local está inactivo. Activa «Este dispositivo + Respaldo en línea» para escuchar frases de libros y juegos sin caché previa."
   }
 }

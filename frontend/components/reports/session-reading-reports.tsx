@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { BookPageContent } from "@/components/reading/book-page-content";
@@ -56,6 +57,41 @@ type ReportsState =
   | { readonly status: "unavailable" }
   | { readonly status: "error" };
 
+const COMPARISONS_PER_PAGE = 5;
+const METRIC_WORDS_PAGE_SIZE = 24;
+
+type PageSlot = number | "ellipsis-start" | "ellipsis-end";
+
+function buildVisiblePageSlots(total: number, activeIndex: number): PageSlot[] {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, idx) => idx);
+  }
+  const safeActive = Math.min(Math.max(0, activeIndex), total - 1);
+  if (safeActive <= 3) {
+    return [0, 1, 2, 3, 4, "ellipsis-end", total - 1];
+  }
+  if (safeActive >= total - 4) {
+    return [
+      0,
+      "ellipsis-start",
+      total - 5,
+      total - 4,
+      total - 3,
+      total - 2,
+      total - 1,
+    ];
+  }
+  return [
+    0,
+    "ellipsis-start",
+    safeActive - 1,
+    safeActive,
+    safeActive + 1,
+    "ellipsis-end",
+    total - 1,
+  ];
+}
+
 function ReportCard({
   group,
   activeReport,
@@ -93,8 +129,49 @@ function ReportCard({
 }) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const [comparisonsPageState, setComparisonsPageState] = useState<{
+    readonly key: string;
+    readonly page: number;
+  }>({ key: group.key, page: 1 });
+  const metricScopeKey = `${activeReport.report_id}:${selectedMetric ?? ""}`;
+  const [metricWordsPageState, setMetricWordsPageState] = useState<{
+    readonly key: string;
+    readonly page: number;
+  }>({ key: metricScopeKey, page: 1 });
   const metrics = buildReportWordMetrics(activeReport);
   const activeMetric = metrics.find((metric) => metric.key === selectedMetric);
+  const rawComparisonsPage =
+    comparisonsPageState.key === group.key ? comparisonsPageState.page : 1;
+  const totalComparisonPages = Math.max(
+    1,
+    Math.ceil(group.allReports.length / COMPARISONS_PER_PAGE),
+  );
+  const safeComparisonsPage = Math.min(
+    Math.max(1, rawComparisonsPage),
+    totalComparisonPages,
+  );
+  const comparisonsStart = (safeComparisonsPage - 1) * COMPARISONS_PER_PAGE;
+  const visibleComparisons = group.allReports.slice(
+    comparisonsStart,
+    comparisonsStart + COMPARISONS_PER_PAGE,
+  );
+  const activeMetricWords = activeMetric?.words ?? [];
+  const rawMetricWordsPage =
+    metricWordsPageState.key === metricScopeKey ? metricWordsPageState.page : 1;
+  const totalMetricWordPages = Math.max(
+    1,
+    Math.ceil(activeMetricWords.length / METRIC_WORDS_PAGE_SIZE),
+  );
+  const safeMetricWordsPage = Math.min(
+    Math.max(1, rawMetricWordsPage),
+    totalMetricWordPages,
+  );
+  const metricWordsStart = (safeMetricWordsPage - 1) * METRIC_WORDS_PAGE_SIZE;
+  const visibleMetricWords = activeMetricWords.slice(
+    metricWordsStart,
+    metricWordsStart + METRIC_WORDS_PAGE_SIZE,
+  );
+  const visiblePageSlots = buildVisiblePageSlots(groups.length, activeIndex);
   const resolvedPage =
     pageEntry.status === "ready" ? pageEntry.page : undefined;
   const isPrimary = activeReport.report_id === group.primaryReport.report_id;
@@ -109,14 +186,14 @@ function ReportCard({
 
   return (
     <article
-      className="flex flex-col gap-5"
+      className="flex flex-col gap-3"
       data-active-report-id={activeReport.report_id}
       data-report-group={group.key}
     >
-      <div className="flex flex-col justify-between gap-3 border-b border-border pb-3.5 sm:flex-row sm:items-center">
+      <div className="flex flex-col justify-between gap-2 border-b border-border/80 pb-2 sm:flex-row sm:items-center">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-lg font-extrabold text-ink sm:text-xl">
+            <h3 className="text-sm font-extrabold text-ink sm:text-base">
               {resolvedPage
                 ? t("sessions.readingReports.pageLabel", {
                     page: resolvedPage.page_number,
@@ -125,7 +202,7 @@ function ReportCard({
                     page: pageNumber,
                   })}
             </h3>
-            <span className="rounded-control bg-canvas px-2.5 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
+            <span className="rounded-control bg-canvas px-2 py-0.5 text-xs font-bold text-muted ring-1 ring-inset ring-border">
               {isImmutable
                 ? t("sessions.readingReports.firstPassTag")
                 : isPrimary
@@ -149,7 +226,7 @@ function ReportCard({
           >
             <button
               aria-label={t("sessions.readingReports.prevReportAria")}
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={pageNumber <= 1}
               onClick={onPrevious}
               type="button"
@@ -161,13 +238,25 @@ function ReportCard({
               {t("sessions.readingReports.prevShort")}
             </button>
             <div className="flex flex-wrap items-center gap-1">
-              {groups.map((item, idx) => {
+              {visiblePageSlots.map((slot) => {
+                if (typeof slot !== "number") {
+                  return (
+                    <span
+                      aria-hidden="true"
+                      className="inline-flex h-9 min-w-7 items-center justify-center px-1 text-xs font-bold text-muted select-none"
+                      key={slot}
+                    >
+                      …
+                    </span>
+                  );
+                }
+                const item = groups[slot];
                 const cached = pageCache.get(item.key);
                 const pageNum =
                   cached?.status === "ready"
                     ? cached.page.page_number
-                    : idx + 1;
-                const isSelected = idx === activeIndex;
+                    : slot + 1;
+                const isSelected = slot === activeIndex;
                 return (
                   <button
                     aria-current={isSelected ? "page" : undefined}
@@ -175,13 +264,13 @@ function ReportCard({
                       page: pageNum,
                     })}
                     className={cn(
-                      "min-h-11 min-w-10 rounded-control px-2.5 text-sm font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "h-9 min-h-9 min-w-9 rounded-control px-2.5 text-xs font-bold tabular-nums transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "bg-primary text-white"
                         : "border border-border bg-white text-ink hover:bg-canvas",
                     )}
                     key={item.key}
-                    onClick={() => onSelectPageIndex(idx)}
+                    onClick={() => onSelectPageIndex(slot)}
                     type="button"
                   >
                     {pageNum}
@@ -191,7 +280,7 @@ function ReportCard({
             </div>
             <button
               aria-label={t("sessions.readingReports.nextReportAria")}
-              className="inline-flex min-h-11 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40 sm:px-3 sm:text-sm"
+              className="inline-flex h-9 min-h-9 items-center justify-center gap-1 rounded-control border border-border bg-white px-2.5 text-xs font-bold text-primary hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-40"
               disabled={pageNumber >= pageCount}
               onClick={onNext}
               type="button"
@@ -206,26 +295,26 @@ function ReportCard({
         ) : null}
       </div>
 
-      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(290px,1fr)]">
-        <div className="flex flex-col gap-3">
-          <div className="rounded-card border border-border bg-cream p-3 sm:p-5">
+      <div className="grid items-start gap-3.5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,1fr)]">
+        <div className="flex flex-col gap-2">
+          <div className="rounded-card border border-border bg-cream p-2.5 sm:p-3.5">
             {pageEntry.status === "loading" ? (
               <div
                 aria-busy="true"
                 aria-label={t("sessions.readingReports.loadingPageAria")}
-                className="space-y-3 p-3"
+                className="space-y-2.5 p-2.5"
               >
                 <Skeleton className="h-5 w-44" />
-                <Skeleton className="h-36 rounded-control" />
+                <Skeleton className="h-28 rounded-control" />
               </div>
             ) : resolvedPage ? (
               <article
-                className="relative mx-auto flex min-h-[220px] w-full flex-col rounded-control bg-[#fffdfa] p-3.5 sm:min-h-[280px] sm:p-6"
+                className="relative mx-auto flex min-h-[140px] w-full flex-col rounded-control bg-[#fffdfa] p-3 sm:min-h-[170px] sm:p-4"
                 data-page-id={resolvedPage.page_id}
                 data-page-revision-id={resolvedPage.page_revision_id}
               >
                 <header className="mb-2 flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2.5 py-1 text-xs font-bold text-success-ink">
+                  <span className="inline-flex items-center gap-1.5 rounded-control bg-success-surface px-2 py-0.5 text-xs font-bold text-success-ink">
                     <span className="size-1.5 rounded-full bg-success-ink" />
                     {t("sessions.readingReports.verifiedPageTitle")}
                   </span>
@@ -244,7 +333,7 @@ function ReportCard({
                   readOnly
                 />
                 {(activeReport.self_corrected_word_ids?.length ?? 0) > 0 ? (
-                  <p className="mt-3 inline-flex items-center gap-1.5 self-start rounded-control border border-green-600/30 bg-green-100 px-3 py-1 text-xs font-bold text-green-900">
+                  <p className="mt-2.5 inline-flex items-center gap-1.5 self-start rounded-control border border-green-600/30 bg-green-100 px-2.5 py-0.5 text-xs font-bold text-green-900">
                     <span aria-hidden="true">↺</span>
                     {t("sessions.readingReports.selfCorrectedCount", {
                       count: activeReport.self_corrected_word_ids?.length ?? 0,
@@ -253,7 +342,7 @@ function ReportCard({
                 ) : null}
               </article>
             ) : (
-              <div className="flex min-h-44 items-center justify-center rounded-control bg-white/80 p-5 text-center text-sm text-muted">
+              <div className="flex min-h-36 items-center justify-center rounded-control bg-white/80 p-4 text-center text-sm text-muted">
                 {t("sessions.readingReports.pageMissingContentNote")}
               </div>
             )}
@@ -265,7 +354,7 @@ function ReportCard({
           >
             {REPORT_WORD_LEGEND.map((legend) => (
               <li
-                className={`rounded-control border px-2.5 py-1 ${legend.swatchClassName}`}
+                className={`rounded-control border px-2 py-0.5 ${legend.swatchClassName}`}
                 key={legend.key}
               >
                 {t(`sessions.readingReports.legend.${legend.key}`)}
@@ -274,8 +363,8 @@ function ReportCard({
           </ul>
         </div>
 
-        <div className="flex flex-col gap-4">
-          <div className="space-y-2">
+        <div className="flex flex-col gap-3">
+          <div className="space-y-1.5">
             <p className="text-xs font-bold text-muted">
               {t("sessions.readingReports.wordBreakdownTitle")}
             </p>
@@ -289,7 +378,7 @@ function ReportCard({
                   <button
                     aria-expanded={isSelected}
                     className={cn(
-                      "min-h-18 rounded-control border p-3 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      "flex min-h-14 flex-col justify-between rounded-control border p-2.5 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
                       isSelected
                         ? "border-primary bg-sky"
                         : "border-border bg-white hover:bg-canvas",
@@ -299,11 +388,11 @@ function ReportCard({
                     type="button"
                   >
                     <span
-                      className={`block text-xs font-bold ${metric.accentClassName}`}
+                      className={`block text-xs font-bold leading-snug ${metric.accentClassName}`}
                     >
                       {metricLabel}
                     </span>
-                    <span className="mt-1 block text-2xl font-extrabold tabular-nums text-ink">
+                    <span className="mt-1 block text-xl font-extrabold tabular-nums text-ink">
                       {metric.count}
                     </span>
                   </button>
@@ -324,18 +413,36 @@ function ReportCard({
                 {activeMetric.count}
               </h4>
               {activeMetric.words.length > 0 ? (
-                <ul className="mt-2.5 flex flex-wrap gap-1.5">
-                  {activeMetric.words.map((word, index) => (
-                    <li
-                      className="viread-learning-content rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
-                      dir="ltr"
-                      key={`${word}-${index}`}
-                      lang="vi"
-                    >
-                      {word}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <ul className="mt-2.5 flex flex-wrap gap-1.5">
+                    {visibleMetricWords.map((word, index) => (
+                      <li
+                        className="viread-learning-content rounded-control border border-border bg-white px-2.5 py-1 text-sm font-bold text-ink"
+                        dir="ltr"
+                        key={`${word}-${metricWordsStart + index}`}
+                        lang="vi"
+                      >
+                        {word}
+                      </li>
+                    ))}
+                  </ul>
+                  <PaginationBar
+                    ariaLabel={t(
+                      `sessions.readingReports.wordMetrics.${activeMetric.key}`,
+                    )}
+                    className="mt-2.5"
+                    compact
+                    onPageChange={(nextPage) =>
+                      setMetricWordsPageState({
+                        key: metricScopeKey,
+                        page: nextPage,
+                      })
+                    }
+                    page={safeMetricWordsPage}
+                    pageSize={METRIC_WORDS_PAGE_SIZE}
+                    total={activeMetricWords.length}
+                  />
+                </>
               ) : (
                 <p className="mt-1.5 text-sm text-muted">
                   {t("sessions.readingReports.noWordsInCategory")}
@@ -344,7 +451,7 @@ function ReportCard({
             </section>
           ) : null}
 
-          <div className="rounded-control border border-border bg-canvas/70 p-3.5">
+          <div className="rounded-control bg-canvas/70 p-3">
             <p className="text-xs font-bold text-muted">
               {t("sessions.readingReports.recordedSpeechLabel")}
             </p>
@@ -366,8 +473,8 @@ function ReportCard({
       </div>
 
       {group.additionalReports.length > 0 ? (
-        <details className="group rounded-control border border-border bg-canvas/60 px-4 py-3">
-          <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink">
+        <details className="group rounded-control border border-border bg-canvas/60 px-3 py-2">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between gap-2 text-sm font-bold text-ink [&::-webkit-details-marker]:hidden">
             <span>
               {t("sessions.readingReports.otherComparisonsTitle", {
                 count: group.additionalReports.length,
@@ -382,7 +489,8 @@ function ReportCard({
             {t("sessions.readingReports.otherComparisonsSubtitle")}
           </p>
           <ul className="mt-3 divide-y divide-border rounded-control border border-border bg-white">
-            {group.allReports.map((entry, idx) => {
+            {visibleComparisons.map((entry, localIdx) => {
+              const idx = comparisonsStart + localIdx;
               const selected = entry.report_id === activeReport.report_id;
               const entryImmutable = isImmutableFirstPassReport(entry);
               const entryTranscript = entry.transcript.trim();
@@ -431,9 +539,10 @@ function ReportCard({
                   <div className="flex flex-wrap items-center gap-2">
                     {!selected ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="h-9 min-h-9! px-3! py-0! text-xs!"
                         fullWidth={false}
                         onClick={() => onSelectReport(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="secondary"
                       >
@@ -446,11 +555,12 @@ function ReportCard({
                       </span>
                     ) : onRequestDelete ? (
                       <Button
-                        className="min-h-10 px-3 py-1.5 text-xs"
+                        className="h-9 min-h-9! px-3! py-0! text-xs!"
                         disabled={deletingId !== null}
                         fullWidth={false}
                         isLoading={deletingId === entry.report_id}
                         onClick={() => onRequestDelete(entry.report_id)}
+                        size="admin"
                         type="button"
                         variant="destructive"
                       >
@@ -463,6 +573,18 @@ function ReportCard({
               );
             })}
           </ul>
+          <PaginationBar
+            ariaLabel={t("sessions.readingReports.additionalPaginationAria")}
+            className="mt-3"
+            compact
+            itemLabel={t("sessions.readingReports.additionalPaginationItem")}
+            onPageChange={(nextPage) =>
+              setComparisonsPageState({ key: group.key, page: nextPage })
+            }
+            page={safeComparisonsPage}
+            pageSize={COMPARISONS_PER_PAGE}
+            total={group.allReports.length}
+          />
         </details>
       ) : null}
     </article>
@@ -654,21 +776,22 @@ export function SessionReadingReports({
   return (
     <section
       aria-labelledby="session-reading-reports-title"
-      className="flex flex-col gap-5 rounded-card border border-border bg-white p-4 sm:p-6"
+      className="flex flex-col gap-3 rounded-card border border-border bg-white p-3.5 sm:p-4"
       data-testid="session-primary-reading-report"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2
-          className="book-title text-2xl text-ink"
+          className="book-title text-base text-ink sm:text-lg"
           id="session-reading-reports-title"
         >
           {t("sessions.readingReports.pageHeading")}
         </h2>
         {state.status !== "loading" && state.status !== "empty" ? (
           <Button
-            className="min-h-10 px-3 py-1.5 text-xs"
+            className="h-9 min-h-9! px-3! py-0! text-xs!"
             fullWidth={false}
             onClick={() => setRequestKey((key) => key + 1)}
+            size="admin"
             variant="quiet"
           >
             <RefreshCw aria-hidden="true" className="size-3.5" />

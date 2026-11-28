@@ -96,6 +96,7 @@ type LoadState =
   | { status: "error" };
 
 interface ReadingVoiceSettingsProps {
+  childId?: string | null;
   disabled?: boolean;
   isPreviewing?: boolean;
   fallbackNotice?: string | null;
@@ -166,6 +167,7 @@ function voiceDetails(voice: VoiceOption, t: SpeechTranslateFn): string {
 }
 
 export function ReadingVoiceSettings({
+  childId = null,
   disabled = false,
   isPreviewing = false,
   fallbackNotice = null,
@@ -184,7 +186,7 @@ export function ReadingVoiceSettings({
     () => appServices?.childService ?? createChildService(),
     [appServices?.childService],
   );
-  const selectedChildId = appStore?.selectedChildId ?? null;
+  const selectedChildId = childId ?? appStore?.selectedChildId ?? null;
   const { preferences, update } = useSpeechPreferences();
   const teacherPersona = useTeacherPersona();
   const policy = useSyncExternalStore(
@@ -292,7 +294,7 @@ export function ReadingVoiceSettings({
   const buildVoiceContextKey = useCallback(
     (healthSnap = getCachedVoiceEngineHealth()) => {
       const currentPolicy = getVoicePolicyPreferences();
-      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}`;
+      return `${currentPolicy.providerMode}:${currentPolicy.allowGoogleTtsFallback}:${healthSnap?.local.available ?? "u"}:${healthSnap?.google.tts_configured ?? "u"}:${healthSnap?.elevenlabs?.tts_configured ?? "u"}:${healthSnap?.elevenlabs?.male_tts_configured ?? "u"}`;
     },
     [],
   );
@@ -337,7 +339,10 @@ export function ReadingVoiceSettings({
               ? fallbackVoice.voice_id
               : null;
           setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
-          update({ voiceId: fallbackVoiceId });
+          update({
+            voiceId: fallbackVoiceId,
+            gender: fallbackVoiceId ? preservedGender : "female",
+          });
           syncPausedSessionLock(fallbackVoiceId);
         }
         setLoadState({ status: "ready", data });
@@ -679,10 +684,15 @@ export function ReadingVoiceSettings({
                   void Promise.resolve()
                     .then(() => onPreview(previewText))
                     .catch((error: unknown) => {
+                      const isAbortError =
+                        typeof error === "object" &&
+                        error !== null &&
+                        "name" in error &&
+                        (error as { name?: unknown }).name === "AbortError";
                       if (
                         mountedRef.current &&
                         generation === previewGenerationRef.current &&
-                        !(error instanceof Error && error.name === "AbortError")
+                        !isAbortError
                       )
                         setPreviewError(true);
                     })

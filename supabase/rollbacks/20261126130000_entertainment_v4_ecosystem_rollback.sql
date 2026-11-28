@@ -1,4 +1,4 @@
--- Rollback for ViRead Intelligent Play & Learn V4.0 additive schema (20261126120000).
+-- Rollback for ViRead Intelligent Play & Learn V4.0 additive schema (20261126130000).
 begin;
 set local lock_timeout = '3s';
 set local statement_timeout = '30s';

@@ -94,52 +94,55 @@ class CatalogRepository:
         )
 
     @staticmethod
-    def current_page_safety_approved():
+    def current_page_safety_approved(*, require_verified: bool = False):
+        conditions = [
+            PageRevision.PageId == BookPage.Id,
+            AdminAiWorkflow.PageId == BookPage.Id,
+            AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
+            AdminAiWorkflow.Status == "READY_FOR_ADMIN_REVIEW",
+            AdminAiWorkflow.SafetyConfirmedAt.is_not(None),
+            AdminAiWorkflow.SafetyInputHash == AdminAiWorkflow.CandidateHash,
+            AdminAiWorkflow.FinalApprovedTextHash == AdminAiWorkflow.CandidateHash,
+            AdminAiWorkflow.OcrApprovedAt.is_not(None),
+            AdminAiWorkflow.OcrApprovedBy.is_not(None),
+            AdminAiWorkflow.Findings == [],
+            or_(
+                AdminAiWorkflow.ImageSafetyStatus.is_(None),
+                AdminAiWorkflow.ImageSafetyStatus != "ADMIN_FLAGGED_UNSAFE",
+            ),
+            or_(
+                and_(
+                    AdminAiWorkflow.SafetyStatus == "CONFIRMED",
+                    AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
+                    AdminAiWorkflow.Suitability.in_(
+                        ("SUITABLE", "SUITABLE_WITH_GUIDANCE")
+                    ),
+                ),
+                and_(
+                    AdminAiWorkflow.SafetyStatus == "AUTO_CONFIRMED",
+                    AdminAiWorkflow.SafetyConfirmedBy.is_(None),
+                    AdminAiWorkflow.Suitability == "SUITABLE",
+                ),
+            ),
+            PageRevision.ProcessingMeta["admin_ai_workflow"][
+                "workflow_id"
+            ].as_string() == cast(AdminAiWorkflow.Id, String),
+            PageRevision.ProcessingMeta["admin_ai_workflow"][
+                "candidate_hash"
+            ].as_string() == AdminAiWorkflow.CandidateHash,
+            PageRevision.ProcessingMeta["admin_ai_workflow"][
+                "safety_input_hash"
+            ].as_string() == AdminAiWorkflow.CandidateHash,
+        ]
+        if require_verified:
+            conditions.append(PageRevision.VerificationStatus == "VERIFIED")
         return exists(
             select(AdminAiWorkflow.Id)
             .join(
                 PageRevision,
                 PageRevision.Id == BookPage.CurrentVerifiedRevisionId,
             )
-            .where(
-                PageRevision.PageId == BookPage.Id,
-                AdminAiWorkflow.PageId == BookPage.Id,
-                AdminAiWorkflow.PageRevisionId == BookPage.CurrentVerifiedRevisionId,
-                AdminAiWorkflow.Status == "READY_FOR_ADMIN_REVIEW",
-                AdminAiWorkflow.SafetyConfirmedAt.is_not(None),
-                AdminAiWorkflow.SafetyInputHash == AdminAiWorkflow.CandidateHash,
-                AdminAiWorkflow.FinalApprovedTextHash == AdminAiWorkflow.CandidateHash,
-                AdminAiWorkflow.OcrApprovedAt.is_not(None),
-                AdminAiWorkflow.OcrApprovedBy.is_not(None),
-                AdminAiWorkflow.Findings == [],
-                or_(
-                    AdminAiWorkflow.ImageSafetyStatus.is_(None),
-                    AdminAiWorkflow.ImageSafetyStatus != "ADMIN_FLAGGED_UNSAFE",
-                ),
-                or_(
-                    and_(
-                        AdminAiWorkflow.SafetyStatus == "CONFIRMED",
-                        AdminAiWorkflow.SafetyConfirmedBy.is_not(None),
-                        AdminAiWorkflow.Suitability.in_(
-                            ("SUITABLE", "SUITABLE_WITH_GUIDANCE")
-                        ),
-                    ),
-                    and_(
-                        AdminAiWorkflow.SafetyStatus == "AUTO_CONFIRMED",
-                        AdminAiWorkflow.SafetyConfirmedBy.is_(None),
-                        AdminAiWorkflow.Suitability == "SUITABLE",
-                    ),
-                ),
-                PageRevision.ProcessingMeta["admin_ai_workflow"][
-                    "workflow_id"
-                ].as_string() == cast(AdminAiWorkflow.Id, String),
-                PageRevision.ProcessingMeta["admin_ai_workflow"][
-                    "candidate_hash"
-                ].as_string() == AdminAiWorkflow.CandidateHash,
-                PageRevision.ProcessingMeta["admin_ai_workflow"][
-                    "safety_input_hash"
-                ].as_string() == AdminAiWorkflow.CandidateHash,
-            )
+            .where(*conditions)
             .correlate(BookPage)
         )
 
@@ -157,13 +160,13 @@ class CatalogRepository:
                 BookPage.LifecycleStatus.in_(("ACTIVE", "PROCESSING")),
                 or_(
                     BookPage.LifecycleStatus != "ACTIVE",
-                    not_(cls.current_page_revision_verified()),
-                    not_(cls.current_page_safety_approved()),
+                    BookPage.CurrentVerifiedRevisionId.is_(None),
+                    not_(cls.current_page_safety_approved(require_verified=True)),
                 ),
             ).correlate(Book)
         )
-        latest_book_decision_id = (
-            select(AuditLog.Id)
+        latest_book_decision_action = (
+            select(AuditLog.Action)
             .where(
                 AuditLog.ResourceType == "book",
                 AuditLog.ResourceId == Book.Id,
@@ -178,21 +181,19 @@ class CatalogRepository:
         # (OCR + Proofreading + Text/Image Child Safety with zero findings), the book
         # enters the parent/child library automatically without a second book-level
         # approval click — unless explicitly rejected in Chất lượng sách.
-        explicitly_rejected_book = exists(
-            select(AuditLog.Id).where(
-                AuditLog.Id == latest_book_decision_id,
-                AuditLog.Action == "book.children.rejected",
-            )
-        ).correlate(Book)
         criteria = [
             is_catalog_book(),
             Book.IsDeleted.is_(False),
-            child_content_page,
-            not_(unready_page),
-            not_(explicitly_rejected_book),
         ]
         if require_active:
             criteria.append(Book.LifecycleStatus == "ACTIVE")
+        criteria.extend(
+            [
+                child_content_page,
+                not_(unready_page),
+                func.coalesce(latest_book_decision_action, "") != "book.children.rejected",
+            ]
+        )
         return and_(*criteria)
 
     @classmethod

@@ -72,12 +72,12 @@ const AUDIO_QUALITY_PROFILES: Record<AudioQualityMode, AudioQualityProfile> = {
   "short-word": {
     calibrationWindowMs: 60,
     minDurationMs: 160,
-    minSpeechDurationMs: 60,
+    minSpeechDurationMs: 40,
     minPeakRms: 0.003,
-    candidateOnsetMs: 50,
+    candidateOnsetMs: 40,
     hangoverMs: 220,
     onsetFloor: 0.0022,
-    onsetMultiplier: 2.4,
+    onsetMultiplier: 1.8,
     offsetFloor: 0.0012,
     offsetMultiplier: 1.4,
   },
@@ -133,13 +133,14 @@ export class AudioQualityMonitor {
     let peak = 0;
     let clippedSamples = 0;
     for (const sample of samples) {
-      if (!Number.isFinite(sample) || Math.abs(sample) > 1) {
+      if (!Number.isFinite(sample)) {
         this.invalid = true;
         continue;
       }
-      sum += sample * sample;
-      peak = Math.max(peak, Math.abs(sample));
-      if (Math.abs(sample) >= 0.99) clippedSamples++;
+      const clampedAbs = Math.min(1, Math.abs(sample));
+      sum += clampedAbs * clampedAbs;
+      peak = Math.max(peak, clampedAbs);
+      if (clampedAbs >= 0.99) clippedSamples++;
     }
     const frameClipped = clippedSamples / samples.length > 0.05;
     this.clipWindow.push({
@@ -267,7 +268,11 @@ export class AudioQualityMonitor {
         status = "SPEECH_DETECTED";
       else status = "BACKGROUND_NOISE";
     }
-    return { ...this.snapshot, status };
+    return {
+      ...this.snapshot,
+      clipped: this.invalid ? false : this.snapshot.clipped,
+      status,
+    };
   }
 }
 
@@ -288,15 +293,23 @@ export function hasUnusableAudio(quality?: AudioQualitySnapshot): boolean {
 /**
  * Trong luyện đọc từ ngắn, giọng đọc nhỏ ("LOW_VOLUME") hoặc nền ồn nhẹ
  * ("BACKGROUND_NOISE") vẫn mang đầy đủ âm vị tiếng Việt để gửi lên STT.
- * Chỉ chặn âm thanh rỗng, câm hoàn toàn, quá ngắn hoặc bị vỡ tiếng.
+ * Âm thanh bị clipping nhẹ vẫn được gửi lên STT miễn là có đủ thời lượng tiếng nói.
+ * Chỉ chặn âm thanh rỗng, câm hoàn toàn, quá ngắn hoặc mẫu dữ liệu lỗi (NaN/Infinity).
  */
 export function hasShortWordBlockingAudioIssue(
   quality?: AudioQualitySnapshot,
 ): boolean {
-  return (
-    quality !== undefined &&
-    ["NO_AUDIO", "SILENCE", "AUDIO_TOO_SHORT", "INVALID_AUDIO"].includes(
-      quality.status,
-    )
+  if (quality === undefined) return false;
+  if (
+    quality.status === "INVALID_AUDIO" &&
+    quality.clipped &&
+    Number.isFinite(quality.rms) &&
+    quality.speechDurationMs >=
+      AUDIO_QUALITY_PROFILES["short-word"].minSpeechDurationMs
+  ) {
+    return false;
+  }
+  return ["NO_AUDIO", "SILENCE", "AUDIO_TOO_SHORT", "INVALID_AUDIO"].includes(
+    quality.status,
   );
 }

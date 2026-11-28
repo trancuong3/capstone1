@@ -30,11 +30,14 @@ import {
   hasUsableTranscript,
 } from "@/lib/reading/recognition-evidence";
 import {
+  buildContrastiveKeyterms,
   classifyPracticePhraseTranscript,
   stripNonSpeechAnnotations,
   type RetryRecognitionStatus,
 } from "@/lib/reading/retry-word-recognition";
 import type { SpeechService } from "@/lib/api/speech-service";
+
+export const SHORT_WORD_CONTEXT_RETRY_THRESHOLD = 1;
 
 export type WordPracticeState =
   | "IDLE"
@@ -53,7 +56,7 @@ export const SHORT_WORD_CAPTURE_CONFIG = {
   pollIntervalMs: 120,
   acousticSettleMs: 140,
   minCaptureMs: 800,
-  postSpeechSilenceMs: 800,
+  postSpeechSilenceMs: 950,
   noSpeechTimeoutMs: 4500,
   maxCaptureMs: 6500,
   softSpeechRmsThreshold: 0.015,
@@ -146,6 +149,7 @@ export interface ShortWordSpeechActivityInput {
   readonly hasLiveBrowserSpeech: boolean;
   readonly speechObserved?: boolean;
   readonly previousSpeechDurationMs?: number;
+  readonly consecutiveEnergyPolls?: number;
 }
 
 export function hasShortWordSpeechActivity(
@@ -157,18 +161,62 @@ export function hasShortWordSpeechActivity(
       ? input.audioLevel / 500
       : input.audioLevel;
   const speechDurationMs = input.quality?.speechDurationMs ?? 0;
-  const initialBurstOnset = !input.speechObserved && speechDurationMs >= 50;
+  const noiseFloor = input.quality?.noiseFloor ?? 0;
+  const initialBurstOnset = !input.speechObserved && speechDurationMs >= 40;
   const speechDurationGrew =
     input.previousSpeechDurationMs !== undefined &&
     speechDurationMs > input.previousSpeechDurationMs;
+  const hasRelativeEnergy =
+    liveRms >= Math.max(0.008, noiseFloor * 1.8) &&
+    (Boolean(input.speechObserved) ||
+      (input.consecutiveEnergyPolls ?? 0) >= 2 ||
+      speechDurationMs >= 40);
   return (
     input.hasLiveBrowserSpeech ||
     input.isSpeakingNow ||
     Boolean(input.quality?.isSpeaking) ||
-    liveRms >= SHORT_WORD_CAPTURE_CONFIG.softSpeechRmsThreshold ||
     initialBurstOnset ||
-    speechDurationGrew
+    speechDurationGrew ||
+    hasRelativeEnergy
   );
+}
+
+export interface ShortWordKeytermPass2Input {
+  readonly status: RetryRecognitionStatus | "ENGINE_ERROR";
+  readonly audioQuality?: AudioQualitySnapshot;
+  readonly transcript?: string | null;
+  readonly browserStatus?: RetryRecognitionStatus | null;
+  readonly hasNonSpeechTagOnly?: boolean;
+}
+
+export function shouldAttemptShortWordKeytermPass2({
+  status,
+  audioQuality,
+  transcript,
+  browserStatus,
+  hasNonSpeechTagOnly,
+}: ShortWordKeytermPass2Input): boolean {
+  const nonSpeechOnly =
+    hasNonSpeechTagOnly ??
+    Boolean(
+      transcript &&
+      transcript.trim() &&
+      !stripNonSpeechAnnotations(transcript).trim(),
+    );
+  if (nonSpeechOnly) return false;
+  if (status === "INCORRECT" && browserStatus === "CORRECT") {
+    return true;
+  }
+  if (status !== "NOT_RECOGNIZED" && status !== "UNCERTAIN") {
+    return false;
+  }
+  if (audioQuality?.status === "SPEECH_DETECTED") {
+    return true;
+  }
+  if (browserStatus === "CORRECT") {
+    return true;
+  }
+  return status === "UNCERTAIN";
 }
 
 export type ShortWordEvaluationSource =
@@ -342,20 +390,28 @@ export async function evaluateRecordedShortWord({
 
     const shouldTryKeytermPass =
       !permanentlyUnconfigured &&
-      (firstStatus === "UNCERTAIN" ||
-        (firstStatus === "NOT_RECOGNIZED" && !hasNonSpeechTagOnly) ||
-        (firstStatus === "INCORRECT" && browserStatus === "CORRECT"));
+      shouldAttemptShortWordKeytermPass2({
+        status: firstStatus,
+        audioQuality,
+        transcript: firstText,
+        browserStatus,
+        hasNonSpeechTagOnly,
+      });
 
     if (shouldTryKeytermPass) {
       try {
         const secondPass = await speechService.transcribe(audioBlob, {
           filename,
           languageCode: "vi",
-          keyterms: [expectedWord],
+          keyterms: buildContrastiveKeyterms(expectedWord, contextPhrase),
         });
         const secondText = secondPass.text.trim();
         const corroborated = browserStatus === "CORRECT";
-        const highConf = hasHighConfidenceKeytermResult(secondPass);
+        const highConf = hasHighConfidenceKeytermResult(
+          secondPass,
+          expectedWord,
+          browserStatus,
+        );
         if (hasUsableTranscript(secondPass) && (corroborated || highConf)) {
           return {
             status: classifyPracticePhraseTranscript(expectedWord, secondText, {

@@ -189,7 +189,7 @@
     "submitFeedback": "Send feedback",
     "charCount": "{count}/{max}",
     "privacyNote": "This email will be used to process your request. Do not include passwords or OTPs.",
-    "sentSuccessDetail": "Your feedback has been received. ViRead will use this email to provide updates.",
+    "sentSuccessDetail": "ViRead has received your feedback. We will use your contact email to reply with updates.",
     "submitError": "Failed to send feedback. Please try again later.",
     "categories": {
       "technical_issue": "Report a technical issue",
@@ -220,8 +220,8 @@
         "title": "Books and recognition",
         "q1": "How do I select a book?",
         "a1": "Open the book catalog, select a book, and follow the on-screen instructions to begin.",
-        "q2": "What should I do if the OCR content is incorrect?",
-        "a2": "Parents can submit feedback on this page. Please specify the book title, page number, and describe the inaccurate recognition. OCR content must be verified before use in reading sessions."
+        "q2": "What should I do if recognized page text is inaccurate?",
+        "a2": "You can submit feedback on this page with the book title, page number, and a description of the inaccurate text so ViRead can review and update it."
       },
       "reading": {
         "title": "Reading session",
@@ -249,6 +249,11 @@
     "selectedBadge": "Selected",
     "regionLabel": "Accent region",
     "voiceListLabel": "Specific voice",
-    "voiceListAria": "Voices matching selected teacher and region"
+    "voiceListAria": "Voices matching selected teacher and region",
+    "policyLabel": "Voice engine mode",
+    "policyAria": "Choose voice engine mode",
+    "policyLocalOnly": "This device only",
+    "policyOnlineBackup": "This device + Online backup",
+    "workerOfflineHint": "The local voice worker is offline. Turn on “This device + Online backup” so your child can hear uncached book sentences and game audio."
   }
 }

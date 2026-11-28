@@ -41,15 +41,15 @@
     "books": "도서관",
     "metadataQuality": "도서 품질",
     "auditLogs": "감사 로그",
-    "training": "OCR 학습",
+    "training": "문자 인식 모델",
     "health": "운영",
     "moreTitle": "기타 관리",
     "mobileQualityShort": "품질",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "문자",
     "mobileMoreDescriptions": {
       "auditLogs": "관리자 감사 로그 추적",
-      "training": "VietOCR V2 모델 학습 및 운영",
-      "health": "시스템 상태, OCR 워커 및 음성"
+      "training": "문자 인식 모델 학습 및 운영",
+      "health": "시스템 상태, 문자 인식 및 음성"
     }
   },
   "accountMenu": {

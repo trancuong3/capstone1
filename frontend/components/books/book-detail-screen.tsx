@@ -78,7 +78,7 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
     pageNumber: number | null;
   } | null>(null);
   const [thumbnailPage, setThumbnailPage] = useState(1);
-  const THUMBNAILS_PER_PAGE = 24;
+  const THUMBNAILS_PER_PAGE = 12;
 
   useEffect(() => {
     let isActive = true;
@@ -656,48 +656,63 @@ export function BookDetailScreen({ bookId }: BookDetailScreenProps) {
                 </Button>
               </div>
             ) : null}
-            <div
-              aria-label={t("detail.previewGridAria")}
-              className="flex gap-4 overflow-x-auto pb-1"
-            >
-              {pages
-                .slice(
-                  (thumbnailPage - 1) * THUMBNAILS_PER_PAGE,
-                  thumbnailPage * THUMBNAILS_PER_PAGE,
-                )
-                .map((page) => (
-                  <BookPageThumbnail
-                    isSelected={selectedPage?.page_id === page.page_id}
-                    key={page.page_id}
-                    onSelect={(nextPage) => {
-                      setSelectedPage(nextPage);
-                      setSelectedEndPageId((currentEndId) => {
-                        const currentEnd = pages.find(
-                          (candidate) => candidate.page_id === currentEndId,
-                        );
-                        return !currentEnd ||
-                          currentEnd.page_number < nextPage.page_number
-                          ? nextPage.page_id
-                          : currentEnd.page_id;
-                      });
-                      setStartState("idle");
-                    }}
-                    page={page}
-                  />
-                ))}
-            </div>
-            {pages.length > THUMBNAILS_PER_PAGE ? (
-              <PaginationBar
-                ariaLabel={t("detail.previewPaginationAria")}
-                className="mt-3"
-                compact
-                itemLabel={t("detail.previewPaginationItemLabel")}
-                onPageChange={setThumbnailPage}
-                page={thumbnailPage}
-                pageSize={THUMBNAILS_PER_PAGE}
-                total={pages.length}
-              />
-            ) : null}
+            {(() => {
+              const totalThumbnailPages = Math.max(
+                1,
+                Math.ceil(pages.length / THUMBNAILS_PER_PAGE),
+              );
+              const safeThumbnailPage = Math.min(
+                Math.max(1, thumbnailPage),
+                totalThumbnailPages,
+              );
+              return (
+                <>
+                  <div
+                    aria-label={t("detail.previewGridAria")}
+                    className="flex gap-4 overflow-x-auto pb-1"
+                  >
+                    {pages
+                      .slice(
+                        (safeThumbnailPage - 1) * THUMBNAILS_PER_PAGE,
+                        safeThumbnailPage * THUMBNAILS_PER_PAGE,
+                      )
+                      .map((page) => (
+                        <BookPageThumbnail
+                          isSelected={selectedPage?.page_id === page.page_id}
+                          key={page.page_id}
+                          onSelect={(nextPage) => {
+                            setSelectedPage(nextPage);
+                            setSelectedEndPageId((currentEndId) => {
+                              const currentEnd = pages.find(
+                                (candidate) =>
+                                  candidate.page_id === currentEndId,
+                              );
+                              return !currentEnd ||
+                                currentEnd.page_number < nextPage.page_number
+                                ? nextPage.page_id
+                                : currentEnd.page_id;
+                            });
+                            setStartState("idle");
+                          }}
+                          page={page}
+                        />
+                      ))}
+                  </div>
+                  {pages.length > THUMBNAILS_PER_PAGE ? (
+                    <PaginationBar
+                      ariaLabel={t("detail.previewPaginationAria")}
+                      className="mt-3"
+                      compact
+                      itemLabel={t("detail.previewPaginationItemLabel")}
+                      onPageChange={setThumbnailPage}
+                      page={safeThumbnailPage}
+                      pageSize={THUMBNAILS_PER_PAGE}
+                      total={pages.length}
+                    />
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         </div>
       </div>

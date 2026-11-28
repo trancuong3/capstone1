@@ -79,6 +79,29 @@ foreach ($kv in $expectedHashes.GetEnumerator()) {
 }
 Write-Host "  Verified 5/5 Sherpa-ONNX SHA-256 checksums."
 
+$bpeModelPath = Join-Path $sherpaDir "bpe.model"
+$bpeVocabPath = Join-Path $sherpaDir "bpe.vocab"
+if ((Test-Path $bpeModelPath) -and (-not (Test-Path $bpeVocabPath))) {
+    Write-Host "  Checking sentencepiece availability to export bpe.vocab..."
+    @'
+import os, sys
+from pathlib import Path
+bpe_model = Path(sys.argv[1])
+bpe_vocab = Path(sys.argv[2])
+try:
+    import sentencepiece as spm
+except ImportError:
+    print("  sentencepiece not installed; skipping bpe.vocab export (worker will fallback).")
+    sys.exit(0)
+sp = spm.SentencePieceProcessor()
+sp.load(str(bpe_model))
+lines = [f"{sp.id_to_piece(i)}\t{sp.get_score(i)}\n" for i in range(sp.get_piece_size())]
+bpe_vocab.write_text("".join(lines), encoding="utf-8")
+print(f"  Exported bpe.vocab ({len(lines)} pieces) from bpe.model.")
+'@ | & $pyExe - $bpeModelPath $bpeVocabPath
+    if ($LASTEXITCODE -ne 0) { throw "Failed while exporting bpe.vocab from bpe.model." }
+}
+
 Write-Host "[4/4] Pre-caching VieNeu-TTS v3 Turbo ($TtsPrecision) ONNX weights..."
 @'
 import os, sys

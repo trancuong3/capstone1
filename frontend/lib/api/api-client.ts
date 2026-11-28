@@ -5,9 +5,11 @@ import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
+  refreshBrowserAccessToken,
 } from "@/lib/api/browser-auth";
 import {
   invalidateApiReadCache,
+  invalidateApiReadCacheByPrefix,
   runCoalescedApiGet,
 } from "@/lib/api/read-cache";
 import { translateMessage } from "@/lib/i18n/formatter";
@@ -382,65 +384,65 @@ const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
   PARENT_AUTH_OPERATION_FAILED:
     "Không thể hoàn tất thao tác xác thực tài khoản phụ huynh lúc này. Vui lòng thử lại sau.",
   PROCESSING_UNAVAILABLE:
-    "Dịch vụ xử lý tài liệu và OCR đang tạm thời không khả dụng. Vui lòng thử lại sau.",
+    "Dịch vụ xử lý tài liệu đang tạm thời không khả dụng. Vui lòng thử lại sau.",
   PROVIDER_NOT_CONFIGURED:
-    "Dịch vụ tích hợp trên máy chủ chưa được cấu hình đầy đủ. Vui lòng liên hệ quản trị viên.",
+    "Tính năng này hiện chưa được kích hoạt đầy đủ. Vui lòng thử lại sau hoặc liên hệ bộ phận hỗ trợ.",
   REVISION_CONFLICT:
     "Phiên bản nội dung đã thay đổi trước đó. Hãy tải lại trang để cập nhật bản mới nhất.",
   DRIVE_QUOTA_EXCEEDED:
-    "Dung lượng Google Drive miễn phí sắp chạm ngưỡng an toàn. Hãy dọn Thùng rác Drive hoặc xóa snapshot/run cũ trước khi tiếp tục.",
+    "Không gian lưu trữ dữ liệu đang gần đầy. Vui lòng dọn bớt dữ liệu cũ rồi thử lại.",
   DRIVE_ACCOUNT_EMAIL_MISMATCH:
-    "Tài khoản Google vừa chọn không khớp tài khoản chủ sở hữu Drive được khóa trên server.",
+    "Tài khoản liên kết không khớp với tài khoản lưu trữ đã thiết lập trên hệ thống.",
   DRIVE_BRIDGE_ACCESS_DENIED:
-    "Apps Script Web App đang chặn truy cập. Trong script.google.com hãy Deploy lại với 'Who has access: Anyone' (bảo vệ bằng HMAC-SHA256).",
+    "Kết nối lưu trữ đám mây đang bị từ chối quyền truy cập. Vui lòng kiểm tra lại thiết lập kết nối.",
   DRIVE_BRIDGE_SECRET_NOT_SET:
-    "Chưa cài VIREAD_BRIDGE_SECRET trong Script Properties của Apps Script Bridge.",
+    "Kết nối lưu trữ đám mây chưa được thiết lập đầy đủ. Vui lòng liên hệ quản trị viên.",
   DRIVE_AUTH_FAILED:
-    "Xác thực chữ ký Apps Script Bridge hoặc phiên Google Drive thất bại. Hãy kiểm tra lại VIREAD_BRIDGE_SECRET.",
+    "Xác thực kết nối lưu trữ đám mây chưa thành công. Vui lòng thử kết nối lại.",
   DRIVE_ENCRYPTION_KEY_MISSING:
-    "Server chưa cấu hình đủ VIREAD_GDRIVE_TOKEN_ENCRYPTION_KEY (>= 32 ký tự).",
+    "Dịch vụ lưu trữ đám mây chưa sẵn sàng. Vui lòng liên hệ quản trị viên.",
   GOOGLE_DRIVE_DESKTOP_UNAVAILABLE_ON_CLOUD_SERVER:
-    "Cloud server (Render) không thể đọc ổ G:\\ trên máy cá nhân; hãy kết nối qua Apps Script Bridge.",
+    "Chế độ đồng bộ máy tính không khả dụng trên hệ thống trực tuyến. Vui lòng sử dụng kết nối trực tuyến.",
   GOOGLE_DRIVE_DESKTOP_REQUIRES_WINDOWS_HOST:
-    "Máy chủ Linux không hỗ trợ Google Drive for Desktop; hãy kết nối qua Apps Script Bridge.",
+    "Hệ thống hiện tại không hỗ trợ đồng bộ thư mục máy tính. Vui lòng sử dụng kết nối trực tuyến.",
   FLOW2_INGESTION_PAUSED:
-    "Luồng 2 đang tạm dừng thu thập (VIREAD_FLOW2_INGESTION_PAUSED=true).",
+    "Tính năng đóng góp dữ liệu cải thiện nhận diện chữ đang tạm dừng.",
   UNRESOLVED_TRAINING_JOB_EXISTS:
-    "Đang có một job huấn luyện chưa kết thúc trong hàng đợi; hãy hoàn tất hoặc xử lý job đó trước.",
+    "Đang có một lượt cập nhật mô hình chưa hoàn tất. Vui lòng đợi hoàn tất trước khi tạo lượt mới.",
   TRAIN_AND_VALIDATION_REQUIRED:
-    "Dataset Luồng 2 cần có đồng thời cả mẫu train và validation (tối thiểu 2 nhóm sách/trang độc lập).",
+    "Dữ liệu đóng góp chưa đủ điều kiện tối thiểu để tổng hợp. Vui lòng bổ sung thêm mẫu đã kiểm duyệt.",
   NO_ELIGIBLE_FLOW2_SAMPLES:
-    "Chưa có mẫu Luồng 2 sạch nào đủ điều kiện tạo snapshot huấn luyện.",
+    "Chưa có mẫu đóng góp đạt chuẩn nào để tạo bản tổng hợp.",
   "Apply migration 20261121210000_flow2_google_drive_storage.sql before connecting Google Drive":
-    "Cần áp dụng migration 20261121210000_flow2_google_drive_storage.sql trên database trước khi kết nối Google Drive.",
+    "Hệ thống lưu trữ đang được cập nhật. Vui lòng thử lại sau.",
   "A queued or running training job cannot be deleted":
-    "Không thể xóa job đang chờ worker hoặc đang chạy.",
+    "Không thể xóa tác vụ đang chờ xử lý hoặc đang chạy.",
   "Only a pre-run failure or an unbenchmarked candidate with a recoverable Colab error can be retried":
-    "Chỉ có thể thử lại job lỗi trước khi tạo run hoặc candidate Colab có lỗi có thể khôi phục.",
+    "Chỉ có thể thử lại các tác vụ gặp sự cố tạm thời trước khi đánh giá.",
   "The pinned Locked Test is missing or no longer meets its integrity requirements":
-    "Locked Test gắn với job bị thiếu hoặc không còn đạt chuẩn toàn vẹn.",
+    "Bộ dữ liệu kiểm thử chuẩn bị thiếu hoặc không còn hợp lệ.",
   "Locked Test is not ready":
-    "Locked Test chưa sẵn sàng hoặc chưa đủ số lượng mẫu/nhóm độc lập.",
+    "Bộ dữ liệu kiểm thử chuẩn chưa sẵn sàng hoặc chưa đủ số lượng mẫu.",
   "The active model has changed since this training job was created":
-    "Model active trên hệ thống đã đổi kể từ khi job này được tạo.",
+    "Mô hình đang sử dụng trên hệ thống đã thay đổi kể từ khi tác vụ này được tạo.",
   "Another training job is already active":
-    "Đang có một job huấn luyện hoặc đánh giá khác đang hoạt động.",
+    "Đang có một tác vụ cập nhật hoặc đánh giá khác đang hoạt động.",
   "Candidate evaluation is already running or queued":
-    "Job đánh giá candidate này đã được xếp hàng hoặc đang chạy.",
+    "Tác vụ đánh giá phiên bản này đã được xếp hàng hoặc đang chạy.",
   "Pilot holdout does not meet minimum samples or groups":
-    "Tập holdout sạch chưa đạt mức tối thiểu 20 mẫu và 5 nhóm sách/trang độc lập để chạy Pilot.",
+    "Dữ liệu kiểm thử chưa đạt số lượng tối thiểu để chạy đánh giá thử nghiệm.",
   "Remote OCR worker is offline; live page scan is temporarily unavailable.":
-    "Máy chủ OCR Windows hiện đang ngoại tuyến nên tính năng quét trang trực tiếp tạm thời không khả dụng. Ba mẹ hãy bật máy trạm OCR hoặc chọn sách trong Thư viện nhé.",
+    "Tính năng quét trang sách trực tiếp hiện đang tạm nghỉ. Ba mẹ hãy chọn sách trong Thư viện để đọc cùng bé hoặc thử lại sau nhé.",
   "Remote OCR worker is offline; cannot run synchronous page OCR":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy nhận diện OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng nhận diện trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker is offline; cannot run synchronous replacement OCR":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể thay ảnh và chạy OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng thay ảnh và nhận diện trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker is offline; cannot reprocess page synchronously":
-    "Máy chủ OCR Windows đang ngoại tuyến; chưa thể chạy lại OCR đồng bộ lúc này. Hãy bật máy trạm OCR rồi thử lại.",
+    "Tính năng nhận diện lại trang sách tạm thời chưa sẵn sàng. Vui lòng thử lại sau ít phút.",
   "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.":
-    "Máy chủ OCR xử lý lâu hơn thời gian chờ trực tiếp. Tác vụ đã được xếp hàng — vui lòng kiểm tra lại trạng thái sau ít giây.",
+    "Quá trình nhận diện trang sách đang xử lý lâu hơn dự kiến và đã được xếp hàng. Vui lòng kiểm tra lại trạng thái sau ít giây.",
   "Remote OCR worker failed":
-    "Máy chủ OCR gặp sự cố khi nhận diện trang. Vui lòng thử lại sau ít giây.",
+    "Hệ thống gặp sự cố khi nhận diện trang sách. Vui lòng thử lại sau ít giây.",
   "Database temporarily unavailable":
     "Hệ thống dữ liệu tạm thời đang bận. Vui lòng thử lại sau vài giây.",
   "Database temporarily unavailable; please retry":
@@ -448,9 +450,9 @@ const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
   "Idempotency key already used for a different OCR payload.":
     "Mã gửi ảnh đã dùng cho một ảnh khác. Hãy chọn lại ảnh để quét mới.",
   "OCR inference job not found.":
-    "Không tìm thấy tác vụ OCR hoặc tác vụ đã hết hạn.",
+    "Không tìm thấy yêu cầu quét trang sách hoặc yêu cầu đã hết hạn.",
   "Scan OCR job not found":
-    "Không tìm thấy tác vụ quét trang sách hoặc tác vụ đã hết hạn.",
+    "Không tìm thấy yêu cầu quét trang sách hoặc yêu cầu đã hết hạn.",
 };
 
 const SAFE_BACKEND_PREFIX_CODES = [
@@ -563,11 +565,18 @@ async function safeBackendMessage(response: Response): Promise<string> {
 
 async function shouldRetryColdStartResponse(
   response: Response,
+  statuses: ReadonlySet<number> = COLD_START_RETRY_STATUSES,
 ): Promise<boolean> {
-  if (!COLD_START_RETRY_STATUSES.has(response.status)) {
+  if (!statuses.has(response.status)) {
     return false;
   }
   const detail = await extractBackendDetail(response);
+  // Structured FastAPI JSON 503 responses (e.g. DB busy, voice offline) are
+  // application-level backpressure and must never be auto-retried; only
+  // unstructured/gateway 503 responses (detail === null) count as cold starts.
+  if (response.status === 503) {
+    return detail === null;
+  }
   // Only treat unstructured/gateway 502/504 responses as cold starts; never
   // retry structured application domain errors such as async OCR 504 responses.
   return detail === null || !isKnownBackendDetail(detail);
@@ -575,26 +584,135 @@ async function shouldRetryColdStartResponse(
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
+const DEFAULT_COLD_START_DEADLINE_MS = 65_000;
+const DEFAULT_GET_RETRY_DELAY_MS = 800;
+const POST_COLD_START_RETRY_DELAY_MS = 1_200;
 
-const COLD_START_RETRY_STATUSES = new Set([502, 504]);
-const COLD_START_RETRY_DELAY_MS = 600;
+function createAbortError(): Error {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException("The operation was aborted.", "AbortError");
+  }
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
 
-function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
-    return Promise.reject(new DOMException("Aborted", "AbortError"));
+    return Promise.reject(createAbortError());
+  }
+  if (ms <= 0) {
+    return Promise.resolve();
   }
   return new Promise((resolve, reject) => {
     const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("Aborted", "AbortError"));
+      globalThis.clearTimeout(timerId);
+      reject(createAbortError());
     };
-    const timer = setTimeout(() => {
+    const timerId = globalThis.setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);
     signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
+
+function isColdStartRetryableGetError(error: ServiceError): boolean {
+  return (
+    error.retryable &&
+    (error.status === 0 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504)
+  );
+}
+
+function invalidateReadCacheForMutationPath(path: string): void {
+  const pathname = path.split("?")[0] ?? path;
+  if (
+    pathname === "/reading" ||
+    pathname.startsWith("/reading/") ||
+    pathname === "/reading-presence" ||
+    pathname.startsWith("/reading-presence/")
+  ) {
+    invalidateApiReadCacheByPrefix([
+      "/reading",
+      "/sessions",
+      "/profiles/dashboard-summary",
+      "/reports",
+      "/system/progress",
+      "/system/difficult-words",
+      "/tutor",
+      "/learning",
+    ]);
+    return;
+  }
+  if (
+    pathname === "/reading-management" ||
+    pathname.startsWith("/reading-management/")
+  ) {
+    invalidateApiReadCacheByPrefix([
+      "/reading-management",
+      "/profiles/dashboard-summary",
+      "/learning",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/books") || pathname.startsWith("/studio")) {
+    invalidateApiReadCacheByPrefix([
+      "/books",
+      "/studio",
+      "/profiles/dashboard-summary",
+      "/reading-management",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/profiles")) {
+    invalidateApiReadCacheByPrefix(["/profiles"]);
+    return;
+  }
+  if (pathname.startsWith("/karaoke")) {
+    invalidateApiReadCacheByPrefix(["/karaoke", "/learning"]);
+    return;
+  }
+  if (pathname.startsWith("/games")) {
+    invalidateApiReadCacheByPrefix([
+      "/games",
+      "/learning",
+      "/system/difficult-words",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/tutor")) {
+    invalidateApiReadCacheByPrefix([
+      "/tutor",
+      "/reading",
+      "/system/progress",
+      "/learning",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/system/difficult-words")) {
+    invalidateApiReadCacheByPrefix([
+      "/system/difficult-words",
+      "/system/progress",
+      "/learning",
+      "/tutor",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/support")) {
+    invalidateApiReadCacheByPrefix(["/support"]);
+    return;
+  }
+  if (pathname.startsWith("/parent-notifications")) {
+    invalidateApiReadCacheByPrefix(["/parent-notifications"]);
+    return;
+  }
+  invalidateApiReadCache();
+}
+
+const COLD_START_RETRY_STATUSES = new Set([502, 503, 504]);
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
@@ -603,6 +721,9 @@ export interface RequestApiOptions {
   readonly bypassCache?: boolean;
   readonly cacheTtlMs?: number;
   readonly timeoutMs?: number;
+  readonly maxRetries?: number;
+  readonly retryDelayMs?: number;
+  readonly retryOnColdStart?: boolean;
 }
 
 /**
@@ -630,147 +751,228 @@ export async function requestApi<T>(
   }
 
   const method = requestOptions.method ?? "GET";
+  const isTestEnv =
+    typeof process !== "undefined" && process.env.NODE_ENV === "test";
+  const allowRetryMethod =
+    method === "GET" || requestOptions.retryOnColdStart === true;
+  const maxRetries = !allowRetryMethod
+    ? 0
+    : typeof requestOptions.maxRetries === "number" &&
+        Number.isFinite(requestOptions.maxRetries) &&
+        requestOptions.maxRetries >= 0
+      ? Math.floor(requestOptions.maxRetries)
+      : requestOptions.retryOnColdStart === true
+        ? 1
+        : isTestEnv
+          ? 0
+          : 2;
+  const baseRetryDelayMs =
+    typeof requestOptions.retryDelayMs === "number" &&
+    Number.isFinite(requestOptions.retryDelayMs) &&
+    requestOptions.retryDelayMs >= 0
+      ? requestOptions.retryDelayMs
+      : method !== "GET" && requestOptions.retryOnColdStart === true
+        ? POST_COLD_START_RETRY_DELAY_MS
+        : DEFAULT_GET_RETRY_DELAY_MS;
+  const isFormDataBody =
+    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+  const hasExplicitTimeout =
+    typeof requestOptions.timeoutMs === "number" &&
+    Number.isFinite(requestOptions.timeoutMs) &&
+    requestOptions.timeoutMs > 0;
+  const singleAttemptTimeoutMs = hasExplicitTimeout
+    ? requestOptions.timeoutMs!
+    : isFormDataBody
+      ? DEFAULT_UPLOAD_TIMEOUT_MS
+      : DEFAULT_REQUEST_TIMEOUT_MS;
+  const totalDeadlineMs =
+    requestOptions.retryOnColdStart === true && hasExplicitTimeout
+      ? singleAttemptTimeoutMs + baseRetryDelayMs + 1_000
+      : hasExplicitTimeout
+        ? requestOptions.timeoutMs!
+        : maxRetries > 0
+          ? Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
+          : singleAttemptTimeoutMs;
+
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
-    let response!: Response;
-    const isFormDataBody =
-      typeof FormData !== "undefined" &&
-      requestOptions.body instanceof FormData;
     const explicitLocale = resolveExplicitLocale();
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
-        ? { "X-ViRead-Locale": explicitLocale }
-        : {}),
-    };
-    if (requestOptions.body !== undefined && !isFormDataBody) {
-      headers["Content-Type"] = "application/json";
-    }
     const body =
       requestOptions.body === undefined
         ? undefined
         : isFormDataBody
           ? requestOptions.body
           : JSON.stringify(requestOptions.body);
-    const effectiveTimeoutMs =
-      typeof requestOptions.timeoutMs === "number" &&
-      Number.isFinite(requestOptions.timeoutMs) &&
-      requestOptions.timeoutMs > 0
-        ? requestOptions.timeoutMs
-        : isFormDataBody
-          ? DEFAULT_UPLOAD_TIMEOUT_MS
-          : DEFAULT_REQUEST_TIMEOUT_MS;
-    const canColdStartRetry = method === "GET";
-    const maxAttempts = canColdStartRetry ? 2 : 1;
+    const deadlineAt = Date.now() + totalDeadlineMs;
+    let activeToken = token;
+    let hasRetriedAuth = false;
+    let lastError: ServiceError | null = null;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const timeoutController = fetchSignal ? null : new AbortController();
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      if (fetchSignal?.aborted) {
+        throw createAbortError();
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (attempt > 0 && remainingMs <= 0) {
+        break;
+      }
+      const attemptTimeoutMs =
+        hasExplicitTimeout || maxRetries > 0
+          ? Math.max(1, Math.min(singleAttemptTimeoutMs, remainingMs))
+          : singleAttemptTimeoutMs;
+
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        Authorization: `Bearer ${activeToken}`,
+        ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
+          ? { "X-ViRead-Locale": explicitLocale }
+          : {}),
+      };
+      if (requestOptions.body !== undefined && !isFormDataBody) {
+        headers["Content-Type"] = "application/json";
+      }
+
+      const attemptController = new AbortController();
       let timedOut = false;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+      const onParentAbort = () => attemptController.abort(fetchSignal?.reason);
+      fetchSignal?.addEventListener("abort", onParentAbort, { once: true });
+
+      let response: Response | null = null;
+      let attemptError: ServiceError | null = null;
+      let allowColdStartAutoRetry = false;
 
       try {
-        const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          attemptController.abort(
+            typeof DOMException !== "undefined"
+              ? new DOMException("Request timed out", "TimeoutError")
+              : undefined,
+          );
+        }, attemptTimeoutMs);
+        response = await fetch(`${getApiBaseUrl()}${path}`, {
           method,
           headers,
           ...(body !== undefined ? { body: body as BodyInit } : {}),
           cache: "no-store",
           credentials: "omit",
           redirect: "error",
-          signal: effectiveSignal,
+          signal: attemptController.signal,
         });
-
-        if (timeoutController) {
-          timeoutId = setTimeout(() => {
-            timedOut = true;
-            timeoutController.abort();
-          }, effectiveTimeoutMs);
-          response = await fetchPromise;
-        } else {
-          const timeoutPromise = new Promise<never>((_resolve, reject) => {
-            timeoutId = setTimeout(() => {
-              timedOut = true;
-              reject(failure(0, "", true));
-            }, effectiveTimeoutMs);
-          });
-          response = await Promise.race([fetchPromise, timeoutPromise]);
-        }
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
-        if (attempt === 0 && canColdStartRetry && !timedOut) {
-          await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
-          continue;
-        }
-        throw failure(0, "", true);
+        allowColdStartAutoRetry = method === "GET" || !timedOut;
+        attemptError = failure(0, "", true);
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
+        fetchSignal?.removeEventListener("abort", onParentAbort);
       }
 
+      if (response !== null) {
+        const requestId = response.headers.get("x-request-id") ?? "";
+        if (!response.ok) {
+          if (response.status === 401) {
+            invalidateBrowserTokenCache();
+            invalidateApiReadCache();
+            if (!hasRetriedAuth && !fetchSignal?.aborted) {
+              hasRetriedAuth = true;
+              const refreshedToken =
+                await refreshBrowserAccessToken(activeToken);
+              if (refreshedToken && refreshedToken !== activeToken) {
+                activeToken = refreshedToken;
+                attempt -= 1;
+                continue;
+              }
+            }
+          }
+          const backendMessage = await safeBackendMessage(response);
+          const coldStartGateway =
+            !COLD_START_RETRY_STATUSES.has(response.status) ||
+            (await shouldRetryColdStartResponse(response));
+          allowColdStartAutoRetry =
+            method === "GET"
+              ? COLD_START_RETRY_STATUSES.has(response.status) &&
+                coldStartGateway
+              : (response.status === 502 || response.status === 504) &&
+                coldStartGateway;
+          attemptError = failure(
+            response.status,
+            requestId,
+            response.status >= 500 &&
+              (response.status === 503 || coldStartGateway),
+            backendMessage,
+          );
+        } else if (response.status === 204 || response.status === 205) {
+          const parsed = schema.safeParse(undefined);
+          if (!parsed.success) {
+            throw failure(response.status, requestId);
+          }
+          return parsed.data;
+        } else {
+          let payload: unknown;
+          try {
+            payload = await response.json();
+          } catch {
+            throw failure(response.status, requestId);
+          }
+          const parsed = schema.safeParse(payload);
+
+          if (!parsed.success) {
+            console.error("[API schema validation failed]", {
+              issueCount: parsed.error.issues.length,
+            });
+
+            throw failure(response.status, requestId);
+          }
+
+          return parsed.data;
+        }
+      }
+
+      lastError = attemptError ?? failure(0, "", true);
       if (
-        attempt === 0 &&
-        canColdStartRetry &&
+        allowRetryMethod &&
+        attempt < maxRetries &&
         !fetchSignal?.aborted &&
-        (await shouldRetryColdStartResponse(response))
+        allowColdStartAutoRetry &&
+        (method === "GET"
+          ? isColdStartRetryableGetError(lastError)
+          : lastError.status === 0 ||
+            lastError.status === 502 ||
+            lastError.status === 504)
       ) {
-        await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+        await response?.body?.cancel().catch(() => undefined);
+        const remainingAfterAttempt = deadlineAt - Date.now();
+        if (remainingAfterAttempt <= 0) {
+          throw lastError;
+        }
+        const boundedDelayMs = Math.min(
+          baseRetryDelayMs * 2 ** attempt,
+          Math.max(0, remainingAfterAttempt - 1),
+        );
+        await sleepWithAbort(boundedDelayMs, fetchSignal);
         continue;
       }
-      break;
+
+      throw lastError;
     }
 
-    const requestId = response.headers.get("x-request-id") ?? "";
-    if (!response.ok) {
-      if (response.status === 401) {
-        invalidateBrowserTokenCache();
-        invalidateApiReadCache();
-      }
-      const backendMessage = await safeBackendMessage(response);
-      const messageWithCorrelation =
-        response.status >= 500 && requestId
-          ? tApiError("errors.requestWithId", {
-              message: backendMessage,
-              requestId,
-            })
-          : backendMessage;
-      throw failure(
-        response.status,
-        requestId,
-        response.status >= 500,
-        messageWithCorrelation,
-      );
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw failure(response.status, requestId);
-    }
-    const parsed = schema.safeParse(payload);
-
-    if (!parsed.success) {
-      console.error("[API schema validation failed]", {
-        issueCount: parsed.error.issues.length,
-      });
-
-      throw failure(response.status, requestId);
-    }
-
-    return parsed.data;
+    throw lastError ?? failure(0, "", true);
   };
 
   if (method !== "GET") {
-    invalidateApiReadCache();
+    invalidateReadCacheForMutationPath(path);
     try {
       return await executeFetch(signal);
     } finally {
-      invalidateApiReadCache();
+      invalidateReadCacheForMutationPath(path);
     }
   }
 
   return runCoalescedApiGet(path, token, signal, executeFetch, {
     bypassCache: requestOptions.bypassCache,
     cacheTtlMs: requestOptions.cacheTtlMs,
+    locale: getActiveLocale(),
   });
 }
 

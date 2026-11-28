@@ -76,6 +76,8 @@ export interface DifficultWordEvaluateDirectInput {
   readonly page_revision_id?: UUID | null;
   readonly word_id?: UUID | null;
   readonly evidence_word_ids?: readonly UUID[];
+  readonly provider_mode?: string | null;
+  readonly allow_google_stt?: boolean | null;
 }
 
 export interface DifficultWordBookGroup {

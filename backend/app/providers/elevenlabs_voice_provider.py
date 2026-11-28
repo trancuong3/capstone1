@@ -405,9 +405,14 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None,
         *,
         allow_default_fallback: bool = True,
+        expected_gender: str | None = None,
     ) -> tuple[str, bool]:
         requested = self._voice_id(requested_voice_id)
         fp = self._key_fingerprint or ""
+        if (expected_gender or "").strip().lower() == "male":
+            if (fp, requested) in _unavailable_voices:
+                raise VoiceProviderUnavailable()
+            return requested, False
         if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
             if not allow_default_fallback:
                 raise VoiceProviderUnavailable()
@@ -474,6 +479,7 @@ class ElevenLabsVoiceProvider:
         requested_voice_id: str | None = None,
         speed: float = 1.0,
         allow_default_fallback: bool = True,
+        expected_gender: str | None = None,
     ) -> SynthesizedAudio:
         headers = self._headers()
         configured_model = os.getenv("ELEVENLABS_MODEL_ID", "").strip()
@@ -485,19 +491,22 @@ class ElevenLabsVoiceProvider:
         settings = self._tts_voice_settings(model_id, speed)
         normalized_speed = settings["speed"]
         fp = self._key_fingerprint or ""
+        is_male_persona = (expected_gender or "").strip().lower() == "male"
 
         male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
         block_default_fallback = (
             not allow_default_fallback
+            or is_male_persona
             or (bool(male_voice_id) and requested_voice_id == male_voice_id)
         )
         voice_id, used_fallback = self._resolve_effective_voice(
             requested_voice_id,
             allow_default_fallback=not block_default_fallback,
+            expected_gender=expected_gender,
         )
         candidates = (
             [(voice_id, used_fallback)]
-            if voice_id == DEFAULT_VOICE_ID or block_default_fallback
+            if (voice_id == DEFAULT_VOICE_ID or block_default_fallback)
             else [(voice_id, False), (DEFAULT_VOICE_ID, True)]
         )
 
@@ -537,14 +546,19 @@ class ElevenLabsVoiceProvider:
                     if (
                         response.status_code in {402, 404}
                         and candidate_voice != DEFAULT_VOICE_ID
-                        and idx + 1 < len(candidates)
                     ):
+                        self._mark_voice_unavailable(candidate_voice)
+                        if idx + 1 < len(candidates):
+                            logger.warning(
+                                "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                                response.status_code,
+                            )
+                            continue
                         logger.warning(
-                            "ElevenLabs voice unavailable (status=%s); falling back to default voice",
+                            "ElevenLabs male voice unavailable (status=%s); refusing female default fallback",
                             response.status_code,
                         )
-                        self._mark_voice_unavailable(candidate_voice)
-                        continue
+                        raise VoiceProviderUnavailable()
                     if response.is_error:
                         raise self._tts_error_from_response(response)
 
@@ -591,6 +605,7 @@ class ElevenLabsVoiceProvider:
         words: list[str],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
         region: str = "north",
         allow_default_fallback: bool = True,
     ) -> Any:
@@ -610,6 +625,7 @@ class ElevenLabsVoiceProvider:
             requested_voice_id=requested_voice_id,
             speed=speed,
             allow_default_fallback=allow_default_fallback,
+            expected_gender=expected_gender,
         )
         duration = self._estimate_mp3_duration_seconds(audio.content)
         projected = project_chunk_spans_to_surface_words(
@@ -643,6 +659,7 @@ class ElevenLabsVoiceProvider:
         steps: list[dict[str, Any]],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        expected_gender: str | None = None,
         region: str = "north",
         allow_default_fallback: bool = True,
     ) -> Any:
@@ -666,6 +683,7 @@ class ElevenLabsVoiceProvider:
                 requested_voice_id=requested_voice_id,
                 speed=speed,
                 allow_default_fallback=allow_default_fallback,
+                expected_gender=expected_gender,
             )
 
         synthesized_steps = await asyncio.gather(*(_synth_step(step) for step in steps))

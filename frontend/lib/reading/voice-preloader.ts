@@ -331,6 +331,16 @@ function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
   );
 }
 
+function hasBackendTtsCueWarmupTarget(
+  health: VoiceEngineHealthSnapshot | null,
+): boolean {
+  if (!health) return false;
+  return Boolean(
+    hasLiveServerTts(health) ||
+    (health.elevenlabs?.tts_configured && !health.elevenlabs.tts_cooldown),
+  );
+}
+
 async function warmInitialTtsCues(
   options: PreloadReadingVoiceOptions,
   health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth(),
@@ -461,7 +471,7 @@ export function preloadReadingVoiceEngines(
     if (options.warmTts !== false) {
       pendingTtsWarmOptions = options;
       const freshHealth = getFreshVoiceEngineHealth();
-      if (hasLiveServerTts(freshHealth)) {
+      if (hasBackendTtsCueWarmupTarget(freshHealth)) {
         void warmInitialTtsCues(options, freshHealth);
       }
     }
@@ -473,7 +483,10 @@ export function preloadReadingVoiceEngines(
   // voice/speed without resetting STT readiness.
   const existingFreshHealth = getFreshVoiceEngineHealth();
   if (existingFreshHealth && state.sttStatus === "ready") {
-    if (options.warmTts !== false && hasLiveServerTts(existingFreshHealth)) {
+    if (
+      options.warmTts !== false &&
+      hasBackendTtsCueWarmupTarget(existingFreshHealth)
+    ) {
       return warmInitialTtsCues(options, existingFreshHealth);
     }
     return Promise.resolve();
@@ -591,7 +604,7 @@ export function preloadReadingVoiceEngines(
     // 2. TTS Readiness
     const queuedTtsOptions = pendingTtsWarmOptions;
     pendingTtsWarmOptions = null;
-    if (hasLiveServerTts(health)) {
+    if (hasBackendTtsCueWarmupTarget(health)) {
       const mergedTtsOptions =
         queuedTtsOptions && queuedTtsOptions !== options
           ? {
@@ -602,6 +615,8 @@ export function preloadReadingVoiceEngines(
             }
           : options;
       void warmInitialTtsCues(mergedTtsOptions, health);
+    }
+    if (hasLiveServerTts(health)) {
       updateState({ ttsStatus: "ready", readyAt: Date.now() });
     } else if (wasmTtsSupported) {
       earlyWasmTtsStarted = true;

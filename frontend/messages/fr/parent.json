@@ -189,7 +189,7 @@
     "submitFeedback": "Envoyer des commentaires",
     "charCount": "{count}/{max}",
     "privacyNote": "Ces informations seront utilisées pour traiter votre demande d'assistance. N'incluez pas de mots de passe ou de codes OTP dans vos commentaires.",
-    "sentSuccessDetail": "Le serveur de messagerie a bien reçu vos commentaires. ViRead utilisera cet e-mail pour vous informer des mises à jour.",
+    "sentSuccessDetail": "ViRead a bien reçu votre message. Nous utiliserons votre e-mail de contact pour vous répondre.",
     "submitError": "Échec de l'envoi des commentaires. Veuillez réessayer plus tard.",
     "categories": {
       "technical_issue": "Signaler un problème technique",
@@ -220,8 +220,8 @@
         "title": "Livres et reconnaissance",
         "q1": "Comment choisir un livre ?",
         "a1": "Ouvrez le catalogue de livres, sélectionnez un livre disponible dans le catalogue, puis suivez les instructions à l'écran pour commencer.",
-        "q2": "Que faire si le contenu OCR est incorrect ?",
-        "a2": "Les parents peuvent envoyer leurs commentaires sur cette page. Veuillez préciser le titre du livre, le numéro de la page et décrire l'erreur de reconnaissance. Le contenu OCR doit être vérifié avant d'être utilisé pour les séances de lecture."
+        "q2": "Que faire si le texte reconnu d'une page est inexact ?",
+        "a2": "Vous pouvez envoyer un message ici en précisant le titre du livre, le numéro de page et l'erreur afin que ViRead la corrige."
       },
       "reading": {
         "title": "Séance de lecture",
@@ -249,6 +249,11 @@
     "selectedBadge": "Actif",
     "regionLabel": "Région",
     "voiceListLabel": "Voix spécifique",
-    "voiceListAria": "Liste des voix selon l'enseignant et la région"
+    "voiceListAria": "Liste des voix selon l'enseignant et la région",
+    "policyLabel": "Mode du moteur vocal",
+    "policyAria": "Choisir le mode du moteur vocal",
+    "policyLocalOnly": "Cet appareil uniquement",
+    "policyOnlineBackup": "Cet appareil + Secours en ligne",
+    "workerOfflineHint": "Le moteur vocal local est hors ligne. Activez « Cet appareil + Secours en ligne » pour lire les phrases et jeux non précalculés."
   }
 }

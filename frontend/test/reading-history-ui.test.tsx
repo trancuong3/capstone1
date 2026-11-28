@@ -473,4 +473,77 @@ describe("Reading history detail", () => {
     await screen.findByRole("heading", { name: "Không tìm thấy buổi đọc" });
     expect(screen.queryByText(bookFixture.title)).not.toBeInTheDocument();
   });
+
+  it("paginates comprehension questions (6 per page) and session events (8 per page)", async () => {
+    const user = userEvent.setup();
+    currentDetail = {
+      ...sessionDetailFixture,
+      comprehension: Array.from({ length: 8 }, (_, idx) => {
+        const suffix = String(idx + 1).padStart(2, "0");
+        const qId = `60000000-0000-4000-8000-0000000000${suffix}`;
+        return {
+          question: {
+            id: qId,
+            type: "FACTUAL" as const,
+            prompt: `Câu hỏi đọc hiểu số ${idx + 1}`,
+            page_revision_id: bookFixture.id,
+            source_span: null,
+            difficulty: "EASY",
+            answered: true,
+          },
+          answer: {
+            answer_id: `70000000-0000-4000-8000-0000000000${suffix}`,
+            question_id: qId,
+            submitted_answer: `Đáp án ${idx + 1}`,
+            is_correct: true,
+            score: 1,
+            feedback_code: null,
+          },
+        };
+      }),
+      events: Array.from({ length: 10 }, (_, idx) => ({
+        ...sessionDetailFixture.events[0],
+        id: `80000000-0000-4000-8000-0000000000${String(idx + 1).padStart(2, "0")}`,
+        start_ms: (idx + 1) * 1000,
+        end_ms: (idx + 1) * 1000 + 500,
+      })),
+      availability: {
+        ...sessionDetailFixture.availability,
+        comprehension: "available",
+      },
+    };
+
+    render(
+      <AppServicesProvider>
+        <SessionDetailScreen sessionId={TEST_SESSION_ID} />
+      </AppServicesProvider>,
+    );
+
+    await screen.findByText("Câu hỏi đọc hiểu số 1");
+    expect(screen.getByText("Câu hỏi đọc hiểu số 6")).toBeInTheDocument();
+    expect(screen.queryByText("Câu hỏi đọc hiểu số 7")).not.toBeInTheDocument();
+
+    const qNav = screen.getByRole("navigation", {
+      name: "Phân trang câu hỏi đọc hiểu",
+    });
+    await user.click(
+      Array.from(qNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(screen.getByText("Câu hỏi đọc hiểu số 7")).toBeInTheDocument();
+    expect(screen.getByText("Câu hỏi đọc hiểu số 8")).toBeInTheDocument();
+    expect(screen.queryByText("Câu hỏi đọc hiểu số 1")).not.toBeInTheDocument();
+
+    const evNav = screen.getByRole("navigation", {
+      name: "Phân trang sự kiện trong buổi đọc",
+    });
+    expect(evNav).toHaveTextContent("Trang 1 / 2");
+    await user.click(
+      Array.from(evNav.querySelectorAll("button")).find((b) =>
+        b.textContent?.includes("Tiếp"),
+      )!,
+    );
+    expect(evNav).toHaveTextContent("Trang 2 / 2");
+  });
 });

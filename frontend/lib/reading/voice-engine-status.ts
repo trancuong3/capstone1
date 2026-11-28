@@ -44,6 +44,7 @@ export interface VoiceEngineHealthSnapshot {
     readonly configured: boolean;
     readonly stt_configured: boolean;
     readonly tts_configured: boolean;
+    readonly male_tts_configured?: boolean;
     readonly stt_cooldown?: boolean;
     readonly tts_cooldown?: boolean;
     readonly error_code?: string | null;
@@ -180,8 +181,8 @@ export function mapProviderToEngineSnapshot(input: {
   const isStt = input.kind === "stt";
 
   let tier: VoiceEngineTier = "local_offline";
-  let engineLabel = isStt ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)";
-  let shortLabel = "Offline";
+  let engineLabel = isStt ? "Nhận diện ViRead" : "Giọng đọc ViRead";
+  let shortLabel = "ViRead";
 
   if (
     normalized === "wasm" ||
@@ -193,12 +194,12 @@ export function mapProviderToEngineSnapshot(input: {
     shortLabel = isStt ? "Offline (WASM)" : "Offline (WASM TTS)";
   } else if (normalized === "precomputed_cache") {
     tier = "local_offline";
-    engineLabel = "Offline (Precomputed Cache)";
-    shortLabel = "Offline (Cache)";
+    engineLabel = "Giọng đọc chuẩn bị sẵn";
+    shortLabel = "Chuẩn bị sẵn";
   } else if (normalized === "catalog_cache" || normalized === "precomputed") {
     tier = "catalog_cache";
-    engineLabel = "VieNeu (Cache chuẩn)";
-    shortLabel = "Cache chuẩn";
+    engineLabel = "Giọng đọc chuẩn";
+    shortLabel = "Chuẩn";
   } else if (
     normalized === "android_native" ||
     normalized === "android" ||
@@ -216,8 +217,8 @@ export function mapProviderToEngineSnapshot(input: {
     shortLabel = "ElevenLabs";
   } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
-    engineLabel = "Google Cloud API";
-    shortLabel = "Online (Google API)";
+    engineLabel = "Trực tuyến";
+    shortLabel = "Trực tuyến";
   } else if (
     normalized === "browser" ||
     normalized === "webspeech" ||
@@ -225,7 +226,7 @@ export function mapProviderToEngineSnapshot(input: {
   ) {
     tier = "browser_default";
     engineLabel = "Trình duyệt mặc định";
-    shortLabel = "Online (Google/Trình duyệt)";
+    shortLabel = "Trình duyệt";
   }
 
   return {
@@ -456,6 +457,9 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
               configured: Boolean(elevenlabsRaw.configured),
               stt_configured: Boolean(elevenlabsRaw.stt_configured),
               tts_configured: Boolean(elevenlabsRaw.tts_configured),
+              ...(typeof elevenlabsRaw.male_tts_configured === "boolean"
+                ? { male_tts_configured: elevenlabsRaw.male_tts_configured }
+                : {}),
               ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
                 ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
                 : {}),

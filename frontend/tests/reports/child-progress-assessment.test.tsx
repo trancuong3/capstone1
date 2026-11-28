@@ -11,6 +11,7 @@ import type {
   ChildProgressAssessment,
   ChildProgressService,
 } from "@/lib/api/child-progress-service";
+import { ServiceError } from "@/lib/api/service-error";
 
 const CHILD_ID = "33333333-3333-4333-8333-333333333333";
 
@@ -274,7 +275,120 @@ describe("AI progress assessment card", () => {
     expect(await screen.findByText("AI: nhận xét mới")).toBeInTheDocument();
     expect(service.generate).toHaveBeenCalledWith(CHILD_ID, 30, {
       refresh: true,
+      signal: expect.any(AbortSignal),
     });
+  });
+
+  it("displays specific fallback guidance when the backend returns RULE_BASED with ai_fallback_reason", async () => {
+    const quotaView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "PROVIDER_QUOTA",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI đang tạm bận hoặc hết hạn mức lượt gọi/),
+    ).toBeInTheDocument();
+    quotaView.unmount();
+
+    const timeoutView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "PROVIDER_TIMEOUT",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI phản hồi lâu hơn dự kiến/),
+    ).toBeInTheDocument();
+    timeoutView.unmount();
+
+    const configView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockResolvedValue(
+        assessment({
+          ai_fallback_reason: "AI_NOT_CONFIGURED",
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/Dịch vụ AI trên máy chủ hiện chưa sẵn sàng/),
+    ).toBeInTheDocument();
+    configView.unmount();
+  });
+
+  it("classifies rejected ServiceError statuses instead of swallowing them", async () => {
+    const quotaView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockRejectedValue(
+        new ServiceError({
+          code: "NETWORK_ERROR",
+          message: "Too many requests",
+          status: 429,
+          request_id: "",
+          retryable: true,
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI đang tạm bận hoặc hết hạn mức lượt gọi/),
+    ).toBeInTheDocument();
+    quotaView.unmount();
+
+    const timeoutView = setup({
+      get: vi.fn().mockResolvedValue(assessment()),
+      generate: vi.fn().mockRejectedValue(
+        new ServiceError({
+          code: "NETWORK_ERROR",
+          message: "Gateway timeout",
+          status: 504,
+          request_id: "",
+          retryable: true,
+        }),
+      ),
+    });
+    expect(
+      await screen.findByText(/AI phản hồi lâu hơn dự kiến/),
+    ).toBeInTheDocument();
+    timeoutView.unmount();
+  });
+
+  it("aborts an in-flight manual refresh when switching periods or unmounting", async () => {
+    const user = userEvent.setup();
+    let capturedSignal: AbortSignal | undefined;
+    const service = {
+      get: vi.fn().mockResolvedValue(aiVersion()),
+      generate: vi.fn().mockImplementation((_childId, _days, options) => {
+        capturedSignal = options?.signal;
+        return new Promise<ChildProgressAssessment>(() => {});
+      }),
+    };
+
+    const view = setup(service);
+    await screen.findByText("AI: bé đang tiến bộ");
+
+    await user.click(
+      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
+    );
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    const firstRefreshSignal = capturedSignal;
+    await user.click(screen.getByRole("radio", { name: "90 ngày" }));
+    expect(firstRefreshSignal?.aborted).toBe(true);
+
+    await screen.findByText("AI: bé đang tiến bộ");
+    await user.click(
+      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
+    );
+    const secondRefreshSignal = capturedSignal;
+    expect(secondRefreshSignal?.aborted).toBe(false);
+
+    view.unmount();
+    expect(secondRefreshSignal?.aborted).toBe(true);
   });
 
   it("offers a retry when the scores cannot be loaded", async () => {

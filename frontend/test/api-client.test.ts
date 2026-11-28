@@ -148,6 +148,8 @@ describe("real API client", () => {
 
       const firstPromise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(firstPromise).resolves.toEqual({ title: "Recovered 502" });
@@ -160,6 +162,8 @@ describe("real API client", () => {
 
       const netPromise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(netPromise).resolves.toEqual({ title: "Recovered net" });
@@ -172,6 +176,8 @@ describe("real API client", () => {
 
       const html504Promise = requestApi("/books/", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       });
       await vi.advanceTimersByTimeAsync(600);
       await expect(html504Promise).resolves.toEqual({ title: "Recovered 504" });
@@ -194,6 +200,8 @@ describe("real API client", () => {
     await expect(
       requestApi("/reading/scan-page-ocr", schema, undefined, {
         bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
       }),
     ).rejects.toMatchObject({
       status: 504,
@@ -206,7 +214,11 @@ describe("real API client", () => {
       Response.json({ detail: "unauthorized" }, { status: 401 }),
     );
     await expect(
-      requestApi("/books/", schema, undefined, { bypassCache: true }),
+      requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 600,
+      }),
     ).rejects.toMatchObject({ status: 401, code: "AUTH_REQUIRED" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
@@ -227,6 +239,8 @@ describe("real API client", () => {
       requestApi("/books/", schema, undefined, {
         method: "POST",
         body: { title: "Create" },
+        maxRetries: 1,
+        retryDelayMs: 600,
       }),
     ).rejects.toMatchObject({ status: 502 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -335,7 +349,7 @@ describe("real API client", () => {
       requestApi("/books/admin/viread-training/flow2/trigger", schema),
     ).rejects.toMatchObject({
       status: 507,
-      message: expect.stringContaining("Google Drive"),
+      message: expect.stringContaining("Không gian lưu trữ dữ liệu"),
     });
 
     fetchMock.mockResolvedValueOnce(
@@ -376,6 +390,132 @@ describe("real API client", () => {
         status: 0,
         retryable: true,
       });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts the underlying fetch signal on timeoutMs even when caller provides an AbortSignal", async () => {
+    vi.useFakeTimers();
+    try {
+      let underlyingSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            underlyingSignal = init?.signal ?? undefined;
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      );
+
+      const callerController = new AbortController();
+      const pending = requestApi("/books/", schema, callerController.signal, {
+        method: "POST",
+        body: { title: "Slow AI" },
+        timeoutMs: 300,
+      }).catch((err: unknown) => err);
+
+      await vi.advanceTimersByTimeAsync(300);
+      const caught = await pending;
+      expect(underlyingSignal?.aborted).toBe(true);
+      expect(callerController.signal.aborted).toBe(false);
+      expect(caught).toBeInstanceOf(ServiceError);
+      expect(caught).toMatchObject({
+        code: "NETWORK_ERROR",
+        status: 0,
+        retryable: true,
+      });
+
+      fetchMock.mockReset();
+      let secondSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            secondSignal = init?.signal ?? undefined;
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      );
+
+      const cancelController = new AbortController();
+      const cancelled = requestApi("/books/", schema, cancelController.signal, {
+        method: "POST",
+        body: { title: "Cancelled" },
+        timeoutMs: 5_000,
+      }).catch((err: unknown) => err);
+
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      cancelController.abort();
+      const abortErr = await cancelled;
+      expect(secondSignal?.aborted).toBe(true);
+      expect(abortErr).not.toBeInstanceOf(ServiceError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries POST once when retryOnColdStart is true on 502/504/network, and never retries 401/429/503", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(
+          Response.json({ detail: "Bad Gateway" }, { status: 502 }),
+        )
+        .mockResolvedValueOnce(Response.json({ title: "POST 502 ok" }));
+
+      const retry502 = requestApi("/tutor/generate", schema, undefined, {
+        method: "POST",
+        body: { days: 30 },
+        retryOnColdStart: true,
+      });
+      await vi.advanceTimersByTimeAsync(1_200);
+      await expect(retry502).resolves.toEqual({ title: "POST 502 ok" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(new Response("Gateway Timeout", { status: 504 }))
+        .mockResolvedValueOnce(Response.json({ title: "POST 504 ok" }));
+
+      const retry504 = requestApi("/tutor/generate", schema, undefined, {
+        method: "POST",
+        body: { days: 30 },
+        retryOnColdStart: true,
+      });
+      await vi.advanceTimersByTimeAsync(1_200);
+      await expect(retry504).resolves.toEqual({ title: "POST 504 ok" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(Response.json({ title: "POST net ok" }));
+
+      const retryNet = requestApi("/tutor/generate", schema, undefined, {
+        method: "POST",
+        body: { days: 30 },
+        retryOnColdStart: true,
+      });
+      await vi.advanceTimersByTimeAsync(1_200);
+      await expect(retryNet).resolves.toEqual({ title: "POST net ok" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      for (const status of [401, 429, 503]) {
+        fetchMock.mockReset();
+        fetchMock.mockResolvedValueOnce(
+          Response.json({ detail: `status-${status}` }, { status }),
+        );
+        await expect(
+          requestApi("/tutor/generate", schema, undefined, {
+            method: "POST",
+            body: { days: 30 },
+            retryOnColdStart: true,
+          }),
+        ).rejects.toMatchObject({ status });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+      }
     } finally {
       vi.useRealTimers();
     }

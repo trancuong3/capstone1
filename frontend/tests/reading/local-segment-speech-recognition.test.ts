@@ -315,6 +315,7 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     for (let i = 0; i < 10; i += 1) internal.consumeSamples16k(voiced);
     for (let i = 0; i < 20; i += 1) internal.consumeSamples16k(silent);
     await new Promise((resolve) => setTimeout(resolve, 320));
+    rec.stop();
 
     expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(0);
     expect(getVoiceEngineStatus().stt.tier).toBe("idle");
@@ -359,10 +360,10 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     expect(nativeRec.continuous).toBe(true);
     expect(nativeRec.interimResults).toBe(true);
 
-    // Voice engine status flipped to Online browser fallback
+    // Voice engine status flipped to browser fallback
     const status = getVoiceEngineStatus();
     expect(status.stt.tier).toBe("browser_default");
-    expect(status.stt.shortLabel).toBe("Online (Google/Trình duyệt)");
+    expect(status.stt.shortLabel).toBe("Trình duyệt");
     expect(status.stt.fallbackUsed).toBe(true);
     expect(status.stt.fallbackReason).toBe("LOCAL_STT_UNAVAILABLE");
 
@@ -530,9 +531,9 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     );
     rec2.start();
 
-    // Badge restored to Offline (Sherpa-ONNX) and did NOT spawn another browser recognizer!
+    // Badge restored to ViRead recognition and did NOT spawn another browser recognizer!
     expect(getVoiceEngineStatus().stt.tier).toBe("local_offline");
-    expect(getVoiceEngineStatus().stt.shortLabel).toBe("Offline");
+    expect(getVoiceEngineStatus().stt.shortLabel).toBe("ViRead");
     expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(1);
     rec2.abort();
   });

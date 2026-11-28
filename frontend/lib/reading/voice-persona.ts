@@ -65,14 +65,11 @@ export function normalizeVoiceGender(
   return null;
 }
 
-export function resolveVoiceGender(
+export function inferIntrinsicVoiceGender(
   voiceId?: string | null,
-  explicitGender?: string | null,
-): VoiceGender {
-  const fromExplicit = normalizeVoiceGender(explicitGender);
-  if (fromExplicit) return fromExplicit;
-
+): VoiceGender | null {
   const trimmed = (voiceId ?? "").trim();
+  if (!trimmed) return null;
   if (KNOWN_MALE_VOICE_IDS.has(trimmed)) return "male";
   if (KNOWN_FEMALE_VOICE_IDS.has(trimmed)) return "female";
 
@@ -87,7 +84,29 @@ export function resolveVoiceGender(
   ) {
     return "male";
   }
-  return "female";
+  if (
+    lower.includes("truc_ly") ||
+    lower.includes("ngoc_linh") ||
+    lower.includes("ngoc_tran") ||
+    lower.includes("thuc_doan") ||
+    lower.includes("my_duyen") ||
+    lower.includes("neural2_a") ||
+    lower.includes("wavenet_c") ||
+    lower.includes("_female")
+  ) {
+    return "female";
+  }
+  return null;
+}
+
+export function resolveVoiceGender(
+  voiceId?: string | null,
+  explicitGender?: string | null,
+): VoiceGender {
+  const fromExplicit = normalizeVoiceGender(explicitGender);
+  if (fromExplicit) return fromExplicit;
+
+  return inferIntrinsicVoiceGender(voiceId) ?? "female";
 }
 
 export function getTeacherPersona(gender: VoiceGender): TeacherPersona {

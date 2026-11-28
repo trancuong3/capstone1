@@ -34,7 +34,7 @@
     "currentInvalid": "La contraseña actual es incorrecta.",
     "changeError": "No se pudo cambiar la contraseña. Por favor, compruebe su conexión e inténtelo de nuevo.",
     "noEmailForRecovery": "No hay una dirección de correo electrónico registrada para enviar un enlace de restablecimiento de contraseña.",
-    "recoverySent": "Supabase Auth ha recibido la solicitud de restablecimiento de contraseña. Por favor, revise su bandeja de entrada y la carpeta de correo no deseado.",
+    "recoverySent": "El sistema de cuentas ha recibido tu solicitud para enviar un enlace de contraseña. Revisa tu bandeja de entrada y spam.",
     "recoveryError": "No se pudo enviar el enlace de restablecimiento de contraseña. Por favor, inténtelo de nuevo más tarde.",
     "showFieldAria": "Mostrar {label}",
     "hideFieldAria": "Ocultar {label}"
@@ -42,6 +42,6 @@
   "language": {
     "heading": "Idioma de la interfaz",
     "description": "Elija el idioma para la navegación y la configuración. El contenido de los libros en vietnamita permanecerá sin cambios.",
-    "learningContentNote": "Cambiar el idioma solo afecta a la navegación, los botones y la configuración. Los libros en vietnamita, el OCR, el reconocimiento de voz (STT) y la síntesis de voz (TTS) seguirán en vietnamita."
+    "learningContentNote": "Cambiar el idioma solo actualiza la navegación, los botones y los ajustes. Los libros en vietnamita, el reconocimiento de páginas, la voz y la narración siguen en vietnamita."
   }
 }

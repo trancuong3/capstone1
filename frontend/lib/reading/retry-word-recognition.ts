@@ -7,9 +7,14 @@
  * Dấu thanh tiếng Việt vẫn được giữ nguyên.
  */
 
-import { matchPhonicsSpelling } from "@/lib/reading/phonics-spelling";
 import {
-  normalizeVietnameseText,
+  decomposeVietnameseSyllable,
+  matchPhonicsSpelling,
+  isPhonicsInProgress,
+  splitVietnameseRhyme,
+  type VietnameseTone,
+} from "@/lib/reading/phonics-spelling";
+import {
   normalizeVietnameseWord,
   tokenizeVietnameseText,
 } from "@/lib/reading/vietnamese-text";
@@ -210,9 +215,188 @@ const DIGIT_WORDS = [
   "chín",
 ];
 
+function mapDigitToken(token: string): string {
+  if (token === "10") return "mười";
+  if (/^[0-9]$/u.test(token)) return DIGIT_WORDS[Number(token)];
+  return token;
+}
+
+function tokenizeShortWordTokens(value: string): string[] {
+  return tokenizeVietnameseText(stripNonSpeechAnnotations(value)).map(
+    mapDigitToken,
+  );
+}
+
 export function normalizeShortWordTranscript(value: string): string {
-  const text = normalizeVietnameseText(stripNonSpeechAnnotations(value));
-  return /^[0-9]$/u.test(text) ? DIGIT_WORDS[Number(text)] : text;
+  return tokenizeShortWordTokens(value).join(" ");
+}
+
+const MAX_CONTRASTIVE_KEYTERMS = 14;
+const ALL_TONES: readonly VietnameseTone[] = [
+  "ngang",
+  "sac",
+  "huyen",
+  "hoi",
+  "nga",
+  "nang",
+];
+const CHECKED_TONES: readonly VietnameseTone[] = ["sac", "nang"];
+const NASAL_CODAS = ["m", "n", "ng", "nh"] as const;
+const STOPPED_CODAS = ["t", "c", "p", "ch"] as const;
+const VOWEL_TONE_TABLE: Readonly<
+  Record<string, Readonly<Record<VietnameseTone, string>>>
+> = {
+  a: { ngang: "a", sac: "á", huyen: "à", hoi: "ả", nga: "ã", nang: "ạ" },
+  ă: { ngang: "ă", sac: "ắ", huyen: "ằ", hoi: "ẳ", nga: "ẵ", nang: "ặ" },
+  â: { ngang: "â", sac: "ấ", huyen: "ầ", hoi: "ẩ", nga: "ẫ", nang: "ậ" },
+  e: { ngang: "e", sac: "é", huyen: "è", hoi: "ẻ", nga: "ẽ", nang: "ẹ" },
+  ê: { ngang: "ê", sac: "ế", huyen: "ề", hoi: "ể", nga: "ễ", nang: "ệ" },
+  i: { ngang: "i", sac: "í", huyen: "ì", hoi: "ỉ", nga: "ĩ", nang: "ị" },
+  o: { ngang: "o", sac: "ó", huyen: "ò", hoi: "ỏ", nga: "õ", nang: "ọ" },
+  ô: { ngang: "ô", sac: "ố", huyen: "ồ", hoi: "ổ", nga: "ỗ", nang: "ộ" },
+  ơ: { ngang: "ơ", sac: "ớ", huyen: "ờ", hoi: "ở", nga: "ỡ", nang: "ợ" },
+  u: { ngang: "u", sac: "ú", huyen: "ù", hoi: "ủ", nga: "ũ", nang: "ụ" },
+  ư: { ngang: "ư", sac: "ứ", huyen: "ừ", hoi: "ử", nga: "ữ", nang: "ự" },
+  y: { ngang: "y", sac: "ý", huyen: "ỳ", hoi: "ỷ", nga: "ỹ", nang: "ỵ" },
+};
+const PALATAL_CODA_NUCLEI = new Set(["a", "ê", "i", "oa", "uê", "uy"]);
+
+function pickToneVowelIndex(nucleus: string, coda: string): number {
+  const chars = [...nucleus];
+  for (let i = chars.length - 1; i >= 0; i -= 1) {
+    if ("ăâêôơư".includes(chars[i])) return i;
+  }
+  if (coda && chars.length >= 2) return 1;
+  if (chars.length >= 3) return 1;
+  if (
+    chars.length === 2 &&
+    (nucleus === "oa" || nucleus === "oe" || nucleus === "uy")
+  ) {
+    return 0;
+  }
+  return 0;
+}
+
+function renderVietnameseSyllable(
+  onset: string,
+  nucleus: string,
+  coda: string,
+  tone: VietnameseTone,
+): string | null {
+  const chars = [...nucleus];
+  if (!chars.length) return null;
+  const idx = pickToneVowelIndex(nucleus, coda);
+  const base = chars[idx];
+  const toned = VOWEL_TONE_TABLE[base]?.[tone];
+  if (!toned) return null;
+  chars[idx] = toned;
+  return `${onset}${chars.join("")}${coda}`.normalize("NFC");
+}
+
+function expandSyllableContrastiveTerms(syllable: string): string[] {
+  const parts = decomposeVietnameseSyllable(syllable);
+  if (!parts) return [];
+  const { nucleus, coda } = splitVietnameseRhyme(parts.rhyme);
+  if (!nucleus) return [];
+
+  const out: string[] = [parts.normalized];
+  const isStopped = (STOPPED_CODAS as readonly string[]).includes(coda);
+  const tones = isStopped ? CHECKED_TONES : ALL_TONES;
+  for (const tone of tones) {
+    if (tone === parts.tone) continue;
+    const variant = renderVietnameseSyllable(parts.onset, nucleus, coda, tone);
+    if (variant) out.push(variant);
+  }
+
+  const codaGroup: readonly string[] = (
+    NASAL_CODAS as readonly string[]
+  ).includes(coda)
+    ? NASAL_CODAS
+    : isStopped
+      ? STOPPED_CODAS
+      : [];
+  for (const altCoda of codaGroup) {
+    if (altCoda === coda) continue;
+    if (
+      (altCoda === "nh" || altCoda === "ch") &&
+      !PALATAL_CODA_NUCLEI.has(nucleus)
+    ) {
+      continue;
+    }
+    const comp = renderVietnameseSyllable(
+      parts.onset,
+      nucleus,
+      altCoda,
+      parts.tone,
+    );
+    if (comp) out.push(comp);
+    if (isStopped) {
+      const altTone: VietnameseTone = parts.tone === "nang" ? "sac" : "nang";
+      const altComp = renderVietnameseSyllable(
+        parts.onset,
+        nucleus,
+        altCoda,
+        altTone,
+      );
+      if (altComp) out.push(altComp);
+    }
+  }
+
+  if (parts.onset === "đ") {
+    const dVar = renderVietnameseSyllable("d", nucleus, coda, parts.tone);
+    if (dVar) out.push(dVar);
+  } else if (parts.onset === "d") {
+    const ddVar = renderVietnameseSyllable("đ", nucleus, coda, parts.tone);
+    if (ddVar) out.push(ddVar);
+  }
+
+  return out;
+}
+
+/**
+ * Generate a contrastive Vietnamese keyterm list (6-tone minimal-pair family
+ * + close coda competitors, capped at ~14 items) so ASR prioritizes the phonetic
+ * neighborhood while acoustic scores still strictly discriminate tones/codas.
+ */
+export function buildContrastiveKeyterms(
+  target: string,
+  contextPhrase?: string | null,
+): string[] {
+  const cleanTarget = target.normalize("NFC").trim();
+  if (!cleanTarget) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const add = (term: string) => {
+    const cleaned = term.normalize("NFC").trim();
+    if (!cleaned) return;
+    const key = cleaned.toLocaleLowerCase("vi-VN");
+    if (seen.has(key) || out.length >= MAX_CONTRASTIVE_KEYTERMS) return;
+    seen.add(key);
+    out.push(cleaned);
+  };
+
+  add(cleanTarget);
+  const cleanContext = contextPhrase
+    ?.replace(/\.\.\./g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .normalize("NFC");
+  if (cleanContext) {
+    const shortCtx = shortWordContext(cleanTarget, cleanContext);
+    if (shortCtx) add(shortCtx);
+    else if (tokenizeVietnameseText(cleanContext).length <= 4) {
+      add(cleanContext);
+    }
+  }
+
+  const targetTokens = tokenizeVietnameseText(cleanTarget);
+  for (const tok of targetTokens) {
+    for (const variant of expandSyllableContrastiveTerms(tok)) {
+      if (out.length >= MAX_CONTRASTIVE_KEYTERMS) return out;
+      add(variant);
+    }
+  }
+  return out.slice(0, MAX_CONTRASTIVE_KEYTERMS);
 }
 
 /** Select up to three adjacent words from the child's book for a second try. */
@@ -242,6 +426,27 @@ export function shortWordContext(
     return words.slice(start, Math.min(start + 3, end)).join(" ");
   }
   return null;
+}
+
+/** Similar nasal or stopped codas need corroboration before an attempt is marked wrong. */
+export function hasConfusableShortCoda(
+  target: string,
+  transcript?: string | null,
+): boolean {
+  if (!transcript) return false;
+  const expected = tokenizeVietnameseText(target);
+  const actual = tokenizeVietnameseText(transcript);
+  if (expected.length !== 1 || actual.length !== 1 || expected[0] === actual[0])
+    return false;
+  const nasalCoda = /^(.+?)(ng|nh|m|n)$/u;
+  const nLeft = nasalCoda.exec(expected[0]);
+  const nRight = nasalCoda.exec(actual[0]);
+  if (nLeft && nRight && nLeft[1] === nRight[1]) return true;
+
+  const stopCoda = /^(.+?)(ch|c|p|t)$/u;
+  const sLeft = stopCoda.exec(expected[0]);
+  const sRight = stopCoda.exec(actual[0]);
+  return Boolean(sLeft && sRight && sLeft[1] === sRight[1]);
 }
 
 /** Similar nasal codas need corroboration before an attempt is marked wrong. */
@@ -295,7 +500,7 @@ function matchesExpectedInsideContextPhrase(
   ) {
     return false;
   }
-  const contextTokens = tokenizeVietnameseText(contextPhrase);
+  const contextTokens = tokenizeShortWordTokens(contextPhrase);
   return (
     containsContiguousTokenSubslice(expectedTokens, candidateTokens) &&
     containsContiguousTokenSubslice(candidateTokens, contextTokens)
@@ -323,21 +528,24 @@ function matchesRetryPhonicsSpelling(
 /**
  * Đánh giá từ đích trong một transcript ngắn.
  *
- * Cụm từ ngắn hoặc chuỗi đánh vần Lớp 1 (ví dụ "ê tờ ê tê", "ô i ôi tờ ôi tôi")
- * được chấp nhận khi kết thúc bằng đúng từ đích. Transcript dài hơn không thuộc
- * đánh vần hoặc câu ngữ cảnh cần được coi là không chắc chắn.
- * Không dùng nội dung keyterm làm bằng chứng nhận diện.
+ * Cụm từ ngắn, từ ghép gạch nối ("ô-tô", "ba-lô") hoặc chuỗi đánh vần Lớp 1
+ * (ví dụ "ê tờ ê tê", "ô i ôi tờ ôi tôi") được chấp nhận khi khớp chính xác
+ * dấu thanh và chữ đ. Transcript dài hơn không thuộc đánh vần hoặc câu ngữ cảnh
+ * cần được coi là không chắc chắn. Không dùng nội dung keyterm làm bằng chứng nhận diện.
  */
 export function classifyRetryTranscript(
   expectedWord: string,
   transcript: string | null | undefined,
   options?: RetryTranscriptOptions,
 ): RetryRecognitionStatus {
-  const expected = normalizeShortWordTranscript(expectedWord);
-
-  if (!expected || /\s/u.test(expected)) {
+  const expectedTokens = tokenizeShortWordTokens(expectedWord);
+  if (expectedTokens.length === 0 || expectedTokens.length > 4) {
     return "UNCERTAIN";
   }
+  if (expectedTokens.length > 1) {
+    return classifyPracticePhraseTranscript(expectedWord, transcript, options);
+  }
+  const expected = expectedTokens[0];
 
   const rawTranscript =
     typeof transcript === "string" ? stripNonSpeechAnnotations(transcript) : "";
@@ -346,9 +554,7 @@ export function classifyRetryTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  const tokens = tokenizeVietnameseText(
-    normalizeShortWordTranscript(rawTranscript),
-  );
+  const tokens = tokenizeShortWordTokens(rawTranscript);
 
   if (tokens.length === 0) {
     return "NOT_RECOGNIZED";
@@ -372,22 +578,45 @@ export function classifyRetryTranscript(
   }
 
   const candidateTokens =
-    tokens.length > 4 &&
-    collapsed.length <= 4 &&
-    collapsed.every((token) => token === expected)
+    tokens.length > 4 && collapsed.length <= 4 && collapsed.includes(expected)
       ? collapsed
       : tokens;
 
   if (candidateTokens.length > 4) {
-    return matchesExpectedInsideContextPhrase(
-      [expected],
-      candidateTokens,
-      options?.contextPhrase,
-    )
-      ? "CORRECT"
-      : "UNCERTAIN";
+    if (
+      isPhonicsInProgress(tokens, expected) ||
+      isPhonicsInProgress(collapsed, expected)
+    ) {
+      return "UNCERTAIN";
+    }
+    if (
+      matchesExpectedInsideContextPhrase(
+        [expected],
+        candidateTokens,
+        options?.contextPhrase,
+      )
+    ) {
+      return "CORRECT";
+    }
+    const expectedParts = decomposeVietnameseSyllable(expected);
+    const lastParts = decomposeVietnameseSyllable(tokens[tokens.length - 1]);
+    if (
+      expectedParts &&
+      lastParts &&
+      lastParts.untonedSyllable === expectedParts.untonedSyllable &&
+      lastParts.normalized !== expected
+    ) {
+      return "INCORRECT";
+    }
+    return "UNCERTAIN";
   }
   if (candidateTokens.includes(expected)) return "CORRECT";
+  if (
+    isPhonicsInProgress(candidateTokens, expected) ||
+    isPhonicsInProgress(collapsed, expected)
+  ) {
+    return "UNCERTAIN";
+  }
   return "INCORRECT";
 }
 
@@ -399,7 +628,7 @@ export function classifyPracticePhraseTranscript(
   transcript: string | null | undefined,
   options?: RetryTranscriptOptions,
 ): RetryRecognitionStatus {
-  const expectedTokens = tokenizeVietnameseText(expectedPhrase);
+  const expectedTokens = tokenizeShortWordTokens(expectedPhrase);
   if (expectedTokens.length === 0 || expectedTokens.length > 4) {
     return "UNCERTAIN";
   }
@@ -414,7 +643,7 @@ export function classifyPracticePhraseTranscript(
     return "NOT_RECOGNIZED";
   }
 
-  const tokens = tokenizeVietnameseText(rawTranscript);
+  const tokens = tokenizeShortWordTokens(rawTranscript);
   if (tokens.length === 0) {
     return "NOT_RECOGNIZED";
   }
@@ -449,6 +678,12 @@ export function classifyPracticePhraseTranscript(
 
   const maxTokens = Math.max(4, expectedTokens.length + 3);
   if (reducedTokens.length > maxTokens) {
+    if (
+      reducedTokens.length <= 10 &&
+      containsContiguousTokenSubslice(expectedTokens, reducedTokens)
+    ) {
+      return "CORRECT";
+    }
     return matchesExpectedInsideContextPhrase(
       expectedTokens,
       reducedTokens,
@@ -460,6 +695,15 @@ export function classifyPracticePhraseTranscript(
 
   if (containsContiguousTokenSubslice(expectedTokens, reducedTokens)) {
     return "CORRECT";
+  }
+  if (
+    expectedCursor < expectedTokens.length &&
+    isPhonicsInProgress(
+      tokens.slice(expectedCursor),
+      expectedTokens[expectedCursor],
+    )
+  ) {
+    return "UNCERTAIN";
   }
   return "INCORRECT";
 }

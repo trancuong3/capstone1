@@ -3,15 +3,14 @@ import { Suspense } from "react";
 
 import { DynamicAdminOcrReviewScreen } from "@/components/admin/admin-dynamic-screens";
 import { translateMessage } from "@/lib/i18n/formatter";
-import { getServerI18n } from "@/lib/i18n/server";
-import { viMessages } from "@/messages/vi";
+import { getServerAdminI18n } from "@/lib/i18n/server";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { locale, messages } = await getServerI18n();
+  const { locale, messages, fallbackMessages } = await getServerAdminI18n();
   return {
     title: translateMessage(
       messages,
-      viMessages,
+      fallbackMessages,
       locale,
       "admin.routes.ocrReviewTitle",
       undefined,
@@ -25,10 +24,8 @@ export default async function Page({
 }: {
   params: Promise<{ bookId: string; pageId: string }>;
 }) {
-  const [{ bookId, pageId }, { locale, messages }] = await Promise.all([
-    params,
-    getServerI18n(),
-  ]);
+  const [{ bookId, pageId }, { locale, messages, fallbackMessages }] =
+    await Promise.all([params, getServerAdminI18n()]);
   return (
     <Suspense
       fallback={
@@ -38,7 +35,7 @@ export default async function Page({
         >
           {translateMessage(
             messages,
-            viMessages,
+            fallbackMessages,
             locale,
             "admin.routes.ocrReviewLoading",
           )}

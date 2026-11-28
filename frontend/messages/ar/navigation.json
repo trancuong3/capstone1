@@ -41,15 +41,15 @@
     "books": "مكتبة الكتب",
     "metadataQuality": "جودة الكتب",
     "auditLogs": "سجلات التدقيق",
-    "training": "تدريب التعرف الضوئي (OCR)",
+    "training": "نماذج التعرف على النص",
     "health": "العمليات",
     "moreTitle": "إدارة إضافية",
     "mobileQualityShort": "الجودة",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "النصوص",
     "mobileMoreDescriptions": {
       "auditLogs": "تتبع سجلات تدقيق الإدارة",
-      "training": "تدريب وتشغيل نموذج VietOCR V2",
-      "health": "حالة النظام، عامل التعرف الضوئي (OCR Worker)، والصوت"
+      "training": "تدريب وإدارة نماذج التعرف على النصوص",
+      "health": "حالة النظام والتعرف على النصوص والصوت"
     }
   },
   "accountMenu": {

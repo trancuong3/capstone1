@@ -10,7 +10,6 @@ Never logs recipient email addresses, SMTP passwords, or API keys.
 
 from __future__ import annotations
 
-import html
 import hashlib
 import hmac
 import time
@@ -28,6 +27,12 @@ from uuid import UUID
 import httpx
 
 from app.database import config as settings
+from app.providers.email_layout import (
+    render_inactivity_alert_html,
+    render_milestone_html,
+    render_test_email_html,
+    render_weekly_digest_html,
+)
 from app.providers.reading_reminder_email_provider import EmailDeliveryNotConfigured
 
 
@@ -62,6 +67,7 @@ class ChildMilestoneItem:
     child_alias: str
     milestone_label: str
     detail: str
+    milestone_kind: str | None = None
 
 
 def _smtp_is_configured() -> bool:
@@ -215,36 +221,6 @@ def _settings_url() -> str:
     return f"{_app_base_url()}/settings#email-notifications"
 
 
-def _wrap_html(*, title: str, greeting: str, body_html: str, cta_label: str, cta_url: str, footer_note: str) -> str:
-    safe_title = html.escape(title)
-    safe_greeting = html.escape(greeting)
-    safe_cta_label = html.escape(cta_label)
-    safe_cta_url = html.escape(cta_url, quote=True)
-    safe_settings_url = html.escape(_settings_url(), quote=True)
-    safe_footer = html.escape(footer_note)
-    return (
-        "<!DOCTYPE html>"
-        '<html lang="vi"><body style="margin:0;padding:24px;background:#f4f7fb;'
-        'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif;color:#1e293b;">'
-        '<div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;'
-        'border:1px solid #e2e8f0;padding:28px;">'
-        '<div style="font-size:13px;font-weight:700;letter-spacing:0.04em;color:#2563eb;'
-        'text-transform:uppercase;margin-bottom:8px;">ViRead</div>'
-        f'<h1 style="margin:0 0 16px;font-size:20px;line-height:1.35;color:#0f172a;">{safe_title}</h1>'
-        f'<p style="margin:0 0 14px;font-size:15px;line-height:1.6;">{safe_greeting}</p>'
-        f'{body_html}'
-        '<div style="margin:24px 0 18px;">'
-        f'<a href="{safe_cta_url}" style="display:inline-block;background:#2563eb;color:#ffffff;'
-        'text-decoration:none;font-weight:700;font-size:15px;padding:12px 20px;border-radius:10px;">'
-        f'{safe_cta_label}</a>'
-        "</div>"
-        '<hr style="border:none;border-top:1px solid #e2e8f0;margin:20px 0;"/>'
-        f'<p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;">{safe_footer} '
-        f'<a href="{safe_settings_url}" style="color:#2563eb;">Quản lý thông báo email</a>.</p>'
-        "</div></body></html>"
-    )
-
-
 def _build_multipart_message(
     *,
     recipient: str,
@@ -265,6 +241,7 @@ def _build_multipart_message(
     message["List-Unsubscribe"] = f"<{_settings_url()}>"
     message.set_content(text_body)
     message.add_alternative(html_body, subtype="html")
+    message["Content-Language"] = "vi"
     return message
 
 
@@ -286,11 +263,6 @@ def build_weekly_digest_message(
         "",
         f"Tổng kết 7 ngày qua ({week_label}) trên ViRead: {total_sessions} buổi đọc ({total_minutes} phút).",
         "",
-    ]
-    html_blocks = [
-        '<p style="margin:0 0 16px;font-size:15px;line-height:1.6;">'
-        f'Tổng kết 7 ngày qua ({html.escape(week_label)}): '
-        f'<strong>{total_sessions} buổi đọc</strong> ({total_minutes} phút).</p>'
     ]
 
     for item in items:
@@ -319,40 +291,6 @@ def build_weekly_digest_message(
                 f"  Từ cần luyện thêm: {', '.join(item.top_difficult_words[:5])}"
             )
 
-        safe_alias = html.escape(item.child_alias)
-        card_parts = [
-            f'<div style="font-weight:700;color:#0f172a;margin-bottom:4px;">{safe_alias}</div>'
-        ]
-        if item.sessions_count > 0:
-            card_parts.append(
-                f'<div style="font-size:14px;color:#334155;">'
-                f'{item.sessions_count} buổi đọc · {item.total_minutes} phút'
-                + (
-                    f' · Độ trôi chảy TB: {round(item.avg_fluency_score)}%'
-                    if item.avg_fluency_score is not None
-                    else ""
-                )
-                + "</div>"
-            )
-        else:
-            card_parts.append(
-                '<div style="font-size:14px;color:#475569;">Tuần này bé chưa có buổi đọc nào. '
-                "Một buổi đọc ngắn 5–10 phút cùng ba mẹ sẽ giúp bé giữ thói quen tốt.</div>"
-            )
-        if item.goal_summary:
-            card_parts.append(
-                f'<div style="font-size:13px;color:#2563eb;margin-top:4px;">Mục tiêu: {html.escape(item.goal_summary)}</div>'
-            )
-        if item.top_difficult_words:
-            words_csv = ", ".join(html.escape(w) for w in item.top_difficult_words[:5])
-            card_parts.append(
-                f'<div style="font-size:13px;color:#64748b;margin-top:4px;">Từ cần luyện thêm: {words_csv}</div>'
-            )
-        html_blocks.append(
-            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;'
-            'padding:14px;margin-bottom:10px;">' + "".join(card_parts) + "</div>"
-        )
-
     cta_url = f"{_app_base_url()}/reports"
     text_lines.extend(
         [
@@ -361,13 +299,12 @@ def build_weekly_digest_message(
             f"Quản lý tần suất hoặc tắt email này: {_settings_url()}",
         ]
     )
-    html_body = _wrap_html(
-        title=f"Báo cáo đọc sách tuần {week_label}",
+    html_body = render_weekly_digest_html(
         greeting=greeting,
-        body_html="".join(html_blocks),
-        cta_label="Xem báo cáo tiến độ",
+        week_label=week_label,
+        items=items,
         cta_url=cta_url,
-        footer_note="ViRead chỉ gửi báo cáo tổng hợp tối đa 1 lần mỗi tuần.",
+        settings_url=_settings_url(),
     )
     return _build_multipart_message(
         recipient=recipient,
@@ -397,16 +334,12 @@ def build_inactivity_alert_message(
         "ViRead gửi lời nhắc nhẹ để giúp bé giữ thói quen đọc sách đều đặn:",
         "",
     ]
-    html_items = []
     for item in items:
         if item.had_prior_sessions:
             line = f"- {item.child_alias}: đã {item.days_inactive} ngày kể từ buổi đọc gần nhất."
         else:
             line = f"- {item.child_alias}: đã {item.days_inactive} ngày nhưng chưa bắt đầu buổi đọc đầu tiên."
         text_lines.append(line)
-        html_items.append(
-            f'<li style="margin-bottom:6px;font-size:14px;color:#334155;">{html.escape(line[2:])}</li>'
-        )
 
     cta_url = f"{_app_base_url()}/books"
     text_lines.extend(
@@ -419,19 +352,11 @@ def build_inactivity_alert_message(
             f"Thay đổi ngưỡng ngày hoặc tắt nhắc: {_settings_url()}",
         ]
     )
-    html_body = _wrap_html(
-        title="Nhắc nhẹ giữ thói quen đọc sách",
+    html_body = render_inactivity_alert_html(
         greeting=greeting,
-        body_html=(
-            '<p style="margin:0 0 12px;font-size:15px;line-height:1.6;">'
-            "ViRead gửi lời nhắc nhẹ để ba mẹ cùng bé duy trì thói quen đọc đều đặn:</p>"
-            f'<ul style="margin:0 0 14px;padding-left:20px;">{"".join(html_items)}</ul>'
-            '<p style="margin:0;font-size:14px;line-height:1.6;color:#475569;">'
-            "Chỉ cần 5–10 phút đọc một truyện ngắn hôm nay là bé đã duy trì được đà tiến bộ rồi.</p>"
-        ),
-        cta_label="Chọn sách đọc cùng bé",
+        items=items,
         cta_url=cta_url,
-        footer_note="ViRead tự động giới hạn tần suất và dừng nhắc nếu gia đình đang nghỉ dài ngày.",
+        settings_url=_settings_url(),
     )
     return _build_multipart_message(
         recipient=recipient,
@@ -456,16 +381,8 @@ def build_milestone_message(
         subject = "Chúc mừng cột mốc đọc sách mới của gia đình trên ViRead!"
 
     text_lines = [greeting, "", "Tin vui từ hành trình đọc sách trên ViRead:", ""]
-    html_cards = []
     for item in items:
         text_lines.append(f"- {item.child_alias}: {item.milestone_label} — {item.detail}")
-        html_cards.append(
-            '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;'
-            'padding:14px;margin-bottom:10px;">'
-            f'<div style="font-weight:700;color:#1d4ed8;">{html.escape(item.child_alias)} · {html.escape(item.milestone_label)}</div>'
-            f'<div style="font-size:14px;color:#1e3a8a;margin-top:4px;">{html.escape(item.detail)}</div>'
-            "</div>"
-        )
 
     cta_url = f"{_app_base_url()}/reports"
     text_lines.extend(
@@ -476,17 +393,11 @@ def build_milestone_message(
             f"Quản lý thông báo email: {_settings_url()}",
         ]
     )
-    html_body = _wrap_html(
-        title="Chúc mừng cột mốc đọc sách mới!",
+    html_body = render_milestone_html(
         greeting=greeting,
-        body_html=(
-            "".join(html_cards)
-            + '<p style="margin:6px 0 0;font-size:14px;line-height:1.6;color:#475569;">'
-            "Ba mẹ nhớ dành cho bé một lời khen thật ấm áp nhé!</p>"
-        ),
-        cta_label="Xem thành tích của bé",
+        items=items,
         cta_url=cta_url,
-        footer_note="Mỗi cột mốc chỉ được gửi chúc mừng một lần duy nhất.",
+        settings_url=_settings_url(),
     )
     return _build_multipart_message(
         recipient=recipient,
@@ -512,18 +423,10 @@ def build_test_email_message(
         "Ba mẹ sẽ chỉ nhận những email hữu ích theo đúng lựa chọn và giới hạn chống spam đã cài đặt.\n\n"
         f"Điều chỉnh cài đặt thông báo: {cta_url}\n"
     )
-    html_body = _wrap_html(
-        title="Kết nối email thông báo thành công",
+    html_body = render_test_email_html(
         greeting=greeting,
-        body_html=(
-            '<p style="margin:0 0 12px;font-size:15px;line-height:1.6;">'
-            "Email thông báo phụ huynh từ <strong>ViRead</strong> đã hoạt động bình thường.</p>"
-            '<p style="margin:0;font-size:14px;line-height:1.6;color:#475569;">'
-            "Ba mẹ luôn có thể tùy chỉnh báo cáo tuần, nhắc nghỉ đọc lâu, chúc mừng cột mốc và khung giờ yên tĩnh.</p>"
-        ),
-        cta_label="Mở cài đặt thông báo",
         cta_url=cta_url,
-        footer_note="Email này được gửi theo yêu cầu kiểm tra từ trang Cài đặt tài khoản.",
+        settings_url=_settings_url(),
     )
     return _build_multipart_message(
         recipient=recipient,

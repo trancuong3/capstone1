@@ -19,6 +19,10 @@ export interface UseReadingAutoScrollOptions {
   readonly pageKey: string;
   /** Disable auto-scroll (e.g. read-only preview). Defaults to true. */
   readonly enabled?: boolean;
+  /** Force-focus token (e.g. retry mode state transitions) that re-attaches and re-centers. */
+  readonly forceFocusKey?: string | null;
+  /** Center-weighted comfort band (~38% target) for retry mode. */
+  readonly centerMode?: boolean;
   /** When true (speculative interim preview), avoid jumping backward upward. */
   readonly isPreview?: boolean;
 }
@@ -33,6 +37,9 @@ export interface UseReadingAutoScrollResult {
 const BAND_TOP_RATIO = 0.16;
 const BAND_BOTTOM_RATIO = 0.6;
 const TARGET_TOP_RATIO = 0.26;
+const CENTER_BAND_TOP_RATIO = 0.22;
+const CENTER_BAND_BOTTOM_RATIO = 0.54;
+const CENTER_TARGET_TOP_RATIO = 0.38;
 const REATTACH_TOP_RATIO = 0.2;
 const REATTACH_BOTTOM_RATIO = 0.68;
 const DETACH_TOP_RATIO = 0.12;
@@ -40,6 +47,8 @@ const DETACH_BOTTOM_RATIO = 0.85;
 const PROGRAMMATIC_INSTANT_GUARD_MS = 160;
 const PROGRAMMATIC_SMOOTH_GUARD_MS = 950;
 const RECENT_USER_SCROLL_WINDOW_MS = 1500;
+const RESIZE_SCROLL_IGNORE_MS = 260;
+const TOUCH_MOVE_THRESHOLD_PX = 8;
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
@@ -90,20 +99,29 @@ export function useReadingAutoScroll({
   activeWordId,
   pageKey,
   enabled = true,
+  forceFocusKey = null,
+  centerMode = false,
   isPreview = false,
 }: UseReadingAutoScrollOptions): UseReadingAutoScrollResult {
   const [isDetached, setIsDetached] = useState(false);
   const isDetachedRef = useRef(false);
   const getActiveElementRef = useRef(getActiveElement);
+  const centerModeRef = useRef(centerMode);
+  const activeWordIdRef = useRef(activeWordId);
   const prevPageKeyRef = useRef<string | null>(null);
   const prevActiveWordIdRef = useRef<string | null | undefined>(undefined);
+  const prevForceFocusKeyRef = useRef<string | null>(null);
   const programmaticStartRef = useRef(0);
   const programmaticUntilRef = useRef(0);
+  const programmaticTargetTopRef = useRef<number | null>(null);
   const userInteractionAtRef = useRef(0);
   const lastObservedScrollTopRef = useRef(0);
+  const lastResizeAtRef = useRef(0);
 
   useEffect(() => {
     getActiveElementRef.current = getActiveElement;
+    centerModeRef.current = centerMode;
+    activeWordIdRef.current = activeWordId;
   });
 
   const setDetachedState = useCallback((next: boolean) => {
@@ -125,10 +143,14 @@ export function useReadingAutoScroll({
       const viewHeight = container.clientHeight;
       if (viewHeight <= 0) return;
 
+      const isCentered = centerModeRef.current;
       const relTop = activeRect.top - containerRect.top;
       const relBottom = activeRect.bottom - containerRect.top;
-      const bandTop = viewHeight * BAND_TOP_RATIO;
-      const bandBottom = viewHeight * BAND_BOTTOM_RATIO;
+      const bandTop =
+        viewHeight * (isCentered ? CENTER_BAND_TOP_RATIO : BAND_TOP_RATIO);
+      const bandBottom =
+        viewHeight *
+        (isCentered ? CENTER_BAND_BOTTOM_RATIO : BAND_BOTTOM_RATIO);
 
       const fitsInBand =
         activeRect.height <= viewHeight * 0.62
@@ -139,7 +161,8 @@ export function useReadingAutoScroll({
 
       const desiredOffset =
         activeRect.height <= viewHeight * 0.62
-          ? viewHeight * TARGET_TOP_RATIO
+          ? viewHeight *
+            (isCentered ? CENTER_TARGET_TOP_RATIO : TARGET_TOP_RATIO)
           : viewHeight * 0.12;
       const maxScrollTop = Math.max(0, container.scrollHeight - viewHeight);
       const nextTop = Math.max(
@@ -147,35 +170,69 @@ export function useReadingAutoScroll({
         Math.min(maxScrollTop, container.scrollTop + relTop - desiredOffset),
       );
 
-      if (Math.abs(nextTop - container.scrollTop) < 2) return;
+      const distance = Math.abs(nextTop - container.scrollTop);
+      if (distance < 2) return;
       if (isPreview && !forceInstant && nextTop < container.scrollTop) return;
 
       const instant = forceInstant || prefersReducedMotion();
       const startedAt = nowMs();
+      const smoothGuardMs = Math.max(
+        PROGRAMMATIC_SMOOTH_GUARD_MS,
+        Math.min(
+          2600,
+          PROGRAMMATIC_SMOOTH_GUARD_MS + Math.round(distance * 0.4),
+        ),
+      );
       programmaticStartRef.current = startedAt;
+      programmaticTargetTopRef.current = instant ? null : nextTop;
       programmaticUntilRef.current =
-        startedAt +
-        (instant
-          ? PROGRAMMATIC_INSTANT_GUARD_MS
-          : PROGRAMMATIC_SMOOTH_GUARD_MS);
+        startedAt + (instant ? PROGRAMMATIC_INSTANT_GUARD_MS : smoothGuardMs);
       scrollContainerTo(container, nextTop, instant ? "instant" : "smooth");
     },
     [containerRef, isPreview],
   );
 
   const resumeAutoFollow = useCallback(() => {
+    userInteractionAtRef.current = 0;
     setDetachedState(false);
     scrollActiveWordIntoView(false);
   }, [scrollActiveWordIntoView, setDetachedState]);
 
-  // Attach manual-scroll detection listeners to the reading container.
+  // Attach manual-scroll detection listeners and ResizeObserver to the reading container.
   useEffect(() => {
     if (!enabled) return;
     const container = containerRef.current;
     if (!container) return;
 
+    let touchStartY: number | null = null;
+    let resizeRafId: number | null = null;
+    let lastSize = {
+      clientHeight: container.clientHeight,
+      scrollHeight: container.scrollHeight,
+    };
+
     const markUserIntent = () => {
       userInteractionAtRef.current = nowMs();
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchStartY = event.touches[0]?.clientY ?? null;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const currentY = event.touches[0]?.clientY;
+      if (currentY === undefined) return;
+      if (touchStartY === null) {
+        touchStartY = currentY;
+        return;
+      }
+      if (Math.abs(currentY - touchStartY) > TOUCH_MOVE_THRESHOLD_PX) {
+        markUserIntent();
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartY = null;
     };
 
     const handlePointerDown = (event: PointerEvent) => {
@@ -211,9 +268,33 @@ export function useReadingAutoScroll({
       const hasRecentUserGesture =
         userInteractionAtRef.current > 0 &&
         now - userInteractionAtRef.current < RECENT_USER_SCROLL_WINDOW_MS;
+      if (
+        lastResizeAtRef.current > 0 &&
+        now - lastResizeAtRef.current < RESIZE_SCROLL_IGNORE_MS &&
+        !hasRecentUserGesture
+      ) {
+        return;
+      }
       const interruptedSmoothScroll =
         hasRecentUserGesture &&
         userInteractionAtRef.current > programmaticStartRef.current;
+      if (interruptedSmoothScroll) {
+        programmaticTargetTopRef.current = null;
+      } else if (programmaticTargetTopRef.current !== null) {
+        const prevDiff = Math.abs(
+          prevScrollTop - programmaticTargetTopRef.current,
+        );
+        const currentDiff = Math.abs(
+          currentScrollTop - programmaticTargetTopRef.current,
+        );
+        if (currentDiff <= 4) {
+          programmaticTargetTopRef.current = null;
+          return;
+        }
+        if (currentDiff < prevDiff) {
+          return;
+        }
+      }
       const outsideProgrammaticWindow = now > programmaticUntilRef.current;
       if (!interruptedSmoothScroll && !outsideProgrammaticWindow) {
         return;
@@ -250,10 +331,55 @@ export function useReadingAutoScroll({
       }
     };
 
+    const scheduleResizeRealign = () => {
+      if (typeof requestAnimationFrame === "function") {
+        if (resizeRafId !== null) {
+          cancelAnimationFrame(resizeRafId);
+        }
+        resizeRafId = requestAnimationFrame(() => {
+          resizeRafId = null;
+          scrollActiveWordIntoView(false);
+        });
+      } else {
+        scrollActiveWordIntoView(false);
+      }
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            const nextClientHeight = container.clientHeight;
+            const nextScrollHeight = container.scrollHeight;
+            const clientHeightChanged =
+              nextClientHeight !== lastSize.clientHeight;
+            const scrollHeightChanged =
+              nextScrollHeight !== lastSize.scrollHeight;
+            if (!clientHeightChanged && !scrollHeightChanged) return;
+            lastSize = {
+              clientHeight: nextClientHeight,
+              scrollHeight: nextScrollHeight,
+            };
+            lastResizeAtRef.current = nowMs();
+            if (
+              clientHeightChanged &&
+              (centerModeRef.current || !isDetachedRef.current)
+            ) {
+              scheduleResizeRealign();
+            }
+          });
+    resizeObserver?.observe(container);
+
     lastObservedScrollTopRef.current = container.scrollTop;
     container.addEventListener("wheel", markUserIntent, { passive: true });
-    container.addEventListener("touchstart", markUserIntent, { passive: true });
-    container.addEventListener("touchmove", markUserIntent, { passive: true });
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: true,
+    });
+    container.addEventListener("touchmove", handleTouchMove, { passive: true });
+    container.addEventListener("touchend", handleTouchEnd, { passive: true });
+    container.addEventListener("touchcancel", handleTouchEnd, {
+      passive: true,
+    });
     container.addEventListener("pointerdown", handlePointerDown, {
       passive: true,
     });
@@ -261,14 +387,49 @@ export function useReadingAutoScroll({
     container.addEventListener("scroll", handleScroll, { passive: true });
 
     return () => {
+      resizeObserver?.disconnect();
+      if (resizeRafId !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(resizeRafId);
+      }
       container.removeEventListener("wheel", markUserIntent);
-      container.removeEventListener("touchstart", markUserIntent);
-      container.removeEventListener("touchmove", markUserIntent);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
       container.removeEventListener("pointerdown", handlePointerDown);
       container.removeEventListener("keydown", handleKeyDown);
       container.removeEventListener("scroll", handleScroll);
     };
-  }, [containerRef, enabled, pageKey, setDetachedState]);
+  }, [
+    containerRef,
+    enabled,
+    pageKey,
+    scrollActiveWordIntoView,
+    setDetachedState,
+  ]);
+
+  // Force focus (e.g., retry mode transitions or layout revision updates)
+  useEffect(() => {
+    if (!enabled) return;
+    if (!forceFocusKey) {
+      prevForceFocusKeyRef.current = null;
+      return;
+    }
+    if (prevForceFocusKeyRef.current === forceFocusKey) {
+      return;
+    }
+    prevForceFocusKeyRef.current = forceFocusKey;
+    userInteractionAtRef.current = 0;
+    setDetachedState(false);
+    prevActiveWordIdRef.current = activeWordIdRef.current;
+    if (typeof requestAnimationFrame === "function") {
+      const rafId = requestAnimationFrame(() => {
+        scrollActiveWordIntoView(false);
+      });
+      return () => cancelAnimationFrame(rafId);
+    }
+    scrollActiveWordIntoView(false);
+  }, [enabled, forceFocusKey, scrollActiveWordIntoView, setDetachedState]);
 
   // Reset scroll to top on page change; follow activeWordId only when it
   // actually changes and auto-follow is not detached.

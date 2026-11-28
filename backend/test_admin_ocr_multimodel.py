@@ -317,9 +317,9 @@ class OcrCorrectionConfigTests(unittest.TestCase):
     def test_empty_env_model_defaults_match_ai_capability_router(self):
         with patch.dict(os.environ, {}, clear=True):
             config = OcrCorrectionConfig.from_environment()
-        self.assertEqual(config.gemini_primary_model, "gemini-2.5-flash-lite")
-        self.assertEqual(config.gemini_fallback_model, "gemini-2.5-flash")
-        self.assertEqual(config.groq_model, "llama-3.3-70b-versatile")
+        self.assertEqual(config.gemini_primary_model, "gemini-3.1-flash-lite")
+        self.assertEqual(config.gemini_fallback_model, "gemini-3.5-flash-lite")
+        self.assertEqual(config.groq_model, "qwen/qwen3.8-27b")
 
 
 class ProviderHttpErrorClassificationTests(unittest.TestCase):

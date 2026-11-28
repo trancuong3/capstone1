@@ -136,7 +136,7 @@ describe("Books UI with real service HTTP test doubles", () => {
     ).toBeInTheDocument();
   });
 
-  it("returns to Dashboard and does not request books for a child the API no longer allows", async () => {
+  it("returns to Dashboard and does not render books or request child-scoped collections for a child the API no longer allows", async () => {
     fetchMock.mockImplementation(async (url: string) => {
       if (new URL(url).pathname.startsWith("/profiles/children/"))
         return Response.json({}, { status: 404 });
@@ -149,10 +149,18 @@ describe("Books UI with real service HTTP test doubles", () => {
       ),
     );
     expect(
-      fetchMock.mock.calls.every(([url]) =>
-        new URL(String(url)).pathname.startsWith("/profiles/children/"),
-      ),
-    ).toBe(true);
+      screen.queryByRole("heading", { name: book.title }),
+    ).not.toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(([url]) => {
+        const parsed = new URL(String(url));
+        return (
+          parsed.pathname.startsWith("/reading-management/") ||
+          (parsed.pathname === "/books/catalog" &&
+            parsed.searchParams.has("grade"))
+        );
+      }),
+    ).toBe(false);
   });
 
   it("uses API book fields, not runtime catalog fixtures", async () => {

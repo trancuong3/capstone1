@@ -18,7 +18,7 @@ export function ReportPageHeader({
     <PageHeader
       action={action}
       actionClassName="sm:w-auto"
-      className="mb-0"
+      className="mb-0 pb-2.5!"
       description={description}
       eyebrow={eyebrow}
       title={title}

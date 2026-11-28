@@ -189,7 +189,7 @@
     "submitFeedback": "发送反馈",
     "charCount": "{count}/{max}",
     "privacyNote": "此邮箱将用于处理您的支持请求。请勿在反馈内容中包含密码或 OTP。",
-    "sentSuccessDetail": "您的反馈已收到。ViRead 将使用此邮箱为您提供更新。",
+    "sentSuccessDetail": "ViRead 已收到您的反馈。有更新时我们将通过您的联系邮箱回复。",
     "submitError": "反馈发送失败。请稍后再试。",
     "categories": {
       "technical_issue": "报告技术问题",
@@ -220,8 +220,8 @@
         "title": "书籍与识别",
         "q1": "如何选择书籍？",
         "a1": "打开书库，选择一本提供的书籍，然后按照屏幕上的说明开始阅读。",
-        "q2": "如果 OCR 内容不准确该怎么办？",
-        "a2": "家长可以在此页面提交反馈，请注明书名、页码并描述识别不准确的内容。OCR 内容在用于阅读活动前需经过核实。"
+        "q2": "如果从书页识别出的文字不准确该怎么办？",
+        "a2": "您可以在本页提交反馈，注明书名、页码和不准确的内容，以便 ViRead 团队核实并更新。"
       },
       "reading": {
         "title": "阅读活动",
@@ -249,6 +249,11 @@
     "selectedBadge": "当前选择",
     "regionLabel": "地区口音",
     "voiceListLabel": "选择具体声音",
-    "voiceListAria": "按老师与地区筛选的声音列表"
+    "voiceListAria": "按老师与地区筛选的声音列表",
+    "policyLabel": "语音引擎模式",
+    "policyAria": "选择语音引擎模式",
+    "policyLocalOnly": "仅限本机",
+    "policyOnlineBackup": "本机 + 在线备用",
+    "workerOfflineHint": "本地语音服务当前未运行。请开启“本机 + 在线备用”，以便朗读未预缓存的绘本句子与游戏语音。"
   }
 }

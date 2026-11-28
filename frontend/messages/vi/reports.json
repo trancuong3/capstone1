@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Điều hướng hành trình đọc"
+  },
   "overview": {
     "title": "Báo cáo tiến bộ",
     "subtitle": "Theo dõi thời lượng đọc, độ chính xác và chuỗi ngày đọc của bé.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "Báo cáo hiện tại vẫn được hiển thị. Ba mẹ có thể thử tải lại danh sách kỳ.",
     "noPeriodReportTitle": "Chưa có báo cáo cho kỳ đã chọn",
     "noSavedReportTitle": "Chưa có báo cáo đã lưu",
-    "noReportDescription": "Không có báo cáo cho lựa chọn này. Ba mẹ có thể chọn bé khác hoặc kỳ khác; hệ thống không dùng số liệu mẫu thay thế.",
+    "noReportDescription": "Không có báo cáo cho lựa chọn này. Ba mẹ có thể chọn hồ sơ bé hoặc kỳ báo cáo khác.",
     "pendingReportTitle": "Dữ liệu đang chờ bổ sung",
-    "pendingReportDesc": "Dữ liệu báo cáo hiện chưa sẵn sàng. Hệ thống không hiển thị số liệu ước tính thay thế.",
+    "pendingReportDesc": "Dữ liệu báo cáo hiện chưa sẵn sàng. Ba mẹ vui lòng thử lại sau.",
     "periodBannerRange": "Kỳ: {start} → {end}",
     "periodGeneratedAt": "Cập nhật lúc {dateTime} (giờ Việt Nam), không tự tính lại sau mỗi buổi đọc.",
     "unsupportedFormatTitle": "Định dạng báo cáo chưa được hỗ trợ",
@@ -61,10 +64,10 @@
     "viewAllWords": "Xem tất cả ({count})",
     "noDifficultWordsInPeriod": "Báo cáo kỳ này chưa ghi nhận từ cần luyện.",
     "difficultWordsWindowNote": "Lưu ý: Mục Từ cần luyện riêng mặc định tổng hợp 90 ngày gần nhất, không tự đổi theo kỳ báo cáo ở trên.",
-    "legacyMetricsTitle": "Chỉ số định dạng cũ",
-    "legacyMetricsSubtitle": "Giữ nguyên tên trường đã lưu; chưa quy đổi sang số buổi đọc hoặc phần trăm chính xác.",
-    "legacyTotalBooks": "Tổng sách đã lưu (total_books)",
-    "legacyAvgFluency": "Giá trị avg_fluency đã lưu (chưa xác định đơn vị)",
+    "legacyMetricsTitle": "Chỉ số lưu trữ trước đây",
+    "legacyMetricsSubtitle": "Các chỉ số tổng hợp từ phiên bản lưu trữ trước.",
+    "legacyTotalBooks": "Tổng số sách đã lưu",
+    "legacyAvgFluency": "Điểm trôi chảy trung bình",
     "periodSelectLabel": "Kỳ báo cáo đã lưu",
     "periodLatestOption": "Mới nhất",
     "periodSelectedRange": "{start} → {end} (đang chọn)",
@@ -135,6 +138,9 @@
       "aiWriting": "AI đang viết nhận xét…",
       "aiRefresh": "Nhờ AI nhận xét lại",
       "aiFallbackHint": "Chưa kết nối được AI nên đang hiển thị nhận xét tự động từ số liệu. Ba mẹ có thể bấm “Nhờ AI nhận xét lại” sau.",
+      "aiFallbackQuota": "AI đang tạm bận hoặc hết hạn mức lượt gọi nên đang hiển thị nhận xét tự động từ số liệu. Ba mẹ vui lòng đợi ít phút rồi bấm “Nhờ AI nhận xét lại” nhé.",
+      "aiFallbackTimeout": "AI phản hồi lâu hơn dự kiến nên đang hiển thị nhận xét tự động từ số liệu. Ba mẹ có thể bấm “Nhờ AI nhận xét lại” ngay sau vài giây.",
+      "aiFallbackConfig": "Dịch vụ AI trên máy chủ hiện chưa sẵn sàng cấu hình nên đang hiển thị nhận xét tự động từ số liệu. Ba mẹ vui lòng thử lại sau hoặc liên hệ quản trị viên.",
       "strengthsTitle": "Bé làm tốt",
       "improvementsTitle": "Bé cần cải thiện",
       "actionsTitle": "Gợi ý đồng hành tiếp theo",
@@ -162,7 +168,11 @@
       "uncertainLabel": "Chưa nghe rõ",
       "uncertainNote": "Ghi nhận riêng, không tính là lỗi phát âm đã xác nhận."
     },
-    "entertainmentSummaryHeading": "Học tập qua Giải trí & Kỹ năng ngôn ngữ (V4.0)"
+    "entertainmentSummaryHeading": "Học tập qua Giải trí & Kỹ năng ngôn ngữ (V4.0)",
+    "focusAria": "Chọn khu vực báo cáo",
+    "focusAssessment": "Đánh giá AI",
+    "focusSignals": "Biểu đồ & chỉ số",
+    "focusEntertainment": "Học mà Chơi"
   },
   "sessions": {
     "title": "Lịch sử đọc",
@@ -174,7 +184,7 @@
     "noChildDesc": "Tạo hồ sơ để bắt đầu lưu lại các buổi đọc của bé.",
     "createChildAction": "Tạo hồ sơ bé",
     "pendingDataTitle": "Dữ liệu đang chờ bổ sung",
-    "pendingHistoryDesc": "Dữ liệu lịch sử đọc hiện chưa sẵn sàng. Hệ thống không hiển thị dữ liệu mẫu thay thế.",
+    "pendingHistoryDesc": "Dữ liệu lịch sử đọc hiện chưa sẵn sàng. Ba mẹ vui lòng thử lại sau.",
     "retry": "Thử lại",
     "manageChildren": "Quản lý hồ sơ bé",
     "notFoundTitle": "Không tìm thấy lịch sử",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes} phút {seconds} giây",
     "detail": {
       "loadingAria": "Đang tải chi tiết buổi đọc",
-      "pendingDesc": "Dữ liệu của mục này chưa sẵn sàng theo định dạng hiện tại. Không có dữ liệu mẫu thay thế.",
+      "pendingDesc": "Dữ liệu của mục này chưa sẵn sàng. Ba mẹ vui lòng thử lại sau.",
       "notFoundTitle": "Không tìm thấy buổi đọc",
       "notFoundDesc": "Buổi đọc không tồn tại hoặc không thuộc tài khoản hiện tại.",
       "backToHistory": "Về lịch sử",
@@ -283,7 +293,7 @@
       "originalOmission": "Bỏ sót",
       "originalMispronunciation": "Phát âm chưa đúng",
       "recognizedPrefix": "ViRead nhận diện: “{text}”",
-      "pageRevisionMeta": "Mã trang {pageId} · phiên bản ",
+      "pageRevisionMeta": "Trang sách",
       "firstPassSectionAria": "Sự kiện lượt đọc đầu",
       "firstPassSectionTitle": "Sự kiện lượt đọc đầu",
       "timestampAt": "Mốc ",
@@ -346,7 +356,7 @@
       "prevShort": "Trước",
       "nextShort": "Sau",
       "loadingPageAria": "Đang tải nội dung trang sách",
-      "verifiedPageTitle": "Nội dung trang đã xác minh",
+      "verifiedPageTitle": "Nội dung trang sách",
       "selfCorrectedCount": "Đã đọc lại đúng: {count} từ",
       "pageMissingContentNote": "Chưa tải được nội dung trang sách đã đọc theo đúng phiên bản lúc bé đọc. Lời đọc và thống kê đã lưu vẫn được giữ nguyên.",
       "legendAria": "Chú giải màu đối chiếu",
@@ -419,7 +429,7 @@
     "errorTitle": "Có vấn đề xảy ra",
     "savedTitle": "Đã lưu",
     "loadChildFailed": "Không tải được hồ sơ bé. Vui lòng thử lại.",
-    "loadManagementFailed": "Chưa tải được dữ liệu quản lý đọc. Vui lòng thử lại sau ít phút.",
+    "loadManagementFailed": "Chưa tải được dữ liệu quản lý đọc. Ba mẹ vui lòng thử lại sau.",
     "mutationUnconfirmed": "Không thực hiện được thao tác. Dữ liệu chưa được xác nhận đã lưu; vui lòng thử lại.",
     "overviewAria": "Tổng quan thói quen đọc",
     "summaryRunningGoals": "Mục tiêu đang chạy",
@@ -527,7 +537,7 @@
     "goalsTimezoneRule": "Tiến độ chỉ tính phiên đã hoàn tất với thời điểm bắt đầu/kết thúc hợp lệ. Mục tiêu không tự hoàn thành chỉ vì đạt 100%.",
     "remindersSectionAria": "Lịch nhắc đọc",
     "remindersTitle": "Lịch nhắc đọc",
-    "remindersSubtitle": "Lịch được lưu theo múi giờ đã chọn. Khi bật email, máy chủ sẽ gửi lời nhắc đến địa chỉ đã xác minh của phụ huynh.",
+    "remindersSubtitle": "Lịch được lưu theo múi giờ đã chọn. Khi bật email, hệ thống sẽ gửi lời nhắc đến địa chỉ đã xác minh của phụ huynh.",
     "addReminder": "Thêm lịch nhắc",
     "dueRemindersTitle": "Đến giờ đọc sách ({count})",
     "reminderAtPrefix": "Lịch nhắc lúc ",
@@ -578,7 +588,7 @@
       "startLabel": "Bắt đầu",
       "createGoal": "Tạo mục tiêu",
       "localTimeLabel": "Giờ địa phương",
-      "ianaTimezoneLabel": "Timezone IANA",
+      "ianaTimezoneLabel": "Múi giờ chi tiết",
       "repeatDaysLabel": "Lặp vào ngày",
       "emailReminderLabel": "Email nhắc đọc",
       "sendEmailCheck": "Gửi email cho phụ huynh khi đến giờ",
@@ -656,7 +666,11 @@
       "favorited": "Đã yêu thích",
       "wantToRead": "Muốn đọc",
       "savedToRead": "Đã lưu đọc"
-    }
+    },
+    "focusAria": "Lọc khu vực quản lý đọc",
+    "focusPlans": "Kế hoạch",
+    "focusGoals": "Mục tiêu",
+    "focusReminders": "Lịch nhắc"
   },
   "entertainmentSummary": {
     "loading": "Đang tổng hợp tiến độ Học mà Chơi cho {childName}…",

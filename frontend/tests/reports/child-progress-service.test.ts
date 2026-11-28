@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createChildProgressService } from "@/lib/api/child-progress-service";
+import { ServiceError } from "@/lib/api/service-error";
 
 const { getSession, initialize, fetchMock } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -130,13 +131,16 @@ describe("child progress service", () => {
     expect(headers.Authorization).toBe("Bearer isolated-test-token");
   });
 
-  it("asks the AI with a POST body", async () => {
-    fetchMock.mockResolvedValue(json(assessmentBody));
+  it("asks the AI with a POST body and parses ai_fallback_reason cleanly", async () => {
+    fetchMock.mockResolvedValue(
+      json({ ...assessmentBody, ai_fallback_reason: "PROVIDER_QUOTA" }),
+    );
 
-    await createChildProgressService().generate(CHILD_ID, 90, {
+    const result = await createChildProgressService().generate(CHILD_ID, 90, {
       refresh: true,
     });
 
+    expect(result.ai_fallback_reason).toBe("PROVIDER_QUOTA");
     expect(fetchMock).toHaveBeenCalledWith(
       `http://127.0.0.1:8000/tutor/children/${CHILD_ID}/progress-assessment`,
       expect.objectContaining({
@@ -144,6 +148,61 @@ describe("child progress service", () => {
         body: JSON.stringify({ days: 90, refresh: true }),
       }),
     );
+  });
+
+  it("retries generate once on Render cold-start 502 and applies a 45s timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(
+          new Response("Bad Gateway", {
+            status: 502,
+          }),
+        )
+        .mockResolvedValueOnce(
+          json({ ...assessmentBody, ai_fallback_reason: null }),
+        );
+
+      const retriedPromise = createChildProgressService().generate(
+        CHILD_ID,
+        30,
+      );
+      await vi.advanceTimersByTimeAsync(1_200);
+      const retried = await retriedPromise;
+      expect(retried.ai_fallback_reason).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      let observedSignal: AbortSignal | undefined;
+      fetchMock.mockImplementation(
+        (_input, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            observedSignal = init?.signal ?? undefined;
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      );
+
+      const slowPromise = createChildProgressService()
+        .generate(CHILD_ID, 30, { refresh: true })
+        .catch((error: unknown) => error);
+
+      await vi.advanceTimersByTimeAsync(44_900);
+      expect(observedSignal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(200);
+      const timeoutError = await slowPromise;
+      expect(observedSignal?.aborted).toBe(true);
+      expect(timeoutError).toBeInstanceOf(ServiceError);
+      expect(timeoutError).toMatchObject({
+        code: "NETWORK_ERROR",
+        status: 0,
+        retryable: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rejects malformed payloads and answers about another child", async () => {

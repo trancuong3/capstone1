@@ -830,4 +830,64 @@ describe("MemoryGameScreen", () => {
       "Bức tranh mở lại 3 giây",
     );
   });
+
+  it("paginates recent history at 6 per page when more than 6 sessions exist", async () => {
+    const validThemeKeys = [
+      "sunny_garden",
+      "happy_classroom",
+      "mid_autumn_yard",
+      "seaside_morning",
+      "countryside_pond",
+      "friendly_market",
+    ] as const;
+    const manyHistory = Array.from({ length: 8 }, (_, index) => ({
+      id: `44000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      child_id: TEST_CHILD_ID,
+      child_grade: 2,
+      theme_key: validThemeKeys[index % validThemeKeys.length]!,
+      theme_name_vi: `Lịch sử trí nhớ ${index + 1}`,
+      difficulty_level: 2,
+      timer_mode: "30S" as const,
+      timer_seconds: 30,
+      recall_mode: "GUIDED_RECALL" as const,
+      status: "COMPLETED" as const,
+      hints_used: 0,
+      peek_count: 0,
+      best_factual_score: 80,
+      best_creative_score: 85,
+      stars: 3,
+      attempts_count: 2,
+      object_count: 5,
+      created_at: "2026-11-25T10:00:00Z",
+      updated_at: "2026-11-25T10:02:00Z",
+    }));
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = new URL(url).pathname;
+        if (path === `/profiles/children/${TEST_CHILD_ID}`)
+          return Response.json(childFixture);
+        if (path === "/games/memory/themes")
+          return Response.json(sampleCatalog);
+        if (path === "/games/memory/sessions")
+          return Response.json(manyHistory);
+        throw new Error(`Unexpected path ${path}`);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    expect(await screen.findByText("Lịch sử trí nhớ 1")).toBeInTheDocument();
+    expect(screen.getByText("Lịch sử trí nhớ 6")).toBeInTheDocument();
+    expect(screen.queryByText("Lịch sử trí nhớ 7")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(await screen.findByText("Lịch sử trí nhớ 7")).toBeInTheDocument();
+    expect(screen.getByText("Lịch sử trí nhớ 8")).toBeInTheDocument();
+    expect(screen.queryByText("Lịch sử trí nhớ 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 2 / 2")).toBeInTheDocument();
+  });
 });

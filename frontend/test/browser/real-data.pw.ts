@@ -236,10 +236,12 @@ test("Admin catalog → metadata, unavailable pages retry, audit and health", as
   await expect(page.getByText("book.read", { exact: true })).toBeVisible();
   await expect(page.getByText("Hệ thống", { exact: true })).toBeVisible();
   await page.goto("/admin/health");
-  await expect(page.getByRole("heading", { name: "Database" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Cơ sở dữ liệu" }),
+  ).toBeVisible();
   await page.getByRole("button", { name: "Kiểm tra lại" }).click();
   await expect(
-    page.getByText("Database đã phản hồi truy vấn đọc."),
+    page.getByText("Cơ sở dữ liệu đã phản hồi truy vấn đọc."),
   ).toBeVisible();
   expect(api.unexpected).toEqual([]);
 });
@@ -255,14 +257,14 @@ test("Admin OCR is read-only and can switch to a stored revision", async ({
   ).toBeVisible();
   await expect(page.getByLabel("Nội dung trang")).toBeDisabled();
   await page
-    .getByText("Thông tin chi tiết từ OCR và lịch sử revision", {
+    .getByText("Thông tin chi tiết từ nhận diện chữ và lịch sử phiên bản", {
       exact: true,
     })
     .click();
   await expect(
     page.getByRole("button", { name: /Chạy lại OCR từ ảnh đã lưu/ }),
   ).toBeEnabled();
-  await page.getByRole("button", { name: /Revision R1/ }).click();
+  await page.getByRole("button", { name: /Bản R1/ }).click();
   await expect(page.getByLabel("Nội dung trang")).toHaveValue(
     "Văn bản revision cũ",
   );
@@ -324,13 +326,13 @@ test("Admin OCR draft → combined AI review → save → verify preserves bound
   const workflowCard = page.getByTestId("admin-ai-workflow");
   await expect(
     workflowCard
-      .getByText("Candidate version")
+      .getByText("Phiên bản nội dung")
       .locator("..")
       .getByText("1", { exact: true }),
   ).toBeVisible();
-  await expect(workflowCard.getByText("Khớp Candidate hiện tại")).toBeVisible();
+  await expect(workflowCard.getByText("Khớp nội dung hiện tại")).toBeVisible();
   await page.getByRole("button", { name: /Lưu bản nháp/ }).click();
-  await expect(page.getByText("Đã lưu bản nháp vào database.")).toBeVisible();
+  await expect(page.getByText("Đã lưu bản nháp.")).toBeVisible();
   expect(api.draftSaveRequest?.draft_text).toBe("Văn bản đã sửa");
   const savedWords = api.draftSaveRequest?.words as
     Array<Record<string, unknown>> | undefined;
@@ -351,7 +353,7 @@ test("Admin OCR draft → combined AI review → save → verify preserves bound
     })
     .click();
   await expect(
-    page.getByText("Đã xác minh revision", { exact: true }),
+    page.getByText("Đã xác minh bản chữ", { exact: true }),
   ).toBeVisible();
   expect(api.verifyRequest?.corrected_text).toBe("Văn bản đã sửa");
   expect(api.verifyRequest?.proofread_audit).toMatchObject({
@@ -1036,7 +1038,7 @@ for (const routeGroup of ["parent", "admin"] as const) {
         ).toBeVisible();
       if (path === "/admin/health")
         await expect(
-          page.getByRole("heading", { name: "Database" }),
+          page.getByRole("heading", { name: "Cơ sở dữ liệu" }),
         ).toBeVisible();
       for (const width of [1440, 1024, 768, 390]) {
         await page.setViewportSize({

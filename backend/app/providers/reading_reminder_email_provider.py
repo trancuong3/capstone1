@@ -12,6 +12,7 @@ from app.database.config import (
     SMTP_SEND_TIMEOUT_SECONDS,
     SMTP_USERNAME,
 )
+from app.providers.email_layout import render_reading_reminder_html
 from app.services.i18n.email_templates import render_reading_reminder_email
 from app.services.i18n.locales import DEFAULT_LOCALE
 
@@ -76,12 +77,23 @@ def build_reading_reminder_message(
         timezone_name=timezone_name,
         app_url=READING_REMINDER_APP_URL,
     )
+    html_body = render_reading_reminder_html(
+        locale=rendered.locale,
+        subject=rendered.subject,
+        plain_body=rendered.body,
+        child_alias=child_alias,
+        local_date=local_date,
+        local_time=local_time,
+        timezone_name=timezone_name,
+        app_url=READING_REMINDER_APP_URL,
+    )
     message = EmailMessage()
     message["From"] = formatted_from
     message["To"] = recipient
     message["Subject"] = rendered.subject
     message["Message-ID"] = f"<reading-reminder-{occurrence_id}@{domain}>"
     message.set_content(rendered.body)
+    message.add_alternative(html_body, subtype="html")
     message["Content-Language"] = rendered.locale
     return message
 

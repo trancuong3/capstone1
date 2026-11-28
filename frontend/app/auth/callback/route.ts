@@ -51,10 +51,50 @@ function isLoopbackOrPrivateLanHost(hostHeader: string): boolean {
   );
 }
 
+function resolveVercelPreviewOrigins(): string[] {
+  if (process.env.VERCEL_ENV !== "preview") {
+    return [];
+  }
+
+  const origins = new Set<string>();
+  for (const rawCandidate of [
+    process.env.VERCEL_URL,
+    process.env.VERCEL_BRANCH_URL,
+  ]) {
+    const trimmed = rawCandidate?.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.includes("://")) {
+      if (!trimmed.toLowerCase().startsWith("https://")) continue;
+      const origin = parseConfiguredOrigin(trimmed);
+      if (origin && !isLoopbackOrPrivateLanHost(new URL(origin).host)) {
+        origins.add(origin);
+      }
+      continue;
+    }
+
+    if (
+      /[\s/?#@]/.test(trimmed) ||
+      !SAFE_HOST_HEADER_RE.test(trimmed) ||
+      isLoopbackOrPrivateLanHost(trimmed)
+    ) {
+      continue;
+    }
+
+    const origin = parseConfiguredOrigin(`https://${trimmed}`);
+    if (origin) {
+      origins.add(origin);
+    }
+  }
+
+  return Array.from(origins);
+}
+
 function resolvePublicOrigin(request: NextRequest): string {
   const configuredSiteOrigin = parseConfiguredOrigin(
     process.env.NEXT_PUBLIC_SITE_URL,
   );
+  const previewOrigins = resolveVercelPreviewOrigins();
   const extraAllowedOrigins = (
     process.env.VIREAD_ALLOWED_CALLBACK_ORIGINS ?? ""
   )
@@ -64,6 +104,7 @@ function resolvePublicOrigin(request: NextRequest): string {
 
   const allowedOrigins = new Set<string>([
     ...(configuredSiteOrigin ? [configuredSiteOrigin] : []),
+    ...previewOrigins,
     ...extraAllowedOrigins,
   ]);
   const requestOrigin = new URL(request.url).origin;
@@ -90,13 +131,15 @@ function resolvePublicOrigin(request: NextRequest): string {
       (allowedOrigins.size === 0 &&
         (candidateOrigin === requestOrigin ||
           isLoopbackOrPrivateLanHost(rawHost))) ||
-      (!configuredSiteOrigin && isLoopbackOrPrivateLanHost(rawHost))
+      (!configuredSiteOrigin &&
+        previewOrigins.length === 0 &&
+        isLoopbackOrPrivateLanHost(rawHost))
     ) {
       return candidateOrigin;
     }
   }
 
-  return configuredSiteOrigin ?? requestOrigin;
+  return configuredSiteOrigin ?? previewOrigins[0] ?? requestOrigin;
 }
 
 function readRequestedNext(request: NextRequest): string | null {

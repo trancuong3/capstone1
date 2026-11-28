@@ -636,10 +636,10 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
       /chưa có âm thanh dựng trước/i,
     );
 
-    // Enable Google fallback panel and verify no raw file path `backend/.env` is shown
-    await user.click(
-      screen.getByRole("button", { name: /Máy này \+ Google dự phòng/ }),
-    );
+    // Verify technical provider toggle and raw file paths are never rendered
+    expect(
+      screen.queryByRole("button", { name: /Máy này \+ Google dự phòng/ }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/backend\/\.env/i)).not.toBeInTheDocument();
     unmount();
 

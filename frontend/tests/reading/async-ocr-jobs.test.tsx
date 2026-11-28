@@ -156,11 +156,11 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
 
     expect(
       await screen.findByText(
-        /Đang xếp hàng chờ máy chủ OCR Windows bật — ảnh đã được lưu an toàn/i,
+        /Đang xếp hàng chờ hệ thống sẵn sàng — ảnh đã được lưu an toàn/i,
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("ocr-worker-online-badge")).toHaveTextContent(
-      /Đang tắt/i,
+      /Đang tạm nghỉ/i,
     );
 
     await user.click(screen.getByRole("button", { name: /Hủy quét/i }));
@@ -223,7 +223,7 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
     );
 
     expect(
-      await screen.findByText(/Đang nhận diện trang sách/i),
+      await screen.findByText("Đang nhận diện trang sách..."),
     ).toBeInTheDocument();
     expect(
       await screen.findByTestId("local-ocr-text", {}, { timeout: 4_000 }),
@@ -363,7 +363,7 @@ describe("Async OCR Queue UX (/book-scanner, /my-books, Admin /jobs)", () => {
     );
 
     expect(
-      await screen.findByText(/Đang chờ máy chủ OCR Windows bật/i),
+      await screen.findByText(/Đang chờ hệ thống nhận diện/i),
     ).toBeInTheDocument();
   });
 

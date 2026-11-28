@@ -267,6 +267,10 @@ def _local_storage_path(object_path: str, bucket_name: str | None = None) -> Pat
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="The stored image is not a Storage object path",
         )
+    if os.name == "nt":
+        target_str = str(target)
+        if len(target_str) >= 248 and not target_str.startswith("\\\\?\\"):
+            return Path(f"\\\\?\\{target_str}")
     return target
 
 

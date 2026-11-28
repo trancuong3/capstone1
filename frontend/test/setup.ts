@@ -4,6 +4,11 @@ import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
 import { resetAllApiCachesForTests } from "@/lib/api/read-cache";
+import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
+import { registerPersistentTestNamespace } from "@/messages/loader";
+import viAdminMessages from "@/messages/vi/admin.json";
+
+registerPersistentTestNamespace(DEFAULT_LOCALE, "admin", viAdminMessages);
 
 vi.mock("next/link", async () => {
   const { createElement } = await import("react");

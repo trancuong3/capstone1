@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Navigation für die Lesereise"
+  },
   "overview": {
     "title": "Fortschrittsbericht",
     "subtitle": "Verfolgen Sie die Lesezeit, Genauigkeit und Leseserien Ihres Kindes.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "Der aktuelle Bericht wird weiterhin angezeigt. Sie können versuchen, die Zeitraumliste neu zu laden.",
     "noPeriodReportTitle": "Kein Bericht für den ausgewählten Zeitraum",
     "noSavedReportTitle": "Keine gespeicherten Berichte",
-    "noReportDescription": "Kein Bericht für diese Auswahl. Bitte wählen Sie ein anderes Kind oder einen anderen Zeitraum; das System verwendet keine Platzhalterdaten.",
+    "noReportDescription": "Kein Bericht für diese Auswahl gefunden. Sie können ein anderes Kind oder einen anderen Zeitraum wählen.",
     "pendingReportTitle": "Daten ausstehend",
-    "pendingReportDesc": "Berichtsdaten sind noch nicht bereit. Das System zeigt keine geschätzten Werte an.",
+    "pendingReportDesc": "Berichtsdaten sind derzeit noch nicht verfügbar. Bitte versuchen Sie es später erneut.",
     "periodBannerRange": "Zeitraum: {start} → {end}",
     "periodGeneratedAt": "Aktualisiert am {dateTime} (Vietnam-Zeit); wird nicht nach jeder Sitzung automatisch neu berechnet.",
     "unsupportedFormatTitle": "Berichtsformat nicht unterstützt",
@@ -61,10 +64,10 @@
     "viewAllWords": "Alle anzeigen ({count})",
     "noDifficultWordsInPeriod": "Für diesen Zeitraum wurden keine schwierigen Wörter erfasst.",
     "difficultWordsWindowNote": "Hinweis: Der Bereich für schwierige Wörter umfasst standardmäßig die letzten 90 Tage und ändert sich nicht basierend auf dem oben gewählten Berichtszeitraum.",
-    "legacyMetricsTitle": "Legacy-Metriken",
-    "legacyMetricsSubtitle": "Gespeicherte Feldnamen beibehalten; keine Umrechnung in Sitzungsanzahl oder genaue Prozentsätze.",
-    "legacyTotalBooks": "Gesamtzahl der gespeicherten Bücher (total_books)",
-    "legacyAvgFluency": "Gespeicherter avg_fluency-Wert (Einheit undefiniert)",
+    "legacyMetricsTitle": "Zuvor gespeicherte Kennzahlen",
+    "legacyMetricsSubtitle": "Zusammengefasste Kennzahlen aus einem früheren Speicherformat.",
+    "legacyTotalBooks": "Gesamtzahl gespeicherter Bücher",
+    "legacyAvgFluency": "Durchschnittlicher Lesefluss-Wert",
     "periodSelectLabel": "Gespeicherter Berichtszeitraum",
     "periodLatestOption": "Neueste",
     "periodSelectedRange": "{start} → {end} (ausgewählt)",
@@ -135,6 +138,9 @@
       "aiWriting": "KI schreibt gerade einen Kommentar…",
       "aiRefresh": "KI bitten, Kommentar neu zu schreiben",
       "aiFallbackHint": "Die KI ist nicht verbunden, daher wird ein automatischer Kommentar aus den Daten angezeigt. Eltern können später auf „KI bitten, Kommentar neu zu schreiben“ tippen.",
+      "aiFallbackQuota": "Die KI ist vorübergehend ausgelastet oder hat das Anfragelimit erreicht, daher wird ein automatischer Kommentar aus den Daten angezeigt. Bitte warten Sie einige Minuten und tippen Sie auf „KI bitten, Kommentar neu zu schreiben“.",
+      "aiFallbackTimeout": "Die Antwort der KI dauerte länger als erwartet, daher wird ein automatischer Kommentar aus den Daten angezeigt. Sie können in wenigen Sekunden erneut auf „KI bitten, Kommentar neu zu schreiben“ tippen.",
+      "aiFallbackConfig": "Der KI-Dienst ist derzeit auf dem Server nicht konfiguriert, daher wird ein automatischer Kommentar aus den Daten angezeigt. Bitte versuchen Sie es später erneut oder wenden Sie sich an den Administrator.",
       "strengthsTitle": "Das Kind macht das gut",
       "improvementsTitle": "Das Kind muss sich verbessern",
       "actionsTitle": "Nächste Schritte zur Unterstützung",
@@ -162,7 +168,11 @@
       "uncertainLabel": "Nicht deutlich gehört",
       "uncertainNote": "Separat erfasst, zählt nicht als bestätigter Aussprachefehler."
     },
-    "entertainmentSummaryHeading": "Spielerisches Lernen & Sprachkompetenzen (V4.0)"
+    "entertainmentSummaryHeading": "Spielerisches Lernen & Sprachkompetenzen (V4.0)",
+    "focusAria": "Berichtsabschnitte filtern",
+    "focusAssessment": "KI-Bewertung",
+    "focusSignals": "Diagramme & Kennzahlen",
+    "focusEntertainment": "Spielen & Lernen"
   },
   "sessions": {
     "title": "Leseverlauf",
@@ -174,7 +184,7 @@
     "noChildDesc": "Erstellen Sie ein Profil, um die Lesesitzungen Ihres Kindes zu speichern.",
     "createChildAction": "Kinderprofil erstellen",
     "pendingDataTitle": "Daten ausstehend",
-    "pendingHistoryDesc": "Daten zur Lesehistorie sind noch nicht verfügbar. Das System zeigt keine Beispieldaten an.",
+    "pendingHistoryDesc": "Leseverlaufsdaten sind noch nicht verfügbar. Bitte versuchen Sie es später erneut.",
     "retry": "Erneut versuchen",
     "manageChildren": "Kindesprofile verwalten",
     "notFoundTitle": "Historie nicht gefunden",
@@ -217,7 +227,7 @@
     "durationMinutesSeconds": "{minutes} Minuten {seconds} Sekunden",
     "detail": {
       "loadingAria": "Details der Lese-Session werden geladen",
-      "pendingDesc": "Die Daten für dieses Element sind im aktuellen Format nicht verfügbar. Keine Beispieldaten verfügbar.",
+      "pendingDesc": "Daten für diesen Eintrag sind noch nicht verfügbar. Bitte versuchen Sie es später erneut.",
       "notFoundTitle": "Lesesitzung nicht gefunden",
       "notFoundDesc": "Die Lesesitzung existiert nicht oder gehört nicht zum aktuellen Konto.",
       "backToHistory": "Zurück zum Verlauf",
@@ -283,7 +293,7 @@
       "originalOmission": "Überspringen",
       "originalMispronunciation": "Falsche Aussprache",
       "recognizedPrefix": "ViRead hat erkannt: „{text}“",
-      "pageRevisionMeta": "Seite {pageId} · Version ",
+      "pageRevisionMeta": "Buchseite",
       "firstPassSectionAria": "Ereignisse beim ersten Durchgang",
       "firstPassSectionTitle": "Ereignisse beim ersten Durchgang",
       "timestampAt": "Um ",
@@ -346,7 +356,7 @@
       "prevShort": "Zurück",
       "nextShort": "Weiter",
       "loadingPageAria": "Buchseiteninhalt wird geladen",
-      "verifiedPageTitle": "Verifizierter Seiteninhalt",
+      "verifiedPageTitle": "Inhalt der Buchseite",
       "selfCorrectedCount": "Selbst korrigiert: {count} Wörter",
       "pageMissingContentNote": "Die genaue Buchseitenversion, die dein Kind gelesen hat, konnte nicht geladen werden. Gespeicherte Lesetexte und Statistiken bleiben unverändert.",
       "legendAria": "Farblegende",
@@ -419,7 +429,7 @@
     "errorTitle": "Etwas ist schiefgelaufen",
     "savedTitle": "Gespeichert",
     "loadChildFailed": "Kinderprofil konnte nicht geladen werden. Bitte versuche es erneut.",
-    "loadManagementFailed": "Leseverwaltungsdaten konnten nicht geladen werden. Bitte versuche es gleich noch einmal.",
+    "loadManagementFailed": "Leseverwaltungsdaten konnten nicht geladen werden. Bitte versuchen Sie es später erneut.",
     "mutationUnconfirmed": "Aktion konnte nicht ausgeführt werden. Die Daten wurden nicht als gespeichert bestätigt; bitte versuche es erneut.",
     "overviewAria": "Übersicht der Lesegewohnheiten",
     "summaryRunningGoals": "Aktive Ziele",
@@ -527,7 +537,7 @@
     "goalsTimezoneRule": "Der Fortschritt zählt nur abgeschlossene Sitzungen mit gültigen Start- und Endzeiten. Ziele werden nicht automatisch abgeschlossen, nur weil 100% erreicht wurden.",
     "remindersSectionAria": "Leseerinnerungen",
     "remindersTitle": "Leseerinnerungen",
-    "remindersSubtitle": "Erinnerungen werden in deiner ausgewählten Zeitzone gespeichert. Wenn E-Mail-Benachrichtigungen aktiviert sind, werden Erinnerungen an die verifizierte Adresse der Eltern gesendet.",
+    "remindersSubtitle": "Zeitpläne werden in der gewählten Zeitzone gespeichert. Bei aktivierter E-Mail sendet das System Erinnerungen an die bestätigte Adresse der Eltern.",
     "addReminder": "Erinnerung hinzufügen",
     "dueRemindersTitle": "Zeit zum Lesen ({count})",
     "reminderAtPrefix": "Erinnerung um ",
@@ -578,7 +588,7 @@
       "startLabel": "Start",
       "createGoal": "Ziel erstellen",
       "localTimeLabel": "Ortszeit",
-      "ianaTimezoneLabel": "IANA-Zeitzone",
+      "ianaTimezoneLabel": "Detaillierte Zeitzone",
       "repeatDaysLabel": "Wiederholen am",
       "emailReminderLabel": "Leseerinnerung per E-Mail",
       "sendEmailCheck": "Elternteil per E-Mail benachrichtigen, wenn es Zeit zum Lesen ist",
@@ -656,7 +666,11 @@
       "favorited": "Zu Favoriten hinzugefügt",
       "wantToRead": "Leseliste",
       "savedToRead": "In Leseliste gespeichert"
-    }
+    },
+    "focusAria": "Bereiche der Leseverwaltung filtern",
+    "focusPlans": "Pläne",
+    "focusGoals": "Ziele",
+    "focusReminders": "Erinnerungen"
   },
   "entertainmentSummary": {
     "loading": "Fortschritte im Spiel- und Lernbereich für {childName} werden geladen…",

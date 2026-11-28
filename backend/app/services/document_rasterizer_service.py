@@ -1296,8 +1296,6 @@ def iter_rasterized_spooled_document(
         header_bytes=spooled.header_bytes,
     )
     temp_pdf_path: Path | None = None
-    page_iter: Iterator[RasterizedDocumentPage] | None = None
-    bounded_iter: Iterator[RasterizedDocumentPage] | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
@@ -1334,23 +1332,24 @@ def iter_rasterized_spooled_document(
         bounded_iter = _bounded_iter()
         yield clean_name, detected, spooled.source_sha256, bounded_iter
     finally:
-        if bounded_iter is not None:
-            close_bounded = getattr(bounded_iter, "close", None)
-            if callable(close_bounded):
+        for it in (bounded_iter, page_iter):
+            close_fn = getattr(it, "close", None)
+            if callable(close_fn):
                 try:
-                    close_bounded()
+                    close_fn()
                 except Exception:
                     pass
-        if page_iter is not None:
-            close_page_iter = getattr(page_iter, "close", None)
-            if callable(close_page_iter):
-                try:
-                    close_page_iter()
-                except Exception:
-                    pass
+        bounded_iter = None
+        page_iter = None
         if temp_pdf_path is not None:
             try:
                 temp_pdf_path.unlink(missing_ok=True)
+            except PermissionError:
+                gc.collect()
+                try:
+                    temp_pdf_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
             except Exception:
                 pass
 

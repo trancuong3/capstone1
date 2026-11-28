@@ -89,7 +89,7 @@ export const bookQualityFindingSchema = z.object({
   excerpt_end: z.number().int().nonnegative(),
   suggested_correction: z.string().nullable(),
   explanation: z.string(),
-  detection_source: z.enum(["RULE", "OLLAMA_TEXT"]),
+  detection_source: z.enum(["RULE", "OLLAMA_TEXT", "CLOUD_AI"]),
   model_name: z.string().nullable(),
   confidence: z.number().min(0).max(1).nullable(),
   status: bookQualityFindingStatusSchema,

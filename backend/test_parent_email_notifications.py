@@ -607,6 +607,47 @@ class TransportAndHealthTests(unittest.TestCase):
         html_body = msg.get_body(preferencelist=("html",)).get_content()
         self.assertNotIn("<script>", html_body)
         self.assertIn("&lt;script&gt;", html_body)
+        self.assertNotIn("#2563eb", html_body.lower())
+        self.assertEqual(msg["Content-Language"], "vi")
+
+    def test_weekly_digest_html_includes_delta_fluency_goal_bar_and_size_bounds(self):
+        with patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):
+            msg = transport.build_weekly_digest_message(
+                recipient="parent@example.test",
+                parent_name="Mẹ Lan",
+                week_label="23/11–29/11",
+                items=[
+                    transport.ChildWeeklyDigestItem(
+                        child_alias="Bé An",
+                        sessions_count=5,
+                        total_minutes=64,
+                        prev_sessions_count=3,
+                        avg_fluency_score=91.4,
+                        goal_summary="5/5 buổi/tuần (100%)",
+                        top_difficult_words=("nghiêng", "khúc khuỷu"),
+                    ),
+                    transport.ChildWeeklyDigestItem(
+                        child_alias="Bé Bo",
+                        sessions_count=1,
+                        total_minutes=12,
+                        prev_sessions_count=3,
+                        avg_fluency_score=78.0,
+                        goal_summary="1/5 buổi/tuần (20%)",
+                        top_difficult_words=(),
+                    ),
+                ],
+                delivery_id=uuid4(),
+            )
+        self.assertEqual(msg["Content-Language"], "vi")
+        html_body = msg.get_body(preferencelist=("html",)).get_content()
+        self.assertIn("+2 so với tuần trước", html_body)
+        self.assertIn("-2 so với tuần trước", html_body)
+        self.assertIn("Độ trôi chảy TB: 91%", html_body)
+        self.assertIn("5/5 buổi/tuần (100%)", html_body)
+        self.assertIn("khúc khuỷu", html_body)
+        self.assertIn("#087467", html_body.lower())
+        self.assertNotIn("#2563eb", html_body.lower())
+        self.assertLess(len(msg.as_bytes()), 64 * 1024)
 
     def test_resend_transport_classifies_429_retryable_and_422_permanent(self):
         with patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):

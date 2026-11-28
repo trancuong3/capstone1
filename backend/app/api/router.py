@@ -25,6 +25,7 @@ from app.api.routes import (
     voice_studio,
 )
 from app.api.routes import admin_viread_training
+from app.api.routes import assistant
 from app.api.routes import book_assets
 from app.api.routes import global_tasks
 from app.api.routes import internal_cron
@@ -79,6 +80,7 @@ api_router.include_router(
 api_router.include_router(comprehension.router, prefix="/comprehension", tags=["Comprehension"])
 api_router.include_router(system.router, prefix="/system", tags=["System"])
 api_router.include_router(support.router, prefix="/support", tags=["Support"])
+api_router.include_router(assistant.router, prefix="/assistant", tags=["Assistant"])
 api_router.include_router(voice.router, prefix="/voice", tags=["Voice"])
 
 api_router.include_router(

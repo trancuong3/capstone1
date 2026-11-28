@@ -1140,4 +1140,57 @@ describe("Sentence Shooter", () => {
     expect(readAgainBtn).toBeEnabled();
     await user.click(readAgainBtn);
   });
+
+  it("paginates lobby books at 6 per page and jumps to initialBookId page when on page 2", async () => {
+    const manyBooks = Array.from({ length: 8 }, (_, index) => ({
+      ...book,
+      id: `30000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      name: `Sách xạ thủ ${index + 1}`,
+      title: `Sách xạ thủ ${index + 1}`,
+    }));
+    fetchMock.mockImplementation(async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/sentence-shooter/books") {
+        return Response.json(manyBooks);
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    const { unmount } = renderScreen();
+
+    expect(
+      await screen.findByRole("button", { name: /Sách xạ thủ 1/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Sách xạ thủ 6/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Sách xạ thủ 7/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(
+      await screen.findByRole("button", { name: /Sách xạ thủ 7/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Sách xạ thủ 8/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Sách xạ thủ 1/ }),
+    ).not.toBeInTheDocument();
+    unmount();
+
+    // When initialBookId is on page 2 (book #7), it starts directly on page 2
+    renderScreenWithBook(manyBooks[6]!.id);
+    const preselectedBtn = await screen.findByRole("button", {
+      name: /Sách xạ thủ 7/,
+    });
+    expect(preselectedBtn).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Trang 2 / 2")).toBeInTheDocument();
+  });
 });

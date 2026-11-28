@@ -221,11 +221,17 @@ describe("ParentPrivateBookManager 30-page mixed state view", () => {
       within(filterGroup).getByRole("button", { name: "Lỗi kiểm tra (1)" }),
     ).toBeInTheDocument();
 
-    // Actionable worker error guidance shown alongside Page 7 LOCAL_OCR_UNAVAILABLE
-    expect(screen.getByText(/LOCAL_OCR_UNAVAILABLE/)).toBeInTheDocument();
+    // Actionable guidance shown alongside Page 7 without exposing raw LOCAL_OCR_UNAVAILABLE code
+    expect(screen.queryByText(/LOCAL_OCR_UNAVAILABLE/)).not.toBeInTheDocument();
     expect(
-      screen.getByText(/Dịch vụ OCR\/AI tạm dừng hoặc đang khởi động/),
+      screen.getByText(/Hệ thống kiểm tra đang tạm nghỉ hoặc khởi động/),
     ).toBeInTheDocument();
+
+    // Overview chips paginate at 16/page and submissions paginate at 10/page (30 total)
+    expect(screen.getByText("Đang xem 1–16 / 30 trang")).toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Đang xem 1–10 / 30 trang")).toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 3")).toBeInTheDocument();
 
     // Filter to failed pages -> focuses cleanly on Page 7 with Retry button
     fireEvent.click(

@@ -145,6 +145,8 @@ export interface WordTimedPlayOptions {
   precomputedCachedSpeed?: number | null;
   /** Preview mode: omit active session lock so voice preview never triggers 409. */
   bypassSessionLock?: boolean;
+  /** Utterance category for session voice-consistency auditing & preview fallback. */
+  utteranceKind?: string;
   bookId?: string | null;
   pageId?: string | null;
   pageRevisionId?: string | null;
@@ -175,11 +177,13 @@ export interface TtsPlaybackCacheContext {
   readonly pageId?: string | null;
   readonly pageRevisionId?: string | null;
   readonly isPrivateBook?: boolean;
+  readonly bypassSessionLock?: boolean;
 }
 
 interface ResolvedOperationVoice {
   readonly sessionId: string | null;
   readonly bypassSessionLock?: boolean;
+  readonly utteranceKind?: string;
   readonly provider: VoiceProviderKind;
   readonly requestedVoiceId: string | null;
   readonly cacheVoiceId: string;
@@ -393,18 +397,43 @@ function canUseAllowedDeviceFallbackTts(
     );
   };
   const isTechnicalServerOutage = (err: unknown): boolean => {
-    if (!err) return false;
-    if (isTransientBusyError(err)) return false;
+    if (!err || isAbort(err) || isTransientBusyError(err)) return false;
     if (isLocalVoiceUnconfiguredError(err)) return true;
-    const status =
-      typeof err === "object" && "status" in err
-        ? Number((err as { status?: unknown }).status)
-        : NaN;
-    if (status === 502 || status === 503 || status === 504 || status === 429) {
+    if (err instanceof TypeError) return true;
+    if (
+      typeof err === "object" &&
+      "name" in err &&
+      (err as { name?: unknown }).name === "TimeoutError"
+    ) {
+      return true;
+    }
+    const rec = typeof err === "object" ? (err as Record<string, unknown>) : {};
+    const hasNumericStatus = typeof rec.status === "number";
+    const status = hasNumericStatus ? (rec.status as number) : NaN;
+    if (status === 401 || status === 403 || status === 422) {
+      return false;
+    }
+    if ((hasNumericStatus && status === 0) || status === 429 || status >= 500) {
+      return true;
+    }
+    const code = typeof rec.code === "string" ? rec.code : "";
+    const providerCode =
+      typeof rec.provider_code === "string"
+        ? rec.provider_code
+        : typeof rec.providerCode === "string"
+          ? rec.providerCode
+          : "";
+    if (
+      code === "TTS_UNAVAILABLE" ||
+      code === "NETWORK_ERROR" ||
+      /LOCAL_TTS_UNAVAILABLE|LOCAL_TTS_TIMEOUT|TTS_TIMEOUT|GOOGLE_TTS_UNAVAILABLE|GOOGLE_TTS_TIMEOUT|TTS_QUOTA_EXCEEDED/i.test(
+        providerCode,
+      )
+    ) {
       return true;
     }
     const msg = err instanceof Error ? err.message : String(err);
-    return /502|503|504|429|timeout|network|failed to fetch|unavailable|offline/i.test(
+    return /500|502|503|504|429|timeout|network|failed to fetch|unavailable|offline|econnrefused/i.test(
       msg,
     );
   };
@@ -441,6 +470,15 @@ function canUseAllowedDeviceFallbackTts(
   if (offlineWasmOutageFallback) {
     return true;
   }
+  if (
+    voice?.bypassSessionLock &&
+    voice?.utteranceKind === "voice_preview" &&
+    error !== undefined &&
+    isTechnicalServerOutage(error) &&
+    canUseBrowserSpeechSynthesis()
+  ) {
+    return true;
+  }
   if (hostedOnDeviceFallback) {
     return wasmAvailable || canUseBrowserSpeechSynthesis();
   }
@@ -474,7 +512,15 @@ function shouldSkipBackendTtsForVoice(
     (permanentlyUnconfigured ? getCachedVoiceEngineHealth() : null);
   if (!health && !permanentlyUnconfigured) return false;
   if (isElevenLabsLiveTtsUsable(health)) {
-    return false;
+    const requestedGender = resolveVoiceGender(
+      voice.requestedVoiceId ?? voice.cacheVoiceId,
+    );
+    if (
+      requestedGender !== "male" ||
+      health?.elevenlabs?.male_tts_configured === true
+    ) {
+      return false;
+    }
   }
   const googleUsable =
     canUseGoogleTtsFallback() &&
@@ -823,6 +869,7 @@ function resolveOperationVoice(
   speedLimit = Infinity,
   speedScale = 1,
   bypassSessionLock = false,
+  utteranceKind?: string,
 ): ResolvedOperationVoice {
   const rawActiveLock = bypassSessionLock ? null : getActiveSessionVoiceLock();
   const prefs = getSpeechPreferences();
@@ -847,6 +894,7 @@ function resolveOperationVoice(
     return {
       sessionId: activeLock.sessionId,
       bypassSessionLock: false,
+      utteranceKind,
       provider: activeLock.provider,
       requestedVoiceId: activeLock.voiceId,
       cacheVoiceId: activeLock.voiceId,
@@ -876,6 +924,7 @@ function resolveOperationVoice(
     sessionId:
       rawActiveLock && !bypassSessionLock ? rawActiveLock.sessionId : null,
     bypassSessionLock,
+    utteranceKind,
     provider,
     requestedVoiceId,
     cacheVoiceId,
@@ -1501,11 +1550,17 @@ export class TtsPlayback {
     speedLimit = Infinity,
     speedScale = 1,
     bypassSessionLock = false,
+    utteranceKind?: string,
   ): Promise<void> {
     this.stop();
     const operation: Operation = {
       controller: new AbortController(),
-      voice: resolveOperationVoice(speedLimit, speedScale, bypassSessionLock),
+      voice: resolveOperationVoice(
+        speedLimit,
+        speedScale,
+        bypassSessionLock,
+        utteranceKind,
+      ),
       paused: false,
       started: false,
     };
@@ -1900,6 +1955,14 @@ export class TtsPlayback {
                 "browser",
               ];
 
+    const allowBrowserFallback =
+      canUseGoogleTtsFallback() ||
+      (isHostedNoLiveServerTts() && hasVietnameseBrowserVoice()) ||
+      Boolean(
+        operation.voice.bypassSessionLock &&
+        operation.voice.utteranceKind === "voice_preview",
+      );
+
     let lastError: unknown = null;
     for (const candidate of tryOrder) {
       this.ensure(operation);
@@ -1948,11 +2011,7 @@ export class TtsPlayback {
         }
         continue;
       }
-      if (
-        canUseBrowserSpeechSynthesis() &&
-        (canUseGoogleTtsFallback() ||
-          (isHostedNoLiveServerTts() && hasVietnameseBrowserVoice()))
-      ) {
+      if (canUseBrowserSpeechSynthesis() && allowBrowserFallback) {
         const elapsedSec = await this.playBrowserSpeech(
           operation,
           text,
@@ -2461,7 +2520,11 @@ export class TtsPlayback {
       ? normalizeVietnameseWord(text)
       : text.normalize("NFC");
     if (!spokenText.trim()) return;
-    const voice = resolveOperationVoice(Infinity, options.speedScale ?? 1);
+    const voice = resolveOperationVoice(
+      Infinity,
+      options.speedScale ?? 1,
+      Boolean(this.defaultCacheContext?.bypassSessionLock),
+    );
     const hasCacheTarget = Boolean(
       options.coaching ||
       options.wordSample ||
@@ -2508,6 +2571,7 @@ export class TtsPlayback {
             voiceId: voice.requestedVoiceId ?? undefined,
             speed: voice.speed,
             wordSample,
+            ...(voice.bypassSessionLock ? { bypassSessionLock: true } : {}),
             ...cacheMeta,
             signal: options.signal,
           });
@@ -3006,7 +3070,11 @@ export class TtsPlayback {
       },
       Infinity,
       options.speedScale,
-      Boolean(options.bypassSessionLock),
+      Boolean(
+        options.bypassSessionLock ||
+        this.defaultCacheContext?.bypassSessionLock,
+      ),
+      options.utteranceKind,
     );
 
   playPhonicsLesson = (
@@ -3757,7 +3825,11 @@ export class TtsPlayback {
       },
       Infinity,
       options.speedScale,
-      Boolean(options.bypassSessionLock),
+      Boolean(
+        options.bypassSessionLock ||
+        this.defaultCacheContext?.bypassSessionLock,
+      ),
+      "phonics_lesson",
     );
 
   playWithWordTimings = (
@@ -4224,7 +4296,11 @@ export class TtsPlayback {
       },
       Infinity,
       1,
-      Boolean(options.bypassSessionLock),
+      Boolean(
+        options.bypassSessionLock ||
+        this.defaultCacheContext?.bypassSessionLock,
+      ),
+      options.utteranceKind,
     );
 
   private cacheShort(

@@ -125,6 +125,7 @@ const sceneSpecSchema = z.object({
   guided_questions_vi: z.array(z.string()),
   creative_prompt_vi: z.string(),
   matched_focus_words: z.array(z.string()),
+  creative_focus_words: z.array(z.string()).optional(),
 });
 
 const themesCatalogSchema = z.object({

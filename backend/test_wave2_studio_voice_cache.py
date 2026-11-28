@@ -6,10 +6,11 @@ import base64
 import io
 import json
 import os
+import shutil
 import struct
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -642,7 +643,9 @@ class Wave2TtsCacheAndVoiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(stale, list)
                 self.assertEqual(len(stale), 1)
                 priv_bucket, priv_path = stale[0]
-                priv_file = Path(tmpdir) / priv_bucket / priv_path
+                priv_file = (Path(tmpdir) / priv_bucket / priv_path).resolve()
+                if os.name == "nt" and len(str(priv_file)) >= 248 and not str(priv_file).startswith("\\\\?\\"):
+                    priv_file = Path(f"\\\\?\\{priv_file}")
                 self.assertTrue(priv_file.is_file())
                 await delete_stale_tts_objects(stale)
                 self.assertFalse(priv_file.is_file())
@@ -1017,7 +1020,16 @@ class M1CacheBoundsAndMultiLayerQuotaTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         from test_zero_cost_phase2_backend import _InMemoryTtsRepo
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        @contextmanager
+        def _longpath_tempdir():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                try:
+                    yield d
+                finally:
+                    if os.name == "nt":
+                        shutil.rmtree(f"\\\\?\\{Path(d).resolve()}", ignore_errors=True)
+
+        with _longpath_tempdir() as tmpdir:
             repo = _InMemoryTtsRepo()
             fake_db = MagicMock(spec=AsyncSession)
             fake_db.commit = AsyncMock()

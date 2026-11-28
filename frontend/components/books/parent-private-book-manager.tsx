@@ -40,19 +40,18 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
 import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
-import {
-  fetchOcrWorkerHealth,
-  type OcrWorkerHealthSnapshot,
-} from "@/lib/api/page-match-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
@@ -85,6 +84,7 @@ const WORKFLOW_BADGE_STYLES: Record<SubmissionWorkflowStatus, string> = {
 
 const STAGE_LABEL_KEYS: Record<string, string> = {
   PENDING: "privateManager.statusLabels.PENDING",
+  PENDING_POST_OCR: "privateManager.statusLabels.PENDING_POST_OCR",
   RUNNING: "privateManager.statusLabels.RUNNING",
   COMPLETED: "privateManager.statusLabels.COMPLETED",
   PASSED: "privateManager.statusLabels.PASSED",
@@ -207,9 +207,7 @@ function describeToolCheckScope(
   if (scope.modality === "TEXT_ONLY") {
     parts.push(t("privateManager.toolScopeBase"));
   } else {
-    parts.push(
-      t("privateManager.toolScopeModality", { modality: scope.modality }),
-    );
+    parts.push(t("privateManager.toolScopeModality"));
   }
   if (scope.local_ai_enforced) {
     parts.push(t("privateManager.toolScopeLocalModel"));
@@ -221,14 +219,6 @@ function describeToolCheckScope(
   }
   if (scope.copyright_scanner_status === "NOT_CONFIGURED") {
     parts.push(t("privateManager.toolScopeNoCopyright"));
-  }
-  if (scope.total_chunks > 0) {
-    parts.push(
-      t("privateManager.toolScopeChunks", {
-        checked: scope.chunks_checked,
-        total: scope.total_chunks,
-      }),
-    );
   }
   return `${parts.join("; ")}.`;
 }
@@ -329,6 +319,7 @@ function describeStageErrorHint(
   return null;
 }
 
+const OVERVIEW_CHIPS_PAGE_SIZE = 16;
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
@@ -440,6 +431,7 @@ function ParentPrivateBookManagerContent({
   const t = useTranslations("books");
   const tCommon = useTranslations("common");
   const service = useParentPrivateBookService();
+  const taskCenter = useOptionalAiTaskCenter();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detailRequestIdRef = useRef(0);
@@ -447,8 +439,6 @@ function ParentPrivateBookManagerContent({
     returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
   const [detail, setDetail] = useState<ParentPrivateBookDetailDTO | null>(null);
-  const [ocrWorkerHealth, setOcrWorkerHealth] =
-    useState<OcrWorkerHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -457,6 +447,7 @@ function ParentPrivateBookManagerContent({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] =
     useState<SubmissionFilterGroup>("ALL");
+  const [overviewPage, setOverviewPage] = useState(1);
   const [submissionsPage, setSubmissionsPage] = useState(1);
   const [committedPage, setCommittedPage] = useState(1);
 
@@ -595,39 +586,26 @@ function ParentPrivateBookManagerContent({
     };
   }, [bookId, currentUserId, service, t]);
 
+  const ocrWorker = useOcrWorkerStatus({
+    onRecovered: () => {
+      void loadDetail(true);
+    },
+  });
+  const ocrWorkerOffline = ocrWorker.isUnavailable;
+
   // Auto-poll while any submission is CHECKING with exponential backoff (3s -> 15s),
-  // in-flight overlap guard, tab-visibility pause, and throttled /health checks (<= 1/30s).
+  // in-flight overlap guard, tab-visibility pause, and gentle >=12s cadence when OCR is offline.
   const hasCheckingSubmission = Boolean(
     detail?.submissions.some((sub) => sub.workflow_status === "CHECKING"),
   );
   const pollInFlightRef = useRef(false);
-  const lastHealthCheckAtRef = useRef(0);
-  const workerOnlineRef = useRef<boolean | null>(null);
+  const workerOfflineRef = useRef<boolean>(ocrWorkerOffline);
   useEffect(() => {
-    workerOnlineRef.current = ocrWorkerHealth?.workerOnline ?? null;
-  }, [ocrWorkerHealth]);
-
-  // Probe OCR worker health once on book view so parents immediately see reassuring
-  // offline-queue guidance even before uploading new pages.
-  useEffect(() => {
-    let active = true;
-    const controller = new AbortController();
-    void fetchOcrWorkerHealth(controller.signal)
-      .then((snapshot) => {
-        if (active && snapshot) {
-          lastHealthCheckAtRef.current = Date.now();
-          setOcrWorkerHealth(snapshot);
-        }
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-      controller.abort();
-    };
-  }, [bookId]);
+    workerOfflineRef.current = ocrWorkerOffline;
+  }, [ocrWorkerOffline]);
 
   useEffect(() => {
-    if (!hasCheckingSubmission) return;
+    if (!hasCheckingSubmission || ocrWorker.isChecking) return;
     let active = true;
     let timerId: number | null = null;
     let idleTicks = 0;
@@ -635,7 +613,6 @@ function ParentPrivateBookManagerContent({
     const ONLINE_MAX_POLL_MS = 6_000;
     const OFFLINE_MIN_POLL_MS = 12_000;
     const OFFLINE_MAX_POLL_MS = 15_000;
-    const HEALTH_POLL_MIN_INTERVAL_MS = 30_000;
 
     const clearTimer = () => {
       if (timerId !== null) {
@@ -643,24 +620,9 @@ function ParentPrivateBookManagerContent({
         timerId = null;
       }
     };
-    const maybePollWorkerHealth = async (force = false) => {
-      const now = Date.now();
-      if (
-        !force &&
-        now - lastHealthCheckAtRef.current < HEALTH_POLL_MIN_INTERVAL_MS
-      ) {
-        return;
-      }
-      lastHealthCheckAtRef.current = now;
-      const snapshot = await fetchOcrWorkerHealth();
-      if (active && snapshot) {
-        setOcrWorkerHealth(snapshot);
-      }
-    };
 
     const nextDelayMs = () => {
-      const offline = workerOnlineRef.current === false;
-      if (offline) {
+      if (workerOfflineRef.current) {
         // Gentle 12-15s cadence while laptop OCR worker is offline to protect Render DB.
         return idleTicks <= 1 ? OFFLINE_MIN_POLL_MS : OFFLINE_MAX_POLL_MS;
       }
@@ -699,7 +661,6 @@ function ParentPrivateBookManagerContent({
       }
       pollInFlightRef.current = true;
       try {
-        void maybePollWorkerHealth(false).catch(() => undefined);
         await loadDetail(true);
         idleTicks += 1;
       } finally {
@@ -718,11 +679,8 @@ function ParentPrivateBookManagerContent({
       }
     };
 
-    void maybePollWorkerHealth(true);
     scheduleNext(
-      workerOnlineRef.current === false
-        ? OFFLINE_MIN_POLL_MS
-        : ONLINE_BASE_POLL_MS,
+      workerOfflineRef.current ? OFFLINE_MIN_POLL_MS : ONLINE_BASE_POLL_MS,
     );
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", onVisibilityChange);
@@ -735,7 +693,7 @@ function ParentPrivateBookManagerContent({
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
     };
-  }, [hasCheckingSubmission, loadDetail]);
+  }, [hasCheckingSubmission, loadDetail, ocrWorker.isChecking]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -761,10 +719,15 @@ function ParentPrivateBookManagerContent({
       }
       setUploadIdempotencyKey(generateClientKey());
       setActionNotice(
-        t("privateManager.uploadAcceptedNotice", {
-          total: response.total_pages,
-          format: response.source_format,
-        }),
+        ocrWorkerOffline
+          ? t("privateManager.uploadQueuedOfflineNotice", {
+              total: response.total_pages,
+              format: response.source_format,
+            })
+          : t("privateManager.uploadAcceptedNotice", {
+              total: response.total_pages,
+              format: response.source_format,
+            }),
       );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
@@ -794,6 +757,8 @@ function ParentPrivateBookManagerContent({
           page: sub.source_page_number,
         }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -824,6 +789,7 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -854,6 +820,7 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
+      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -871,7 +838,12 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.retrySubmission(bookId, sub.id, "AUTO");
-      setActionNotice(t("privateManager.retriedNotice"));
+      setActionNotice(
+        ocrWorkerOffline
+          ? t("privateManager.retriedQueuedOfflineNotice")
+          : t("privateManager.retriedNotice"),
+      );
+      taskCenter?.markTaskAlertSeen(sub.id);
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -886,7 +858,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.editSubmission(bookId, sub.id, {
+      const updated = await service.editSubmission(bookId, sub.id, {
         candidate_text: editText,
         source_type: editSourceType,
         source_note: editSourceNote.trim() || null,
@@ -895,6 +867,12 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(t("privateManager.editedSubmissionNotice"));
+      taskCenter?.markTaskAlertSeen(
+        sub.id,
+        updated?.workflow_status === "CHECKING"
+          ? undefined
+          : { includeNextSync: true },
+      );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -953,6 +931,9 @@ function ParentPrivateBookManagerContent({
             })
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
+      if (updated.pending_submission_count > 0) {
+        emitStudioTasksChanged({ portal: "parent" });
+      }
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("myBooks.updateErrorFallback")));
@@ -967,6 +948,8 @@ function ParentPrivateBookManagerContent({
     setActionNotice(null);
     try {
       await service.delete(bookId);
+      taskCenter?.markTargetAlertsSeen({ bookId });
+      emitStudioTasksChanged({ portal: "parent" });
       router.push(backHref);
     } catch (error) {
       setActionError(errorText(error, t("myBooks.deleteErrorFallback")));
@@ -1005,6 +988,7 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1027,10 +1011,15 @@ function ParentPrivateBookManagerContent({
       await service.replaceCommittedPageFile(bookId, page.page_id, file);
       setEditingPageId(null);
       setActionNotice(
-        t("privateManager.replacedPageImageNotice", {
-          page: page.page_number,
-        }),
+        ocrWorkerOffline
+          ? t("privateManager.replacedPageImageQueuedOfflineNotice", {
+              page: page.page_number,
+            })
+          : t("privateManager.replacedPageImageNotice", {
+              page: page.page_number,
+            }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1055,6 +1044,8 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.deletedPageNotice", { page: page.page_number }),
       );
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1078,7 +1069,12 @@ function ParentPrivateBookManagerContent({
         sub.source_type,
         sub.source_note,
       );
-      setActionNotice(t("privateManager.replacedSubmissionImageNotice"));
+      setActionNotice(
+        ocrWorkerOffline
+          ? t("privateManager.replacedSubmissionImageQueuedOfflineNotice")
+          : t("privateManager.replacedSubmissionImageNotice"),
+      );
+      taskCenter?.markTaskAlertSeen(sub.id);
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1100,6 +1096,8 @@ function ParentPrivateBookManagerContent({
     try {
       await service.cancelSubmission(bookId, sub.id);
       setActionNotice(t("privateManager.cancelledSubmissionNotice"));
+      taskCenter?.markTaskAlertSeen(sub.id);
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1186,8 +1184,6 @@ function ParentPrivateBookManagerContent({
     (item) =>
       item.workflow_status === "CHECKING" && item.ocr_status === "RUNNING",
   ).length;
-  const ocrWorkerOffline =
-    ocrWorkerHealth !== null && !ocrWorkerHealth.workerOnline;
   const workerFailureCount = activeSubmissions.filter(
     (item) =>
       Boolean(item.ocr_error_code) ||
@@ -1201,11 +1197,27 @@ function ParentPrivateBookManagerContent({
       : activeSubmissions.filter(
           (item) => submissionFilterGroup(item) === statusFilter,
         );
+  const overviewTotalPages = Math.max(
+    1,
+    Math.ceil(activeSubmissions.length / OVERVIEW_CHIPS_PAGE_SIZE),
+  );
+  const safeOverviewPage = Math.min(
+    Math.max(1, overviewPage),
+    overviewTotalPages,
+  );
+  const overviewStartIndex = (safeOverviewPage - 1) * OVERVIEW_CHIPS_PAGE_SIZE;
+  const visibleOverviewSubmissions = activeSubmissions.slice(
+    overviewStartIndex,
+    overviewStartIndex + OVERVIEW_CHIPS_PAGE_SIZE,
+  );
   const submissionsTotalPages = Math.max(
     1,
     Math.ceil(filteredSubmissions.length / SUBMISSIONS_PAGE_SIZE),
   );
-  const safeSubmissionsPage = Math.min(submissionsPage, submissionsTotalPages);
+  const safeSubmissionsPage = Math.min(
+    Math.max(1, submissionsPage),
+    submissionsTotalPages,
+  );
   const visibleSubmissions = filteredSubmissions.slice(
     (safeSubmissionsPage - 1) * SUBMISSIONS_PAGE_SIZE,
     safeSubmissionsPage * SUBMISSIONS_PAGE_SIZE,
@@ -1214,7 +1226,10 @@ function ParentPrivateBookManagerContent({
     1,
     Math.ceil(committedPages.length / COMMITTED_PAGES_PAGE_SIZE),
   );
-  const safeCommittedPage = Math.min(committedPage, committedTotalPages);
+  const safeCommittedPage = Math.min(
+    Math.max(1, committedPage),
+    committedTotalPages,
+  );
   const visibleCommittedPages = committedPages.slice(
     (safeCommittedPage - 1) * COMMITTED_PAGES_PAGE_SIZE,
     safeCommittedPage * COMMITTED_PAGES_PAGE_SIZE,
@@ -1617,6 +1632,19 @@ function ParentPrivateBookManagerContent({
           </p>
         </div>
 
+        <OcrServiceStatusBanner
+          isChecking={ocrWorker.isChecking}
+          justRecovered={ocrWorker.justRecovered}
+          onDismissRecovered={ocrWorker.dismissRecoveredNotice}
+          onRecheck={() => void ocrWorker.recheckNow()}
+          queuedCount={
+            pendingOcrCount > 0 ? pendingOcrCount : ocrWorker.queueDepth
+          }
+          status={ocrWorker.status}
+          testId="private-book-worker-offline-notice"
+          variant="parent"
+        />
+
         <div className="grid min-w-0 gap-4 md:grid-cols-2">
           <label className="flex min-w-0 flex-col gap-1.5 text-label font-semibold text-ink">
             {t("privateManager.chooseFileLabel")}
@@ -1676,16 +1704,6 @@ function ParentPrivateBookManagerContent({
           />
         </label>
 
-        {ocrWorkerOffline ? (
-          <div
-            className="rounded-control border border-amber-300 bg-amber-50/80 px-3.5 py-2.5 text-xs font-medium text-amber-950"
-            data-testid="private-book-worker-offline-notice"
-            role="status"
-          >
-            {t("privateManager.workerOfflineUploadNotice")}
-          </div>
-        ) : null}
-
         <div className="flex flex-wrap items-center gap-3">
           <Button
             className="sm:w-auto"
@@ -1696,7 +1714,9 @@ function ParentPrivateBookManagerContent({
             <FileUp aria-hidden="true" className="size-4" />
             {uploading
               ? t("privateManager.uploadingButton")
-              : t("privateManager.uploadButton")}
+              : ocrWorker.status === "unavailable"
+                ? t("privateManager.uploadOfflineQueueButton")
+                : t("privateManager.uploadButton")}
           </Button>
           {hasCheckingSubmission ? (
             ocrWorkerOffline && pendingOcrCount > 0 ? (
@@ -1811,52 +1831,64 @@ function ParentPrivateBookManagerContent({
               })}
             </div>
             {activeSubmissions.length > 1 ? (
-              <div
-                aria-label={t("privateManager.overviewAria")}
-                className="flex flex-wrap gap-1.5 border-t border-border pt-3"
-              >
-                {activeSubmissions.map((sub, index) => {
-                  const isChipQueuedOffline =
-                    ocrWorkerOffline &&
-                    sub.workflow_status === "CHECKING" &&
-                    sub.ocr_status === "PENDING";
-                  const chipStyle = isChipQueuedOffline
-                    ? "border-amber-300 bg-amber-50 text-amber-950"
-                    : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
-                      "border-border bg-canvas text-ink");
-                  const chipLabel = isChipQueuedOffline
-                    ? t("privateManager.queuedWaitingWorkerBadge")
-                    : sub.workflow_status_label;
-                  return (
-                    <button
-                      key={`map-${sub.id}`}
-                      className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
-                      onClick={() => {
-                        setStatusFilter("ALL");
-                        setSubmissionsPage(
-                          Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
-                        );
-                        requestAnimationFrame(() => {
-                          const target = document.querySelector(
-                            `[data-submission-id="${sub.id}"]`,
+              <div className="flex flex-col gap-2 border-t border-border pt-3">
+                <div
+                  aria-label={t("privateManager.overviewAria")}
+                  className="flex flex-wrap gap-1.5"
+                >
+                  {visibleOverviewSubmissions.map((sub, offsetIndex) => {
+                    const index = overviewStartIndex + offsetIndex;
+                    const isChipQueuedOffline =
+                      ocrWorkerOffline &&
+                      sub.workflow_status === "CHECKING" &&
+                      sub.ocr_status === "PENDING";
+                    const chipStyle = isChipQueuedOffline
+                      ? "border-amber-300 bg-amber-50 text-amber-950"
+                      : (WORKFLOW_BADGE_STYLES[sub.workflow_status] ??
+                        "border-border bg-canvas text-ink");
+                    const chipLabel = isChipQueuedOffline
+                      ? t("privateManager.queuedWaitingWorkerBadge")
+                      : sub.workflow_status_label;
+                    return (
+                      <button
+                        key={`map-${sub.id}`}
+                        className={`inline-flex items-center gap-1 rounded-control border px-2 py-1 text-[11px] font-bold ${chipStyle}`}
+                        onClick={() => {
+                          setStatusFilter("ALL");
+                          setSubmissionsPage(
+                            Math.floor(index / SUBMISSIONS_PAGE_SIZE) + 1,
                           );
-                          target?.scrollIntoView?.({
-                            behavior: "smooth",
-                            block: "nearest",
+                          requestAnimationFrame(() => {
+                            const target = document.querySelector(
+                              `[data-submission-id="${sub.id}"]`,
+                            );
+                            target?.scrollIntoView?.({
+                              behavior: "smooth",
+                              block: "nearest",
+                            });
                           });
-                        });
-                      }}
-                      title={t("privateManager.overviewChipTitle", {
-                        page: sub.source_page_number,
-                        status: chipLabel,
-                      })}
-                      type="button"
-                    >
-                      <span>Tr.{sub.source_page_number}</span>
-                      <span className="font-normal">· {chipLabel}</span>
-                    </button>
-                  );
-                })}
+                        }}
+                        title={t("privateManager.overviewChipTitle", {
+                          page: sub.source_page_number,
+                          status: chipLabel,
+                        })}
+                        type="button"
+                      >
+                        <span>Tr.{sub.source_page_number}</span>
+                        <span className="font-normal">· {chipLabel}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <PaginationBar
+                  ariaLabel={t("privateManager.overviewAria")}
+                  compact
+                  itemLabel={t("privateManager.pageItemLabel")}
+                  onPageChange={setOverviewPage}
+                  page={safeOverviewPage}
+                  pageSize={OVERVIEW_CHIPS_PAGE_SIZE}
+                  total={activeSubmissions.length}
+                />
               </div>
             ) : null}
 
@@ -1966,14 +1998,6 @@ function ParentPrivateBookManagerContent({
                             page: `${sub.source_page_number}/${sub.batch_total_pages}`,
                           })}
                         </p>
-                        <p className="text-[11px] font-mono text-muted">
-                          {t("privateManager.versionBadge", {
-                            version: sub.submission_version,
-                          })}
-                          {sub.candidate_hash
-                            ? ` · #${sub.candidate_hash.slice(0, 8)}`
-                            : ""}
-                        </p>
                       </div>
 
                       {/* Details & Pipeline Stages */}
@@ -2040,7 +2064,7 @@ function ParentPrivateBookManagerContent({
                               {sub.ocr_status === "PENDING" && ocrWorkerOffline
                                 ? t("privateManager.waitingWindowsOcrShort")
                                 : stageStatusLabel(sub.ocr_status, "ocr", t)}
-                              {sub.ocr_error_code
+                              {sub.ocr_error_code && !ocrHint
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}
                             </p>
@@ -2068,7 +2092,7 @@ function ParentPrivateBookManagerContent({
                                     },
                                   )
                                 : ""}
-                              {sub.proofread_error_code
+                              {sub.proofread_error_code && !proofreadHint
                                 ? ` (${sub.proofread_error_code})`
                                 : ""}
                             </p>
@@ -2093,7 +2117,7 @@ function ParentPrivateBookManagerContent({
                                     count: sub.tool_check_findings_count,
                                   })
                                 : ""}
-                              {sub.tool_check_error_code
+                              {sub.tool_check_error_code && !toolCheckHint
                                 ? ` (${sub.tool_check_error_code})`
                                 : ""}
                             </p>
@@ -2339,9 +2363,7 @@ function ParentPrivateBookManagerContent({
                         {isReviewFormOpen ? (
                           <div className="rounded-control border border-amber-400 bg-amber-50/70 p-3">
                             <p className="text-xs font-bold text-amber-950">
-                              {t("privateManager.submitAdminTitle", {
-                                version: sub.submission_version,
-                              })}
+                              {t("privateManager.submitAdminTitle")}
                             </p>
                             <div className="mt-2 grid gap-2 sm:grid-cols-2">
                               <label className="flex flex-col gap-1 text-xs font-semibold text-ink">
