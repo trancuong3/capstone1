@@ -201,6 +201,7 @@ export function ReadingPreparationScreen({
 
   useEffect(() => {
     if (state.status !== "ready" || !state.data.startPage) return;
+    hydrateTeacherVoiceFromChildProfile(state.data.child);
     const isPrivateBook = state.data.book.visibility_scope === "PARENT_PRIVATE";
     const preloadArgs = {
       bookId: state.data.book.id,

@@ -19,7 +19,10 @@ import {
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
 } from "@/lib/reading/session-voice-lock";
-import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
+import {
+  getSpeechPreferences,
+  getSpeechPreferencesMeta,
+} from "@/lib/reading/speech-preferences";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
   buildTtsBrowserCacheKey,
@@ -300,13 +303,17 @@ export function createVoiceStudioService(): VoiceStudioService {
           isPrivateBook: options.isPrivateBook,
         });
       const speechPrefs = getSpeechPreferences();
+      const defaultVoiceOverride =
+        policy.region !== "north" ||
+        getSpeechPreferencesMeta().gender === "male"
+          ? getEffectiveVoiceId()
+          : null;
       const resolvedRequestVoiceId =
         options.voiceId ??
         activeLock?.voiceId ??
         (options.voiceId === null
           ? null
-          : (speechPrefs.voiceId ??
-            (policy.region !== "north" ? getEffectiveVoiceId() : null)));
+          : (speechPrefs.voiceId ?? defaultVoiceOverride));
       const cacheVoiceId =
         resolvedRequestVoiceId ??
         getEffectiveVoiceId() ??

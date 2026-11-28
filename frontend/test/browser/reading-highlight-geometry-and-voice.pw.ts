@@ -872,6 +872,21 @@ test.describe("Vercel Reading Flow Overhaul: Zero-Layout-Shift Highlighting & Vo
   test("keeps reading controls interactive (non-blocking tts-error) and skips duplicate short TTS roundtrip on 503 LOCAL_VOICE_UNCONFIGURED", async ({
     page,
   }) => {
+    await page.route("**/workers/sherpa-tts-worker.js", (route) =>
+      route.abort(),
+    );
+    await page.addInitScript(() => {
+      Object.defineProperty(window, "speechSynthesis", {
+        configurable: true,
+        value: {
+          getVoices: () => [],
+          speak: () => {},
+          cancel: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        },
+      });
+    });
     const { metrics } = await installHostedVercelReadingSession(page, {
       hostedUnconfigured: true,
       forceTts503: true,

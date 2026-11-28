@@ -20,6 +20,8 @@ import {
 } from "@/lib/reading/browser-wasm-stt";
 import {
   getFreshVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -311,9 +313,12 @@ export async function evaluateRecordedShortWord({
   }
 
   const freshHealth = getFreshVoiceEngineHealth();
+  const permanentlyUnconfigured =
+    isPermanentlyHostedLocalUnconfigured(freshHealth);
   const localSttUnavailable =
-    freshHealth !== null &&
-    (!freshHealth.local.available || !freshHealth.local.stt_ready);
+    permanentlyUnconfigured ||
+    (freshHealth !== null &&
+      (!freshHealth.local.available || !freshHealth.local.stt_ready));
   const canUseWasm = detectBrowserWasmSttSupport().supported;
   let triedWasmFirst = false;
 
@@ -333,9 +338,10 @@ export async function evaluateRecordedShortWord({
       if (wasmText) {
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: freshHealth.local.configured !== false,
+          fallbackUsed:
+            !permanentlyUnconfigured && freshHealth?.local.configured !== false,
           fallbackReason:
-            freshHealth.local.configured === false
+            permanentlyUnconfigured || freshHealth?.local.configured === false
               ? null
               : "LOCAL_STT_UNAVAILABLE",
         });
@@ -382,13 +388,15 @@ export async function evaluateRecordedShortWord({
       };
     }
 
-    const shouldTryKeytermPass = shouldAttemptShortWordKeytermPass2({
-      status: firstStatus,
-      audioQuality,
-      transcript: firstText,
-      browserStatus,
-      hasNonSpeechTagOnly,
-    });
+    const shouldTryKeytermPass =
+      !permanentlyUnconfigured &&
+      shouldAttemptShortWordKeytermPass2({
+        status: firstStatus,
+        audioQuality,
+        transcript: firstText,
+        browserStatus,
+        hasNonSpeechTagOnly,
+      });
 
     if (shouldTryKeytermPass) {
       try {
@@ -437,7 +445,14 @@ export async function evaluateRecordedShortWord({
       transcript: firstText || null,
       sttDurationMs: elapsedMs(),
     };
-  } catch {
+  } catch (err) {
+    const errText =
+      typeof err === "object" && err !== null
+        ? `${String((err as { code?: unknown }).code ?? "")} ${String((err as { providerCode?: unknown }).providerCode ?? "")} ${err instanceof Error ? err.message : ""}`
+        : "";
+    if (errText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+      markHostedLocalUnconfigured();
+    }
     if (!triedWasmFirst && canUseWasm) {
       try {
         const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
