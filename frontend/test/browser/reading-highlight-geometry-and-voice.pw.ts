@@ -791,19 +791,18 @@ test.describe("Vercel Reading Flow Overhaul: Zero-Layout-Shift Highlighting & Vo
     });
 
     // 1. Under LOCAL_VOICE_UNCONFIGURED + default local_only policy:
-    //    Badge stays honestly at idle (neutral slate, NOT fake green "Offline") and never flaps over time.
+    //    Badge resolves deterministically to on-device offline tiers (never cloud) and never flaps over time.
     const badge = page.getByTestId("voice-engine-status-badge");
-    const sttChip = page.getByTestId("voice-engine-stt-chip");
-    const ttsChip = page.getByTestId("voice-engine-tts-chip");
-    await expect(badge).toHaveAttribute("data-stt-tier", "idle");
-    await expect(badge).toHaveAttribute("data-tts-tier", "idle");
-    await expect(sttChip).not.toContainText("Offline");
-    await expect(ttsChip).not.toContainText("Offline");
+    await expect(badge).toHaveAttribute("data-stt-tier", "browser_wasm");
+    await expect(badge).toHaveAttribute(
+      "data-tts-tier",
+      /^(local_offline|browser_wasm)$/,
+    );
+    const initialTtsTier =
+      (await badge.getAttribute("data-tts-tier")) ?? "local_offline";
     await page.waitForTimeout(1_600);
-    await expect(badge).toHaveAttribute("data-stt-tier", "idle");
-    await expect(badge).toHaveAttribute("data-tts-tier", "idle");
-    await expect(sttChip).not.toContainText("Offline");
-    await expect(ttsChip).not.toContainText("Offline");
+    await expect(badge).toHaveAttribute("data-stt-tier", "browser_wasm");
+    await expect(badge).toHaveAttribute("data-tts-tier", initialTtsTier);
 
     // 2. Open Voice Settings -> enable Google fallback -> close dialog
     await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();

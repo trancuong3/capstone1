@@ -71,10 +71,10 @@ export function SessionHistoryScreen({
   const t = useTranslations("reports");
   const authRuntime = useAuthRuntime();
   const appStore = useContext(AppStoreContext);
-  const preferredChildId =
-    requestedChildId ?? appStore?.selectedChildId ?? null;
   const userId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? undefined;
   const { childService, sessionService } = useReportServices();
   const currentPage =
     Number.isSafeInteger(page) && page >= 1 && page <= 100000 ? page : 1;
@@ -103,10 +103,10 @@ export function SessionHistoryScreen({
           PERSISTENT_USER_CACHE_MAX_STALE_MS,
         )?.data;
         const cachedChild = cachedChildren?.length
-          ? ((preferredChildId
-              ? cachedChildren.find((item) => item.id === preferredChildId)
-              : undefined) ??
-            (requestedChildId ? undefined : cachedChildren[0]))
+          ? preferredChildId
+            ? (cachedChildren.find((item) => item.id === preferredChildId) ??
+              (!requestedChildId ? cachedChildren[0] : undefined))
+            : cachedChildren[0]
           : undefined;
 
         if (cachedChildren && cachedChild) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 from collections.abc import Callable, Iterator
 from dataclasses import replace
 import hashlib
@@ -12,6 +13,7 @@ import os
 from pathlib import Path
 import random
 import re
+import tarfile
 import threading
 import time
 from typing import Any, BinaryIO
@@ -41,9 +43,12 @@ from app.services.training_storage.google_drive_store import (
 )
 from app.services.training_storage.references import (
     DRIVE_ROOT_DISPLAY_PATH,
+    SHA256_HEX_RE,
     StorageProvider,
+    build_vpack_storage_ref,
     format_gdrive_ref,
     parse_artifact_ref,
+    parse_vpack_ref,
     validate_drive_file_id,
     validate_logical_path,
     validate_sha256,
@@ -181,6 +186,10 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         self._quota_cache_safe_floor_bytes = 500 * 1024 * 1024
         self._cached_quota: StorageQuotaStatus | None = None
         self._cached_quota_at: float = 0.0
+        self._vpack_cache_lock = threading.Lock()
+        self._vpack_cache: OrderedDict[str, dict[str, bytes]] = OrderedDict()
+        self._vpack_cache_capacity = 4
+        self._vpack_inflight_locks: dict[str, threading.Lock] = {}
 
     def _get_session(self) -> requests.Session:
         if self._provided_session is not None:
@@ -257,7 +266,11 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
             status_code = response.status_code
             content_type = (response.headers.get("Content-Type") or "").lower()
             try:
-                raw_text = response.text or ""
+                content_obj = getattr(response, "content", None)
+                if isinstance(content_obj, (bytes, bytearray)):
+                    raw_bytes = bytes(content_obj)
+                else:
+                    raw_bytes = str(getattr(response, "text", "") or "").encode("utf-8")
             finally:
                 response.close()
 
@@ -276,8 +289,8 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                     http_status=status_code,
                 )
 
-            if status_code in {401, 403} or "text/html" in content_type or raw_text.lstrip().startswith("<"):
-                lowered = raw_text.lower()
+            if status_code in {401, 403} or "text/html" in content_type or raw_bytes.lstrip().startswith(b"<"):
+                lowered = raw_bytes[:8192].decode("utf-8", errors="replace").lower()
                 if "accounts.google.com" in lowered or "servicelogin" in lowered or "sign in" in lowered:
                     raise DrivePermissionError(
                         "Apps Script Web App requires Google Sign-In; redeploy with 'Who has access: Anyone'",
@@ -292,7 +305,7 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
 
             try:
                 try:
-                    parsed = json.loads(raw_text)
+                    parsed = json.loads(raw_bytes)
                 except ValueError as exc:
                     raise DriveTransientError(
                         "Apps Script Drive bridge returned invalid JSON payload",
@@ -732,10 +745,151 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
             if should_close:
                 stream.close()
 
+    def _read_bridge_file_bytes(self, file_id: str) -> tuple[ArtifactMetadata, bytes]:
+        res = self._call_bridge("get_file", {"file_id": file_id})
+        file_info = dict(res.get("file") or {})
+        if not file_info.get("file_id"):
+            file_info["file_id"] = file_id
+        meta = self._metadata_from_file_info(file_info)
+        if meta.is_public:
+            raise DrivePermissionError(
+                "Drive artifact has public permissions; refusing read",
+                code="DRIVE_PUBLIC_PERMISSION_DETECTED",
+            )
+        if meta.trashed:
+            raise DriveNotFoundError("Drive artifact is trashed")
+        raw_bytes = base64.b64decode(str(res.get("content_b64") or ""))
+        is_chunked = bool(file_info.get("is_chunked")) or bool(meta.extra.get("is_chunked"))
+        if is_chunked:
+            try:
+                manifest = json.loads(raw_bytes.decode("utf-8"))
+            except Exception as exc:
+                raise DriveIntegrityError("Corrupted chunked artifact manifest on Google Drive") from exc
+            if not isinstance(manifest, dict) or not manifest.get("viread_chunked_v1"):
+                raise DriveIntegrityError("Invalid chunked artifact manifest structure")
+            parts = sorted(manifest.get("parts") or [], key=lambda p: int(p.get("index", 0)))
+            if meta.size_bytes is None and isinstance(manifest.get("size_bytes"), int):
+                meta = replace(meta, size_bytes=int(manifest["size_bytes"]))
+            buf = bytearray()
+            for part in parts:
+                part_id = validate_drive_file_id(str(part["file_id"]))
+                part_res = self._call_bridge("get_file", {"file_id": part_id})
+                part_bytes = base64.b64decode(str(part_res.get("content_b64") or ""))
+                expected_part_sha = validate_sha256(part.get("sha256"), required=False)
+                actual_part_sha = hashlib.sha256(part_bytes).hexdigest()
+                if expected_part_sha and actual_part_sha != expected_part_sha:
+                    raise DriveIntegrityError("Chunked artifact part SHA-256 mismatch")
+                buf.extend(part_bytes)
+            raw_bytes = bytes(buf)
+        if meta.sha256:
+            actual_sha = hashlib.sha256(raw_bytes).hexdigest()
+            if actual_sha != meta.sha256.lower():
+                raise DriveIntegrityError(
+                    f"Streamed artifact SHA-256 mismatch: expected {meta.sha256[:12]}, got {actual_sha[:12]}"
+                )
+        return meta, raw_bytes
+
+    def _get_vpack_members(self, pack_file_id: str) -> dict[str, bytes]:
+        pack_ref = format_gdrive_ref(pack_file_id)
+        if parse_vpack_ref(pack_ref) is not None:
+            raise ValueError("Pack file ID cannot itself be a virtual vpack reference")
+        clean_pack_id = parse_artifact_ref(pack_ref).drive_file_id
+        assert clean_pack_id is not None
+        with self._vpack_cache_lock:
+            cached = self._vpack_cache.get(clean_pack_id)
+            if cached is not None:
+                self._vpack_cache.move_to_end(clean_pack_id)
+                return cached
+            inflight_lock = self._vpack_inflight_locks.setdefault(clean_pack_id, threading.Lock())
+
+        with inflight_lock:
+            with self._vpack_cache_lock:
+                cached = self._vpack_cache.get(clean_pack_id)
+                if cached is not None:
+                    self._vpack_cache.move_to_end(clean_pack_id)
+                    return cached
+
+            _pack_meta, raw_tar_bytes = self._read_bridge_file_bytes(clean_pack_id)
+            members: dict[str, bytes] = {}
+            try:
+                with tarfile.open(fileobj=io.BytesIO(raw_tar_bytes), mode="r:*") as tf:
+                    for tar_member in tf.getmembers():
+                        if not tar_member.isfile():
+                            continue
+                        base_name = tar_member.name.replace("\\", "/").rsplit("/", 1)[-1]
+                        stem = (base_name.split(".", 1)[0] if "." in base_name else base_name).lower()
+                        if not SHA256_HEX_RE.fullmatch(stem):
+                            continue
+                        extracted = tf.extractfile(tar_member)
+                        members[stem] = extracted.read() if extracted is not None else b""
+            except (tarfile.TarError, EOFError, OSError) as exc:
+                raise DriveIntegrityError("Corrupted virtual pack tar archive on Google Drive") from exc
+
+            with self._vpack_cache_lock:
+                self._vpack_cache[clean_pack_id] = members
+                self._vpack_cache.move_to_end(clean_pack_id)
+                while len(self._vpack_cache) > self._vpack_cache_capacity:
+                    self._vpack_cache.popitem(last=False)
+            return members
+
+    def _resolve_vpack_member(
+        self,
+        reference: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> tuple[ArtifactMetadata, bytes]:
+        vpack = parse_vpack_ref(reference)
+        if vpack is None:
+            raise ValueError("Reference is not a valid virtual pack reference")
+        pack_file_id, member_sha = vpack
+        expected = validate_sha256(expected_sha256, required=False)
+        if expected and expected != member_sha:
+            raise DriveIntegrityError(
+                f"Virtual pack member SHA-256 mismatch: expected {expected[:12]}, got {member_sha[:12]}"
+            )
+        members = self._get_vpack_members(pack_file_id)
+        member_bytes = members.get(member_sha)
+        if member_bytes is None:
+            raise DriveNotFoundError(f"Virtual pack {pack_file_id} does not contain member {member_sha}")
+        actual_sha = hashlib.sha256(member_bytes).hexdigest()
+        if actual_sha != member_sha:
+            raise DriveIntegrityError(
+                f"Virtual pack member SHA-256 mismatch: expected {member_sha[:12]}, got {actual_sha[:12]}"
+            )
+        if member_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            content_type = "image/png"
+            ext = "png"
+        elif member_bytes.startswith(b"\xff\xd8\xff"):
+            content_type = "image/jpeg"
+            ext = "jpg"
+        elif member_bytes[:4] == b"RIFF" and member_bytes[8:12] == b"WEBP":
+            content_type = "image/webp"
+            ext = "webp"
+        else:
+            content_type = "application/octet-stream"
+            ext = "bin"
+        meta = ArtifactMetadata(
+            provider=StorageProvider.GOOGLE_DRIVE,
+            reference=build_vpack_storage_ref(pack_file_id, member_sha),
+            name=f"{member_sha}.{ext}",
+            size_bytes=len(member_bytes),
+            sha256=member_sha,
+            content_type=content_type,
+            trashed=False,
+            is_public=False,
+            drive_file_id=f"vpack--{pack_file_id}--{member_sha}",
+            logical_path=None,
+            extra={"is_chunked": False, "is_vpack_member": True, "pack_file_id": pack_file_id},
+        )
+        return meta, member_bytes
+
     def get_metadata(self, reference: str) -> ArtifactMetadata:
         parsed = parse_artifact_ref(reference)
         if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
             raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
+        if parse_vpack_ref(parsed.raw) is not None:
+            meta, _member_bytes = self._resolve_vpack_member(parsed.raw)
+            return meta
         res = self._call_bridge("get_metadata", {"file_id": parsed.drive_file_id})
         meta = self._metadata_from_file_info(res["file"])
         if meta.is_public:
@@ -764,6 +918,15 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
             raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
         expected = validate_sha256(expected_sha256, required=False)
+        if parse_vpack_ref(parsed.raw) is not None:
+            _meta, member_bytes = self._resolve_vpack_member(parsed.raw, expected_sha256=expected)
+            step = max(64 * 1024, int(chunk_size))
+
+            def _iter_vpack() -> Iterator[bytes]:
+                for pos in range(0, len(member_bytes), step):
+                    yield member_bytes[pos : pos + step]
+
+            return _iter_vpack()
         file_id = parsed.drive_file_id
         meta = preloaded_meta if preloaded_meta is not None else self.get_metadata(reference)
         if meta.is_public:
@@ -828,6 +991,15 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
             raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
         expected = validate_sha256(expected_sha256, required=False)
+        step = max(64 * 1024, int(chunk_size))
+        if parse_vpack_ref(parsed.raw) is not None:
+            meta, member_bytes = self._resolve_vpack_member(parsed.raw, expected_sha256=expected)
+
+            def _iter_vpack() -> Iterator[bytes]:
+                for pos in range(0, len(member_bytes), step):
+                    yield member_bytes[pos : pos + step]
+
+            return meta, _iter_vpack()
         file_id = parsed.drive_file_id
 
         res = self._call_bridge("get_file", {"file_id": file_id})
@@ -843,7 +1015,6 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
 
         raw_bytes = base64.b64decode(str(res.get("content_b64") or ""))
         is_chunked = bool(file_info.get("is_chunked")) or bool(meta.extra.get("is_chunked"))
-        step = max(64 * 1024, int(chunk_size))
 
         if is_chunked:
             try:

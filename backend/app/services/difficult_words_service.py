@@ -1854,6 +1854,7 @@ class DifficultWordsService:
             "WASM_VERIFIED",
             "ANDROID_NATIVE_STT",
         }
+        wasm_verified_status = trusted_client_stt_status
         exact_browser_read = exact_browser_tokens_match and (
             (valid_browser_conf is not None and valid_browser_conf >= 0.9)
             or trusted_client_stt_status
@@ -1876,6 +1877,23 @@ class DifficultWordsService:
 
         if exact_browser_read:
             return ("CORRECT", "BROWSER_SPEECH", clean_browser_text, valid_browser_conf)
+
+        if (
+            wasm_verified_status
+            and browser_usable
+            and browser_status is not None
+            and policy is not None
+            and policy.provider_mode == "local_only"
+        ):
+            local_prov = getattr(self.voice_provider, "local", None)
+            is_conf_fn = getattr(local_prov, "is_configured", None)
+            if local_prov is not None and callable(is_conf_fn) and not is_conf_fn():
+                return (
+                    browser_status,
+                    "BROWSER_SPEECH",
+                    clean_browser_text,
+                    valid_browser_conf,
+                )
 
         resolved_status: PracticeAssessmentStatusLiteral
         resolved_source: PracticeRecognitionSourceLiteral = "SERVER_STT"
@@ -1997,6 +2015,9 @@ class DifficultWordsService:
                 resolved_source = "BROWSER_SPEECH"
                 spoken_transcript = clean_browser_text
                 calibrated_confidence = valid_browser_conf
+            elif wasm_verified_status:
+                resolved_status = "NO_CLEAR_AUDIO"
+                resolved_source = "BROWSER_SPEECH"
             else:
                 resolved_status = "ENGINE_ERROR"
                 resolved_source = "ENGINE_ERROR"

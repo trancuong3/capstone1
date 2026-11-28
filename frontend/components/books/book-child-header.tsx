@@ -64,7 +64,7 @@ export function BookChildHeader({
             alias: child.alias,
             grade: child.grade,
           })}
-          className="inline-flex min-h-9 max-w-[132px] shrink-0 items-center truncate rounded-full border border-border/70 bg-sky/80 px-2.5 py-1 text-xs font-bold text-primary-hover focus-visible:outline-3 focus-visible:outline-primary sm:min-h-12 sm:w-[220px] sm:max-w-none sm:rounded-control sm:border-0 sm:bg-sky sm:px-3 sm:py-2 sm:text-sm sm:font-semibold sm:text-primary"
+          className="inline-flex min-h-11 max-w-[132px] shrink-0 items-center truncate rounded-full border border-border/70 bg-sky/80 px-2.5 py-1 text-xs font-bold text-primary-hover focus-visible:outline-3 focus-visible:outline-primary sm:min-h-12 sm:w-[220px] sm:max-w-none sm:rounded-control sm:border-0 sm:bg-sky sm:px-3 sm:py-2 sm:text-sm sm:font-semibold sm:text-primary"
         >
           <span className="truncate">
             {t("childHeader.childMeta", {

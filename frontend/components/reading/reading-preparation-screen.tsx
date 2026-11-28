@@ -690,9 +690,7 @@ export function ReadingPreparationScreen({
           <div className="flex flex-wrap items-center gap-2">
             <VoiceEngineBadge compact />
             <ReadingVoiceSettings
-              childId={
-                state.status === "ready" ? state.data.child.id : selectedChildId
-              }
+              childId={data.child.id}
               disabled={isStarting}
               fallbackNotice={speechPlayer.fallbackNotice}
               isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}

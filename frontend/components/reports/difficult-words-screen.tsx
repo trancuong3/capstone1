@@ -14,6 +14,7 @@ import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -26,6 +27,7 @@ import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
@@ -80,10 +82,11 @@ export function DifficultWordsScreen({
   const t = useTranslations("difficultWords");
   const authRuntime = useAuthRuntime();
   const appStore = useContext(AppStoreContext);
-  const preferredChildId =
-    requestedChildId ?? appStore?.selectedChildId ?? null;
+  const speechPlayer = useSpeechPlayer();
   const userId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? undefined;
   const { childService, difficultWordService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
@@ -94,7 +97,7 @@ export function DifficultWordsScreen({
   const BOOK_GROUPS_PAGE_SIZE = 6;
   const loadRequestIdRef = useRef(0);
   const mountedRef = useRef(true);
-  const routeSelectionKey = `${requestedChildId ?? ""}|${requestedPracticeWord ?? ""}`;
+  const routeSelectionKey = `${preferredChildId ?? ""}|${requestedPracticeWord ?? ""}`;
   const [practiceSelection, setPracticeSelection] = useState<{
     readonly routeKey: string;
     readonly word: string | null;
@@ -176,10 +179,10 @@ export function DifficultWordsScreen({
           PERSISTENT_USER_CACHE_MAX_STALE_MS,
         )?.data;
         const cachedChild = cachedChildren?.length
-          ? ((preferredChildId
-              ? cachedChildren.find((item) => item.id === preferredChildId)
-              : undefined) ??
-            (requestedChildId ? undefined : cachedChildren[0]))
+          ? preferredChildId
+            ? (cachedChildren.find((item) => item.id === preferredChildId) ??
+              (!requestedChildId ? cachedChildren[0] : undefined))
+            : cachedChildren[0]
           : undefined;
         if (cachedChildren && cachedChild) {
           const cachedWords =
@@ -523,17 +526,37 @@ export function DifficultWordsScreen({
       <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
         <ReportPageHeader
           action={
-            <ButtonLink
-              className="sm:w-auto"
-              href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
-              variant="secondary"
-            >
-              <ArrowLeft
-                aria-hidden="true"
-                className="viread-rtl-flip size-5"
-              />
-              {t("screen.backToReports")}
-            </ButtonLink>
+            <div className="flex flex-wrap items-center gap-2">
+              {!selectedPracticeWord ? (
+                <ReadingVoiceSettings
+                  childId={state.child.id}
+                  fallbackNotice={speechPlayer.fallbackNotice}
+                  isPreviewing={speechPlayer.isPlaying}
+                  onPreview={(sample) => {
+                    speechPlayer.stop();
+                    return speechPlayer.play(sample, {
+                      coaching: true,
+                      cacheScope: "COACHING",
+                      isPrivateBook: false,
+                      bypassSessionLock: true,
+                      utteranceKind: "voice_preview",
+                    });
+                  }}
+                  onStopPreview={speechPlayer.stop}
+                />
+              ) : null}
+              <ButtonLink
+                className="sm:w-auto"
+                href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5"
+                />
+                {t("screen.backToReports")}
+              </ButtonLink>
+            </div>
           }
           description={t("screen.headerDescription", { days: periodDays })}
           eyebrow={t("screen.eyebrow")}
@@ -550,7 +573,7 @@ export function DifficultWordsScreen({
               : undefined
           }
           child={state.child}
-          key={selectedPracticeWord.normalized_word}
+          key={`${state.child.id}:${selectedPracticeWord.normalized_word}`}
           onAttemptCompleted={applyAttemptToLocalState}
           onClose={() => {
             openPracticeSession(null, null, false);

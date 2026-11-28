@@ -62,6 +62,7 @@ function buildContentSecurityPolicy(): string {
     "https://*.supabase.co",
     "wss://*.supabase.co",
     "https://huggingface.co",
+    "https://*.huggingface.co",
     "https://*.hf.co",
   ]);
   if (supabaseOrigin) {
@@ -162,6 +163,15 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=86400, stale-while-revalidate=604800",
+          },
+        ],
+      },
+      {
+        source: "/audio/voice-previews/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
           },
         ],
       },

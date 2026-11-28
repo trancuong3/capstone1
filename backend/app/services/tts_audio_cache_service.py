@@ -1430,7 +1430,9 @@ class TtsAudioCacheService:
                     allow_page_timed_fallback=can_search_page_timed,
                     allow_speed_fallback=allow_speed_fallback,
                     require_word_timings=require_word_timings,
-                    include_coaching_fallback=(target.scope == "CATALOG" and is_phonics),
+                    include_coaching_fallback=(
+                        target.scope in ("CATALOG", "PRIVATE") and is_phonics
+                    ),
                 )
                 for candidate in candidates:
                     cand_sha = getattr(candidate, "ContentSha256", None)

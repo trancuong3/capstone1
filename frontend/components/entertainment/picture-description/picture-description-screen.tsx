@@ -87,6 +87,7 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import {
   getEffectiveTeacherPersona,
+  getVoicePolicyPreferences,
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
@@ -102,9 +103,10 @@ import {
 } from "@/lib/reading/voice-preloader";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   markHostedLocalUnconfigured,
+  recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { cn } from "@/lib/utils/cn";
 import {
@@ -836,6 +838,23 @@ export function PictureDescriptionScreen({
       }
       cancelMicCountdown();
       cancelAutoSubmit();
+      if (process.env.NODE_ENV !== "test") {
+        void recorder.prepare?.().catch(() => undefined);
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const localReady = Boolean(
+          routingHealth?.local.available && routingHealth.local.stt_ready,
+        );
+        if (
+          !shouldPreferAndroidNativeStt() &&
+          !localReady &&
+          detectBrowserWasmSttSupport().supported &&
+          !getBrowserWasmSttClient().isReady()
+        ) {
+          void getBrowserWasmSttClient()
+            .init()
+            .catch(() => undefined);
+        }
+      }
       const sound = getEntertainmentPreferences().calmSound
         ? createCountdownSound()
         : null;
@@ -873,7 +892,7 @@ export function PictureDescriptionScreen({
         }
       }, 1000);
     },
-    [cancelAutoSubmit, cancelMicCountdown],
+    [cancelAutoSubmit, cancelMicCountdown, recorder],
   );
 
   const abortActiveVoiceCapture = useCallback(
@@ -1616,17 +1635,22 @@ export function PictureDescriptionScreen({
       setVoiceMessage(t("pictureDescription.micListening"));
 
       const rawCtor = getSpeechRecognitionCtor();
-      const SpeechRecognition = preferAndroidNativeStt
-        ? ((resolveLocalFirstSpeechRecognitionConstructor(
-            window as unknown as Parameters<
-              typeof resolveLocalFirstSpeechRecognitionConstructor
-            >[0],
-            speechService,
-            () => ({ sessionId: pictureVoiceSessionId }),
-          ) as BrowserSpeechRecognitionCtor | undefined) ?? null)
-        : isInjectedTestSpeechRecognition(rawCtor)
-          ? rawCtor
-          : null;
+      const hasSharedWebTrack =
+        process.env.NODE_ENV !== "test" &&
+        Boolean(recorder.getStream?.()?.getAudioTracks()?.[0]);
+      const SpeechRecognition =
+        preferAndroidNativeStt || hasSharedWebTrack
+          ? ((resolveLocalFirstSpeechRecognitionConstructor(
+              window as unknown as Parameters<
+                typeof resolveLocalFirstSpeechRecognitionConstructor
+              >[0],
+              speechService,
+              () => ({ sessionId: pictureVoiceSessionId }),
+              () => recorder.getStream?.()?.getAudioTracks()?.[0],
+            ) as BrowserSpeechRecognitionCtor | undefined) ?? null)
+          : isInjectedTestSpeechRecognition(rawCtor)
+            ? rawCtor
+            : null;
       if (SpeechRecognition) {
         try {
           const recognition = new SpeechRecognition();
@@ -1776,15 +1800,23 @@ export function PictureDescriptionScreen({
               .filter(Boolean)
               .slice(0, 16)
           : [];
-        const localUnconfigured = isPermanentlyHostedLocalUnconfigured(
-          getFreshVoiceEngineHealth(),
-        );
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const policy = getVoicePolicyPreferences();
+        const cloudSttAllowed =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleSttFallback;
         const wasmSupported = detectBrowserWasmSttSupport().supported;
         const serverSttUnavailable =
-          localUnconfigured ||
+          isPermanentlyHostedLocalUnconfigured(routingHealth) ||
           isServerSttConfirmedUnavailable() ||
+          (!cloudSttAllowed &&
+            routingHealth !== null &&
+            (!routingHealth.local.available ||
+              !routingHealth.local.stt_ready)) ||
           (wasmSupported && shouldPreferWarmWasmBatchStt());
-        if (serverSttUnavailable && wasmSupported) {
+        if (serverSttUnavailable && browserFallback) {
+          sttTranscript = browserFallback;
+        } else if (serverSttUnavailable && wasmSupported) {
           try {
             const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
               audioBlob,
@@ -1792,6 +1824,18 @@ export function PictureDescriptionScreen({
             );
             if (isStaleCapture()) return null;
             sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
+            if (sttTranscript) {
+              recordSttEngineUsage({
+                provider: "wasm",
+                fallbackUsed:
+                  !isPermanentlyHostedLocalUnconfigured(routingHealth),
+                fallbackReason: isPermanentlyHostedLocalUnconfigured(
+                  routingHealth,
+                )
+                  ? null
+                  : "LOCAL_STT_UNAVAILABLE",
+              });
+            }
           } catch {
             if (isStaleCapture()) return null;
             sttTranscript = null;

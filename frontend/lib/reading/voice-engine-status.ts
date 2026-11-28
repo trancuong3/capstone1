@@ -1,6 +1,9 @@
 import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import {
+  getEffectiveVoiceId,
+  getVoicePolicyPreferences,
   inferRegionFromVoiceId,
+  subscribeVoicePolicy,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import {
@@ -90,6 +93,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
 export const VOICE_UNAVAILABLE_ROUTING_TTL_MS = 2 * 60_000;
 export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
+export const VOICE_LOCAL_DOWN_ROUTING_TTL_MS = 2 * 60_000;
 const BACKGROUND_HEALTH_REFRESH_COOLDOWN_MS = 15_000;
 
 let state: VoiceEngineStatusState = {
@@ -103,6 +107,12 @@ let lastBackgroundRefreshAt = 0;
 let inFlightHealthPromise: Promise<VoiceEngineHealthSnapshot | null> | null =
   null;
 let permanentlyHostedLocalUnconfigured = false;
+let lastPolicyRoutingKey = "";
+
+function getPolicyRoutingKey(): string {
+  const policy = getVoicePolicyPreferences();
+  return `${policy.providerMode}|${policy.allowGoogleSttFallback}|${policy.allowGoogleTtsFallback}`;
+}
 
 const listeners = new Set<() => void>();
 const healthListeners = new Set<() => void>();
@@ -336,6 +346,97 @@ export function getFreshVoiceEngineHealth(
  *   up to 2 minutes (triggering a non-blocking background refresh when > 30s old)
  * so active reading/practice sessions never fall back into slow dead-backend roundtrips.
  */
+function seedIdleStatusFromHealth(
+  health: VoiceEngineHealthSnapshot,
+  forceRefresh = false,
+): void {
+  const policy = getVoicePolicyPreferences();
+  const allowCloudStt =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleSttFallback;
+  const allowCloudTts =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleTtsFallback;
+  const effectiveVoiceId = getEffectiveVoiceId();
+  const effectiveGender = resolveVoiceGender(effectiveVoiceId);
+
+  let changed = false;
+  let nextStt = state.stt;
+  let nextTts = state.tts;
+
+  if (state.stt.tier === "idle" || forceRefresh) {
+    const sttProvider =
+      health.local.available && health.local.stt_ready
+        ? "local"
+        : allowCloudStt &&
+            health.elevenlabs?.stt_configured &&
+            !health.elevenlabs.stt_cooldown
+          ? "elevenlabs"
+          : allowCloudStt &&
+              health.google.stt_configured &&
+              !health.google.stt_cooldown
+            ? "google"
+            : "wasm";
+    nextStt = mapProviderToEngineSnapshot({
+      kind: "stt",
+      provider: sttProvider,
+      fallbackUsed: false,
+      fallbackReason: null,
+    });
+    changed = true;
+  }
+
+  if (state.tts.tier === "idle" || forceRefresh) {
+    const elevenLabsTtsUsable = Boolean(
+      allowCloudTts &&
+      health.elevenlabs?.tts_configured &&
+      !health.elevenlabs.tts_cooldown &&
+      (effectiveGender !== "male" ||
+        health.elevenlabs.male_tts_configured === true),
+    );
+    const ttsProvider =
+      health.local.available && health.local.tts_ready
+        ? "local"
+        : elevenLabsTtsUsable
+          ? "elevenlabs"
+          : allowCloudTts &&
+              health.google.tts_configured &&
+              !health.google.tts_cooldown
+            ? "google"
+            : "precomputed_cache";
+    nextTts = mapProviderToEngineSnapshot({
+      kind: "tts",
+      provider: ttsProvider,
+      fallbackUsed: false,
+      fallbackReason: null,
+      voiceId: effectiveVoiceId,
+      voiceGender: effectiveGender,
+    });
+    changed = true;
+  }
+
+  lastPolicyRoutingKey = getPolicyRoutingKey();
+
+  if (changed) {
+    state = { stt: nextStt, tts: nextTts };
+    emit();
+  }
+}
+
+subscribeVoicePolicy(() => {
+  const nextKey = getPolicyRoutingKey();
+  const policyRoutingChanged = nextKey !== lastPolicyRoutingKey;
+  lastPolicyRoutingKey = nextKey;
+  if (cachedHealth) {
+    seedIdleStatusFromHealth(
+      cachedHealth,
+      policyRoutingChanged ||
+        state.stt.tier === "idle" ||
+        state.tts.tier === "idle",
+    );
+  }
+});
+
 export function getVoiceEngineHealthForRouting(
   maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
 ): VoiceEngineHealthSnapshot | null {
@@ -350,7 +451,8 @@ export function getVoiceEngineHealthForRouting(
     return cachedHealth;
   }
   if (
-    isLocalVoiceConfirmedUnavailable(cachedHealth) &&
+    (isLocalVoiceConfirmedUnavailable(cachedHealth) ||
+      !cachedHealth.local.available) &&
     ageMs <= VOICE_UNAVAILABLE_ROUTING_TTL_MS
   ) {
     const now = Date.now();
@@ -384,6 +486,7 @@ export function setCachedVoiceEngineHealth(
     } else if (health.local.configured === true && health.local.available) {
       permanentlyHostedLocalUnconfigured = false;
     }
+    seedIdleStatusFromHealth(health);
   }
   emitHealth();
 }
@@ -394,6 +497,7 @@ export function resetVoiceEngineStatus(): void {
   lastBackgroundRefreshAt = 0;
   inFlightHealthPromise = null;
   permanentlyHostedLocalUnconfigured = false;
+  lastPolicyRoutingKey = "";
   state = {
     stt: createIdleSnapshot("stt"),
     tts: createIdleSnapshot("tts"),

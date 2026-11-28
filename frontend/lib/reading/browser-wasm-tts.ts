@@ -308,8 +308,7 @@ interface PendingTtsJob {
 export class BrowserWasmTtsClient {
   private worker: Worker | null = null;
   private readonly readyGenders = new Set<VoiceGender>();
-  private pendingInit: { gender: VoiceGender; promise: Promise<void> } | null =
-    null;
+  private readonly pendingInits = new Map<VoiceGender, Promise<void>>();
   private reqCounter = 0;
   private readonly pending = new Map<string, PendingTtsJob>();
   private readonly progressListeners = new Set<
@@ -374,6 +373,13 @@ export class BrowserWasmTtsClient {
         message?: string;
       };
       if (!msg) return;
+      if (
+        msg.type === "evicted" &&
+        (msg.gender === "female" || msg.gender === "male")
+      ) {
+        this.readyGenders.delete(msg.gender);
+        return;
+      }
       if (msg.type === "progress") {
         const progressEvent: WasmTtsProgressEvent = {
           stage: msg.stage ?? "loading-tts-model",
@@ -440,7 +446,7 @@ export class BrowserWasmTtsClient {
         this.worker = null;
       }
       this.readyGenders.clear();
-      this.pendingInit = null;
+      this.pendingInits.clear();
       this.failAllPending(failure);
     };
     this.worker = worker;
@@ -513,34 +519,15 @@ export class BrowserWasmTtsClient {
       ? this.subscribeProgress(options.onProgress)
       : null;
     try {
-      while (true) {
-        if (this.readyGenders.has(gender) && this.worker && !this.pendingInit) {
-          return;
-        }
-        if (this.pendingInit && this.pendingInit.gender !== gender) {
-          await raceWithSignalAndTimeout(
-            this.pendingInit.promise.catch(() => undefined),
-            {
-              signal: options.signal,
-              timeoutMs: options.timeoutMs,
-            },
-          );
-          continue;
-        }
-        break;
-      }
-
-      if (this.readyGenders.has(gender) && this.worker && !this.pendingInit) {
+      if (this.readyGenders.has(gender) && this.worker) {
         return;
       }
 
-      if (!this.pendingInit || this.pendingInit.gender !== gender) {
-        const initPromise = this.postRequest<unknown>(
-          { type: "init", gender },
-          90_000,
-        )
+      let initPromise = this.pendingInits.get(gender);
+      if (!initPromise) {
+        const req = this.postRequest<unknown>({ type: "init", gender }, 90_000)
           .then((res) => {
-            if (this.pendingInit?.promise === initPromise) {
+            if (this.worker) {
               const readyList = (
                 res as { readyGenders?: readonly VoiceGender[] } | undefined
               )?.readyGenders;
@@ -552,14 +539,15 @@ export class BrowserWasmTtsClient {
             throw err;
           })
           .finally(() => {
-            if (this.pendingInit?.promise === initPromise) {
-              this.pendingInit = null;
+            if (this.pendingInits.get(gender) === req) {
+              this.pendingInits.delete(gender);
             }
           });
-        this.pendingInit = { gender, promise: initPromise };
+        initPromise = req;
+        this.pendingInits.set(gender, req);
       }
 
-      await raceWithSignalAndTimeout(this.pendingInit.promise, {
+      await raceWithSignalAndTimeout(initPromise, {
         signal: options.signal,
         timeoutMs: options.timeoutMs,
       });
@@ -659,7 +647,7 @@ export class BrowserWasmTtsClient {
     const worker = this.worker;
     this.worker = null;
     this.readyGenders.clear();
-    this.pendingInit = null;
+    this.pendingInits.clear();
     this.failAllPending(new DOMException("Disposed", "AbortError"));
     if (worker) {
       try {

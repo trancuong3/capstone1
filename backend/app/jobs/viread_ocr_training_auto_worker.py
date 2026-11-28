@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from app.database.session import AsyncSessionLocal
 from app.diagnostic_logging import log_diagnostic
+from app.jobs.viread_ocr_outbox_worker import is_flow2_ingestion_paused
 from app.services.storage_service import download_object
 from app.services.training_storage import is_gdrive_ref
 from app.services.viread_drive_connection_service import VireadDriveConnectionService
@@ -28,6 +29,7 @@ from app.services.viread_ocr_training_service import (
     ORIGINAL_SHA256,
     ORIGINAL_VOCAB_SHA256,
     VireadOcrTrainingService,
+    _is_flow2_profile,
 )
 from app.services.worker_telemetry import (
     persist_worker_heartbeat_with_factory,
@@ -333,6 +335,8 @@ def next_job_generation(latest_generation: int | None, disposition: str | None) 
 
 async def _ensure_automatic_locked_test(actor_id: UUID | None = None) -> dict[str, Any] | None:
     """Create/use a sealed test only from real, verified holdout samples."""
+    if is_flow2_ingestion_paused():
+        return None
     async with AsyncSessionLocal() as db:
         effective_actor_id = actor_id
         if effective_actor_id is None:
@@ -406,12 +410,20 @@ def _training_config(profile: str, repo_root: Path) -> tuple[dict[str, Any], str
         sys.path.insert(0, str(repo_root))
     from ai.vietocr_v2.contracts import canonical_sha256
 
+    is_flow2 = _is_flow2_profile(profile)
+    default_steps = "5000"
+    default_batch_size = "16" if is_flow2 else "8"
+    default_freeze_epochs = "3" if is_flow2 else "5"
+    steps = int((os.getenv("VIETOCR_TRAINING_STEPS") or "").strip() or default_steps)
+    batch_size = int((os.getenv("VIETOCR_TRAINING_BATCH_SIZE") or "").strip() or default_batch_size)
+    freeze_epochs = int((os.getenv("VIETOCR_TRAINING_FREEZE_EPOCHS") or "").strip() or default_freeze_epochs)
+
     config = {
         "config_schema_version": "viread-training-job-config-v2",
         "profile": profile,
-        "steps": int(os.getenv("VIETOCR_TRAINING_STEPS", "5000")),
-        "batch_size": int(os.getenv("VIETOCR_TRAINING_BATCH_SIZE", "8")),
-        "freeze_epochs": int(os.getenv("VIETOCR_TRAINING_FREEZE_EPOCHS", "5")),
+        "steps": steps,
+        "batch_size": batch_size,
+        "freeze_epochs": freeze_epochs,
         "seed": int(os.getenv("VIETOCR_TRAINING_SEED", "20261113")),
         "fp16": True, "scheduler": "CosineAnnealingLR", "optimizer": "AdamW",
         "preprocessing": "opencv-line-v1",
@@ -646,6 +658,15 @@ async def _schedule_ready_flow2_detailed(
                 "train_count": int(counts["train_count"] or 0),
                 "validation_count": int(counts["validation_count"] or 0),
             }
+        locked_test_id, locked_test_sha = await _resolve_unconsumed_locked_test(db, locked_test)
+        if not locked_test_id or not locked_test_sha:
+            await db.commit()
+            return {
+                "scheduled": 0,
+                "reason": "LOCKED_TEST_REQUIRED_BEFORE_TRAINING",
+                "dataset_version_id": str(dataset_id),
+                "manifest_sha256": manifest_sha,
+            }
         local_ready, hardware = await asyncio.to_thread(local_training_capacity)
         target = "LOCAL" if local_ready else "COLAB"
         initial_status = "QUEUED" if local_ready else "WAITING_FOR_COLAB_WORKER"
@@ -653,21 +674,16 @@ async def _schedule_ready_flow2_detailed(
         training_config, config_sha = await asyncio.to_thread(
             _training_config, "FLOW2_ADMIN_VERIFIED", repo_root
         )
-        locked_test_id, locked_test_sha = await _resolve_unconsumed_locked_test(db, locked_test)
-        evaluation_status = (
-            "LOCKED_TEST_PINNED" if (locked_test_id and locked_test_sha) else "WAITING_FOR_HOLDOUT"
-        )
+        evaluation_status = "LOCKED_TEST_PINNED"
         prior = await db.execute(text("""
             SELECT generation, metadata->>'candidate_disposition' AS disposition
             FROM public.viread_ocr_training_jobs
             WHERE profile='FLOW2_ADMIN_VERIFIED' AND dataset_version_id=:dataset_id
               AND manifest_sha256=:manifest_sha AND config_sha256=:config_sha
               AND parent_checkpoint_sha256=:parent_sha
-              AND locked_test_version_id IS NOT DISTINCT FROM CAST(:locked_test_id AS uuid)
             ORDER BY generation DESC LIMIT 1 FOR UPDATE
         """), {"dataset_id": dataset_id, "manifest_sha": manifest_sha,
-              "config_sha": config_sha, "parent_sha": parent_sha,
-              "locked_test_id": locked_test_id})
+              "config_sha": config_sha, "parent_sha": parent_sha})
         prior_row = prior.mappings().first()
         generation = next_job_generation(
             int(prior_row["generation"]) if prior_row else None,

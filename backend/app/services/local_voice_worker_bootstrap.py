@@ -28,8 +28,9 @@ logger = logging.getLogger("viread.local_voice_bootstrap")
 
 DEFAULT_LOCAL_VOICE_WORKER_URL = "http://127.0.0.1:8010"
 _FAILURE_COOLDOWN_SECONDS = 30.0
-_HEALTH_TIMEOUT_SECONDS = 1.5
+_HEALTH_TIMEOUT_SECONDS = 0.6
 _STARTUP_TIMEOUT_SECONDS = 90
+_INLINE_WAIT_SECONDS = 0.25
 
 _autostart_armed = False
 _bootstrap_lock: asyncio.Lock | None = None
@@ -313,7 +314,24 @@ async def ensure_local_voice_worker_running(
             )
             return False
 
-        deadline = time.monotonic() + _STARTUP_TIMEOUT_SECONDS + 5
+        inline_nonblocking = stop_event is None and not force
+        if inline_nonblocking:
+            try:
+                inline_budget = max(
+                    0.2,
+                    float(
+                        os.getenv(
+                            "VIREAD_BOOTSTRAP_INLINE_WAIT_SECONDS",
+                            str(_INLINE_WAIT_SECONDS),
+                        )
+                    ),
+                )
+            except ValueError:
+                inline_budget = _INLINE_WAIT_SECONDS
+            deadline = time.monotonic() + inline_budget
+        else:
+            deadline = time.monotonic() + _STARTUP_TIMEOUT_SECONDS + 5
+
         try:
             while time.monotonic() < deadline:
                 if stop_event is not None and stop_event.is_set():
@@ -344,10 +362,21 @@ async def ensure_local_voice_worker_running(
                     except TimeoutError:
                         pass
                 else:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.2 if inline_nonblocking else 0.5)
         except asyncio.CancelledError:
-            _terminate_bootstrap_process(proc)
+            if not inline_nonblocking:
+                _terminate_bootstrap_process(proc)
             raise
+
+        if inline_nonblocking and proc.poll() is None:
+            # Keep the detached PowerShell launcher warming the worker in background
+            # instead of blocking live HTTP requests for 90s or killing warmup mid-flight.
+            _last_failed_attempt_monotonic = time.monotonic()
+            logger.info(
+                "Local voice worker warming up in background on %s; failing fast for current request",
+                resolved_url,
+            )
+            return False
 
         _terminate_bootstrap_process(proc)
         _last_failed_attempt_monotonic = time.monotonic()

@@ -1033,3 +1033,284 @@ test("Dashboard AI teacher selection auto-plays precomputed greeting, persists p
     api.unexpected.filter((item) => item !== "external:huggingface.co"),
   ).toEqual([]);
 });
+
+test("Pure-offline cross-feature Male Teacher sync: Dashboard -> Difficult Words (no ?childId) -> Sentence Shooter plays bundled static VieNeu MP3 with zero Chưa phát được giọng đọc", async ({
+  page,
+}, testInfo) => {
+  const api = await installApiFixture(page);
+  const corsHeaders = {
+    "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
+    "access-control-allow-headers":
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id,x-voice-lock-update",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS",
+    "access-control-expose-headers":
+      "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback,x-voice-gender",
+  };
+
+  await page.route("http://127.0.0.1:8000/reading/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    }
+    const path = new URL(route.request().url()).pathname;
+    const base = `/reading/sessions/${ids.session}`;
+    const respondJson = (body: unknown, status = 200) =>
+      route.fulfill({
+        status,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify(body),
+      });
+    if (path === `${base}/practice-state`) {
+      return respondJson({
+        session_id: ids.session,
+        legacy_evidence_present: false,
+        pages: [],
+        words: [],
+      });
+    }
+    if (path === base) {
+      return respondJson({
+        id: ids.session,
+        child_id: ids.child,
+        book_id: ids.book,
+        state: "PAGE_READY",
+        started_at: "2026-11-11T00:00:00Z",
+        ended_at: null,
+        duration_ms: null,
+      });
+    }
+    if (path === `${base}/page`) {
+      return respondJson({
+        page_id: ids.page,
+        page_revision_id: ids.revision,
+        page_number: 1,
+        confidence: null,
+        width: 800,
+        height: 1000,
+        image_url: null,
+        text: "Bé mèo nhỏ đọc sách.",
+        words: ["Bé", "mèo", "nhỏ", "đọc", "sách."].map((w, idx) => ({
+          word_id: `90000000-0000-4000-8000-${String(idx + 1).padStart(12, "0")}`,
+          word_index: idx,
+          text: w,
+          bbox: [0.05 + idx * 0.16, 0.1, 0.14, 0.05],
+          line_index: 0,
+        })),
+      });
+    }
+    if (path === `${base}/progress`) {
+      return respondJson({
+        session_id: ids.session,
+        persisted: true,
+        start_page_id: ids.page,
+        end_page_id: ids.page,
+        current_page_id: ids.page,
+        start_page_number: 1,
+        end_page_number: 1,
+        current_page_number: 1,
+        current_index: 0,
+        total_pages: 1,
+        completed_pages: 0,
+        pages: [
+          {
+            page_id: ids.page,
+            page_revision_id: ids.revision,
+            page_number: 1,
+            page_order: 0,
+            status: "IN_PROGRESS",
+            started_at: null,
+            completed_at: null,
+          },
+        ],
+      });
+    }
+    return route.fallback();
+  });
+
+  // Simulate pure offline / worker-down hosted environment where /voice/text-to-speech ALWAYS returns 503 LOCAL_VOICE_UNCONFIGURED
+  await page.route("http://127.0.0.1:8000/voice/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    }
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status" && route.request().method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify({
+          default_mode: "local_only",
+          default_voice_id: "local_north_truc_ly",
+          local: {
+            configured: false,
+            available: false,
+            stt_ready: false,
+            tts_ready: false,
+          },
+          google: {
+            stt_configured: false,
+            tts_configured: false,
+            stt_cooldown: false,
+            tts_cooldown: false,
+          },
+          elevenlabs: {
+            configured: true,
+            stt_configured: true,
+            tts_configured: true,
+            male_tts_configured: false,
+            stt_cooldown: false,
+            tts_cooldown: false,
+          },
+        }),
+      });
+    }
+    if (
+      (path === "/voice/text-to-speech" ||
+        path === "/voice/text-to-speech/timed") &&
+      route.request().method() === "POST"
+    ) {
+      return route.fulfill({
+        status: 503,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: { code: "LOCAL_VOICE_UNCONFIGURED" },
+        }),
+      });
+    }
+    return route.fallback();
+  });
+
+  await page.addInitScript(() => {
+    const probe: Probe = {
+      audios: [],
+      utterances: [],
+      microphoneRequests: 0,
+      cancels: 0,
+      pauses: 0,
+      resumes: 0,
+    };
+    window.__ttsProbe = probe;
+    const OriginalAudio = window.Audio;
+    Object.defineProperty(window, "Audio", {
+      configurable: true,
+      value: function (src?: string) {
+        const audio = new OriginalAudio(src);
+        probe.audios.push(audio);
+        return audio;
+      },
+    });
+  });
+
+  // 1. Select Thầy giáo AI on Dashboard BEFORE clicking child card, then click child card:
+  // bundled static VieNeu MP3 plays immediately with ZERO error and pre-child Male selection is preserved!
+  await page.goto("/dashboard");
+  const section = page.getByTestId("ai-teacher-voice-section");
+  await expect(section).toBeVisible();
+  await page.getByTestId("teacher-card-male").click();
+  await page.getByRole("button", { name: /Bé API, lớp 2/ }).click();
+  await expect(page.getByTestId("teacher-card-male")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          window.__ttsProbe.audios.length >= 1 &&
+          window.__ttsProbe.audios.at(-1)?.paused === false,
+      ),
+    )
+    .toBe(true);
+  await expect(section.locator('[role="alert"]')).toHaveCount(0);
+
+  // 2. Navigate to /reports/difficult-words WITHOUT ?childId=: must honor selectedChildId and keep Thầy giáo AI!
+  await page.goto("/reports/difficult-words");
+  await expect(
+    page.getByRole("heading", { name: /Từ cần luyện/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+  const dwDialog = page.getByRole("dialog");
+  await expect(
+    dwDialog.getByRole("heading", { name: /Giọng đọc mẫu · Thầy giáo AI/ }),
+  ).toBeVisible();
+  await expect(
+    dwDialog.getByText(/Đang kiểm tra nhận diện giọng nói/),
+  ).toHaveCount(0);
+
+  // 3. Navigate to Story Reading (/reading/:sessionId) and verify ReadingScreen keeps Thầy giáo AI
+  // and plays bundled static MP3 via playWithWordTimings with zero error!
+  await page.goto(`/reading/${ids.session}?state=reading`);
+  await expect(
+    page.getByRole("button", { name: "Nghe đọc mẫu cả trang" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+  const readingDialog = page.getByRole("dialog");
+  await expect(
+    readingDialog.getByRole("heading", {
+      name: /Giọng đọc mẫu · Thầy giáo AI/,
+    }),
+  ).toBeVisible();
+  const beforeReadingPreviewCount = await page.evaluate(
+    () => window.__ttsProbe.audios.length,
+  );
+  await readingDialog
+    .getByRole("button", { name: "Nghe thử", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (prev) =>
+          window.__ttsProbe.audios.length > prev &&
+          window.__ttsProbe.audios.at(-1)?.paused === false,
+        beforeReadingPreviewCount,
+      ),
+    )
+    .toBe(true);
+  await expect(readingDialog.getByText(/Chưa phát được giọng đọc/)).toHaveCount(
+    0,
+  );
+
+  // 4. Navigate to /entertainment/sentence-shooter (exact route from user screenshot):
+  await page.goto("/entertainment/sentence-shooter");
+  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+  const shooterDialog = page.getByRole("dialog");
+  await expect(
+    shooterDialog.getByRole("heading", {
+      name: /Giọng đọc mẫu · Thầy giáo AI/,
+    }),
+  ).toBeVisible();
+  await expect(
+    shooterDialog.getByText(/Đang kiểm tra nhận diện giọng nói/),
+  ).toHaveCount(0);
+  await expect(
+    shooterDialog.getByRole("radio", { name: /Thầy Thiện Minh/ }),
+  ).toBeChecked();
+
+  const beforeShooterPreviewCount = await page.evaluate(
+    () => window.__ttsProbe.audios.length,
+  );
+  await shooterDialog
+    .getByRole("button", { name: "Nghe thử", exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (prev) =>
+          window.__ttsProbe.audios.length > prev &&
+          window.__ttsProbe.audios.at(-1)?.paused === false,
+        beforeShooterPreviewCount,
+      ),
+    )
+    .toBe(true);
+  await expect(shooterDialog.getByText(/Chưa phát được giọng đọc/)).toHaveCount(
+    0,
+  );
+  await expect(shooterDialog.locator('[role="alert"]')).toHaveCount(0);
+  await page.screenshot({
+    path: testInfo.outputPath("sentence-shooter-offline-male-synced.png"),
+  });
+  expect(
+    api.unexpected.filter((item) => item !== "external:huggingface.co"),
+  ).toEqual([]);
+});

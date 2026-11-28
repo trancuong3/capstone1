@@ -296,7 +296,7 @@ export function BookLibraryScreen() {
               <ButtonLink
                 href="/my-books"
                 variant="secondary"
-                className="min-h-10! w-auto gap-1.5 px-3! py-1.5! text-xs! sm:min-h-12! sm:gap-2 sm:px-4! sm:py-2! sm:text-sm!"
+                className="min-h-11! w-auto gap-1.5 px-3! py-1.5! text-xs! sm:min-h-12! sm:gap-2 sm:px-4! sm:py-2! sm:text-sm!"
               >
                 <BookMarked aria-hidden="true" className="size-4" />
                 {t("catalog.myBooksLink")}
@@ -325,7 +325,7 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex min-h-9 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-12 sm:rounded-control sm:border-0 sm:px-4 sm:text-label",
+                    "flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-xs font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-12 sm:rounded-control sm:border-0 sm:px-4 sm:text-label",
                     isSelected
                       ? "border-primary/30 bg-sky text-primary-hover"
                       : "border-border bg-white text-ink hover:bg-sky",

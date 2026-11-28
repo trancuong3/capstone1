@@ -12,11 +12,11 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { FiveMinuteTrainCtaCard } from "@/components/adaptive/five-minute-train-cta-card";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
@@ -184,7 +184,8 @@ function ProgressReportContent({
   const tCommon = useTranslations("common");
   const tNav = useTranslations("navigation");
   const appStore = useContext(AppStoreContext);
-  const preferredChildId = appStore?.selectedChildId ?? null;
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? undefined;
   const { childService, reportService } = useReportServices();
   const [state, setState] = useState<State>({ status: "loading" });
   const loadedChild = state.status === "loaded" ? state.child : null;

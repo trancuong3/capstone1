@@ -416,13 +416,17 @@ class ElevenLabsVoiceProvider:
     ) -> tuple[str, bool]:
         requested = self._voice_id(requested_voice_id)
         fp = self._key_fingerprint or ""
+        if not allow_default_fallback:
+            if requested == DEFAULT_VOICE_ID or (fp, requested) in _unavailable_voices:
+                if requested == DEFAULT_VOICE_ID:
+                    _unavailable_voices.add((fp, DEFAULT_VOICE_ID))
+                raise VoiceProviderUnavailable()
+            return requested, False
         if (expected_gender or "").strip().lower() == "male":
-            if (fp, requested) in _unavailable_voices:
+            if requested == DEFAULT_VOICE_ID or (fp, requested) in _unavailable_voices:
                 raise VoiceProviderUnavailable()
             return requested, False
         if requested != DEFAULT_VOICE_ID and (fp, requested) in _unavailable_voices:
-            if not allow_default_fallback:
-                raise VoiceProviderUnavailable()
             return DEFAULT_VOICE_ID, True
         return requested, False
 
@@ -562,7 +566,7 @@ class ElevenLabsVoiceProvider:
                             )
                             continue
                         logger.warning(
-                            "ElevenLabs male voice unavailable (status=%s); refusing female default fallback",
+                            "ElevenLabs voice unavailable (status=%s); refusing foreign/default voice fallback",
                             response.status_code,
                         )
                         raise VoiceProviderUnavailable()

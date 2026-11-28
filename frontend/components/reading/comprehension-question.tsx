@@ -49,7 +49,10 @@ import {
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { InteractivePromptSelector } from "@/lib/reading/interactive-prompts";
 import { parseVoiceIntent } from "@/lib/reading/voice-intent";
-import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
+import {
+  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
+} from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   awaitSttReadyBeforeListening,
@@ -704,7 +707,8 @@ export function ComprehensionQuestion({
         return;
       }
       const rawCtor = getSpeechRecognitionCtor();
-      const freshHealth = getFreshVoiceEngineHealth();
+      const freshHealth =
+        getVoiceEngineHealthForRouting() ?? getFreshVoiceEngineHealth();
       const localSttReady = Boolean(
         freshHealth?.local.available && freshHealth.local.stt_ready,
       );
@@ -1131,6 +1135,23 @@ export function ComprehensionQuestion({
       const gen = flowGenRef.current;
       silenceReminderCountRef.current = 0;
       setVoicePhase("reading");
+
+      if (process.env.NODE_ENV !== "test") {
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const localSttReady = Boolean(
+          routingHealth?.local.available && routingHealth.local.stt_ready,
+        );
+        if (
+          !isAndroidNativeSpeechAvailable() &&
+          !localSttReady &&
+          detectBrowserWasmSttSupport().supported &&
+          !getBrowserWasmSttClient().isReady()
+        ) {
+          void getBrowserWasmSttClient()
+            .init()
+            .catch(() => undefined);
+        }
+      }
 
       // Start the question prompt first so it gets first priority on the local voice
       // worker (lowest TTFA), then pre-fetch choices B/C/D in background with an

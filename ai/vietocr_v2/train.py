@@ -27,9 +27,9 @@ logger = logging.getLogger("viread.vietocr.train")
 PROFILES = {
     "FLOW1_EXTERNAL_TRDG": {"flows": {"FLOW2_EXTERNAL", "FLOW2_TRDG"}, "learning_rate": 1e-4, "weight_decay": 5e-4, "image_aug": True,
                              "sample_volume_limits": {"FLOW2_EXTERNAL": (500, 1_000), "FLOW2_TRDG": (20_000, 50_000)}},
-    "FLOW2_ADMIN_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 100},
+    "FLOW2_ADMIN_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 200},
     # Read/resume compatibility for runs created before the public flow names were corrected.
-    "FLOW1_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 100},
+    "FLOW1_VERIFIED": {"flows": {"FLOW1_VERIFIED"}, "learning_rate": 3e-5, "weight_decay": 1e-3, "image_aug": False, "valid_every": 200},
     "FLOW2_EXTERNAL_TRDG": {"flows": {"FLOW2_EXTERNAL", "FLOW2_TRDG"}, "learning_rate": 1e-4, "weight_decay": 5e-4, "image_aug": True},
 }
 
@@ -143,10 +143,10 @@ def _write_annotations(rows, manifest_dir: Path, root: Path, *, vocabulary: str)
     processed_root = root / "preprocessed" / PREPROCESSING_CONFIG["pipeline"]
     train_path, valid_path = root / "train.tsv", root / "validation.tsv"
     for split, target in (("train", train_path), ("validation", valid_path)):
+        split_rows = [row for row in rows if row.split == split]
+        count = len(split_rows)
         with target.open("w", encoding="utf-8", newline="\n") as stream:
-            for row in rows:
-                if row.split != split:
-                    continue
+            for idx, row in enumerate(split_rows, start=1):
                 image = Path(row.image)
                 if not image.is_absolute():
                     image = (manifest_dir / image).resolve()
@@ -159,6 +159,8 @@ def _write_annotations(rows, manifest_dir: Path, root: Path, *, vocabulary: str)
                     preprocess_line_image(image, processed)
                 label = _label_for_locked_vocabulary(row.label, vocabulary)
                 stream.write(f"{processed.as_posix()}\t{label}\n")
+                if idx % 500 == 0 or idx == count:
+                    print(f"Preprocessed {split} crops: {idx}/{count}", flush=True)
     if not train_path.stat().st_size or not valid_path.stat().st_size:
         raise ValueError("training requires both train and validation groups")
     return train_path, valid_path
@@ -256,6 +258,32 @@ def _install_vietocr_numpy_bytes_compatibility(np, cv2) -> None:
 
     if not hasattr(Image, "ANTIALIAS"):
         Image.ANTIALIAS = Image.Resampling.LANCZOS
+
+    if os.name == "nt":
+        lmdb_mod = getattr(vietocr_dataset, "lmdb", None)
+        current_lmdb_open = getattr(lmdb_mod, "open", None) if lmdb_mod is not None else None
+        if callable(current_lmdb_open) and not getattr(
+            current_lmdb_open, "_viread_windows_lmdb_map_size_compatibility", False
+        ):
+            def windows_safe_lmdb_open(*args, **kwargs):
+                try:
+                    return current_lmdb_open(*args, **kwargs)
+                except Exception as exc:
+                    fallback_mb = max(64, int(os.getenv("VIREAD_WINDOWS_LMDB_MAP_SIZE_MB", "512")))
+                    fallback_bytes = fallback_mb * 1024 * 1024
+                    requested_map_size = kwargs.get("map_size")
+                    if (
+                        "paging file is too small" in str(exc).lower()
+                        and isinstance(requested_map_size, int)
+                        and requested_map_size > fallback_bytes
+                    ):
+                        retry_kwargs = dict(kwargs)
+                        retry_kwargs["map_size"] = fallback_bytes
+                        return current_lmdb_open(*args, **retry_kwargs)
+                    raise
+
+            windows_safe_lmdb_open._viread_windows_lmdb_map_size_compatibility = True
+            lmdb_mod.open = windows_safe_lmdb_open
 
     current_validator = vietocr_dataset.checkImageIsValid
     if not getattr(current_validator, "_viread_numpy_bytes_compatibility", False):
@@ -458,6 +486,17 @@ def _should_resume(requested: bool, checkpoint_path: Path, run_dir: Path) -> boo
     return requested
 
 
+def _parse_version_tuple(raw: str) -> tuple[int, ...]:
+    base = str(raw).split("+", 1)[0].strip()
+    parts: list[int] = []
+    for segment in base.split("."):
+        match = re.match(r"^(\d+)", segment.strip())
+        if not match:
+            break
+        parts.append(int(match.group(1)))
+    return tuple(parts)
+
+
 def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     """Import the pinned training stack before a Colab worker claims a job.
 
@@ -502,7 +541,8 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
     imgaug_version = package_version("imgaug")
     prefetch_generator_version = package_version("prefetch-generator")
     pillow_version = package_version("Pillow")
-    if np.__version__ not in {"1.26.4", "2.3.5", "2.4.6"}:
+    np_ver = _parse_version_tuple(np.__version__)
+    if not ((len(np_ver) >= 2 and np_ver[0] == 1 and np_ver[1] == 26) or (len(np_ver) >= 1 and np_ver[0] == 2)):
         raise RuntimeError(f"COLAB_NUMPY_VERSION_MISMATCH:{np.__version__}")
     if vietocr_version != "0.3.12" or imgaug_version != "0.4.0":
         raise RuntimeError(
@@ -510,11 +550,14 @@ def prepare_vietocr_training_runtime() -> dict[str, str | bool]:
         )
     if prefetch_generator_version != "1.0.1":
         raise RuntimeError(f"PREFETCH_GENERATOR_VERSION_MISMATCH:{prefetch_generator_version}")
-    if torch_version != "2.14.1" or torchvision_version != "0.29.1":
+    torch_ver = _parse_version_tuple(torch_version)
+    tv_ver = _parse_version_tuple(torchvision_version)
+    if torch_ver < (2, 0) or tv_ver < (0, 15):
         raise RuntimeError(
             f"COLAB_TORCH_VERSION_MISMATCH:{torch_version}/{torchvision_version}"
         )
-    if np.__version__ in {"2.3.5", "2.4.6"} and package_version("opencv-python") != "4.13.0.92":
+    cv2_ver = _parse_version_tuple(cv2.__version__)
+    if not cv2_ver or cv2_ver[0] != 4:
         raise RuntimeError(f"COLAB_OPENCV_VERSION_MISMATCH:{cv2.__version__}")
     return {
         "numpy_version": np.__version__,
@@ -649,7 +692,14 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
     train_batches_per_epoch = len(trainer.train_gen)
     if train_batches_per_epoch < 1:
         raise ValueError("VietOCR training dataset produced no width-compatible batches")
-    freeze_steps = min(freeze_epochs * train_batches_per_epoch, total_steps - 1)
+    freeze_steps = max(
+        1,
+        min(
+            freeze_epochs * train_batches_per_epoch,
+            max(200, int(total_steps * 0.20)),
+            total_steps - 1,
+        ),
+    )
     cnn_parameters = list(trainer.model.cnn.parameters())
     cnn_ids = {id(parameter) for parameter in cnn_parameters}
     decoder_parameters = [parameter for parameter in trainer.model.parameters() if id(parameter) not in cnn_ids]
@@ -777,6 +827,7 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                 trainer.optimizer, T_max=max(1, total_steps - step), eta_min=1e-7,
             )
             stage = "unfreeze_all"
+            evals_without_improvement = 0
         try:
             batch = next(iterator)
         except StopIteration:
@@ -837,7 +888,11 @@ def run_training(*, profile: str, manifest_path: str, output_dir: str, parent_ch
                 evals_without_improvement = 0
             else:
                 evals_without_improvement += 1
-                if early_stopping_patience > 0 and evals_without_improvement >= early_stopping_patience:
+                if (
+                    stage == "unfreeze_all"
+                    and early_stopping_patience > 0
+                    and evals_without_improvement >= early_stopping_patience
+                ):
                     early_stopped = True
         if step % 100 == 0 or step == total_steps or validated:
             state = {"model_family": ORIGINAL_MODEL_FAMILY, "profile": profile, "step": step,
