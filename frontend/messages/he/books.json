@@ -290,7 +290,37 @@
     "addPagesPrimary": "הוספת עמודים",
     "managePagesSecondary": "ניהול עמודים",
     "editModalTitle": "עריכת פרטי הספר",
-    "deleteModalTitle": "למחוק את הספר הפרטי הזה?"
+    "deleteModalTitle": "למחוק את הספר הפרטי הזה?",
+    "storyweaver": {
+      "openAction": "סטודיו סיפורים משפחתי",
+      "createdNotice": "הספרון המשפחתי נוצר ומוכן לקריאה!",
+      "modalTitle": "סטודיו משפחתי ליצירת ספרוני קריאה",
+      "modalDescription": "צרו יחד ספרון וייטנאמי בן 3–4 עמודים המותאם לכיתת הילד ומשלב בטבעיות מילות תרגול.",
+      "stagePreparing": "מכין אוצר מילים ומסגרת רמת כיתה…",
+      "stageWeaving": "אורג את הסיפור הווייטנאמי המשפחתי…",
+      "themeRequiredError": "נא להזין נושא לסיפור (לפחות 2 תווים).",
+      "genericError": "לא ניתן ליצור את הספרון כעת. נסו שוב.",
+      "wordsUsedLabel": "מילות תרגול ששולבו: {words}",
+      "readTogetherNow": "קראו יחד עכשיו",
+      "openBookDetail": "פתיחת פרטי הספר",
+      "childLabel": "עבור הילד/ה",
+      "gradeLabel": "כיתת יעד",
+      "themeLabel": "נושא הסיפור",
+      "themePlaceholder": "למשל: גינת בוקר שמשית, חתלתול סקרן…",
+      "titleOptionalLabel": "שם הספר (אופציונלי)",
+      "titleOptionalPlaceholder": "השאירו ריק להצעת כותרת אוטומטית",
+      "styleModeLabel": "סגנון קריאה",
+      "styleDuet": "קריאה משותפת הורה וילד (דו-שיח)",
+      "stylePoem": "שיר ילדים בן 4 שורות",
+      "styleProse": "סיפור פרוזה קצר",
+      "pageCountLabel": "אורך הספרון",
+      "threePages": "3 עמודים קצרים",
+      "fourPages": "4 עמודים מלאים",
+      "customWordsLabel": "מילים נוספות לשילוב (מופרדות בפסיקים)",
+      "customWordsPlaceholder": "למשל: שמש חמימה, חרוץ, פרח",
+      "submitAction": "צור ספרון עכשיו",
+      "safetyFootnote": "נבדק אוטומטית לבטיחות ילדים ונשמר בפרטיות במדף המשפחתי."
+    }
   },
   "privateManager": {
     "backToMyBooks": "חזרה לספריי",
@@ -531,5 +561,12 @@
     "enableError": "לא ניתן לעדכן את הגדרת תרומת דוגמאות ה-OCR.",
     "disabledNotice": "תרומת דוגמאות ה-OCR עבור ספר זה הופסקה. המערכת תפסיק לאסוף דוגמאות חדשות ותסיר את דוגמאות ספר זה מהפקת ערכות הנתונים הבאות.",
     "disableError": "לא ניתן להפסיק את תרומת דוגמאות ה-OCR כרגע."
+  },
+  "readability": {
+    "matched": "מותאם לכיתה",
+    "tooHard": "מאתגר (כיתה {min}–{max})",
+    "tooEasy": "קליל לחימום (כיתה {min}–{max})",
+    "estimatedGrade": "רמה משוערת כיתה {min}–{max}",
+    "phonicsScore": "מוכנות פונטית {score}%"
   }
 }

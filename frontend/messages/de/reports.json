@@ -683,5 +683,20 @@
     "karaokeWeakSegmentsTitle": "Liedzeilen zum langsamen Üben mit 0,85x",
     "openSongAction": "Lied öffnen",
     "homeTipsTitle": "Tipps für zu Hause für Eltern"
+  },
+  "printCertificate": {
+    "brandTagline": "Familien-Lesefortschrittsbericht",
+    "printA4Action": "A4-Bericht drucken",
+    "downloadCertificateAction": "Urkunde speichern (.png)",
+    "certificateHeading": "LESEMEILENSTEIN-URKUNDE",
+    "certificateSubtitle": "Für ausdauerndes vietnamesisches Lesen mit der Familie",
+    "awardedTo": "Mit Stolz verliehen an",
+    "progressAchievement": "{alias} hat ausdauernd gelesen und seinen vietnamesischen Wortschatz erweitert!",
+    "progressStatsLine": "Sitzungen: {sessions} · Gelesene Wörter: {words} · Ø Genauigkeit: {accuracy}",
+    "sessionReaderFallback": "Fleißiges Lesekind",
+    "sessionAchievement": "Hat eine klare und selbstbewusste Lesesitzung abgeschlossen!",
+    "sessionStatsLine": "Seiten: {pages} · Wörter gesamt: {words} · Beste Genauigkeit: {accuracy}",
+    "issuedOn": "Ausgestellt am: {date}",
+    "encouragementFooter": "Jede heute gelesene Seite pflanzt einen warmen Wissensfunken in der Familie."
   }
 }

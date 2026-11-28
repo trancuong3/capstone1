@@ -36,9 +36,12 @@ from app.schemas.parent_private_book import (
     ParentPrivatePageEditRequest,
     ParentRequestAdminReviewRequest,
     ParentRetrySubmissionRequest,
+    ParentStoryweaverRequest,
+    ParentStoryweaverResponse,
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
 )
+from app.services.family_storyweaver_service import FamilyStoryweaverService
 from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.parent_private_book_service import ParentPrivateBookService
 from app.services.rate_limiter import rate_limit
@@ -117,6 +120,26 @@ async def list_my_private_books_paged(
         search=search,
         limit=limit,
         offset=offset,
+    )
+
+
+@router.post(
+    "/my-books/storyweaver",
+    response_model=ParentStoryweaverResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("parent_storyweaver", default_max=15, default_window=60.0))],
+)
+async def create_storyweaver_private_book(
+    payload: ParentStoryweaverRequest,
+    request: Request,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    base_url = str(request.base_url) if hasattr(request, "base_url") else None
+    return await FamilyStoryweaverService(db).create_storyweaver_book(
+        actor_id, payload, base_url=base_url
     )
 
 

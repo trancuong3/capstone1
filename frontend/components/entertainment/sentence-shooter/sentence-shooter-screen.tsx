@@ -140,6 +140,7 @@ const MAX_ACTIVE_PROJECTILES = 6;
 
 interface SentenceShooterScreenProps {
   initialBookId?: string;
+  initialPageId?: string;
   readingSessionId?: string;
 }
 
@@ -389,6 +390,7 @@ function SentenceShooterResultView({
 
 export function SentenceShooterScreen({
   initialBookId,
+  initialPageId,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
@@ -896,6 +898,10 @@ export function SentenceShooterScreen({
         {
           child_id: child.id,
           book_id: selectedBook.id,
+          ...(initialPageId &&
+          (!hasManuallySelectedBook || selectedBook.id === initialBookId)
+            ? { book_page_id: initialPageId }
+            : {}),
           difficulty,
           total_rounds: totalRounds,
           learning_mode: learningMode,

@@ -290,7 +290,37 @@
     "addPagesPrimary": "Ajouter des pages",
     "managePagesSecondary": "Gérer les pages",
     "editModalTitle": "Modifier les informations du livre",
-    "deleteModalTitle": "Supprimer ce livre privé ?"
+    "deleteModalTitle": "Supprimer ce livre privé ?",
+    "storyweaver": {
+      "openAction": "Atelier Familial de Mini-Livres",
+      "createdNotice": "Mini-livre familial créé et prêt pour la lecture !",
+      "modalTitle": "Atelier Familial d’Histoires Décodables",
+      "modalDescription": "Créez avec votre enfant un mini-livre vietnamien de 3–4 pages adapté à son niveau avec ses mots d’entraînement.",
+      "stagePreparing": "Préparation du vocabulaire et du cadre de niveau…",
+      "stageWeaving": "Tissage de la mini-histoire vietnamienne familiale…",
+      "themeRequiredError": "Veuillez saisir un thème d’histoire (au moins 2 caractères).",
+      "genericError": "Impossible de créer le mini-livre pour le moment. Veuillez réessayer.",
+      "wordsUsedLabel": "Mots d’entraînement intégrés : {words}",
+      "readTogetherNow": "Lire ensemble maintenant",
+      "openBookDetail": "Ouvrir les détails du livre",
+      "childLabel": "Pour l’enfant",
+      "gradeLabel": "Niveau cible",
+      "themeLabel": "Thème de l’histoire",
+      "themePlaceholder": "ex. jardin ensoleillé du matin, petit chaton…",
+      "titleOptionalLabel": "Titre du livre (facultatif)",
+      "titleOptionalPlaceholder": "Laisser vide pour un titre automatique",
+      "styleModeLabel": "Format de lecture",
+      "styleDuet": "Lecture en duo Parent & Enfant (Dialogue)",
+      "stylePoem": "Poème enfantin de 4 vers",
+      "styleProse": "Court récit en prose",
+      "pageCountLabel": "Longueur du mini-livre",
+      "threePages": "3 pages courtes",
+      "fourPages": "4 pages complètes",
+      "customWordsLabel": "Mots supplémentaires à intégrer (séparés par des virgules)",
+      "customWordsPlaceholder": "ex. soleil doux, assidu, fleur",
+      "submitAction": "Créer le mini-livre",
+      "safetyFootnote": "Vérifié automatiquement pour la sécurité enfant et enregistré en privé pour votre famille."
+    }
   },
   "privateManager": {
     "backToMyBooks": "Retour à Mes livres",
@@ -531,5 +561,12 @@
     "enableError": "Impossible de mettre à jour le paramètre de contribution d'échantillons OCR.",
     "disabledNotice": "Contribution d'échantillons OCR pour ce livre arrêtée. Le système cessera de collecter de nouveaux échantillons et retirera les échantillons de ce livre des générations de jeux de données à venir.",
     "disableError": "Impossible d'arrêter la contribution d'échantillons OCR pour le moment."
+  },
+  "readability": {
+    "matched": "Adapté au niveau",
+    "tooHard": "Exigeant (Niveau {min}–{max})",
+    "tooEasy": "Léger d’échauffement (Niveau {min}–{max})",
+    "estimatedGrade": "Niveau est. {min}–{max}",
+    "phonicsScore": "Décodage {score}%"
   }
 }

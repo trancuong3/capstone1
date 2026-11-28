@@ -538,7 +538,8 @@
       "who": "有谁 / 什么动物？",
       "action": "正在做什么？",
       "where": "在哪里 / 什么颜色？"
-    }
+    },
+    "studioIllustrationBadge": "纯净无字插画"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "无法循环播放。请点击听句子后再试。",

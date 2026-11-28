@@ -683,5 +683,20 @@
     "karaokeWeakSegmentsTitle": "0.85배속으로 천천히 연습하면 좋은 소절",
     "openSongAction": "노래 열기",
     "homeTipsTitle": "가정에서 함께할 수 있는 팁"
+  },
+  "printCertificate": {
+    "brandTagline": "가족 독서 성장 리포트",
+    "printA4Action": "A4 리포트 인쇄",
+    "downloadCertificateAction": "인증서 저장 (.png)",
+    "certificateHeading": "독서 성장 마일스톤 인증서",
+    "certificateSubtitle": "가족과 함께 꾸준히 이어온 베트남어 읽기 여정을 축하하며",
+    "awardedTo": "자랑스러운 어린이 독서가",
+    "progressAchievement": "{alias} 어린이는 매주 꾸준히 읽기를 연습하며 베트남어 어휘력을 키웠어요!",
+    "progressStatsLine": "완료 세션: {sessions} · 읽은 단어: {words} · 평균 정확도: {accuracy}",
+    "sessionReaderFallback": "성실한 어린이 독서가",
+    "sessionAchievement": "또렷하고 자신감 있게 읽기 세션을 완주했어요!",
+    "sessionStatsLine": "읽은 페이지: {pages} · 전체 단어: {words} · 최고 정확도: {accuracy}",
+    "issuedOn": "발급일: {date}",
+    "encouragementFooter": "오늘 읽은 한 페이지가 가족과 함께 자라는 따뜻한 지혜의 씨앗이 됩니다."
   }
 }

@@ -296,18 +296,21 @@ class SentenceShooterService:
         total_rounds: int,
         focus_set: set[str],
         rng: random.SystemRandom,
+        *,
+        preferred_page_id: UUID | None = None,
     ) -> list[tuple[_PageSource, ExtractedSentence]]:
-        if not focus_set:
+        if not focus_set and preferred_page_id is None:
             return rng.sample(candidates, total_rounds)
 
-        buckets: dict[int, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
+        buckets: dict[tuple[int, int], list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
         for item in candidates:
+            page_boost = 1 if preferred_page_id is not None and item[0].page.Id == preferred_page_id else 0
             score = len(cls._matched_difficult_words(item[1], focus_set))
-            buckets[score].append(item)
+            buckets[(page_boost, score)].append(item)
 
         chosen: list[tuple[_PageSource, ExtractedSentence]] = []
-        for score in sorted(buckets.keys(), reverse=True):
-            group = list(buckets[score])
+        for bucket_key in sorted(buckets.keys(), reverse=True):
+            group = list(buckets[bucket_key])
             rng.shuffle(group)
             needed = total_rounds - len(chosen)
             chosen.extend(group[:needed])
@@ -619,11 +622,25 @@ class SentenceShooterService:
         # transaction with rollback and would expire ORM instances.
         child_id = child.Id
         child_grade = child.Grade
-        rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
+        if hasattr(self.repository.verified_word_rows, "__code__") and (
+            "parent_id" in self.repository.verified_word_rows.__code__.co_varnames
+        ):
+            rows = await self.repository.verified_word_rows(
+                child_grade, payload.book_id, parent_id=actor_id
+            )
+        else:
+            rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
         sources = self._group_page_sources(rows)
         candidates = self._sentences(sources, payload.difficulty)
         if not candidates:
-            book = await self.repository.book_for_session(payload.book_id)
+            if hasattr(self.repository.book_for_session, "__code__") and (
+                "parent_id" in self.repository.book_for_session.__code__.co_varnames
+            ):
+                book = await self.repository.book_for_session(
+                    payload.book_id, parent_id=actor_id
+                )
+            else:
+                book = await self.repository.book_for_session(payload.book_id)
             if (
                 book is None
                 or book.LifecycleStatus != "ACTIVE"
@@ -655,6 +672,7 @@ class SentenceShooterService:
             payload.total_rounds,
             focus_set,
             rng,
+            preferred_page_id=payload.book_page_id,
         )
         book_word_pool = [
             token.text

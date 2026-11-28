@@ -185,6 +185,29 @@ export const bookApprovalStatusSchema = z.enum([
   "STALE",
 ]);
 
+export const bookReadabilitySchema = z.object({
+  syllable_count: z.number().int().nonnegative(),
+  sentence_count: z.number().int().nonnegative(),
+  avg_syllables_per_sentence: z.number().nonnegative(),
+  complex_phonics_ratio: z.number().nonnegative(),
+  multisyllable_ratio: z.number().nonnegative(),
+  decodable_syllable_ratio: z.number().nonnegative(),
+  estimated_grade_band: z.enum([
+    "GRADE_1",
+    "GRADE_2",
+    "GRADE_3",
+    "GRADE_4_5",
+    "UNRATED",
+  ]),
+  estimated_min_grade: z.number().int().min(1).max(5),
+  estimated_max_grade: z.number().int().min(1).max(5),
+  grade_match_status: z.enum(["MATCHED", "TOO_HARD", "TOO_EASY", "UNRATED"]),
+  phonics_readiness_score: z.number().nonnegative(),
+  sample_complex_syllables: z.array(z.string()).optional(),
+  explanation_vi: z.string().optional(),
+});
+export type BookReadabilityDTO = z.infer<typeof bookReadabilitySchema>;
+
 export const bookApprovalAssessmentSchema = z.object({
   status: bookApprovalStatusSchema,
   page_count: z.number().int().nonnegative(),
@@ -234,6 +257,7 @@ export const bookApprovalAssessmentSchema = z.object({
     .default(null),
   rights_confirmed: z.boolean(),
   blockers: z.array(z.string()),
+  readability: bookReadabilitySchema.nullable().optional(),
 });
 
 export const bookQualityBookSummarySchema = z.object({

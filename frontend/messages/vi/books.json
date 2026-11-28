@@ -290,7 +290,37 @@
     "addPagesPrimary": "Thêm trang",
     "managePagesSecondary": "Quản lý trang",
     "editModalTitle": "Chỉnh sửa thông tin sách",
-    "deleteModalTitle": "Xóa sách riêng này?"
+    "deleteModalTitle": "Xóa sách riêng này?",
+    "storyweaver": {
+      "openAction": "Trạm Sáng Tạo Sách Mỏng",
+      "createdNotice": "Đã tạo sách mỏng gia đình sẵn sàng cho bé đọc!",
+      "modalTitle": "Trạm Sáng Tạo Sách Mỏng Gia Đình",
+      "modalDescription": "Cùng bé tạo sách mỏng tiếng Việt 3–4 trang vừa sức khối lớp, lồng ghép tự nhiên các từ đang luyện đọc.",
+      "stagePreparing": "Đang chuẩn bị từ vựng và khung khối lớp…",
+      "stageWeaving": "Đang dệt câu chuyện tiếng Việt cho gia đình…",
+      "themeRequiredError": "Ba mẹ vui lòng nhập chủ đề câu chuyện (ít nhất 2 ký tự).",
+      "genericError": "Không thể tạo sách mỏng lúc này. Vui lòng thử lại.",
+      "wordsUsedLabel": "Từ luyện đọc đã lồng ghép: {words}",
+      "readTogetherNow": "Đọc cùng bé ngay",
+      "openBookDetail": "Mở chi tiết sách",
+      "childLabel": "Dành cho bé",
+      "gradeLabel": "Khối lớp mục tiêu",
+      "themeLabel": "Chủ đề câu chuyện",
+      "themePlaceholder": "Ví dụ: khu vườn nắng sớm, chú mèo nhỏ…",
+      "titleOptionalLabel": "Tựa sách (không bắt buộc)",
+      "titleOptionalPlaceholder": "Để trống để hệ thống gợi ý tự động",
+      "styleModeLabel": "Hình thức đọc",
+      "styleDuet": "Đọc phân vai Ba Mẹ & Bé (Hội thoại)",
+      "stylePoem": "Thơ thiếu nhi 4 dòng",
+      "styleProse": "Truyện ngắn văn xuôi",
+      "pageCountLabel": "Độ dài sách mỏng",
+      "threePages": "3 trang ngắn gọn",
+      "fourPages": "4 trang trọn vẹn",
+      "customWordsLabel": "Từ muốn lồng ghép thêm (cách nhau bởi dấu phẩy)",
+      "customWordsPlaceholder": "Ví dụ: nắng ấm, chăm chỉ, bông hoa",
+      "submitAction": "Tạo sách mỏng ngay",
+      "safetyFootnote": "Tự động kiểm duyệt an toàn trẻ em và lưu riêng tư trong kệ sách gia đình."
+    }
   },
   "privateManager": {
     "backToMyBooks": "Về Sách của tôi",
@@ -531,5 +561,12 @@
     "enableError": "Không thể cập nhật tùy chọn đóng góp mẫu OCR.",
     "disabledNotice": "Đã ngừng đóng góp mẫu OCR cho cuốn sách này. Hệ thống sẽ dừng tuyển mẫu mới và loại mẫu của cuốn sách khỏi các đợt tạo dataset tiếp theo.",
     "disableError": "Không thể ngừng đóng góp mẫu OCR lúc này."
+  },
+  "readability": {
+    "matched": "Khớp khối lớp",
+    "tooHard": "Hơi khó (Lớp {min}–{max})",
+    "tooEasy": "Nhẹ nhàng (Lớp {min}–{max})",
+    "estimatedGrade": "Ước lượng Lớp {min}–{max}",
+    "phonicsScore": "Đánh vần {score}%"
   }
 }

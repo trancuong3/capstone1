@@ -572,9 +572,21 @@ function PageSurface(
     >
       <header className="reader-bookplate">
         <div className="min-w-0">
-          <p className="reader-folio">
-            {t("progress.pageLabel", { page: formatNumber(page.page_number) })}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="reader-folio">
+              {t("progress.pageLabel", {
+                page: formatNumber(page.page_number),
+              })}
+            </p>
+            {page.page_kind ? (
+              <span
+                className="inline-flex items-center rounded-full border border-primary/25 bg-sky/70 px-2.5 py-0.5 text-[11px] font-bold text-primary-hover"
+                data-testid="studio-v2-page-kind-badge"
+              >
+                {t(`pageKinds.${page.page_kind}`, undefined, page.page_kind)}
+              </span>
+            ) : null}
+          </div>
           <h1
             className="book-title viread-learning-content line-clamp-1 break-words text-lg sm:line-clamp-none sm:text-3xl"
             dir="ltr"

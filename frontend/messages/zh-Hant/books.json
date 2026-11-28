@@ -290,7 +290,37 @@
     "addPagesPrimary": "新增頁面",
     "managePagesSecondary": "管理頁面",
     "editModalTitle": "編輯書籍資訊",
-    "deleteModalTitle": "確定刪除此私密書籍？"
+    "deleteModalTitle": "確定刪除此私密書籍？",
+    "storyweaver": {
+      "openAction": "家庭微繪本創作站",
+      "createdNotice": "家庭微繪本已建立，隨時可與孩子共讀！",
+      "modalTitle": "家庭分級拼讀微繪本創作站",
+      "modalDescription": "與孩子共同創作 3–4 頁適齡越南語微繪本，自然融入正在練習的重點詞彙。",
+      "stagePreparing": "正在準備詞彙與年級適讀框架…",
+      "stageWeaving": "正在編織家庭專屬越南語小故事…",
+      "themeRequiredError": "請輸入故事主題（至少 2 個字元）。",
+      "genericError": "目前無法建立微繪本，請稍後再試。",
+      "wordsUsedLabel": "已融入練習詞彙：{words}",
+      "readTogetherNow": "立即與孩子共讀",
+      "openBookDetail": "查看繪本詳情",
+      "childLabel": "適用兒童",
+      "gradeLabel": "目標年級",
+      "themeLabel": "故事主題",
+      "themePlaceholder": "例如：晨光小花園、可愛的小貓…",
+      "titleOptionalLabel": "繪本標題（可選）",
+      "titleOptionalPlaceholder": "留空將自動產生合適標題",
+      "styleModeLabel": "共讀形式",
+      "styleDuet": "親子分角色共讀（對話體）",
+      "stylePoem": "四行兒童韻律詩",
+      "styleProse": "短篇敘事散文",
+      "pageCountLabel": "繪本頁數",
+      "threePages": "精簡 3 頁",
+      "fourPages": "完整 4 頁",
+      "customWordsLabel": "額外想融入的詞語（用逗號分隔）",
+      "customWordsPlaceholder": "例如：溫暖陽光、勤奮、小花朵",
+      "submitAction": "立即產生微繪本",
+      "safetyFootnote": "自動通過兒童安全審核，僅保存在您的家庭私密書架中。"
+    }
   },
   "privateManager": {
     "backToMyBooks": "返回我的書櫃",
@@ -531,5 +561,12 @@
     "enableError": "無法更新 OCR 樣本貢獻設定。",
     "disabledNotice": "已停止此書的 OCR 樣本貢獻。系統將停止收集新樣本，並從後續的數據集生成中移除此書的樣本。",
     "disableError": "目前無法停止 OCR 樣本貢獻。"
+  },
+  "readability": {
+    "matched": "符合年級難度",
+    "tooHard": "略難（約{min}–{max}年級）",
+    "tooEasy": "輕鬆熱身（約{min}–{max}年級）",
+    "estimatedGrade": "預估 {min}–{max}年級",
+    "phonicsScore": "拼讀適讀度 {score}%"
   }
 }

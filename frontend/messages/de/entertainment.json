@@ -538,7 +538,8 @@
       "who": "Wer oder welches Tier?",
       "action": "Was passiert gerade?",
       "where": "Wo und welche Farbe?"
-    }
+    },
+    "studioIllustrationBadge": "Textfreie Illustration"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Endloswiedergabe fehlgeschlagen. Tippen Sie zum erneuten Versuch auf Anhören.",

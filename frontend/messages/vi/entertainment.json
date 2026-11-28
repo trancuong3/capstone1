@@ -538,7 +538,8 @@
       "who": "Có ai / con gì?",
       "action": "Đang làm gì?",
       "where": "Ở đâu / màu gì?"
-    }
+    },
+    "studioIllustrationBadge": "Minh họa sạch chữ"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Chưa phát lặp được. Hãy bấm nghe câu để thử lại.",

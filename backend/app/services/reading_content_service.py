@@ -1401,9 +1401,14 @@ class ReadingContentService:
 
         illustration_url = None
         illustration_text_free = False
+        extracted_page_kind: str | None = None
+        extracted_blocks_json: list[dict] | None = None
         try:
             from sqlalchemy import desc, select
-            from app.models.smart_book_studio import BookPresentationAsset
+            from app.models.smart_book_studio import (
+                BookPresentationAsset,
+                PageOcrExtraction,
+            )
 
             db_session = getattr(self.repository, "db", None)
             if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
@@ -1423,9 +1428,33 @@ class ReadingContentService:
                     if ill_asset is not None:
                         illustration_url = f"/studio/assets/{ill_asset.Id}/media"
                         illustration_text_free = True
+
+                    ocr_ext = await db_session.scalar(
+                        select(PageOcrExtraction)
+                        .where(PageOcrExtraction.BookPageId == page_id)
+                        .order_by(
+                            desc(PageOcrExtraction.UpdatedAt),
+                            desc(PageOcrExtraction.Id),
+                        )
+                        .limit(1)
+                    )
+                    if ocr_ext is not None:
+                        extracted_page_kind = str(ocr_ext.PageKind) if ocr_ext.PageKind else None
+                        if isinstance(ocr_ext.BlocksJson, list):
+                            extracted_blocks_json = ocr_ext.BlocksJson
         except Exception:
             illustration_url = None
             illustration_text_free = False
+
+        para_start_lines = safe_line_indices("paragraph_start_line_indices")
+        from app.services.duet_reading import build_duet_segments_for_page
+
+        duet_segments = build_duet_segments_for_page(
+            words,
+            page_kind=extracted_page_kind,
+            blocks_json=extracted_blocks_json,
+            paragraph_start_line_indices=para_start_lines,
+        )
 
         return ReadingPageDTO(
             page_id=page_id,
@@ -1447,8 +1476,10 @@ class ReadingContentService:
             ),
             illustration_url=illustration_url,
             illustration_text_free=illustration_text_free,
+            page_kind=extracted_page_kind,
+            duet_segments=duet_segments,
             text=text_content,
             words=words,
-            paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),
+            paragraph_start_line_indices=para_start_lines,
             indented_line_indices=safe_line_indices("indented_line_indices"),
         )

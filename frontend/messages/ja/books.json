@@ -290,7 +290,37 @@
     "addPagesPrimary": "ページを追加",
     "managePagesSecondary": "ページ管理",
     "editModalTitle": "本の情報を編集",
-    "deleteModalTitle": "このマイブックを削除しますか？"
+    "deleteModalTitle": "このマイブックを削除しますか？",
+    "storyweaver": {
+      "openAction": "家族ミニ絵本スタジオ",
+      "createdNotice": "家族ミニ絵本が完成し、すぐに読めるようになりました！",
+      "modalTitle": "家族でつくるベトナム語ミニ絵本スタジオ",
+      "modalDescription": "学年に合った3〜4ページのベトナム語ミニ絵本を作成し、練習中の単語を自然に織り込みます。",
+      "stagePreparing": "語彙と学年レベル構成を準備中…",
+      "stageWeaving": "家族のためのベトナム語ミニストーリーを紡いでいます…",
+      "themeRequiredError": "物語のテーマを2文字以上で入力してください。",
+      "genericError": "現在ミニ絵本を作成できません。もう一度お試しください。",
+      "wordsUsedLabel": "織り込まれた練習語彙: {words}",
+      "readTogetherNow": "今すぐ一緒に読む",
+      "openBookDetail": "本の詳細を開く",
+      "childLabel": "対象のお子さま",
+      "gradeLabel": "対象学年",
+      "themeLabel": "物語のテーマ",
+      "themePlaceholder": "例：朝のひだまりの庭、小さな子猫…",
+      "titleOptionalLabel": "タイトル（任意）",
+      "titleOptionalPlaceholder": "空欄の場合は自動でタイトルを付けます",
+      "styleModeLabel": "読書スタイル",
+      "styleDuet": "親子で交互に読む会話スタイル",
+      "stylePoem": "4行の子ども向け韻文・詩",
+      "styleProse": "短い物語（散文）",
+      "pageCountLabel": "ページ数",
+      "threePages": "コンパクトな3ページ",
+      "fourPages": "しっかり4ページ",
+      "customWordsLabel": "追加で入れたい単語（カンマ区切り）",
+      "customWordsPlaceholder": "例：あたたかい日差し、熱心、お花",
+      "submitAction": "ミニ絵本を作成する",
+      "safetyFootnote": "子ども向け安全チェックを自動実施し、家族専用の本棚に非公開保存されます。"
+    }
   },
   "privateManager": {
     "backToMyBooks": "マイブックに戻る",
@@ -531,5 +561,12 @@
     "enableError": "OCR サンプル共有の設定を更新できませんでした。",
     "disabledNotice": "この本の OCR サンプル共有を停止しました。システムは新しいサンプルの収集を停止し、今後のデータセット生成からこの本のサンプルを除外します。",
     "disableError": "現在、OCR サンプル共有を停止できません。"
+  },
+  "readability": {
+    "matched": "学年レベル適合",
+    "tooHard": "やや難しめ（{min}〜{max}年生相当）",
+    "tooEasy": "やさしい導入（{min}〜{max}年生相当）",
+    "estimatedGrade": "推定 {min}〜{max}年生",
+    "phonicsScore": "フォニックス適合 {score}%"
   }
 }

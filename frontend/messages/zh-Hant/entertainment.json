@@ -538,7 +538,8 @@
       "who": "有誰 / 什麼動物？",
       "action": "正在做什麼？",
       "where": "在哪裡 / 什麼顏色？"
-    }
+    },
+    "studioIllustrationBadge": "純淨無字插畫"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "未偵測到播放。請點擊聽句重試。",

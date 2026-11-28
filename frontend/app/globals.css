@@ -1251,3 +1251,35 @@ html:lang(bn) {
 [dir="rtl"] .viread-rtl-flip {
   transform: scaleX(-1);
 }
+
+@page {
+  size: A4 portrait;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff !important;
+    color: #16302b !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .parent-topbar,
+  .site-colophon,
+  .viread-no-print,
+  [data-print-hide="true"],
+  nav[aria-label] {
+    display: none !important;
+  }
+
+  .viread-print-sheet,
+  .report-metrics > *,
+  section,
+  article {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    box-shadow: none !important;
+  }
+}

@@ -42,6 +42,7 @@ class SentenceShooterBookRead(BaseModel):
 class SentenceShooterSessionCreate(BaseModel):
     child_id: UUID
     book_id: UUID
+    book_page_id: UUID | None = None
     difficulty: Difficulty
     total_rounds: int = Field(default=3, ge=1, le=5)
     learning_mode: LearningMode = "WORD_ORDER"

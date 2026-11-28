@@ -683,5 +683,20 @@
     "karaokeWeakSegmentsTitle": "مقاطع غنائية يُنصح بتدريبها ببطء 0.85x",
     "openSongAction": "افتح الأغنية",
     "homeTipsTitle": "نصائح للمتابعة في المنزل"
+  },
+  "printCertificate": {
+    "brandTagline": "تقرير تقدم القراءة العائلية",
+    "printA4Action": "طباعة تقرير A4",
+    "downloadCertificateAction": "حفظ الشهادة (.png)",
+    "certificateHeading": "شهادة إنجاز في القراءة",
+    "certificateSubtitle": "تقديراً للمثابرة في ممارسة القراءة الفيتنامية مع العائلة",
+    "awardedTo": "تُمنح بكل فخر إلى",
+    "progressAchievement": "واظب {alias} على القراءة وتنمية المفردات الفيتنامية كل أسبوع!",
+    "progressStatsLine": "الجلسات المكتملة: {sessions} · الكلمات المقروءة: {words} · متوسط الدقة: {accuracy}",
+    "sessionReaderFallback": "القارئ الصغير المجتهد",
+    "sessionAchievement": "أتمّ جلسة قراءة واضحة وواثقة!",
+    "sessionStatsLine": "الصفحات المقروءة: {pages} · إجمالي الكلمات: {words} · أعلى دقة: {accuracy}",
+    "issuedOn": "تاريخ الإصدار: {date}",
+    "encouragementFooter": "كل صفحة تقرؤها اليوم تغرس بذرة معرفة دافئة مع عائلتك."
   }
 }

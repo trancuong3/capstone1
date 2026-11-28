@@ -4,15 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Award,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Printer,
   RefreshCw,
   Trash2,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import {
+  downloadMilestoneCertificatePng,
+  triggerPrintA4Report,
+} from "@/lib/reports/milestone-certificate-canvas";
 import {
   deleteReadingReport,
   getSessionReports,
@@ -166,11 +172,78 @@ export default function ReadingReportPage() {
         </h1>
       </div>
       {!loading && !error && reports.length > 0 ? (
-        <p className="text-sm font-semibold text-muted tabular-nums">
-          {t("sessions.readingReports.reportsCountSummary", {
-            count: reports.length,
-          })}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-muted tabular-nums">
+            {t("sessions.readingReports.reportsCountSummary", {
+              count: reports.length,
+            })}
+          </p>
+          <div className="viread-no-print flex flex-wrap items-center gap-2">
+            <Button
+              className="w-auto"
+              data-testid="print-session-report-btn"
+              fullWidth={false}
+              onClick={() => triggerPrintA4Report()}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <Printer aria-hidden="true" className="size-4" />
+              {t("printCertificate.printA4Action")}
+            </Button>
+            <Button
+              className="w-auto"
+              data-testid="download-session-certificate-btn"
+              fullWidth={false}
+              onClick={() => {
+                let bestAccuracy = 0;
+                let totalWords = 0;
+                for (const r of reports) {
+                  const bookWordRows = r.alignment.filter(
+                    (item) => item.book_word !== null,
+                  );
+                  const matchedRows = bookWordRows.filter(
+                    (item) => item.status === "MATCH",
+                  );
+                  totalWords += bookWordRows.length;
+                  if (bookWordRows.length > 0) {
+                    const pct = Math.round(
+                      (matchedRows.length / bookWordRows.length) * 100,
+                    );
+                    if (pct > bestAccuracy) bestAccuracy = pct;
+                  }
+                }
+                void downloadMilestoneCertificatePng({
+                  brandLabel: "VIREAD · CHỨNG NHẬN PHIÊN ĐỌC",
+                  heading: t("printCertificate.certificateHeading"),
+                  subtitle: t("printCertificate.certificateSubtitle"),
+                  awardedToLabel: t("printCertificate.awardedTo"),
+                  childName: t("printCertificate.sessionReaderFallback"),
+                  gradeLabel: t("sessions.readingReports.pageHeading"),
+                  achievementLine: t("printCertificate.sessionAchievement"),
+                  statsLine: t("printCertificate.sessionStatsLine", {
+                    pages: reports.length,
+                    words: totalWords,
+                    accuracy: `${bestAccuracy}%`,
+                  }),
+                  issuedDateLabel: t("printCertificate.issuedOn", {
+                    date: new Intl.DateTimeFormat("vi-VN").format(new Date()),
+                  }),
+                  encouragementFooter: t(
+                    "printCertificate.encouragementFooter",
+                  ),
+                  fileNameSlug: sessionId.slice(0, 8),
+                });
+              }}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <Award aria-hidden="true" className="size-4" />
+              {t("printCertificate.downloadCertificateAction")}
+            </Button>
+          </div>
+        </div>
       ) : null}
     </header>
   );

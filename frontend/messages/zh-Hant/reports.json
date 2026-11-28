@@ -683,5 +683,20 @@
     "karaokeWeakSegmentsTitle": "建議以 0.85 倍速慢練的歌詞片段",
     "openSongAction": "打開歌曲",
     "homeTipsTitle": "家長居家陪伴小建議"
+  },
+  "printCertificate": {
+    "brandTagline": "家庭閱讀成長報告",
+    "printA4Action": "列印 A4 報告",
+    "downloadCertificateAction": "下載里程碑證書 (.png)",
+    "certificateHeading": "閱讀成長里程碑證書",
+    "certificateSubtitle": "表彰與家人堅持不懈的越南語朗讀成長之旅",
+    "awardedTo": "欣然授予熱愛閱讀的小讀者",
+    "progressAchievement": "{alias} 每週堅持朗讀練習，不斷豐富越南語詞彙！",
+    "progressStatsLine": "完成練習：{sessions} 次 · 累計朗讀：{words} 詞 · 平均準確率：{accuracy}",
+    "sessionReaderFallback": "勤奮的小讀者",
+    "sessionAchievement": "清晰自信地完成本次朗讀練習！",
+    "sessionStatsLine": "已讀頁數：{pages} · 總詞數：{words} · 最高準確率：{accuracy}",
+    "issuedOn": "頒發日期：{date}",
+    "encouragementFooter": "今天讀過的每一頁書，都是在家人陪伴下播下的溫暖知識種子。"
   }
 }

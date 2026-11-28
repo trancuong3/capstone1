@@ -380,7 +380,16 @@ function renderStars(count: number, ariaLabel: string) {
   );
 }
 
-export function PictureDescriptionScreen() {
+export interface PictureDescriptionScreenProps {
+  readonly initialChildId?: string;
+  readonly initialBookId?: string;
+  readonly initialPageId?: string;
+}
+
+export function PictureDescriptionScreen({
+  initialBookId,
+  initialPageId,
+}: PictureDescriptionScreenProps = {}) {
   const t = useTranslations("entertainment");
   const tCommon = useTranslations("common");
   const defaultGameError = t("pictureDescription.defaultError");
@@ -401,7 +410,9 @@ export function PictureDescriptionScreen() {
     status: "loading",
   });
   const [catalogRefreshKey, setCatalogRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<SourceTab>("SAMPLE");
+  const [activeTab, setActiveTab] = useState<SourceTab>(() =>
+    initialPageId || initialBookId ? "BOOK_PAGE" : "SAMPLE",
+  );
   const [practiceTab, setPracticeTab] = useState<PracticeTab>("PRACTICE");
   const [session, setSession] = useState<PictureSessionDTO | null>(null);
   const [selectedVocabWord, setSelectedVocabWord] = useState<string | null>(
@@ -669,8 +680,15 @@ export function PictureDescriptionScreen() {
     const controller = new AbortController();
     let active = true;
 
+    const catalogOptions =
+      initialBookId || initialPageId
+        ? { bookId: initialBookId, bookPageId: initialPageId }
+        : undefined;
+
     void Promise.all([
-      pictureService.getCatalog(childId, controller.signal),
+      catalogOptions
+        ? pictureService.getCatalog(childId, controller.signal, catalogOptions)
+        : pictureService.getCatalog(childId, controller.signal),
       pictureService.listSessions(childId, controller.signal),
     ])
       .then(([catalog, sessions]) => {
@@ -689,7 +707,14 @@ export function PictureDescriptionScreen() {
       active = false;
       controller.abort();
     };
-  }, [catalogRefreshKey, childId, defaultGameError, pictureService]);
+  }, [
+    catalogRefreshKey,
+    childId,
+    defaultGameError,
+    initialBookId,
+    initialPageId,
+    pictureService,
+  ]);
 
   const sampleSessionMap = useMemo(() => {
     const map = new Map<string, PictureSessionSummaryDTO>();
@@ -1830,9 +1855,20 @@ export function PictureDescriptionScreen() {
                             const hasPriorAttempt = Boolean(
                               existing && existing.attempts_count > 0,
                             );
+                            const isPinnedPage = Boolean(
+                              initialPageId && page.page_id === initialPageId,
+                            );
                             return (
                               <article
-                                className="flex flex-col overflow-hidden rounded-card border border-border bg-white shadow-sm"
+                                className={cn(
+                                  "flex flex-col overflow-hidden rounded-card border bg-white shadow-sm",
+                                  isPinnedPage
+                                    ? "border-2 border-primary ring-2 ring-primary/20"
+                                    : "border-border",
+                                )}
+                                data-pinned-book-page={
+                                  isPinnedPage ? "true" : undefined
+                                }
                                 key={page.page_id}
                               >
                                 <div className="relative aspect-[4/3] w-full overflow-hidden bg-sky/30">
@@ -1848,6 +1884,13 @@ export function PictureDescriptionScreen() {
                                     className="h-full w-full object-cover"
                                     src={page.image_url}
                                   />
+                                  {page.has_verified_illustration ? (
+                                    <span className="absolute start-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-primary shadow-sm">
+                                      {t(
+                                        "pictureDescription.studioIllustrationBadge",
+                                      )}
+                                    </span>
+                                  ) : null}
                                   {hasPriorAttempt && existing ? (
                                     <span className="absolute end-3 top-3 rounded-full bg-white/95 px-2.5 py-1 text-xs font-extrabold text-success-ink shadow-sm">
                                       {t("pictureDescription.starsBadge", {

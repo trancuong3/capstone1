@@ -391,22 +391,6 @@ export function AppShell({ children }: AppShellProps) {
   const isProtectedByChildLock =
     isChildModeLocked && isParentProtectedRoute(pathname);
 
-  useEffect(() => {
-    if (!userId) return;
-    let mounted = true;
-    const targetUserId = userId;
-    familyPedagogyService
-      .getPinStatus()
-      .then((statusRes) => {
-        if (!mounted) return;
-        setPinState({ userId: targetUserId, hasPin: statusRes.has_pin });
-      })
-      .catch(() => undefined);
-    return () => {
-      mounted = false;
-    };
-  }, [familyPedagogyService, userId]);
-
   const handleChildModeToggle = useCallback(() => {
     if (!userId) return;
     if (isChildModeLocked) {
@@ -420,8 +404,31 @@ export function AppShell({ children }: AppShellProps) {
       }
       return;
     }
-    setPinModalMode("setup");
-  }, [hasParentPin, isChildModeLocked, pathname, router, userId]);
+    const targetUserId = userId;
+    void familyPedagogyService
+      .getPinStatus()
+      .then((statusRes) => {
+        setPinState({ userId: targetUserId, hasPin: statusRes.has_pin });
+        if (statusRes.has_pin) {
+          setChildModeLockedForUser(targetUserId, true);
+          if (isParentProtectedRoute(pathname)) {
+            router.push("/dashboard");
+          }
+        } else {
+          setPinModalMode("setup");
+        }
+      })
+      .catch(() => {
+        setPinModalMode("setup");
+      });
+  }, [
+    familyPedagogyService,
+    hasParentPin,
+    isChildModeLocked,
+    pathname,
+    router,
+    userId,
+  ]);
 
   async function handleSignOut() {
     if (isSigningOut) return;

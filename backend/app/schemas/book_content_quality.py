@@ -209,6 +209,22 @@ class BookQualityReportAdminPage(BaseModel):
     offset: int
 
 
+class BookReadabilityRead(BaseModel):
+    syllable_count: int = 0
+    sentence_count: int = 0
+    avg_syllables_per_sentence: float = 0.0
+    complex_phonics_ratio: float = 0.0
+    multisyllable_ratio: float = 0.0
+    decodable_syllable_ratio: float = 0.0
+    estimated_grade_band: Literal["GRADE_1", "GRADE_2", "GRADE_3", "GRADE_4_5", "UNRATED"] = "UNRATED"
+    estimated_min_grade: int = 1
+    estimated_max_grade: int = 5
+    grade_match_status: Literal["MATCHED", "TOO_HARD", "TOO_EASY", "UNRATED"] = "UNRATED"
+    phonics_readiness_score: float = 0.0
+    sample_complex_syllables: list[str] = Field(default_factory=list)
+    explanation_vi: str = ""
+
+
 class BookQualityBookSummary(BaseModel):
     book_id: UUID
     book_title: str
@@ -259,6 +275,7 @@ class BookApprovalAssessment(BaseModel):
     publication_source: Literal["AUTO_APPROVAL", "ADMIN_APPROVAL"] | None = None
     rights_confirmed: bool = False
     blockers: list[str] = Field(default_factory=list)
+    readability: BookReadabilityRead | None = None
 
 
 BookQualityBookSummary.model_rebuild()

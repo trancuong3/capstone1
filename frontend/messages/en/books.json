@@ -290,7 +290,37 @@
     "addPagesPrimary": "Add pages",
     "managePagesSecondary": "Manage pages",
     "editModalTitle": "Edit book details",
-    "deleteModalTitle": "Delete this private book?"
+    "deleteModalTitle": "Delete this private book?",
+    "storyweaver": {
+      "openAction": "Family Storyweaver",
+      "createdNotice": "Family mini-book created and ready for reading!",
+      "modalTitle": "Family Decodable Storyweaver",
+      "modalDescription": "Co-create a 3–4 page grade-matched Vietnamese mini-book weaving your child's practice words naturally.",
+      "stagePreparing": "Preparing vocabulary and grade framework…",
+      "stageWeaving": "Weaving your family's Vietnamese mini-story…",
+      "themeRequiredError": "Please enter a story theme (at least 2 characters).",
+      "genericError": "Unable to create the mini-book right now. Please try again.",
+      "wordsUsedLabel": "Practice words woven in: {words}",
+      "readTogetherNow": "Read together now",
+      "openBookDetail": "Open book details",
+      "childLabel": "For child",
+      "gradeLabel": "Target grade",
+      "themeLabel": "Story theme",
+      "themePlaceholder": "e.g. sunny morning garden, friendly kitten…",
+      "titleOptionalLabel": "Book title (optional)",
+      "titleOptionalPlaceholder": "Leave blank for an automatic title",
+      "styleModeLabel": "Reading style",
+      "styleDuet": "Parent & Child Duet Dialogue",
+      "stylePoem": "4-line Children's Verse",
+      "styleProse": "Short Narrative Prose",
+      "pageCountLabel": "Mini-book length",
+      "threePages": "3 concise pages",
+      "fourPages": "4 complete pages",
+      "customWordsLabel": "Extra words to weave in (comma-separated)",
+      "customWordsPlaceholder": "e.g. warm sunshine, diligent, flower",
+      "submitAction": "Weave mini-book now",
+      "safetyFootnote": "Automatically screened for child safety and stored privately on your family shelf."
+    }
   },
   "privateManager": {
     "backToMyBooks": "Back to My Books",
@@ -531,5 +561,12 @@
     "enableError": "Could not update the OCR sample contribution setting.",
     "disabledNotice": "OCR sample contribution for this book has been stopped. The system will stop collecting new samples and remove this book's samples from upcoming dataset generations.",
     "disableError": "Could not stop OCR sample contribution at this time."
+  },
+  "readability": {
+    "matched": "Grade-matched",
+    "tooHard": "Challenging (Grade {min}–{max})",
+    "tooEasy": "Light warm-up (Grade {min}–{max})",
+    "estimatedGrade": "Est. Grade {min}–{max}",
+    "phonicsScore": "Phonics {score}%"
   }
 }

@@ -683,5 +683,20 @@
     "karaokeWeakSegmentsTitle": "שורות שיר לתרגול איטי ב-0.85x",
     "openSongAction": "פתח שיר",
     "homeTipsTitle": "טיפים לליווי הורים בבית"
+  },
+  "printCertificate": {
+    "brandTagline": "דוח התקדמות קריאה משפחתי",
+    "printA4Action": "הדפסת דוח A4",
+    "downloadCertificateAction": "שמירת תעודה (.png)",
+    "certificateHeading": "תעודת אבן דרך בקריאה",
+    "certificateSubtitle": "כהוקרה על התמדה בתרגול הקריאה בווייטנאמית עם המשפחה",
+    "awardedTo": "מוענקת בגאווה ל",
+    "progressAchievement": "{alias} התמיד/ה בקריאה והרחיב/ה את אוצר המילים בווייטנאמית מדי שבוע!",
+    "progressStatsLine": "מפגשים שהושלמו: {sessions} · מילים שנקראו: {words} · דיוק ממוצע: {accuracy}",
+    "sessionReaderFallback": "קורא/ת צעיר/ה ומתמיד/ה",
+    "sessionAchievement": "השלים/ה מפגש קריאה ברור ומלא ביטחון!",
+    "sessionStatsLine": "עמודים שנקראו: {pages} · סך מילים: {words} · דיוק מרבי: {accuracy}",
+    "issuedOn": "תאריך הנפקה: {date}",
+    "encouragementFooter": "כל עמוד שקראת היום זורע זרע חם של סקרנות וידע בחיק המשפחה."
   }
 }
