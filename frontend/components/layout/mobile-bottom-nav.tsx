@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   MobileMoreSheet,
@@ -77,19 +77,12 @@ export const PARENT_MOBILE_PRIMARY_TABS: readonly MobileNavTabItem[] = [
 
 export const PARENT_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
   {
-    href: "/my-books",
-    label: "Sách của tôi",
-    labelKey: "navigation.parent.myBooks",
-    description: "Tải lên và quản lý sách riêng của gia đình",
-    descriptionKey: "navigation.parent.moreDescriptions.myBooks",
-    icon: BookMarked,
-  },
-  {
     href: "/reading-management",
     label: "Quản lý đọc",
     labelKey: "navigation.parent.readingManagement",
     description: "Mục tiêu, lịch đọc và sách đã lưu cho bé",
     descriptionKey: "navigation.parent.moreDescriptions.readingManagement",
+    groupKey: "navigation.parent.learningGroup",
     icon: CalendarClock,
   },
   {
@@ -98,7 +91,25 @@ export const PARENT_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
     labelKey: "navigation.parent.sessions",
     description: "Xem lại các buổi đọc đã hoàn thành",
     descriptionKey: "navigation.parent.moreDescriptions.sessions",
+    groupKey: "navigation.parent.learningGroup",
     icon: History,
+  },
+  {
+    href: "/reports/difficult-words",
+    label: "Từ cần luyện",
+    labelKey: "navigation.parent.difficultWords",
+    description: "Ôn luyện các từ bé hay đọc nhầm",
+    descriptionKey: "navigation.parent.moreDescriptions.difficultWords",
+    groupKey: "navigation.parent.learningGroup",
+    icon: Volume2,
+  },
+  {
+    href: "/my-books",
+    label: "Sách của tôi",
+    labelKey: "navigation.parent.myBooks",
+    description: "Tải lên và quản lý sách riêng của gia đình",
+    descriptionKey: "navigation.parent.moreDescriptions.myBooks",
+    icon: BookMarked,
   },
   {
     href: "/entertainment",
@@ -110,14 +121,6 @@ export const PARENT_MOBILE_MORE_ITEMS: readonly MobileMoreSheetItem[] = [
     isActive: (pathname) =>
       routeMatches(pathname, "/entertainment") ||
       routeMatches(pathname, "/karaoke"),
-  },
-  {
-    href: "/reports/difficult-words",
-    label: "Từ cần luyện",
-    labelKey: "navigation.parent.difficultWords",
-    description: "Ôn luyện các từ bé hay đọc nhầm",
-    descriptionKey: "navigation.parent.moreDescriptions.difficultWords",
-    icon: Volume2,
   },
 ] as const;
 
@@ -196,6 +199,7 @@ export function MobileBottomNav({
 }: MobileBottomNavProps) {
   const { t } = useI18n();
   const [openForPathname, setOpenForPathname] = useState<string | null>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
   const isMoreOpen = openForPathname === pathname;
   const resolvedAriaLabel = ariaLabel ?? t("navigation.parent.mobileAriaLabel");
   const resolvedMoreTitle = moreTitle ?? t("navigation.parent.moreTitle");
@@ -309,6 +313,7 @@ export function MobileBottomNav({
                 current === pathname ? null : pathname,
               )
             }
+            ref={moreButtonRef}
             type="button"
           >
             <span
@@ -338,6 +343,7 @@ export function MobileBottomNav({
         items={moreItems}
         onClose={() => setOpenForPathname(null)}
         pathname={pathname}
+        returnFocusRef={moreButtonRef}
         title={resolvedMoreTitle}
       />
     </>

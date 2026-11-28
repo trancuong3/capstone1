@@ -2,7 +2,13 @@
 
 import { ChevronRight, X, type LucideIcon } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  type RefObject,
+} from "react";
 
 import { useI18n } from "@/hooks/use-i18n";
 import { cn } from "@/lib/utils/cn";
@@ -13,6 +19,7 @@ export interface MobileMoreSheetItem {
   readonly labelKey?: string;
   readonly description?: string;
   readonly descriptionKey?: string;
+  readonly groupKey?: string;
   readonly icon: LucideIcon;
   readonly isActive?: (pathname: string) => boolean;
 }
@@ -22,6 +29,7 @@ interface MobileMoreSheetProps {
   readonly isOpen: boolean;
   readonly onClose: () => void;
   readonly pathname: string;
+  readonly returnFocusRef?: RefObject<HTMLElement | null>;
   readonly title?: string;
   readonly items: readonly MobileMoreSheetItem[];
 }
@@ -35,12 +43,18 @@ export function MobileMoreSheet({
   isOpen,
   onClose,
   pathname,
+  returnFocusRef,
   title,
   items,
 }: MobileMoreSheetProps) {
   const { t } = useI18n();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const resolvedTitle = title ?? t("navigation.parent.moreTitle");
+
+  const handleDismiss = useCallback(() => {
+    onClose();
+    returnFocusRef?.current?.focus();
+  }, [onClose, returnFocusRef]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -49,7 +63,7 @@ export function MobileMoreSheet({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
-        onClose();
+        handleDismiss();
       }
     }
 
@@ -57,7 +71,7 @@ export function MobileMoreSheet({
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, handleDismiss]);
 
   if (!isOpen) return null;
 
@@ -69,14 +83,14 @@ export function MobileMoreSheet({
       <button
         aria-label={t("accessibility.closeMoreSheet")}
         className="fixed inset-0 bg-ink/40 backdrop-blur-[1px]"
-        onClick={onClose}
+        onClick={handleDismiss}
         tabIndex={-1}
         type="button"
       />
       <section
         aria-labelledby={`${id}-title`}
         aria-modal="true"
-        className="relative z-10 w-full rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+        className="relative z-10 max-h-[85dvh] w-full overflow-y-auto rounded-t-2xl border-t border-border bg-white px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3 shadow-2xl"
         id={id}
         role="dialog"
       >
@@ -91,7 +105,7 @@ export function MobileMoreSheet({
           <button
             aria-label={t("accessibility.closeSheet")}
             className="flex size-12 items-center justify-center rounded-full text-muted transition-colors hover:bg-canvas hover:text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-            onClick={onClose}
+            onClick={handleDismiss}
             ref={closeButtonRef}
             type="button"
           >
@@ -99,25 +113,44 @@ export function MobileMoreSheet({
           </button>
         </div>
         <nav aria-label={resolvedTitle} className="grid gap-1.5">
-          {items.map(
-            ({
+          {items.map((item, index) => {
+            const {
               href,
               label,
               labelKey,
               description,
               descriptionKey,
+              groupKey,
               icon: Icon,
               isActive,
-            }) => {
-              const active = isActive
-                ? isActive(pathname)
-                : defaultRouteActive(pathname, href);
-              const resolvedLabel = labelKey ? t(labelKey) : label;
-              const resolvedDescription = descriptionKey
-                ? t(descriptionKey)
-                : description;
+            } = item;
+            const previousGroupKey =
+              index > 0 ? items[index - 1]?.groupKey : undefined;
+            const showGroupHeading =
+              Boolean(groupKey) && groupKey !== previousGroupKey;
+            const showGroupDivider =
+              index > 0 && groupKey !== previousGroupKey;
+            const active = isActive
+              ? isActive(pathname)
+              : defaultRouteActive(pathname, href);
+            const resolvedLabel = labelKey ? t(labelKey) : label;
+            const resolvedDescription = descriptionKey
+              ? t(descriptionKey)
+              : description;
 
-              return (
+            return (
+              <Fragment key={href}>
+                {showGroupDivider ? (
+                  <div
+                    aria-hidden="true"
+                    className="my-1 border-t border-border/80"
+                  />
+                ) : null}
+                {showGroupHeading && groupKey ? (
+                  <p className="px-3 pb-0.5 pt-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t(groupKey)}
+                  </p>
+                ) : null}
                 <Link
                   aria-current={active ? "page" : undefined}
                   className={cn(
@@ -127,7 +160,6 @@ export function MobileMoreSheet({
                       : "bg-white text-ink hover:bg-canvas",
                   )}
                   href={href}
-                  key={href}
                   onClick={onClose}
                 >
                   <span
@@ -156,9 +188,9 @@ export function MobileMoreSheet({
                     className="size-4 shrink-0 text-muted viread-rtl-flip"
                   />
                 </Link>
-              );
-            },
-          )}
+              </Fragment>
+            );
+          })}
         </nav>
       </section>
     </div>

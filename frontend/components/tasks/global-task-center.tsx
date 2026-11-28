@@ -323,7 +323,9 @@ export function GlobalTaskCenter({
           ? failedCount
           : 0;
 
+  const isIdle = highlightCount === 0;
   const isCompactTopbar = variant === "header-pill" || variant === "topbar";
+  const isCompactIdleIcon = isCompactTopbar && isIdle;
 
   const triggerButton = (
     <button
@@ -335,9 +337,13 @@ export function GlobalTaskCenter({
         variant === "sidebar" &&
           "min-h-10 w-full justify-between gap-2 rounded-control px-3 py-2 text-xs shadow-2xs",
         variant === "topbar" &&
-          "min-h-10 min-w-10 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-2xs sm:px-3",
+          (isIdle
+            ? "size-10 justify-center rounded-full p-0 text-xs shadow-2xs"
+            : "min-h-10 min-w-10 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-2xs sm:px-3"),
         variant === "header-pill" &&
-          "min-h-11 min-w-11 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-sm sm:gap-2 sm:px-3.5 sm:text-sm",
+          (isIdle
+            ? "size-10 justify-center rounded-full p-0 text-xs shadow-2xs sm:size-11"
+            : "min-h-10 min-w-10 justify-center gap-1.5 rounded-full px-2.5 text-xs shadow-sm sm:min-h-11 sm:gap-2 sm:px-3.5 sm:text-sm"),
         variant === "floating" &&
           "fixed bottom-20 end-4 z-40 min-h-12 justify-center gap-2 rounded-full px-4 text-xs shadow-lg sm:text-sm xl:bottom-5 xl:end-5",
         allActiveWaitingForWorker
@@ -348,15 +354,24 @@ export function GlobalTaskCenter({
               ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
               : waitingReviewCount > 0
                 ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
-                : "border-border bg-white text-ink hover:bg-canvas",
+                : isCompactIdleIcon
+                  ? "border-border bg-white text-muted hover:border-primary/40 hover:bg-canvas hover:text-primary"
+                  : "border-border bg-white text-ink hover:bg-canvas",
         className,
       )}
+      data-idle={isIdle ? "true" : "false"}
       data-testid="global-task-center-trigger"
       data-variant={variant}
       onClick={togglePanel}
+      title={pillText}
       type="button"
     >
-      <span className="flex min-w-0 items-center gap-2">
+      <span
+        className={cn(
+          "flex min-w-0 items-center",
+          isCompactIdleIcon ? "justify-center" : "gap-2",
+        )}
+      >
         {allActiveWaitingForWorker ? (
           <Clock
             aria-hidden="true"
@@ -372,13 +387,18 @@ export function GlobalTaskCenter({
         ) : (
           <Sparkles
             aria-hidden="true"
-            className="size-4 shrink-0 text-primary"
+            className={cn(
+              "size-4 shrink-0",
+              !isCompactIdleIcon && "text-primary",
+            )}
           />
         )}
         <span
           className={cn(
             "truncate whitespace-nowrap",
-            isCompactTopbar && "sr-only sm:not-sr-only",
+            isCompactIdleIcon
+              ? "sr-only"
+              : isCompactTopbar && "sr-only sm:not-sr-only",
           )}
         >
           {pillText}

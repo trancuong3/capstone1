@@ -1,6 +1,16 @@
 "use client";
 
-import { ArrowRight, Eye, EyeOff, Globe, Mail } from "lucide-react";
+import {
+  ArrowRight,
+  CalendarClock,
+  Eye,
+  EyeOff,
+  Globe,
+  Info,
+  KeyRound,
+  Mail,
+  UserRound,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -388,37 +398,43 @@ export function AccountSettingsScreen() {
     );
 
   return (
-    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-4">
+    <section className="settings-sheet mx-auto flex w-full max-w-[960px] flex-col gap-5">
       <PageHeader
         description={t("settings.account.description")}
         eyebrow={t("settings.account.eyebrow")}
         title={t("settings.account.title")}
       />
 
-      <Card>
-        <div className="flex items-start gap-3">
-          <Globe
-            aria-hidden="true"
-            className="mt-1 size-6 shrink-0 text-primary"
-          />
-          <div className="min-w-0 flex-1">
-            <h2 className="text-2xl font-extrabold text-ink">
-              {t("settings.language.heading")}
-            </h2>
-            <p className="mt-1 text-body text-muted">
-              {t("settings.language.description")}
-            </p>
+      <Card className="overflow-visible">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-control bg-sky text-primary">
+              <Globe aria-hidden="true" className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
+                {t("settings.language.heading")}
+              </h2>
+              <p className="mt-1 text-sm leading-5 text-muted">
+                {t("settings.language.description")}
+              </p>
+            </div>
+          </div>
+          <div className="w-full shrink-0 sm:w-64">
+            <LanguageSelector
+              align="end"
+              onLocaleChange={(next) => setLanguageChangedTo(next)}
+              variant="settings"
+            />
           </div>
         </div>
-        <div className="max-w-md">
-          <LanguageSelector
-            onLocaleChange={(next) => setLanguageChangedTo(next)}
-            variant="settings"
+        <p className="flex items-start gap-2 border-t border-border/70 pt-3 text-xs leading-5 text-muted">
+          <Info
+            aria-hidden="true"
+            className="mt-0.5 size-4 shrink-0 text-primary"
           />
-        </div>
-        <StatusMessage tone="info">
-          {t("settings.language.learningContentNote")}
-        </StatusMessage>
+          <span>{t("settings.language.learningContentNote")}</span>
+        </p>
         {languageChangedTo ? (
           <StatusMessage role="status" tone="success">
             {t("notifications.updates.localeChanged", {
@@ -429,15 +445,26 @@ export function AccountSettingsScreen() {
       </Card>
 
       <Card>
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold text-ink">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-control bg-sky text-primary">
+              <UserRound aria-hidden="true" className="size-5" />
+            </div>
+            <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
               {t("settings.account.infoHeading")}
             </h2>
           </div>
+          <ButtonLink
+            className="shrink-0 sm:w-auto"
+            href="/profile"
+            variant="secondary"
+          >
+            {t("settings.account.manageProfile")}{" "}
+            <ArrowRight aria-hidden="true" className="size-4 viread-rtl-flip" />
+          </ButtonLink>
         </div>
 
-        <dl className="grid gap-4 sm:grid-cols-2">
+        <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
           <div className="rounded-control border border-border bg-white px-4 py-3">
             <dt className="text-label font-semibold text-muted">
               {t("settings.account.displayName")}
@@ -479,66 +506,61 @@ export function AccountSettingsScreen() {
             </dd>
           </div>
         </dl>
-        <ButtonLink
-          className="sm:w-auto sm:self-start"
-          href="/profile"
-          variant="secondary"
-        >
-          {t("settings.account.manageProfile")}{" "}
-          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
-        </ButtonLink>
-      </Card>
 
-      <Button
-        className="sm:max-w-72"
-        variant="secondary"
-        onClick={() => setShowPasswordEditor(true)}
-      >
-        {t("settings.account.changePassword")}
-      </Button>
+        <div className="flex flex-col gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold text-ink">
+              {t("settings.account.emailVerificationHeading")}
+            </p>
+            <p className="mt-0.5 text-xs leading-5 text-muted">
+              {profile.pending_email
+                ? t("settings.account.emailPendingBody")
+                : t("settings.account.emailDefaultBody")}{" "}
+              <Link
+                className="font-semibold text-primary underline-offset-4 hover:underline"
+                href="/profile"
+              >
+                {t("settings.account.openParentProfile")}
+              </Link>
+            </p>
+          </div>
+          <Button
+            className="shrink-0 sm:w-auto"
+            onClick={() => setShowPasswordEditor(true)}
+            variant="outline"
+          >
+            <KeyRound aria-hidden="true" className="size-4" />
+            {t("settings.account.changePassword")}
+          </Button>
+        </div>
+      </Card>
 
       <ParentEmailPreferencesCard emailVerified={profile.email_verified} />
 
       <Card>
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold text-ink">
-              {t("settings.account.emailVerificationHeading")}
-            </h2>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-control bg-sky text-primary">
+              <CalendarClock aria-hidden="true" className="size-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
+                {t("settings.account.readingRemindersHeading")}
+              </h2>
+              <p className="mt-1 text-sm text-muted">
+                {t("settings.account.readingRemindersDescription")}
+              </p>
+            </div>
           </div>
+          <ButtonLink
+            className="shrink-0 sm:w-auto"
+            href="/reading-management"
+            variant="secondary"
+          >
+            {t("settings.account.readingRemindersHeading")}{" "}
+            <ArrowRight aria-hidden="true" className="size-4 viread-rtl-flip" />
+          </ButtonLink>
         </div>
-        <p className="text-body text-muted">
-          {profile.pending_email
-            ? t("settings.account.emailPendingBody")
-            : t("settings.account.emailDefaultBody")}
-        </p>
-        <Link
-          className="font-semibold text-primary underline-offset-4 hover:underline"
-          href="/profile"
-        >
-          {t("settings.account.openParentProfile")}
-        </Link>
-      </Card>
-
-      <Card>
-        <div className="flex items-center gap-3">
-          <div>
-            <h2 className="text-2xl font-extrabold text-ink">
-              {t("settings.account.readingRemindersHeading")}
-            </h2>
-            <p className="text-sm text-muted">
-              {t("settings.account.readingRemindersDescription")}
-            </p>
-          </div>
-        </div>
-        <ButtonLink
-          className="sm:w-auto sm:self-start"
-          href="/reading-management"
-          variant="secondary"
-        >
-          {t("settings.account.readingRemindersHeading")}{" "}
-          <ArrowRight aria-hidden="true" className="size-5 viread-rtl-flip" />
-        </ButtonLink>
       </Card>
     </section>
   );

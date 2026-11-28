@@ -19,8 +19,11 @@
     "booksShort": "图书",
     "scannerShort": "扫描",
     "moreButton": "更多",
+    "learningGroup": "学习",
+    "learningGroupAria": "学习与阅读追踪菜单",
     "mobileAriaLabel": "移动端快速导航",
     "moreDescriptions": {
+      "reports": "追踪孩子的阅读准确度、速度和进度",
       "myBooks": "上传并管理家庭藏书",
       "readingManagement": "查看孩子的阅读目标、计划及已保存的图书",
       "sessions": "回顾已完成的阅读会话",

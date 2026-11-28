@@ -8,6 +8,7 @@ import {
   ChevronDown,
   CircleHelp,
   Gamepad2,
+  GraduationCap,
   History,
   LayoutDashboard,
   LogOut,
@@ -64,42 +65,44 @@ interface AppShellProps {
   children: ReactNode;
 }
 
-const navigationItemsConfig = [
-  {
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    labelKey: "navigation.parent.dashboard",
-  },
-  {
-    href: "/my-books",
-    icon: BookMarked,
-    labelKey: "navigation.parent.myBooks",
-  },
+const learningMenuItemsConfig = [
   {
     href: "/reports",
     icon: BarChart3,
     labelKey: "navigation.parent.reports",
-  },
-  {
-    href: "/reading-management",
-    icon: CalendarClock,
-    labelKey: "navigation.parent.readingManagement",
-  },
-  {
-    href: "/sessions",
-    icon: History,
-    labelKey: "navigation.parent.sessions",
-  },
-  {
-    href: "/entertainment",
-    icon: Gamepad2,
-    labelKey: "navigation.parent.entertainment",
+    descriptionKey: "navigation.parent.moreDescriptions.reports",
+    badgeClassName: "bg-sky text-primary",
   },
   {
     href: "/reports/difficult-words",
     icon: Volume2,
     labelKey: "navigation.parent.difficultWords",
+    descriptionKey: "navigation.parent.moreDescriptions.difficultWords",
+    badgeClassName: "bg-amber-50 text-amber-700",
   },
+  {
+    href: "/sessions",
+    icon: History,
+    labelKey: "navigation.parent.sessions",
+    descriptionKey: "navigation.parent.moreDescriptions.sessions",
+    badgeClassName: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    href: "/reading-management",
+    icon: CalendarClock,
+    labelKey: "navigation.parent.readingManagement",
+    descriptionKey: "navigation.parent.moreDescriptions.readingManagement",
+    badgeClassName: "bg-orange-50 text-amber-800",
+  },
+] as const;
+
+const learningGroupHrefs = learningMenuItemsConfig.map((item) => item.href);
+
+const allParentNavHrefs = [
+  "/dashboard",
+  "/my-books",
+  "/entertainment",
+  ...learningGroupHrefs,
 ] as const;
 
 function normalizeRoutePath(pathname: string): string {
@@ -133,13 +136,20 @@ export function isAppShellNavItemActive(
   }
   return (
     routeIsActive(normalized, href) &&
-    !navigationItemsConfig.some(
-      (other) =>
-        other.href !== href &&
-        other.href.startsWith(`${href}/`) &&
-        routeIsActive(normalized, other.href),
+    !allParentNavHrefs.some(
+      (otherHref) =>
+        otherHref !== href &&
+        otherHref.startsWith(`${href}/`) &&
+        routeIsActive(normalized, otherHref),
     )
   );
+}
+
+export function isAppShellNavGroupActive(
+  pathname: string,
+  hrefs: readonly string[],
+): boolean {
+  return hrefs.some((href) => isAppShellNavItemActive(pathname, href));
 }
 
 export function AppShell({ children }: AppShellProps) {
@@ -150,9 +160,10 @@ export function AppShell({ children }: AppShellProps) {
   const appStore = useContext(AppStoreContext);
   const pathname = usePathname();
   const router = useRouter();
-  const activeNavigationRef = useRef<HTMLAnchorElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
   const avatarButtonRef = useRef<HTMLButtonElement>(null);
+  const learningMenuRef = useRef<HTMLDivElement>(null);
+  const learningButtonRef = useRef<HTMLButtonElement>(null);
   const childSwitcherRef = useRef<HTMLDivElement>(null);
   const previousUserIdRef = useRef<string | undefined>(undefined);
 
@@ -169,6 +180,9 @@ export function AppShell({ children }: AppShellProps) {
     isOpen: boolean;
     pathname: string;
   }>({ isOpen: false, pathname: "" });
+  const [learningMenuOpenForPath, setLearningMenuOpenForPath] = useState<
+    string | null
+  >(null);
   const [childSwitcherOpenForPath, setChildSwitcherOpenForPath] = useState<
     string | null
   >(null);
@@ -206,7 +220,12 @@ export function AppShell({ children }: AppShellProps) {
 
   const isAccountMenuVisible =
     accountMenu.isOpen && accountMenu.pathname === pathname;
+  const isLearningMenuVisible = learningMenuOpenForPath === pathname;
   const isChildSwitcherVisible = childSwitcherOpenForPath === pathname;
+  const isLearningGroupActive = isAppShellNavGroupActive(
+    pathname,
+    learningGroupHrefs,
+  );
   const isMobileImmersive =
     immersiveEventState.active && immersiveEventState.pathname === pathname;
   const isChildOnboarding = pathname === "/children/new";
@@ -227,20 +246,6 @@ export function AppShell({ children }: AppShellProps) {
       : profile?.role === "admin"
         ? t("parent.profile.roleAdmin")
         : null;
-
-  useEffect(() => {
-    const activeLink = activeNavigationRef.current;
-    const navContainer = activeLink?.parentElement;
-    if (
-      !activeLink ||
-      !navContainer ||
-      navContainer.scrollWidth <= navContainer.clientWidth ||
-      typeof activeLink.scrollIntoView !== "function"
-    ) {
-      return;
-    }
-    activeLink.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [pathname]);
 
   useEffect(() => {
     let isActive = true;
@@ -358,6 +363,41 @@ export function AppShell({ children }: AppShellProps) {
   }, [isAccountMenuVisible]);
 
   useEffect(() => {
+    if (!isLearningMenuVisible) return;
+    learningMenuRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]')
+      ?.focus();
+  }, [isLearningMenuVisible]);
+
+  useEffect(() => {
+    if (!isLearningMenuVisible) return;
+
+    function closeOnOutsidePointer(event: PointerEvent) {
+      if (
+        event.target instanceof Node &&
+        !learningMenuRef.current?.contains(event.target)
+      ) {
+        setLearningMenuOpenForPath(null);
+      }
+    }
+
+    function closeOnEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setLearningMenuOpenForPath(null);
+        learningButtonRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isLearningMenuVisible]);
+
+  useEffect(() => {
     if (!isChildSwitcherVisible) return;
 
     function closeOnOutsidePointer(event: PointerEvent) {
@@ -418,6 +458,36 @@ export function AppShell({ children }: AppShellProps) {
     } finally {
       setIsSigningOut(false);
     }
+  }
+
+  function handleLearningMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    const items = learningMenuRef.current?.querySelectorAll<HTMLElement>(
+      '[role="menuitem"]:not([disabled])',
+    );
+    if (!items?.length) return;
+
+    event.preventDefault();
+    const currentIndex = Array.from(items).indexOf(
+      document.activeElement as HTMLElement,
+    );
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? items.length - 1
+          : event.key === "ArrowDown"
+            ? currentIndex < 0
+              ? 0
+              : (currentIndex + 1) % items.length
+            : currentIndex < 0
+              ? items.length - 1
+              : (currentIndex - 1 + items.length) % items.length;
+
+    items[nextIndex]?.focus();
   }
 
   function handleMenuKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -501,25 +571,263 @@ export function AppShell({ children }: AppShellProps) {
         </a>
         <header
           className={cn(
-            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border bg-white/95 px-3 backdrop-blur-sm sm:px-6 xl:static xl:bg-white xl:px-8",
+            "parent-topbar sticky top-0 z-30 shrink-0 border-b border-border/80 bg-white/95 backdrop-blur-md",
             isMobileImmersive && "hidden xl:block",
           )}
         >
           <nav
             aria-label={t("navigation.parent.navLabel")}
             className={cn(
-              "mx-auto flex h-14 w-full min-w-0 max-w-[1312px] items-center gap-2 xl:h-auto xl:min-h-16 xl:gap-2 2xl:gap-4",
+              "mx-auto flex h-14 w-full min-w-0 max-w-[1184px] items-center gap-2 px-4 sm:px-8 xl:h-16 xl:gap-4",
               isChildOnboarding && "min-h-11",
             )}
           >
             <ViReadLogo
               ariaLabel={t("navigation.footer.logoDashboardAria")}
-              className={cn(isChildOnboarding ? "text-label" : "xl:me-auto")}
+              className={cn("shrink-0", isChildOnboarding && "text-label")}
               href="/dashboard"
               size="md"
             />
 
-            <div className="flex min-w-0 flex-1 items-center justify-end gap-2 xl:w-auto xl:flex-none xl:gap-2 2xl:gap-3">
+            {!isChildOnboarding ? (
+              <div className="parent-nav-links hidden min-w-0 items-center gap-1.5 xl:ms-4 xl:flex xl:flex-none xl:flex-nowrap">
+                <Link
+                  aria-current={
+                    isAppShellNavItemActive(pathname, "/dashboard")
+                      ? "page"
+                      : undefined
+                  }
+                  className={cn(
+                    "group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-3.5 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isAppShellNavItemActive(pathname, "/dashboard")
+                      ? "bg-sky/80 font-bold text-primary-hover"
+                      : "text-ink hover:bg-canvas hover:text-primary-hover",
+                  )}
+                  href="/dashboard"
+                  onClick={() => {
+                    setLearningMenuOpenForPath(null);
+                    setAccountMenu((current) => ({
+                      ...current,
+                      isOpen: false,
+                    }));
+                  }}
+                >
+                  <LayoutDashboard
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 transition-colors",
+                      isAppShellNavItemActive(pathname, "/dashboard")
+                        ? "text-primary"
+                        : "text-muted group-hover:text-primary",
+                    )}
+                    strokeWidth={1.9}
+                  />
+                  <span>{t("navigation.parent.dashboard")}</span>
+                </Link>
+
+                <Link
+                  aria-current={
+                    isAppShellNavItemActive(pathname, "/my-books")
+                      ? "page"
+                      : undefined
+                  }
+                  className={cn(
+                    "group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-3.5 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isAppShellNavItemActive(pathname, "/my-books")
+                      ? "bg-sky/80 font-bold text-primary-hover"
+                      : "text-ink hover:bg-canvas hover:text-primary-hover",
+                  )}
+                  href="/my-books"
+                  onClick={() => {
+                    setLearningMenuOpenForPath(null);
+                    setAccountMenu((current) => ({
+                      ...current,
+                      isOpen: false,
+                    }));
+                  }}
+                >
+                  <BookMarked
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 transition-colors",
+                      isAppShellNavItemActive(pathname, "/my-books")
+                        ? "text-primary"
+                        : "text-muted group-hover:text-primary",
+                    )}
+                    strokeWidth={1.9}
+                  />
+                  <span>{t("navigation.parent.myBooks")}</span>
+                </Link>
+
+                <div className="relative" ref={learningMenuRef}>
+                  <button
+                    aria-controls="parent-learning-menu"
+                    aria-expanded={isLearningMenuVisible}
+                    aria-haspopup="menu"
+                    className={cn(
+                      "group inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-full px-3.5 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                      isLearningGroupActive
+                        ? "bg-sky/80 font-bold text-primary-hover"
+                        : isLearningMenuVisible
+                          ? "bg-canvas text-primary-hover"
+                          : "text-ink hover:bg-canvas hover:text-primary-hover",
+                    )}
+                    data-active={isLearningGroupActive ? "true" : undefined}
+                    onClick={() => {
+                      setAccountMenu((current) => ({
+                        ...current,
+                        isOpen: false,
+                      }));
+                      setChildSwitcherOpenForPath(null);
+                      setLearningMenuOpenForPath((current) =>
+                        current === pathname ? null : pathname,
+                      );
+                    }}
+                    onKeyDown={(event) => {
+                      if (
+                        (event.key === "ArrowDown" ||
+                          event.key === "ArrowUp") &&
+                        !isLearningMenuVisible
+                      ) {
+                        event.preventDefault();
+                        setAccountMenu((current) => ({
+                          ...current,
+                          isOpen: false,
+                        }));
+                        setChildSwitcherOpenForPath(null);
+                        setLearningMenuOpenForPath(pathname);
+                      }
+                    }}
+                    ref={learningButtonRef}
+                    title={t("navigation.parent.learningGroupAria")}
+                    type="button"
+                  >
+                    <GraduationCap
+                      aria-hidden="true"
+                      className={cn(
+                        "size-4 shrink-0 transition-colors",
+                        isLearningGroupActive || isLearningMenuVisible
+                          ? "text-primary"
+                          : "text-muted group-hover:text-primary",
+                      )}
+                      strokeWidth={1.9}
+                    />
+                    <span>{t("navigation.parent.learningGroup")}</span>
+                    <ChevronDown
+                      aria-hidden="true"
+                      className={cn(
+                        "size-4 shrink-0 transition-transform duration-150",
+                        isLearningGroupActive || isLearningMenuVisible
+                          ? "text-primary"
+                          : "text-muted group-hover:text-primary",
+                        isLearningMenuVisible && "rotate-180",
+                      )}
+                      strokeWidth={2}
+                    />
+                  </button>
+
+                  {isLearningMenuVisible ? (
+                    <div
+                      aria-label={t("navigation.parent.learningGroupAria")}
+                      className="absolute start-0 top-full z-50 mt-2 w-80 rounded-card border border-border bg-white p-2 shadow-xl"
+                      id="parent-learning-menu"
+                      onKeyDown={handleLearningMenuKeyDown}
+                      role="menu"
+                    >
+                      <div className="grid gap-1">
+                        {learningMenuItemsConfig.map(
+                          ({
+                            href,
+                            icon: Icon,
+                            labelKey,
+                            descriptionKey,
+                            badgeClassName,
+                          }) => {
+                            const isItemActive = isAppShellNavItemActive(
+                              pathname,
+                              href,
+                            );
+
+                            return (
+                              <Link
+                                aria-current={isItemActive ? "page" : undefined}
+                                className={cn(
+                                  "flex items-start gap-3 rounded-control px-3 py-2.5 text-start outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary",
+                                  isItemActive
+                                    ? "bg-sky/80 text-primary-hover"
+                                    : "text-ink hover:bg-canvas",
+                                )}
+                                href={href}
+                                key={href}
+                                onClick={() => setLearningMenuOpenForPath(null)}
+                                role="menuitem"
+                                tabIndex={0}
+                              >
+                                <span
+                                  aria-hidden="true"
+                                  className={cn(
+                                    "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-control",
+                                    isItemActive
+                                      ? "bg-white text-primary shadow-2xs"
+                                      : badgeClassName,
+                                  )}
+                                >
+                                  <Icon className="size-4" strokeWidth={1.9} />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block text-sm font-bold leading-snug">
+                                    {t(labelKey)}
+                                  </span>
+                                  <span className="mt-0.5 block text-xs leading-snug text-muted">
+                                    {t(descriptionKey)}
+                                  </span>
+                                </span>
+                              </Link>
+                            );
+                          },
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <Link
+                  aria-current={
+                    isAppShellNavItemActive(pathname, "/entertainment")
+                      ? "page"
+                      : undefined
+                  }
+                  className={cn(
+                    "group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-full px-3.5 text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                    isAppShellNavItemActive(pathname, "/entertainment")
+                      ? "bg-sky/80 font-bold text-primary-hover"
+                      : "text-ink hover:bg-canvas hover:text-primary-hover",
+                  )}
+                  href="/entertainment"
+                  onClick={() => {
+                    setLearningMenuOpenForPath(null);
+                    setAccountMenu((current) => ({
+                      ...current,
+                      isOpen: false,
+                    }));
+                  }}
+                >
+                  <Gamepad2
+                    aria-hidden="true"
+                    className={cn(
+                      "size-4 shrink-0 transition-colors",
+                      isAppShellNavItemActive(pathname, "/entertainment")
+                        ? "text-primary"
+                        : "text-muted group-hover:text-primary",
+                    )}
+                    strokeWidth={1.9}
+                  />
+                  <span>{t("navigation.parent.entertainment")}</span>
+                </Link>
+              </div>
+            ) : null}
+
+            <div className="ms-auto flex min-w-0 items-center justify-end gap-2 sm:gap-2.5">
               {!isChildOnboarding ? (
                 <>
                   <div
@@ -538,12 +846,17 @@ export function AppShell({ children }: AppShellProps) {
                                 })
                               : t("navigation.childSwitcher.openAria")
                           }
-                          className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                          onClick={() =>
+                          className="inline-flex min-h-12 max-w-[136px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary min-[390px]:max-w-[164px]"
+                          onClick={() => {
+                            setLearningMenuOpenForPath(null);
+                            setAccountMenu((current) => ({
+                              ...current,
+                              isOpen: false,
+                            }));
                             setChildSwitcherOpenForPath((current) =>
                               current === pathname ? null : pathname,
-                            )
-                          }
+                            );
+                          }}
                           type="button"
                         >
                           <span className="truncate">
@@ -623,7 +936,7 @@ export function AppShell({ children }: AppShellProps) {
                       </>
                     ) : (
                       <Link
-                        className="inline-flex min-h-12 max-w-[164px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        className="inline-flex min-h-12 max-w-[136px] items-center gap-1.5 rounded-full border border-border bg-sky/70 px-3 text-xs font-bold text-primary-hover transition-colors hover:bg-sky focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary min-[390px]:max-w-[164px]"
                         href="/dashboard?focus=child-selection"
                       >
                         <span className="truncate">
@@ -638,61 +951,17 @@ export function AppShell({ children }: AppShellProps) {
                     )}
                   </div>
 
-                  <div className="parent-nav-links hidden min-w-0 items-center justify-end gap-1 py-1 xl:flex xl:flex-none xl:flex-nowrap 2xl:gap-2">
-                    {navigationItemsConfig.map(
-                      ({ href, icon: Icon, labelKey }) => {
-                        const isActive = isAppShellNavItemActive(
-                          pathname,
-                          href,
-                        );
+                  <span
+                    aria-hidden="true"
+                    className="hidden h-5 w-px shrink-0 bg-border/80 xl:block"
+                  />
 
-                        return (
-                          <Link
-                            aria-current={isActive ? "page" : undefined}
-                            className={cn(
-                              "flex min-h-10 shrink-0 items-center justify-center gap-1 rounded-control px-1.5 text-center text-xs font-semibold text-ink transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:min-h-11 sm:px-2.5 sm:text-sm xl:h-12 xl:gap-1.5 xl:px-2 xl:text-label 2xl:gap-2 2xl:px-3",
-                              isActive
-                                ? "bg-sky text-primary-hover xl:underline xl:decoration-2 xl:underline-offset-8"
-                                : "bg-white hover:bg-canvas",
-                            )}
-                            href={href}
-                            key={href}
-                            onClick={() =>
-                              setAccountMenu((current) => ({
-                                ...current,
-                                isOpen: false,
-                              }))
-                            }
-                            ref={isActive ? activeNavigationRef : undefined}
-                          >
-                            <Icon
-                              aria-hidden="true"
-                              className="size-4 shrink-0 sm:size-[18px]"
-                              strokeWidth={1.8}
-                            />
-                            <span className="whitespace-nowrap">
-                              {t(labelKey)}
-                            </span>
-                          </Link>
-                        );
-                      },
-                    )}
-                  </div>
+                  <GlobalTaskCenter
+                    className="shrink-0"
+                    hideOnPaths={["/children/new"]}
+                    variant="header-pill"
+                  />
                 </>
-              ) : (
-                <span className="flex-1" />
-              )}
-
-              <div className="hidden shrink-0 xl:block">
-                <LanguageSelector variant="compact" />
-              </div>
-
-              {!isChildOnboarding ? (
-                <GlobalTaskCenter
-                  className="shrink-0"
-                  hideOnPaths={["/children/new"]}
-                  variant="header-pill"
-                />
               ) : null}
 
               <div className="relative shrink-0" ref={accountMenuRef}>
@@ -705,9 +974,10 @@ export function AppShell({ children }: AppShellProps) {
                       ? t("navigation.accountMenu.closeAria")
                       : t("navigation.accountMenu.openAria")
                   }
-                  className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-sm transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary"
+                  className="flex size-12 items-center justify-center rounded-full border border-border bg-white p-0.5 shadow-2xs transition-colors hover:border-primary focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary xl:size-11"
                   onClick={() => {
                     setChildSwitcherOpenForPath(null);
+                    setLearningMenuOpenForPath(null);
                     if (isAccountMenuVisible) {
                       setAccountMenu((current) => ({
                         ...current,
@@ -720,6 +990,8 @@ export function AppShell({ children }: AppShellProps) {
                   onKeyDown={(event) => {
                     if (event.key === "ArrowDown" && !isAccountMenuVisible) {
                       event.preventDefault();
+                      setChildSwitcherOpenForPath(null);
+                      setLearningMenuOpenForPath(null);
                       setAccountMenu({ isOpen: true, pathname });
                     }
                   }}
@@ -735,45 +1007,48 @@ export function AppShell({ children }: AppShellProps) {
                 </button>
                 <div
                   aria-label={t("navigation.accountMenu.shortMenuAria")}
-                  className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-card border border-border bg-white p-3 shadow-lg"
+                  className="absolute end-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-card border border-border bg-white p-2 shadow-xl"
                   hidden={!isAccountMenuVisible}
                   id="parent-account-menu"
                   onKeyDown={handleMenuKeyDown}
                   role="menu"
                 >
-                  <div className="flex flex-col items-center gap-2 px-3 py-3 text-center">
+                  <div className="flex items-center gap-3 rounded-control bg-canvas/70 px-3 py-2.5">
                     <ProfileAvatar
                       ariaLabel={t("accessibility.accountAvatar")}
                       displayName={displayName}
                       imageUrl={profile?.avatar_url}
-                      size="lg"
+                      size="md"
                     />
-                    <p className="max-w-full break-words text-label font-semibold text-ink">
-                      {displayName ??
-                        t("navigation.accountMenu.defaultAccountLabel")}
-                    </p>
-                    {resolvedRoleLabel ? (
-                      <p className="text-sm font-semibold text-primary">
-                        {resolvedRoleLabel}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-bold text-ink">
+                        {displayName ??
+                          t("navigation.accountMenu.defaultAccountLabel")}
                       </p>
-                    ) : null}
-                    {email ? (
-                      <p className="max-w-full break-all text-sm text-muted">
-                        {email}
-                      </p>
-                    ) : null}
+                      {email ? (
+                        <p className="truncate text-xs text-muted">{email}</p>
+                      ) : null}
+                      {resolvedRoleLabel ? (
+                        <p className="mt-0.5 text-xs font-semibold text-primary">
+                          {resolvedRoleLabel}
+                        </p>
+                      ) : null}
+                    </div>
                   </div>
 
-                  <div className="my-2 border-t border-border" />
+                  <div className="my-2 border-t border-border/80" />
+                  <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t("navigation.accountMenu.profileSection")}
+                  </p>
                   <Link
                     aria-current={
                       routeIsActive(pathname, "/profile") ? "page" : undefined
                     }
                     className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      "flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary",
                       routeIsActive(pathname, "/profile")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
+                        ? "bg-sky/80 text-primary-hover"
+                        : "hover:bg-canvas",
                     )}
                     href="/profile"
                     onClick={() =>
@@ -785,7 +1060,10 @@ export function AppShell({ children }: AppShellProps) {
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
-                    <UserRound aria-hidden="true" className="size-5" />
+                    <UserRound
+                      aria-hidden="true"
+                      className="size-4 text-primary"
+                    />
                     {t("navigation.parent.parentProfile")}
                   </Link>
                   <Link
@@ -793,10 +1071,10 @@ export function AppShell({ children }: AppShellProps) {
                       routeIsActive(pathname, "/children") ? "page" : undefined
                     }
                     className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      "flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary",
                       routeIsActive(pathname, "/children")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
+                        ? "bg-sky/80 text-primary-hover"
+                        : "hover:bg-canvas",
                     )}
                     href="/children"
                     onClick={() =>
@@ -808,20 +1086,26 @@ export function AppShell({ children }: AppShellProps) {
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
-                    <UsersRound aria-hidden="true" className="size-5" />
+                    <UsersRound
+                      aria-hidden="true"
+                      className="size-4 text-primary"
+                    />
                     {t("navigation.parent.children")}
                   </Link>
 
-                  <div className="my-2 border-t border-border" />
+                  <div className="my-2 border-t border-border/80" />
+                  <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t("navigation.accountMenu.accountSection")}
+                  </p>
                   <Link
                     aria-current={
                       routeIsActive(pathname, "/settings") ? "page" : undefined
                     }
                     className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      "flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary",
                       routeIsActive(pathname, "/settings")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
+                        ? "bg-sky/80 text-primary-hover"
+                        : "hover:bg-canvas",
                     )}
                     href="/settings"
                     onClick={() =>
@@ -833,9 +1117,17 @@ export function AppShell({ children }: AppShellProps) {
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
-                    <Settings aria-hidden="true" className="size-5" />
+                    <Settings
+                      aria-hidden="true"
+                      className="size-4 text-primary"
+                    />
                     {t("navigation.parent.settings")}
                   </Link>
+
+                  <div className="my-2 border-t border-border/80" />
+                  <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t("navigation.accountMenu.helpSection")}
+                  </p>
                   <Link
                     aria-current={
                       routeIsActive(pathname, "/help-support")
@@ -843,10 +1135,10 @@ export function AppShell({ children }: AppShellProps) {
                         : undefined
                     }
                     className={cn(
-                      "flex min-h-12 items-center gap-3 rounded-control px-3 text-label font-semibold text-ink outline-none focus-visible:ring-3 focus-visible:ring-primary",
+                      "flex min-h-11 items-center gap-3 rounded-control px-3 text-sm font-semibold text-ink outline-none transition-colors focus-visible:ring-2 focus-visible:ring-primary",
                       routeIsActive(pathname, "/help-support")
-                        ? "bg-sky text-primary-hover"
-                        : "hover:bg-sky",
+                        ? "bg-sky/80 text-primary-hover"
+                        : "hover:bg-canvas",
                     )}
                     href="/help-support"
                     onClick={() =>
@@ -858,21 +1150,27 @@ export function AppShell({ children }: AppShellProps) {
                     role="menuitem"
                     tabIndex={isAccountMenuVisible ? 0 : -1}
                   >
-                    <CircleHelp aria-hidden="true" className="size-5" />
+                    <CircleHelp
+                      aria-hidden="true"
+                      className="size-4 text-primary"
+                    />
                     {t("navigation.parent.helpSupport")}
                   </Link>
 
-                  <div className="my-2 border-t border-border" />
+                  <div className="my-2 border-t border-border/80" />
                   <div className="px-1 py-1">
-                    <p className="px-2 pb-1 text-xs font-semibold text-muted">
+                    <p className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
                       {t("common.languageSelector.label")}
                     </p>
                     <LanguageSelector variant="menu" />
                   </div>
 
-                  <div className="my-2 border-t border-border" />
+                  <div className="my-2 border-t border-border/80" />
+                  <p className="px-3 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted">
+                    {t("navigation.accountMenu.sessionSection")}
+                  </p>
                   <button
-                    className="flex min-h-12 w-full items-center gap-3 rounded-control px-3 text-start text-label font-semibold text-ink outline-none hover:bg-sky focus-visible:ring-3 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-55"
+                    className="flex min-h-11 w-full items-center gap-3 rounded-control px-3 text-start text-sm font-semibold text-danger outline-none transition-colors hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger disabled:cursor-not-allowed disabled:opacity-55"
                     disabled={isSigningOut}
                     onClick={() => void handleSignOut()}
                     role="menuitem"
@@ -881,7 +1179,7 @@ export function AppShell({ children }: AppShellProps) {
                   >
                     <LogOut
                       aria-hidden="true"
-                      className="size-5 viread-rtl-flip"
+                      className="size-4 viread-rtl-flip"
                     />
                     {isSigningOut
                       ? t("auth.session.signingOut")
@@ -893,7 +1191,7 @@ export function AppShell({ children }: AppShellProps) {
           </nav>
           {hasSignOutError ? (
             <p
-              className="mx-auto mt-3 w-full max-w-[1376px] pb-2 text-label font-semibold text-danger"
+              className="mx-auto mt-2 w-full max-w-[1184px] px-4 pb-2 text-sm font-semibold text-danger sm:px-8"
               role="alert"
             >
               {t("auth.session.signOutError")}

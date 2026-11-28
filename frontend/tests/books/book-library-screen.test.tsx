@@ -103,6 +103,7 @@ describe("BookLibraryScreen with real API adapters", () => {
       ).toBeInTheDocument();
     }
     const all = within(filters).getByRole("button", { name: "Tất cả" });
+    expect(all).toHaveClass("rounded-full", "border", "border-border");
     await user.click(all);
     expect(all).toHaveAttribute("aria-pressed", "true");
     await waitFor(() => {

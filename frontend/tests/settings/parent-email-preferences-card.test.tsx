@@ -148,6 +148,12 @@ describe("ParentEmailPreferencesCard", () => {
     );
     expect(inactivitySelect).toHaveValue("10");
 
+    // Verify spacious 2-column grid instead of cramped 4-column select row
+    const selectGrid = inactivitySelect.closest("div.grid");
+    expect(selectGrid).toHaveClass("grid-cols-1", "sm:grid-cols-2");
+    expect(selectGrid).not.toHaveClass("lg:grid-cols-4");
+    expect(inactivitySelect.closest("#email-notifications")).not.toBeNull();
+
     const quietSelect = screen.getByLabelText(/Khung giờ yên tĩnh/i);
     await user.selectOptions(quietSelect, "22-6");
 

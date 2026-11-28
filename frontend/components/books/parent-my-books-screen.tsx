@@ -357,7 +357,7 @@ function ParentMyBooksContent({
   }
 
   return (
-    <section className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 py-6 sm:px-8 sm:py-8">
+    <section className="mx-auto flex w-full max-w-[1184px] flex-col gap-6">
       <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-bold uppercase tracking-wider text-primary">

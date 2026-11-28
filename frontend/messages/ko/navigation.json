@@ -19,8 +19,11 @@
     "booksShort": "책",
     "scannerShort": "스캔",
     "moreButton": "더 보기",
+    "learningGroup": "학습",
+    "learningGroupAria": "학습 및 읽기 추적 메뉴",
     "mobileAriaLabel": "모바일 빠른 내비게이션",
     "moreDescriptions": {
+      "reports": "자녀의 읽기 정확도, 속도 및 진도 추적",
       "myBooks": "가족용 도서 업로드 및 관리",
       "readingManagement": "자녀의 목표, 읽기 일정 및 저장된 책",
       "sessions": "완료된 읽기 세션 검토",

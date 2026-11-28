@@ -249,7 +249,7 @@ export function ParentEmailPreferencesCard({
           <Bell aria-hidden="true" className="size-5" />
         </div>
         <div>
-          <h2 className="text-2xl font-extrabold text-ink">
+          <h2 className="text-xl font-extrabold text-ink sm:text-2xl">
             Thông báo Email cho phụ huynh
           </h2>
           <p className="text-sm text-muted">
@@ -342,13 +342,13 @@ export function ParentEmailPreferencesCard({
             />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <label className="flex flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label className="flex min-w-0 flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3 focus-within:border-primary/60">
               <span className="text-label font-semibold text-muted">
                 Ngày gửi báo cáo tuần
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="w-full min-w-0 bg-transparent text-body font-semibold text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={isSaving || !draft.weekly_digest_enabled}
                 onChange={(event) =>
                   setDraft({
@@ -366,12 +366,12 @@ export function ParentEmailPreferencesCard({
               </select>
             </label>
 
-            <label className="flex flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3">
+            <label className="flex min-w-0 flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3 focus-within:border-primary/60">
               <span className="text-label font-semibold text-muted">
                 Nhắc khi bé nghỉ đọc sau
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="w-full min-w-0 bg-transparent text-body font-semibold text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={isSaving || !draft.inactivity_alert_enabled}
                 onChange={(event) =>
                   setDraft({
@@ -392,12 +392,12 @@ export function ParentEmailPreferencesCard({
               </select>
             </label>
 
-            <label className="flex flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3">
+            <label className="flex min-w-0 flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3 focus-within:border-primary/60">
               <span className="text-label font-semibold text-muted">
                 Trần chống spam mỗi tuần
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="w-full min-w-0 bg-transparent text-body font-semibold text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={isSaving}
                 onChange={(event) =>
                   setDraft({
@@ -418,12 +418,12 @@ export function ParentEmailPreferencesCard({
               </select>
             </label>
 
-            <label className="flex flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3">
+            <label className="flex min-w-0 flex-col gap-1.5 rounded-control border border-border bg-white px-4 py-3 focus-within:border-primary/60">
               <span className="text-label font-semibold text-muted">
                 Khung giờ yên tĩnh
               </span>
               <select
-                className="bg-transparent text-body font-semibold text-ink outline-none"
+                className="w-full min-w-0 bg-transparent text-body font-semibold text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                 disabled={isSaving}
                 onChange={(event) => {
                   const [startStr, endStr] = event.target.value.split("-");

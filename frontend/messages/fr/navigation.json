@@ -19,8 +19,11 @@
     "booksShort": "Livres",
     "scannerShort": "Scanner",
     "moreButton": "Plus",
+    "learningGroup": "Apprentissage",
+    "learningGroupAria": "Menu d'apprentissage et de suivi de lecture",
     "mobileAriaLabel": "Navigation mobile rapide",
     "moreDescriptions": {
+      "reports": "Suivez la précision, la vitesse et les progrès de lecture",
       "myBooks": "Téléchargez et gérez les livres de votre famille",
       "readingManagement": "Objectifs, planning de lecture et livres enregistrés pour votre enfant",
       "sessions": "Revoir les sessions de lecture terminées",

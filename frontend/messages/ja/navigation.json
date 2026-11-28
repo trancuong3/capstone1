@@ -19,8 +19,11 @@
     "booksShort": "本",
     "scannerShort": "スキャン",
     "moreButton": "その他",
+    "learningGroup": "学習",
+    "learningGroupAria": "学習と読書記録のメニュー",
     "mobileAriaLabel": "モバイル用クイックナビゲーション",
     "moreDescriptions": {
+      "reports": "お子様の読書の正確さ、速度、進捗を確認",
       "myBooks": "ご家庭の本のアップロードと管理",
       "readingManagement": "お子様の目標、読書スケジュール、保存した本",
       "sessions": "完了した読書セッションの確認",

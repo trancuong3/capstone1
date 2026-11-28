@@ -180,4 +180,58 @@ describe("AccountSettingsScreen", () => {
       "Mật khẩu đã được cập nhật",
     );
   });
+
+  it("consolidates password action and email verification inside the account info card with no orphan floating button", async () => {
+    const authService = createAuthServiceFixture();
+    authService.getCurrentUser.mockResolvedValue({
+      ...authSessionFixture.user,
+      providers: ["email"],
+    });
+
+    const { container } = render(
+      withAuthFixture(<AccountSettingsScreen />, authService, {
+        session: authSessionFixture,
+      }),
+    );
+
+    const accountHeading = await screen.findByRole("heading", {
+      level: 2,
+      name: "Thông tin tài khoản",
+    });
+    const accountCard = accountHeading.closest(".rounded-card");
+    expect(accountCard).not.toBeNull();
+
+    // No orphan floating button directly under the root settings section
+    const rootSection = container.querySelector("section.settings-sheet");
+    expect(rootSection).not.toBeNull();
+    const directChildButtons = Array.from(rootSection?.children ?? []).filter(
+      (child) => child.tagName === "BUTTON",
+    );
+    expect(directChildButtons).toHaveLength(0);
+
+    // Change password button and verification link live cleanly inside the account info card
+    expect(
+      within(accountCard as HTMLElement).getByRole("button", {
+        name: "Đổi mật khẩu",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(accountCard as HTMLElement).getByRole("link", {
+        name: /Quản lý hồ sơ/,
+      }),
+    ).toHaveAttribute("href", "/profile");
+    expect(
+      within(accountCard as HTMLElement).getByRole("link", {
+        name: "Mở hồ sơ phụ huynh",
+      }),
+    ).toHaveAttribute("href", "/profile");
+
+    // No duplicate standalone Email & Verification h2 card
+    expect(
+      screen.queryByRole("heading", {
+        level: 2,
+        name: "Email và xác minh",
+      }),
+    ).not.toBeInTheDocument();
+  });
 });

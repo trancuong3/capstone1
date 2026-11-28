@@ -19,8 +19,11 @@
     "booksShort": "الكتب",
     "scannerShort": "مسح ضوئي",
     "moreButton": "المزيد",
+    "learningGroup": "التعلّم",
+    "learningGroupAria": "قائمة التعلّم ومتابعة القراءة",
     "mobileAriaLabel": "التنقل السريع عبر الهواتف المحمولة",
     "moreDescriptions": {
+      "reports": "متابعة دقة القراءة وسرعتها وتقدّم طفلك",
       "myBooks": "تحميل وإدارة كتب عائلتك",
       "readingManagement": "الأهداف، جدول القراءة، والكتب المحفوظة لطفلك",
       "sessions": "مراجعة جلسات القراءة المكتملة",

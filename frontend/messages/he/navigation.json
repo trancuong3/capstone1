@@ -19,8 +19,11 @@
     "booksShort": "ספרים",
     "scannerShort": "סריקה",
     "moreButton": "עוד",
+    "learningGroup": "למידה",
+    "learningGroupAria": "תפריט למידה ומעקב קריאה",
     "mobileAriaLabel": "ניווט נייד מהיר",
     "moreDescriptions": {
+      "reports": "מעקב אחר דיוק הקריאה, הקצב וההתקדמות של הילד",
       "myBooks": "העלאה וניהול של ספרי המשפחה",
       "readingManagement": "יעדים, לו\"ז קריאה וספרים שמורים עבור הילד",
       "sessions": "סקירת סכומי קריאה שהושלמו",

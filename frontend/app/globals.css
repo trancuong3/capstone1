@@ -284,22 +284,6 @@
   background: #dceffd;
   color: #225c84;
 }
-.parent-nav-links a svg {
-  color: var(--ra-color-primary);
-}
-.parent-nav-links a[href="/reports"] svg,
-.parent-nav-links a[href="/sessions"] svg {
-  color: #25668a;
-}
-.parent-nav-links a[href="/reading-management"] svg {
-  color: #94502a;
-}
-.parent-nav-links a[href="/entertainment"] svg {
-  color: #734578;
-}
-.parent-nav-links a[href="/reports/difficult-words"] svg {
-  color: #9b541e;
-}
 .activity-library > div > article:first-child > div:first-child {
   background: #e0f4f8;
 }
@@ -887,23 +871,6 @@ button:disabled {
   font-weight: 800;
   letter-spacing: -0.015em;
   line-height: 1.15;
-}
-.parent-topbar {
-  padding-block: 8px;
-}
-.parent-nav-links a[aria-current="page"] {
-  color: var(--ra-color-primary-hover);
-}
-@media (min-width: 1280px) {
-  .parent-nav-links a {
-    background: transparent;
-    border-radius: 0;
-    font-weight: 600;
-  }
-  .parent-nav-links a[aria-current="page"] {
-    text-decoration: none;
-    box-shadow: inset 0 -2px var(--ra-color-primary);
-  }
 }
 .site-colophon {
   background: #eef6ee;

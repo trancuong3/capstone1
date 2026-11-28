@@ -19,8 +19,11 @@
     "booksShort": "Books",
     "scannerShort": "Scan",
     "moreButton": "More",
+    "learningGroup": "Learning",
+    "learningGroupAria": "Learning and reading tracking menu",
     "mobileAriaLabel": "Quick mobile navigation",
     "moreDescriptions": {
+      "reports": "Track reading accuracy, speed, and progress",
       "myBooks": "Upload and manage your family's books",
       "readingManagement": "Goals, reading schedule, and saved books for your child",
       "sessions": "Review completed reading sessions",

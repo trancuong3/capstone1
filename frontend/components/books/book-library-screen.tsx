@@ -304,7 +304,7 @@ export function BookLibraryScreen() {
 
         <fieldset className="min-w-0">
           <legend className="sr-only">{t("catalog.gradeFilterLegend")}</legend>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2.5">
             {[null, ...CHILD_GRADES].map((grade) => {
               const isSelected = selectedGrade === grade;
 
@@ -312,10 +312,10 @@ export function BookLibraryScreen() {
                 <button
                   aria-pressed={isSelected}
                   className={cn(
-                    "flex min-h-12 min-w-0 items-center justify-center gap-2 rounded-control px-4 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                    "inline-flex min-h-12 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-full border px-4 text-label font-bold transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary sm:px-5",
                     isSelected
-                      ? "bg-sky text-primary-hover"
-                      : "bg-white text-ink hover:bg-sky",
+                      ? "border-primary/40 bg-sky text-primary-hover"
+                      : "border-border bg-white text-ink hover:border-primary/40 hover:bg-sky/70 hover:text-primary-hover",
                   )}
                   key={grade ?? "all"}
                   onClick={() => {

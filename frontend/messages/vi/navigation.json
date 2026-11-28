@@ -19,8 +19,11 @@
     "booksShort": "Sách",
     "scannerShort": "Quét",
     "moreButton": "Thêm",
+    "learningGroup": "Học tập",
+    "learningGroupAria": "Menu học tập và theo dõi đọc",
     "mobileAriaLabel": "Điều hướng nhanh trên di động",
     "moreDescriptions": {
+      "reports": "Theo dõi độ chính xác, tốc độ và tiến bộ của bé",
       "myBooks": "Tải lên và quản lý sách riêng của gia đình",
       "readingManagement": "Mục tiêu, lịch đọc và sách đã lưu cho bé",
       "sessions": "Xem lại các buổi đọc đã hoàn thành",
