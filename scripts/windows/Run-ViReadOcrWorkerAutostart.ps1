@@ -766,6 +766,8 @@ try {
             $consecutiveDegradedChecks = 0
             $consecutiveUnreachableChecks = 0
             $consecutiveStartingChecks = 0
+            $lastStartingCpuSeconds = -1.0
+            $maxStartingAbsoluteSeconds = 1500.0
             $nextHealthProbeAt = $launchStart.AddSeconds($StartupGraceSeconds)
 
             while (-not $proc.HasExited) {
@@ -818,14 +820,41 @@ try {
                         }
                     } elseif ($pReachable -and $pWorkerStatus -eq "STARTING") {
                         $consecutiveUnreachableChecks = 0
-                        $consecutiveStartingChecks++
-                        if ($consecutiveStartingChecks -ge $MaxStartingChecks) {
-                            Write-SupervisorLog "Health watchdog triggered (reason=starting_timeout) after $consecutiveStartingChecks/$MaxStartingChecks consecutive STARTING checks past ${StartupGraceSeconds}s grace (${HealthProbeIntervalSeconds}s interval) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating deadlocked worker process tree for restart." "ERROR"
-                            Stop-ProcessTreeSafe -TargetPid $proc.Id
-                            [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
-                            break
+                        $treeCpuSeconds = 0.0
+                        try {
+                            $treePids = New-Object System.Collections.Generic.HashSet[int]
+                            [void]$treePids.Add([int]$proc.Id)
+                            if ($null -ne $state["listenPid"] -and [int]$state["listenPid"] -gt 0) {
+                                [void]$treePids.Add([int]$state["listenPid"])
+                            }
+                            $childProcs = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $($proc.Id)" -ErrorAction SilentlyContinue)
+                            foreach ($cp in $childProcs) { [void]$treePids.Add([int]$cp.ProcessId) }
+                            foreach ($tp in $treePids) {
+                                $pObj = Get-Process -Id $tp -ErrorAction SilentlyContinue
+                                if ($null -ne $pObj -and $null -ne $pObj.CPU) {
+                                    $treeCpuSeconds += [double]$pObj.CPU
+                                }
+                            }
+                        } catch {
+                            $treeCpuSeconds = -1.0
+                        }
+                        $cpuAdvanced = ($lastStartingCpuSeconds -ge 0.0 -and $treeCpuSeconds -ge 0.0 -and ($treeCpuSeconds - $lastStartingCpuSeconds) -ge 0.25)
+                        if ($treeCpuSeconds -ge 0.0) {
+                            $lastStartingCpuSeconds = $treeCpuSeconds
+                        }
+                        if ($cpuAdvanced -and $elapsedSec -lt $maxStartingAbsoluteSeconds) {
+                            $consecutiveStartingChecks = 0
+                            Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is actively loading models under load (cpu=$([Math]::Round($treeCpuSeconds, 1))s, elapsed=$([Math]::Round($elapsedSec, 0))s); skipping restart." "INFO"
                         } else {
-                            Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is actively warming up ($consecutiveStartingChecks/$MaxStartingChecks, status='$pStatus', worker_status='$pWorkerStatus'); skipping degraded increment (degraded=$consecutiveDegradedChecks/$UnhealthyThreshold, unreachable=0/$UnreachableThreshold)." "INFO"
+                            $consecutiveStartingChecks++
+                            if ($consecutiveStartingChecks -ge $MaxStartingChecks -or $elapsedSec -ge $maxStartingAbsoluteSeconds) {
+                                Write-SupervisorLog "Health watchdog triggered (reason=starting_timeout) after $consecutiveStartingChecks/$MaxStartingChecks stalled STARTING checks (cpu=$([Math]::Round($treeCpuSeconds, 1))s, elapsed=$([Math]::Round($elapsedSec, 0))s) for PID=$($proc.Id): status='$pStatus', worker_status='$pWorkerStatus', last_error='$pLastError'. Terminating deadlocked worker process tree for restart." "ERROR"
+                                Stop-ProcessTreeSafe -TargetPid $proc.Id
+                                [void](Clear-UnhealthyOcrPortListener -Port $BindPort)
+                                break
+                            } else {
+                                Write-SupervisorLog "Health watchdog probe for PID=$($proc.Id): worker is warming up ($consecutiveStartingChecks/$MaxStartingChecks stalled checks, cpu=$([Math]::Round($treeCpuSeconds, 1))s, status='$pStatus', worker_status='$pWorkerStatus'); skipping degraded increment (degraded=$consecutiveDegradedChecks/$UnhealthyThreshold, unreachable=0/$UnreachableThreshold)." "INFO"
+                            }
                         }
                     } elseif ($pReachable) {
                         $consecutiveUnreachableChecks = 0

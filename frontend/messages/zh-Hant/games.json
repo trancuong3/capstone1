@@ -111,6 +111,13 @@
     "readFullSentence": "朗讀完整句子",
     "practicedDifficultWordsRound": "剛剛練習的詞語：",
     "practicedDifficultWordsSummary": "本輪練習的重點詞：",
+    "quickStartHeading": "已為孩子準備好",
+    "startNowButton": "立即開始",
+    "autoStartingStatus": "正在為孩子快速開啟合適的練習…",
+    "autoAdvanceCountdown": "{seconds}秒後自動進入下一句",
+    "stopAutoAdvance": "停止自動",
+    "autoPlayFlowToggleOn": "自動暢玩",
+    "autoPlayFlowToggleOff": "自動暢玩（已關）",
     "magicQuest": {
       "deckBadge": "✨ 即時產生 · 玩後自動清除",
       "deckTitle": "貓頭鷹的 60 秒魔法單字卷軸",
@@ -290,6 +297,19 @@
       "svgTitle": "{theme} 插畫"
     },
     "mobileLabel": "記憶角",
+    "quickPlayDifficultCta": "立即開始（複習生詞）",
+    "quickPlayDifficultHint": "系統自動為{grade}年級挑選最合適的圖畫與時長。",
+    "focusWordsReviewLabel": "需要複習的詞：",
+    "autoPlayFlowOn": "自動暢玩",
+    "autoPlayFlowOff": "自動暢玩（已關）",
+    "observeAutoCue": "仔細看看畫裡每樣東西的顏色和位置喔！",
+    "autoRecallFallbackNotice": "請點擊語音回答或輸入你記住的細節。",
+    "autoSubmitCountdown": "{seconds}秒後自動提交",
+    "sendNowButton": "立即提交",
+    "switchToTextButton": "打字輸入",
+    "turnOffAutoButton": "關閉自動",
+    "playNewRoundNowButton": "馬上玩新一局",
+    "practicedWordsRevealPrefix": "已複習的詞：",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

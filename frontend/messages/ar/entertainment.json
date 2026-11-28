@@ -27,7 +27,7 @@
     "defaultGreeting": "مرحبًا يا بطل! هل تريد اليوم حكاية بالصور أم تركيب الجمل أم الغناء أم لعبة الذاكرة؟",
     "defaultRecommendationReason": "يرتبط كل نشاط بلطف بالكتب التي يقرأها الطفل لتثبيت الكلمات دون أي ضغط.",
     "focusDifficultWordsLabel": "كلمات يراجعها الطفل بلطف:",
-    "playSuggestedCta": "العب النشاط المقترح الآن",
+    "playSuggestedCta": "العب الآن مع البومة",
     "onboardingRegionAria": "دليل التعرف على منطقة اللعب والتعلّم",
     "onboardingCounter": "دليل سريع ({current}/{total})",
     "onboardingStep1Title": "١. اختر ركن اللعب المفضل",
@@ -58,6 +58,11 @@
     "breakReminderTitle": "استراحة مريحة للعين:",
     "defaultBreakReminder": "نحو ١٠–١٥ دقيقة لكل جلسة مثالية للحفاظ على صحة العينين والتعلّم بسلاسة.",
     "recommendationLoadError": "تعذر تحميل توصيات التعلّم الآن.",
+    "autoPlayFlowOn": "التشغيل التلقائي",
+    "autoPlayFlowOff": "التشغيل التلقائي (متوقف)",
+    "quickPlayCta": "دخول سريع",
+    "quickPlayCardAria": "دخول سريع: {title}",
+    "misreadWordsChipTitle": "كلمات للمراجعة:",
     "magicQuestCta": "✨ مغامرة الكلمات السحرية 60 ثانية (مراجعة الآن)",
     "magicQuestNoBookHint": "لا يوجد كتاب مطابق بعد؟ تنسج بومة ViRead قصة سحرية في 60 ثانية تُحذف تلقائيًا بعد اللعب!",
     "karaokeMagicChantCta": "✨ 80 BPM Magic Rhythm Chant"
@@ -95,7 +100,10 @@
       "coverAlt": "غلاف الألبوم لـ {title}",
       "songInfo": "معلومات الأغنية",
       "gradeRange": "الصف {min}–{max}",
-      "singSongAction": "اغنية {title}"
+      "singSongAction": "اغنية {title}",
+      "reviewDifficultWordsLabel": "كلمات للتدريب:",
+      "singNowAction": "غنِّ الآن",
+      "difficultWordsBoostHint": "تظهر الأغاني التي تحتوي على الكلمات التي يتدرب عليها طفلك أولاً."
     },
     "playerScreen": {
       "backToLibrary": "العودة إلى مكتبة الأغاني",
@@ -253,8 +261,12 @@
         "weakestSegmentTitle": "مقطع يُنصح بالتدرب عليه · السطر {number}",
         "retrySegmentSlow": "تدرّب على هذا المقطع (0.85x)",
         "segmentReportSummary": "تقرير حسب المقاطع ({count} أسطر)",
-        "segmentLineHeader": "السطر {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "السطر {number} ({start}–{end})",
+        "practiceWeakestNow": "تدرّب الآن على أضعف سطر (0.85×)"
+      },
+      "autoplayPreparing": "جارٍ تجهيز الأغنية تلقائيًا…",
+      "autoplayTapToStart": "المس مرة واحدة لبدء الموسيقى",
+      "autoplayTapHint": "يحتاج المتصفح إلى لمسة سريعة لتشغيل الموسيقى والميكروفون."
     },
     "score": {
       "regionAria": "دقة الكلمات",
@@ -585,6 +597,18 @@
       "action": "ماذا يفعل؟",
       "where": "أين وما اللون؟"
     },
+    "practicingWordsBadge": "كلمات قيد المراجعة",
+    "cardDifficultWordsTag": "كلمات للتدريب: {words}",
+    "matchedDifficultWordBanner": "كلمات تمت مراجعتها: {words}",
+    "autoPlayOn": "التشغيل التلقائي",
+    "autoPlayOff": "التشغيل التلقائي (متوقف)",
+    "quickPlayAutopilotBtn": "العب الآن (اختيار تلقائي لصورة المراجعة)",
+    "openingAutopilotPrompt": "انظر إلى هذه الصورة وأخبرني بما تراه!",
+    "autoMicBlockedFallback": "اضغط على التحدث بالميكروفون لتروي قصتك!",
+    "autoSubmitCountdown": "سيتم الإرسال خلال {seconds} ث",
+    "submitNowAction": "أرسل الآن",
+    "pauseAutoAction": "إيقاف التلقائي مؤقتًا",
+    "autoPausedNotice": "تم إيقاف الإرسال التلقائي — اضغط على إرسال عند الانتهاء من قصتك.",
     "emptyBookPagesBridgeCta": "✨ Switch to a Theme Picture carrying your focus words",
     "ephemeralFocusBarTitle": "✨ Owl's Challenge Word Cards (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap a card to hear slow pronunciation (0.9×) — try weaving 1–2 words into your story!",

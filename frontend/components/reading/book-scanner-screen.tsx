@@ -380,15 +380,20 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
 
   useEffect(() => {
     return () => {
-      // Stop local polling cleanly on unmount. Keep queued jobs durably tracked
-      // in GlobalTaskCenter across reloads/navigation whether the worker is
-      // online or offline; users cancel explicitly via the Cancel button.
+      // Stop local polling cleanly on unmount. Keep offline-queued jobs durably
+      // saved across reloads/navigation; only cancel an abandoned live interactive
+      // scan when the OCR worker is online.
       ocrGenerationRef.current += 1;
       ocrAbortRef.current?.abort();
       ocrAbortRef.current = null;
       pollWakeRef.current = null;
+      const jobIdToCancel = activeJobIdRef.current;
+      const wasWorkerOnline = activeJobWorkerOnlineRef.current;
       activeJobIdRef.current = null;
       activeJobWorkerOnlineRef.current = false;
+      if (jobIdToCancel && wasWorkerOnline) {
+        void cancelScanPageOcrJob(jobIdToCancel).catch(() => undefined);
+      }
     };
   }, []);
 

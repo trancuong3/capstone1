@@ -29,10 +29,16 @@ def _build_service(db: AsyncSession) -> MemoryGameService:
 
 @router.get("/themes", response_model=MemoryThemesCatalogRead)
 async def list_memory_game_themes(
-    _parent_id: UUID = Depends(require_parent_id),
+    child_id: UUID | None = Query(default=None),
+    parent_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
-    return _build_service(db).get_themes()
+    resolved_child_id = child_id if isinstance(child_id, UUID) else None
+    resolved_parent_id = parent_id if isinstance(parent_id, UUID) else None
+    return await _build_service(db).get_themes_for_child(
+        parent_id=resolved_parent_id,
+        child_id=resolved_child_id,
+    )
 
 
 @router.post(

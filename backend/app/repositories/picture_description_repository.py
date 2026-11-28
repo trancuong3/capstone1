@@ -19,6 +19,10 @@ from app.models import (
 )
 from app.policies.book_access import is_book_private
 from app.repositories.book_repository import CatalogRepository
+from app.services.child_difficult_word_feed import (
+    ChildDifficultWordFeed,
+    DifficultWordTarget,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +121,19 @@ class PictureDescriptionRepository:
             ParentId=row.ParentId,
             Grade=row.Grade,
             Settings=dict(raw_settings) if isinstance(raw_settings, dict) else {},
+        )
+
+    async def list_difficult_word_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 8,
+    ) -> list[DifficultWordTarget]:
+        return await ChildDifficultWordFeed(self.db).list_targets(
+            child_id,
+            parent_id,
+            limit=limit,
         )
 
     async def _enrich_candidates_with_studio_v2(

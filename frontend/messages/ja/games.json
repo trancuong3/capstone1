@@ -111,6 +111,13 @@
     "readFullSentence": "完成した文をきく",
     "practicedDifficultWordsRound": "いま練習したことば：",
     "practicedDifficultWordsSummary": "今回練習した重点単語：",
+    "quickStartHeading": "準備できました",
+    "startNowButton": "すぐ始める",
+    "autoStartingStatus": "お子さまに合うゲームをすぐ開いています…",
+    "autoAdvanceCountdown": "{seconds}秒後に次の文へ進みます",
+    "stopAutoAdvance": "自動を止める",
+    "autoPlayFlowToggleOn": "おまかせ進行",
+    "autoPlayFlowToggleOff": "おまかせ進行（オフ）",
     "magicQuest": {
       "deckBadge": "✨ 即時生成 · プレイ後自動消去",
       "deckTitle": "フクロウの60秒マジックワード巻物",
@@ -290,6 +297,19 @@
       "svgTitle": "{theme} のイラスト"
     },
     "mobileLabel": "記憶コーナー",
+    "quickPlayDifficultCta": "今すぐ遊ぶ（苦手なことば復習）",
+    "quickPlayDifficultHint": "{grade}年生にぴったりの絵と時間を自動で選びます。",
+    "focusWordsReviewLabel": "復習することば：",
+    "autoPlayFlowOn": "おまかせ進行",
+    "autoPlayFlowOff": "おまかせ進行（オフ）",
+    "observeAutoCue": "絵の中の色や場所をよく見て覚えてね！",
+    "autoRecallFallbackNotice": "声で答えるを押すか、覚えていることを入力してね。",
+    "autoSubmitCountdown": "あと {seconds}秒で送信",
+    "sendNowButton": "今すぐ送信",
+    "switchToTextButton": "文字で入力",
+    "turnOffAutoButton": "自動をオフ",
+    "playNewRoundNowButton": "すぐ次のゲームを遊ぶ",
+    "practicedWordsRevealPrefix": "復習したことば：",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

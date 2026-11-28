@@ -24,7 +24,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 interface KaraokePageProps {
-  searchParams?: Promise<{
+  readonly searchParams?: Promise<{
+    autoplay?: string | string[];
     mode?: string | string[];
     focus?: string | string[];
     autopilot?: string | string[];
@@ -39,5 +40,7 @@ export default async function Page({ searchParams }: KaraokePageProps = {}) {
   const query = searchParams ? await searchParams : undefined;
   const initialMode =
     firstValue(query?.mode) === "magic-chant" ? "magic-chant" : undefined;
-  return <KaraokeLibraryScreen initialMode={initialMode} />;
+  const autoPlay =
+    firstValue(query?.autoplay) === "1" || firstValue(query?.autopilot) === "1";
+  return <KaraokeLibraryScreen autoPlay={autoPlay} initialMode={initialMode} />;
 }

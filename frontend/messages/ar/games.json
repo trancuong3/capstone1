@@ -111,6 +111,13 @@
     "readFullSentence": "استمع للجملة كاملة",
     "practicedDifficultWordsRound": "كلمات تدرّبت عليها الآن:",
     "practicedDifficultWordsSummary": "الكلمات الصعبة المتدرَّب عليها:",
+    "quickStartHeading": "جاهز لطفلك",
+    "startNowButton": "ابدأ الآن",
+    "autoStartingStatus": "جارٍ فتح لعبة مناسبة لطفلك…",
+    "autoAdvanceCountdown": "الجملة التالية خلال {seconds} ث",
+    "stopAutoAdvance": "إيقاف التلقائي",
+    "autoPlayFlowToggleOn": "التشغيل التلقائي",
+    "autoPlayFlowToggleOff": "التشغيل التلقائي (متوقف)",
     "magicQuest": {
       "deckBadge": "✨ فوري · يُحذف تلقائيًا بعد اللعب",
       "deckTitle": "لفافة الكلمات السحرية 60 ثانية من البومة",
@@ -290,6 +297,19 @@
       "svgTitle": "لوحة {theme}"
     },
     "mobileLabel": "ركن الذاكرة",
+    "quickPlayDifficultCta": "العب الآن (مراجعة الكلمات الصعبة)",
+    "quickPlayDifficultHint": "يختار المشهد والمؤقت الأنسب للصف {grade} تلقائيًا.",
+    "focusWordsReviewLabel": "كلمات للمراجعة:",
+    "autoPlayFlowOn": "التشغيل التلقائي",
+    "autoPlayFlowOff": "التشغيل التلقائي (متوقف)",
+    "observeAutoCue": "تأمّل جيدًا ألوان الأشياء وأماكنها في الصورة!",
+    "autoRecallFallbackNotice": "اضغط على التحدث أو اكتب التفاصيل التي تتذكرها.",
+    "autoSubmitCountdown": "سيتم الإرسال خلال {seconds} ث",
+    "sendNowButton": "أرسل الآن",
+    "switchToTextButton": "كتابة نص",
+    "turnOffAutoButton": "إيقاف التلقائي",
+    "playNewRoundNowButton": "العب جولة جديدة الآن",
+    "practicedWordsRevealPrefix": "الكلمات المراجَعة:",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

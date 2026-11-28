@@ -48,6 +48,7 @@ const sampleSchema = z.object({
   theme: z.string(),
   description: z.string(),
   image_url: z.string(),
+  matched_difficult_words: z.array(z.string()).optional(),
 });
 
 const bookPageSchema = z.object({
@@ -56,6 +57,7 @@ const bookPageSchema = z.object({
   page_id: z.uuid(),
   page_number: z.number().int().min(1),
   image_url: z.string(),
+  matched_difficult_words: z.array(z.string()).optional(),
   has_verified_illustration: z.boolean().optional(),
   page_kind: z.string().nullish(),
   ocr_excerpt: z.string().nullish(),
@@ -64,6 +66,9 @@ const bookPageSchema = z.object({
 const catalogSchema = z.object({
   samples: z.array(sampleSchema),
   book_pages: z.array(bookPageSchema),
+  focus_difficult_words: z.array(z.string()).optional(),
+  recommended_sample_key: z.string().nullish(),
+  recommended_book_page_id: z.string().nullish(),
 });
 
 const vocabSchema = z.object({
@@ -96,6 +101,7 @@ const feedbackSchema = z.object({
   scaffolding_step: scaffoldingStepSchema.nullish(),
   next_prompt_question: z.string().nullish(),
   used_target_words: z.array(z.string()).optional(),
+  practiced_difficult_words: z.array(z.string()).optional(),
   provider_tier: providerTierSchema.nullish(),
 });
 
@@ -108,6 +114,7 @@ const attemptSchema = z.object({
   stars: z.number().int().min(0).max(3),
   evaluation_source: z.enum(["AI", "FALLBACK"]).optional().default("AI"),
   provider_tier: providerTierSchema.nullish(),
+  practiced_difficult_words: z.array(z.string()).optional(),
   feedback: feedbackSchema,
   created_at: z.string(),
 });
@@ -128,6 +135,8 @@ const sessionSchema = z.object({
   attempts_count: z.number().int().min(0),
   teaching_mode: teachingModeSchema.optional(),
   target_words: z.array(z.string()).optional(),
+  target_vocabulary: z.array(z.string()).optional(),
+  practiced_difficult_words: z.array(z.string()).optional(),
   provider_tier: providerTierSchema.nullish(),
   guide: guideSchema,
   attempts: z.array(attemptSchema),
@@ -156,11 +165,13 @@ const sessionSummaryListSchema = z.array(sessionSummarySchema);
 const evaluateResponseSchema = z.object({
   session: sessionSchema,
   latest_attempt: attemptSchema,
+  practiced_difficult_words: z.array(z.string()).optional(),
 });
 
 export interface CreatePictureSessionInput {
   readonly child_id: string;
-  readonly source_type: PictureSourceType;
+  readonly source_type?: PictureSourceType;
+  readonly auto_select?: boolean;
   readonly sample_key?: string;
   readonly book_id?: string;
   readonly book_page_id?: string;
@@ -288,7 +299,12 @@ export function createPictureDescriptionService(): PictureDescriptionService {
     createSession(input, signal) {
       const form = new FormData();
       form.append("child_id", input.child_id);
-      form.append("source_type", input.source_type);
+      if (input.source_type) {
+        form.append("source_type", input.source_type);
+      }
+      if (input.auto_select) {
+        form.append("auto_select", "true");
+      }
       if (input.sample_key) {
         form.append("sample_key", input.sample_key);
       }

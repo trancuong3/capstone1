@@ -696,7 +696,8 @@
     "practiceTimes": "{count}회",
     "karaokeWeakSegmentsTitle": "0.85배속으로 천천히 연습하면 좋은 소절",
     "openSongAction": "노래 열기",
-    "homeTipsTitle": "가정에서 함께할 수 있는 팁"
+    "homeTipsTitle": "가정에서 함께할 수 있는 팁",
+    "misreadWordsReinforcedLabel": "게임으로 복습한 읽기 낱말"
   },
   "printCertificate": {
     "brandTagline": "가족 독서 성장 리포트",

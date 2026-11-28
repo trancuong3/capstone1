@@ -111,6 +111,13 @@
     "readFullSentence": "שמע משפט שלם",
     "practicedDifficultWordsRound": "מילים שתורגלו כעת:",
     "practicedDifficultWordsSummary": "מילים קשות שתורגלו:",
+    "quickStartHeading": "מוכן לילד שלך",
+    "startNowButton": "התחל עכשיו",
+    "autoStartingStatus": "פותח משחק מותאם לילד שלך…",
+    "autoAdvanceCountdown": "מעבר למשפט הבא בעוד {seconds} שנ׳",
+    "stopAutoAdvance": "עצור אוטומטי",
+    "autoPlayFlowToggleOn": "הפעלה אוטומטית",
+    "autoPlayFlowToggleOff": "הפעלה אוטומטית (כבוי)",
     "magicQuest": {
       "deckBadge": "✨ מיידי · נמחק בסיום המשחק",
       "deckTitle": "מגילת הקסם ב-60 שניות של הינשוף",
@@ -290,6 +297,19 @@
       "svgTitle": "איור {theme}"
     },
     "mobileLabel": "פינת הזיכרון",
+    "quickPlayDifficultCta": "שחק עכשיו (חזרה על מילים קשות)",
+    "quickPlayDifficultHint": "בוחר אוטומטית את התמונה והזמן המתאימים ביותר לכיתה {grade}.",
+    "focusWordsReviewLabel": "מילים לחזרה:",
+    "autoPlayFlowOn": "הפעלה אוטומטית",
+    "autoPlayFlowOff": "הפעלה אוטומטית (כבוי)",
+    "observeAutoCue": "התבונן היטב בצבעים ובמיקום של הפריטים בתמונה!",
+    "autoRecallFallbackNotice": "הקש על תשובה קולית או הקלד את הפרטים שזכרת.",
+    "autoSubmitCountdown": "נשלח בעוד {seconds} שנ׳",
+    "sendNowButton": "שלח עכשיו",
+    "switchToTextButton": "הקלד טקסט",
+    "turnOffAutoButton": "כבה אוטומטי",
+    "playNewRoundNowButton": "שחק סיבוב חדש עכשיו",
+    "practicedWordsRevealPrefix": "מילים שתורגלו:",
     "ephemeralFocusBarTitle": "✨ Creative Challenge Keywords (Auto-clears after play)",
     "ephemeralFocusBarHint": "Tap to hear the model — try including one of these words in your story continuation!"
   }

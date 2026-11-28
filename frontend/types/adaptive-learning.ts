@@ -45,6 +45,7 @@ export interface CrossGameRecommendationDTO {
   suggested_difficulty: number;
   target_words: string[];
   href: string;
+  quick_play_href?: string | null;
   priority: number;
 }
 
@@ -91,6 +92,7 @@ export interface ParentEntertainmentAnalyticsDTO {
   module_activities: ModuleActivitySummaryDTO[];
   karaoke_weak_segments: KaraokeWeakSegmentSummaryDTO[];
   home_support_tips_vi: string[];
+  reading_misread_words_reinforced?: number;
   generated_at: string;
 }
 

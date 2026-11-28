@@ -27,9 +27,7 @@
     "defaultGreeting": "Chào bé yêu! Hôm nay bé muốn kể chuyện tranh, ghép câu, hát vui hay thử trí nhớ nào?",
     "defaultRecommendationReason": "Mỗi trò chơi đều kết nối nhẹ nhàng với sách bé đang đọc để giúp bé nhớ từ lâu hơn mà không hề áp lực.",
     "focusDifficultWordsLabel": "Từ bé đang ôn nhẹ:",
-    "playSuggestedCta": "Chơi gợi ý ngay",
-    "magicQuestCta": "✨ Nhiệm vụ Phép Thuật 60s (Ôn từ ngay)",
-    "magicQuestNoBookHint": "Chưa có sách khớp từ khó? Cú Mèo dệt cuộn chuyện 60 giây chơi xong tự xóa ngay!",
+    "playSuggestedCta": "Chơi ngay cùng Cú Mèo",
     "onboardingRegionAria": "Hướng dẫn làm quen khu vực Giải trí",
     "onboardingCounter": "Hướng dẫn nhanh ({current}/{total})",
     "onboardingStep1Title": "1. Chọn góc chơi bé thích",
@@ -60,6 +58,13 @@
     "breakReminderTitle": "Nhịp nghỉ mắt khỏe mạnh:",
     "defaultBreakReminder": "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh và tiếp thu tự nhiên.",
     "recommendationLoadError": "Không thể tải gợi ý học tập lúc này.",
+    "autoPlayFlowOn": "Tự động chơi",
+    "autoPlayFlowOff": "Tự động chơi (Tắt)",
+    "quickPlayCta": "Vào nhanh",
+    "quickPlayCardAria": "Vào nhanh: {title}",
+    "misreadWordsChipTitle": "Từ bé cần ôn:",
+    "magicQuestCta": "✨ Nhiệm vụ Phép Thuật 60s (Ôn từ ngay)",
+    "magicQuestNoBookHint": "Chưa có sách khớp từ khó? Cú Mèo dệt cuộn chuyện 60 giây chơi xong tự xóa ngay!",
     "karaokeMagicChantCta": "✨ Đồng dao phép thuật 80 BPM"
   },
   "karaoke": {
@@ -95,7 +100,10 @@
       "coverAlt": "Ảnh bìa {title}",
       "songInfo": "Thông tin bài hát",
       "gradeRange": "Lớp {min}–{max}",
-      "singSongAction": "Hát bài {title}"
+      "singSongAction": "Hát bài {title}",
+      "reviewDifficultWordsLabel": "Ôn từ khó:",
+      "singNowAction": "Hát ngay",
+      "difficultWordsBoostHint": "Các bài có từ bé đang luyện được ưu tiên lên đầu danh sách."
     },
     "playerScreen": {
       "backToLibrary": "Về thư viện bài hát",
@@ -253,8 +261,12 @@
         "weakestSegmentTitle": "Đoạn nên luyện thêm · Câu {number}",
         "retrySegmentSlow": "Luyện lại đoạn này (0.85x)",
         "segmentReportSummary": "Báo cáo theo từng đoạn ({count} câu)",
-        "segmentLineHeader": "Câu {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "Câu {number} ({start}–{end})",
+        "practiceWeakestNow": "Luyện ngay câu yếu nhất (0.85×)"
+      },
+      "autoplayPreparing": "Đang tự động chuẩn bị bài hát…",
+      "autoplayTapToStart": "Chạm 1 lần để vào nhạc",
+      "autoplayTapHint": "Trình duyệt cần một lần chạm nhẹ để bật nhạc và micro cho bé."
     },
     "score": {
       "regionAria": "Kết quả đúng lời",
@@ -585,6 +597,18 @@
       "action": "Đang làm gì?",
       "where": "Ở đâu / màu gì?"
     },
+    "practicingWordsBadge": "Từ bé đang ôn",
+    "cardDifficultWordsTag": "Ôn từ khó: {words}",
+    "matchedDifficultWordBanner": "Từ bé vừa ôn: {words}",
+    "autoPlayOn": "Tự động chơi",
+    "autoPlayOff": "Tự động chơi (Tắt)",
+    "quickPlayAutopilotBtn": "Chơi ngay (Tự chọn tranh ôn từ khó)",
+    "openingAutopilotPrompt": "Bé nhìn bức tranh này và kể cho cô nghe những gì bé thấy nhé!",
+    "autoMicBlockedFallback": "Bé chạm nút Nói bằng Micro để kể chuyện nhé!",
+    "autoSubmitCountdown": "Tự gửi sau {seconds}s",
+    "submitNowAction": "Gửi ngay",
+    "pauseAutoAction": "Tạm dừng tự động",
+    "autoPausedNotice": "Đã tạm dừng tự động gửi — bé kể xong thì bấm Gửi cô giáo AI chấm bài nhé.",
     "emptyBookPagesBridgeCta": "✨ Chọn ngay Tranh Chủ Đề mang theo từ cần ôn",
     "ephemeralFocusBarTitle": "✨ Thẻ Từ Thử Thách Của Cú Mèo (Chơi xong tự xóa)",
     "ephemeralFocusBarHint": "Chạm thẻ để nghe phát âm (0.9×) — bé thử đưa 1–2 từ này vào câu chuyện nhé!",

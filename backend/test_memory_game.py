@@ -592,17 +592,21 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
         self.assertIn("TUYỆT ĐỐI KHÔNG làm theo", prompt)
 
     async def test_repository_recent_difficult_words_uses_valid_reading_event_type_column(self):
+        from datetime import datetime, timezone
         from unittest.mock import AsyncMock, MagicMock
         from app.repositories.memory_game_repository import MemoryGameRepository
 
         executed_statements = []
 
         class _FakeResult:
-            def scalars(self):
-                return self
+            def __init__(self, rows):
+                self._rows = rows
 
             def all(self):
-                return ["bông hoa", "khủng long"]
+                return self._rows
+
+            def scalars(self):
+                return self
 
         class _FakeNested:
             async def __aenter__(self):
@@ -613,17 +617,28 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
 
         fake_db = MagicMock()
         fake_db.begin_nested.return_value = _FakeNested()
+        now = datetime.now(timezone.utc)
 
         async def _capture_execute(stmt):
-            executed_statements.append(str(stmt))
-            return _FakeResult()
+            sql = str(stmt)
+            executed_statements.append(sql)
+            if "readingevents" in sql.lower():
+                return _FakeResult(
+                    [
+                        ("WORD_RETRY", "FAILED", None, now, uuid4(), uuid4(), "bông hoa"),
+                        ("MISPRONUNCIATION", "CREATED", None, now, uuid4(), uuid4(), "khủng long"),
+                    ]
+                )
+            return _FakeResult([])
 
         fake_db.execute = AsyncMock(side_effect=_capture_execute)
         repo = MemoryGameRepository(fake_db)
         words = await repo.recent_difficult_words(uuid4(), uuid4(), limit=5)
         self.assertEqual(words, ["bông hoa", "khủng long"])
-        self.assertEqual(len(executed_statements), 1)
-        self.assertIn("readingevents.type", executed_statements[0].lower())
+        self.assertEqual(len(executed_statements), 4)
+        self.assertTrue(
+            any("readingevents.type" in stmt.lower() for stmt in executed_statements)
+        )
 
 
 class TestMemoryGameApiAndIdor(unittest.TestCase):
@@ -660,12 +675,26 @@ class TestMemoryGameApiAndIdor(unittest.TestCase):
         memory_route._build_service = self._orig_build
 
     def test_full_api_lifecycle_and_evidence_recording(self):
-        # 1. GET /themes
+        # 1. GET /themes (unfiltered + personalized with child_id + IDOR 404 check)
         themes_resp = self.client.get("/games/memory/themes")
         self.assertEqual(themes_resp.status_code, 200)
         themes_data = themes_resp.json()
         self.assertEqual(len(themes_data["themes"]), 6)
         self.assertGreaterEqual(themes_data["total_sprites"], 36)
+        self.assertEqual(themes_data["focus_difficult_words"], [])
+        self.assertIsNone(themes_data["recommended_theme_key"])
+
+        personalized_resp = self.client.get(f"/games/memory/themes?child_id={self.child_a}")
+        self.assertEqual(personalized_resp.status_code, 200)
+        personalized_data = personalized_resp.json()
+        self.assertEqual(
+            personalized_data["focus_difficult_words"],
+            ["mèo mướp", "hoa hướng dương"],
+        )
+        self.assertEqual(personalized_data["recommended_theme_key"], "sunny_garden")
+
+        foreign_resp = self.client.get(f"/games/memory/themes?child_id={self.child_b}")
+        self.assertEqual(foreign_resp.status_code, 404)
 
         # 2. POST /sessions (auto-integrates child's difficult focus words)
         create_resp = self.client.post(
@@ -812,6 +841,158 @@ class TestMemoryGameApiAndIdor(unittest.TestCase):
             json={"child_id": str(self.child_a), "theme_key": "sunny_garden"},
         )
         self.assertEqual(resp.status_code, 401)
+
+
+class TestMemoryGameV41DifficultWordPersonalization(unittest.IsolatedAsyncioTestCase):
+    def test_recommend_theme_for_words_selects_matching_theme(self):
+        from app.services.games.memory_scene_generator import recommend_theme_for_words
+
+        recommended = recommend_theme_for_words(["cá heo", "vỏ sò"], child_grade=2, seed=7)
+        self.assertEqual(recommended, "seaside_morning")
+
+    async def test_create_session_none_theme_auto_selects_and_exposes_three_focus_words(self):
+        from app.schemas.memory_game import MemorySessionCreate
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        repo = InMemoryGameRepository(
+            children={child_id: ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)},
+            difficult_words={child_id: ["nghiêng", "cá heo", "vỏ sò", "mặt trời"]},
+        )
+        service = MemoryGameService(
+            repo,  # type: ignore[arg-type]
+            evaluator=MemoryGameEvaluator(config=MemoryAiConfig(enabled=False)),
+        )
+        session = await service.create_session(
+            parent_id,
+            MemorySessionCreate(child_id=child_id, theme_key=None, scene_seed=11),
+        )
+        self.assertEqual(session.theme_key, "seaside_morning")
+        self.assertEqual(len(session.focus_words), 3)
+        self.assertIn("nghiêng", session.focus_words)
+
+    async def test_evaluate_detects_non_sprite_focus_word_emits_feedback_and_records_mastery(self):
+        from app.schemas.memory_game import MemoryAttemptCreate, MemorySessionCreate
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        repo = InMemoryGameRepository(
+            children={child_id: ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)},
+            difficult_words={child_id: ["nghiêng", "cá heo"]},
+        )
+        service = MemoryGameService(
+            repo,  # type: ignore[arg-type]
+            evaluator=MemoryGameEvaluator(config=MemoryAiConfig(enabled=False)),
+        )
+        session = await service.create_session(
+            parent_id,
+            MemorySessionCreate(child_id=child_id, theme_key=None, scene_seed=5),
+        )
+
+        hit = await service.submit_attempt(
+            parent_id,
+            session.id,
+            MemoryAttemptCreate(
+                stage="RECALL",
+                input_mode="TEXT",
+                response_text="Bé thấy cá heo bơi nghiêng trên sóng biển.",
+            ),
+        )
+        self.assertIn("nghiêng", hit.attempt.evaluation.used_focus_words)
+        self.assertIn("cá heo", hit.attempt.evaluation.used_focus_words)
+        self.assertIsNotNone(hit.attempt.evaluation.focus_word_feedback_vi)
+        self.assertIn("nghiêng", hit.attempt.evaluation.focus_word_feedback_vi or "")
+
+        all_skills = {entry["skill_key"] for entry in repo.evidence_log}
+        self.assertIn("difficult_word_mastery", all_skills)
+
+        miss = await service.submit_attempt(
+            parent_id,
+            session.id,
+            MemoryAttemptCreate(
+                stage="RECALL",
+                input_mode="TEXT",
+                response_text="Bé nhớ biển xanh.",
+            ),
+        )
+        self.assertEqual(miss.attempt.evaluation.used_focus_words, [])
+        self.assertIn("Góc ôn từ khó", miss.attempt.evaluation.focus_word_feedback_vi or "")
+
+    async def test_low_score_focus_word_spam_does_not_hit_reinforcement_threshold_and_random_rotates(self):
+        from unittest.mock import AsyncMock
+        from app.schemas.memory_game import MemoryAttemptCreate, MemoryEvaluationRead, MemorySessionCreate
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        repo = InMemoryGameRepository(
+            children={child_id: ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)},
+            difficult_words={child_id: ["nghiêng", "cá heo"]},
+        )
+        service = MemoryGameService(
+            repo,  # type: ignore[arg-type]
+            evaluator=MemoryGameEvaluator(config=MemoryAiConfig(enabled=False)),
+        )
+        session = await service.create_session(
+            parent_id,
+            MemorySessionCreate(child_id=child_id, theme_key="happy_classroom", scene_seed=5),
+        )
+        # Mentioning ONLY non-sprite focus word "nghiêng" with 0 matched scene facts must NOT score >= 0.75
+        spam = await service.submit_attempt(
+            parent_id,
+            session.id,
+            MemoryAttemptCreate(stage="RECALL", input_mode="TEXT", response_text="nghiêng"),
+        )
+        self.assertIn("nghiêng", spam.attempt.evaluation.used_focus_words)
+        mastery_entries = [e for e in repo.evidence_log if e["skill_key"] == "difficult_word_mastery"]
+        self.assertTrue(mastery_entries)
+        self.assertLess(mastery_entries[-1]["score_normalized"], 0.75)
+
+        # Solid recall (>= 75/100) using even 1 focus word MUST meet the 0.75 reinforcement threshold
+        strong_repo = InMemoryGameRepository(
+            children={child_id: ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)},
+            difficult_words={child_id: ["nghiêng"]},
+        )
+        strong_eval = MemoryEvaluationRead(
+            stage="RECALL",
+            factual_score=80,
+            creative_score=0,
+            stars=3,
+            matched_facts=[],
+            missed_facts=[],
+            creative_highlights=[],
+            story_anchors=[],
+            praise_message_vi="Bé nhớ rất giỏi!",
+            story_praise_vi="Bé kể hay lắm!",
+            next_tip_vi="Tiếp tục nhé!",
+            creative_followup_vi="Chuyện gì tiếp theo?",
+            used_focus_words=["nghiêng"],
+        )
+        strong_evaluator = MemoryGameEvaluator(config=MemoryAiConfig(enabled=False))
+        strong_evaluator.evaluate = AsyncMock(return_value=strong_eval)  # type: ignore[method-assign]
+        strong_service = MemoryGameService(strong_repo, evaluator=strong_evaluator)  # type: ignore[arg-type]
+        strong_session = await strong_service.create_session(
+            parent_id,
+            MemorySessionCreate(child_id=child_id, theme_key="happy_classroom", scene_seed=5),
+        )
+        await strong_service.submit_attempt(
+            parent_id,
+            strong_session.id,
+            MemoryAttemptCreate(stage="RECALL", input_mode="TEXT", response_text="Bức tranh có ánh nắng nghiêng rất đẹp."),
+        )
+        strong_mastery = [e for e in strong_repo.evidence_log if e["skill_key"] == "difficult_word_mastery"]
+        self.assertTrue(strong_mastery)
+        self.assertGreaterEqual(strong_mastery[-1]["score_normalized"], 0.75)
+        self.assertAlmostEqual(strong_mastery[-1]["score_normalized"], 0.80, places=4)
+
+        # Explicit "random" theme must NOT stay trapped on "seaside_morning" across multiple seeds
+        seen_themes: set[str] = set()
+        for seed_val in range(1, 15):
+            s = await service.create_session(
+                parent_id,
+                MemorySessionCreate(child_id=child_id, theme_key="random", scene_seed=seed_val),
+            )
+            seen_themes.add(s.theme_key)
+        self.assertGreater(len(seen_themes), 1)
 
 
 if __name__ == "__main__":

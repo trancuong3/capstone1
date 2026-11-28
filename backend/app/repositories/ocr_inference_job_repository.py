@@ -269,7 +269,8 @@ class OcrInferenceJobRepository:
         )
         ids = list((await self.db.scalars(query)).all())
         positions: dict[UUID, int] = {}
-        for idx, row_id in enumerate(ids, start=1):
+        for idx, row_or_id in enumerate(ids, start=1):
+            row_id = getattr(row_or_id, "Id", row_or_id)
             if row_id in target_set:
                 positions[row_id] = idx
                 if len(positions) == len(target_set):
