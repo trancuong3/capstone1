@@ -1109,12 +1109,10 @@ async def match_book_page_from_camera(
         )
         for w in words_orm
     ]
-    await _release_db(db)
 
     from app.services.vision_page_matcher import project_page_lines_to_camera
 
-    spotlight_proj = await asyncio.to_thread(
-        project_page_lines_to_camera,
+    spotlight_proj = project_page_lines_to_camera(
         match_res.get("homography_cam_to_db"),
         cam_size=match_res.get("cam_resized_size"),
         db_size=match_res.get("db_resized_size"),
@@ -1264,12 +1262,10 @@ async def match_page_global_from_camera(
         )
         for w in words_orm
     ]
-    await _release_db(db)
 
     from app.services.vision_page_matcher import project_page_lines_to_camera
 
-    spotlight_proj = await asyncio.to_thread(
-        project_page_lines_to_camera,
+    spotlight_proj = project_page_lines_to_camera(
         match_res.get("homography_cam_to_db"),
         cam_size=match_res.get("cam_resized_size"),
         db_size=match_res.get("db_resized_size"),
