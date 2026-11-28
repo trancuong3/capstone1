@@ -31,18 +31,25 @@ from app.services.admin_ocr_local import (
     LocalCorrectionError,
     _validate_loopback_url,
 )
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_MULTIMODAL_MODEL,
+    record_cloud_ai_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-DEFAULT_PRIMARY_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_PRIMARY_MODEL = DEFAULT_GEMINI_PRIMARY_MODEL
+DEFAULT_FALLBACK_MODEL = DEFAULT_GEMINI_FALLBACK_MODEL
 DEFAULT_EXTRA_GEMINI_MODELS: tuple[str, ...] = (
-    "gemini-flash-lite-latest",
+    DEFAULT_GEMINI_ALIAS_MODEL,
 )
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = DEFAULT_GROQ_MULTIMODAL_MODEL
 DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_HEDGE_STAGGER_SECONDS = 3.5
 DEFAULT_MAX_OUTPUT_TOKENS = 1280
@@ -1326,6 +1333,25 @@ class GeminiPictureDescriptionAI:
         if self._transport is None:
             _clear_model_cooldown(model)
 
+    def _record_outcome(
+        self,
+        provider: str,
+        model: str,
+        *,
+        ok: bool,
+        error_code: str | None = None,
+        http_status: int | None = None,
+    ) -> None:
+        if self._transport is None:
+            record_cloud_ai_outcome(
+                "picture_description",
+                provider,
+                model,
+                ok=ok,
+                error_code=error_code,
+                http_status=http_status,
+            )
+
     async def _call_single_gemini_model(
         self,
         client: httpx.AsyncClient,
@@ -1363,6 +1389,9 @@ class GeminiPictureDescriptionAI:
                 response = await client.post(endpoint, headers=headers, json=request_body)
             except httpx.TimeoutException as exc:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1387,6 +1416,9 @@ class GeminiPictureDescriptionAI:
                 )
             except httpx.HTTPError as exc:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1412,6 +1444,13 @@ class GeminiPictureDescriptionAI:
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             if response.status_code in {401, 403}:
+                self._record_outcome(
+                    "gemini",
+                    model,
+                    ok=False,
+                    error_code="PROVIDER_AUTHENTICATION",
+                    http_status=response.status_code,
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1448,6 +1487,9 @@ class GeminiPictureDescriptionAI:
                 continue
             if response.status_code == 429:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_QUOTA", http_status=429
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1472,6 +1514,9 @@ class GeminiPictureDescriptionAI:
                 )
             if response.status_code == 503:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_UNAVAILABLE", http_status=503
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1497,6 +1542,19 @@ class GeminiPictureDescriptionAI:
             if response.status_code != 200:
                 if response.status_code >= 500:
                     self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini",
+                    model,
+                    ok=False,
+                    error_code=(
+                        "MODEL_UNAVAILABLE"
+                        if response.status_code == 404
+                        else "PROVIDER_UNAVAILABLE"
+                        if response.status_code >= 500
+                        else "PROVIDER_REJECTED"
+                    ),
+                    http_status=response.status_code,
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1531,6 +1589,7 @@ class GeminiPictureDescriptionAI:
                         safety_reason=_clean_text(parsed.get("safety_reason"), max_len=160)
                     )
                 self._note_model_success(model)
+                self._record_outcome("gemini", model, ok=True, http_status=200)
                 log_diagnostic(
                     logger,
                     logging.INFO,
@@ -1554,6 +1613,9 @@ class GeminiPictureDescriptionAI:
                 )
                 raise
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="INVALID_CONTENT", http_status=200
+                )
                 last_error = PictureAiError(
                     code="AI_INVALID_RESPONSE",
                     status_code=502,
@@ -1806,6 +1868,9 @@ class GeminiPictureDescriptionAI:
                     json=payload,
                 )
         except httpx.TimeoutException as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1824,6 +1889,9 @@ class GeminiPictureDescriptionAI:
                 retryable=True,
             )
         except httpx.HTTPError as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1846,6 +1914,23 @@ class GeminiPictureDescriptionAI:
         if response.status_code != 200:
             code = "AI_RATE_LIMITED" if response.status_code == 429 else "AI_UNAVAILABLE"
             status_code = 429 if response.status_code == 429 else 502
+            self._record_outcome(
+                "groq",
+                self.config.groq_model,
+                ok=False,
+                error_code=(
+                    "PROVIDER_AUTHENTICATION"
+                    if response.status_code in {401, 403}
+                    else "PROVIDER_QUOTA"
+                    if response.status_code == 429
+                    else "MODEL_UNAVAILABLE"
+                    if response.status_code == 404
+                    else "PROVIDER_UNAVAILABLE"
+                    if response.status_code >= 500
+                    else "PROVIDER_REJECTED"
+                ),
+                http_status=response.status_code,
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1877,6 +1962,7 @@ class GeminiPictureDescriptionAI:
                     safety_reason=_clean_text(parsed.get("safety_reason"), max_len=160)
                 )
             model_tag = f"groq:{self.config.groq_model}"[:64]
+            self._record_outcome("groq", self.config.groq_model, ok=True, http_status=200)
             log_diagnostic(
                 logger,
                 logging.INFO,
@@ -1890,6 +1976,9 @@ class GeminiPictureDescriptionAI:
         except PictureSafetyError:
             raise
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="INVALID_CONTENT", http_status=200
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,

@@ -67,7 +67,7 @@ export function createComprehensionService(): ComprehensionService {
         `${sessionPath(sessionId)}/generate`,
         generateSchema,
         undefined,
-        { method: "POST" },
+        { method: "POST", timeoutMs: 45_000, retryOnColdStart: true },
       );
       return result.total;
     },

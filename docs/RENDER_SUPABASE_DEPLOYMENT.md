@@ -51,9 +51,9 @@ Configure these under the Render Web Service's Environment section:
 | OCR_CLOUD_CORRECTION_ENABLED | true for cloud-first Admin OCR; false selects local Ollama only |
 | GEMINI_API_KEY | Server-only Gemini key; store as a Render secret |
 | GROQ_API_KEY | Server-only Groq key; store as a Render secret |
-| GEMINI_OCR_PRIMARY_MODEL | gemini-3.5-flash-lite |
-| GROQ_OCR_MODEL | qwen/qwen3.8-27b |
-| GEMINI_OCR_FALLBACK_MODEL | gemini-3.1-flash-lite |
+| GEMINI_OCR_PRIMARY_MODEL | Optional override (`gemini-3.1-flash-lite`; leave unset to use `cloud_ai_defaults.py`) |
+| GEMINI_OCR_FALLBACK_MODEL | Optional override (`gemini-3.5-flash-lite`; leave unset to use `cloud_ai_defaults.py`) |
+| GROQ_OCR_MODEL | Optional override (`qwen/qwen3.8-27b`; leave unset to use `cloud_ai_defaults.py`) |
 | VIREAD_OCR_MODE | remote_worker (offloads 3-engine OCR off Render 512 MB) |
 | VIREAD_WEB_DISABLE_HEAVY_WORKERS | true (disables heavy in-process loops & caps post-OCR concurrency to 1) |
 | VIREAD_OCR_WORKER_TOKEN | >= 32-char shared secret matching remote OCR worker |

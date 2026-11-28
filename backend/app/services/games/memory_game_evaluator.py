@@ -19,15 +19,29 @@ from app.schemas.memory_game import (
     SceneObjectSpec,
     SceneSpec,
 )
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_TEXT_MODEL,
+    build_gemini_model_chain,
+    build_groq_model_chain,
+    extract_gemini_text,
+    gemini_thinking_config,
+    read_model_env,
+    read_secret_env,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
 from app.services.games.memory_scene_generator import COLOR_BY_VI, fold_vietnamese
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_GEMINI_FALLBACK_MODEL = "gemini-2.5-flash"
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GEMINI_MODEL = DEFAULT_GEMINI_PRIMARY_MODEL
+DEFAULT_GEMINI_FALLBACK_MODEL = DEFAULT_GEMINI_FALLBACK_MODEL
+DEFAULT_GROQ_MODEL = DEFAULT_GROQ_TEXT_MODEL
 
 # Explicit imagination markers so creative elaborations are NEVER treated as factual errors.
 IMAGINATION_MARKERS_FOLDED: tuple[str, ...] = (
@@ -149,40 +163,55 @@ class MemoryAiConfig:
     gemini_fallback_model: str | None = None
     groq_api_key: str | None = field(default=None, repr=False)
     groq_model: str = DEFAULT_GROQ_MODEL
-    timeout_seconds: float = 5.5
+    timeout_seconds: float = 8.0
 
 
 def _secret(name: str) -> str | None:
-    raw = os.getenv(name)
-    if raw is None:
-        return None
-    stripped = raw.strip().strip('"').strip("'").strip()
-    return stripped or None
+    return read_secret_env(name)
 
 
 def _optional_model(name: str, default: str | None) -> str | None:
     raw = os.getenv(name)
     if raw is None:
         return default
-    stripped = raw.strip().strip('"').strip("'").strip()
+    stripped = read_secret_env(name)
     if not stripped or stripped.lower() in {"none", "off", "disabled"}:
         return None
     return stripped
 
 
 def get_memory_ai_config() -> MemoryAiConfig:
-    flag = (_secret("MEMORY_GAME_AI_ENRICHMENT_ENABLED") or "true").lower()
+    flag = (read_secret_env("MEMORY_GAME_AI_ENRICHMENT_ENABLED") or "true").lower()
     enabled = flag not in {"0", "false", "no", "off"}
-    return MemoryAiConfig(
-        enabled=enabled,
-        gemini_api_key=_secret("GEMINI_API_KEY"),
-        gemini_model=_secret("MEMORY_GAME_GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
-        gemini_fallback_model=_optional_model(
+    explicit_fallback = os.getenv("MEMORY_GAME_GEMINI_FALLBACK_MODEL")
+    if explicit_fallback is not None:
+        fallback_model = _optional_model(
             "MEMORY_GAME_GEMINI_FALLBACK_MODEL",
             DEFAULT_GEMINI_FALLBACK_MODEL,
+        )
+    else:
+        fallback_model = read_model_env(
+            "GEMINI_FALLBACK_MODEL",
+            "GEMINI_OCR_FALLBACK_MODEL",
+            default=DEFAULT_GEMINI_FALLBACK_MODEL,
+        )
+    return MemoryAiConfig(
+        enabled=enabled,
+        gemini_api_key=read_secret_env("GEMINI_API_KEY"),
+        gemini_model=read_model_env(
+            "MEMORY_GAME_GEMINI_MODEL",
+            "GEMINI_PRIMARY_MODEL",
+            "GEMINI_OCR_PRIMARY_MODEL",
+            default=DEFAULT_GEMINI_MODEL,
         ),
-        groq_api_key=_secret("GROQ_API_KEY"),
-        groq_model=_secret("MEMORY_GAME_GROQ_MODEL") or DEFAULT_GROQ_MODEL,
+        gemini_fallback_model=fallback_model,
+        groq_api_key=read_secret_env("GROQ_API_KEY"),
+        groq_model=read_model_env(
+            "MEMORY_GAME_GROQ_MODEL",
+            "GROQ_PRIMARY_MODEL",
+            "GROQ_OCR_MODEL",
+            default=DEFAULT_GROQ_MODEL,
+        ),
     )
 
 
@@ -678,11 +707,7 @@ def evaluate_memory_attempt_deterministic(
 
 
 def _strip_json_fences(raw: str) -> str:
-    cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
-    return cleaned.strip()
+    return strip_think_tags(raw)
 
 
 def _parse_enrichment_json(raw: str) -> dict[str, str] | None:
@@ -829,12 +854,19 @@ class MemoryGameEvaluator:
             follow_redirects=False,
             transport=self._transport,
         ) as client:
-            # Tier 1: Gemini Free Tier (primary -> optional fallback, strict sequential, x-goog-api-key header only)
+            # Tier 1: Gemini Free Tier (primary -> fallback -> alias, strict sequential, x-goog-api-key header only)
             if self.config.gemini_api_key:
-                gemini_models: list[str] = []
-                for candidate in (self.config.gemini_model, self.config.gemini_fallback_model):
-                    if candidate and candidate not in gemini_models:
-                        gemini_models.append(candidate)
+                if self.config.gemini_fallback_model is None and self._transport is not None:
+                    gemini_models = [self.config.gemini_model]
+                else:
+                    gemini_models = list(
+                        build_gemini_model_chain(
+                            self.config.gemini_model,
+                            self.config.gemini_fallback_model,
+                            (DEFAULT_GEMINI_ALIAS_MODEL,),
+                            include_defaults=False,
+                        )
+                    )
                 for model_name in gemini_models:
                     enriched = await self._call_gemini(client, prompt, model=model_name)
                     if enriched:
@@ -842,12 +874,28 @@ class MemoryGameEvaluator:
 
             # Tier 2: Groq Free Tier fallback
             if self.config.groq_api_key:
-                enriched = await self._call_groq(client, prompt)
-                if enriched:
-                    return enriched, f"groq:{self.config.groq_model}"
+                groq_models = list(
+                    build_groq_model_chain(self.config.groq_model, multimodal=False)
+                )
+                for groq_model_name in groq_models:
+                    enriched = await self._call_groq(client, prompt, model=groq_model_name)
+                    if enriched:
+                        return enriched, f"groq:{groq_model_name}"
 
         # Tier 3: Deterministic fallback handled by caller
         return None, None
+
+    @staticmethod
+    def _classify_http_error(status_code: int) -> str:
+        if status_code in {401, 403}:
+            return "PROVIDER_AUTHENTICATION"
+        if status_code == 429:
+            return "PROVIDER_QUOTA"
+        if status_code == 404:
+            return "MODEL_UNAVAILABLE"
+        if status_code >= 500:
+            return "PROVIDER_UNAVAILABLE"
+        return "PROVIDER_REJECTED"
 
     async def _call_gemini(
         self,
@@ -858,13 +906,17 @@ class MemoryGameEvaluator:
     ) -> dict[str, str] | None:
         model_name = model or self.config.gemini_model
         url = f"{GEMINI_API_BASE}/{model_name}:generateContent"
+        generation_config: dict[str, Any] = {
+            "temperature": 0.4,
+            "maxOutputTokens": 320,
+            "responseMimeType": "application/json",
+        }
+        thinking_cfg = gemini_thinking_config(model_name)
+        if thinking_cfg is not None:
+            generation_config["thinkingConfig"] = thinking_cfg
         payload: dict[str, Any] = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.4,
-                "maxOutputTokens": 320,
-                "responseMimeType": "application/json",
-            },
+            "generationConfig": generation_config,
         }
         headers = {
             "Content-Type": "application/json",
@@ -872,22 +924,67 @@ class MemoryGameEvaluator:
         }
         try:
             response = await client.post(url, json=payload, headers=headers)
+            if response.status_code == 400 and thinking_cfg is not None:
+                generation_config.pop("thinkingConfig", None)
+                response = await client.post(url, json=payload, headers=headers)
             if response.status_code != 200:
+                if self._transport is None:
+                    record_cloud_ai_outcome(
+                        "memory_game",
+                        "gemini",
+                        model_name,
+                        ok=False,
+                        error_code=self._classify_http_error(response.status_code),
+                        http_status=response.status_code,
+                    )
                 return None
             data = response.json()
-            candidates = data.get("candidates")
-            if not isinstance(candidates, list) or not candidates:
-                return None
-            parts = candidates[0].get("content", {}).get("parts", [])
-            texts = [p.get("text", "") for p in parts if isinstance(p, dict) and not p.get("thought")]
-            return _parse_enrichment_json("\n".join(texts))
+            text = extract_gemini_text(data)
+            parsed = _parse_enrichment_json(text) if isinstance(text, str) else None
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "gemini",
+                    model_name,
+                    ok=parsed is not None,
+                    error_code=None if parsed is not None else "INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
+            return parsed
+        except httpx.TimeoutException:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "gemini",
+                    model_name,
+                    ok=False,
+                    error_code="PROVIDER_TIMEOUT",
+                    http_status=504,
+                )
+            logger.debug("Memory game Gemini enrichment timed out: %s", model_name)
+            return None
         except Exception as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "gemini",
+                    model_name,
+                    ok=False,
+                    error_code="PROVIDER_NETWORK" if isinstance(exc, httpx.HTTPError) else "UNKNOWN",
+                )
             logger.debug("Memory game Gemini enrichment skipped: %s", type(exc).__name__)
             return None
 
-    async def _call_groq(self, client: httpx.AsyncClient, prompt: str) -> dict[str, str] | None:
+    async def _call_groq(
+        self,
+        client: httpx.AsyncClient,
+        prompt: str,
+        *,
+        model: str | None = None,
+    ) -> dict[str, str] | None:
+        model_name = model or self.config.groq_model
         payload: dict[str, Any] = {
-            "model": self.config.groq_model,
+            "model": model_name,
             "temperature": 0.4,
             "max_tokens": 320,
             "response_format": {"type": "json_object"},
@@ -906,13 +1003,61 @@ class MemoryGameEvaluator:
         try:
             response = await client.post(GROQ_CHAT_URL, json=payload, headers=headers)
             if response.status_code != 200:
+                if self._transport is None:
+                    record_cloud_ai_outcome(
+                        "memory_game",
+                        "groq",
+                        model_name,
+                        ok=False,
+                        error_code=self._classify_http_error(response.status_code),
+                        http_status=response.status_code,
+                    )
                 return None
             data = response.json()
             choices = data.get("choices")
             if not isinstance(choices, list) or not choices:
+                if self._transport is None:
+                    record_cloud_ai_outcome(
+                        "memory_game",
+                        "groq",
+                        model_name,
+                        ok=False,
+                        error_code="INVALID_CONTENT",
+                        http_status=response.status_code,
+                    )
                 return None
             content = choices[0].get("message", {}).get("content", "")
-            return _parse_enrichment_json(str(content))
+            parsed = _parse_enrichment_json(str(content))
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "groq",
+                    model_name,
+                    ok=parsed is not None,
+                    error_code=None if parsed is not None else "INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
+            return parsed
+        except httpx.TimeoutException:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "groq",
+                    model_name,
+                    ok=False,
+                    error_code="PROVIDER_TIMEOUT",
+                    http_status=504,
+                )
+            logger.debug("Memory game Groq enrichment timed out: %s", model_name)
+            return None
         except Exception as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "memory_game",
+                    "groq",
+                    model_name,
+                    ok=False,
+                    error_code="PROVIDER_NETWORK" if isinstance(exc, httpx.HTTPError) else "UNKNOWN",
+                )
             logger.debug("Memory game Groq enrichment skipped: %s", type(exc).__name__)
             return None

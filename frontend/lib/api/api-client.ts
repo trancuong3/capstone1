@@ -578,6 +578,7 @@ export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
 
 const COLD_START_RETRY_STATUSES = new Set([502, 504]);
 const COLD_START_RETRY_DELAY_MS = 600;
+const POST_COLD_START_RETRY_DELAY_MS = 1_200;
 
 function delayWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) {
@@ -603,6 +604,7 @@ export interface RequestApiOptions {
   readonly bypassCache?: boolean;
   readonly cacheTtlMs?: number;
   readonly timeoutMs?: number;
+  readonly retryOnColdStart?: boolean;
 }
 
 /**
@@ -660,50 +662,59 @@ export async function requestApi<T>(
         : isFormDataBody
           ? DEFAULT_UPLOAD_TIMEOUT_MS
           : DEFAULT_REQUEST_TIMEOUT_MS;
-    const canColdStartRetry = method === "GET";
+    const canColdStartRetry =
+      method === "GET" || requestOptions.retryOnColdStart === true;
+    const coldStartRetryDelayMs =
+      method === "GET"
+        ? COLD_START_RETRY_DELAY_MS
+        : POST_COLD_START_RETRY_DELAY_MS;
     const maxAttempts = canColdStartRetry ? 2 : 1;
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-      const timeoutController = fetchSignal ? null : new AbortController();
+      const timeoutController = new AbortController();
       let timedOut = false;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+      const forwardAbort = () => {
+        timeoutController.abort(fetchSignal?.reason);
+      };
+
+      if (fetchSignal) {
+        if (fetchSignal.aborted) {
+          forwardAbort();
+        } else {
+          fetchSignal.addEventListener("abort", forwardAbort, { once: true });
+        }
+      }
 
       try {
-        const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          timeoutController.abort(
+            new DOMException("Request timed out", "TimeoutError"),
+          );
+        }, effectiveTimeoutMs);
+
+        response = await fetch(`${getApiBaseUrl()}${path}`, {
           method,
           headers,
           ...(body !== undefined ? { body: body as BodyInit } : {}),
           cache: "no-store",
           credentials: "omit",
           redirect: "error",
-          signal: effectiveSignal,
+          signal: timeoutController.signal,
         });
-
-        if (timeoutController) {
-          timeoutId = setTimeout(() => {
-            timedOut = true;
-            timeoutController.abort();
-          }, effectiveTimeoutMs);
-          response = await fetchPromise;
-        } else {
-          const timeoutPromise = new Promise<never>((_resolve, reject) => {
-            timeoutId = setTimeout(() => {
-              timedOut = true;
-              reject(failure(0, "", true));
-            }, effectiveTimeoutMs);
-          });
-          response = await Promise.race([fetchPromise, timeoutPromise]);
-        }
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
         if (attempt === 0 && canColdStartRetry && !timedOut) {
-          await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+          await delayWithSignal(coldStartRetryDelayMs, fetchSignal);
           continue;
         }
         throw failure(0, "", true);
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
+        if (fetchSignal) {
+          fetchSignal.removeEventListener("abort", forwardAbort);
+        }
       }
 
       if (
@@ -712,7 +723,8 @@ export async function requestApi<T>(
         !fetchSignal?.aborted &&
         (await shouldRetryColdStartResponse(response))
       ) {
-        await delayWithSignal(COLD_START_RETRY_DELAY_MS, fetchSignal);
+        await response.body?.cancel().catch(() => undefined);
+        await delayWithSignal(coldStartRetryDelayMs, fetchSignal);
         continue;
       }
       break;

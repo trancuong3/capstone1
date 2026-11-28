@@ -89,6 +89,7 @@ const assessmentSchema = z.object({
     encouragement: z.string(),
   }),
   ai_cached: z.boolean(),
+  ai_fallback_reason: z.string().nullable().optional(),
 });
 
 export type ChildProgressAssessment = z.infer<typeof assessmentSchema>;
@@ -128,6 +129,8 @@ export function createChildProgressService(): ChildProgressService {
         {
           method: "POST",
           body: { days, refresh: options.refresh ?? false },
+          timeoutMs: 45_000,
+          retryOnColdStart: true,
         },
       ),
   };
