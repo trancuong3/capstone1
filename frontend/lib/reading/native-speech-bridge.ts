@@ -37,13 +37,15 @@ export interface AndroidSpeechCapabilities {
   readonly sttAvailable: boolean;
   readonly onDeviceSttAvailable: boolean;
   readonly platform: string;
+  readonly hasMaleViVoice?: boolean;
+  readonly hasFemaleViVoice?: boolean;
 }
 
 export interface AndroidNativeTtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
+  readonly voiceGender?: "male" | "female";
   readonly voiceId?: string | null;
-  readonly voiceGender?: "female" | "male";
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
   readonly onStart?: (meta?: {
@@ -61,6 +63,9 @@ export interface NativeSpeechIncomingEvent {
   readonly viVoicesCount?: number;
   readonly sttAvailable?: boolean;
   readonly onDeviceSttAvailable?: boolean;
+  readonly hasMaleViVoice?: boolean;
+  readonly hasFemaleViVoice?: boolean;
+  readonly actualVoiceGender?: "male" | "female" | "unknown";
   readonly platform?: string;
   readonly voiceGenderMismatch?: boolean;
   readonly resolvedVoiceName?: string | null;
@@ -357,6 +362,12 @@ export async function getAndroidSpeechCapabilities(options?: {
           typeof event.platform === "string" && event.platform.trim()
             ? event.platform
             : "android-webview",
+        ...(typeof event.hasMaleViVoice === "boolean"
+          ? { hasMaleViVoice: event.hasMaleViVoice }
+          : {}),
+        ...(typeof event.hasFemaleViVoice === "boolean"
+          ? { hasFemaleViVoice: event.hasFemaleViVoice }
+          : {}),
       });
     });
 
@@ -546,11 +557,13 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
   onresult: ((event: SegmentSpeechEvent) => void) | null = null;
   onerror: ((event: SegmentSpeechErrorEvent) => void) | null = null;
   onend: (() => void) | null = null;
+  onready: (() => void) | null = null;
   onrms: ((rmsDb: number) => void) | null = null;
   ononset: ((onsetAt: number) => void) | null = null;
 
   onsetAt: number | null = null;
   rmsDb: number | null = null;
+  ready = false;
 
   private active = false;
   private stopping = false;
@@ -576,6 +589,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
     this.resultsHistory = [];
     this.onsetAt = null;
     this.rmsDb = null;
+    this.ready = false;
     this.currentCycleOnsetAt = null;
 
     const requestId = nextRequestId("stt");
@@ -589,6 +603,8 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
       switch (event.type) {
         case "stt_ready":
           this.currentCycleOnsetAt = null;
+          this.ready = true;
+          this.onready?.();
           break;
         case "stt_onset": {
           const normalized =
@@ -760,6 +776,7 @@ export class AndroidNativeSpeechRecognition implements SegmentSpeechRecognitionL
   private teardownInternal(): void {
     this.active = false;
     this.stopping = false;
+    this.ready = false;
     this.activeRequestId = null;
     this.unsubscribe?.();
     this.unsubscribe = null;

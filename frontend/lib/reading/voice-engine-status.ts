@@ -44,6 +44,9 @@ export interface VoiceEngineHealthSnapshot {
     readonly configured: boolean;
     readonly stt_configured: boolean;
     readonly tts_configured: boolean;
+    readonly stt_cooldown?: boolean;
+    readonly tts_cooldown?: boolean;
+    readonly error_code?: string | null;
     readonly model_id?: string | null;
     readonly voice_id?: string | null;
   };
@@ -349,6 +352,7 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
     const rec = raw as Record<string, unknown>;
     const localRaw = rec.local as Record<string, unknown> | undefined;
     const googleRaw = rec.google as Record<string, unknown> | undefined;
+    const elevenlabsRaw = rec.elevenlabs as Record<string, unknown> | undefined;
     if (!localRaw || !googleRaw) return null;
 
     const snapshot: VoiceEngineHealthSnapshot = {
@@ -391,6 +395,38 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
         stt_cooldown: Boolean(googleRaw.stt_cooldown),
         tts_cooldown: Boolean(googleRaw.tts_cooldown),
       },
+      ...(elevenlabsRaw && typeof elevenlabsRaw === "object"
+        ? {
+            elevenlabs: {
+              configured: Boolean(elevenlabsRaw.configured),
+              stt_configured: Boolean(elevenlabsRaw.stt_configured),
+              tts_configured: Boolean(elevenlabsRaw.tts_configured),
+              ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
+                ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.tts_cooldown === "boolean"
+                ? { tts_cooldown: elevenlabsRaw.tts_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.error_code === "string" ||
+              elevenlabsRaw.error_code === null
+                ? {
+                    error_code:
+                      typeof elevenlabsRaw.error_code === "string"
+                        ? elevenlabsRaw.error_code
+                        : null,
+                  }
+                : {}),
+              model_id:
+                typeof elevenlabsRaw.model_id === "string"
+                  ? elevenlabsRaw.model_id
+                  : null,
+              voice_id:
+                typeof elevenlabsRaw.voice_id === "string"
+                  ? elevenlabsRaw.voice_id
+                  : null,
+            },
+          }
+        : {}),
     };
     setCachedVoiceEngineHealth(snapshot);
     return snapshot;

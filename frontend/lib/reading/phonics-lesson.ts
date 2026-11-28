@@ -89,6 +89,7 @@ export type UnsupportedPhonicsReason =
 
 export interface SupportedPhonicsLessonPlan {
   readonly supported: true;
+  readonly source?: "rules" | "ai";
   readonly rawText: string;
   readonly cleanPhrase: string;
   readonly syllables: readonly string[];
@@ -273,6 +274,11 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "yêm",
   "uôm",
   "ươm",
+  "oam",
+  "oăm",
+  "uâm",
+  "uêm",
+  "uym",
   "an",
   "ăn",
   "ân",
@@ -290,6 +296,7 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "uan",
   "uân",
   "uyên",
+  "uyn",
   "iên",
   "yên",
   "uôn",
@@ -304,6 +311,8 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "ưng",
   "oang",
   "oăng",
+  "oong",
+  "oeng",
   "uang",
   "uâng",
   "iêng",
@@ -321,14 +330,20 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "ăc",
   "âc",
   "ec",
+  "êc",
   "oc",
   "ôc",
   "uc",
   "ưc",
   "oac",
   "oăc",
+  "oec",
+  "ooc",
+  "uâc",
+  "uêc",
   "uôc",
   "iêc",
+  "yêc",
   "ươc",
   "ach",
   "êch",
@@ -346,8 +361,13 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "ôp",
   "ơp",
   "up",
+  "ưp",
   "oap",
+  "oăp",
+  "oep",
   "uâp",
+  "uôp",
+  "uyp",
   "iêp",
   "yêp",
   "ươp",
@@ -367,6 +387,7 @@ const VALID_VIETNAMESE_UNT0NED_RHYMES = new Set([
   "oet",
   "uat",
   "uât",
+  "uêt",
   "uyt",
   "uyêt",
   "iêt",
@@ -445,6 +466,7 @@ function resolveUnderlyingVietnameseRhyme(
     (rhyme === "êng" ||
       rhyme === "êt" ||
       rhyme === "êc" ||
+      rhyme === "êp" ||
       rhyme === "êu" ||
       rhyme === "êm" ||
       rhyme === "ên")
@@ -453,7 +475,13 @@ function resolveUnderlyingVietnameseRhyme(
   }
   if (
     onset === "qu" &&
-    (rhyme === "ynh" || rhyme === "yt" || rhyme === "ych")
+    (rhyme === "ynh" ||
+      rhyme === "yt" ||
+      rhyme === "ych" ||
+      rhyme === "ya" ||
+      rhyme === "yu" ||
+      rhyme === "yên" ||
+      rhyme === "yêt")
   ) {
     return `u${rhyme}`;
   }
@@ -597,24 +625,13 @@ export function buildPhonicsLesson(
     };
   }
 
-  // Reject all-uppercase acronyms >= 2 chars (e.g. "SGK", "UBND", "TV")
-  if (
-    syllableSlices.some(
-      (s) =>
-        s.text.length >= 2 &&
-        s.text === s.text.toUpperCase() &&
-        s.text !== s.text.toLowerCase(),
-    )
-  ) {
-    return {
-      supported: false,
-      rawText: rawNfc,
-      cleanPhrase,
-      reason: "ACRONYM",
-      message: "Chưa có mẫu đánh vần",
-      canPlayWholeWord: true,
-    };
-  }
+  // Reject genuine all-uppercase acronyms >= 2 chars (e.g. "SGK", "UBND", "TV"),
+  // while ALLOWING valid ALL-CAPS Vietnamese words/headings (e.g. "TRƯỜNG", "HỌC",
+  // "TỰ", "TOÁN", "PHAN", "QUÝ") that pass Vietnamese syllable orthography!
+  const isAllUpperSlice = (text: string): boolean =>
+    text.length >= 2 &&
+    text === text.toUpperCase() &&
+    text !== text.toLowerCase();
 
   if (options.rejectCapitalizedProperNoun) {
     const isCapitalized = syllableSlices.every(
@@ -637,12 +654,13 @@ export function buildPhonicsLesson(
 
   // Every syllable in the word/phrase must be valid Vietnamese orthography
   for (const slice of syllableSlices) {
+    const sliceIsAllUpper = isAllUpperSlice(slice.text);
     if (hasForeignLetters(slice.text)) {
       return {
         supported: false,
         rawText: rawNfc,
         cleanPhrase,
-        reason: "FOREIGN_OR_NON_VIETNAMESE",
+        reason: sliceIsAllUpper ? "ACRONYM" : "FOREIGN_OR_NON_VIETNAMESE",
         message: "Chưa có mẫu đánh vần",
         canPlayWholeWord: true,
       };
@@ -653,7 +671,7 @@ export function buildPhonicsLesson(
         supported: false,
         rawText: rawNfc,
         cleanPhrase,
-        reason: "FOREIGN_OR_NON_VIETNAMESE",
+        reason: sliceIsAllUpper ? "ACRONYM" : "FOREIGN_OR_NON_VIETNAMESE",
         message: "Chưa có mẫu đánh vần",
         canPlayWholeWord: true,
       };
@@ -671,7 +689,7 @@ export function buildPhonicsLesson(
         supported: false,
         rawText: rawNfc,
         cleanPhrase,
-        reason: "FOREIGN_OR_NON_VIETNAMESE",
+        reason: sliceIsAllUpper ? "ACRONYM" : "FOREIGN_OR_NON_VIETNAMESE",
         message: "Chưa có mẫu đánh vần",
         canPlayWholeWord: true,
       };
@@ -976,5 +994,128 @@ export function evaluatePostPhonicsAttempt(
   return {
     kind: "CORRECT_AFTER_SPELLING",
     mastery: "CORRECT_AFTER_SPELLING",
+  };
+}
+
+export interface RawAiPhonicsPayload {
+  readonly supported: boolean;
+  readonly source?: "rules" | "ai" | "none";
+  readonly raw_text?: string;
+  readonly clean_phrase?: string;
+  readonly syllables?: readonly string[];
+  readonly focus_syllable_index?: number;
+  readonly focus_syllable?: string;
+  readonly focus_range_start?: number;
+  readonly focus_range_end?: number;
+  readonly onset?: { readonly written: string; readonly spoken: string } | null;
+  readonly rhyme?: {
+    readonly written: string;
+    readonly untoned: string;
+    readonly nucleus: string;
+    readonly coda: string;
+    readonly spoken: string;
+  } | null;
+  readonly tone?: {
+    readonly key: VietnameseTone;
+    readonly label: string;
+    readonly spoken: string | null;
+  } | null;
+  readonly steps?: readonly {
+    readonly id: string;
+    readonly index: number;
+    readonly kind: PhonicsStepKind;
+    readonly display_text: string;
+    readonly spoken_text: string;
+    readonly highlight_part: PhonicsHighlightPart;
+    readonly highlight_start: number;
+    readonly highlight_end: number;
+    readonly pause_after_ms: number;
+  }[];
+}
+
+/**
+ * Convert a validated `/voice/phonics/analyze` AI payload into a `SupportedPhonicsLessonPlan`.
+ * Returns `null` if the payload is unsupported or fails structural safety checks.
+ */
+export function normalizeAiPhonicsResponse(
+  payload: RawAiPhonicsPayload | null | undefined,
+  fallbackRawText: string,
+): SupportedPhonicsLessonPlan | null {
+  if (!payload || !payload.supported || !payload.steps?.length) return null;
+  const rawText = (payload.raw_text || fallbackRawText).normalize("NFC").trim();
+  const cleanPhrase = (payload.clean_phrase || rawText).normalize("NFC").trim();
+  const focusSyllable = (payload.focus_syllable || cleanPhrase)
+    .normalize("NFC")
+    .trim()
+    .toLowerCase();
+  if (!cleanPhrase || !focusSyllable || !payload.rhyme || !payload.tone) {
+    return null;
+  }
+  const steps: PhonicsLessonStep[] = payload.steps
+    .map((step, idx) => ({
+      id: step.id || `${step.kind}_${idx}`,
+      index: idx,
+      kind: step.kind,
+      displayText: step.display_text.normalize("NFC").trim(),
+      spokenText: step.spoken_text
+        .normalize("NFC")
+        .replace(/[→+\-/*=<>{}\[\]|\\~^_`#@$%&]+/g, ", ")
+        .replace(/\s+/g, " ")
+        .trim(),
+      highlightPart: step.highlight_part,
+      highlightRange: {
+        start: Math.max(0, step.highlight_start),
+        end: Math.max(Math.max(0, step.highlight_start), step.highlight_end),
+      },
+      pauseAfterMs: Math.max(150, Math.min(1500, step.pause_after_ms || 420)),
+    }))
+    .filter((s) => s.displayText.length > 0 && s.spokenText.length > 0);
+
+  if (steps.length < 2) return null;
+
+  const syllables =
+    payload.syllables && payload.syllables.length > 0
+      ? payload.syllables.map((s) => s.normalize("NFC").trim()).filter(Boolean)
+      : [focusSyllable];
+  const focusSyllableIndex = Math.max(
+    0,
+    Math.min(syllables.length - 1, payload.focus_syllable_index ?? 0),
+  );
+  const start = Math.max(0, payload.focus_range_start ?? 0);
+  const end = Math.max(
+    start,
+    Math.min(cleanPhrase.length, payload.focus_range_end ?? cleanPhrase.length),
+  );
+
+  return {
+    supported: true,
+    source: payload.source === "rules" ? "rules" : "ai",
+    rawText,
+    cleanPhrase,
+    syllables,
+    focusSyllableIndex,
+    focusSyllable,
+    focusRangeInPhrase: { start, end },
+    onset: payload.onset
+      ? {
+          written: payload.onset.written.normalize("NFC").trim(),
+          spoken: payload.onset.spoken.normalize("NFC").trim(),
+        }
+      : null,
+    rhyme: {
+      written: payload.rhyme.written.normalize("NFC").trim(),
+      untoned: payload.rhyme.untoned.normalize("NFC").trim(),
+      nucleus: payload.rhyme.nucleus.normalize("NFC").trim(),
+      coda: payload.rhyme.coda.normalize("NFC").trim(),
+      spoken: payload.rhyme.spoken.normalize("NFC").trim(),
+    },
+    tone: {
+      code: payload.tone.key,
+      label: payload.tone.label.normalize("NFC").trim(),
+      spoken: payload.tone.spoken
+        ? payload.tone.spoken.normalize("NFC").trim()
+        : null,
+    },
+    steps,
   };
 }

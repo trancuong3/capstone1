@@ -13,11 +13,13 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
   type VoiceProviderMode,
 } from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import {
   getSynthesizedAudioMeta,
   setSynthesizedAudioMeta,
@@ -40,6 +42,10 @@ import {
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
+import {
+  normalizeAiPhonicsResponse,
+  type SupportedPhonicsLessonPlan,
+} from "@/lib/reading/phonics-lesson";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
 const wordTimestampSchema = z.object({
@@ -153,12 +159,85 @@ export interface SpeechToTextOptions {
   readonly timeoutMs?: number;
 }
 
+const phonicsAnalyzeResponseSchema = z.object({
+  supported: z.boolean(),
+  source: z.enum(["rules", "ai", "none"]).optional(),
+  raw_text: z.string().optional(),
+  clean_phrase: z.string().optional(),
+  syllables: z.array(z.string()).optional(),
+  focus_syllable_index: z.number().int().nonnegative().optional(),
+  focus_syllable: z.string().optional(),
+  focus_range_start: z.number().int().nonnegative().optional(),
+  focus_range_end: z.number().int().nonnegative().optional(),
+  onset: z
+    .object({ written: z.string(), spoken: z.string() })
+    .nullable()
+    .optional(),
+  rhyme: z
+    .object({
+      written: z.string(),
+      untoned: z.string(),
+      nucleus: z.string(),
+      coda: z.string(),
+      spoken: z.string(),
+    })
+    .nullable()
+    .optional(),
+  tone: z
+    .object({
+      key: z.enum(["ngang", "sac", "huyen", "hoi", "nga", "nang"]),
+      label: z.string(),
+      spoken: z.string().nullable(),
+    })
+    .nullable()
+    .optional(),
+  steps: z
+    .array(
+      z.object({
+        id: z.string(),
+        index: z.number().int().nonnegative(),
+        kind: z.enum([
+          "rhyme_build",
+          "onset_blend",
+          "tone_blend",
+          "whole_syllable",
+          "context_phrase",
+        ]),
+        display_text: z.string(),
+        spoken_text: z.string(),
+        highlight_part: z.enum([
+          "rhyme",
+          "onset_and_rhyme",
+          "tone_and_syllable",
+          "whole_syllable",
+          "context",
+        ]),
+        highlight_start: z.number().int().nonnegative(),
+        highlight_end: z.number().int().nonnegative(),
+        pause_after_ms: z.number().int().positive(),
+      }),
+    )
+    .optional(),
+});
+
+const aiPhonicsCache = new Map<string, SupportedPhonicsLessonPlan | null>();
+
+export interface PhonicsAnalyzeOptions {
+  readonly contextPhrase?: string | null;
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+}
+
 export interface SpeechService {
   synthesize(text: string, options?: TextToSpeechOptions): Promise<Blob>;
   synthesizePhonics?(
     steps: readonly SynthesizePhonicsStepInput[],
     options?: TextToSpeechOptions,
   ): Promise<SynthesizedPhonicsSpeech>;
+  analyzePhonics?(
+    text: string,
+    options?: PhonicsAnalyzeOptions,
+  ): Promise<SupportedPhonicsLessonPlan | null>;
   transcribe(
     audio: Blob,
     options?: SpeechToTextOptions,
@@ -198,6 +277,7 @@ async function speechRequest(
   path:
     | "/voice/text-to-speech"
     | "/voice/text-to-speech/phonics"
+    | "/voice/phonics/analyze"
     | "/voice/speech-to-text",
   capabilityCode: "STT_UNAVAILABLE" | "TTS_UNAVAILABLE",
   init: RequestInit,
@@ -304,8 +384,16 @@ export function createSpeechService(): SpeechService {
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        speechPrefs.voiceId ??
+        (policy.region !== "north" ? getEffectiveVoiceId() : null);
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ??
+        getEffectiveVoiceId() ??
+        DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -316,7 +404,7 @@ export function createSpeechService(): SpeechService {
             textOrTokens: normalizedText,
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? 1,
+            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -366,10 +454,14 @@ export function createSpeechService(): SpeechService {
               },
               body: JSON.stringify({
                 text: normalizedText,
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(resolvedRequestVoiceId
+                  ? { voice_id: resolvedRequestVoiceId }
+                  : {}),
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
-                  : {}),
+                  : activeLock
+                    ? { speed: activeLock.speed }
+                    : {}),
                 ...(options.wordSample ? { word_sample: true } : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
@@ -412,8 +504,13 @@ export function createSpeechService(): SpeechService {
               : headerProvider;
           const fallbackReason =
             response.headers.get("x-voice-fallback-reason")?.trim() || null;
+          const isElevenLabsProvider = headerProvider
+            .toLowerCase()
+            .startsWith("elevenlabs");
           const voiceGender = resolveVoiceGender(
-            resolvedVoiceId ?? options.voiceId,
+            isElevenLabsProvider
+              ? (resolvedRequestVoiceId ?? options.voiceId ?? resolvedVoiceId)
+              : (resolvedVoiceId ?? resolvedRequestVoiceId ?? options.voiceId),
             response.headers.get("x-voice-gender"),
           );
           const cachedSpeed = parsePositiveSpeedHeader(
@@ -432,7 +529,11 @@ export function createSpeechService(): SpeechService {
             provider,
             fallbackUsed: usedFallbackVoice,
             fallbackReason,
-            voiceId: resolvedVoiceId ?? options.voiceId ?? null,
+            voiceId:
+              resolvedVoiceId ??
+              resolvedRequestVoiceId ??
+              options.voiceId ??
+              null,
             voiceGender,
           });
           const headerScopeRaw = response.headers
@@ -448,6 +549,7 @@ export function createSpeechService(): SpeechService {
           if (
             browserCacheKey &&
             !usedFallbackVoice &&
+            !isElevenLabsProvider &&
             shouldPersistTtsCacheEntry({
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),
@@ -491,8 +593,16 @@ export function createSpeechService(): SpeechService {
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        speechPrefs.voiceId ??
+        (policy.region !== "north" ? getEffectiveVoiceId() : null);
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ??
+        getEffectiveVoiceId() ??
+        DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
@@ -509,7 +619,7 @@ export function createSpeechService(): SpeechService {
             ),
             voiceId: cacheVoiceId,
             modelVersion: cacheModelVersion,
-            speed: options.speed ?? activeLock?.speed ?? 1,
+            speed: options.speed ?? activeLock?.speed ?? speechPrefs.speed,
             format: options.audioFormat ?? "auto",
             scope: cacheScope,
           })
@@ -568,10 +678,14 @@ export function createSpeechService(): SpeechService {
                   spoken_text: s.spokenText.normalize("NFC").trim(),
                   pause_after_ms: s.pauseAfterMs ?? 420,
                 })),
-                ...(options.voiceId ? { voice_id: options.voiceId } : {}),
+                ...(resolvedRequestVoiceId
+                  ? { voice_id: resolvedRequestVoiceId }
+                  : {}),
                 ...(options.speed !== undefined
                   ? { speed: options.speed }
-                  : {}),
+                  : activeLock
+                    ? { speed: activeLock.speed }
+                    : {}),
                 ...(options.audioFormat
                   ? { audio_format: options.audioFormat }
                   : {}),
@@ -610,10 +724,13 @@ export function createSpeechService(): SpeechService {
           }
           if (!audio.size) throw failure("TTS_UNAVAILABLE", 502);
           const phonicsProvider = parsed.data.provider ?? "local";
+          const isElevenLabsPhonics = phonicsProvider
+            .toLowerCase()
+            .startsWith("elevenlabs");
           const phonicsUsedFallback =
-            (Boolean(options.voiceId) &&
-              parsed.data.resolved_voice_id !== options.voiceId) ||
-            (!options.voiceId && phonicsProvider === "google");
+            (Boolean(resolvedRequestVoiceId) &&
+              parsed.data.resolved_voice_id !== resolvedRequestVoiceId) ||
+            (!resolvedRequestVoiceId && phonicsProvider === "google");
           const cachedSpeed =
             parsed.data.cached_speed ??
             parsePositiveSpeedHeader(
@@ -631,7 +748,11 @@ export function createSpeechService(): SpeechService {
             provider: phonicsProvider,
             fallbackUsed: phonicsUsedFallback,
             voiceId: parsed.data.resolved_voice_id,
-            voiceGender: resolveVoiceGender(parsed.data.resolved_voice_id),
+            voiceGender: resolveVoiceGender(
+              isElevenLabsPhonics
+                ? (resolvedRequestVoiceId ?? parsed.data.resolved_voice_id)
+                : parsed.data.resolved_voice_id,
+            ),
           });
           const headerScopeRaw = response.headers
             .get("x-tts-scope")
@@ -646,6 +767,7 @@ export function createSpeechService(): SpeechService {
           if (
             browserCacheKey &&
             !phonicsUsedFallback &&
+            !isElevenLabsPhonics &&
             shouldPersistTtsCacheEntry({
               scope: effectiveScope,
               cacheControl: response.headers.get("cache-control"),
@@ -684,6 +806,55 @@ export function createSpeechService(): SpeechService {
         options.signal,
         options.timeoutMs ?? 30_000,
       );
+    },
+
+    async analyzePhonics(text, options = {}) {
+      const normalized = text.normalize("NFC").trim();
+      if (!normalized) return null;
+      const contextPhrase =
+        options.contextPhrase?.normalize("NFC").trim() || null;
+      const cacheKey = `${normalized.toLowerCase()}::${(contextPhrase ?? "").toLowerCase()}`;
+      if (aiPhonicsCache.has(cacheKey)) {
+        return aiPhonicsCache.get(cacheKey) ?? null;
+      }
+      try {
+        const result = await withRequestDeadline(
+          async (signal) => {
+            const response = await speechRequest(
+              "/voice/phonics/analyze",
+              "TTS_UNAVAILABLE",
+              {
+                method: "POST",
+                headers: {
+                  Accept: "application/json",
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  text: normalized,
+                  ...(contextPhrase ? { context_phrase: contextPhrase } : {}),
+                }),
+              },
+              signal,
+            );
+            const payload: unknown = await response.json();
+            signal.throwIfAborted();
+            const parsed = phonicsAnalyzeResponseSchema.safeParse(payload);
+            if (!parsed.success) return null;
+            return normalizeAiPhonicsResponse(parsed.data, normalized);
+          },
+          options.signal,
+          options.timeoutMs ?? 8_000,
+        );
+        if (aiPhonicsCache.size >= 256) {
+          const firstKey = aiPhonicsCache.keys().next().value;
+          if (firstKey !== undefined) aiPhonicsCache.delete(firstKey);
+        }
+        aiPhonicsCache.set(cacheKey, result);
+        return result;
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        return null;
+      }
     },
 
     async transcribe(audio, options = {}) {

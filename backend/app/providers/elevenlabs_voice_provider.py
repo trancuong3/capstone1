@@ -539,6 +539,7 @@ class ElevenLabsVoiceProvider:
         words: list[str],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        region: str = "north",
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalTimedSpeech,
@@ -576,7 +577,7 @@ class ElevenLabsVoiceProvider:
             duration_seconds=duration,
             words=timed_words,
             resolved_voice_id=audio.resolved_voice_id or self.get_configured_voice_id(),
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,
@@ -588,6 +589,7 @@ class ElevenLabsVoiceProvider:
         steps: list[dict[str, Any]],
         requested_voice_id: str | None = None,
         speed: float = 1.0,
+        region: str = "north",
     ) -> Any:
         from app.providers.local_voice_provider import (
             LocalPhonicsSpeech,
@@ -642,7 +644,7 @@ class ElevenLabsVoiceProvider:
             duration_seconds=total_duration,
             step_timings=timings,
             resolved_voice_id=resolved_voice,
-            region="north",
+            region=region,
             model_version=self.get_configured_model_id(),
             provider="elevenlabs",
             used_fallback_voice=False,

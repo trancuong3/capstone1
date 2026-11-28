@@ -18,6 +18,8 @@ const HF_BASE_URL =
 const SAMPLE_RATE = 16000;
 const MIN_PAD_DURATION_SECONDS = 1.2;
 const LEAD_PAD_SECONDS = 0.18;
+const LEAD_TRIM_SAFETY_MARGIN_SECONDS = 0.08;
+const WARMUP_SILENCE_SAMPLES = Math.round(SAMPLE_RATE * 0.25); // 0.25s = 4000 samples
 const SHORT_TRAIL_CAP_SECONDS = 0.2;
 const TRAILING_PAD_SECONDS = 0.35;
 const IDB_NAME = "viread-wasm-models-v1";
@@ -424,6 +426,32 @@ async function ensureRecognizer() {
       throw new Error("WASM STT init disposed");
     }
 
+    // Run a 0.25s silent dummy decode warmup so ONNX Runtime JIT / arena
+    // allocations finish BEFORE posting `ready` and never stall the first word.
+    try {
+      const warmupStream = recognizer.createStream();
+      try {
+        warmupStream.acceptWaveform(
+          SAMPLE_RATE,
+          new Float32Array(WARMUP_SILENCE_SAMPLES),
+        );
+        recognizer.decode(warmupStream);
+      } finally {
+        warmupStream.free();
+      }
+    } catch {
+      // Best-effort warmup only; never fail recognizer initialization.
+    }
+
+    if (epoch !== loadEpoch) {
+      try {
+        recognizer.free();
+      } catch {
+        // Ignore cleanup failure
+      }
+      throw new Error("WASM STT init disposed");
+    }
+
     recognizerInstance = recognizer;
     return recognizer;
   })().catch((err) => {
@@ -460,9 +488,11 @@ function preprocessChildVoice(input, sampleRate) {
   const rc = 1 / (2 * Math.PI * 60);
   const dt = 1 / sr;
   const alpha = rc / (rc + dt);
-  let prevX = input[0] - mean;
-  let prevY = alpha * prevX;
-  out[0] = prevY;
+  const firstCentered = input[0] - mean;
+  const quietLead = Math.abs(firstCentered) < 0.005;
+  let prevX = quietLead ? 0 : firstCentered;
+  let prevY = quietLead ? 0 : alpha * firstCentered;
+  out[0] = quietLead ? alpha * firstCentered : prevY;
   for (let i = 1; i < n; i += 1) {
     const x = input[i] - mean;
     const y = alpha * (prevY + x - prevX);
@@ -708,12 +738,16 @@ self.onmessage = async (event) => {
           : estimatedVoicedSeconds;
       let audioForDecode = preprocessed;
       let leadPadSamples = 0;
+      const maxPreservedLeadSeconds =
+        LEAD_PAD_SECONDS + LEAD_TRIM_SAFETY_MARGIN_SECONDS;
       if (
         voicedDurationSeconds < MIN_PAD_DURATION_SECONDS &&
-        existingLeadSeconds > LEAD_PAD_SECONDS
+        existingLeadSeconds > maxPreservedLeadSeconds
       ) {
+        // Keep an extra 80ms safety margin before `firstActive` so quiet unvoiced
+        // Vietnamese initial consonants (c/k/t/ch/tr/s/x/ph/th/kh) are never clipped.
         const trimSamples = Math.round(
-          (existingLeadSeconds - LEAD_PAD_SECONDS) * sr,
+          (existingLeadSeconds - maxPreservedLeadSeconds) * sr,
         );
         if (trimSamples > 0 && trimSamples < preprocessed.length) {
           audioForDecode = preprocessed.subarray(trimSamples);

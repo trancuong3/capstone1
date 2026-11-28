@@ -44,13 +44,22 @@ import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
   useEntertainmentPreferences,
 } from "@/hooks/use-entertainment-preferences";
-import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
+import {
+  detectBrowserWasmSttSupport,
+  getBrowserWasmSttClient,
+} from "@/lib/reading/browser-wasm-stt";
+import {
+  isInjectedTestSpeechRecognition,
+  resolveLocalFirstSpeechRecognitionConstructor,
+  shouldPreferAndroidNativeStt,
+} from "@/lib/reading/local-segment-speech-recognition";
 import { useTranslations } from "@/hooks/use-i18n";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -66,7 +75,13 @@ import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
 } from "@/lib/reading/browser-transcript-collector";
+import {
+  getEffectiveTeacherPersona,
+  lockSessionVoice,
+  releaseSessionVoiceLock,
+} from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
@@ -453,6 +468,7 @@ export function PictureDescriptionScreen() {
   );
 
   const mountedRef = useRef(true);
+  const usingExternalNativeSttRef = useRef(false);
   const sessionEpochRef = useRef(0);
   const sessionIdRef = useRef<string | null>(null);
   const isRecordingVoiceRef = useRef(false);
@@ -482,6 +498,17 @@ export function PictureDescriptionScreen() {
   });
 
   const childId = childState.status === "ready" ? childState.child.id : null;
+  const pictureVoiceSessionId = childId
+    ? `game_picture_${childId}`
+    : "game_picture";
+
+  useEffect(() => {
+    lockSessionVoice(pictureVoiceSessionId);
+    void preloadReadingVoiceEngines();
+    return () => {
+      releaseSessionVoiceLock(pictureVoiceSessionId);
+    };
+  }, [pictureVoiceSessionId]);
 
   useEffect(() => {
     sessionIdRef.current = session?.session_id ?? null;
@@ -518,6 +545,7 @@ export function PictureDescriptionScreen() {
         browserRecognitionRef.current !== null ||
         sttControllerRef.current !== null;
       isRecordingVoiceRef.current = false;
+      usingExternalNativeSttRef.current = false;
       setIsRecordingVoice(false);
       setIsTranscribing(false);
       sttControllerRef.current?.abort();
@@ -702,7 +730,11 @@ export function PictureDescriptionScreen() {
   }, [stopSpeechPlayback]);
 
   const speakVietnamese = useCallback(
-    async (text: string, key: string) => {
+    async (
+      text: string,
+      key: string,
+      options?: { readonly adaptPersona?: boolean },
+    ) => {
       if (!calmSound) return;
       const cleaned = text.trim();
       if (!cleaned) return;
@@ -717,9 +749,13 @@ export function PictureDescriptionScreen() {
         key.startsWith("vocab:") ||
         key.startsWith("sample:") ||
         key.startsWith("upgraded:");
-      const spokenText = isStoryOrVocabSample
-        ? cleaned
-        : adaptTextToTeacherPersona(cleaned, teacherPersona.gender);
+      const shouldAdapt =
+        options?.adaptPersona !== undefined
+          ? options.adaptPersona
+          : !isStoryOrVocabSample;
+      const spokenText = shouldAdapt
+        ? adaptTextToTeacherPersona(cleaned, teacherPersona.gender)
+        : cleaned;
 
       // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
       abortActiveVoiceCapture({ preserveDraft: true });
@@ -729,7 +765,8 @@ export function PictureDescriptionScreen() {
 
       try {
         await speechPlayer.play(spokenText, {
-          utteranceKind: isStoryOrVocabSample ? "game_sample" : "game_coaching",
+          utteranceKind: shouldAdapt ? "game_coaching" : "game_sample",
+          ...(shouldAdapt ? { coaching: true } : {}),
         });
       } catch {
         // Ignore playback interruption / fallback errors.
@@ -1003,16 +1040,20 @@ export function PictureDescriptionScreen() {
       }
     }
 
-    try {
-      await recorder.start();
-    } catch {
-      if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+    const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    usingExternalNativeSttRef.current = preferAndroidNativeStt;
+    if (!preferAndroidNativeStt) {
+      try {
+        await recorder.start();
+      } catch {
+        if (!mountedRef.current || sessionEpochRef.current !== captureEpoch) {
+          return;
+        }
+        isRecordingVoiceRef.current = false;
+        setIsRecordingVoice(false);
+        setVoiceMessage(t("pictureDescription.micUnavailable"));
         return;
       }
-      isRecordingVoiceRef.current = false;
-      setIsRecordingVoice(false);
-      setVoiceMessage(t("pictureDescription.micUnavailable"));
-      return;
     }
 
     if (
@@ -1021,7 +1062,9 @@ export function PictureDescriptionScreen() {
       micArmTokenRef.current !== armToken ||
       isTtsPlayingRef.current
     ) {
-      recorder.cancel();
+      if (!preferAndroidNativeStt) {
+        recorder.cancel();
+      }
       return;
     }
 
@@ -1030,9 +1073,17 @@ export function PictureDescriptionScreen() {
     setVoiceMessage(t("pictureDescription.micListening"));
 
     const rawCtor = getSpeechRecognitionCtor();
-    const SpeechRecognition = isInjectedTestSpeechRecognition(rawCtor)
-      ? rawCtor
-      : null;
+    const SpeechRecognition = preferAndroidNativeStt
+      ? ((resolveLocalFirstSpeechRecognitionConstructor(
+          window as unknown as Parameters<
+            typeof resolveLocalFirstSpeechRecognitionConstructor
+          >[0],
+          speechService,
+          () => ({ sessionId: pictureVoiceSessionId }),
+        ) as BrowserSpeechRecognitionCtor | undefined) ?? null)
+      : isInjectedTestSpeechRecognition(rawCtor)
+        ? rawCtor
+        : null;
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition();
@@ -1115,7 +1166,9 @@ export function PictureDescriptionScreen() {
       sessionIdRef.current !== activeSessionId;
 
     try {
-      const audioBlob = await recorder.stop();
+      const usedExternalNative = usingExternalNativeSttRef.current;
+      usingExternalNativeSttRef.current = false;
+      const audioBlob = usedExternalNative ? null : await recorder.stop();
       if (isStaleCapture()) return;
       const browserFallback = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveSnapshot,
@@ -1140,12 +1193,29 @@ export function PictureDescriptionScreen() {
           if (isStaleCapture()) return;
           sttTranscript = null;
         }
+        if (!sttTranscript && detectBrowserWasmSttSupport().supported) {
+          try {
+            const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
+              audioBlob,
+              { timeoutMs: 12_000 },
+            );
+            if (isStaleCapture()) return;
+            sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
+          } catch {
+            if (isStaleCapture()) return;
+          }
+        }
       }
 
       if (isStaleCapture()) return;
       const finalTranscript = sttTranscript || browserFallback || null;
       if (!finalTranscript) {
-        setVoiceMessage(t("pictureDescription.unclearVoice"));
+        setVoiceMessage(
+          adaptTextToTeacherPersona(
+            t("pictureDescription.unclearVoice"),
+            getEffectiveTeacherPersona().gender,
+          ),
+        );
         return;
       }
 
@@ -1378,6 +1448,17 @@ export function PictureDescriptionScreen() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <ReadingVoiceSettings
+            disabled={isRecordingVoice}
+            fallbackNotice={speechPlayer.fallbackNotice}
+            isPreviewing={speechPlayer.isPlaying}
+            onPreview={(sample) => {
+              abortActiveVoiceCapture({ preserveDraft: true });
+              stopSpeechPlayback();
+              return speechPlayer.play(sample, { bypassSessionLock: true });
+            }}
+            onStopPreview={stopSpeechPlayback}
+          />
           <Button
             aria-pressed={!calmSound}
             className="min-h-11"
@@ -2040,6 +2121,7 @@ export function PictureDescriptionScreen() {
                           void speakVietnamese(
                             t(activeModeSpec.audioHintKey),
                             `mode-audio:${teachingMode}`,
+                            { adaptPersona: true },
                           )
                         }
                         size="compact"
@@ -2170,6 +2252,7 @@ export function PictureDescriptionScreen() {
                         void speakVietnamese(
                           t(activeModeSpec.audioHintKey),
                           `mode-cue:${teachingMode}`,
+                          { adaptPersona: true },
                         )
                       }
                       size="compact"
@@ -2299,6 +2382,7 @@ export function PictureDescriptionScreen() {
                           void speakVietnamese(
                             activeFollowUpQuestion,
                             "practice-followup",
+                            { adaptPersona: true },
                           )
                         }
                         size="compact"
@@ -2340,7 +2424,7 @@ export function PictureDescriptionScreen() {
                       dir="ltr"
                       lang="vi"
                     >
-                      {latestAttempt.feedback.improvement_tip}
+                      {adaptTeacherText(latestAttempt.feedback.improvement_tip)}
                     </p>
                     {latestAttempt.feedback.missed_details.length > 0 ? (
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
@@ -2996,6 +3080,7 @@ export function PictureDescriptionScreen() {
                       void speakVietnamese(
                         `${activeAttempt.feedback.praise_message} ${activeAttempt.feedback.improvement_tip}`,
                         `feedback:${activeAttempt.attempt_id}`,
+                        { adaptPersona: true },
                       )
                     }
                     size="compact"
@@ -3164,7 +3249,7 @@ export function PictureDescriptionScreen() {
                       dir="ltr"
                       lang="vi"
                     >
-                      {activeAttempt.feedback.improvement_tip}
+                      {adaptTeacherText(activeAttempt.feedback.improvement_tip)}
                     </span>
                   </p>
                   {activeAttempt.feedback.upgraded_sentences.length > 0 ? (
@@ -3246,7 +3331,9 @@ export function PictureDescriptionScreen() {
                   {activeAttempt.feedback.vocabulary_highlights.length > 0 ? (
                     <div className="mt-3 border-t border-border pt-3">
                       <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                        {t("pictureDescription.vocabHighlightsTitle")}
+                        {adaptTeacherText(
+                          t("pictureDescription.vocabHighlightsTitle"),
+                        )}
                       </p>
                       <div className="mt-1.5 flex flex-wrap gap-2">
                         {activeAttempt.feedback.vocabulary_highlights.map(
@@ -3260,6 +3347,7 @@ export function PictureDescriptionScreen() {
                                 void speakVietnamese(
                                   word,
                                   `highlight:${activeAttempt.attempt_id}:${word}`,
+                                  { adaptPersona: false },
                                 )
                               }
                               type="button"
@@ -3306,6 +3394,7 @@ export function PictureDescriptionScreen() {
                           void speakVietnamese(
                             activeAttempt.feedback.next_prompt_question ?? "",
                             `followup:${activeAttempt.attempt_id}`,
+                            { adaptPersona: true },
                           )
                         }
                         size="compact"
@@ -3324,7 +3413,9 @@ export function PictureDescriptionScreen() {
                       dir="ltr"
                       lang="vi"
                     >
-                      {activeAttempt.feedback.next_prompt_question}
+                      {adaptTeacherText(
+                        activeAttempt.feedback.next_prompt_question,
+                      )}
                     </p>
                     <div className="mt-3">
                       <Button

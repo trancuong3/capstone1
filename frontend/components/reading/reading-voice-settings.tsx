@@ -30,7 +30,9 @@ import {
 } from "@/lib/api/voice-studio-service";
 import {
   applyGlobalTeacherVoiceSelection,
+  clearPendingSessionVoiceSwitch,
   getActiveSessionVoiceLock,
+  getDefaultLocalVoiceIdForRegionAndGender,
   getDefaultVoiceIdForRegionAndGender,
   getDefaultVoicePolicyPreferences,
   getVoicePolicyPreferences,
@@ -273,6 +275,9 @@ export function ReadingVoiceSettings({
             sessionId: activeLock.sessionId,
             voiceId: updatedLock.voiceId,
           })
+          .then(() => {
+            clearPendingSessionVoiceSwitch(activeLock.sessionId);
+          })
           .catch(() => undefined);
       }
     },
@@ -433,7 +438,8 @@ export function ReadingVoiceSettings({
     onStopPreview();
     setPreviewError(false);
     const updated = setVoicePolicyPreferences(nextPolicy);
-    // If Google TTS was disabled while a Google voice was chosen, reset cleanly to local voice of the same gender
+    // If Google TTS was disabled while a Google voice was chosen, downgrade
+    // cleanly to the matching region+gender local voice (treating default as null).
     const currentVoiceId = getSpeechPreferences().voiceId;
     if (
       currentVoiceId?.startsWith("google_") &&
@@ -441,16 +447,24 @@ export function ReadingVoiceSettings({
         !updated.allowGoogleTtsFallback)
     ) {
       const preservedGender = resolveVoiceGender(currentVoiceId);
-      const fallbackLocal = getDefaultVoiceIdForRegionAndGender(
+      const preservedRegion = inferRegionFromVoiceId(
+        currentVoiceId,
         updated.region,
+      );
+      const localFallbackId = getDefaultLocalVoiceIdForRegionAndGender(
+        preservedRegion,
         preservedGender,
       );
+      const defaultVoice =
+        loadState.status === "ready"
+          ? loadState.data.default_voice_id
+          : "local_north_truc_ly";
       applyGlobalTeacherVoiceSelection({
-        voiceId: fallbackLocal,
+        voiceId: localFallbackId,
         storedVoiceId:
-          fallbackLocal === "local_north_truc_ly" ? null : fallbackLocal,
+          localFallbackId === defaultVoice ? null : localFallbackId,
         gender: preservedGender,
-        region: updated.region,
+        region: preservedRegion,
         childId: selectedChildId,
         persistToBackend:
           selectedChildId &&
@@ -603,7 +617,10 @@ export function ReadingVoiceSettings({
               <Button
                 className="w-auto!"
                 size="compact"
-                onClick={() => change({ voiceId: null })}
+                onClick={() => {
+                  setVoicePolicyPreferences({ region: "north" });
+                  change({ voiceId: null });
+                }}
                 variant="quiet"
               >
                 {t("settings.useDefaultVoice")}

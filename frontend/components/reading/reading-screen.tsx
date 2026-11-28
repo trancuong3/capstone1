@@ -28,7 +28,6 @@ import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  getWasmModelCacheStatus,
   type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
@@ -58,6 +57,10 @@ import {
   setActiveVoiceSession,
   subscribeVoicePolicy,
 } from "@/lib/reading/session-voice-lock";
+import {
+  awaitSttReadyBeforeListening,
+  preloadReadingVoiceEngines,
+} from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
@@ -329,6 +332,7 @@ function ReadingSessionScreen({
 }: ReadingScreenProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
+  const teacherPersona = useTeacherPersona();
   const tCommon = useTranslations("common");
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -570,7 +574,6 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
-  const teacherPersona = useTeacherPersona();
   const { preferences: automationPreferences, coachingStyle } =
     useAutomationPreferences();
   const automationRef = useRef(automationPreferences);
@@ -665,6 +668,7 @@ function ReadingSessionScreen({
     readonly wordId: string | null;
     readonly plan: PhonicsLessonPlan;
   } | null>(null);
+  const [isAnalyzingPhonicsAi, setIsAnalyzingPhonicsAi] = useState(false);
   const [activePhonicsStepIndex, setActivePhonicsStepIndex] = useState<
     number | null
   >(null);
@@ -866,6 +870,15 @@ function ReadingSessionScreen({
       pageRevisionId: activeCachePageRevisionId,
       isPrivateBook: activeCacheIsPrivate,
     });
+    if (activeCachePageId && page?.words?.length) {
+      void preloadReadingVoiceEngines({
+        bookId: activeCacheBookId,
+        pageId: activeCachePageId,
+        pageRevisionId: activeCachePageRevisionId,
+        isPrivateBook: activeCacheIsPrivate,
+        previewWords: page.words.slice(0, 3).map((w) => w.text),
+      });
+    }
     return () => {
       setSpeechCacheContext?.(null);
     };
@@ -875,6 +888,7 @@ function ReadingSessionScreen({
     activeCacheIsPrivate,
     activeCachePageId,
     activeCachePageRevisionId,
+    page?.words,
   ]);
 
   useEffect(() => {
@@ -905,6 +919,9 @@ function ReadingSessionScreen({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
+    // Warm STT (WASM/Android) & TTS immediately upon entering ReadingScreen
+    // (covers direct URL navigation, refresh, or resume without prep screen).
+    void preloadReadingVoiceEngines();
     const cleanupMicrophoneOnLeave = () => {
       listeningGenerationRef.current += 1;
       isListeningActiveRef.current = false;
@@ -987,7 +1004,20 @@ function ReadingSessionScreen({
         const wasmSupported = detectBrowserWasmSttSupport().supported;
         if (localSttDown) {
           if (currentSttTier === "browser_wasm" && wasmSupported) {
-            // Preserve active Tier-1 on-device Browser WASM STT; never clobber it back to local/browser.
+            // Preserve active Tier-2 on-device Browser WASM STT; never clobber it back to local/browser.
+          } else if (wasmSupported && !isAndroidNativeSpeechAvailable()) {
+            // Strict Offline-First STT priority: prefer On-Device WASM BEFORE
+            // Cloud Google / Browser Web Speech. Under `local_only` before reading
+            // begins, keep the mount badge honestly at `"idle"` while Browser WASM
+            // pre-initializes silently in the background and switches to
+            // `browser_wasm` as soon as the child actually begins reading.
+            if (sttAllowsFallback) {
+              recordSttEngineUsage({
+                provider: "wasm",
+                fallbackUsed: true,
+                fallbackReason: "LOCAL_STT_UNAVAILABLE",
+              });
+            }
           } else if (sttAllowsFallback) {
             const useGoogleStt =
               health.google.stt_configured && !health.google.stt_cooldown;
@@ -1000,33 +1030,24 @@ function ReadingSessionScreen({
                   .webkitSpeechRecognition,
               );
             recordSttEngineUsage({
-              provider: useGoogleStt
-                ? "google"
-                : hasNativeWebSpeech
-                  ? "browser"
-                  : wasmSupported
-                    ? "wasm"
+              provider: isAndroidNativeSpeechAvailable()
+                ? "android_native"
+                : useGoogleStt
+                  ? "google"
+                  : hasNativeWebSpeech
+                    ? "browser"
                     : "browser",
               fallbackUsed: true,
               fallbackReason: "LOCAL_STT_UNAVAILABLE",
             });
           }
-          // When hosted deployment has no local voice worker configured, quietly
-          // pre-warm Browser WASM ONLY if model files are already cached in IndexedDB.
-          if (hostedLocalUnconfigured && wasmSupported && !sttAllowsFallback) {
-            void getWasmModelCacheStatus()
-              .then((cacheStatus) => {
-                if (!cancelled && cacheStatus.ready) {
-                  void getBrowserWasmSttClient()
-                    .init()
-                    .catch(() => undefined);
-                }
-              })
+          // Eagerly initialize Browser WASM STT whenever local STT is down so
+          // the model is already warm before the child speaks the first word!
+          if (wasmSupported && !isAndroidNativeSpeechAvailable()) {
+            void getBrowserWasmSttClient()
+              .init()
               .catch(() => undefined);
           }
-          // Under `local_only` when STT has not started yet, keep the idle mount
-          // badge honestly at `"idle"`; Tier-1 `browser_wasm` activates lazily
-          // when the child actually begins reading.
         } else {
           recordSttEngineUsage({
             provider: "local",
@@ -1088,13 +1109,13 @@ function ReadingSessionScreen({
             }
             if (!getActiveSessionVoiceLock() && !ttsUsingCachedAudio) {
               // Only advertise browser TTS fallback when no SessionVoiceLock forbids it.
-              const effectiveId = getEffectiveVoiceId();
+              const effectiveVoiceId = getEffectiveVoiceId();
               recordTtsEngineUsage({
                 provider: "browser",
                 fallbackUsed: true,
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-                voiceId: effectiveId,
-                voiceGender: resolveVoiceGender(effectiveId),
+                voiceId: effectiveVoiceId,
+                voiceGender: resolveVoiceGender(effectiveVoiceId),
               });
             }
           }
@@ -1108,12 +1129,14 @@ function ReadingSessionScreen({
               (!ttsAllowsFallback && currentTtsSnap.fallbackUsed))
           ) {
             const activeLock = getActiveSessionVoiceLock();
+            const resolvedVoiceId =
+              activeLock?.voiceId ?? getEffectiveVoiceId();
             recordTtsEngineUsage({
               provider: "local",
               fallbackUsed: false,
               fallbackReason: null,
-              voiceId: activeLock?.voiceId ?? null,
-              voiceGender: resolveVoiceGender(activeLock?.voiceId),
+              voiceId: resolvedVoiceId,
+              voiceGender: resolveVoiceGender(resolvedVoiceId),
             });
           }
         }
@@ -2049,7 +2072,7 @@ function ReadingSessionScreen({
               message: promptText,
             });
             setLatestTranscript(promptText);
-            await speakGuarded(promptText);
+            await speakGuarded(promptText, { preserveBookText: true });
           }
         },
         true,
@@ -2118,10 +2141,10 @@ function ReadingSessionScreen({
                 message: comfortText,
               });
               setLatestTranscript(comfortText);
-              await speakGuarded(comfortText);
+              await speakGuarded(comfortText, { preserveBookText: true });
             } else {
               setLatestTranscript(
-                adaptPersona(`Con nghe cô đọc từ “${word.text}” nhé.`),
+                `${adaptPersona("Con nghe cô đọc từ")} “${word.text}” nhé.`,
               );
               await speakGuarded("Cô đọc mẫu cho con nhé.", { coaching: true });
               if (!isCurrent()) return;
@@ -2146,7 +2169,7 @@ function ReadingSessionScreen({
                 message: step3Text,
               });
               setLatestTranscript(`${step3Text} “${phrase}”`);
-              await speakGuarded(step3Text);
+              await speakGuarded(step3Text, { preserveBookText: true });
               if (!isCurrent()) return;
               await speakGuarded(phrase, { preserveBookText: true });
             } else {
@@ -2172,14 +2195,16 @@ function ReadingSessionScreen({
               });
               setLatestTranscript(`${phonicsGuide} · “${phrase}”`);
               if (style === "gentle") {
-                await speakGuarded(intro, { coaching: true });
+                await speakGuarded(intro, {
+                  coaching: true,
+                  preserveBookText: true,
+                });
                 if (!isCurrent()) return;
               }
-              await speakGuarded(phonicsGuide);
+              await speakGuarded(phonicsGuide, { preserveBookText: true });
               if (!isCurrent()) return;
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.75,
               });
               if (!isCurrent()) return;
               await speakGuarded(phrase, { preserveBookText: true });
@@ -2189,7 +2214,6 @@ function ReadingSessionScreen({
               );
               await speakGuarded(word.text, {
                 wordSample: true,
-                speedScale: 0.8,
               });
               if (!isCurrent()) return;
               if (phraseWords.length > 1) {
@@ -2424,7 +2448,7 @@ function ReadingSessionScreen({
     }
   }
 
-  /** Speak one assistant utterance and register it with the echo guard. */
+  /** Speak one assistant utterance and register it individually with the echo guard. */
   async function speakGuarded(
     text: string,
     options?: SpeechPlayOptions & { readonly preserveBookText?: boolean },
@@ -2439,9 +2463,11 @@ function ReadingSessionScreen({
     if (spokenText.trim()) {
       assistantTurnSpokenRef.current.push(spokenText.trim());
     }
-    const guardText = assistantTurnSpokenRef.current.join(" ");
+    // Register ONLY this utterance's text with EchoGuard (never concatenate earlier
+    // modeled book words into "Đến lượt con đọc nhé.", which would falsely reject
+    // the child's immediate first spoken word as `tail-overlap`).
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
-    echoGuard.playbackStarted(id, guardText || spokenText, performance.now());
+    echoGuard.playbackStarted(id, spokenText, performance.now());
     try {
       if (Object.keys(playOptions).length === 0) {
         await speechPlayer.play(spokenText);
@@ -2493,7 +2519,7 @@ function ReadingSessionScreen({
         async () => {
           if (!isCurrent()) return;
           setLatestTranscript(promptText);
-          await speakGuarded(promptText);
+          await speakGuarded(promptText, { preserveBookText: true });
         },
         true,
         false,
@@ -2601,10 +2627,11 @@ function ReadingSessionScreen({
           })());
     if (!target) return;
 
-    const plan = buildPhonicsLesson(target.text);
+    let plan = buildPhonicsLesson(target.text);
     setActivePhonicsLesson({ wordId: target.word_id, plan });
     setActivePhonicsStepIndex(plan.supported ? 0 : null);
     setPhonicsStatusHint(null);
+    setIsAnalyzingPhonicsAi(false);
 
     if (target.word_id && !retryModeRef.current) {
       helpedWordIdsRef.current.add(target.word_id);
@@ -2624,6 +2651,33 @@ function ReadingSessionScreen({
       await playAssistantAudio(
         async () => {
           if (!isCurrent()) return;
+          if (
+            !plan.supported &&
+            plan.canPlayWholeWord &&
+            typeof speechService.analyzePhonics === "function"
+          ) {
+            setIsAnalyzingPhonicsAi(true);
+            try {
+              const aiPlan = await speechService.analyzePhonics(target.text, {
+                contextPhrase: capturePage?.words
+                  ? capturePage.words
+                      .slice(0, 12)
+                      .map((w) => w.text)
+                      .join(" ")
+                  : null,
+              });
+              if (!isCurrent()) return;
+              if (aiPlan && aiPlan.supported) {
+                plan = aiPlan;
+                setActivePhonicsLesson({ wordId: target.word_id, plan });
+                setActivePhonicsStepIndex(0);
+              }
+            } finally {
+              if (mountedRef.current) {
+                setIsAnalyzingPhonicsAi(false);
+              }
+            }
+          }
           if (!plan.supported) {
             setPhonicsStatusHint(plan.message);
             if (plan.canPlayWholeWord) {
@@ -2725,6 +2779,22 @@ function ReadingSessionScreen({
     }
 
     const preferAndroidNativeStt = shouldPreferAndroidNativeStt();
+    if (
+      !preferAndroidNativeStt &&
+      detectBrowserWasmSttSupport().supported &&
+      !getBrowserWasmSttClient().isReady()
+    ) {
+      const freshHealth = getFreshVoiceEngineHealth();
+      const localSttReady = Boolean(
+        freshHealth?.local.available && freshHealth.local.stt_ready,
+      );
+      if (!localSttReady) {
+        setLatestTranscript("Đang khởi động nhận diện giọng nói...");
+        await awaitSttReadyBeforeListening(4_000);
+        if (!isCurrent()) return false;
+        setLatestTranscript(null);
+      }
+    }
     let recorderStarted = false;
     if (preferAndroidNativeStt) {
       // Skip parallel WebView getUserMedia/MediaRecorder when Android native
@@ -2948,8 +3018,29 @@ function ReadingSessionScreen({
                 if (!isFencedResult(meta)) {
                   return false;
                 }
+                const immediateWindowWords = (() => {
+                  const activePage = pageRef.current ?? capturePage;
+                  if (!activePage) return [] as string[];
+                  const curId = engine.getSnapshot().currentWordId;
+                  const curIdx = activePage.words.findIndex(
+                    (w) => w.word_id === curId,
+                  );
+                  const startIdx = Math.max(0, curIdx >= 0 ? curIdx - 1 : 0);
+                  return activePage.words
+                    .slice(startIdx, startIdx + 6)
+                    .map((w) => w.text);
+                })();
+                const isLowVolumeMatchingWindow =
+                  meta?.audioQuality?.status === "LOW_VOLUME" &&
+                  Boolean(part.trim()) &&
+                  hasUsableChildWindowBrowserConfidence(
+                    part,
+                    immediateWindowWords,
+                    0.9,
+                  );
                 if (
                   meta?.audioQuality &&
+                  !isLowVolumeMatchingWindow &&
                   (meta.audioQuality.status === "LOW_VOLUME" ||
                     meta.audioQuality.status === "CLIPPING" ||
                     meta.audioQuality.status === "AUDIO_TOO_SHORT")
@@ -2974,21 +3065,7 @@ function ReadingSessionScreen({
                   !isPhonicsCueUsable(part, confidence) &&
                   !hasUsableChildWindowBrowserConfidence(
                     part,
-                    (() => {
-                      const activePage = pageRef.current ?? capturePage;
-                      if (!activePage) return [];
-                      const curId = engine.getSnapshot().currentWordId;
-                      const curIdx = activePage.words.findIndex(
-                        (w) => w.word_id === curId,
-                      );
-                      const startIdx = Math.max(
-                        0,
-                        curIdx >= 0 ? curIdx - 1 : 0,
-                      );
-                      return activePage.words
-                        .slice(startIdx, startIdx + 6)
-                        .map((w) => w.text);
-                    })(),
+                    immediateWindowWords,
                     confidence,
                   )
                 ) {
@@ -3665,6 +3742,20 @@ function ReadingSessionScreen({
             rec.start();
             recognitionRef.current = rec;
             browserRecognitionStarted = true;
+            if (isLocalSegmentRec) {
+              await rec.whenAudioGraphReady(800);
+              if (!isCurrent()) {
+                if (recognitionRef.current === rec) {
+                  recognitionRef.current = null;
+                }
+                try {
+                  rec.abort();
+                } catch {
+                  // Ignore cleanup error
+                }
+                return false;
+              }
+            }
           } catch {
             // MediaRecorder remains the primary source when available.
           }
@@ -4573,6 +4664,13 @@ function ReadingSessionScreen({
       setComparisonResult(null);
       setComparisonError(null);
 
+      // Pre-warm the microphone stream during the 3s countdown on Web (never on
+      // Android APK where native SpeechRecognizer owns HAL mic) so the first
+      // letter/word is captured immediately when countdown hits 0.
+      if (!shouldPreferAndroidNativeStt()) {
+        void speechRecorder.prepare().catch(() => undefined);
+      }
+
       setCountdown(3);
     } catch (error) {
       console.error("Không thể bắt đầu buổi đọc:", error);
@@ -5074,7 +5172,11 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          const tutorText = action?.tts_text ?? word;
+          const isVerbatimTutorWord =
+            !action || !action.tts_text || action.tts_text === word;
+          const tutorText = isVerbatimTutorWord
+            ? word
+            : adaptPersona(action?.tts_text ?? word);
           const tutorPlaybackId = `tutor-read-${(assistantPlaybackSeqRef.current += 1)}`;
           echoGuard.playbackStarted(
             tutorPlaybackId,
@@ -5084,7 +5186,7 @@ function ReadingSessionScreen({
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(tutorText, {
-              wordSample: !action || action.tts_text === word,
+              wordSample: isVerbatimTutorWord,
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -5147,7 +5249,11 @@ function ReadingSessionScreen({
           ) {
             return;
           }
-          const retryTutorText = nextAction?.tts_text ?? word;
+          const isVerbatimRetryTutorWord =
+            !nextAction || !nextAction.tts_text || nextAction.tts_text === word;
+          const retryTutorText = isVerbatimRetryTutorWord
+            ? word
+            : adaptPersona(nextAction?.tts_text ?? word);
           const retryTutorPlaybackId = `tutor-retry-${(assistantPlaybackSeqRef.current += 1)}`;
           echoGuard.playbackStarted(
             retryTutorPlaybackId,
@@ -5157,7 +5263,7 @@ function ReadingSessionScreen({
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(retryTutorText, {
-              wordSample: !nextAction || nextAction.tts_text === word,
+              wordSample: isVerbatimRetryTutorWord,
             });
           } finally {
             setIsPlayingTutorAudio(false);
@@ -7228,7 +7334,10 @@ function ReadingSessionScreen({
 
     const runVoiceWrapUp = async () => {
       try {
-        await speakGuarded(promptText, { coaching: true });
+        await speakGuarded(promptText, {
+          coaching: true,
+          preserveBookText: true,
+        });
       } catch {
         // Fallback silently to visual buttons if TTS is unavailable
       }
@@ -7780,6 +7889,7 @@ function ReadingSessionScreen({
             <PhonicsLessonCard
               activeStepIndex={activePhonicsStepIndex}
               compact
+              isAnalyzingAi={isAnalyzingPhonicsAi}
               isListeningRetry={isMicRecording}
               isPlayingPhonics={isPlayingPhonicsLesson}
               isPlayingWord={isReadingWord}
