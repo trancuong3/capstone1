@@ -22,9 +22,15 @@ const selectChildFromAssistantMock = vi.hoisted(() => vi.fn());
 const authState = vi.hoisted(() => ({
   userId: "91000000-0000-4000-8000-000000000001" as string | null,
   throwOnCreate: false,
-  callback: null as
-    ((event: string, session: { user: { id: string } } | null) => void) | null,
+  callbacks: new Set<
+    (event: string, session: { user: { id: string } } | null) => void
+  >(),
   unsubscribe: vi.fn(),
+  emit(event: string, session: { user: { id: string } } | null) {
+    for (const listener of Array.from(this.callbacks)) {
+      listener(event, session);
+    }
+  },
 }));
 
 vi.mock("next/navigation", () => ({
@@ -54,11 +60,14 @@ vi.mock("@/lib/supabase/client", () => ({
         onAuthStateChange: (
           cb: (event: string, session: { user: { id: string } } | null) => void,
         ) => {
-          authState.callback = cb;
+          authState.callbacks.add(cb);
           return {
             data: {
               subscription: {
-                unsubscribe: authState.unsubscribe,
+                unsubscribe: () => {
+                  authState.callbacks.delete(cb);
+                  authState.unsubscribe();
+                },
               },
             },
           };
@@ -123,7 +132,7 @@ describe("ViReadAssistantWidget", () => {
     selectChildFromAssistantMock.mockReset();
     authState.userId = PARENT_ID;
     authState.throwOnCreate = false;
-    authState.callback = null;
+    authState.callbacks.clear();
     authState.unsubscribe.mockReset();
     readAssistantChildContextMock.mockResolvedValue({
       userId: PARENT_ID,
@@ -1200,7 +1209,7 @@ describe("ViReadAssistantWidget", () => {
 
     // Switching customer account (PARENT_ID -> OTHER_PARENT_ID) immediately clears history!
     await act(async () => {
-      authState.callback?.("SIGNED_IN", { user: { id: OTHER_PARENT_ID } });
+      authState.emit("SIGNED_IN", { user: { id: OTHER_PARENT_ID } });
     });
     expect(
       screen.queryByText("Phản hồi riêng cho phụ huynh A."),
