@@ -84,6 +84,35 @@ class handler(BaseHTTPRequestHandler):
         # Do not let access logs capture request headers, bodies, or recipients.
         pass
 
+    def _write_json(self, code, payload, extra_headers=None):
+        data = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-store")
+        if extra_headers:
+            for key, value in extra_headers.items():
+                self.send_header(key, value)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if getattr(self, "command", None) != "HEAD":
+            self.wfile.write(data)
+
+    def _method_not_allowed(self):
+        self._write_json(
+            405,
+            {"code": "METHOD_NOT_ALLOWED"},
+            extra_headers={"Allow": "POST"},
+        )
+
+    def do_GET(self):
+        self._method_not_allowed()
+
+    def do_HEAD(self):
+        self._method_not_allowed()
+
+    def do_OPTIONS(self):
+        self._method_not_allowed()
+
     def do_POST(self):
         try:
             size = int(self.headers.get("Content-Length", "0"))
@@ -97,10 +126,4 @@ class handler(BaseHTTPRequestHandler):
                 self.headers.get("X-Email-Relay-Timestamp"),
                 self.headers.get("X-Email-Relay-Signature"),
             )
-        data = json.dumps(result).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._write_json(code, result)

@@ -10,6 +10,7 @@ import {
 import Link from "next/link";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -17,11 +18,15 @@ import {
 } from "react";
 
 import { AdminBadge } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+import { TaskProgressView } from "@/components/tasks/global-task-center";
 import { useAdminServices } from "@/hooks/use-admin-services";
-import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useAiProgress } from "@/hooks/use-ai-progress";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   useOcrWorkerStatus,
   type UseOcrWorkerStatusResult,
@@ -176,6 +181,134 @@ function classifyUploadFile(
   };
 }
 
+function UploadFileProgressItem({
+  item,
+  t,
+}: {
+  item: AdminPageUploadProgressUI;
+  t: TranslateFn;
+}) {
+  const tCommon = useTranslations("common");
+  const isQueuedOffline =
+    item.status === "QUEUED_OFFLINE" || item.queued_offline === true;
+  const isCompleted =
+    !isQueuedOffline &&
+    item.status === "PROCESSING" &&
+    item.progress_percent >= 100;
+  const isFailed = item.status === "FAILED";
+  const isActive = !isCompleted && !isFailed && !isQueuedOffline;
+
+  const stages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 18, label: tCommon("aiProgress.uploading") },
+      { atPct: 45, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+
+  const realPct = isCompleted
+    ? 100
+    : isFailed || isQueuedOffline
+      ? item.progress_percent
+      : item.progress_percent > 0
+        ? item.progress_percent
+        : item.status === "UPLOADING"
+          ? 14
+          : 8;
+
+  const progress = useAiProgress({
+    active: isActive,
+    realPercent: realPct,
+    progressMode:
+      isCompleted || isFailed || isQueuedOffline ? "measured" : "staged",
+    stages,
+    expectedDurationMs: 14_000,
+    completed: isCompleted,
+    failed: isFailed,
+  });
+
+  const barTone = isFailed
+    ? "danger"
+    : isQueuedOffline
+      ? "warning"
+      : isCompleted
+        ? "success"
+        : "primary";
+  const barLabel = isFailed
+    ? tCommon("aiProgress.processing")
+    : isQueuedOffline
+      ? tCommon("aiProgress.waitingWorker")
+      : isCompleted
+        ? tCommon("aiProgress.completed")
+        : (progress.stageLabel ??
+          (item.status === "UPLOADING"
+            ? tCommon("aiProgress.uploading")
+            : tCommon("aiProgress.preparing")));
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0 flex-1 break-all text-xs font-semibold text-ink">
+          {item.file_name ?? item.client_id}
+        </span>
+        <AdminBadge
+          icon={
+            isQueuedOffline ? (
+              <Clock3 aria-hidden="true" className="size-3.5 shrink-0" />
+            ) : undefined
+          }
+          tone={
+            item.status === "FAILED"
+              ? "danger"
+              : isQueuedOffline
+                ? "warning"
+                : item.status === "UPLOADING"
+                  ? "info"
+                  : item.status === "QUEUED"
+                    ? "neutral"
+                    : "success"
+          }
+        >
+          {item.status === "FAILED"
+            ? t("books.uploader.statusFailed")
+            : isQueuedOffline
+              ? t(
+                  "books.uploader.statusQueuedOffline",
+                  undefined,
+                  "Đã đưa vào hàng chờ OCR",
+                )
+              : item.status === "UPLOADING"
+                ? t("books.uploader.statusUploading")
+                : item.status === "QUEUED"
+                  ? t("books.uploader.statusPending")
+                  : (item.summary_message ??
+                    t("books.uploader.statusSavedFallback"))}
+        </AdminBadge>
+      </div>
+      {!isQueuedOffline ? (
+        <AiProgressBar
+          active={isActive}
+          elapsedSeconds={isActive ? progress.elapsedSeconds : undefined}
+          label={barLabel}
+          percent={isFailed ? item.progress_percent : progress.percent}
+          size="compact"
+          tone={barTone}
+        />
+      ) : null}
+      {isQueuedOffline && item.summary_message ? (
+        <span className="block text-xs text-amber-900">
+          {item.summary_message}
+        </span>
+      ) : null}
+      {item.status === "FAILED" && item.error_message ? (
+        <span className="block text-xs text-danger">{item.error_message}</span>
+      ) : null}
+    </div>
+  );
+}
+
 export function AdminPageUploader({
   bookId,
   collapsed = false,
@@ -183,19 +316,21 @@ export function AdminPageUploader({
   ocrWorkerStatus,
 }: AdminPageUploaderProps) {
   const { pages } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
+  const actorId = taskCenter?.actorId ?? null;
   const t = useTranslations("admin");
-  const { formatNumber } = useI18n();
+  const tCommon = useTranslations("common");
   const [files, setFiles] = useState<File[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const session = useSyncExternalStore(
-    (onChange) => subscribeAdminBookUploadSession(bookId, onChange),
-    () => getAdminBookUploadSession(bookId),
+    (onChange) => subscribeAdminBookUploadSession(bookId, onChange, actorId),
+    () => getAdminBookUploadSession(bookId, actorId),
     () => emptyAdminBookUploadSession,
   );
   const lastCompletedRunIdRef = useRef(0);
   const hadActiveServerTasksRef = useRef(false);
 
-  // Rehydrate durable active upload/OCR jobs from GET /studio/tasks after reload or route switch.
+  // Rehydrate durable active upload/OCR jobs from GET /studio/admin/tasks after reload or route switch.
   useEffect(() => {
     let active = true;
     let controller: AbortController | null = null;
@@ -204,6 +339,7 @@ export function AdminPageUploader({
       controller?.abort();
       controller = new AbortController();
       void rehydrateAdminBookUploadTasks(bookId, {
+        actorId,
         signal: controller.signal,
       }).then((tasks) => {
         if (!active) return;
@@ -229,7 +365,7 @@ export function AdminPageUploader({
         window.removeEventListener("viread:android-resume", syncServerTasks);
       }
     };
-  }, [bookId, onUploaded]);
+  }, [actorId, bookId, onUploaded]);
 
   const shouldRender =
     !collapsed ||
@@ -368,7 +504,7 @@ export function AdminPageUploader({
       "page-images",
     ) as HTMLInputElement | null;
     if (input) input.value = "";
-    void runAdminBookUpload(bookId, pages, entries, initialProgress);
+    void runAdminBookUpload(bookId, pages, entries, initialProgress, actorId);
   }
 
   return (
@@ -505,18 +641,12 @@ export function AdminPageUploader({
             </Link>
           </div>
           <div className="grid gap-2">
-            {session.serverTasks.map((task) => {
-              const hasMeasured =
-                !task.is_indeterminate &&
-                task.progress_completed !== null &&
-                task.progress_total !== null &&
-                task.progress_total > 0 &&
-                task.progress_pct !== null;
-              return (
-                <div
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2 text-xs"
-                  key={`${task.source}-${task.id}`}
-                >
+            {session.serverTasks.map((task) => (
+              <div
+                className="space-y-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2.5 text-xs"
+                key={`${task.source}-${task.id}`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-bold text-ink">
                       {task.title_vi}
@@ -527,96 +657,27 @@ export function AdminPageUploader({
                     </p>
                   </div>
                   <AdminBadge tone="info">{task.status_label_vi}</AdminBadge>
-                  {hasMeasured ? (
-                    <span className="font-semibold tabular-nums text-ink">
-                      {task.progress_completed}/{task.progress_total} (
-                      {Math.round(task.progress_pct!)}%)
-                    </span>
-                  ) : null}
                 </div>
-              );
-            })}
+                <TaskProgressView t={tCommon} task={task} />
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
 
       {session.progress.length ? (
         <div className="space-y-2" aria-live="polite">
-          {session.progress.map((item) => {
-            const isQueuedOffline =
-              item.status === "QUEUED_OFFLINE" || item.queued_offline === true;
-            return (
-              <div
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface-subtle/50 px-3 py-2"
-                key={item.client_id}
-              >
-                <span className="min-w-0 flex-1 break-all text-xs font-semibold text-ink">
-                  {item.file_name ?? item.client_id}
-                </span>
-                <div className="flex items-center gap-2">
-                  <AdminBadge
-                    icon={
-                      isQueuedOffline ? (
-                        <Clock3
-                          aria-hidden="true"
-                          className="size-3.5 shrink-0"
-                        />
-                      ) : undefined
-                    }
-                    tone={
-                      item.status === "FAILED"
-                        ? "danger"
-                        : isQueuedOffline
-                          ? "warning"
-                          : item.status === "UPLOADING"
-                            ? "info"
-                            : item.status === "QUEUED"
-                              ? "neutral"
-                              : "success"
-                    }
-                  >
-                    {item.status === "FAILED"
-                      ? t("books.uploader.statusFailed")
-                      : isQueuedOffline
-                        ? t(
-                            "books.uploader.statusQueuedOffline",
-                            undefined,
-                            "Đã đưa vào hàng chờ OCR",
-                          )
-                        : item.status === "UPLOADING"
-                          ? t("books.uploader.statusUploading")
-                          : item.status === "QUEUED"
-                            ? t("books.uploader.statusPending")
-                            : (item.summary_message ??
-                              t("books.uploader.statusSavedFallback"))}
-                  </AdminBadge>
-                  {!isQueuedOffline ? (
-                    <span className="text-xs font-bold text-muted tabular-nums">
-                      {formatNumber(item.progress_percent)}%
-                    </span>
-                  ) : null}
-                </div>
-                {isQueuedOffline && item.summary_message ? (
-                  <span className="basis-full text-xs text-amber-900">
-                    {item.summary_message}
-                  </span>
-                ) : null}
-                {item.status === "FAILED" && item.error_message ? (
-                  <span className="basis-full text-xs text-danger">
-                    {item.error_message}
-                  </span>
-                ) : null}
-              </div>
-            );
-          })}
+          {session.progress.map((item) => (
+            <UploadFileProgressItem item={item} key={item.client_id} t={t} />
+          ))}
         </div>
       ) : null}
 
-      {hasRetryableAdminBookUploads(bookId) ? (
+      {hasRetryableAdminBookUploads(bookId, actorId) ? (
         <Button
           disabled={session.busy}
           isLoading={session.busy}
-          onClick={() => void retryAdminBookUpload(bookId, pages)}
+          onClick={() => void retryAdminBookUpload(bookId, pages, actorId)}
           size="admin"
           variant="outline"
         >

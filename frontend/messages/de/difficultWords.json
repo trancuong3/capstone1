@@ -52,7 +52,12 @@
     "emptyFilterDescription": "Keine Wörter entsprechen dem ausgewählten Übungsstatus.",
     "viewAllWords": "Alle Wörter anzeigen ({count})",
     "paginationAria": "Buchgruppen für Wortübungen paginieren",
-    "paginationItemLabel": "Bücher"
+    "paginationItemLabel": "Bücher",
+    "statTotal": "Wörter gesamt",
+    "statCompleted": "Sicher gelesen",
+    "statRemaining": "Noch üben",
+    "quickMastered": "Gekonnt",
+    "quickNeedsMoreFull": "Mehr üben"
   },
   "bookCard": {
     "gradeSingle": "Klasse {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Noch nicht wiederholt",
     "badgeNeedsMore": "Übung erforderlich",
     "badgeInProgress": "In Übung",
-    "badgeCompleted": "Richtig gelesen"
+    "badgeCompleted": "Richtig gelesen",
+    "showMoreWords": "+{count} weitere",
+    "showFewerWords": "Weniger",
+    "tagMispronounced": "Falsch {count}",
+    "tagOmitted": "Ausgel. {count}",
+    "tagRepeated": "Wdh. {count}"
   },
   "item": {
     "notPracticed": "Nicht geübt",

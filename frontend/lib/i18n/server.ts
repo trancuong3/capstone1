@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 
 import {
@@ -38,6 +39,20 @@ export function resolveServerLocaleFromCookieValue(
   return normalized;
 }
 
+const getMemoizedPublishedServerLocale = cache(
+  async (): Promise<SupportedLocale> => {
+    try {
+      const cookieStore = await cookies();
+      const rawCookie = cookieStore.get(LOCALE_COOKIE_NAME)?.value;
+      return resolveServerLocaleFromCookieValue(rawCookie, {
+        publishedOnly: true,
+      });
+    } catch {
+      return DEFAULT_LOCALE;
+    }
+  },
+);
+
 /**
  * Reads `viread_locale` using Next.js 16 async `cookies()`.
  * Falls back safely to `DEFAULT_LOCALE` (`"vi"`) when called outside a
@@ -46,13 +61,16 @@ export function resolveServerLocaleFromCookieValue(
 export async function getServerLocale(
   options: ServerLocaleOptions = {},
 ): Promise<SupportedLocale> {
-  try {
-    const cookieStore = await cookies();
-    const rawCookie = cookieStore.get(LOCALE_COOKIE_NAME)?.value;
-    return resolveServerLocaleFromCookieValue(rawCookie, options);
-  } catch {
-    return DEFAULT_LOCALE;
+  if (options.publishedOnly === false) {
+    try {
+      const cookieStore = await cookies();
+      const rawCookie = cookieStore.get(LOCALE_COOKIE_NAME)?.value;
+      return resolveServerLocaleFromCookieValue(rawCookie, options);
+    } catch {
+      return DEFAULT_LOCALE;
+    }
   }
+  return getMemoizedPublishedServerLocale();
 }
 
 export interface ServerI18nSnapshot {
@@ -69,22 +87,64 @@ export interface ServerAdminI18nSnapshot extends ServerI18nSnapshot {
 }
 
 /**
+ * Omits the large (~170-240 KB) `admin` i18n namespace from RSC serialization
+ * on non-admin routes. Client navigation into `/admin` lazily hydrates the
+ * full locale bundle via `I18nProvider`.
+ */
+export function stripHeavyUnusedNamespaces(
+  messages: MessagesDictionary,
+  requestPath: string,
+): MessagesDictionary {
+  const normalizedPath = requestPath.split("?")[0] ?? "/";
+  if (
+    normalizedPath === "/admin" ||
+    normalizedPath.startsWith("/admin/") ||
+    !("admin" in messages)
+  ) {
+    return messages;
+  }
+  const trimmed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(messages)) {
+    if (key === "admin") continue;
+    trimmed[key] = value;
+  }
+  return trimmed as MessagesDictionary;
+}
+
+const getMemoizedPublishedServerI18n = cache(
+  async (): Promise<ServerI18nSnapshot> => {
+    const locale = await getMemoizedPublishedServerLocale();
+    const messages = await loadLocaleMessages(locale);
+    const metadata = getLocaleMetadata(locale);
+
+    return {
+      locale,
+      dir: getLocaleDirection(locale),
+      metadata,
+      messages,
+    };
+  },
+);
+
+/**
  * Loads ONLY the resolved SSR locale's core message bundle (excluding `admin`)
  * for RootLayout hydration.
  */
 export async function getServerI18n(
   options: ServerLocaleOptions = {},
 ): Promise<ServerI18nSnapshot> {
-  const locale = await getServerLocale(options);
-  const messages = await loadLocaleMessages(locale);
-  const metadata = getLocaleMetadata(locale);
-
-  return {
-    locale,
-    dir: getLocaleDirection(locale),
-    metadata,
-    messages,
-  };
+  if (options.publishedOnly === false) {
+    const locale = await getServerLocale(options);
+    const messages = await loadLocaleMessages(locale);
+    const metadata = getLocaleMetadata(locale);
+    return {
+      locale,
+      dir: getLocaleDirection(locale),
+      metadata,
+      messages,
+    };
+  }
+  return getMemoizedPublishedServerI18n();
 }
 
 /**

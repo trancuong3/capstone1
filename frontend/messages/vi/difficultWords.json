@@ -52,7 +52,12 @@
     "emptyFilterDescription": "Chưa có từ nào khớp trạng thái luyện đang chọn.",
     "viewAllWords": "Xem tất cả từ ({count})",
     "paginationAria": "Phân trang nhóm sách từ cần luyện",
-    "paginationItemLabel": "cuốn sách"
+    "paginationItemLabel": "cuốn sách",
+    "statTotal": "Tổng từ",
+    "statCompleted": "Đã đọc đúng",
+    "statRemaining": "Còn cần ôn",
+    "quickMastered": "Đã thuộc",
+    "quickNeedsMoreFull": "Cần ôn thêm"
   },
   "bookCard": {
     "gradeSingle": "Lớp {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "Chưa đọc lại",
     "badgeNeedsMore": "Cần luyện thêm",
     "badgeInProgress": "Đang luyện",
-    "badgeCompleted": "Đã đọc đúng"
+    "badgeCompleted": "Đã đọc đúng",
+    "showMoreWords": "+{count} từ khác",
+    "showFewerWords": "Thu gọn",
+    "tagMispronounced": "Nhầm {count}",
+    "tagOmitted": "Bỏ {count}",
+    "tagRepeated": "Lặp {count}"
   },
   "item": {
     "notPracticed": "Chưa luyện",

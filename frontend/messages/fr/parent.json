@@ -233,5 +233,22 @@
         "a3": "Ouvrez la section Progrès pour voir les rapports ou la section Historique pour voir les séances de lecture enregistrées."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Synchronisation vocale complète",
+    "title": "Choisir la Maîtresse ou le Maître IA",
+    "subtitle": "La voix choisie accompagne Lecture · Épellation · Mots difficiles · Compréhension · Jeux.",
+    "savedForChild": "Enregistré pour {alias}",
+    "previewButton": "Écouter un extrait",
+    "stopPreviewButton": "Arrêter l'extrait",
+    "personaGroupAria": "Choisir Maîtresse IA ou Maître IA",
+    "femaleTitle": "Maîtresse IA",
+    "femaleDesc": "Voix féminine douce et chaleureuse",
+    "maleTitle": "Maître IA",
+    "maleDesc": "Voix masculine posée et expressive",
+    "selectedBadge": "Actif",
+    "regionLabel": "Région",
+    "voiceListLabel": "Voix spécifique",
+    "voiceListAria": "Liste des voix selon l'enseignant et la région"
   }
 }

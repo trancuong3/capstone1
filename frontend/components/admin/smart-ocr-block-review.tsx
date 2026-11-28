@@ -17,8 +17,10 @@ import Image from "next/image";
 import { useMemo, useState } from "react";
 
 import { AdminBadge, type AdminBadgeTone } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import {
   applyPageOcrExtractionToDraft,
@@ -329,6 +331,7 @@ export function SmartOcrBlockReview({
   className,
 }: SmartOcrBlockReviewProps) {
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatNumber } = useI18n();
   const [extraction, setExtraction] =
     useState<PageOcrExtractionDTO>(initialExtraction);
@@ -342,6 +345,19 @@ export function SmartOcrBlockReview({
   const [editDraft, setEditDraft] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [applyingToDraft, setApplyingToDraft] = useState(false);
+  const applyStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 35, label: tCommon("aiProgress.processing") },
+      { atPct: 78, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const applyProgress = useAiProgress({
+    active: applyingToDraft,
+    stages: applyStages,
+    expectedDurationMs: 6_000,
+  });
   const [notice, setNotice] = useState<{
     tone: "info" | "success" | "warning" | "error";
     text: string;
@@ -901,6 +917,17 @@ export function SmartOcrBlockReview({
         </div>
       </div>
 
+      {applyingToDraft ? (
+        <AiProgressBar
+          active
+          elapsedSeconds={applyProgress.elapsedSeconds}
+          label={applyProgress.stageLabel ?? tCommon("aiProgress.processing")}
+          percent={applyProgress.percent}
+          size="sm"
+          testId="smart-ocr-apply-progress"
+        />
+      ) : null}
+
       {extraction.stats.circuit_breaker_triggered ? (
         <StatusMessage
           title={t(
@@ -1237,11 +1264,26 @@ export function SmartOcrBlockReviewLoader({
   ) => Promise<void> | void;
 }) {
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const [extraction, setExtraction] = useState<PageOcrExtractionDTO | null>(
     null,
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const extractStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 24, label: tCommon("aiProgress.analyzing") },
+      { atPct: 58, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const extractProgress = useAiProgress({
+    active: loading,
+    stages: extractStages,
+    expectedDurationMs: 10_000,
+  });
 
   async function loadOrExtract(forceExtract = false) {
     setLoading(true);
@@ -1297,6 +1339,18 @@ export function SmartOcrBlockReviewLoader({
               )}
         </Button>
       </div>
+      {loading ? (
+        <AiProgressBar
+          active
+          elapsedSeconds={extractProgress.elapsedSeconds}
+          label={
+            extractProgress.stageLabel ?? tCommon("aiProgress.ocrExtracting")
+          }
+          percent={extractProgress.percent}
+          size="sm"
+          testId="smart-ocr-extract-progress"
+        />
+      ) : null}
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
       {extraction ? (
         <SmartOcrBlockReview

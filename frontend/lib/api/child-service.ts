@@ -10,6 +10,14 @@ import type {
   ChildProfilePatchDTO,
 } from "@/types/child";
 
+export interface ChildVoicePreferencesPayload {
+  readonly voice_id: string;
+  readonly gender: "female" | "male";
+  readonly region: "north" | "central" | "south";
+  readonly speed: number;
+  readonly updated_at?: number;
+}
+
 export interface ChildService {
   list(): Promise<ChildProfileDTO[]>;
   create(request: ChildProfileCreateDTO): Promise<ChildProfileDTO>;
@@ -17,6 +25,10 @@ export interface ChildService {
   update(
     childId: string,
     request: ChildProfilePatchDTO,
+  ): Promise<ChildProfileDTO>;
+  updateVoicePreferences?(
+    childId: string,
+    payload: ChildVoicePreferencesPayload,
   ): Promise<ChildProfileDTO>;
   uploadAvatar(childId: string, file: File): Promise<ChildProfileDTO>;
   removeAvatar(childId: string): Promise<ChildProfileDTO>;
@@ -119,6 +131,20 @@ export function createChildService(): ChildService {
             },
           },
         ),
+      );
+    },
+
+    async updateVoicePreferences(
+      childId: string,
+      payload: ChildVoicePreferencesPayload,
+    ): Promise<ChildProfileDTO> {
+      return request(
+        `/profiles/children/${encodeURIComponent(childId)}/voice-preferences`,
+        childProfileSchema,
+        {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        },
       );
     },
 

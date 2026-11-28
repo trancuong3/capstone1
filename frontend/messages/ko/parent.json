@@ -233,5 +233,22 @@
         "a3": "진행도 섹션에서 리포트를 보거나 기록 섹션에서 저장된 독서 세션을 확인할 수 있습니다."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "전체 기능 음성 동기화",
+    "title": "AI 여선생님 / 남선생님 선택",
+    "subtitle": "선택한 목소리는 책 읽기 · 철자 연습 · 어려운 단어 · 독해 · 게임 전체에 동일하게 적용됩니다.",
+    "savedForChild": "{alias} 프로필에 저장됨",
+    "previewButton": "목소리 미리듣기",
+    "stopPreviewButton": "미리듣기 중지",
+    "personaGroupAria": "AI 여선생님 또는 AI 남선생님 선택",
+    "femaleTitle": "AI 여선생님",
+    "femaleDesc": "부드럽고 따뜻한 여성 목소리",
+    "maleTitle": "AI 남선생님",
+    "maleDesc": "차분하고 표현력 있는 남성 목소리",
+    "selectedBadge": "선택됨",
+    "regionLabel": "지역 억양",
+    "voiceListLabel": "세부 목소리",
+    "voiceListAria": "선택한 선생님과 지역의 목소리 목록"
   }
 }

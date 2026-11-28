@@ -233,5 +233,22 @@
         "a3": "פתחו את סעיף ההתקדמות לצפייה בדוחות או את סעיף ההיסטוריה לצפייה במפגשי קריאה שמורים."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "סנכרון קול בכל המערכת",
+    "title": "בחירת מורה AI (אישה או גבר)",
+    "subtitle": "הקול הנבחר מסונכרן בקריאה · איות · מילים מאתגרות · הבנת הנקרא · משחקים.",
+    "savedForChild": "נשמר עבור {alias}",
+    "previewButton": "השמעת דוגמה",
+    "stopPreviewButton": "עצירת דוגמה",
+    "personaGroupAria": "בחירת מורה AI אישה או גבר",
+    "femaleTitle": "מורה AI (אישה)",
+    "femaleDesc": "קול נשי חם ורך",
+    "maleTitle": "מורה AI (גבר)",
+    "maleDesc": "קול גברי חם וברור",
+    "selectedBadge": "נבחר",
+    "regionLabel": "אזור מבטא",
+    "voiceListLabel": "בחירת קול",
+    "voiceListAria": "רשימת קולות לפי מורה ואזור"
   }
 }

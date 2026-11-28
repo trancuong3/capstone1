@@ -25,9 +25,15 @@ import {
 } from "@/components/layout/mobile-bottom-nav";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useTranslations } from "@/hooks/use-i18n";
+import { clearAdminBookUploadSessions } from "@/lib/admin/admin-book-upload-session";
 import { clearPrivateMediaMemoryCache } from "@/lib/api/api-client";
+import {
+  broadcastActorSwitch,
+  clearGlobalTasksMemoryCache,
+} from "@/lib/api/global-tasks-service";
 import { resetApiReadCacheForActorSwitch } from "@/lib/api/read-cache";
 import { clearUserCache } from "@/lib/cache/user-query-cache";
 import { cn } from "@/lib/utils/cn";
@@ -93,6 +99,7 @@ const navGroups = [
 
 export function AdminLayout({ children }: { children: ReactNode }) {
   const { auth } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
   const t = useTranslations("admin");
   const pathname = usePathname();
   const router = useRouter();
@@ -135,10 +142,14 @@ export function AdminLayout({ children }: { children: ReactNode }) {
     setHasSignOutError(false);
     setIsSigningOut(true);
     try {
+      taskCenter?.clearForLogout();
+      clearGlobalTasksMemoryCache();
+      clearAdminBookUploadSessions();
       clearAdminBookAiBatchSessions();
       clearPrivateMediaMemoryCache();
       clearUserCache();
       resetApiReadCacheForActorSwitch();
+      broadcastActorSwitch();
       await auth.signOut();
       router.replace("/admin/login");
       router.refresh();

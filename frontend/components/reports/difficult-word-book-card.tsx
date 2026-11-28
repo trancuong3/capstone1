@@ -29,26 +29,26 @@ const CHIP_STYLES: Record<
 > = {
   NOT_PRACTICED: {
     className:
-      "border-red-300 bg-red-50 text-red-900 hover:bg-red-100 focus-visible:outline-red-600",
-    dotClass: "bg-red-500",
+      "border-orange-200 bg-orange-50/90 text-orange-950 hover:border-orange-300 hover:bg-orange-100/90 focus-visible:outline-primary",
+    dotClass: "bg-orange-500",
     labelKey: "bookCard.badgeNotPracticed",
   },
   NEEDS_MORE_PRACTICE: {
     className:
-      "border-red-300 bg-red-50 text-red-900 hover:bg-red-100 focus-visible:outline-red-600",
-    dotClass: "bg-red-500",
+      "border-amber-300 bg-warning-surface/90 text-warning hover:border-amber-400 hover:bg-warning-surface focus-visible:outline-primary",
+    dotClass: "bg-amber-600",
     labelKey: "bookCard.badgeNeedsMore",
   },
   IN_PROGRESS: {
     className:
-      "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 focus-visible:outline-amber-600",
+      "border-amber-200 bg-cream text-ink hover:border-amber-300 hover:bg-warning-surface/70 focus-visible:outline-primary",
     dotClass: "bg-amber-500",
     labelKey: "bookCard.badgeInProgress",
   },
   COMPLETED: {
     className:
-      "border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 focus-visible:outline-emerald-600",
-    dotClass: "bg-emerald-500",
+      "border-emerald-300 bg-success-surface text-success-ink hover:border-emerald-400 hover:bg-emerald-100 focus-visible:outline-primary",
+    dotClass: "bg-emerald-600",
     labelKey: "bookCard.badgeCompleted",
   },
 };
@@ -106,7 +106,7 @@ export function DifficultWordBookCard({
 
   return (
     <article
-      className="flex min-w-0 flex-col justify-between gap-5 rounded-[24px] border border-[#DCE8E4] bg-white p-5 shadow-sm transition-shadow hover:shadow-md sm:p-6"
+      className="flex h-full min-w-0 flex-col justify-between gap-5 rounded-card border border-border bg-white p-5 shadow-xs transition-shadow hover:shadow-md sm:p-6"
       data-book-group={group.key}
     >
       <div className="flex flex-col gap-4">
@@ -120,7 +120,7 @@ export function DifficultWordBookCard({
                  safest option until cover URLs are served from a known CDN. */
               <img
                 alt={t("bookCard.coverAlt", { title: group.bookTitle })}
-                className="h-24 w-20 shrink-0 rounded-2xl border border-[#DCE8E4] object-cover sm:h-28 sm:w-24"
+                className="h-24 w-20 shrink-0 rounded-control border border-border object-cover shadow-xs sm:h-28 sm:w-24"
                 loading="lazy"
                 onError={handleCoverError}
                 src={group.bookCoverUrl}
@@ -135,12 +135,12 @@ export function DifficultWordBookCard({
                   max_grade: group.maxGrade ?? group.minGrade ?? 1,
                   lifecycle_status: "ACTIVE",
                 }}
-                className="h-24! w-20! shrink-0 rounded-2xl! border border-[#DCE8E4] p-2 sm:h-28! sm:w-24!"
+                className="h-24! w-20! shrink-0 rounded-control! border border-border p-2 shadow-xs sm:h-28! sm:w-24!"
                 hero
               />
             )
           ) : (
-            <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] text-[#147D87] sm:h-28 sm:w-24">
+            <div className="flex h-24 w-20 shrink-0 items-center justify-center rounded-control border border-border bg-surface-subtle text-primary shadow-2xs sm:h-28 sm:w-24">
               <BookOpen aria-hidden="true" className="size-8" />
             </div>
           )}
@@ -148,12 +148,12 @@ export function DifficultWordBookCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               {gradeLabel ? (
-                <span className="inline-flex items-center rounded-full bg-[#DDF3F5] px-2.5 py-0.5 text-xs font-bold text-[#0E6D76]">
+                <span className="inline-flex items-center rounded-full bg-sky px-2.5 py-0.5 text-xs font-bold text-primary-hover">
                   {gradeLabel}
                 </span>
               ) : null}
               {allCompleted ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-900">
+                <span className="inline-flex items-center gap-1 rounded-full bg-success-surface px-2.5 py-0.5 text-xs font-bold text-success-ink">
                   <Sparkles aria-hidden="true" className="size-3.5" />
                   {t("bookCard.completedBadge")}
                 </span>
@@ -161,7 +161,7 @@ export function DifficultWordBookCard({
             </div>
 
             <h2
-              className="viread-learning-content mt-1.5 text-xl font-extrabold leading-snug text-[#213C42]"
+              className="viread-learning-content mt-1.5 line-clamp-2 text-xl font-extrabold leading-snug text-ink"
               dir="ltr"
               lang="vi"
             >
@@ -170,7 +170,7 @@ export function DifficultWordBookCard({
 
             {group.bookAuthor ? (
               <p
-                className="viread-learning-content mt-0.5 truncate text-sm text-[#526970]"
+                className="viread-learning-content mt-0.5 truncate text-sm text-muted"
                 dir="ltr"
                 lang="vi"
               >
@@ -179,23 +179,23 @@ export function DifficultWordBookCard({
             ) : null}
 
             <div className="mt-3">
-              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-[#526970]">
+              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs font-bold text-muted">
                 <span>
                   {t("bookCard.progressSummary", {
                     completed: formatNumber(group.completedWords),
                     total: formatNumber(group.totalWords),
                   })}
                 </span>
-                <span className="tabular-nums text-[#0E6D76]">
+                <span className="tabular-nums text-primary-hover">
                   {group.progressPercent}%
                 </span>
               </div>
               <div
                 aria-hidden="true"
-                className="h-2.5 w-full overflow-hidden rounded-full bg-[#E8EFEA]"
+                className="h-2.5 w-full overflow-hidden rounded-full bg-surface-subtle"
               >
                 <div
-                  className="h-full rounded-full bg-[#147D87] transition-all duration-300"
+                  className="h-full rounded-full bg-primary transition-all duration-300"
                   style={{ width: `${group.progressPercent}%` }}
                 />
               </div>
@@ -253,60 +253,83 @@ export function DifficultWordBookCard({
           />
         </div>
 
-        <details className="group rounded-2xl border border-[#DCE8E4] bg-[#F6FAF8] px-4 py-2.5 text-sm">
-          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-bold text-[#213C42]">
+        <details className="group rounded-control border border-border bg-surface-subtle/80 px-4 py-2.5 text-sm">
+          <summary className="flex min-h-9 cursor-pointer list-none items-center justify-between font-bold text-ink">
             <span>{t("bookCard.parentDetails")}</span>
             <ChevronDown
               aria-hidden="true"
-              className="size-4 text-[#526970] transition-transform group-open:rotate-180"
+              className="size-4 text-muted transition-transform group-open:rotate-180"
             />
           </summary>
-          <ul className="mt-2.5 space-y-2 border-t border-[#DCE8E4] pt-2.5 text-xs text-[#526970]">
+          <ul className="mt-2.5 divide-y divide-border/70 border-t border-border pt-2 text-xs text-muted">
             {visibleDetailWords.map((word) => {
               const source = word.sources?.[0];
+              const mispronounced = word.mispronunciation_count ?? 0;
               return (
                 <li
-                  className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between"
+                  className="flex flex-col gap-1.5 py-2 first:pt-1 last:pb-0 sm:flex-row sm:items-center sm:justify-between"
                   key={`detail-${word.normalized_word}`}
                 >
-                  <div>
-                    <span
-                      className="viread-learning-content font-bold text-[#213C42]"
-                      dir="ltr"
-                      lang="vi"
-                    >
-                      {word.display_text}
-                    </span>
-                    {source?.page_number ? (
-                      <span>
-                        {" "}
-                        ·{" "}
-                        {tr("progress.pageLabel", {
-                          page: formatNumber(source.page_number),
-                        })}
-                      </span>
-                    ) : null}
-                    {source?.context_phrase ? (
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <span
-                        className="viread-learning-content italic"
+                        className="viread-learning-content text-sm font-extrabold text-ink"
                         dir="ltr"
                         lang="vi"
                       >
-                        {" "}
-                        · “{source.context_phrase}”
+                        {word.display_text}
+                      </span>
+                      {source?.page_number ? (
+                        <span className="inline-flex items-center rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-bold text-muted">
+                          {tr("progress.pageLabel", {
+                            page: formatNumber(source.page_number),
+                          })}
+                        </span>
+                      ) : null}
+                    </div>
+                    {source?.context_phrase ? (
+                      <p
+                        className="viread-learning-content italic text-muted"
+                        dir="ltr"
+                        lang="vi"
+                      >
+                        “{source.context_phrase}”
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-1.5 tabular-nums">
+                    <span className="rounded-full border border-border bg-white px-2 py-0.5 text-[11px] font-bold text-ink">
+                      {
+                        t("bookCard.wordStats", {
+                          score: formatNumber(word.difficulty_score),
+                          mispronounced: formatNumber(mispronounced),
+                          omitted: formatNumber(word.omission_count),
+                          repeated: formatNumber(word.repetition_count),
+                        }).split(" · ")[0]
+                      }
+                    </span>
+                    {mispronounced > 0 ? (
+                      <span className="rounded-full bg-orange-100/90 px-2 py-0.5 text-[11px] font-bold text-orange-900">
+                        {t("bookCard.tagMispronounced", {
+                          count: formatNumber(mispronounced),
+                        })}
+                      </span>
+                    ) : null}
+                    {word.omission_count > 0 ? (
+                      <span className="rounded-full bg-warning-surface px-2 py-0.5 text-[11px] font-bold text-warning">
+                        {t("bookCard.tagOmitted", {
+                          count: formatNumber(word.omission_count),
+                        })}
+                      </span>
+                    ) : null}
+                    {word.repetition_count > 0 ? (
+                      <span className="rounded-full bg-sky px-2 py-0.5 text-[11px] font-bold text-primary-hover">
+                        {t("bookCard.tagRepeated", {
+                          count: formatNumber(word.repetition_count),
+                        })}
                       </span>
                     ) : null}
                   </div>
-                  <span className="tabular-nums">
-                    {t("bookCard.wordStats", {
-                      score: formatNumber(word.difficulty_score),
-                      mispronounced: formatNumber(
-                        word.mispronunciation_count ?? 0,
-                      ),
-                      omitted: formatNumber(word.omission_count),
-                      repeated: formatNumber(word.repetition_count),
-                    })}
-                  </span>
                 </li>
               );
             })}
@@ -325,7 +348,7 @@ export function DifficultWordBookCard({
 
       {firstPendingWord ? (
         <Button
-          className="min-h-12 w-full rounded-2xl text-base font-extrabold"
+          className="min-h-12 w-full rounded-control text-base font-extrabold"
           onClick={() => onStartBookPractice(firstPendingWord)}
           variant={allCompleted ? "secondary" : "primary"}
         >

@@ -15,13 +15,17 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { useRecordingPlayback } from "@/hooks/use-recording-playback";
 import { createSpeechService } from "@/lib/api/speech-service";
@@ -265,9 +269,11 @@ export function DifficultWordPracticePanel({
 }: DifficultWordPracticePanelProps) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("difficultWords");
+  const tCommon = useTranslations("common");
   const { difficultWordService } = useReportServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
+  const teacherPersona = useTeacherPersona();
   const echoGuard = useMemo(() => new EchoGuard(), []);
   const practiceSessionLockId = `practice_${child.id}`;
 
@@ -309,6 +315,25 @@ export function DifficultWordPracticePanel({
   const [isPlayingPhonics, setIsPlayingPhonics] = useState(false);
   const [masteryOutcome, setMasteryOutcome] =
     useState<ReadingWordMasteryOutcome | null>(null);
+  const isEvaluatingPronunciation =
+    flowState === "EVALUATING" || flowState === "SAVING";
+  const evalProgress = useAiProgress({
+    active: isEvaluatingPronunciation,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.transcribing") },
+      { atPct: 50, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 5_000,
+  });
+  const phonicsProgress = useAiProgress({
+    active: isPlayingPhonics,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
 
   const mountedRef = useRef(true);
   const flowGenerationRef = useRef(0);
@@ -1868,10 +1893,10 @@ export function DifficultWordPracticePanel({
     flowState === "SUCCESS"
       ? "border-emerald-300 bg-emerald-50"
       : flowState === "LISTENING" || flowState === "EVALUATING"
-        ? "border-amber-300 bg-amber-50"
+        ? "border-amber-300 bg-warning-surface/70"
         : failureLabel === "Đọc sai" &&
             (flowState === "INSTRUCTING" || flowState === "NEEDS_RETRY")
-          ? "border-red-300 bg-red-50"
+          ? "border-orange-300 bg-orange-50/90"
           : flowState === "NEEDS_RETRY" || flowState === "TECHNICAL_ERROR"
             ? "border-warning/30 bg-warning-surface"
             : "border-border bg-cream";
@@ -1924,9 +1949,9 @@ export function DifficultWordPracticePanel({
   return (
     <section
       aria-labelledby="practice-word-heading"
-      className="mx-auto flex w-full max-w-[780px] flex-col gap-4 rounded-[24px] border border-[#DCE8E4] bg-white p-4 shadow-sm sm:gap-5 sm:p-8"
+      className="mx-auto flex w-full max-w-[780px] flex-col gap-5 rounded-card border border-border bg-white p-5 shadow-sm sm:gap-6 sm:p-8"
     >
-      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-[#DCE8E4] pb-3 sm:gap-3 sm:pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 border-b border-border pb-3.5 sm:gap-3 sm:pb-4">
         <Button
           className="min-h-12 sm:w-auto"
           onClick={() => {
@@ -1942,7 +1967,7 @@ export function DifficultWordPracticePanel({
 
         <div className="flex flex-wrap items-center gap-2">
           {wordIndexInQueue >= 0 ? (
-            <span className="rounded-full bg-[#F6FAF8] px-3 py-1 text-xs font-bold text-[#526970]">
+            <span className="rounded-full bg-surface-subtle px-3 py-1 text-xs font-bold text-muted">
               {t("practice.wordPosition", {
                 current: wordIndexInQueue + 1,
                 total: words.length,
@@ -1958,10 +1983,10 @@ export function DifficultWordPracticePanel({
       </div>
 
       {primarySource?.book_title ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-[#526970]">
-          <BookOpen aria-hidden="true" className="size-4 text-[#147D87]" />
+        <div className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <BookOpen aria-hidden="true" className="size-4 text-primary" />
           <span
-            className="viread-learning-content font-bold text-[#213C42]"
+            className="viread-learning-content font-bold text-ink"
             dir="ltr"
             lang="vi"
           >
@@ -1974,7 +1999,7 @@ export function DifficultWordPracticePanel({
           ) : null}
           {primarySource.context_phrase ? (
             <span
-              className="viread-learning-content rounded-lg bg-[#F6FAF8] px-2.5 py-0.5 text-xs italic text-[#526970]"
+              className="viread-learning-content rounded-control bg-surface-subtle px-2.5 py-0.5 text-xs italic text-muted"
               dir="ltr"
               lang="vi"
             >
@@ -1988,14 +2013,14 @@ export function DifficultWordPracticePanel({
         ref={wordCardRef}
         data-capture-ms={latestResult?.audio_duration_ms ?? undefined}
         data-evaluation-ms={evaluationDurationMs ?? undefined}
-        className={`flex flex-col items-center gap-4 rounded-card border px-5 py-5 text-center transition-colors sm:py-7 ${stageThemeClass}`}
+        className={`flex flex-col items-center gap-4 rounded-card border px-5 py-6 text-center transition-colors sm:py-8 ${stageThemeClass}`}
       >
         <p className="text-sm font-extrabold text-primary" aria-live="polite">
           {stageLabel}
         </p>
 
         {failureDisplay && flowState !== "SUCCESS" ? (
-          <span className="rounded-full border border-warning/30 bg-white/90 px-3 py-0.5 text-xs font-extrabold text-[#213C42]">
+          <span className="rounded-full border border-warning/30 bg-white/90 px-3 py-0.5 text-xs font-extrabold text-ink">
             {failureDisplay}
           </span>
         ) : null}
@@ -2010,7 +2035,7 @@ export function DifficultWordPracticePanel({
         ) : null}
 
         <h2
-          className="viread-learning-content text-5xl font-black tracking-tight text-[#213C42] sm:text-6xl"
+          className="viread-learning-content text-5xl font-black tracking-tight text-ink sm:text-6xl"
           dir="ltr"
           id="practice-word-heading"
           lang="vi"
@@ -2018,14 +2043,14 @@ export function DifficultWordPracticePanel({
           {word.display_text}
         </h2>
 
-        <p
-          aria-live="polite"
-          className="max-w-md text-base font-bold text-[#213C42]"
-        >
+        <p aria-live="polite" className="max-w-md text-base font-bold text-ink">
           {flowState === "PREPARING"
             ? t("practice.promptPreparing")
             : flowState === "INSTRUCTING"
-              ? (coachCue ?? t("practice.promptInstructingFallback"))
+              ? adaptTextToTeacherPersona(
+                  coachCue ?? t("practice.promptInstructingFallback"),
+                  teacherPersona.gender,
+                )
               : flowState === "LISTENING"
                 ? phraseTurn
                   ? t("practice.promptListeningPhrase")
@@ -2053,6 +2078,34 @@ export function DifficultWordPracticePanel({
                           ? t("practice.promptPaused")
                           : t("practice.promptIdle")}
         </p>
+
+        {isEvaluatingPronunciation ? (
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              label={
+                evalProgress.stageLabel ??
+                tCommon("aiProgress.evaluatingAnswer")
+              }
+              percent={evalProgress.percent}
+              size="compact"
+              testId="practice-evaluating-progress"
+            />
+          </div>
+        ) : isPlayingPhonics ? (
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              label={
+                phonicsProgress.stageLabel ??
+                tCommon("aiProgress.synthesizingVoice")
+              }
+              percent={phonicsProgress.percent}
+              size="compact"
+              testId="practice-phonics-progress"
+            />
+          </div>
+        ) : null}
 
         {latestResult?.spoken_transcript ? (
           <p className="rounded-full bg-white/85 px-4 py-1 text-sm font-semibold text-[#526970]">

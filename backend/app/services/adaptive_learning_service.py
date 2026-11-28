@@ -684,6 +684,8 @@ class AdaptiveLearningService:
         self,
         child_id: UUID,
         parent_id: UUID,
+        *,
+        teacher_gender: str | None = None,
     ) -> EntertainmentRecommendationsRead:
         profile = await self.get_adaptive_profile(child_id, parent_id, window_days=7)
         today_utc = datetime.now(timezone.utc).date()
@@ -691,6 +693,18 @@ class AdaptiveLearningService:
         recent_shoot = await self.repository.list_shooter_sessions(child_id, window_days=2)
         recent_kar = await self.repository.list_karaoke_sessions(child_id, window_days=2)
         recent_mem = await self.repository.list_memory_sessions(child_id, window_days=2)
+
+        resolved_gender = teacher_gender if teacher_gender in ("female", "male") else None
+        if resolved_gender is None:
+            try:
+                child = await self._require_child(child_id, parent_id)
+                settings = getattr(child, "Settings", None)
+                if isinstance(settings, dict):
+                    vp = settings.get("voice_preferences")
+                    if isinstance(vp, dict) and vp.get("gender") in ("female", "male"):
+                        resolved_gender = vp["gender"]
+            except Exception:
+                resolved_gender = None
 
         today_count = sum(
             1
@@ -707,9 +721,18 @@ class AdaptiveLearningService:
             break_msg = "Mỗi phiên chơi khoảng 10–15 phút là vừa đẹp để mắt bé luôn khỏe mạnh."
 
         primary = profile.recommendations[0]
-        greeting = (
-            f"Chào {profile.child_alias}! Hôm nay mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
-        )
+        if resolved_gender == "male":
+            greeting = (
+                f"Chào {profile.child_alias}! Hôm nay thầy trò mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
+            )
+        elif resolved_gender == "female":
+            greeting = (
+                f"Chào {profile.child_alias}! Hôm nay cô trò mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
+            )
+        else:
+            greeting = (
+                f"Chào {profile.child_alias}! Hôm nay mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
+            )
 
         return EntertainmentRecommendationsRead(
             child_id=profile.child_id,

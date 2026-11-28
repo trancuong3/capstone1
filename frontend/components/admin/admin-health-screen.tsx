@@ -33,9 +33,11 @@ import {
   AdminStatusBadge,
   type AdminBadgeTone,
 } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -840,6 +842,7 @@ function GroupSectionHeader({
 export function AdminHealthScreen() {
   const { health } = useAdminServices();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber, formatPercent } = useI18n();
 
   const [snapshot, setSnapshot] = useState<HealthSnapshotUI | null>(null);
@@ -860,6 +863,16 @@ export function AdminHealthScreen() {
 
   const [isWakingOcr, setIsWakingOcr] = useState(false);
   const [wakeNotice, setWakeNotice] = useState<ActionNotice | null>(null);
+  const wakeOcrProgress = useAiProgress({
+    active: isWakingOcr,
+    expectedDurationMs: 45_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.wakingWorker") },
+      { atPct: 28, label: tCommon("aiProgress.connecting") },
+      { atPct: 62, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   const [clientCaps, setClientCaps] =
     useState<ClientDeviceCapabilitiesSnapshot | null>(null);
@@ -2003,6 +2016,19 @@ export function AdminHealthScreen() {
                                   )}
                             </Button>
                           </div>
+                        ) : null}
+                        {isWakingOcr ? (
+                          <AiProgressBar
+                            active
+                            elapsedSeconds={wakeOcrProgress.elapsedSeconds}
+                            label={
+                              wakeOcrProgress.stageLabel ??
+                              tCommon("aiProgress.wakingWorker")
+                            }
+                            percent={wakeOcrProgress.percent}
+                            size="sm"
+                            testId="ocr-wakeup-progress"
+                          />
                         ) : null}
                         {wakeNotice ? (
                           <StatusMessage

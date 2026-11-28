@@ -52,7 +52,12 @@
     "emptyFilterDescription": "沒有符合所選練習狀態的詞彙。",
     "viewAllWords": "查看所有詞彙 ({count})",
     "paginationAria": "待練習詞彙書籍分頁",
-    "paginationItemLabel": "本書籍"
+    "paginationItemLabel": "本書籍",
+    "statTotal": "總詞數",
+    "statCompleted": "已讀準",
+    "statRemaining": "待複習",
+    "quickMastered": "已掌握",
+    "quickNeedsMoreFull": "需加強"
   },
   "bookCard": {
     "gradeSingle": "{grade} 年級",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "尚未重讀",
     "badgeNeedsMore": "需要加強練習",
     "badgeInProgress": "練習中",
-    "badgeCompleted": "已正確朗讀"
+    "badgeCompleted": "已正確朗讀",
+    "showMoreWords": "+{count} 個詞",
+    "showFewerWords": "收合",
+    "tagMispronounced": "讀錯 {count}",
+    "tagOmitted": "漏讀 {count}",
+    "tagRepeated": "重複 {count}"
   },
   "item": {
     "notPracticed": "未練習",

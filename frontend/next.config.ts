@@ -124,16 +124,21 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   reactStrictMode: true,
   poweredByHeader: false,
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+    ...(isPlaywrightDev
+      ? {
+          devMemoryThresholdRestart: false,
+          serverComponentsHmrCache: false,
+          webpackMemoryOptimizations: true,
+        }
+      : {}),
+  },
   ...(isPlaywrightDev
     ? {
         onDemandEntries: {
           maxInactiveAge: 60 * 60 * 1000,
           pagesBufferLength: 100,
-        },
-        experimental: {
-          devMemoryThresholdRestart: false,
-          serverComponentsHmrCache: false,
-          webpackMemoryOptimizations: true,
         },
       }
     : {}),

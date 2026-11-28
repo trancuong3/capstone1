@@ -42,9 +42,14 @@ export interface AndroidSpeechCapabilities {
 export interface AndroidNativeTtsSpeakOptions {
   readonly rate?: number;
   readonly pitch?: number;
+  readonly voiceId?: string | null;
+  readonly voiceGender?: "female" | "male";
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
-  readonly onStart?: () => void;
+  readonly onStart?: (meta?: {
+    readonly voiceGenderMismatch?: boolean;
+    readonly resolvedVoiceName?: string | null;
+  }) => void;
   readonly onRangeStart?: (start: number, end: number) => void;
   readonly onDone?: () => void;
 }
@@ -57,6 +62,8 @@ export interface NativeSpeechIncomingEvent {
   readonly sttAvailable?: boolean;
   readonly onDeviceSttAvailable?: boolean;
   readonly platform?: string;
+  readonly voiceGenderMismatch?: boolean;
+  readonly resolvedVoiceName?: string | null;
   readonly start?: number;
   readonly end?: number;
   readonly onsetAt?: number;
@@ -448,10 +455,13 @@ export async function speakWithAndroidNativeTts(
       }
     };
 
-    const emitStart = () => {
+    const emitStart = (meta?: {
+      readonly voiceGenderMismatch?: boolean;
+      readonly resolvedVoiceName?: string | null;
+    }) => {
       if (startedEmitted) return;
       startedEmitted = true;
-      opts.onStart?.();
+      opts.onStart?.(meta);
     };
 
     const onAbort = () => {
@@ -464,7 +474,13 @@ export async function speakWithAndroidNativeTts(
       if (event.requestId && event.requestId !== requestId) return;
       switch (event.type) {
         case "tts_start":
-          emitStart();
+          emitStart({
+            voiceGenderMismatch: Boolean(event.voiceGenderMismatch),
+            resolvedVoiceName:
+              typeof event.resolvedVoiceName === "string"
+                ? event.resolvedVoiceName
+                : null,
+          });
           break;
         case "tts_range":
           emitStart();
@@ -505,6 +521,8 @@ export async function speakWithAndroidNativeTts(
       text: normalized,
       rate,
       pitch,
+      ...(opts.voiceGender ? { voiceGender: opts.voiceGender } : {}),
+      ...(opts.voiceId ? { voiceId: opts.voiceId } : {}),
     });
     if (!sent.ok) {
       finish(new Error("Failed to dispatch Android native TTS command."));

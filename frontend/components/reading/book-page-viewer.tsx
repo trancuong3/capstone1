@@ -12,6 +12,7 @@ import {
 } from "react";
 import { BookPageContent } from "@/components/reading/book-page-content";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   fetchAuthenticatedBlobUrl,
   isPrivateApiMediaUrl,
@@ -20,7 +21,6 @@ import {
 import { isStudioAuthenticatedMediaUrl } from "@/lib/api/book-assets-service";
 import { invalidateBrowserTokenCache } from "@/lib/api/browser-auth";
 import { canOverlayPage, containImage } from "@/lib/reading/page-presentation";
-import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { useReadingAutoScroll } from "@/lib/reading/use-reading-auto-scroll";
 import {
   getWordHighlightTier,
@@ -196,7 +196,8 @@ function PageSurface(
 ) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
-  const isMalePersona = getEffectiveTeacherPersona().gender === "male";
+  const teacherPersona = useTeacherPersona();
+  const isMalePersona = teacherPersona.gender === "male";
   const {
     page,
     currentWordId,

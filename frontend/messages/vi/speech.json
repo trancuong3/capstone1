@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "Máy trạm giọng đọc đang ngoại tuyến và hiện chưa có âm thanh dựng trước trên máy. Hãy bật máy trạm giọng đọc hoặc bật chế độ dự phòng bên dưới để nghe đọc mẫu.",
     "localWorkerLabel": "Máy trạm giọng đọc:",
     "sessionLockedBadge": "Đang khóa cho phiên đọc này",
-    "offlineBrowserBadge": "Trình duyệt đang ngoại tuyến"
+    "offlineBrowserBadge": "Trình duyệt đang ngoại tuyến",
+    "teacherPersonaAria": "Chọn nhanh Cô giáo AI hoặc Thầy giáo AI",
+    "femaleTeacherQuickBtn": "Cô giáo AI (Giọng nữ)",
+    "maleTeacherQuickBtn": "Thầy giáo AI (Giọng nam)"
   },
   "engineBadge": {
     "ariaLabel": "Nguồn giọng nói: Nghe {stt}, Đọc {tts}",
@@ -117,7 +120,8 @@
     "androidNativeFallbackNotice": "Giọng đọc trực tuyến tạm nghỉ — ViRead đang dùng giọng tiếng Việt trên thiết bị.",
     "browserFallbackNotice": "Giọng đọc trên máy chưa bật — ViRead đang dùng giọng Online của trình duyệt.",
     "autoplayBlocked": "Trình duyệt đang chờ bé chạm nút Nghe lại để bật âm thanh.",
-    "partialPlayback": "Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé."
+    "partialPlayback": "Âm thanh bị gián đoạn. Bé có thể nghe lại từ đầu nhé.",
+    "deviceVoiceGenderMismatchNotice": "Thiết bị hiện chỉ có gói giọng tiếng Việt khác giới tính ở chế độ ngoại tuyến. Hãy bật máy trạm giọng đọc hoặc Google dự phòng để nghe đúng giọng đã chọn."
   },
   "wasm": {
     "workerUnavailable": "Web Worker không khả dụng",

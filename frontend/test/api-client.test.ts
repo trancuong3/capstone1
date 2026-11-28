@@ -137,6 +137,111 @@ describe("real API client", () => {
     });
   });
 
+  it("retries idempotent GET once on transient 502/504 or network cold start", async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(
+          Response.json({ detail: "Bad Gateway" }, { status: 502 }),
+        )
+        .mockResolvedValueOnce(Response.json({ title: "Recovered 502" }));
+
+      const firstPromise = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(firstPromise).resolves.toEqual({ title: "Recovered 502" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+        .mockResolvedValueOnce(Response.json({ title: "Recovered net" }));
+
+      const netPromise = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(netPromise).resolves.toEqual({ title: "Recovered net" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(new Response("Gateway Timeout", { status: 504 }))
+        .mockResolvedValueOnce(Response.json({ title: "Recovered 504" }));
+
+      const html504Promise = requestApi("/books/", schema, undefined, {
+        bypassCache: true,
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      await expect(html504Promise).resolves.toEqual({ title: "Recovered 504" });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not retry GET on structured backend 504 domain errors, 401/503, or POST on 502/network failures", async () => {
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        {
+          detail:
+            "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
+        },
+        { status: 504 },
+      ),
+    );
+    await expect(
+      requestApi("/reading/scan-page-ocr", schema, undefined, {
+        bypassCache: true,
+      }),
+    ).rejects.toMatchObject({
+      status: 504,
+      message: expect.stringContaining("xếp hàng"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: "unauthorized" }, { status: 401 }),
+    );
+    await expect(
+      requestApi("/books/", schema, undefined, { bypassCache: true }),
+    ).rejects.toMatchObject({ status: 401, code: "AUTH_REQUIRED" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: "voice offline" }, { status: 503 }),
+    );
+    await expect(
+      requestApi("/books/", schema, undefined, { bypassCache: true }),
+    ).rejects.toMatchObject({ status: 503, code: "NETWORK_ERROR" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ detail: "Bad Gateway" }, { status: 502 }),
+    );
+    await expect(
+      requestApi("/books/", schema, undefined, {
+        method: "POST",
+        body: { title: "Create" },
+      }),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fetchMock.mockReset();
+    fetchMock.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    await expect(
+      requestApi("/books/", schema, undefined, {
+        method: "POST",
+        body: { title: "Create" },
+      }),
+    ).rejects.toMatchObject({ status: 0, code: "NETWORK_ERROR" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("does not produce a ready result while HTTP is pending", async () => {
     let resolveResponse: ((response: Response) => void) | undefined;
     fetchMock.mockReturnValue(

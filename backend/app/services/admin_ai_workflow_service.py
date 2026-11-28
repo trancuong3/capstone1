@@ -120,6 +120,14 @@ class AdminAiWorkflowService:
                 and safety_hash
                 and candidate_hash == safety_hash
             )
+        from app.services.ai_task_progress import compute_admin_workflow_progress
+
+        progress_pct, _progress_mode = compute_admin_workflow_progress(
+            status=row.Status,
+            stage=row.Stage,
+            completed_chunks=row.CompletedChunks,
+            total_chunks=row.TotalChunks,
+        )
         return AdminAiWorkflowRead(
             workflow_id=row.Id,
             page_id=row.PageId,
@@ -128,6 +136,7 @@ class AdminAiWorkflowService:
             status=row.Status,
             stage=row.Stage,
             progress={"completed_chunks": row.CompletedChunks, "total_chunks": row.TotalChunks},
+            progress_pct=progress_pct,
             attempts=int(row.Attempts or 0),
             error_code=row.ErrorCode,
             original_ocr_hash=row.OriginalOcrHash,

@@ -14,9 +14,14 @@ interface InflightRead {
   invalidated: boolean;
 }
 
+interface RegisteredResetListener {
+  readonly listener: () => void;
+  readonly onActorSwitch: boolean;
+}
+
 const readCache = new Map<string, CachedEntry>();
 const inflightReads = new Map<string, InflightRead>();
-const resetListeners = new Set<() => void>();
+const resetListeners = new Set<RegisteredResetListener>();
 let activeActorScope = "anon";
 let crossRequestCacheEnabled = false;
 let cacheEpoch = 0;
@@ -30,6 +35,7 @@ const NON_CACHEABLE_PATH_PATTERNS = [
   /\/scan-page-ocr(?:\/|\?|$)/,
   /\/my-books(?:\/|\?|$)/,
   /\/global-tasks(?:\/|\?|$)/,
+  /\/studio\/(?:(?:admin|parent)\/)?tasks(?:\/|\?|$)/,
   /\/workflows(?:\/|\?|$)/,
   /\/user-books(?:\/|\?|$)/,
   /\/processing(?:\/|\?|$)/,
@@ -41,16 +47,22 @@ export function setApiReadCacheEnabled(enabled: boolean): void {
   crossRequestCacheEnabled = enabled;
 }
 
-export function registerCacheResetListener(listener: () => void): void {
-  resetListeners.add(listener);
+export function registerCacheResetListener(
+  listener: () => void,
+  options?: { readonly onActorSwitch?: boolean },
+): void {
+  resetListeners.add({
+    listener,
+    onActorSwitch: options?.onActorSwitch ?? true,
+  });
 }
 
 export function resetAllApiCachesForTests(): void {
   crossRequestCacheEnabled = false;
   resetApiReadCacheForActorSwitch();
   setApiReadCacheActorScope(null);
-  for (const listener of resetListeners) {
-    listener();
+  for (const entry of resetListeners) {
+    entry.listener();
   }
 }
 
@@ -145,6 +157,11 @@ export function resetApiReadCacheForActorSwitch(): void {
     entry.controller.abort();
   }
   inflightReads.clear();
+  for (const entry of resetListeners) {
+    if (entry.onActorSwitch) {
+      entry.listener();
+    }
+  }
 }
 
 export function clearApiReadCache(): void {

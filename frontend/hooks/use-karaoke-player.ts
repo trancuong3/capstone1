@@ -49,6 +49,7 @@ export function useKaraokePlayer(
   const [error, setError] = useState("");
   const [volume, setVolumeState] = useState(0.6);
   const [rate, setRateState] = useState(1);
+  const [keyShift, setKeyShiftState] = useState(0);
 
   const emitClock = useCallback((ms: number) => {
     for (const listener of clockListeners.current) {
@@ -349,6 +350,11 @@ export function useKaraokePlayer(
     }
     setRateState(value);
   }, []);
+  const setKeyShift = useCallback((semitones: number) => {
+    if (!Number.isFinite(semitones)) return;
+    const clamped = Math.max(-3, Math.min(3, Math.round(semitones)));
+    setKeyShiftState(clamped);
+  }, []);
   const getCurrentMs = useCallback(() => {
     const value = Math.round((audioRef.current?.currentTime ?? 0) * 1000);
     return Number.isFinite(value)
@@ -366,12 +372,14 @@ export function useKaraokePlayer(
     error,
     volume,
     rate,
+    keyShift,
     play,
     pause,
     seek,
     setVolume,
     setMuted,
     setRate,
+    setKeyShift,
     getCurrentMs,
     subscribeClock,
   };

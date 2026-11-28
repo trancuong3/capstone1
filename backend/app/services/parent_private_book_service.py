@@ -404,6 +404,15 @@ class ParentPrivateBookService:
             and book.ModerationStatus == MODERATION_ACTIVE
             and sub.WorkflowStatus in ("CHECK_FAILED", "NEEDS_RECHECK")
         )
+        from app.services.ai_task_progress import compute_parent_submission_progress
+
+        _stages_done, _total_stages, progress_pct, _progress_mode = compute_parent_submission_progress(
+            workflow_status=sub.WorkflowStatus,
+            ocr_status=sub.OcrStatus,
+            proofread_status=sub.ProofreadStatus,
+            tool_check_status=sub.ToolCheckStatus,
+            is_image_only=bool(sub.IsImageOnly),
+        )
         return ParentPageSubmissionRead(
             id=sub.Id,
             book_id=sub.BookId,
@@ -429,6 +438,7 @@ class ParentPrivateBookService:
             optimistic_lock_version=int(sub.OptimisticLockVersion),
             workflow_status=sub.WorkflowStatus,  # type: ignore[arg-type]
             workflow_status_label=WORKFLOW_STATUS_LABELS.get(sub.WorkflowStatus, sub.WorkflowStatus),
+            progress_pct=progress_pct,
             ocr_status=sub.OcrStatus,
             ocr_text=sub.OcrText,
             ocr_error_code=sub.OcrErrorCode,

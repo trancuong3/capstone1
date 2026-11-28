@@ -99,6 +99,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/cron|api/parent-email-relay|_next/static|_next/image|wasm/|workers/|audio/|favicon\\.ico|icon\\.svg|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|wasm|wav|mp3|js)$).*)",
+    "/((?!api/cron|api/parent-email-relay|_next/static|_next/image|wasm/|workers/|audio/|sounds/|favicon\\.ico|icon\\.svg|sitemap\\.xml|robots\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|wasm|onnx|mp3|wav|ogg|json|js|mjs|map)$).*)",
   ],
 };

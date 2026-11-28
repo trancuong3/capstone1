@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "ローカル音声ワーカーはオフラインで、端末に事前生成済み音声がありません。サンプル音声を再生するにはローカルワーカーを起動するか、下のフォールバックを有効にしてください。",
     "localWorkerLabel": "ローカルワーカー:",
     "sessionLockedBadge": "この読書セッションで固定中",
-    "offlineBrowserBadge": "ブラウザはオフラインです"
+    "offlineBrowserBadge": "ブラウザはオフラインです",
+    "teacherPersonaAria": "女性AI先生・男性AI先生を素早く切替",
+    "femaleTeacherQuickBtn": "女性のAI先生",
+    "maleTeacherQuickBtn": "男性のAI先生"
   },
   "engineBadge": {
     "ariaLabel": "音声状態: 聞き取り {stt}、読み上げ {tts}",
@@ -117,7 +120,8 @@
     "androidNativeFallbackNotice": "オンライン音声は一時停止中です。端末のベトナム語音声を使用しています。",
     "browserFallbackNotice": "デバイス音声が無効です — ブラウザのオンライン音声を使用しています。",
     "autoplayBlocked": "ブラウザは、音声再生を有効にするための操作を待機しています。「もう一度聞く」をタップしてください。",
-    "partialPlayback": "音声が中断されました。最初から聞き直すことができます。"
+    "partialPlayback": "音声が中断されました。最初から聞き直すことができます。",
+    "deviceVoiceGenderMismatchNotice": "この端末にはオフラインで別性別のベトナム語音声のみが入っています。選んだ性別の声を使うには音声サーバーまたはGoogle予備を有効にしてください。"
   },
   "wasm": {
     "workerUnavailable": "Web Workerが利用できません",

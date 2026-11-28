@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "خدمة الصوت المحلية غير متصلة ولا يوجد صوت مخزن محلياً حالياً. يرجى تشغيل الخدمة المحلية أو تفعيل الوضع الاحتياطي أدناه للاستماع إلى الصوت النموذجي.",
     "localWorkerLabel": "خدمة الصوت المحلية:",
     "sessionLockedBadge": "مقفل لجلسة القراءة هذه",
-    "offlineBrowserBadge": "المتصفح غير متصل بالإنترنت"
+    "offlineBrowserBadge": "المتصفح غير متصل بالإنترنت",
+    "teacherPersonaAria": "تبديل سريع بين المعلمة والمعلم الذكي",
+    "femaleTeacherQuickBtn": "المعلمة الذكية (أنثى)",
+    "maleTeacherQuickBtn": "المعلم الذكي (ذكر)"
   },
   "engineBadge": {
     "ariaLabel": "حالة الصوت: الاستماع {stt}، القراءة {tts}",
@@ -117,7 +120,8 @@
     "androidNativeFallbackNotice": "الصوت عبر الإنترنت متوقف مؤقتًا — يستخدم ViRead الصوت الفيتنامي على جهازك.",
     "browserFallbackNotice": "صوت الجهاز غير مفعل — تستخدم ViRead صوت المتصفح عبر الإنترنت.",
     "autoplayBlocked": "المتصفح في انتظار لمس الطفل لزر الاستماع مرة أخرى لتشغيل الصوت.",
-    "partialPlayback": "تم مقاطعة الصوت. يمكنكم الاستماع مرة أخرى من البداية."
+    "partialPlayback": "تم مقاطعة الصوت. يمكنكم الاستماع مرة أخرى من البداية.",
+    "deviceVoiceGenderMismatchNotice": "لا يتوفر على هذا الجهاز دون إنترنت إلا صوت فيتنامي من جنس مختلف. فعّل خادم الصوت المحلي أو بديل Google لسماع الجنس المحدد."
   },
   "wasm": {
     "workerUnavailable": "Web Worker غير متاح",

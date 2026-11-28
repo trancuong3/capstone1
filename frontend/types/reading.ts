@@ -1,4 +1,4 @@
-import type { BookPagePreviewDTO } from "@/types/book";
+import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { ISODateTime, UUID } from "@/types/profile";
 
 export type ReadingSessionState =
@@ -26,6 +26,7 @@ export interface HistorySessionSummaryDTO extends Omit<
   "state"
 > {
   readonly state: ReadingSessionState | "IN_PROGRESS";
+  readonly book?: BookDetailDTO | null;
 }
 
 export type ReadingSession = ReadingSessionSummaryDTO;

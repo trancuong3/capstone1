@@ -22,6 +22,7 @@ from app.services.profile_service import (
     batch_sign_avatar_paths,
 )
 from app.schemas.profile import (
+    ChildVoicePreferencesUpdate,
     ContactPhoneUpdateRequest,
     DashboardSummaryResponse,
     AdminParentListResponse,
@@ -150,6 +151,27 @@ class ChildProfileRepository:
         child.AvatarPath = avatar_path
         try:
             await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            raise
+        return child
+
+    async def update_voice_preferences(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        voice_preferences: dict,
+    ):
+        child = await self.get_by_id_and_parent(child_id, parent_id)
+        if child is None:
+            return None
+
+        next_settings = dict(child.Settings or {})
+        next_settings["voice_preferences"] = dict(voice_preferences)
+        child.Settings = next_settings
+        try:
+            await self.db.commit()
+            await self.db.refresh(child)
         except Exception:
             await self.db.rollback()
             raise
@@ -319,6 +341,30 @@ class ChildProfileService:
         updated = await self.repository.update(child)
         return (await self._serialize_children_batched([updated]))[0]
 
+    async def update_child_voice_preferences(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        data: ChildVoicePreferencesUpdate,
+    ):
+        import time as _time
+
+        payload = {
+            "voice_id": data.voice_id,
+            "gender": data.gender,
+            "region": data.region,
+            "speed": data.speed,
+            "updated_at": data.updated_at if data.updated_at is not None else int(_time.time() * 1000),
+        }
+        updated = await self.repository.update_voice_preferences(
+            child_id,
+            parent_id,
+            payload,
+        )
+        if updated is None:
+            raise ChildProfileNotFoundError()
+        return (await self._serialize_children_batched([updated]))[0]
+
     async def delete_child(
         self,
         child_id: UUID,
@@ -453,6 +499,42 @@ async def update_child(
             child_id,
             current_parent_id,
             child_in,
+        )
+
+    except ChildProfileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "RESOURCE_NOT_FOUND",
+                "message": "Child profile not found",
+            },
+        )
+
+
+@router.patch(
+    "/children/{child_id}/voice-preferences",
+    response_model=ChildProfileResponse,
+)
+async def update_child_voice_preferences(
+    child_id: UUID,
+    voice_in: ChildVoicePreferencesUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_parent_id: UUID = Depends(
+        require_parent_id
+    ),
+):
+    """
+    Cập nhật lựa chọn giọng Cô giáo / Thầy giáo AI cho hồ sơ trẻ (lưu trong childprofiles.settings).
+    """
+
+    repository = ChildProfileRepository(db)
+    service = ChildProfileService(repository)
+
+    try:
+        return await service.update_child_voice_preferences(
+            child_id,
+            current_parent_id,
+            voice_in,
         )
 
     except ChildProfileNotFoundError:

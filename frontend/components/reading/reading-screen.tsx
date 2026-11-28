@@ -20,6 +20,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -27,11 +28,15 @@ import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
   getWasmModelCacheStatus,
+  type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -52,8 +57,10 @@ import {
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
+  getEffectiveVoiceId,
   getSessionVoiceAudit,
   getVoicePolicyPreferences,
+  hasPendingSessionVoiceSwitch,
   lockSessionVoice,
   setActiveVoiceSession,
   subscribeVoicePolicy,
@@ -643,6 +650,7 @@ function ReadingSessionScreen({
 }: ReadingScreenProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
   const services = useReadingServices();
   const speechService = useMemo(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
@@ -735,6 +743,108 @@ function ReadingSessionScreen({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
+  const [wasmDownloadState, setWasmDownloadState] = useState<{
+    percent: number | null;
+    file?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const wasmClient = getBrowserWasmSttClient();
+    const unsubscribe = wasmClient.subscribeProgress(
+      (event: WasmSttProgressEvent) => {
+        const normalizedStage = event.stage.toLowerCase();
+        if (
+          normalizedStage === "ready" ||
+          normalizedStage === "completed" ||
+          normalizedStage === "done" ||
+          wasmClient.isReady()
+        ) {
+          setWasmDownloadState(null);
+          return;
+        }
+        const computedPercent =
+          typeof event.index === "number" &&
+          typeof event.total === "number" &&
+          event.total > 0
+            ? Math.max(
+                5,
+                Math.min(
+                  95,
+                  Math.round(((event.index + 1) / event.total) * 85),
+                ),
+              )
+            : null;
+        setWasmDownloadState({
+          percent: computedPercent,
+          file: event.file,
+        });
+      },
+    );
+    return unsubscribe;
+  }, []);
+
+  const isWasmDownloading = wasmDownloadState !== null;
+  useEffect(() => {
+    if (!isWasmDownloading) return;
+    const wasmClient = getBrowserWasmSttClient();
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      if (wasmClient.isReady() || Date.now() - startedAt > 95_000) {
+        setWasmDownloadState(null);
+      }
+    }, 350);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [isWasmDownloading]);
+
+  const isTtsSynthesizing = speechPlayer.state === "loading";
+  const isReadingAiWait =
+    (isBusy && !speechPlayer.isPlaying) ||
+    isRetryingReports ||
+    isTtsSynthesizing;
+  const sessionLoadProgress = useAiProgress({
+    active: loadState.status === "loading" || !page,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 55, label: tCommon("aiProgress.connecting") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 5_000,
+  });
+  const wasmModelProgress = useAiProgress({
+    active: isWasmDownloading,
+    realPercent: wasmDownloadState?.percent ?? null,
+    progressMode:
+      wasmDownloadState?.percent !== null &&
+      wasmDownloadState?.percent !== undefined
+        ? "measured"
+        : "staged",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.downloadingSpeechModel") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 25_000,
+  });
+  const readingAiProgress = useAiProgress({
+    active: isReadingAiWait,
+    stages: isTtsSynthesizing
+      ? [
+          { atPct: 0, label: tCommon("aiProgress.synthesizingVoice") },
+          { atPct: 74, label: tCommon("aiProgress.finalizing") },
+        ]
+      : isRetryingReports
+        ? [
+            { atPct: 0, label: tCommon("aiProgress.analyzing") },
+            { atPct: 74, label: tCommon("aiProgress.finalizing") },
+          ]
+        : [
+            { atPct: 0, label: tCommon("aiProgress.transcribing") },
+            { atPct: 48, label: tCommon("aiProgress.analyzing") },
+            { atPct: 84, label: tCommon("aiProgress.finalizing") },
+          ],
+    expectedDurationMs: 4_500,
+  });
   const [isMicRecording, setIsMicRecording] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isReadingWord, setIsReadingWord] = useState(false);
@@ -832,6 +942,7 @@ function ReadingSessionScreen({
   const retryIncorrectCountsRef = useRef(new Map<string, number>());
 
   // Automatic reading flow: parent switches, echo protection, help ladder.
+  const teacherPersona = useTeacherPersona();
   const { preferences: automationPreferences, coachingStyle } =
     useAutomationPreferences();
   const automationRef = useRef(automationPreferences);
@@ -1171,7 +1282,10 @@ function ReadingSessionScreen({
         cachedHealth.google.tts_configured && !cachedHealth.google.tts_cooldown;
       if (ttsAllowsFallback && localTtsDown && useGoogleTts) {
         lockSessionVoice(sessionId, {
-          voiceId: mapLocalVoiceToGoogleBackup(null, policy.region),
+          voiceId: mapLocalVoiceToGoogleBackup(
+            getEffectiveVoiceId(),
+            policy.region,
+          ),
         });
       } else {
         lockSessionVoice(sessionId);
@@ -1340,7 +1454,7 @@ function ReadingSessionScreen({
           const activeLock = getActiveSessionVoiceLock();
           if (useGoogleTts) {
             const googleVoiceId = mapLocalVoiceToGoogleBackup(
-              activeLock?.voiceId ?? null,
+              activeLock?.voiceId ?? getEffectiveVoiceId(),
               activeLock?.region ?? policy.region,
             );
             // Lock directly to the configured Google voice (or resync server-side
@@ -1352,7 +1466,8 @@ function ReadingSessionScreen({
               });
             } else if (
               activeLock.provider === "local" &&
-              getSessionVoiceAudit(sessionId).length === 0
+              (getSessionVoiceAudit(sessionId).length === 0 ||
+                hasPendingSessionVoiceSwitch(sessionId))
             ) {
               lockSessionVoice(sessionId, {
                 voiceId: googleVoiceId,
@@ -1382,12 +1497,13 @@ function ReadingSessionScreen({
             }
             if (!getActiveSessionVoiceLock() && !ttsUsingCachedAudio) {
               // Only advertise browser TTS fallback when no SessionVoiceLock forbids it.
+              const effectiveId = getEffectiveVoiceId();
               recordTtsEngineUsage({
                 provider: "browser",
                 fallbackUsed: true,
                 fallbackReason: "LOCAL_TTS_UNAVAILABLE",
-                voiceId: null,
-                voiceGender: resolveVoiceGender(null),
+                voiceId: effectiveId,
+                voiceGender: resolveVoiceGender(effectiveId),
               });
             }
           }
@@ -7956,6 +8072,15 @@ function ReadingSessionScreen({
         <span className="sr-only" role="status">
           {t("session.loadingText")}
         </span>
+        <AiProgressBar
+          active
+          label={
+            sessionLoadProgress.stageLabel ?? tCommon("aiProgress.preparing")
+          }
+          percent={sessionLoadProgress.percent}
+          size="sm"
+          testId="reading-session-loading-progress"
+        />
         <Skeleton className="h-12 w-full rounded-control" />
         <Skeleton className="min-h-[680px] w-full rounded-card" />
         <Skeleton className="h-20 w-full rounded-card" />
@@ -8046,7 +8171,9 @@ function ReadingSessionScreen({
   const hasTopBarContent = Boolean(
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice,
+    speechPlayer.fallbackNotice ||
+    isWasmDownloading ||
+    isReadingAiWait,
   );
 
   const readingTopBar = hasTopBarContent ? (
@@ -8176,6 +8303,33 @@ function ReadingSessionScreen({
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {isWasmDownloading ? (
+        <AiProgressBar
+          active
+          detail={wasmDownloadState?.file}
+          label={
+            wasmModelProgress.stageLabel ??
+            tCommon("aiProgress.downloadingSpeechModel")
+          }
+          percent={wasmModelProgress.percent}
+          size="compact"
+          testId="reading-wasm-model-progress"
+        />
+      ) : null}
+      {isReadingAiWait ? (
+        <AiProgressBar
+          active
+          label={
+            readingAiProgress.stageLabel ??
+            (isTtsSynthesizing
+              ? tCommon("aiProgress.synthesizingVoice")
+              : tCommon("aiProgress.transcribing"))
+          }
+          percent={readingAiProgress.percent}
+          size="compact"
+          testId="reading-ai-busy-progress"
+        />
       ) : null}
       {pageProgress &&
       pageProgress.current_index === pageProgress.total_pages - 1 ? (

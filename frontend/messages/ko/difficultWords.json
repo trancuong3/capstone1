@@ -52,7 +52,12 @@
     "emptyFilterDescription": "선택한 연습 상태와 일치하는 단어가 없습니다.",
     "viewAllWords": "모든 단어 보기 ({count})",
     "paginationAria": "연습할 단어 도서 그룹 페이지네이션",
-    "paginationItemLabel": "권"
+    "paginationItemLabel": "권",
+    "statTotal": "전체 단어",
+    "statCompleted": "정확히 읽음",
+    "statRemaining": "복습 필요",
+    "quickMastered": "익힘 완료",
+    "quickNeedsMoreFull": "추가 복습"
   },
   "bookCard": {
     "gradeSingle": "{grade}학년",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "다시 읽지 않음",
     "badgeNeedsMore": "연습 필요",
     "badgeInProgress": "연습 중",
-    "badgeCompleted": "정확히 읽음"
+    "badgeCompleted": "정확히 읽음",
+    "showMoreWords": "+{count}개 더 보기",
+    "showFewerWords": "접기",
+    "tagMispronounced": "오독 {count}",
+    "tagOmitted": "생략 {count}",
+    "tagRepeated": "반복 {count}"
   },
   "item": {
     "notPracticed": "연습 전",

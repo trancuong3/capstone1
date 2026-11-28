@@ -911,6 +911,30 @@ class BookCoverService:
             v2_storage_degraded=cover_degraded or ill_degraded or bible_degraded,
         )
 
+    async def _mark_inflight_cover_jobs_stale_scoped(
+        self,
+        book_id: UUID,
+        *,
+        actor_role: str | None,
+        actor_id: UUID | None,
+    ) -> int:
+        import inspect
+
+        fn = self.repo.mark_inflight_cover_jobs_stale
+        try:
+            sig = inspect.signature(fn)
+            has_kwargs = any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+            )
+            kwargs: dict[str, Any] = {}
+            if has_kwargs or "actor_role" in sig.parameters:
+                kwargs["actor_role"] = actor_role
+            if has_kwargs or "actor_id" in sig.parameters:
+                kwargs["actor_id"] = actor_id
+            return await fn(book_id, **kwargs)
+        except (TypeError, ValueError):
+            return await fn(book_id)
+
     async def upload_user_cover(
         self,
         actor_id: UUID,
@@ -924,7 +948,7 @@ class BookCoverService:
         crop_h: float | None = None,
         rotation: int = 0,
     ) -> BookPresentationAssetRead:
-        book, _role = await self.authorize_book_write(actor_id, book_id)
+        book, role = await self.authorize_book_write(actor_id, book_id)
         resolved_book_id = book.Id
         private_book = is_book_private(book)
         owner_id = book.OwnerParentId if private_book else None
@@ -957,8 +981,12 @@ class BookCoverService:
             upsert=False,
         )
         try:
-            # Anti-overwrite invariant: mark any pending/running AI cover jobs STALE first!
-            stale_count = await self.repo.mark_inflight_cover_jobs_stale(resolved_book_id)
+            # Anti-overwrite invariant: mark any pending/running AI cover jobs STALE scoped to portal/actor!
+            stale_count = await self._mark_inflight_cover_jobs_stale_scoped(
+                resolved_book_id,
+                actor_role=role,
+                actor_id=actor_id,
+            )
             asset = await self.repo.create_cover_asset(
                 book_id=resolved_book_id,
                 owner_id=owner_id,
@@ -996,7 +1024,7 @@ class BookCoverService:
     async def delete_book_cover(
         self, actor_id: UUID, book_id: UUID
     ) -> BookCoverDeleteResponse:
-        book, _role = await self.authorize_book_write(actor_id, book_id)
+        book, role = await self.authorize_book_write(actor_id, book_id)
         resolved_book_id = book.Id
         bucket = _bucket_for_book(book)
         fallback = build_metadata_cover_fallback(book)
@@ -1009,7 +1037,11 @@ class BookCoverService:
                     orphan_paths.append(_validate_relative_storage_path(raw_path))
                 except HTTPException:
                     continue
-        await self.repo.mark_inflight_cover_jobs_stale(resolved_book_id)
+        await self._mark_inflight_cover_jobs_stale_scoped(
+            resolved_book_id,
+            actor_role=role,
+            actor_id=actor_id,
+        )
         await self.db.commit()
 
         for orphan_path in orphan_paths:
@@ -1054,7 +1086,7 @@ class BookCoverService:
         priority and marks in-flight AI cover jobs STALE so late AI jobs never overwrite.
         """
         _ = actor_role
-        book, _resolved_role = await self.authorize_book_write(actor_id, book_id)
+        book, resolved_role = await self.authorize_book_write(actor_id, book_id)
         page = await self.repo.get_page(book.Id, page_id)
         if page is None:
             raise HTTPException(
@@ -1149,7 +1181,11 @@ class BookCoverService:
             upsert=False,
         )
         try:
-            stale_count = await self.repo.mark_inflight_cover_jobs_stale(book_id_val)
+            stale_count = await self._mark_inflight_cover_jobs_stale_scoped(
+                book_id_val,
+                actor_role=resolved_role,
+                actor_id=actor_id,
+            )
             has_user_cover = await self.repo.has_active_user_uploaded_cover(book_id_val)
             activate_new_cover = force_replace_user_upload or (not has_user_cover)
             asset = await self.repo.create_cover_asset(
@@ -1449,6 +1485,39 @@ class BookCoverService:
             honest_ai_generated=False,
         )
 
+    async def _advance_worker_progress(
+        self,
+        *,
+        job_id: UUID,
+        lease_token: UUID,
+        stage: str,
+        completed: int,
+        total: int,
+        unit: str = "bước",
+    ) -> None:
+        """Persist intermediate step progress while the job is RUNNING (without pre-empting final cancel fence)."""
+        try:
+            row = await self.repo.get_studio_job(job_id)
+            if (
+                row is not None
+                and row.Status == "RUNNING"
+                and row.LeaseToken == lease_token
+            ):
+                row.Stage = stage[:40]
+                row.ProgressCompleted = max(0, min(int(completed), int(total)))
+                row.ProgressTotal = max(1, int(total))
+                row.ProgressUnit = unit[:24]
+                row.UpdatedAt = datetime.now(timezone.utc)
+                await self.db.commit()
+            elif callable(getattr(self.db, "rollback", None)):
+                await self.db.rollback()
+        except Exception:
+            if callable(getattr(self.db, "rollback", None)):
+                try:
+                    await self.db.rollback()
+                except Exception:
+                    pass
+
     async def execute_ai_cover_job(
         self,
         actor_id: UUID,
@@ -1546,7 +1615,15 @@ class BookCoverService:
         if existing_job_id is not None:
             job = await self.repo.get_studio_job(existing_job_id)
             effective_job_id: UUID | None = existing_job_id
-            if callable(getattr(self.db, "rollback", None)):
+            if managed_by_worker and existing_lease_token is not None:
+                await self._advance_worker_progress(
+                    job_id=existing_job_id,
+                    lease_token=existing_lease_token,
+                    stage="STYLE_BIBLE",
+                    completed=1,
+                    total=4,
+                )
+            elif callable(getattr(self.db, "rollback", None)):
                 await self.db.rollback()
         else:
             existing_job_before = None
@@ -1603,6 +1680,9 @@ class BookCoverService:
             if job is not None:
                 now_start = datetime.now(timezone.utc)
                 job.LeaseExpiresAt = now_start + timedelta(seconds=90)
+                job.ProgressCompleted = 1
+                job.ProgressTotal = 4
+                job.ProgressUnit = "bước"
                 job.UpdatedAt = now_start
             await self.db.commit()
             effective_job_id = job.Id if job is not None else None
@@ -1694,6 +1774,23 @@ class BookCoverService:
                     honest_ai_generated=False,
                 )
 
+        # Progress step 2/4: AI image generated -> entering Dual Text-Free Gate.
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="IMAGE_GENERATING",
+                completed=2,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "TEXT_FREE_VERIFY"
+            job.ProgressCompleted = 2
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
+
         # MANDATORY Dual Text-Free Gate on AI-generated cover before saving!
         processed_preview = await asyncio.to_thread(
             validate_and_process_cover_image, raw_bytes, None, rotation=0
@@ -1739,6 +1836,23 @@ class BookCoverService:
                 style_bible=style_bible,
                 honest_ai_generated=False,
             )
+
+        # Progress step 3/4: Dual Text-Free Gate passed -> saving asset.
+        if managed_by_worker and existing_job_id is not None and existing_lease_token is not None:
+            await self._advance_worker_progress(
+                job_id=existing_job_id,
+                lease_token=existing_lease_token,
+                stage="TEXT_FREE_VERIFY",
+                completed=3,
+                total=4,
+            )
+        elif job is not None and not managed_by_worker:
+            job.Stage = "SAVING"
+            job.ProgressCompleted = 3
+            job.ProgressTotal = 4
+            job.ProgressUnit = "bước"
+            job.UpdatedAt = datetime.now(timezone.utc)
+            await self.db.commit()
 
         asset, superseded = await self.commit_generated_cover_bytes(
             book=book,
@@ -1787,8 +1901,8 @@ class BookCoverService:
                     checkpoint_data={"asset_id": str(asset.Id)},
                     next_status="SUCCEEDED",
                     result_ref={"asset_id": str(asset.Id), **verification_meta},
-                    progress_completed=2,
-                    progress_total=2,
+                    progress_completed=4,
+                    progress_total=4,
                     progress_unit="bước",
                 )
             except BaseException:
@@ -1823,6 +1937,9 @@ class BookCoverService:
                 now_done = datetime.now(timezone.utc)
                 job.Status = "SUCCEEDED"
                 job.Stage = "COMPLETED"
+                job.ProgressCompleted = 4
+                job.ProgressTotal = 4
+                job.ProgressUnit = "bước"
                 job.CompletedAt = now_done
                 job.UpdatedAt = now_done
                 job.LeaseExpiresAt = None

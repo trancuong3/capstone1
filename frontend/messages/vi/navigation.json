@@ -26,7 +26,11 @@
       "sessions": "Xem lại các buổi đọc đã hoàn thành",
       "entertainment": "Trò chơi ngôn ngữ, kể chuyện và karaoke",
       "difficultWords": "Ôn luyện các từ bé hay đọc nhầm"
-    }
+    },
+    "devicePermissions": "Kiểm tra Micro & Camera",
+    "aiTasksNotifications": "Tác vụ AI & Thông báo",
+    "userGuide": "Hướng dẫn sử dụng chi tiết",
+    "helpFeedback": "Trợ giúp & gửi phản hồi"
   },
   "admin": {
     "navLabel": "Điều hướng quản trị",
@@ -58,7 +62,19 @@
     "accountSection": "Tài khoản",
     "helpSection": "Trợ giúp",
     "sessionSection": "Phiên đăng nhập",
-    "defaultAccountLabel": "Tài khoản ViRead"
+    "defaultAccountLabel": "Tài khoản ViRead",
+    "activitiesSection": "Hoạt động & Tiện ích",
+    "accountDeviceSection": "Tài khoản & Thiết bị",
+    "guideSupportSection": "Hướng dẫn & Hỗ trợ",
+    "quickChildTitle": "Hồ sơ bé đang đọc",
+    "languageLabel": "Ngôn ngữ giao diện",
+    "taskStatusRunning": "{count} tác vụ đang chạy nền",
+    "taskStatusReview": "{count} tác vụ chờ ba mẹ rà soát",
+    "taskStatusFailed": "{count} tác vụ gặp lỗi cần xem",
+    "taskStatusNewDone": "{count} tác vụ mới hoàn tất",
+    "taskStatusIdle": "Chưa có tác vụ mới",
+    "unreadBadgeAria": "Có thông báo tác vụ AI mới",
+    "runningBadgeAria": "Đang có tác vụ AI chạy nền"
   },
   "childSwitcher": {
     "selectedAria": "Bé đang chọn: {alias}, bấm để đổi",
@@ -73,5 +89,38 @@
     "ariaLabel": "Thông tin ViRead",
     "logoDashboardAria": "ViRead - về tổng quan",
     "logoHomeAria": "ViRead - về trang chủ"
+  },
+  "guide": {
+    "title": "Hướng dẫn sử dụng ViRead",
+    "subtitle": "5 bước đơn giản để đồng hành đọc sách cùng bé mỗi ngày.",
+    "closeAction": "Đã hiểu",
+    "openHelpCenter": "Mở trung tâm Trợ giúp",
+    "steps": {
+      "1": {
+        "title": "1. Tạo hồ sơ cho bé",
+        "body": "Vào mục Hồ sơ bé để thêm tên gọi và khối lớp (Lớp 1–5) giúp ViRead gợi ý sách phù hợp.",
+        "action": "Hồ sơ bé"
+      },
+      "2": {
+        "title": "2. Chọn sách hoặc tải sách riêng",
+        "body": "Chọn truyện trong thư viện hoặc tải ảnh, PDF, DOCX trong Sách của tôi để đọc riêng trong gia đình.",
+        "action": "Sách của tôi"
+      },
+      "3": {
+        "title": "3. Kiểm tra Micro & đọc cùng bé",
+        "body": "Thử micro trước khi đọc để ViRead nghe rõ giọng bé, hỗ trợ đánh vần và khen ngợi kịp thời.",
+        "action": "Kiểm tra thiết bị"
+      },
+      "4": {
+        "title": "4. Ôn Từ cần luyện & xem Tiến bộ",
+        "body": "Luyện lại các từ bé đọc chưa vững theo từng cuốn sách và theo dõi biểu đồ tiến bộ theo tuần.",
+        "action": "Từ cần luyện"
+      },
+      "5": {
+        "title": "5. Đặt lịch đọc & theo dõi Tác vụ AI",
+        "body": "Thiết lập mục tiêu, lịch nhắc đọc ở Quản lý đọc và xem tiến trình OCR/tạo bìa trong Tác vụ AI.",
+        "action": "Quản lý đọc"
+      }
+    }
   }
 }

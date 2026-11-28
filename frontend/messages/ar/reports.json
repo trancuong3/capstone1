@@ -388,7 +388,20 @@
         "repeated": "تكرار الكلمات",
         "hesitation": "متردد"
       }
-    }
+    },
+    "summarySessions": "عدد الجلسات",
+    "summaryDuration": "إجمالي المدة",
+    "summaryCompleted": "مكتملة",
+    "summaryDurationZero": "0 دقيقة",
+    "filterAria": "تصفية جلسات القراءة حسب الحالة",
+    "filterAll": "الكل",
+    "filterCompleted": "مكتملة",
+    "filterIncomplete": "غير مكتملة",
+    "searchPlaceholder": "ابحث بعنوان الكتاب في هذه الصفحة…",
+    "searchAria": "البحث عن الجلسات بعنوان الكتاب",
+    "filterEmptyTitle": "لا توجد جلسات مطابقة",
+    "filterEmptyDesc": "جرّب تغيير التصفية أو مسح البحث.",
+    "clearFilterAction": "عرض كل الجلسات"
   },
   "readingManagement": {
     "title": "إدارة القراءة والتذكيرات",

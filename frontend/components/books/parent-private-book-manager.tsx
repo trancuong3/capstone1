@@ -25,6 +25,7 @@ import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
@@ -35,6 +36,7 @@ import { BookCover } from "@/components/books/book-cover";
 import { BookCoverStudio } from "@/components/books/book-cover-studio";
 import { PageIllustrationStudio } from "@/components/books/page-illustration-studio";
 import { ParentOcrContributionCard } from "@/components/books/parent-ocr-contribution-card";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { AuthenticatedImage } from "@/components/common/authenticated-image";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
@@ -42,6 +44,7 @@ import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-b
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
@@ -367,6 +370,84 @@ const OVERVIEW_CHIPS_PAGE_SIZE = 16;
 const SUBMISSIONS_PAGE_SIZE = 10;
 const COMMITTED_PAGES_PAGE_SIZE = 12;
 
+function isStageDone(status: string): boolean {
+  return (
+    status === "COMPLETED" ||
+    status === "PASSED" ||
+    status === "FLAGGED" ||
+    status === "NO_TEXT_DETECTED" ||
+    status === "SKIPPED"
+  );
+}
+
+function SubmissionCheckingProgressBar({
+  submission,
+  isQueuedOffline,
+}: {
+  submission: ParentPageSubmissionDTO;
+  isQueuedOffline: boolean;
+}) {
+  const tCommon = useTranslations("common");
+  const isChecking = submission.workflow_status === "CHECKING";
+
+  const derivedPercent = useMemo(() => {
+    if (!isChecking) return null;
+    if (isQueuedOffline) return 2;
+    if (
+      typeof submission.progress_pct === "number" &&
+      Number.isFinite(submission.progress_pct)
+    ) {
+      return submission.progress_pct;
+    }
+    if (!isStageDone(submission.ocr_status)) {
+      return submission.ocr_status === "RUNNING" ? 22 : 10;
+    }
+    if (!isStageDone(submission.proofread_status)) {
+      return submission.proofread_status === "RUNNING" ? 54 : 38;
+    }
+    if (!isStageDone(submission.tool_check_status)) {
+      return submission.tool_check_status === "RUNNING" ? 82 : 70;
+    }
+    return 94;
+  }, [
+    isChecking,
+    isQueuedOffline,
+    submission.ocr_status,
+    submission.progress_pct,
+    submission.proofread_status,
+    submission.tool_check_status,
+  ]);
+
+  const stageLabel = isQueuedOffline
+    ? tCommon("aiProgress.waitingWorker")
+    : !isStageDone(submission.ocr_status)
+      ? tCommon("aiProgress.ocrExtracting")
+      : !isStageDone(submission.proofread_status)
+        ? tCommon("aiProgress.proofreading")
+        : tCommon("aiProgress.safetyChecking");
+
+  const progress = useAiProgress({
+    active: isChecking,
+    realPercent: derivedPercent,
+    progressMode: isQueuedOffline ? "measured" : "staged",
+    expectedDurationMs: 16_000,
+  });
+
+  if (!isChecking) return null;
+
+  return (
+    <AiProgressBar
+      active={!isQueuedOffline}
+      elapsedSeconds={isQueuedOffline ? undefined : progress.elapsedSeconds}
+      label={stageLabel}
+      percent={progress.percent}
+      size="sm"
+      testId={`submission-progress-${submission.id}`}
+      tone={isQueuedOffline ? "warning" : "primary"}
+    />
+  );
+}
+
 interface ParentPrivateBookManagerProps {
   bookId: string;
   returnPage?: number;
@@ -395,6 +476,7 @@ function ParentPrivateBookManagerContent({
 }: ParentPrivateBookManagerProps & { currentUserId: string }) {
   const { formatNumber } = useI18n();
   const t = useTranslations("books");
+  const tCommon = useTranslations("common");
   const service = useParentPrivateBookService();
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -425,6 +507,20 @@ function ParentPrivateBookManagerContent({
   );
   const [uploadSourceNote, setUploadSourceNote] = useState("");
   const [uploading, setUploading] = useState(false);
+  const uploadProgressStages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 24, label: tCommon("aiProgress.uploading") },
+      { atPct: 62, label: tCommon("aiProgress.ocrExtracting") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+  const uploadProgress = useAiProgress({
+    active: uploading,
+    stages: uploadProgressStages,
+    expectedDurationMs: 12_000,
+  });
 
   // Per-submission UI state
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
@@ -679,7 +775,7 @@ function ParentPrivateBookManagerContent({
               format: response.source_format,
             }),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -737,7 +833,7 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.commitErrorFallback")));
@@ -767,7 +863,7 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -789,7 +885,7 @@ function ParentPrivateBookManagerContent({
           ? t("privateManager.retriedQueuedOfflineNotice")
           : t("privateManager.retriedNotice"),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(errorText(error, t("privateManager.retryErrorFallback")));
@@ -812,7 +908,7 @@ function ParentPrivateBookManagerContent({
       });
       setEditingSubId(null);
       setActionNotice(t("privateManager.editedSubmissionNotice"));
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -922,7 +1018,7 @@ function ParentPrivateBookManagerContent({
       setActionNotice(
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -952,7 +1048,7 @@ function ParentPrivateBookManagerContent({
               page: page.page_number,
             }),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1004,7 +1100,7 @@ function ParentPrivateBookManagerContent({
           ? t("privateManager.replacedSubmissionImageQueuedOfflineNotice")
           : t("privateManager.replacedSubmissionImageNotice"),
       );
-      emitStudioTasksChanged();
+      emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
       setActionError(
@@ -1663,6 +1759,16 @@ function ParentPrivateBookManagerContent({
             )
           ) : null}
         </div>
+        {uploading ? (
+          <AiProgressBar
+            active
+            elapsedSeconds={uploadProgress.elapsedSeconds}
+            label={uploadProgress.stageLabel ?? tCommon("aiProgress.uploading")}
+            percent={uploadProgress.percent}
+            size="sm"
+            testId="private-book-upload-progress"
+          />
+        ) : null}
       </form>
 
       {/* Staged Submissions Queue */}
@@ -1966,6 +2072,11 @@ function ParentPrivateBookManagerContent({
                             </button>
                           ) : null}
                         </div>
+
+                        <SubmissionCheckingProgressBar
+                          isQueuedOffline={isQueuedOffline}
+                          submission={sub}
+                        />
 
                         {/* 3-Stage Status Strip */}
                         <div

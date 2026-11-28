@@ -167,6 +167,7 @@ class FluencyAssessmentResponse(FluencyAssessmentBase):
 
 
 from typing import Literal
+from app.schemas.book import CatalogBookResponse
 
 SessionStateRead = Literal["CREATED", "PAGE_READY", "LISTENING", "PAUSED", "RECONNECTING", "QUESTIONING", "FINISHED", "ABORTED"]
 
@@ -215,6 +216,7 @@ class HistorySessionSummaryRead(SessionSummaryRead):
     state: SessionStateRead | Literal["IN_PROGRESS"]
     started_at: AwareDatetime
     ended_at: AwareDatetime | None
+    book: CatalogBookResponse | None = None
 
 
 class SessionHistoryRead(BaseModel):
@@ -503,6 +505,8 @@ class LocalOcrPageScanJobRead(BaseModel):
     updated_at: datetime
     file_name: str | None = None
     queue_position: int | None = Field(default=None, ge=1)
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
+    worker_phase: str | None = None
     error_code: str | None = None
     error_message: str | None = None
     result: LocalOcrPageScanRead | None = None

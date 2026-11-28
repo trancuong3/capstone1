@@ -233,5 +233,22 @@
         "a3": "打开“进度”查看报告，或打开“历史记录”查看已保存的阅读活动。"
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "全系统语音同步",
+    "title": "选择 AI 女老师 / 男老师",
+    "subtitle": "所选声音将同步应用于阅读 · 拼读 · 错词重读 · 阅读理解 · 趣味游戏。",
+    "savedForChild": "已为 {alias} 保存",
+    "previewButton": "试听声音",
+    "stopPreviewButton": "停止试听",
+    "personaGroupAria": "选择 AI 女老师或 AI 男老师",
+    "femaleTitle": "AI 女老师",
+    "femaleDesc": "温柔亲切的女声",
+    "maleTitle": "AI 男老师",
+    "maleDesc": "沉稳生动的男声",
+    "selectedBadge": "当前选择",
+    "regionLabel": "地区口音",
+    "voiceListLabel": "选择具体声音",
+    "voiceListAria": "按老师与地区筛选的声音列表"
   }
 }

@@ -240,7 +240,7 @@ export function ReadingLayout({
             className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-control border border-primary/30 bg-sky/60 px-2 text-xs font-semibold text-primary hover:bg-sky disabled:opacity-55 sm:gap-2 sm:px-3 sm:text-sm"
           >
             <Volume2 aria-hidden="true" className="size-4 shrink-0" />
-            <span>
+            <span className="inline-block max-sm:first-letter:uppercase">
               <span className="hidden sm:inline">
                 {t("layout.phonicsPrefix")}
               </span>

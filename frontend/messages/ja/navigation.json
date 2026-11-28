@@ -26,7 +26,11 @@
       "sessions": "完了した読書セッションの確認",
       "entertainment": "言語ゲーム、読み聞かせ、カラオケ",
       "difficultWords": "お子様が読み間違えやすい単語の練習"
-    }
+    },
+    "devicePermissions": "マイク・カメラの確認",
+    "aiTasksNotifications": "AIタスクと通知",
+    "userGuide": "詳しい使い方ガイド",
+    "helpFeedback": "ヘルプ・フィードバック"
   },
   "admin": {
     "navLabel": "管理者用ナビゲーション",
@@ -58,7 +62,19 @@
     "accountSection": "アカウント",
     "helpSection": "ヘルプ",
     "sessionSection": "セッション",
-    "defaultAccountLabel": "ViReadアカウント"
+    "defaultAccountLabel": "ViReadアカウント",
+    "activitiesSection": "アクティビティ・ツール",
+    "accountDeviceSection": "アカウント・デバイス",
+    "guideSupportSection": "ガイド・サポート",
+    "quickChildTitle": "選択中のお子さま",
+    "languageLabel": "表示言語",
+    "taskStatusRunning": "{count}件のタスクを実行中",
+    "taskStatusReview": "{count}件のタスクが確認待ち",
+    "taskStatusFailed": "{count}件のタスクにエラー",
+    "taskStatusNewDone": "{count}件のタスクが完了",
+    "taskStatusIdle": "新しいタスクはありません",
+    "unreadBadgeAria": "未読のAIタスク通知があります",
+    "runningBadgeAria": "バックグラウンドでAIタスクを実行中"
   },
   "childSwitcher": {
     "selectedAria": "選択中の子：{alias}、タップで切り替え",
@@ -73,5 +89,38 @@
     "ariaLabel": "ViReadについて",
     "logoDashboardAria": "ViRead - ダッシュボードへ",
     "logoHomeAria": "ViRead - ホームへ"
+  },
+  "guide": {
+    "title": "ViRead の使い方",
+    "subtitle": "毎日楽しく音読を続けるための5つのステップ。",
+    "closeAction": "わかりました",
+    "openHelpCenter": "ヘルプセンターを開く",
+    "steps": {
+      "1": {
+        "title": "1. お子さまプロフィールを作成",
+        "body": "名前と学年（1〜5年生）を登録すると、最適な本を提案します。",
+        "action": "お子さま管理"
+      },
+      "2": {
+        "title": "2. 本を選ぶ・マイブックを追加",
+        "body": "ライブラリから選ぶか、マイブックに画像・PDF・DOCXを登録できます。",
+        "action": "マイブック"
+      },
+      "3": {
+        "title": "3. マイクを確認して音読開始",
+        "body": "事前にマイクを確認し、AIの音声サポートと一緒に読み進めましょう。",
+        "action": "デバイス確認"
+      },
+      "4": {
+        "title": "4. 苦手な単語の練習と進捗確認",
+        "body": "本ごとに苦手な単語を復習し、週ごとの成長グラフを確認できます。",
+        "action": "練習する単語"
+      },
+      "5": {
+        "title": "5. 読書予定とAIタスクを管理",
+        "body": "読書管理で目標やリマインダーを設定し、AIタスクで処理状況を確認できます。",
+        "action": "読書管理"
+      }
+    }
   }
 }

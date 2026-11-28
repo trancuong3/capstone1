@@ -19,11 +19,13 @@ import {
 } from "react";
 
 import { AppServicesContext } from "@/components/providers/app-services-provider";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type { ChildProgressAssessment } from "@/lib/api/child-progress-service";
 import { cn } from "@/lib/utils/cn";
@@ -257,11 +259,21 @@ export function ChildProgressAssessmentCard({
   readonly showReadingAssessment?: boolean;
 }) {
   const t = useTranslations("reports");
+  const tCommon = useTranslations("common");
   const service = useContext(AppServicesContext)?.childProgressService;
   const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
   const [view, setView] = useState<View>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const requestRef = useRef(0);
+  const initialLoadProgress = useAiProgress({
+    active: Boolean(service) && view.status === "loading",
+    expectedDurationMs: 8_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.analyzing") },
+      { atPct: 45, label: tCommon("aiProgress.writingAssessment") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   useEffect(() => {
     if (!service) return;
@@ -389,6 +401,17 @@ export function ChildProgressAssessmentCard({
           aria-label={t("overview.assessmentCard.loadingAria")}
           className="mt-5 space-y-4"
         >
+          <AiProgressBar
+            active
+            elapsedSeconds={initialLoadProgress.elapsedSeconds}
+            label={
+              initialLoadProgress.stageLabel ??
+              tCommon("aiProgress.writingAssessment")
+            }
+            percent={initialLoadProgress.percent}
+            size="sm"
+            testId="child-progress-initial-loading-progress"
+          />
           <Skeleton className="h-32 rounded-card" />
           <Skeleton className="h-24 rounded-card" />
         </div>
@@ -435,6 +458,7 @@ function AssessmentBody({
   readonly showReadingAssessment: boolean;
 }) {
   const t = useTranslations("reports");
+  const tCommon = useTranslations("common");
   const shortDate = useShortDate();
   const [practiceWordsPage, setPracticeWordsPage] = useState(1);
   const { data } = view;
@@ -451,6 +475,15 @@ function AssessmentBody({
     (safePracticeWordsPage - 1) * PRACTICE_WORDS_PAGE_SIZE,
     safePracticeWordsPage * PRACTICE_WORDS_PAGE_SIZE,
   );
+  const aiWritingProgress = useAiProgress({
+    active: view.ai === "writing",
+    expectedDurationMs: 10_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.writingAssessment") },
+      { atPct: 45, label: tCommon("aiProgress.analyzing") },
+      { atPct: 82, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
   const actionsFor = (audience: "PARENT" | "CHILD") =>
     assessment.actions.filter((action) => action.audience === audience);
 
@@ -603,6 +636,20 @@ function AssessmentBody({
             </Button>
           ) : null}
         </div>
+
+        {view.ai === "writing" ? (
+          <AiProgressBar
+            active
+            elapsedSeconds={aiWritingProgress.elapsedSeconds}
+            label={
+              aiWritingProgress.stageLabel ??
+              tCommon("aiProgress.writingAssessment")
+            }
+            percent={aiWritingProgress.percent}
+            size="sm"
+            testId="child-progress-ai-writing-progress"
+          />
+        ) : null}
 
         {view.ai === "failed" ? (
           <StatusMessage tone="warning">

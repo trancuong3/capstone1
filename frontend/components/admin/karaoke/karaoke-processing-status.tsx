@@ -1,10 +1,21 @@
 "use client";
 import { useState } from "react";
 import { AdminStatusBadge } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import type { ProcessingJob } from "@/types/karaoke-processing";
+
+const KARAOKE_STAGE_PERCENT_MAP: Record<ProcessingJob["stage"], number> = {
+  QUEUED: 8,
+  VALIDATING_INPUT: 20,
+  PREPARING_AUDIO: 45,
+  ALIGNING_LYRICS: 75,
+  VALIDATING_RESULT: 92,
+  COMPLETE: 100,
+};
 
 export const processingStatusLabels = {
   QUEUED: "Đang chờ xử lý",
@@ -44,10 +55,31 @@ function ProcessingStatusBody({
   onApply,
 }: Props) {
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const [costAcknowledged, setCostAcknowledged] = useState(false);
   const candidate = job.status === "READY" || job.status === "NEEDS_REVIEW";
-  const outstanding =
-    candidate || job.status === "QUEUED" || job.status === "RUNNING";
+  const isProcessingActive =
+    job.status === "QUEUED" || job.status === "RUNNING";
+  const outstanding = candidate || isProcessingActive;
+  const backendProgressPct = (job as { progress_pct?: number | null })
+    .progress_pct;
+  const stageBasePct =
+    typeof backendProgressPct === "number" &&
+    Number.isFinite(backendProgressPct)
+      ? backendProgressPct
+      : (KARAOKE_STAGE_PERCENT_MAP[job.stage] ?? 10);
+  const aiProgress = useAiProgress({
+    active: isProcessingActive,
+    realPercent: stageBasePct,
+    progressMode:
+      typeof backendProgressPct === "number" &&
+      Number.isFinite(backendProgressPct)
+        ? "measured"
+        : "staged",
+    expectedDurationMs: 25_000,
+    completed: candidate || job.status === "APPLIED",
+    failed: job.status === "FAILED" || job.status === "CANCELLED",
+  });
   const costUnknown = job.retry_policy === "EXPLICIT_COST_ACK";
   const retry =
     ["FAILED", "CANCELLED", "STALE"].includes(job.status) &&
@@ -94,10 +126,20 @@ function ProcessingStatusBody({
           </p>
         )}
       </div>
-      {(job.status === "QUEUED" || job.status === "RUNNING") && (
-        <p className="text-sm text-muted">
-          {t("karaoke.processing.serverReceivedHint")}
-        </p>
+      {isProcessingActive && (
+        <div className="space-y-2">
+          <AiProgressBar
+            active
+            elapsedSeconds={aiProgress.elapsedSeconds}
+            label={tCommon("aiProgress.processingKaraoke")}
+            percent={aiProgress.percent}
+            size="sm"
+            testId="karaoke-processing-progress"
+          />
+          <p className="text-sm text-muted">
+            {t("karaoke.processing.serverReceivedHint")}
+          </p>
+        </div>
       )}
       {queuedLong && (
         <StatusMessage tone="info">

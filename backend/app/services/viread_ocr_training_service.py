@@ -704,6 +704,13 @@ class VireadOcrTrainingService:
             LEFT JOIN public.viread_ocr_training_runs AS training_run ON training_run.id=job.run_id
             ORDER BY job.created_at DESC LIMIT 30
         """)
+        from app.services.ai_task_progress import compute_training_job_progress
+
+        for job_row in jobs:
+            job_row["progress_pct"] = compute_training_job_progress(
+                status=job_row.get("status"),
+                progress=job_row.get("progress"),
+            )
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
                    candidate_checkpoint_sha256, locked_test_manifest_sha256, evaluation_type, created_at

@@ -5,10 +5,13 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid5
 
+from starlette.concurrency import run_in_threadpool
+
 from app.providers.karaoke_local_aligner_client import ALIGNMENT_MODEL, ALIGNMENT_BOUNDARIES, ALIGNMENT_ENGINE, STEM_MODEL
 from app.providers.karaoke_local_aligner_client import KaraokeEngineError
 from app.schemas.karaoke import Lyrics
 from app.services.karaoke_alignment import FLAG_NAMESPACE, MAPPING_VERSION, lyric_units, map_alignment_to_lyrics
+from app.services.karaoke_melody_extractor import extract_melody_profile
 from app.services.karaoke_processing_review import fingerprint, lyrics_hashes, quality_flags
 
 
@@ -130,15 +133,35 @@ class KaraokeProcessingPipeline:
         # Download/parse the final immutable MP3 again, rather than binding timing
         # to a source/reference file or trusting provider duration.
         await context.download(final_audio, "validated-output")
+        melody_profile = None
+        try:
+            melody_profile = await run_in_threadpool(
+                extract_melody_profile,
+                stems.payload["vocal"],
+                lyrics=aligned.checkpoint.get("result_lyrics"),
+                offset_ms=offset,
+                duration_ms=final_audio.duration_ms,
+            )
+        except Exception:
+            melody_profile = None
+        provenance = dict(
+            pipeline_version=job.pipeline_version,
+            alignment_model=ALIGNMENT_MODEL,
+            alignment_boundaries=ALIGNMENT_BOUNDARIES,
+            alignment_mapping=MAPPING_VERSION,
+            stem_model=STEM_MODEL,
+            local_offline=True,
+            quality_calibrated=False,
+            timeline_offset_ms=offset,
+            stems=stems.payload["diagnostics"],
+            alignment=aligned.usage["diagnostics"],
+        )
+        if melody_profile is not None:
+            provenance["melody_profile"] = melody_profile
         values = dict(
             **aligned.checkpoint, result_audio_path=final_audio.path,
             result_audio_sha256=final_audio.sha256, result_audio_size_bytes=final_audio.size_bytes,
             result_duration_ms=final_audio.duration_ms,
-            provenance=dict(pipeline_version=job.pipeline_version, alignment_model=ALIGNMENT_MODEL,
-                alignment_boundaries=ALIGNMENT_BOUNDARIES,
-                alignment_mapping=MAPPING_VERSION,
-                stem_model=STEM_MODEL, local_offline=True, quality_calibrated=False,
-                timeline_offset_ms=offset, stems=stems.payload["diagnostics"],
-                alignment=aligned.usage["diagnostics"]),
+            provenance=provenance,
         )
         return ProcessingResult(values)

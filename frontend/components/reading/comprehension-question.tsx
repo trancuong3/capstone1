@@ -11,9 +11,11 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
@@ -137,6 +139,7 @@ export function ComprehensionQuestion({
   sessionId,
 }: ComprehensionQuestionProps) {
   const t = useTranslations("reading");
+  const tCommon = useTranslations("common");
   const { comprehensionService } = useReadingServices();
   const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -153,6 +156,23 @@ export function ComprehensionQuestion({
     null,
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const questionGenProgress = useAiProgress({
+    active: loadState.status === "loading",
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 58, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const evalAnswerProgress = useAiProgress({
+    active: isSubmitting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 3_500,
+  });
   const [progress, setProgress] = useState<{
     position?: number;
     total?: number;
@@ -1243,6 +1263,16 @@ export function ComprehensionQuestion({
             aria-label={t("comprehension.loadingAria")}
             className="space-y-4"
           >
+            <AiProgressBar
+              active
+              label={
+                questionGenProgress.stageLabel ??
+                tCommon("aiProgress.generatingQuestion")
+              }
+              percent={questionGenProgress.percent}
+              size="sm"
+              testId="comprehension-question-loading-progress"
+            />
             <Skeleton className="h-40 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
             <Skeleton className="h-18 rounded-card" />
@@ -1409,6 +1439,19 @@ export function ComprehensionQuestion({
                 );
               })}
             </div>
+
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  evalAnswerProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={evalAnswerProgress.percent}
+                size="compact"
+                testId="comprehension-answer-evaluating-progress"
+              />
+            ) : null}
 
             {result ? (
               <div ref={feedbackRef}>

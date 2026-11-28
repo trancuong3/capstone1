@@ -31,11 +31,13 @@ import {
   sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 import type {
   DashboardLatestSessionDTO,
   DashboardSummaryDTO,
 } from "@/types/profile";
+import { AiTeacherVoiceSection } from "./ai-teacher-voice-section";
 import { FamilyReadingDesk } from "./family-reading-desk";
 
 const DASHBOARD_CHILDREN_PAGE_SIZE = 4;
@@ -159,6 +161,7 @@ export function DashboardScreen() {
       return;
     }
     setValidatedSelectedChild(child);
+    hydrateTeacherVoiceFromChildProfile(child);
   }, [
     clearSelectedChild,
     replace,
@@ -332,6 +335,9 @@ export function DashboardScreen() {
                         forSelectedId: child.id,
                         page: safeChildrenPage,
                       });
+                      hydrateTeacherVoiceFromChildProfile(child, {
+                        force: true,
+                      });
                       setSelectionPrompt(false);
                       if (searchParams.toString()) replace("/dashboard");
                     }}
@@ -366,6 +372,22 @@ export function DashboardScreen() {
           )}
         </section>
       </div>
+
+      <AiTeacherVoiceSection
+        selectedChild={selectedChild ?? null}
+        onChildSettingsUpdated={(updatedChild) => {
+          setState((prev) => {
+            if (prev.status !== "ready") return prev;
+            return {
+              ...prev,
+              children: prev.children.map((item) =>
+                item.id === updatedChild.id ? updatedChild : item,
+              ),
+            };
+          });
+          setValidatedSelectedChild(updatedChild);
+        }}
+      />
 
       {!isLoading && children.length > 0 ? (
         <>

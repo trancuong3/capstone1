@@ -48,6 +48,13 @@ from app.schemas.global_tasks import (
     ReconcileTasksResponse,
 )
 from app.services.ai_capability_router import AiCapabilityRouter, get_default_ai_router
+from app.services.ai_task_progress import (
+    compute_admin_workflow_progress,
+    compute_ocr_job_progress,
+    compute_parent_submission_progress,
+    compute_studio_job_progress,
+    extract_ocr_worker_phase,
+)
 from app.services.gpu_workload_scheduler import GpuWorkloadScheduler, get_default_gpu_scheduler
 from app.services.ocr_inference_job_service import (
     reconcile_orphaned_parent_submissions,
@@ -131,19 +138,64 @@ STAGE_LABELS_VI: dict[str, str] = {
     "PROCESSING": "Đang xử lý",
     "BOUNDARY_DETECT": "Nhận diện khung trang",
     "OCR": "Nhận diện chữ (OCR)",
+    "OCR_EXTRACT": "Tách nội dung OCR",
     "PROOFREADING": "Soát lỗi chính tả AI",
     "CHILD_SAFETY": "Kiểm tra an toàn trẻ em",
+    "CHILD_SAFETY_SCANNING": "Kiểm tra an toàn trẻ em",
     "TOOL_CHECK": "Kiểm tra an toàn & chất lượng",
     "STYLE_BIBLE": "Phân tích phong cách sách",
+    "STYLE_ANALYSIS": "Phân tích phong cách sách",
+    "IMAGE_GENERATING": "Đang tạo ảnh AI",
     "ILLUSTRATION": "Xử lý tranh minh họa",
+    "ILLUSTRATION_EXTRACT": "Tách tranh minh họa",
+    "ILLUSTRATION_GEN": "Tạo tranh minh họa AI",
     "COVER": "Xử lý bìa sách",
+    "COVER_GEN": "Tạo bìa sách AI",
     "TEXT_FREE_VERIFY": "Kiểm chứng tranh không chứa chữ",
+    "SAVING": "Đang lưu kết quả",
     "WAITING_FOR_REVIEW": "Chờ người dùng xác minh",
     "COMPLETED": "Hoàn tất",
     "FAILED": "Gặp lỗi",
     "CANCELLED": "Đã hủy",
     "STALE": "Đã lỗi thời",
 }
+
+_OCR_PHASE_LABELS_VI: dict[str, str] = {
+    "downloading": "Đang tải ảnh trang sách",
+    "fetch": "Đang tải ảnh trang sách",
+    "fetching": "Đang tải ảnh trang sách",
+    "loading_image": "Đang tải ảnh trang sách",
+    "preprocessing": "Đang tiền xử lý ảnh trang",
+    "preprocess": "Đang tiền xử lý ảnh trang",
+    "deskew": "Đang căn chỉnh góc trang",
+    "detecting": "Đang dò vị trí dòng chữ",
+    "detection": "Đang dò vị trí dòng chữ",
+    "layout": "Đang phân tích bố cục trang",
+    "craft": "Đang dò vị trí dòng chữ",
+    "paddle_det": "Đang dò vị trí dòng chữ",
+    "recognizing": "Đang nhận diện chữ tiếng Việt",
+    "recognition": "Đang nhận diện chữ tiếng Việt",
+    "vietocr": "Đang nhận diện chữ tiếng Việt",
+    "ocr": "Đang nhận diện chữ tiếng Việt",
+    "inferencing": "Đang nhận diện chữ tiếng Việt",
+    "postprocessing": "Đang hoàn tất kết quả OCR",
+    "postprocess": "Đang hoàn tất kết quả OCR",
+    "finalizing": "Đang hoàn tất kết quả OCR",
+    "uploading": "Đang lưu kết quả OCR",
+    "saving": "Đang lưu kết quả OCR",
+}
+
+
+def _ocr_phase_label_vi(worker_phase: str | None) -> str | None:
+    if not worker_phase:
+        return None
+    norm = worker_phase.strip().lower()
+    if norm in _OCR_PHASE_LABELS_VI:
+        return _OCR_PHASE_LABELS_VI[norm]
+    for marker, label in _OCR_PHASE_LABELS_VI.items():
+        if marker in norm:
+            return label
+    return None
 
 
 class StaleLeaseError(RuntimeError):
@@ -239,20 +291,39 @@ class GlobalTasksService:
             )
         return role  # type: ignore[return-value]
 
+    async def resolve_actor_portal(
+        self,
+        actor_id: UUID,
+        portal: ActorRole | None = None,
+    ) -> ActorRole:
+        actor_role = await self.require_actor_role(actor_id)
+        if portal is not None and portal != actor_role:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="PORTAL_ROLE_MISMATCH",
+            )
+        return actor_role
+
     async def create_task(
         self,
         *,
         actor_id: UUID,
         payload: GlobalTaskCreateRequest,
+        portal: ActorRole | None = None,
     ) -> GlobalTaskActionResponse:
-        actor_role = await self.require_actor_role(actor_id)
+        actor_role = await self.resolve_actor_portal(actor_id, portal)
 
-        # Enforce strict tenant ownership when parent references a book, page, or revision.
+        # Enforce strict tenant & portal ownership when referencing a book, page, or revision.
         authorized_book_id: UUID | None = None
         if payload.book_id is not None:
             book = await self.repo.get_book(payload.book_id)
             if book is None or bool(getattr(book, "IsDeleted", False)):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="BOOK_NOT_FOUND")
+            if actor_role == "admin" and is_book_private(book):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="ADMIN_PRIVATE_BOOK_TASK_FORBIDDEN",
+                )
             if actor_role == "parent" and (
                 not is_book_private(book)
                 or book.OwnerParentId != actor_id
@@ -269,6 +340,13 @@ class GlobalTasksService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PAGE_NOT_FOUND")
             if payload.book_id is not None and page.BookId != payload.book_id:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PAGE_BOOK_MISMATCH")
+            if actor_role == "admin":
+                page_book = await self.repo.get_book(page.BookId)
+                if page_book is not None and is_book_private(page_book):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="ADMIN_PRIVATE_BOOK_TASK_FORBIDDEN",
+                    )
             if actor_role == "parent":
                 book = await self.repo.get_book(page.BookId)
                 if (
@@ -533,8 +611,9 @@ class GlobalTasksService:
         *,
         actor_id: UUID,
         job_id: UUID,
+        portal: ActorRole | None = None,
     ) -> GlobalTaskActionResponse:
-        actor_role = await self.require_actor_role(actor_id)
+        actor_role = await self.resolve_actor_portal(actor_id, portal)
         job = await self.repo.get_job_for_actor(
             job_id,
             actor_id=actor_id,
@@ -587,8 +666,9 @@ class GlobalTasksService:
         *,
         actor_id: UUID,
         job_id: UUID,
+        portal: ActorRole | None = None,
     ) -> GlobalTaskActionResponse:
-        actor_role = await self.require_actor_role(actor_id)
+        actor_role = await self.resolve_actor_portal(actor_id, portal)
         job = await self.repo.get_job_for_actor(
             job_id,
             actor_id=actor_id,
@@ -746,17 +826,7 @@ class GlobalTasksService:
             failed_parent_submissions=int(parent_reconcile.get("failed_count", 0)),
         )
 
-    async def list_tasks(
-        self,
-        *,
-        actor_id: UUID,
-        limit: int = 40,
-        active_only: bool = False,
-    ) -> GlobalTaskListResponse:
-        """Aggregate all durable workflows strictly isolated to `(actor_id, actor_role)`."""
-        in_tx_fn = getattr(self.db, "in_transaction", None)
-        was_in_tx = bool(in_tx_fn()) if callable(in_tx_fn) else False
-        actor_role = await self.require_actor_role(actor_id)
+    async def _resolve_worker_online(self, *, was_in_tx: bool) -> bool | None:
         worker_online = await self.repo.is_remote_ocr_worker_online(
             ttl_seconds=worker_heartbeat_ttl_seconds()
         )
@@ -783,6 +853,130 @@ class GlobalTasksService:
                             pass
                     probe = await probe_configured_remote_ocr_worker_health()
                     worker_online = bool(probe and probe.get("online"))
+        return worker_online
+
+    async def get_task(
+        self,
+        *,
+        actor_id: UUID,
+        job_id: UUID,
+        portal: ActorRole | None = None,
+    ) -> GlobalTaskItem:
+        """Fetch a single task strictly scoped to `(actor_id, portal)` (404 on cross-actor/portal)."""
+        in_tx_fn = getattr(self.db, "in_transaction", None)
+        was_in_tx = bool(in_tx_fn()) if callable(in_tx_fn) else False
+        actor_role = await self.resolve_actor_portal(actor_id, portal)
+        worker_online = await self._resolve_worker_online(was_in_tx=was_in_tx)
+
+        studio_job = await self.repo.get_job_for_actor(
+            job_id,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            lock=False,
+        )
+        if studio_job is not None:
+            book_titles = await self.repo.get_book_titles(
+                {studio_job.BookId} if studio_job.BookId else set()
+            )
+            page_numbers = await self.repo.get_page_numbers(
+                {studio_job.BookPageId} if studio_job.BookPageId else set()
+            )
+            ocr_by_id: dict[UUID, OcrInferenceJob] = {}
+            checkpoints = (
+                studio_job.CheckpointsJson
+                if isinstance(studio_job.CheckpointsJson, dict)
+                else {}
+            )
+            raw_ocr_ids = checkpoints.get("ocr_job_ids")
+            if studio_job.JobType == "BATCH_BOOK_IMPORT" and isinstance(raw_ocr_ids, list):
+                parsed_ids: list[UUID] = []
+                for raw_id in raw_ocr_ids:
+                    try:
+                        parsed_ids.append(UUID(str(raw_id)))
+                    except (ValueError, TypeError):
+                        continue
+                if parsed_ids:
+                    linked_rows = await self.repo.list_ocr_inference_jobs_by_ids(
+                        parsed_ids,
+                        actor_id=actor_id,
+                    )
+                    ocr_by_id = {row.Id: row for row in linked_rows}
+            return self._map_studio_job(
+                studio_job,
+                book_titles=book_titles,
+                page_numbers=page_numbers,
+                ocr_jobs_by_id=ocr_by_id,
+                worker_online=worker_online,
+            )
+
+        ocr_job = await self.repo.get_ocr_inference_job_for_actor(
+            job_id,
+            actor_id=actor_id,
+            actor_role=actor_role,
+        )
+        if ocr_job is not None:
+            book_titles = await self.repo.get_book_titles(
+                {ocr_job.BookId} if ocr_job.BookId else set()
+            )
+            page_numbers = await self.repo.get_page_numbers(
+                {ocr_job.PageId} if ocr_job.PageId else set()
+            )
+            return self._map_ocr_job(
+                ocr_job,
+                actor_id=actor_id,
+                actor_role=actor_role,
+                worker_online=worker_online,
+                book_titles=book_titles,
+                page_numbers=page_numbers,
+            )
+
+        if actor_role == "admin":
+            wf = await self.repo.get_admin_workflow_for_actor(job_id, actor_id=actor_id)
+            if wf is not None:
+                book_titles = await self.repo.get_book_titles(
+                    {wf.BookId} if wf.BookId else set()
+                )
+                page_numbers = await self.repo.get_page_numbers(
+                    {wf.PageId} if wf.PageId else set()
+                )
+                return self._map_admin_workflow(
+                    wf,
+                    actor_id=actor_id,
+                    book_titles=book_titles,
+                    page_numbers=page_numbers,
+                )
+        else:
+            sub = await self.repo.get_parent_submission_for_actor(job_id, actor_id=actor_id)
+            if sub is not None:
+                linked_ocr = await self.repo.get_latest_ocr_job_for_submission(
+                    sub.Id,
+                    actor_id=actor_id,
+                )
+                book_titles = await self.repo.get_book_titles(
+                    {sub.BookId} if sub.BookId else set()
+                )
+                return self._map_parent_submission(
+                    sub,
+                    worker_online=worker_online,
+                    book_titles=book_titles,
+                    linked_ocr_job=linked_ocr,
+                )
+
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TASK_NOT_FOUND")
+
+    async def list_tasks(
+        self,
+        *,
+        actor_id: UUID,
+        limit: int = 40,
+        active_only: bool = False,
+        portal: ActorRole | None = None,
+    ) -> GlobalTaskListResponse:
+        """Aggregate all durable workflows strictly isolated to `(actor_id, portal)`."""
+        in_tx_fn = getattr(self.db, "in_transaction", None)
+        was_in_tx = bool(in_tx_fn()) if callable(in_tx_fn) else False
+        actor_role = await self.resolve_actor_portal(actor_id, portal)
+        worker_online = await self._resolve_worker_online(was_in_tx=was_in_tx)
 
         studio_jobs = await self.repo.list_studio_jobs_for_actor(
             actor_id=actor_id,
@@ -795,7 +989,9 @@ class GlobalTasksService:
             limit=limit,
         )
         admin_workflows: list[AdminAiWorkflow] = (
-            await self.repo.list_admin_workflows(limit=limit) if actor_role == "admin" else []
+            await self.repo.list_admin_workflows(actor_id=actor_id, limit=limit)
+            if actor_role == "admin"
+            else []
         )
         parent_submissions: list[ParentBookPageSubmission] = (
             await self.repo.list_parent_submissions(actor_id=actor_id, limit=limit)
@@ -813,6 +1009,30 @@ class GlobalTasksService:
                     continue
             deduped_ocr_jobs.append(ocr_job)
         ocr_jobs = deduped_ocr_jobs
+
+        # Fetch any additional OCR jobs referenced by admin BATCH_BOOK_IMPORT tracking jobs.
+        ocr_jobs_by_id: dict[UUID, OcrInferenceJob] = {row.Id: row for row in ocr_jobs}
+        missing_batch_ocr_ids: set[UUID] = set()
+        for studio_job in studio_jobs:
+            if studio_job.JobType != "BATCH_BOOK_IMPORT":
+                continue
+            cp = studio_job.CheckpointsJson if isinstance(studio_job.CheckpointsJson, dict) else {}
+            raw_ids = cp.get("ocr_job_ids")
+            if isinstance(raw_ids, list):
+                for raw_id in raw_ids:
+                    try:
+                        parsed = UUID(str(raw_id))
+                    except (ValueError, TypeError):
+                        continue
+                    if parsed not in ocr_jobs_by_id:
+                        missing_batch_ocr_ids.add(parsed)
+        if missing_batch_ocr_ids:
+            extra_ocr = await self.repo.list_ocr_inference_jobs_by_ids(
+                list(missing_batch_ocr_ids),
+                actor_id=actor_id,
+            )
+            for row in extra_ocr:
+                ocr_jobs_by_id[row.Id] = row
 
         book_ids: set[UUID] = set()
         page_ids: set[UUID] = set()
@@ -838,13 +1058,37 @@ class GlobalTasksService:
         book_titles = await self.repo.get_book_titles(book_ids)
         page_numbers = await self.repo.get_page_numbers(page_ids)
 
+        # Deduplicate ParentBookPageSubmission + linked PARENT_BOOK_SUBMISSION OcrInferenceJob
+        # into one unified parent_submission task item with continuous merged OCR phase `%`.
+        submissions_by_id: dict[UUID, ParentBookPageSubmission] = {
+            sub.Id: sub for sub in parent_submissions
+        }
+        linked_ocr_by_submission: dict[UUID, OcrInferenceJob] = {}
+
         items: list[GlobalTaskItem] = []
         for job in studio_jobs:
-            items.append(self._map_studio_job(job, book_titles=book_titles, page_numbers=page_numbers))
+            items.append(
+                self._map_studio_job(
+                    job,
+                    book_titles=book_titles,
+                    page_numbers=page_numbers,
+                    ocr_jobs_by_id=ocr_jobs_by_id,
+                    worker_online=worker_online,
+                )
+            )
         for ocr_job in ocr_jobs:
+            if (
+                actor_role == "parent"
+                and str(ocr_job.JobKind) == "PARENT_BOOK_SUBMISSION"
+                and ocr_job.SubmissionId is not None
+                and ocr_job.SubmissionId in submissions_by_id
+            ):
+                linked_ocr_by_submission.setdefault(ocr_job.SubmissionId, ocr_job)
+                continue
             items.append(
                 self._map_ocr_job(
                     ocr_job,
+                    actor_id=actor_id,
                     actor_role=actor_role,
                     worker_online=worker_online,
                     book_titles=book_titles,
@@ -853,7 +1097,12 @@ class GlobalTasksService:
             )
         for wf in admin_workflows:
             items.append(
-                self._map_admin_workflow(wf, book_titles=book_titles, page_numbers=page_numbers)
+                self._map_admin_workflow(
+                    wf,
+                    actor_id=actor_id,
+                    book_titles=book_titles,
+                    page_numbers=page_numbers,
+                )
             )
         for sub in parent_submissions:
             items.append(
@@ -861,6 +1110,7 @@ class GlobalTasksService:
                     sub,
                     worker_online=worker_online,
                     book_titles=book_titles,
+                    linked_ocr_job=linked_ocr_by_submission.get(sub.Id),
                 )
             )
 
@@ -898,6 +1148,7 @@ class GlobalTasksService:
         return GlobalTaskListResponse(
             actor_id=actor_id,
             actor_role=actor_role,
+            portal=actor_role,
             active_count=active_count,
             waiting_review_count=waiting_review_count,
             failed_count=failed_count,
@@ -945,14 +1196,69 @@ class GlobalTasksService:
         *,
         book_titles: dict[UUID, str],
         page_numbers: dict[UUID, int],
+        ocr_jobs_by_id: dict[UUID, OcrInferenceJob] | None = None,
+        worker_online: bool | None = None,
     ) -> GlobalTaskItem:
-        completed, total, unit, pct, is_indeterminate = compute_honest_progress(
-            job.ProgressCompleted,
-            job.ProgressTotal,
-            job.ProgressUnit,
-        )
         actor_role: ActorRole = "admin" if job.ActorRole == "admin" else "parent"
         status_val: GlobalTaskStatus = job.Status  # type: ignore[assignment]
+        stage_val = str(job.Stage or "QUEUED")
+        raw_completed = job.ProgressCompleted
+        raw_total = job.ProgressTotal
+        raw_unit = job.ProgressUnit
+        checkpoints = dict(job.CheckpointsJson or {}) if isinstance(job.CheckpointsJson, dict) else {}
+
+        # Live page-level rollup for remote-OCR BATCH_BOOK_IMPORT tracking jobs.
+        if (
+            job.JobType == "BATCH_BOOK_IMPORT"
+            and checkpoints.get("tracking_mode") == "remote_ocr_batch"
+            and isinstance(checkpoints.get("ocr_job_ids"), list)
+            and ocr_jobs_by_id
+        ):
+            linked_rows: list[OcrInferenceJob] = []
+            for raw_id in checkpoints["ocr_job_ids"]:
+                try:
+                    uid = UUID(str(raw_id))
+                except (ValueError, TypeError):
+                    continue
+                if uid in ocr_jobs_by_id:
+                    linked_rows.append(ocr_jobs_by_id[uid])
+            if linked_rows:
+                total_batch = max(len(checkpoints["ocr_job_ids"]), len(linked_rows))
+                succeeded_n = sum(1 for r in linked_rows if str(r.Status or "").upper() == "SUCCEEDED")
+                failed_n = sum(
+                    1 for r in linked_rows if str(r.Status or "").upper() in ("DEAD_LETTER", "FAILED", "CANCELLED")
+                )
+                running_n = sum(
+                    1 for r in linked_rows if str(r.Status or "").upper() in ("CLAIMED", "RUNNING")
+                )
+                done_n = min(total_batch, succeeded_n + failed_n)
+                raw_completed = done_n
+                raw_total = total_batch
+                raw_unit = raw_unit or "trang"
+                if done_n >= total_batch:
+                    if succeeded_n == total_batch:
+                        status_val = "SUCCEEDED"
+                        stage_val = "COMPLETED"
+                    elif succeeded_n > 0:
+                        status_val = "PARTIAL_SUCCESS"
+                        stage_val = "COMPLETED"
+                    else:
+                        status_val = "FAILED"
+                        stage_val = "FAILED"
+                elif running_n > 0 or done_n > 0:
+                    status_val = "RUNNING"
+                    stage_val = "OCR"
+                elif worker_online is False:
+                    status_val = "WAITING_FOR_WORKER"
+                    stage_val = "OCR"
+
+        completed, total, unit, pct, is_indeterminate, progress_mode = compute_studio_job_progress(
+            status=status_val,
+            stage=stage_val,
+            completed=raw_completed,
+            total=raw_total,
+            unit=raw_unit,
+        )
         created_at = job.CreatedAt or datetime.now(timezone.utc)
         updated_at = job.UpdatedAt or created_at
         return GlobalTaskItem(
@@ -965,11 +1271,17 @@ class GlobalTasksService:
             book_title=book_titles.get(job.BookId) if job.BookId else None,
             page_number=page_numbers.get(job.BookPageId) if job.BookPageId else None,
             source_revision_id=job.SourceRevisionId,
+            actor_id=job.ActorId,
             actor_role=actor_role,
+            portal=actor_role,
             status=status_val,
             status_label_vi=_status_label(status_val, job.JobType),
-            stage=str(job.Stage or "QUEUED"),
-            stage_label_vi=_stage_label(str(job.Stage or "QUEUED")),
+            stage=stage_val,
+            stage_label_vi=(
+                WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
+                if status_val == "WAITING_FOR_WORKER" and stage_val == "OCR"
+                else _stage_label(stage_val)
+            ),
             priority=int(job.Priority or 50),
             attempt_count=int(job.AttemptCount or 0),
             max_attempts=int(job.MaxAttempts or 3),
@@ -977,6 +1289,7 @@ class GlobalTasksService:
             progress_total=total,
             progress_unit=unit,
             progress_pct=pct,
+            progress_mode=progress_mode,
             is_indeterminate=is_indeterminate,
             can_retry=status_val in RETRYABLE_STUDIO_STATUSES,
             can_cancel=status_val in ("QUEUED", "RUNNING", "WAITING_FOR_WORKER", "WAITING_FOR_QUOTA", "RETRY_SCHEDULED"),
@@ -986,7 +1299,7 @@ class GlobalTasksService:
                 book_page_id=job.BookPageId,
             ),
             result_ref=dict(job.ResultRefJson or {}) if isinstance(job.ResultRefJson, dict) else {},
-            checkpoints=dict(job.CheckpointsJson or {}) if isinstance(job.CheckpointsJson, dict) else {},
+            checkpoints=checkpoints,
             error_code=job.ErrorCode,
             error_message_vi=job.ErrorMessageVi,
             created_at=created_at,
@@ -1003,6 +1316,7 @@ class GlobalTasksService:
         worker_online: bool | None,
         book_titles: dict[UUID, str],
         page_numbers: dict[UUID, int],
+        actor_id: UUID | None = None,
     ) -> GlobalTaskItem:
         raw_status = str(job.Status or "QUEUED").upper()
         mapped_status: GlobalTaskStatus
@@ -1021,9 +1335,20 @@ class GlobalTasksService:
         else:
             mapped_status = "QUEUED"
 
+        worker_phase = extract_ocr_worker_phase(getattr(job, "ProcessingMeta", None))
+        pct, progress_mode = compute_ocr_job_progress(
+            status=raw_status,
+            worker_phase=worker_phase,
+            worker_online=worker_online,
+        )
+        phase_label = _ocr_phase_label_vi(worker_phase) if mapped_status == "RUNNING" else None
+        stage_label_vi = (
+            WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
+            if mapped_status == "WAITING_FOR_WORKER"
+            else (phase_label or _stage_label("OCR"))
+        )
         created_at = job.CreatedAt or datetime.now(timezone.utc)
         updated_at = job.UpdatedAt or created_at
-        # Single-page OCR inference has no mid-inference percentage -> honest indeterminate!
         return GlobalTaskItem(
             id=job.Id,
             source="ocr_inference_job",
@@ -1034,23 +1359,22 @@ class GlobalTasksService:
             book_title=book_titles.get(job.BookId) if job.BookId else None,
             page_number=page_numbers.get(job.PageId) if job.PageId else None,
             source_revision_id=job.RevisionId,
+            actor_id=job.OwnerUserId or actor_id,
             actor_role=actor_role,
+            portal=actor_role,
             status=mapped_status,
             status_label_vi=_status_label(mapped_status, str(job.JobKind)),
-            stage="OCR",
-            stage_label_vi=(
-                WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
-                if mapped_status == "WAITING_FOR_WORKER"
-                else _stage_label("OCR")
-            ),
+            stage=(worker_phase.upper()[:40] if worker_phase and mapped_status == "RUNNING" else "OCR"),
+            stage_label_vi=stage_label_vi,
             priority=int(job.Priority or 50),
             attempt_count=int(job.AttemptCount or 0),
             max_attempts=int(job.MaxAttempts or 3),
             progress_completed=None,
             progress_total=None,
             progress_unit=None,
-            progress_pct=None,
-            is_indeterminate=True,
+            progress_pct=pct,
+            progress_mode=progress_mode,
+            is_indeterminate=False,
             can_retry=False,
             can_cancel=False,
             result_href=_build_result_href(
@@ -1059,6 +1383,7 @@ class GlobalTasksService:
                 book_page_id=job.PageId,
                 job_type=str(job.JobKind),
             ),
+            result_ref=({"worker_phase": worker_phase} if worker_phase else {}),
             error_code=job.ErrorCode,
             error_message_vi=job.ErrorMessage,
             created_at=created_at,
@@ -1073,12 +1398,13 @@ class GlobalTasksService:
         *,
         book_titles: dict[UUID, str],
         page_numbers: dict[UUID, int],
+        actor_id: UUID | None = None,
     ) -> GlobalTaskItem:
         raw_status = str(wf.Status or "QUEUED").upper()
         mapped_status: GlobalTaskStatus
         if raw_status == "QUEUED":
             mapped_status = "QUEUED"
-        elif raw_status in ("RUNNING", "IN_PROGRESS"):
+        elif raw_status in ("RUNNING", "IN_PROGRESS", "PROOFREADING", "CHILD_SAFETY_SCANNING"):
             mapped_status = "RUNNING"
         elif raw_status in ("READY_FOR_ADMIN_REVIEW", "READY_FOR_REVIEW", "NEEDS_REVIEW"):
             mapped_status = "WAITING_FOR_REVIEW"
@@ -1095,10 +1421,14 @@ class GlobalTasksService:
 
         total_chunks = int(wf.TotalChunks or 0)
         completed_chunks = int(wf.CompletedChunks or 0)
-        completed, total, unit, pct, is_indeterminate = compute_honest_progress(
-            completed_chunks if total_chunks > 0 else None,
-            total_chunks if total_chunks > 0 else None,
-            "đoạn" if total_chunks > 0 else None,
+        completed = max(0, min(completed_chunks, total_chunks)) if total_chunks > 0 else None
+        total = total_chunks if total_chunks > 0 else None
+        unit = "đoạn" if total_chunks > 0 else None
+        pct, progress_mode = compute_admin_workflow_progress(
+            status=raw_status,
+            stage=str(wf.Stage or "PROOFREADING"),
+            completed_chunks=completed_chunks,
+            total_chunks=total_chunks,
         )
         created_at = wf.CreatedAt or datetime.now(timezone.utc)
         updated_at = wf.UpdatedAt or created_at
@@ -1112,7 +1442,9 @@ class GlobalTasksService:
             book_title=book_titles.get(wf.BookId) if wf.BookId else None,
             page_number=page_numbers.get(wf.PageId) if wf.PageId else None,
             source_revision_id=wf.PageRevisionId,
+            actor_id=wf.ActorId or actor_id,
             actor_role="admin",
+            portal="admin",
             status=mapped_status,
             status_label_vi=_status_label(mapped_status, "ADMIN_AI_WORKFLOW"),
             stage=str(wf.Stage or "PROOFREADING"),
@@ -1124,7 +1456,8 @@ class GlobalTasksService:
             progress_total=total,
             progress_unit=unit,
             progress_pct=pct,
-            is_indeterminate=is_indeterminate,
+            progress_mode=progress_mode,
+            is_indeterminate=False,
             can_retry=False,
             can_cancel=False,
             result_href=_build_result_href(
@@ -1144,28 +1477,31 @@ class GlobalTasksService:
         *,
         worker_online: bool | None,
         book_titles: dict[UUID, str],
+        linked_ocr_job: OcrInferenceJob | None = None,
     ) -> GlobalTaskItem:
         wf_status = str(sub.WorkflowStatus or "CHECKING").upper()
         ocr_status = str(sub.OcrStatus or "PENDING").upper()
         proof_status = str(sub.ProofreadStatus or "PENDING").upper()
         tool_status = str(sub.ToolCheckStatus or "PENDING").upper()
 
-        stages_done = 0
-        if ocr_status in ("COMPLETED", "NO_TEXT_DETECTED"):
-            stages_done += 1
-        if proof_status in ("COMPLETED", "SKIPPED") or bool(sub.IsImageOnly):
-            stages_done += 1
-        if tool_status in ("PASSED", "FLAGGED", "NEEDS_MANUAL_REVIEW"):
-            stages_done += 1
+        linked_ocr_status = str(linked_ocr_job.Status or "").upper() if linked_ocr_job is not None else None
+        linked_worker_phase = (
+            extract_ocr_worker_phase(getattr(linked_ocr_job, "ProcessingMeta", None))
+            if linked_ocr_job is not None
+            else None
+        )
 
         if wf_status == "CHECKING":
-            if ocr_status == "PENDING" and worker_online is False:
+            if (
+                ocr_status == "PENDING"
+                and (linked_ocr_status is None or linked_ocr_status == "QUEUED")
+                and worker_online is False
+            ):
                 mapped_status: GlobalTaskStatus = "WAITING_FOR_WORKER"
             else:
                 mapped_status = "RUNNING"
         elif wf_status in ("PASSED_READY_TO_ADD", "APPROVED_READY_TO_ADD", "COMMITTED", "ADDED_TO_BOOK"):
             mapped_status = "SUCCEEDED"
-            stages_done = 3
         elif wf_status in ("NEEDS_ADMIN_REVIEW", "PENDING_ADMIN_REVIEW", "PENDING_ADMIN", "NEEDS_RECHECK"):
             mapped_status = "WAITING_FOR_REVIEW"
         elif wf_status in ("CHECK_FAILED", "REJECTED"):
@@ -1175,11 +1511,11 @@ class GlobalTasksService:
         else:
             mapped_status = "RUNNING"
 
-        if ocr_status == "PENDING":
+        if ocr_status in ("PENDING", "RUNNING"):
             stage = "OCR"
-        elif proof_status == "PENDING" and not bool(sub.IsImageOnly):
+        elif proof_status in ("PENDING", "RUNNING") and not bool(sub.IsImageOnly):
             stage = "PROOFREADING"
-        elif tool_status == "PENDING":
+        elif tool_status in ("PENDING", "RUNNING"):
             stage = "TOOL_CHECK"
         elif mapped_status == "WAITING_FOR_REVIEW":
             stage = "WAITING_FOR_REVIEW"
@@ -1188,12 +1524,36 @@ class GlobalTasksService:
         else:
             stage = "PROCESSING"
 
-        completed, total, unit, pct, is_indeterminate = compute_honest_progress(
-            stages_done, 3, "bước"
+        stages_done, total_stages, pct, progress_mode = compute_parent_submission_progress(
+            workflow_status=wf_status,
+            ocr_status=ocr_status,
+            proofread_status=proof_status,
+            tool_check_status=tool_status,
+            is_image_only=bool(sub.IsImageOnly),
+            linked_ocr_status=linked_ocr_status,
+            linked_ocr_worker_phase=linked_worker_phase,
+            worker_online=worker_online,
+        )
+        phase_label = (
+            _ocr_phase_label_vi(linked_worker_phase)
+            if stage == "OCR" and mapped_status == "RUNNING"
+            else None
+        )
+        stage_label_vi = (
+            WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
+            if mapped_status == "WAITING_FOR_WORKER"
+            else (phase_label or _stage_label(stage))
         )
         created_at = sub.CreatedAt or datetime.now(timezone.utc)
         updated_at = sub.UpdatedAt or created_at
+        if linked_ocr_job is not None and linked_ocr_job.UpdatedAt and linked_ocr_job.UpdatedAt > updated_at:
+            updated_at = linked_ocr_job.UpdatedAt
         err_code = sub.ToolCheckErrorCode or sub.ProofreadErrorCode or sub.OcrErrorCode
+        result_ref: dict[str, Any] = {}
+        if linked_ocr_job is not None:
+            result_ref["linked_ocr_job_id"] = str(linked_ocr_job.Id)
+            if linked_worker_phase:
+                result_ref["worker_phase"] = linked_worker_phase
         return GlobalTaskItem(
             id=sub.Id,
             source="parent_submission",
@@ -1204,23 +1564,22 @@ class GlobalTasksService:
             book_title=book_titles.get(sub.BookId) if sub.BookId else None,
             page_number=int(sub.TargetPageNumber or sub.SourcePageNumber or 1),
             source_revision_id=sub.CommittedRevisionId,
+            actor_id=sub.OwnerParentId,
             actor_role="parent",
+            portal="parent",
             status=mapped_status,
             status_label_vi=_status_label(mapped_status, "PARENT_PAGE_PIPELINE"),
             stage=stage,
-            stage_label_vi=(
-                WAITING_FOR_OCR_WORKER_SUBSTATUS_VI
-                if mapped_status == "WAITING_FOR_WORKER"
-                else _stage_label(stage)
-            ),
+            stage_label_vi=stage_label_vi,
             priority=50,
             attempt_count=int(sub.Attempts or 0),
             max_attempts=3,
-            progress_completed=completed,
-            progress_total=total,
-            progress_unit=unit,
+            progress_completed=stages_done,
+            progress_total=total_stages,
+            progress_unit="bước",
             progress_pct=pct,
-            is_indeterminate=is_indeterminate,
+            progress_mode=progress_mode,
+            is_indeterminate=False,
             can_retry=False,
             can_cancel=False,
             result_href=_build_result_href(
@@ -1228,6 +1587,7 @@ class GlobalTasksService:
                 book_id=sub.BookId,
                 book_page_id=sub.CommittedPageId,
             ),
+            result_ref=result_ref,
             error_code=err_code,
             created_at=created_at,
             updated_at=updated_at,
@@ -1336,6 +1696,17 @@ async def _execute_ocr_extract_job(
                 )
             handle.checkpoint("BOUNDARY_DETECT", raise_on_preempt=True)
 
+        await svc.commit_stage_result(
+            job_id=job.Id,
+            lease_token=lease_token,
+            stage="BOUNDARY_DETECT",
+            mark_stage_completed=True,
+            checkpoint_data={"boundary_detected": boundary is not None},
+            progress_completed=1,
+            progress_total=2,
+            progress_unit="bước",
+        )
+
         result = extract_ocr_content(
             words,
             page_number=max(1, int(page.PageNumber or 1)),
@@ -1387,9 +1758,9 @@ async def _execute_ocr_extract_job(
             "excluded_blocks": result.stats.exclude_blocks,
             "review_blocks": result.stats.review_blocks,
         },
-        progress_completed=1,
-        progress_total=1,
-        progress_unit="trang",
+        progress_completed=2,
+        progress_total=2,
+        progress_unit="bước",
     )
 
 
@@ -1492,11 +1863,63 @@ async def _execute_batch_book_import_job(
         or req_opts.get("source_storage_path")
     )
 
+    # Mode 0: Remote-OCR batch import tracker (reflects real completion of enqueued OcrInferenceJob rows)
+    if checkpoints.get("tracking_mode") == "remote_ocr_batch" and isinstance(checkpoints.get("ocr_job_ids"), list):
+        ocr_job_uuids: list[UUID] = []
+        for raw_id in checkpoints["ocr_job_ids"]:
+            try:
+                ocr_job_uuids.append(UUID(str(raw_id)))
+            except (ValueError, TypeError):
+                continue
+        tracked_rows = await svc.repo.list_ocr_inference_jobs_by_ids(ocr_job_uuids)
+        total_tracked = max(1, len(ocr_job_uuids))
+        succeeded_n = sum(1 for r in tracked_rows if str(r.Status or "").upper() == "SUCCEEDED")
+        failed_n = sum(
+            1 for r in tracked_rows if str(r.Status or "").upper() in ("DEAD_LETTER", "FAILED", "CANCELLED")
+        )
+        done_n = min(total_tracked, succeeded_n + failed_n)
+        if done_n >= total_tracked:
+            final_st: GlobalTaskStatus = (
+                "SUCCEEDED"
+                if succeeded_n == total_tracked
+                else ("PARTIAL_SUCCESS" if succeeded_n > 0 else "FAILED")
+            )
+            await svc.commit_stage_result(
+                job_id=job.Id,
+                lease_token=lease_token,
+                stage="COMPLETED" if final_st != "FAILED" else "FAILED",
+                mark_stage_completed=(final_st != "FAILED"),
+                next_status=final_st,
+                result_ref={
+                    "book_id": str(book.Id),
+                    "succeeded_pages": succeeded_n,
+                    "failed_pages": failed_n,
+                    "total_pages": total_tracked,
+                },
+                progress_completed=done_n,
+                progress_total=total_tracked,
+                progress_unit="trang",
+            )
+        else:
+            worker_online = await svc.repo.is_remote_ocr_worker_online(
+                ttl_seconds=worker_heartbeat_ttl_seconds()
+            )
+            await svc.commit_stage_result(
+                job_id=job.Id,
+                lease_token=lease_token,
+                stage="OCR",
+                mark_stage_completed=False,
+                next_status=("WAITING_FOR_WORKER" if worker_online is False else "RETRY_SCHEDULED"),
+                progress_completed=done_n,
+                progress_total=total_tracked,
+                progress_unit="trang",
+            )
+        return
+
     # Mode A: Stored multi-page PDF/DOCX rasterization & page ingestion
     if isinstance(source_storage_path, str) and source_storage_path.strip() and job.ActorRole == "admin":
         import hashlib
         from tempfile import SpooledTemporaryFile
-        from starlette.concurrency import run_in_threadpool
         from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
         from app.services.admin_ocr_service import AdminOcrService
         from app.services.document_rasterizer_service import (
@@ -2003,6 +2426,15 @@ async def process_one_smart_studio_job(
         if job_type in ("STYLE_BIBLE", "BOOK_STYLE_BIBLE") and job_book_id is not None:
             from app.services.book_style_bible import BookStyleBibleService
 
+            await svc.commit_stage_result(
+                job_id=job_id,
+                lease_token=lease_token,
+                stage="STYLE_BIBLE",
+                mark_stage_completed=False,
+                progress_completed=1,
+                progress_total=2,
+                progress_unit="bước",
+            )
             res = await BookStyleBibleService(db).build_for_actor(
                 job_actor_id,
                 job_book_id,
@@ -2015,8 +2447,8 @@ async def process_one_smart_studio_job(
                 checkpoint_data={"style_context_hash": res.context_hash},
                 next_status="SUCCEEDED",
                 result_ref={"book_id": str(res.book_id), "context_hash": res.context_hash},
-                progress_completed=1,
-                progress_total=1,
+                progress_completed=2,
+                progress_total=2,
                 progress_unit="bước",
             )
             return True
@@ -2059,8 +2491,8 @@ async def process_one_smart_studio_job(
                         checkpoint_data={"asset_id": str(res.cover.id)},
                         next_status="SUCCEEDED",
                         result_ref={"asset_id": str(res.cover.id)},
-                        progress_completed=2,
-                        progress_total=2,
+                        progress_completed=4,
+                        progress_total=4,
                         progress_unit="bước",
                     )
                 else:
@@ -2121,9 +2553,9 @@ async def process_one_smart_studio_job(
                         checkpoint_data={"asset_id": str(res.asset.id)},
                         next_status="SUCCEEDED",
                         result_ref={"asset_id": str(res.asset.id)},
-                        progress_completed=1,
-                        progress_total=1,
-                        progress_unit="trang",
+                        progress_completed=3,
+                        progress_total=3,
+                        progress_unit="bước",
                     )
                 else:
                     mapped_status = _map_non_success_studio_status(res.status)
@@ -2178,8 +2610,8 @@ async def process_one_smart_studio_job(
                         checkpoint_data={"asset_id": str(res.asset.id)},
                         next_status="SUCCEEDED",
                         result_ref={"asset_id": str(res.asset.id)},
-                        progress_completed=2,
-                        progress_total=2,
+                        progress_completed=4,
+                        progress_total=4,
                         progress_unit="bước",
                     )
                 else:

@@ -278,6 +278,7 @@ class ParentPageSubmissionRead(BaseModel):
     optimistic_lock_version: int
     workflow_status: SubmissionWorkflowStatus
     workflow_status_label: str
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
 
     ocr_status: str
     ocr_text: str | None = None
@@ -460,6 +461,7 @@ class AdminUserBookSubmissionDetailRead(BaseModel):
 
     workflow_status: SubmissionWorkflowStatus
     workflow_status_label: str
+    progress_pct: float = Field(default=0.0, ge=0.0, le=100.0)
     request_status: str | None = None
 
     ocr_status: str

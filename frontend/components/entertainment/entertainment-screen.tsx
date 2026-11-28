@@ -22,15 +22,20 @@ import {
   useSyncExternalStore,
 } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   CrossGameRecommendationDTO,
@@ -193,6 +198,8 @@ export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
   const t = useTranslations("entertainment");
+  const teacherPersona = useTeacherPersona();
+  const tCommon = useTranslations("common");
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
@@ -208,6 +215,9 @@ export function EntertainmentScreen({
   const [fallbackChildId, setFallbackChildId] = useState<string | null>(null);
   const [fetchedRecommendations, setFetchedRecommendations] =
     useState<EntertainmentRecommendationsDTO | null>(null);
+  const [loadingRecsForChildId, setLoadingRecsForChildId] = useState<
+    string | null
+  >(null);
 
   const storedShowOnboarding = useSyncExternalStore(
     emptySubscribe,
@@ -280,14 +290,23 @@ export function EntertainmentScreen({
 
     let active = true;
     async function loadAdaptiveRecommendations(childId: string) {
+      setLoadingRecsForChildId(childId);
       try {
-        const recs =
-          await createAdaptiveLearningService().getRecommendations(childId);
+        const recs = await createAdaptiveLearningService().getRecommendations(
+          childId,
+          teacherPersona.gender,
+        );
         if (active) {
           setFetchedRecommendations(recs);
         }
       } catch {
         // Gracefully keep static child-first hub if adaptive recommendations are unavailable.
+      } finally {
+        if (active) {
+          setLoadingRecsForChildId((current) =>
+            current === childId ? null : current,
+          );
+        }
       }
     }
 
@@ -295,7 +314,12 @@ export function EntertainmentScreen({
     return () => {
       active = false;
     };
-  }, [appStore?.selectedChildId, fallbackChildId, initialRecommendations]);
+  }, [
+    appStore?.selectedChildId,
+    fallbackChildId,
+    initialRecommendations,
+    teacherPersona.gender,
+  ]);
 
   const recommendations =
     fetchedRecommendations &&
@@ -305,6 +329,19 @@ export function EntertainmentScreen({
           (!activeChildId || initialRecommendations.child_id === activeChildId)
         ? initialRecommendations
         : null;
+  const isLoadingRecommendations =
+    Boolean(activeChildId) &&
+    loadingRecsForChildId === activeChildId &&
+    !recommendations;
+  const recommendationsProgress = useAiProgress({
+    active: isLoadingRecommendations,
+    expectedDurationMs: 5_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.analyzing") },
+      { atPct: 45, label: tCommon("aiProgress.loadingRecommendations") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   function handleSelectChild(nextChildId: string) {
     if (!nextChildId) return;
@@ -320,6 +357,7 @@ export function EntertainmentScreen({
     }
     if (matched) {
       setValidatedChild(matched);
+      hydrateTeacherVoiceFromChildProfile(matched);
     }
   }
 
@@ -469,7 +507,10 @@ export function EntertainmentScreen({
           <p className="text-lg font-extrabold text-ink">
             {recommendations?.mascot_greeting_vi ? (
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recommendations.mascot_greeting_vi}
+                {adaptTextToTeacherPersona(
+                  recommendations.mascot_greeting_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             ) : (
               t("hub.defaultGreeting")
@@ -484,6 +525,20 @@ export function EntertainmentScreen({
               t("hub.defaultRecommendationReason")
             )}
           </p>
+          {isLoadingRecommendations ? (
+            <div className="pt-1">
+              <AiProgressBar
+                active
+                label={
+                  recommendationsProgress.stageLabel ??
+                  tCommon("aiProgress.loadingRecommendations")
+                }
+                percent={recommendationsProgress.percent}
+                size="compact"
+                testId="entertainment-recommendations-progress"
+              />
+            </div>
+          ) : null}
           {recommendations?.focus_difficult_words.length ? (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <span className="text-xs font-bold text-ink">
@@ -532,7 +587,10 @@ export function EntertainmentScreen({
                 {t(activeStep.titleKey)}
               </h2>
               <p className="mt-1 text-body text-muted">
-                {t(activeStep.bodyKey)}
+                {adaptTextToTeacherPersona(
+                  t(activeStep.bodyKey),
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
             <div className="flex items-center gap-2">

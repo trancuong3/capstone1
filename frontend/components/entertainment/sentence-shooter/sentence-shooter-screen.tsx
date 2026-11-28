@@ -26,6 +26,7 @@ import {
 
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { BookCover } from "@/components/books/book-cover";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
@@ -44,6 +45,7 @@ import {
 } from "@/components/entertainment/sentence-shooter/sound-engine";
 import { StageLayoutCache } from "@/components/entertainment/sentence-shooter/stage-layout-cache";
 import { ToyCannon } from "@/components/entertainment/sentence-shooter/toy-cannon";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
@@ -181,7 +183,16 @@ function SentenceShooterResultView({
   session,
 }: SentenceShooterResultViewProps) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const speechPlayer = useSpeechPlayer();
+  const resultDetailsProgress = useAiProgress({
+    active: !result && isLoadingResult,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 72, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
   const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
   const summaryCompletedRounds =
     result?.completed_rounds ?? session?.completed_rounds ?? 0;
@@ -297,9 +308,22 @@ function SentenceShooterResultView({
             })}
           </p>
         ) : isLoadingResult ? (
-          <p className="mt-3 text-sm font-semibold text-muted" role="status">
-            {t("sentenceShooter.loadingResultDetails")}
-          </p>
+          <div className="mx-auto mt-3 flex max-w-sm flex-col items-center gap-2">
+            <p className="text-sm font-semibold text-muted" role="status">
+              {t("sentenceShooter.loadingResultDetails")}
+            </p>
+            <AiProgressBar
+              active
+              className="w-full"
+              label={
+                resultDetailsProgress.stageLabel ??
+                tCommon("aiProgress.evaluatingAnswer")
+              }
+              percent={resultDetailsProgress.percent}
+              size="compact"
+              testId="sentence-shooter-result-details-progress"
+            />
+          </div>
         ) : resultError ? (
           <div className="mt-3 flex flex-col items-center gap-2">
             <p className="text-sm font-semibold text-danger">
@@ -362,6 +386,7 @@ export function SentenceShooterScreen({
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const gameError = t("sentenceShooter.gameError");
   const shootError = t("sentenceShooter.shootError");
   const router = useRouter();
@@ -418,6 +443,39 @@ export function SentenceShooterScreen({
   const [prefetchedNextRound, setPrefetchedNextRound] =
     useState<SentenceShooterRoundDTO | null>(null);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
+  const startSessionProgress = useAiProgress({
+    active: isStartingSession,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 48, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const nextRoundProgress = useAiProgress({
+    active: isLoadingNextRound,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 75, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const hintProgress = useAiProgress({
+    active: isRequestingHint,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingHint") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 3_500,
+  });
+  const loadResultProgress = useAiProgress({
+    active: isLoadingResult,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 75, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_500,
+  });
   const [resultError, setResultError] = useState(false);
   const [sessionScore, setSessionScore] = useState(0);
   const [projectiles, setProjectiles] = useState<readonly ActiveProjectile[]>(
@@ -1573,6 +1631,20 @@ export function SentenceShooterScreen({
                 {t("sentenceShooter.hintButton")}
               </button>
             </div>
+            {isRequestingHint ? (
+              <div className="w-full">
+                <AiProgressBar
+                  active
+                  label={
+                    hintProgress.stageLabel ??
+                    tCommon("aiProgress.generatingHint")
+                  }
+                  percent={hintProgress.percent}
+                  size="compact"
+                  testId="sentence-shooter-hint-progress"
+                />
+              </div>
+            ) : null}
             {roundComplete ? (
               <div className="w-full rounded-card border border-[#B6DDBB] bg-success-surface p-5 text-center">
                 <p
@@ -1627,27 +1699,59 @@ export function SentenceShooterScreen({
                     </span>
                   </p>
                 ) : null}
-                <div className="mt-4">
+                <div className="mt-4 space-y-2.5">
                   {session.completed_rounds < session.total_rounds ? (
-                    <Button
-                      className="mx-auto max-w-sm"
-                      disabled={isLoadingNextRound}
-                      isLoading={isLoadingNextRound}
-                      onClick={() => void continueToNextRound()}
-                    >
-                      <Play aria-hidden="true" className="size-5" />{" "}
-                      {t("sentenceShooter.nextRound")}
-                    </Button>
+                    <>
+                      <Button
+                        className="mx-auto max-w-sm"
+                        disabled={isLoadingNextRound}
+                        isLoading={isLoadingNextRound}
+                        onClick={() => void continueToNextRound()}
+                      >
+                        <Play aria-hidden="true" className="size-5" />{" "}
+                        {t("sentenceShooter.nextRound")}
+                      </Button>
+                      {isLoadingNextRound ? (
+                        <div className="mx-auto max-w-sm">
+                          <AiProgressBar
+                            active
+                            label={
+                              nextRoundProgress.stageLabel ??
+                              tCommon("aiProgress.generatingQuestion")
+                            }
+                            percent={nextRoundProgress.percent}
+                            size="compact"
+                            testId="sentence-shooter-next-round-progress"
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   ) : (
-                    <Button
-                      className="mx-auto max-w-sm"
-                      disabled={isLoadingResult}
-                      isLoading={isLoadingResult}
-                      onClick={() => void loadCompletedResult()}
-                    >
-                      <RefreshCw aria-hidden="true" className="size-5" />{" "}
-                      {t("sentenceShooter.viewResult")}
-                    </Button>
+                    <>
+                      <Button
+                        className="mx-auto max-w-sm"
+                        disabled={isLoadingResult}
+                        isLoading={isLoadingResult}
+                        onClick={() => void loadCompletedResult()}
+                      >
+                        <RefreshCw aria-hidden="true" className="size-5" />{" "}
+                        {t("sentenceShooter.viewResult")}
+                      </Button>
+                      {isLoadingResult ? (
+                        <div className="mx-auto max-w-sm">
+                          <AiProgressBar
+                            active
+                            label={
+                              loadResultProgress.stageLabel ??
+                              tCommon("aiProgress.evaluatingAnswer")
+                            }
+                            percent={loadResultProgress.percent}
+                            size="compact"
+                            testId="sentence-shooter-result-progress"
+                          />
+                        </div>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </div>
@@ -2036,6 +2140,19 @@ export function SentenceShooterScreen({
           {t("sentenceShooter.startPlaying")}
         </Button>
       </div>
+      {isStartingSession ? (
+        <div className="mx-auto w-full max-w-md">
+          <AiProgressBar
+            active
+            label={
+              startSessionProgress.stageLabel ?? tCommon("aiProgress.preparing")
+            }
+            percent={startSessionProgress.percent}
+            size="sm"
+            testId="sentence-shooter-starting-progress"
+          />
+        </div>
+      ) : null}
       <p className="text-center text-sm font-semibold text-muted">
         {t("sentenceShooter.duplicateTokenNote")}
       </p>

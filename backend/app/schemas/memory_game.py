@@ -166,6 +166,7 @@ class MemoryAttemptCreate(BaseModel):
     stage: MemoryAttemptStage = "RECALL"
     input_mode: MemoryInputMode = "TEXT"
     response_text: str = Field(..., min_length=1, max_length=2000)
+    teacher_gender: Literal["female", "male"] | None = None
 
 
 class MatchedFactRead(BaseModel):

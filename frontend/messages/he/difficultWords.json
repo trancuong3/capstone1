@@ -52,7 +52,12 @@
     "emptyFilterDescription": "אין מילים התואמות למצב התרגול הנבחר.",
     "viewAllWords": "הצג את כל המילים ({count})",
     "paginationAria": "עימוד קבוצות ספרי תרגול מילים",
-    "paginationItemLabel": "ספרים"
+    "paginationItemLabel": "ספרים",
+    "statTotal": "סה״כ מילים",
+    "statCompleted": "נקראו נכון",
+    "statRemaining": "לחזרה",
+    "quickMastered": "נשלטות",
+    "quickNeedsMoreFull": "דורש חיזוק"
   },
   "bookCard": {
     "gradeSingle": "כיתה {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "לא נקרא שוב",
     "badgeNeedsMore": "דורש תרגול נוסף",
     "badgeInProgress": "בתהליך תרגול",
-    "badgeCompleted": "נקרא נכון"
+    "badgeCompleted": "נקרא נכון",
+    "showMoreWords": "+{count} מילים נוספות",
+    "showFewerWords": "צמצום",
+    "tagMispronounced": "שגוי {count}",
+    "tagOmitted": "דולג {count}",
+    "tagRepeated": "חזר {count}"
   },
   "item": {
     "notPracticed": "לא תורגל",

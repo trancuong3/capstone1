@@ -233,5 +233,22 @@
         "a3": "「進捗」セクションでレポートを確認するか、「履歴」セクションで保存された読書セッションを確認してください。"
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "全機能で音声を同期",
+    "title": "AI先生（女性・男性）を選ぶ",
+    "subtitle": "選んだ声は読書・発音練習・苦手な言葉・読解・ゲームすべてに反映されます。",
+    "savedForChild": "{alias}用に保存中",
+    "previewButton": "声を試聴する",
+    "stopPreviewButton": "試聴を止める",
+    "personaGroupAria": "女性のAI先生または男性のAI先生を選択",
+    "femaleTitle": "女性のAI先生",
+    "femaleDesc": "やさしく温かな女性の声",
+    "maleTitle": "男性のAI先生",
+    "maleDesc": "落ち着いて豊かな男性の声",
+    "selectedBadge": "選択中",
+    "regionLabel": "地域アクセント",
+    "voiceListLabel": "具体的な声",
+    "voiceListAria": "先生と地域に合う声の一覧"
   }
 }

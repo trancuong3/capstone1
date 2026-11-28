@@ -10,7 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   AdminBadge,
@@ -25,11 +25,13 @@ import {
   type AdminBadgeTone,
 } from "@/components/admin/admin-ui";
 import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-books-quality-section";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -381,6 +383,134 @@ function ScanPageFindingsList({
         total={findings.length}
       />
     </div>
+  );
+}
+
+function QualityScanProgressBar({
+  scan,
+  enqueuing = false,
+  testId,
+}: {
+  scan: {
+    status: string;
+    progress_pct?: number | null;
+    total_pages: number;
+    completed_pages: number;
+  } | null;
+  enqueuing?: boolean;
+  testId?: string;
+}) {
+  const tCommon = useTranslations("common");
+  const { formatNumber } = useI18n();
+  const isScanActive =
+    enqueuing || scan?.status === "QUEUED" || scan?.status === "RUNNING";
+  const hasMeasuredPages = Boolean(scan && scan.total_pages > 0);
+  const derivedPct =
+    enqueuing && !scan
+      ? 10
+      : typeof scan?.progress_pct === "number" &&
+          Number.isFinite(scan.progress_pct)
+        ? scan.progress_pct
+        : hasMeasuredPages
+          ? Math.round((scan!.completed_pages / scan!.total_pages) * 100)
+          : scan?.status === "RUNNING"
+            ? 35
+            : 10;
+
+  const stages = useMemo(
+    () => [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 20, label: tCommon("aiProgress.analyzing") },
+      { atPct: 55, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    [tCommon],
+  );
+
+  const progress = useAiProgress({
+    active: isScanActive,
+    realPercent: derivedPct,
+    progressMode: "staged",
+    stages,
+    expectedDurationMs: 18_000,
+  });
+
+  if (!isScanActive) return null;
+
+  return (
+    <AiProgressBar
+      active
+      className="mt-2.5"
+      detail={
+        hasMeasuredPages
+          ? `${formatNumber(scan!.completed_pages)}/${formatNumber(scan!.total_pages)}`
+          : undefined
+      }
+      elapsedSeconds={progress.elapsedSeconds}
+      label={progress.stageLabel ?? tCommon("aiProgress.safetyChecking")}
+      percent={progress.percent}
+      size="sm"
+      testId={testId}
+    />
+  );
+}
+
+function WorkflowInlineProgressBar({
+  status,
+  completedChunks,
+  totalChunks,
+  progressPct,
+}: {
+  status: string;
+  completedChunks: number;
+  totalChunks: number;
+  progressPct?: number | null;
+}) {
+  const tCommon = useTranslations("common");
+  const { formatNumber } = useI18n();
+  const isActive =
+    status === "QUEUED" ||
+    status === "PROOFREADING" ||
+    status === "CHILD_SAFETY_SCANNING";
+  const derivedPct =
+    typeof progressPct === "number" && Number.isFinite(progressPct)
+      ? progressPct
+      : status === "CHILD_SAFETY_SCANNING"
+        ? totalChunks > 0
+          ? Math.round(55 + (completedChunks / totalChunks) * 38)
+          : 65
+        : status === "PROOFREADING"
+          ? totalChunks > 0
+            ? Math.round(10 + (completedChunks / totalChunks) * 45)
+            : 18
+          : 8;
+  const progress = useAiProgress({
+    active: isActive,
+    realPercent: derivedPct,
+    progressMode: "staged",
+    expectedDurationMs: 14_000,
+  });
+  if (!isActive) return null;
+  const label =
+    status === "CHILD_SAFETY_SCANNING"
+      ? tCommon("aiProgress.safetyChecking")
+      : status === "PROOFREADING"
+        ? tCommon("aiProgress.proofreading")
+        : tCommon("aiProgress.preparing");
+  return (
+    <AiProgressBar
+      active
+      className="mt-2.5"
+      detail={
+        totalChunks > 0
+          ? `${formatNumber(completedChunks)}/${formatNumber(totalChunks)}`
+          : undefined
+      }
+      elapsedSeconds={progress.elapsedSeconds}
+      label={label}
+      percent={progress.percent}
+      size="compact"
+    />
   );
 }
 
@@ -1668,6 +1798,11 @@ export function AdminBookContentQualityScreen({
                           )}
                         </span>
                       </div>
+                      <QualityScanProgressBar
+                        enqueuing={busyKey === `scan:${book.book_id}`}
+                        scan={book.latest_scan}
+                        testId={`quality-book-scan-progress-${book.book_id}`}
+                      />
                     </div>
 
                     <div className="grid w-full grid-cols-2 gap-2 sm:w-[20rem] sm:shrink-0 sm:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -2145,6 +2280,12 @@ export function AdminBookContentQualityScreen({
                   )}
                 </AdminBadge>
               </div>
+
+              <QualityScanProgressBar
+                enqueuing={busyKey === `scan:${selectedBook.book_id}`}
+                scan={selectedBook.latest_scan_detail}
+                testId="quality-drawer-scan-progress"
+              />
 
               <AdminKpiGrid columns={4}>
                 <AdminKpiCard
@@ -2948,6 +3089,13 @@ export function AdminBookContentQualityScreen({
                         </p>
                       ) : null}
 
+                      <WorkflowInlineProgressBar
+                        completedChunks={workflow.progress.completed_chunks}
+                        progressPct={workflow.progress_pct}
+                        status={workflow.status}
+                        totalChunks={workflow.progress.total_chunks}
+                      />
+
                       {workflow.findings.length ? (
                         <div className="mt-2.5 grid gap-2">
                           {workflow.findings.map((finding, index) => (
@@ -3138,6 +3286,10 @@ export function AdminBookContentQualityScreen({
                     })}
                   </h3>
                 </div>
+                <QualityScanProgressBar
+                  scan={selectedScan}
+                  testId="quality-selected-scan-progress"
+                />
                 <div className="mt-2.5 flex flex-wrap gap-2 text-xs tabular-nums">
                   {(
                     [

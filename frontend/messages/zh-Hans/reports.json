@@ -388,7 +388,20 @@
         "repeated": "重复",
         "hesitation": "犹豫"
       }
-    }
+    },
+    "summarySessions": "阅读次数",
+    "summaryDuration": "累计时长",
+    "summaryCompleted": "已完成",
+    "summaryDurationZero": "0 分钟",
+    "filterAria": "按状态筛选阅读记录",
+    "filterAll": "全部",
+    "filterCompleted": "已完成",
+    "filterIncomplete": "未完成",
+    "searchPlaceholder": "按当前页书名筛选…",
+    "searchAria": "按书名搜索阅读记录",
+    "filterEmptyTitle": "没有符合条件的记录",
+    "filterEmptyDesc": "请切换状态或清空搜索关键词。",
+    "clearFilterAction": "查看全部记录"
   },
   "readingManagement": {
     "title": "阅读管理与提醒",

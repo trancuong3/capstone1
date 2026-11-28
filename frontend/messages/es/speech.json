@@ -86,7 +86,10 @@
     "offlineCacheEmpty": "El servicio de voz local está desconectado y aún no hay audio pregenerado en el dispositivo. Inicia el servicio local o activa el respaldo abajo para reproducir muestras.",
     "localWorkerLabel": "Servicio local:",
     "sessionLockedBadge": "Bloqueada para esta sesión de lectura",
-    "offlineBrowserBadge": "El navegador está sin conexión"
+    "offlineBrowserBadge": "El navegador está sin conexión",
+    "teacherPersonaAria": "Cambio rápido entre Maestra IA y Maestro IA",
+    "femaleTeacherQuickBtn": "Maestra IA (Femenina)",
+    "maleTeacherQuickBtn": "Maestro IA (Masculina)"
   },
   "engineBadge": {
     "ariaLabel": "Estado de voz: Escucha {stt}, Voz {tts}",
@@ -117,7 +120,8 @@
     "androidNativeFallbackNotice": "La voz en línea está en pausa — ViRead usa la voz vietnamita de tu dispositivo.",
     "browserFallbackNotice": "Voz del dispositivo desactivada; se está utilizando la voz en línea del navegador.",
     "autoplayBlocked": "El navegador espera interacción para activar el audio. Pulsa Escuchar de nuevo.",
-    "partialPlayback": "Audio interrumpido. Puedes escuchar desde el principio."
+    "partialPlayback": "Audio interrumpido. Puedes escuchar desde el principio.",
+    "deviceVoiceGenderMismatchNotice": "Este dispositivo solo tiene instalada sin conexión una voz vietnamita de otro género. Activa el servidor local o el respaldo de Google."
   },
   "wasm": {
     "workerUnavailable": "Web Worker no disponible",
