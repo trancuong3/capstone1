@@ -7,6 +7,7 @@ import {
   Brain,
   Coffee,
   HelpCircle,
+  Mic,
   Music2,
   Play,
   Sparkles,
@@ -19,6 +20,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useRef,
   useState,
   useSyncExternalStore,
 } from "react";
@@ -31,6 +33,7 @@ import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
@@ -199,20 +202,53 @@ function HubSelectedChildSync({
 export function EntertainmentScreen({
   initialRecommendations = null,
 }: Props = {}) {
-  const t = useTranslations("entertainment");
+  const tRaw = useTranslations("entertainment");
   const teacherPersona = useTeacherPersona();
+  const t = useCallback(
+    (
+      key: string,
+      params?: Record<string, string | number>,
+      defaultValue?: string,
+    ) =>
+      adaptTextToTeacherPersona(
+        tRaw(key, params, defaultValue),
+        teacherPersona.gender,
+      ),
+    [tRaw, teacherPersona.gender],
+  );
   const tCommon = useTranslations("common");
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
+  const speechPlayer = useSpeechPlayer();
+  const speechPlayerRef = useRef(speechPlayer);
   const {
     reducedMotion,
     calmSound,
     autoPlayFlow,
+    autopilotEnabled,
     toggleReducedMotion,
     toggleCalmSound,
     toggleAutoPlayFlow,
   } = useEntertainmentPreferences();
+
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
+    return () => {
+      speechPlayerRef.current.stop();
+    };
+  }, []);
+
+  function handleSpeakFocusWord(word: string) {
+    const cleaned = word.trim();
+    if (!cleaned || !calmSound) return;
+    void speechPlayer
+      .play(cleaned, { wordSample: true, speedScale: 0.92 })
+      .catch(() => undefined);
+  }
 
   const [childrenList, setChildrenList] = useState<readonly ChildProfileDTO[]>(
     [],
@@ -267,13 +303,21 @@ export function EntertainmentScreen({
         if (!children.length) return;
         const currentSelected = appStore?.selectedChildId ?? null;
         if (currentSelected) {
+          const matchedSelected =
+            children.find((item) => item.id === currentSelected) ?? null;
+          if (matchedSelected) {
+            appStore?.setValidatedSelectedChild(matchedSelected);
+            hydrateTeacherVoiceFromChildProfile(matchedSelected);
+          }
           return;
         }
         if (appStore) {
           appStore.selectChild(children[0].id);
           appStore.setValidatedSelectedChild(children[0]);
+          hydrateTeacherVoiceFromChildProfile(children[0]);
         } else if (!initialRecommendations) {
           setFallbackChildId(children[0].id);
+          hydrateTeacherVoiceFromChildProfile(children[0]);
         }
       } catch {
         // Gracefully remain in calm static child-first hub when unauthenticated or offline.
@@ -365,7 +409,7 @@ export function EntertainmentScreen({
     }
     if (matched) {
       setValidatedChild(matched);
-      hydrateTeacherVoiceFromChildProfile(matched);
+      hydrateTeacherVoiceFromChildProfile(matched, { force: true });
     }
   }
 
@@ -386,6 +430,21 @@ export function EntertainmentScreen({
     ]),
   );
   const primaryRec = recommendations?.primary_recommendation ?? null;
+  const focusWordsForLaunch = primaryRec?.target_words.length
+    ? primaryRec.target_words
+    : (recommendations?.focus_difficult_words ?? []);
+  const autopilotHref = (() => {
+    if (!primaryRec) return null;
+    const baseHref = primaryRec.href;
+    const sep = baseHref.includes("?") ? "&" : "?";
+    const params: string[] = ["autopilot=1"];
+    if (focusWordsForLaunch.length && !baseHref.includes("focus=")) {
+      params.push(
+        `focus=${encodeURIComponent(focusWordsForLaunch.slice(0, 4).join(","))}`,
+      );
+    }
+    return `${baseHref}${sep}${params.join("&")}`;
+  })();
   const activeStep = ONBOARDING_STEP_KEYS[onboardingStep];
   const displayChild =
     childrenList.find((item) => item.id === activeChildId) ??
@@ -402,6 +461,7 @@ export function EntertainmentScreen({
         reducedMotion && "motion-reduce",
       )}
       data-auto-play-flow={autoPlayFlow ? "true" : "false"}
+      data-autopilot={autopilotEnabled ? "true" : "false"}
       data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
       data-sound-muted={calmSound ? "false" : "true"}
@@ -448,14 +508,14 @@ export function EntertainmentScreen({
           <Button
             aria-pressed={autoPlayFlow}
             className="min-h-12 px-4"
-            data-testid="hub-autoplay-toggle"
+            data-testid="hub-autopilot-toggle"
             fullWidth={false}
             onClick={toggleAutoPlayFlow}
             size="compact"
             type="button"
             variant={autoPlayFlow ? "secondary" : "quiet"}
           >
-            <Play aria-hidden="true" className="size-4" />
+            <Mic aria-hidden="true" className="size-4" />
             {autoPlayFlow ? t("hub.autoPlayFlowOn") : t("hub.autoPlayFlowOff")}
           </Button>
           <Button
@@ -579,19 +639,31 @@ export function EntertainmentScreen({
                   {t("hub.misreadWordsChipTitle")}
                 </span>
                 {recommendations.focus_difficult_words.map((word) => (
-                  <span
-                    className="viread-learning-content rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 shadow-2xs"
-                    dir="ltr"
+                  <button
+                    aria-label={`Nghe mẫu từ ${word}`}
+                    className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 shadow-2xs transition hover:border-amber-500 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    data-testid={`hub-focus-word-${word}`}
                     key={word}
-                    lang="vi"
+                    onClick={() => handleSpeakFocusWord(word)}
+                    type="button"
                   >
-                    {word}
-                  </span>
+                    <Volume2
+                      aria-hidden="true"
+                      className="size-3.5 text-amber-700"
+                    />
+                    <span
+                      className="viread-learning-content"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {word}
+                    </span>
+                  </button>
                 ))}
               </div>
             ) : null}
             {primaryRec ? (
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <ButtonLink
                   className="min-h-12 w-full sm:w-auto"
                   data-testid="hub-owl-quick-play"
@@ -607,6 +679,21 @@ export function EntertainmentScreen({
                     className="viread-rtl-flip size-4"
                   />
                 </ButtonLink>
+                {autopilotEnabled && autopilotHref ? (
+                  <ButtonLink
+                    className="min-h-12 w-full sm:w-auto"
+                    data-testid="hub-autopilot-cta"
+                    href={autopilotHref}
+                    size="compact"
+                    variant="secondary"
+                  >
+                    {t("hub.autopilotLaunchCta", undefined, "Vào học vui ngay")}{" "}
+                    <ArrowRight
+                      aria-hidden="true"
+                      className="viread-rtl-flip size-4"
+                    />
+                  </ButtonLink>
+                ) : null}
               </div>
             ) : null}
           </div>

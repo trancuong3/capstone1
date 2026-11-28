@@ -245,6 +245,7 @@ class SentenceShooterService:
         available_rounds: int,
         matched_difficult_words: list[str] | None = None,
     ) -> SentenceShooterBookRead:
+        cleaned_matched = list(matched_difficult_words or [])[:8]
         return SentenceShooterBookRead(
             id=book.Id,
             name=book.Name,
@@ -253,7 +254,8 @@ class SentenceShooterService:
             min_grade=book.MinGrade,
             max_grade=book.MaxGrade,
             available_rounds=available_rounds,
-            matched_difficult_words=list(matched_difficult_words or []),
+            difficult_word_count=len(cleaned_matched),
+            matched_difficult_words=cleaned_matched,
         )
 
     def _sentences(
@@ -768,7 +770,7 @@ class SentenceShooterService:
                 count += 1
                 for word in self._matched_difficult_words(sentence, focus_set, focus_phrases):
                     norm = normalize_token(word)
-                    if norm and norm not in matched_seen and len(matched_list) < 6:
+                    if norm and norm not in matched_seen and len(matched_list) < 8:
                         matched_seen.add(norm)
                         matched_list.append(word)
             by_book[book_id] = (book_obj, count, matched_list, matched_seen)
@@ -781,7 +783,7 @@ class SentenceShooterService:
         return sorted(
             result,
             key=lambda item: (
-                -len(item.matched_difficult_words),
+                -item.difficult_word_count,
                 0 if item.id in history_book_ids else 1,
                 item.title.casefold(),
                 str(item.id),

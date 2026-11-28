@@ -66,6 +66,7 @@ export function EntertainmentLearningSummary({
         const result = await createAdaptiveLearningService().getParentAnalytics(
           childId,
           30,
+          teacherPersona.gender,
         );
         if (!active) return;
         if (
@@ -88,7 +89,7 @@ export function EntertainmentLearningSummary({
     return () => {
       active = false;
     };
-  }, [childId, initialData]);
+  }, [childId, initialData, teacherPersona.gender]);
 
   const data = initialData ?? fetchedData;
   const status = initialData ? "ready" : fetchStatus;
@@ -345,7 +346,16 @@ export function EntertainmentLearningSummary({
               >
                 <span className="viread-learning-content" dir="ltr" lang="vi">
                   {word.display_text}
-                </span>{" "}
+                </span>
+                {word.phonics_label_vi ? (
+                  <span
+                    className="viread-learning-content rounded-full bg-white/85 px-1.5 py-0.5 text-[10px] font-semibold text-ink"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {word.phonics_label_vi}
+                  </span>
+                ) : null}{" "}
                 ·{" "}
                 {t("entertainmentSummary.practiceTimes", {
                   count: word.practice_count,

@@ -47,16 +47,18 @@ export function AccountAvatarMenu({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<AvatarMenuView>("main");
   const [returningFromLanguage, setReturningFromLanguage] = useState(false);
-  const [languageAnnouncement, setLanguageAnnouncement] = useState("");
   const [languageOpenedByKeyboard, setLanguageOpenedByKeyboard] =
     useState(false);
+  const [languageAnnouncement, setLanguageAnnouncement] = useState("");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const languageTriggerRef = useRef<HTMLButtonElement>(null);
+  const openedFreshRef = useRef(false);
   const restoreLanguageFocusRef = useRef(false);
   const menuId = useId();
   const languagePanelId = useId();
+  const languageTitleId = useId();
   const identity = displayName?.trim() || email?.trim() || "";
   const initial =
     Array.from(identity)[0]?.toLocaleUpperCase(metadata.bcp47) || "?";
@@ -70,19 +72,22 @@ export function AccountAvatarMenu({
     setView("main");
     setReturningFromLanguage(false);
     setLanguageOpenedByKeyboard(false);
+    openedFreshRef.current = false;
     restoreLanguageFocusRef.current = false;
     if (restoreFocus) triggerRef.current?.focus();
   }, []);
 
   const openLanguageView = useCallback((byKeyboard: boolean) => {
-    setLanguageOpenedByKeyboard(byKeyboard);
+    openedFreshRef.current = false;
     restoreLanguageFocusRef.current = false;
+    setLanguageOpenedByKeyboard(byKeyboard);
     setReturningFromLanguage(false);
     setView("language");
   }, []);
 
   const handleBackToMain = useCallback(
     (options?: { readonly restoreFocus?: boolean }) => {
+      openedFreshRef.current = false;
       restoreLanguageFocusRef.current = options?.restoreFocus ?? true;
       setLanguageOpenedByKeyboard(false);
       setReturningFromLanguage(true);
@@ -106,7 +111,10 @@ export function AccountAvatarMenu({
       languageTriggerRef.current?.focus();
       return;
     }
-    focusItem(0);
+    if (openedFreshRef.current) {
+      openedFreshRef.current = false;
+      focusItem(0);
+    }
   }, [focusItem, open, view]);
 
   useEffect(() => {
@@ -195,6 +203,7 @@ export function AccountAvatarMenu({
           if (open) {
             close();
           } else {
+            openedFreshRef.current = true;
             setView("main");
             setReturningFromLanguage(false);
             setOpen(true);
@@ -208,12 +217,20 @@ export function AccountAvatarMenu({
 
       {open ? (
         <div
-          aria-label={t("navigation.accountMenu.menuAria")}
-          className="avatar-menu-enter absolute end-0 top-full z-50 mt-2.5 flex max-h-[min(calc(100dvh-5.5rem),580px)] w-[min(21rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-border/90 bg-white shadow-[0_20px_44px_-14px_rgba(35,62,64,0.20),0_4px_14px_-2px_rgba(35,62,64,0.08)]"
+          aria-label={
+            view === "main" ? t("navigation.accountMenu.menuAria") : undefined
+          }
+          aria-labelledby={view === "language" ? languageTitleId : undefined}
+          className={cn(
+            "avatar-menu-enter absolute end-0 top-full z-50 mt-2.5 flex w-[min(21rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-border/80 bg-white shadow-[0_20px_44px_-14px_rgba(35,62,64,0.18),0_4px_14px_-2px_rgba(35,62,64,0.06)] ring-1 ring-ink/[0.06]",
+            view === "language"
+              ? "max-h-[min(calc(100dvh-9.5rem),540px)] xl:max-h-[min(calc(100dvh-5.5rem),560px)]"
+              : "max-h-[min(calc(100dvh-9.5rem),580px)] xl:max-h-[min(calc(100dvh-5.5rem),640px)]",
+          )}
           id={menuId}
           onKeyDown={handleMenuKeyDown}
           ref={menuRef}
-          role="menu"
+          role={view === "language" ? "dialog" : "menu"}
         >
           {view === "language" ? (
             <InlineLanguagePanel
@@ -221,6 +238,7 @@ export function AccountAvatarMenu({
               onAnnouncement={setLanguageAnnouncement}
               onBack={handleBackToMain}
               openedByKeyboard={languageOpenedByKeyboard}
+              titleId={languageTitleId}
             />
           ) : (
             <div
@@ -230,10 +248,10 @@ export function AccountAvatarMenu({
               )}
             >
               {/* Pinned Profile Bookplate Header */}
-              <div className="flex shrink-0 items-center gap-3 border-b border-border/75 bg-sky/40 px-4 py-3.5">
+              <div className="flex shrink-0 items-center gap-3 border-b border-border/75 bg-sky/40 px-3.5 py-2.5">
                 <div
                   aria-hidden="true"
-                  className="flex size-12 shrink-0 items-center justify-center rounded-full bg-sky text-lg font-bold text-primary ring-2 ring-white shadow-xs"
+                  className="flex size-10 shrink-0 items-center justify-center rounded-full bg-sky text-base font-bold text-primary ring-2 ring-white shadow-xs"
                 >
                   {initial}
                 </div>
@@ -262,12 +280,12 @@ export function AccountAvatarMenu({
               {/* Single Scrollable Menu Body */}
               <div className="avatar-menu-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain p-2">
                 <div>
-                  <p className="px-2.5 pb-0.5 pt-1 text-xs font-bold text-muted">
+                  <p className="px-2.5 pb-0.5 pt-0.5 text-xs font-bold text-muted">
                     {t("navigation.accountMenu.profileSection")}
                   </p>
                   <div className="space-y-0.5">
                     <Link
-                      className="flex min-h-11 items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                      className="flex min-h-11 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                       href="/profile"
                       onClick={() => close()}
                       role="menuitem"
@@ -275,7 +293,7 @@ export function AccountAvatarMenu({
                     >
                       <span
                         aria-hidden="true"
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-primary"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-primary sm:size-7"
                       >
                         <UserRound className="size-4" />
                       </span>
@@ -284,7 +302,7 @@ export function AccountAvatarMenu({
                       </span>
                     </Link>
                     <Link
-                      className="flex min-h-11 items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                      className="flex min-h-11 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                       href="/children"
                       onClick={() => close()}
                       role="menuitem"
@@ -292,7 +310,7 @@ export function AccountAvatarMenu({
                     >
                       <span
                         aria-hidden="true"
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-primary"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-primary sm:size-7"
                       >
                         <UsersRound className="size-4" />
                       </span>
@@ -315,7 +333,7 @@ export function AccountAvatarMenu({
                   </p>
                   <div className="space-y-0.5">
                     <Link
-                      className="flex min-h-11 items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                      className="flex min-h-11 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                       href="/settings"
                       onClick={() => close()}
                       role="menuitem"
@@ -323,7 +341,7 @@ export function AccountAvatarMenu({
                     >
                       <span
                         aria-hidden="true"
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted sm:size-7"
                       >
                         <Settings className="size-4" />
                       </span>
@@ -332,7 +350,7 @@ export function AccountAvatarMenu({
                       </span>
                     </Link>
                     <Link
-                      className="flex min-h-11 items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                      className="flex min-h-11 items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                       href="/help-support"
                       onClick={() => close()}
                       role="menuitem"
@@ -340,7 +358,7 @@ export function AccountAvatarMenu({
                     >
                       <span
                         aria-hidden="true"
-                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted"
+                        className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-surface-subtle text-muted sm:size-7"
                       >
                         <CircleHelp className="size-4" />
                       </span>
@@ -353,14 +371,14 @@ export function AccountAvatarMenu({
                       <button
                         aria-controls={languagePanelId}
                         aria-expanded={false}
-                        aria-haspopup="listbox"
+                        aria-haspopup="dialog"
                         aria-label={t(
                           "common.languageSelector.buttonAriaLabel",
                           {
                             language: metadata.nativeName,
                           },
                         )}
-                        className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                        className="group flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-start text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                         onClick={(event) =>
                           openLanguageView(event.detail === 0)
                         }
@@ -369,7 +387,7 @@ export function AccountAvatarMenu({
                       >
                         <span
                           aria-hidden="true"
-                          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary transition-colors group-hover:bg-sky"
+                          className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary transition-colors group-hover:bg-sky sm:size-7"
                         >
                           <Globe className="size-4" />
                         </span>
@@ -382,7 +400,7 @@ export function AccountAvatarMenu({
                           </span>
                           <ChevronRight
                             aria-hidden="true"
-                            className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5 viread-rtl-flip"
+                            className="size-4 shrink-0 text-muted transition-transform ltr:group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 viread-rtl-flip"
                           />
                         </span>
                       </button>
@@ -392,9 +410,9 @@ export function AccountAvatarMenu({
               </div>
 
               {/* Pinned Sign-Out Footer */}
-              <div className="shrink-0 border-t border-border/75 bg-cream/80 p-2">
+              <div className="shrink-0 border-t border-border/75 bg-cream/80 p-1.5">
                 <button
-                  className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start text-sm font-semibold text-danger transition-colors outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-start text-sm font-semibold text-danger transition-colors outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-60 sm:min-h-[38px]"
                   disabled={isSigningOut}
                   onClick={() => {
                     close();
@@ -406,7 +424,7 @@ export function AccountAvatarMenu({
                 >
                   <span
                     aria-hidden="true"
-                    className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-surface text-danger"
+                    className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-surface text-danger sm:size-7"
                   >
                     <LogOut className="size-4 viread-rtl-flip" />
                   </span>

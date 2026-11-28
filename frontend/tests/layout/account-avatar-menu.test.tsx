@@ -1,8 +1,17 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { I18nProvider } from "@/components/i18n/i18n-provider";
 import { AccountAvatarMenu } from "@/components/layout/account-avatar-menu";
+import { LOCALE_COOKIE_NAME } from "@/lib/i18n/locales";
+
+beforeEach(() => {
+  document.cookie = `${LOCALE_COOKIE_NAME}=; Path=/; Max-Age=0`;
+  window.localStorage.clear();
+  document.documentElement.lang = "vi";
+  document.documentElement.dir = "ltr";
+});
 
 describe("AccountAvatarMenu", () => {
   it("uses the first display-name initial and exposes account links", async () => {
@@ -116,5 +125,113 @@ describe("AccountAvatarMenu", () => {
     await user.click(screen.getByRole("button", { name: "Mở menu tài khoản" }));
     await user.click(screen.getByRole("menuitem", { name: "Đăng xuất" }));
     expect(onSignOut).toHaveBeenCalledOnce();
+  });
+
+  it("opens the inline language sub-view inside the menu, filters and switches locale, and handles layered Escape", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <I18nProvider>
+        <div>
+          <AccountAvatarMenu
+            displayName="Minh Anh"
+            email="parent@example.com"
+            isSigningOut={false}
+            onSignOut={vi.fn()}
+            role="Phụ huynh"
+          />
+          <button type="button">Outside</button>
+        </div>
+      </I18nProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Mở menu tài khoản" });
+    await user.click(trigger);
+
+    const menu = screen.getByRole("menu");
+    const langTrigger = within(menu).getByRole("button", {
+      name: /Chọn ngôn ngữ giao diện/i,
+    });
+    expect(langTrigger.closest('[data-variant="menu"]')).not.toBeNull();
+    expect(container.textContent).not.toMatch(/[\u{1F1E6}-\u{1F1FF}]/u);
+
+    // Drill into inline language sub-view (shell switches role="menu" -> role="dialog")
+    await user.click(langTrigger);
+    const languageDialog = screen.getByRole("dialog", {
+      name: "Chọn ngôn ngữ",
+    });
+    expect(
+      languageDialog.querySelector('[data-language-inline="true"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('[data-language-popover="true"]'),
+    ).toBeNull();
+    expect(container.querySelector('[data-language-sheet="true"]')).toBeNull();
+
+    const searchInput = within(languageDialog).getByRole("searchbox", {
+      name: "Tìm ngôn ngữ",
+    });
+    expect(searchInput).toHaveFocus();
+
+    // Escape from language sub-view returns to Main View without closing the menu
+    await user.keyboard("{Escape}");
+    const restoredMenu = screen.getByRole("menu");
+    expect(
+      restoredMenu.querySelector('[data-language-inline="true"]'),
+    ).toBeNull();
+    expect(
+      within(restoredMenu).getByRole("button", {
+        name: /Chọn ngôn ngữ giao diện/i,
+      }),
+    ).toHaveFocus();
+
+    // Second Escape closes the menu and restores focus to avatar trigger
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    // Reopen, switch locale via search, and verify return to Main View + live announcement
+    await user.click(trigger);
+    const reopenedMenu = screen.getByRole("menu");
+    await user.click(
+      within(reopenedMenu).getByRole("button", {
+        name: /Chọn ngôn ngữ giao diện/i,
+      }),
+    );
+
+    const reopenedDialog = screen.getByRole("dialog", {
+      name: "Chọn ngôn ngữ",
+    });
+    const search = within(reopenedDialog).getByRole("searchbox", {
+      name: "Tìm ngôn ngữ",
+    });
+    await user.type(search, "English");
+    await user.click(
+      within(reopenedDialog).getByRole("option", { name: /English/ }),
+    );
+
+    await waitFor(() => {
+      expect(document.documentElement.lang).toBe("en");
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("English");
+    });
+
+    // Outside click while inside language sub-view resets to Main View on reopen
+    await user.click(
+      within(screen.getByRole("menu")).getByRole("button", {
+        name: /Select interface language/i,
+      }),
+    );
+    expect(
+      screen
+        .getByRole("dialog", { name: "Select language" })
+        .querySelector('[data-language-inline="true"]'),
+    ).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Outside" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Open account menu" }));
+    const freshMenu = screen.getByRole("menu");
+    expect(freshMenu.querySelector('[data-language-inline="true"]')).toBeNull();
   });
 });

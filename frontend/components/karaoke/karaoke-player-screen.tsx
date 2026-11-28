@@ -18,6 +18,7 @@ import {
   type KaraokePlayback,
 } from "@/lib/api/karaoke-service";
 import { createKaraokePracticeService } from "@/lib/api/karaoke-practice-service";
+import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { isServiceError } from "@/lib/api/service-error";
 import type { MusicalEvaluationResult } from "@/lib/karaoke/musical-scoring";
 import type { ChildProfileDTO } from "@/types/child";
@@ -116,6 +117,45 @@ function ChildKaraokeSession({
 }) {
   const t = useTranslations("entertainment");
   const practiceService = useMemo(() => createKaraokePracticeService(), []);
+  const adaptiveService = useMemo(() => createAdaptiveLearningService(), []);
+  const [focusWords, setFocusWords] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    const params = new URLSearchParams(window.location.search);
+    const raw =
+      params.get("focus") ??
+      params.get("focusWords") ??
+      params.get("targetWords") ??
+      "";
+    return raw
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  });
+  const initialAutopilot = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return (
+      params.get("autopilot") === "1" || params.get("autopilot") === "true"
+    );
+  }, []);
+
+  useEffect(() => {
+    if (focusWords.length > 0) return;
+    let active = true;
+    void adaptiveService
+      .getRecommendations(child.id)
+      .then((rec) => {
+        if (active && rec.focus_difficult_words?.length) {
+          setFocusWords(rec.focus_difficult_words.slice(0, 6));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [adaptiveService, child.id, focusWords.length]);
+
   const player = useKaraokePlayer(
     source.audio_url,
     source.duration_ms,
@@ -156,6 +196,7 @@ function ChildKaraokeSession({
         headphoneMode: boolean;
         segmentStartMs: number | null;
         segmentEndMs: number | null;
+        matchedDifficultWords?: string[];
       },
     ) => {
       await practiceService.savePracticeSession({
@@ -168,6 +209,7 @@ function ChildKaraokeSession({
         segmentStartMs: meta.segmentStartMs,
         segmentEndMs: meta.segmentEndMs,
         evaluation,
+        matchedDifficultWords: meta.matchedDifficultWords,
       });
     },
     [child.id, practiceService, source.song_id, source.version_id],
@@ -179,6 +221,8 @@ function ChildKaraokeSession({
       player={player}
       childAlias={child.alias}
       label={t("karaoke.playerScreen.childStageLabel")}
+      focusWords={focusWords}
+      initialAutopilot={initialAutopilot}
       onReload={onReload}
       onLoadMusicalProfile={onLoadMusicalProfile}
       onLoadPracticeHistory={onLoadPracticeHistory}

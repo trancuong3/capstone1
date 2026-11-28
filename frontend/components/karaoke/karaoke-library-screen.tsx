@@ -129,6 +129,23 @@ function Catalog({
   const router = useRouter();
   const service = useKaraokeService();
   const redirectedRef = useRef(false);
+  const [launchQuery] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try {
+      const incoming = new URLSearchParams(window.location.search);
+      const out = new URLSearchParams();
+      const autopilot = incoming.get("autopilot");
+      const focus =
+        incoming.get("focus") ??
+        incoming.get("focusWords") ??
+        incoming.get("targetWords");
+      if (autopilot) out.set("autopilot", autopilot);
+      if (focus) out.set("focus", focus);
+      return out.toString();
+    } catch {
+      return "";
+    }
+  });
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "ready"; data: KaraokeCatalog }
@@ -219,6 +236,7 @@ function Catalog({
             {data.items.map((song) => (
               <SongCard
                 key={`${song.song_id}:${song.version_id}`}
+                launchQuery={launchQuery}
                 song={song}
               />
             ))}

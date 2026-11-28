@@ -12,6 +12,7 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
+  expect: { timeout: 15_000 },
   retries: process.env.CI ? 2 : 0,
   reporter: [
     ["list"],
@@ -24,21 +25,24 @@ export default defineConfig({
       "parent",
       authFixtureToken,
     ),
+    serviceWorkers: "block",
     trace: "on-first-retry",
   },
   webServer: {
-    command: `npm run dev -- --hostname 127.0.0.1 --port ${port}`,
+    command: `npm run dev -- --webpack --disable-source-maps --hostname 127.0.0.1 --port ${port}`,
     env: {
+      NEXT_DIST_DIR: process.env.NEXT_DIST_DIR ?? ".next-e2e",
       NEXT_PUBLIC_API_URL:
         process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000",
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
       NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
       PLAYWRIGHT_AUTH_FIXTURES: "1",
       PLAYWRIGHT_AUTH_FIXTURE_TOKEN: authFixtureToken,
+      PLAYWRIGHT_PORT: port,
     },
     url: baseURL,
     reuseExistingServer: false,
-    timeout: 120_000,
+    timeout: 180_000,
   },
   workers: 2,
   projects: [

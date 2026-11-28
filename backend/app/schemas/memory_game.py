@@ -93,6 +93,7 @@ class SceneSpec(BaseModel):
     creative_prompt_vi: str
     focus_words: list[str] = Field(default_factory=list)
     matched_focus_words: list[str] = Field(default_factory=list)
+    creative_focus_words: list[str] = Field(default_factory=list)
 
 
 class MemoryThemeRead(BaseModel):

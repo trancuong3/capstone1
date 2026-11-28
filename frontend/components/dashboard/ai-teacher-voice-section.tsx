@@ -30,18 +30,26 @@ import {
   getVoicePolicyPreferences,
   GOOGLE_TTS_MODEL_VERSION,
   inferRegionFromVoiceId,
+  setVoicePolicyPreferences,
   STATIC_LOCAL_VOICES,
   subscribeVoiceLock,
   subscribeVoicePolicy,
+  type VoiceProviderMode,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import {
   clampSpeed,
+  getSpeechPreferences,
   SPEED_MAX,
   SPEED_MIN,
   SPEED_STEP,
 } from "@/lib/reading/speech-preferences";
 import {
+  getCachedVoiceEngineHealth,
+  subscribeVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
+import {
+  adaptTextToTeacherPersona,
   resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
@@ -61,6 +69,9 @@ const REGIONS: readonly {
   { id: "central", labelKey: "settings.regions.central" },
   { id: "south", labelKey: "settings.regions.south" },
 ];
+
+const TEACHER_VOICE_PREVIEW_BASE_TEXT =
+  "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.";
 
 const SPEED_PRESETS = [
   { labelKey: "preferences.slow", value: 0.85 },
@@ -244,17 +255,42 @@ export function AiTeacherVoiceSection({
     () => STATIC_LOCAL_VOICES[0].voice_id,
   );
 
+  const voiceHealth = useSyncExternalStore(
+    subscribeVoiceEngineHealth,
+    getCachedVoiceEngineHealth,
+    () => null,
+  );
+
   const [remoteVoices, setRemoteVoices] = useState<
     readonly VoiceOption[] | null
   >(null);
+  const [localWorkerReady, setLocalWorkerReady] = useState<boolean | null>(
+    null,
+  );
   const googleBackupEnabled =
     policy.providerMode === "local_with_google_fallback" &&
     policy.allowGoogleTtsFallback;
+  const mountedRef = useRef(true);
+  const previewGenRef = useRef(0);
+  const persistSeqRef = useRef(0);
+  const speechPlayerRef = useRef(speechPlayer);
+
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      speechPlayerRef.current.stop();
+    };
+  }, []);
 
   useEffect(() => {
     if (
-      process.env.NODE_ENV === "test" ||
-      typeof voiceStudio.listVoices !== "function"
+      typeof voiceStudio.listVoices !== "function" ||
+      (process.env.NODE_ENV === "test" && !("mock" in voiceStudio.listVoices))
     ) {
       return;
     }
@@ -262,8 +298,12 @@ export function AiTeacherVoiceSection({
     void voiceStudio
       .listVoices(controller.signal)
       .then((res) => {
-        if (!controller.signal.aborted && res.voices.length > 0) {
+        if (controller.signal.aborted || !mountedRef.current) return;
+        if (res.voices.length > 0) {
           setRemoteVoices(res.voices);
+        }
+        if (typeof res.local_worker_ready === "boolean") {
+          setLocalWorkerReady(res.local_worker_ready);
         }
       })
       .catch(() => {
@@ -286,21 +326,6 @@ export function AiTeacherVoiceSection({
   }, [remoteVoices, googleBackupEnabled]);
   const [previewError, setPreviewError] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
-  const mountedRef = useRef(true);
-  const previewGenRef = useRef(0);
-  const speechPlayerRef = useRef(speechPlayer);
-
-  useEffect(() => {
-    speechPlayerRef.current = speechPlayer;
-  }, [speechPlayer]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      speechPlayerRef.current.stop();
-    };
-  }, []);
 
   const activeGender: VoiceGender = teacherPersona.gender;
   const activeVoiceId = preferences.voiceId ?? effectiveVoiceId;
@@ -321,12 +346,13 @@ export function AiTeacherVoiceSection({
       },
     ) => {
       if (typeof childService.updateVoicePreferences !== "function") return;
+      const seq = ++persistSeqRef.current;
       try {
         const updated = await childService.updateVoicePreferences(
           childId,
           payload,
         );
-        if (mountedRef.current) {
+        if (mountedRef.current && seq === persistSeqRef.current) {
           onChildSettingsUpdated?.(updated);
         }
       } catch {
@@ -389,44 +415,143 @@ export function AiTeacherVoiceSection({
     [voices],
   );
 
+  const startPreviewPlayback = useCallback(
+    (genderOverride?: VoiceGender) => {
+      const gen = ++previewGenRef.current;
+      setPreviewError(false);
+      setIsPreviewing(true);
+      const targetGender = genderOverride ?? activeGender;
+      const greeting = adaptTextToTeacherPersona(
+        TEACHER_VOICE_PREVIEW_BASE_TEXT,
+        targetGender,
+      );
+
+      void speechPlayer
+        .play(greeting, {
+          coaching: true,
+          cacheScope: "COACHING",
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        })
+        .catch((error: unknown) => {
+          const isAbortError =
+            typeof error === "object" &&
+            error !== null &&
+            "name" in error &&
+            (error as { name?: unknown }).name === "AbortError";
+          if (
+            mountedRef.current &&
+            gen === previewGenRef.current &&
+            !isAbortError
+          ) {
+            setPreviewError(true);
+          }
+        })
+        .finally(() => {
+          if (mountedRef.current && gen === previewGenRef.current) {
+            setIsPreviewing(false);
+          }
+        });
+    },
+    [activeGender, speechPlayer],
+  );
+
   const handleSelectTeacherGender = (nextGender: VoiceGender) => {
-    if (nextGender === activeGender) return;
-    const picked = findPreferredVoice(nextGender, activeRegion);
-    applySelection({
-      gender: nextGender,
-      region: activeRegion,
-      voiceId:
-        picked?.voice_id ??
-        getDefaultVoiceIdForRegionAndGender(activeRegion, nextGender),
-      modelVersion: picked?.model_version ?? undefined,
-    });
+    if (nextGender !== activeGender) {
+      const picked = findPreferredVoice(nextGender, activeRegion);
+      applySelection({
+        gender: nextGender,
+        region: activeRegion,
+        voiceId:
+          picked?.voice_id ??
+          getDefaultVoiceIdForRegionAndGender(activeRegion, nextGender),
+        modelVersion: picked?.model_version ?? undefined,
+      });
+    } else {
+      stopPreview();
+    }
+    startPreviewPlayback(nextGender);
   };
 
   const handleSelectRegion = (nextRegion: VoiceRegion) => {
-    if (nextRegion === activeRegion) return;
-    const picked = findPreferredVoice(activeGender, nextRegion);
-    applySelection({
-      gender: activeGender,
-      region: nextRegion,
-      voiceId:
-        picked?.voice_id ??
-        getDefaultVoiceIdForRegionAndGender(nextRegion, activeGender),
-      modelVersion: picked?.model_version ?? undefined,
-    });
+    if (nextRegion !== activeRegion) {
+      const picked = findPreferredVoice(activeGender, nextRegion);
+      applySelection({
+        gender: activeGender,
+        region: nextRegion,
+        voiceId:
+          picked?.voice_id ??
+          getDefaultVoiceIdForRegionAndGender(nextRegion, activeGender),
+        modelVersion: picked?.model_version ?? undefined,
+      });
+    } else {
+      stopPreview();
+    }
+    startPreviewPlayback(activeGender);
   };
 
   const handleSelectVoice = (voice: VoiceOption) => {
+    const voiceGender = resolveVoiceGender(voice.voice_id, voice.gender);
     applySelection({
       voiceId: voice.voice_id,
-      gender: resolveVoiceGender(voice.voice_id, voice.gender),
+      gender: voiceGender,
       region: resolveOptionRegion(voice),
       modelVersion: voice.model_version ?? undefined,
     });
+    startPreviewPlayback(voiceGender);
   };
 
   const handleSelectSpeed = (speed: number) => {
     applySelection({ speed: clampSpeed(speed) });
   };
+
+  const handleSelectProviderMode = (nextMode: VoiceProviderMode) => {
+    stopPreview();
+    const updated =
+      nextMode === "local_only"
+        ? setVoicePolicyPreferences({
+            providerMode: "local_only",
+            allowGoogleSttFallback: false,
+            allowGoogleTtsFallback: false,
+          })
+        : setVoicePolicyPreferences({
+            providerMode: "local_with_google_fallback",
+            allowGoogleSttFallback: true,
+            allowGoogleTtsFallback: true,
+          });
+
+    const currentVoiceId = getSpeechPreferences().voiceId;
+    if (
+      currentVoiceId?.startsWith("google_") &&
+      (updated.providerMode !== "local_with_google_fallback" ||
+        !updated.allowGoogleTtsFallback)
+    ) {
+      const preservedGender = resolveVoiceGender(currentVoiceId);
+      const fallbackLocal = getDefaultVoiceIdForRegionAndGender(
+        updated.region,
+        preservedGender,
+      );
+      applyGlobalTeacherVoiceSelection({
+        voiceId: fallbackLocal,
+        storedVoiceId:
+          fallbackLocal === "local_north_truc_ly" ? null : fallbackLocal,
+        gender: preservedGender,
+        region: updated.region,
+        childId: selectedChild?.id ?? null,
+        persistToBackend: selectedChild?.id ? persistChildVoice : undefined,
+        syncActiveServerSessionLock:
+          typeof voiceStudio.updateSessionVoiceLock === "function"
+            ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+            : undefined,
+      });
+    }
+  };
+
+  const isLocalWorkerOffline =
+    localWorkerReady !== null
+      ? !localWorkerReady
+      : voiceHealth !== null &&
+        (!voiceHealth.local.available || !voiceHealth.local.tts_ready);
 
   const exactVoicesForGenderAndRegion = voices.filter(
     (v) =>
@@ -458,36 +583,7 @@ export function AiTeacherVoiceSection({
       stopPreview();
       return;
     }
-    const gen = ++previewGenRef.current;
-    setPreviewError(false);
-    setIsPreviewing(true);
-    const voiceName =
-      cleanVoiceName(currentVoice) ||
-      (activeGender === "male" ? "Thầy Thiện Minh" : "Cô Trúc Ly");
-    const greeting =
-      activeGender === "male"
-        ? `Chào con, thầy là ${voiceName}. Hôm nay thầy và con cùng đọc bài thật vui nhé!`
-        : `Chào con, cô là ${voiceName}. Hôm nay cô và con cùng đọc bài thật vui nhé!`;
-
-    void speechPlayer
-      .play(greeting, {
-        bypassSessionLock: true,
-        utteranceKind: "voice_preview",
-      })
-      .catch((error: unknown) => {
-        if (
-          mountedRef.current &&
-          gen === previewGenRef.current &&
-          !(error instanceof Error && error.name === "AbortError")
-        ) {
-          setPreviewError(true);
-        }
-      })
-      .finally(() => {
-        if (mountedRef.current && gen === previewGenRef.current) {
-          setIsPreviewing(false);
-        }
-      });
+    startPreviewPlayback(activeGender);
   };
 
   const formatSpeed = (speed: number): string =>
@@ -751,6 +847,59 @@ export function AiTeacherVoiceSection({
               type="range"
               value={preferences.speed}
             />
+          </div>
+
+          <div className="space-y-1.5 border-t border-border/60 pt-2.5">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-muted">
+              {tParent("teacherVoice.policyLabel")}
+            </p>
+            <div
+              aria-label={tParent("teacherVoice.policyAria")}
+              className="flex flex-wrap gap-2"
+              role="radiogroup"
+            >
+              <button
+                aria-checked={!googleBackupEnabled}
+                className={cn(
+                  "min-h-10 rounded-control border px-3 py-1.5 text-xs font-bold transition focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                  !googleBackupEnabled
+                    ? "border-primary bg-primary text-white shadow-2xs"
+                    : "border-border bg-white text-ink hover:border-primary/60",
+                )}
+                data-testid="teacher-policy-local-only"
+                onClick={() => handleSelectProviderMode("local_only")}
+                role="radio"
+                type="button"
+              >
+                {tParent("teacherVoice.policyLocalOnly")}
+              </button>
+              <button
+                aria-checked={googleBackupEnabled}
+                className={cn(
+                  "min-h-10 rounded-control border px-3 py-1.5 text-xs font-bold transition focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary",
+                  googleBackupEnabled
+                    ? "border-primary bg-primary text-white shadow-2xs"
+                    : "border-border bg-white text-ink hover:border-primary/60",
+                )}
+                data-testid="teacher-policy-online-backup"
+                onClick={() =>
+                  handleSelectProviderMode("local_with_google_fallback")
+                }
+                role="radio"
+                type="button"
+              >
+                {tParent("teacherVoice.policyOnlineBackup")}
+              </button>
+            </div>
+            {isLocalWorkerOffline && !googleBackupEnabled ? (
+              <p
+                className="rounded-control border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs leading-relaxed text-amber-950"
+                data-testid="teacher-voice-worker-offline-hint"
+                role="status"
+              >
+                {tParent("teacherVoice.workerOfflineHint")}
+              </p>
+            ) : null}
           </div>
 
           {previewError ? (

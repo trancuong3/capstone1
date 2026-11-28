@@ -280,8 +280,22 @@ class KaraokePracticeService:
         )
 
         evidence_rows: list[LearningSkillEvidence] = []
+        raw_matched_words = (
+            payload.report_payload.get("matched_difficult_words")
+            if isinstance(payload.report_payload, dict)
+            else None
+        )
+        matched_words: list[str] = (
+            [
+                str(w).strip()[:80]
+                for w in raw_matched_words
+                if isinstance(w, str) and str(w).strip()
+            ][:8]
+            if isinstance(raw_matched_words, list)
+            else []
+        )
+        difficulty = max(1, min(5, int(getattr(child, "Grade", 1) or 1)))
         if payload.scoring_mode != "INSUFFICIENT_EVIDENCE":
-            difficulty = max(1, min(5, int(getattr(child, "Grade", 1) or 1)))
             evidence_type = (
                 "OBSERVED"
                 if payload.scoring_mode in ("FULL_MUSICAL", "RHYTHM_AND_LYRICS")
@@ -329,6 +343,15 @@ class KaraokePracticeService:
                 ),
                 ("lyric_delivery", payload.lyrics_score, 0.80),
             )
+            effective_words = list(practiced_words)
+            if (
+                not effective_words
+                and matched_words
+                and payload.practice_mode != "RHYTHM_TAP"
+                and payload.lyrics_score is not None
+                and payload.lyrics_score >= 55
+            ):
+                effective_words = list(matched_words)
             for skill_key, score_val, confidence in skill_entries:
                 if score_val is None:
                     continue
@@ -345,7 +368,7 @@ class KaraokePracticeService:
                         Confidence=confidence,
                         DifficultyLevel=difficulty,
                         PracticeWords=(
-                            list(practiced_words)
+                            list(effective_words)
                             if skill_key == "lyric_delivery"
                             else []
                         ),
@@ -354,7 +377,7 @@ class KaraokePracticeService:
                     )
                 )
             if (
-                practiced_words
+                effective_words
                 and payload.practice_mode != "RHYTHM_TAP"
                 and payload.lyrics_score is not None
             ):
@@ -370,7 +393,7 @@ class KaraokePracticeService:
                         ScoreNormalized=round(float(payload.lyrics_score) / 100.0, 4),
                         Confidence=0.80,
                         DifficultyLevel=difficulty,
-                        PracticeWords=list(practiced_words),
+                        PracticeWords=list(effective_words),
                         MetadataJson=dict(metadata_json),
                         CreatedAt=now,
                     )
@@ -380,6 +403,32 @@ class KaraokePracticeService:
             saved = await self.repository.create_practice_session(
                 session_row, evidence_rows
             )
+            vocal_words = matched_words or (
+                practiced_words if payload.scoring_mode != "INSUFFICIENT_EVIDENCE" else []
+            )
+            if (
+                vocal_words
+                and payload.scoring_mode != "INSUFFICIENT_EVIDENCE"
+                and payload.practice_mode != "RHYTHM_TAP"
+                and payload.lyrics_score is not None
+                and payload.lyrics_score >= 55
+            ):
+                from app.services.active_weak_words import (
+                    record_entertainment_vocal_word_practice,
+                )
+
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repository, "db", None),
+                    child_id=payload.child_id,
+                    parent_id=parent_id,
+                    words=vocal_words,
+                    source_module="KARAOKE",
+                    source_record_id=str(session_id),
+                    transcript_text=", ".join(vocal_words),
+                    confidence=0.80,
+                    difficulty_level=difficulty,
+                    recognition_source="BROWSER_SPEECH",
+                )
             return _session_to_read(saved, persisted=True)
         except KaraokePracticeTableUnavailable:
             return _session_to_read(

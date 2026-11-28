@@ -1308,3 +1308,7 @@ html:lang(bn) {
   scrollbar-width: thin;
   scrollbar-color: rgb(8 116 103 / 24%) transparent;
 }
+
+.avatar-menu-search:focus-visible {
+  outline: none;
+}

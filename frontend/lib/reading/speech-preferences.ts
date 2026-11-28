@@ -4,8 +4,8 @@
  */
 
 import {
+  inferIntrinsicVoiceGender,
   normalizeVoiceGender,
-  resolveVoiceGender,
   type VoiceGender,
 } from "@/lib/reading/voice-persona";
 
@@ -25,6 +25,8 @@ export interface SpeechPreferencesMeta {
   readonly updatedAt: number;
   /** Timestamp stamped ONLY by explicit global teacher voice switches (not bare low-level setSpeechPreferences). */
   readonly globalSelectionUpdatedAt: number;
+  /** Child profile ID that currently owns this active voice preference (null when unassigned). */
+  readonly childId?: string | null;
 }
 
 export const SPEECH_PREFERENCES_STORAGE_KEY = "viread.speech-preferences.v1";
@@ -38,6 +40,7 @@ const DEFAULT_META: SpeechPreferencesMeta = {
   gender: "female",
   updatedAt: 0,
   globalSelectionUpdatedAt: 0,
+  childId: null,
 };
 
 type Listener = () => void;
@@ -77,9 +80,10 @@ function sanitizeMeta(
     typeof record.gender === "string"
       ? normalizeVoiceGender(record.gender)
       : null;
-  const gender: VoiceGender = voiceId
-    ? resolveVoiceGender(voiceId)
-    : (explicitGender ?? "female");
+  const gender: VoiceGender =
+    (voiceId ? inferIntrinsicVoiceGender(voiceId) : null) ??
+    explicitGender ??
+    "female";
   const updatedAt =
     typeof record.updatedAt === "number" &&
     Number.isFinite(record.updatedAt) &&
@@ -92,7 +96,13 @@ function sanitizeMeta(
     record.globalSelectionUpdatedAt >= 0
       ? Math.floor(record.globalSelectionUpdatedAt)
       : 0;
-  return { gender, updatedAt, globalSelectionUpdatedAt };
+  const childId =
+    typeof record.childId === "string" &&
+    record.childId.trim().length > 0 &&
+    record.childId.trim().length <= 100
+      ? record.childId.trim()
+      : null;
+  return { gender, updatedAt, globalSelectionUpdatedAt, childId };
 }
 
 function read(): SpeechPreferences {
@@ -196,6 +206,7 @@ export function setSpeechPreferences(
     readonly gender?: VoiceGender;
     readonly updatedAt?: number;
     readonly globalSelectionUpdatedAt?: number;
+    readonly childId?: string | null;
   },
 ): SpeechPreferences {
   const current = getSpeechPreferences();
@@ -204,21 +215,29 @@ export function setSpeechPreferences(
     speed: update.speed !== undefined ? update.speed : current.speed,
   });
   const currentMeta = getSpeechPreferencesMeta();
-  const nextGender =
-    next.voiceId !== null
-      ? resolveVoiceGender(next.voiceId)
-      : (update.gender ?? currentMeta.gender);
+  const intrinsicGender =
+    next.voiceId !== null ? inferIntrinsicVoiceGender(next.voiceId) : null;
+  const fallbackExplicit =
+    update.gender ??
+    (next.voiceId === current.voiceId ? currentMeta.gender : undefined);
+  const nextGender: VoiceGender =
+    intrinsicGender ?? fallbackExplicit ?? "female";
   const nextUpdatedAt =
     update.updatedAt !== undefined ? update.updatedAt : Date.now();
   const nextGlobalSelectionUpdatedAt =
     update.globalSelectionUpdatedAt !== undefined
       ? update.globalSelectionUpdatedAt
       : currentMeta.globalSelectionUpdatedAt;
+  const nextChildId =
+    update.childId !== undefined
+      ? update.childId
+      : (currentMeta.childId ?? null);
   const nextMeta = sanitizeMeta(
     {
       gender: nextGender,
       updatedAt: nextUpdatedAt,
       globalSelectionUpdatedAt: nextGlobalSelectionUpdatedAt,
+      childId: nextChildId,
     },
     next.voiceId,
   );
@@ -246,6 +265,32 @@ export function subscribeSpeechPreferences(listener: Listener): () => void {
   return () => {
     listeners.delete(listener);
   };
+}
+
+/** Reset persisted teacher voice preferences on sign-out or parent account switch. */
+export function resetSpeechPreferencesForActorSwitch(): void {
+  const prevPrefs = cached;
+  const prevMeta = cachedMeta;
+  cached = DEFAULT_PREFERENCES;
+  cachedMeta = DEFAULT_META;
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(SPEECH_PREFERENCES_STORAGE_KEY);
+      window.localStorage.removeItem(SPEECH_PREFERENCES_META_STORAGE_KEY);
+    } catch {
+      // Ignore blocked storage.
+    }
+  }
+  const hadNonDefault =
+    prevPrefs === null ||
+    prevMeta === null ||
+    prevPrefs.voiceId !== null ||
+    prevPrefs.speed !== DEFAULT_SPEED ||
+    prevMeta.gender !== "female" ||
+    prevMeta.childId !== null;
+  if (hadNonDefault) {
+    listeners.forEach((listener) => listener());
+  }
 }
 
 /** Test helper: forget the in-memory copy so storage is read again. */

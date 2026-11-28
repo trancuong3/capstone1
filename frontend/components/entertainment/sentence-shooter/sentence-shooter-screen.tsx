@@ -251,6 +251,7 @@ function SentenceShooterResultView({
     ],
     expectedDurationMs: 4_000,
   });
+  const summaryBookId = result?.book.id ?? session?.book.id ?? null;
   const summaryBookTitle = result?.book.title ?? session?.book.title ?? "";
   const summaryCompletedRounds =
     result?.completed_rounds ?? session?.completed_rounds ?? 0;
@@ -272,7 +273,14 @@ function SentenceShooterResultView({
   function readSentence() {
     if (!calmSound || !finalSentence.trim()) return;
     speechPlayer.stop();
-    void speechPlayer.play(finalSentence).catch(() => undefined);
+    void speechPlayer
+      .play(finalSentence, {
+        bookId: summaryBookId,
+        cacheScope: "CATALOG",
+        bypassSessionLock: true,
+        utteranceKind: "game_sample",
+      })
+      .catch(() => undefined);
   }
 
   return (
@@ -472,8 +480,10 @@ export function SentenceShooterScreen({
     reducedMotion,
     calmSound,
     autoPlayFlow,
+    autopilotEnabled,
     setCalmSound,
     toggleAutoPlayFlow,
+    toggleAutopilot,
   } = useEntertainmentPreferences();
   const soundEnabled = calmSound;
   const autoPlayRequested = useMemo(
@@ -499,6 +509,20 @@ export function SentenceShooterScreen({
     [initialLearningMode],
   );
 
+  const [urlFocusWords] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("focus") ?? "";
+      return raw
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+    } catch {
+      return [];
+    }
+  });
   const [difficulty, setDifficulty] = useState<SentenceShooterDifficulty>(
     () => resolvedInitialDifficulty ?? "easy",
   );
@@ -1063,6 +1087,9 @@ export function SentenceShooterScreen({
               difficulty: candidateDiff,
               total_rounds: totalRounds,
               learning_mode: targetLearningMode,
+              ...(urlFocusWords.length > 0
+                ? { focus_words: urlFocusWords }
+                : {}),
             },
             controller.signal,
           );
@@ -1249,6 +1276,9 @@ export function SentenceShooterScreen({
       }
     }
   }
+  useEffect(() => {
+    continueToNextRoundRef.current = continueToNextRound;
+  });
 
   async function loadCompletedResult() {
     if (!session) return;
@@ -1325,7 +1355,17 @@ export function SentenceShooterScreen({
     setAutoAdvanceStoppedForRound(true);
     setAutoAdvanceRemainingMs(null);
     speechPlayer.stop();
-    void speechPlayer.play(text).catch(() => undefined);
+    void speechPlayer
+      .play(text, {
+        bookId:
+          session?.book.id ??
+          result?.book.id ??
+          (effectiveSelectedBookId || initialBookId || null),
+        cacheScope: "CATALOG",
+        bypassSessionLock: true,
+        utteranceKind: "game_sample",
+      })
+      .catch(() => undefined);
   }
 
   const startGameRef = useRef(startGame);
@@ -1708,7 +1748,11 @@ export function SentenceShooterScreen({
               <button
                 aria-label={t("sentenceShooter.pauseAria")}
                 className="flex min-h-11 items-center justify-center gap-2 rounded-control bg-sky px-3 font-bold text-primary hover:bg-border disabled:opacity-55"
-                onClick={() => setIsPaused(true)}
+                onClick={() => {
+                  clearAutoAdvanceTimer();
+                  setAutoAdvanceRemainingMs(null);
+                  setIsPaused(true);
+                }}
                 type="button"
               >
                 <Pause aria-hidden="true" className="size-5" />
@@ -2465,20 +2509,65 @@ export function SentenceShooterScreen({
           <h2 className="text-lg font-extrabold text-ink">
             {t("sentenceShooter.chooseBook")}
           </h2>
-          <span className="text-sm font-semibold text-muted">
-            {t("sentenceShooter.selectedConfigWithMode", {
-              mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
-              difficulty: selectedDifficultyOption
-                ? t(selectedDifficultyOption.titleKey)
-                : "",
-              rounds: totalRounds,
-            })}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              aria-pressed={autopilotEnabled}
+              className={cn(
+                "inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition",
+                autopilotEnabled
+                  ? "border-primary bg-sky text-primary"
+                  : "border-border bg-white text-muted",
+              )}
+              data-testid="shooter-autopilot-toggle"
+              onClick={toggleAutopilot}
+              type="button"
+            >
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              {autopilotEnabled
+                ? t(
+                    "sentenceShooter.autopilotOn",
+                    undefined,
+                    "Tự chuyển câu: Bật",
+                  )
+                : t(
+                    "sentenceShooter.autopilotOff",
+                    undefined,
+                    "Tự chuyển câu: Tắt",
+                  )}
+            </button>
+            <span className="text-sm font-semibold text-muted">
+              {t("sentenceShooter.selectedConfigWithMode", {
+                mode: t(LEARNING_MODE_LABEL_KEYS[learningMode]),
+                difficulty: selectedDifficultyOption
+                  ? t(selectedDifficultyOption.titleKey)
+                  : "",
+                rounds: totalRounds,
+              })}
+            </span>
+          </div>
         </div>
         {initialBookId && selectedBook?.id === initialBookId ? (
           <p className="mb-3 rounded-control bg-success-surface px-4 py-3 text-sm font-semibold text-success-ink">
             <Gamepad2 aria-hidden="true" className="me-2 inline size-4" />
             {t("sentenceShooter.preselectedRecentBook")}
+            <strong className="viread-learning-content" dir="ltr" lang="vi">
+              {selectedBook.title}
+            </strong>
+          </p>
+        ) : !initialBookId &&
+          !hasManuallySelectedBook &&
+          selectedBook &&
+          (selectedBook.difficult_word_count ?? 0) > 0 ? (
+          <p
+            className="mb-3 rounded-control border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950"
+            data-testid="shooter-preselected-difficult-book"
+          >
+            ⭐{" "}
+            {t(
+              "sentenceShooter.preselectedDifficultBook",
+              { count: selectedBook.difficult_word_count ?? 0 },
+              `Đã chọn sẵn sách có ${selectedBook.difficult_word_count ?? 0} từ bé đang ôn: `,
+            )}
             <strong className="viread-learning-content" dir="ltr" lang="vi">
               {selectedBook.title}
             </strong>
@@ -2588,10 +2677,25 @@ export function SentenceShooterScreen({
                                 t("sentenceShooter.defaultBookSource")
                               )}
                             </span>
-                            <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                              {t("sentenceShooter.readyRoundsBadge", {
-                                count: book.available_rounds,
-                              })}
+                            <span className="mt-3 flex flex-wrap items-center gap-1.5">
+                              <span className="inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                                {t("sentenceShooter.readyRoundsBadge", {
+                                  count: book.available_rounds,
+                                })}
+                              </span>
+                              {(book.difficult_word_count ?? 0) > 0 ? (
+                                <span
+                                  className="inline-block rounded-full bg-amber-100 px-2.5 py-1 text-xs font-extrabold text-amber-950"
+                                  data-testid={`book-difficult-count-${book.id}`}
+                                >
+                                  ⭐{" "}
+                                  {t(
+                                    "sentenceShooter.bookDifficultWordsBadge",
+                                    { count: book.difficult_word_count ?? 0 },
+                                    `${book.difficult_word_count ?? 0} từ bé cần ôn`,
+                                  )}
+                                </span>
+                              ) : null}
                             </span>
                             {(book.matched_difficult_words?.length ?? 0) > 0 ? (
                               <span className="mt-2 inline-flex flex-wrap items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning">

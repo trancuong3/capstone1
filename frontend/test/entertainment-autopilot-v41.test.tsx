@@ -624,7 +624,7 @@ describe("Child Autopilot UX V4.1", () => {
       "/entertainment/memory-game?autoplay=1",
     );
 
-    const autoPlayToggle = screen.getByTestId("hub-autoplay-toggle");
+    const autoPlayToggle = screen.getByTestId("hub-autopilot-toggle");
     expect(autoPlayToggle).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(autoPlayToggle);
     expect(autoPlayToggle).toHaveAttribute("aria-pressed", "false");

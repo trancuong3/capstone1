@@ -965,10 +965,44 @@ class PictureDescriptionService:
         # Static built-in samples serve curated default_guide directly with ZERO outbound cloud calls
         # unless the caller explicitly requests refresh_ai_guide=True.
         if resolved_source_type == "SAMPLE" and sample_spec is not None and not refresh_ai_guide:
+            curated_vocab = list(sample_spec.default_guide.suggested_vocabulary)
+            if cleaned_targets:
+                from app.services.active_weak_words import classify_vietnamese_phonics_category
+
+                scene_corpus = " ".join(
+                    [
+                        sample_spec.title,
+                        sample_spec.theme,
+                        sample_spec.description,
+                        sample_spec.default_guide.scene_summary,
+                        *sample_spec.default_guide.model_sample_sentences,
+                        *(v.word for v in curated_vocab),
+                    ]
+                ).casefold()
+                existing_words = {item.word.casefold() for item in curated_vocab}
+                ranked_targets = sorted(
+                    [w for w in cleaned_targets if w.casefold() not in existing_words],
+                    key=lambda w: (
+                        0 if w.casefold() in scene_corpus else 1,
+                        0
+                        if classify_vietnamese_phonics_category(w)[0]
+                        in ("compound_reduplicative", "hoi_nga")
+                        else 1,
+                    ),
+                )
+                injected = [
+                    PictureVocabItem(
+                        word=word,
+                        hint="⭐ Từ bé đang luyện: hãy thử đưa từ này vào câu kể nhé!",
+                    )
+                    for word in ranked_targets[:2]
+                ]
+                curated_vocab = (injected + curated_vocab)[:8]
             guide = sample_spec.default_guide.model_copy(
                 update={
                     "teaching_mode": active_mode,
                     "target_words": cleaned_targets,
+                    "suggested_vocabulary": curated_vocab,
                 }
             )
             model_used = "curated-sample-v4"
@@ -1309,6 +1343,29 @@ class PictureDescriptionService:
             model_used=model_used,
             practiced_difficult_words=practiced_difficult_words,
         )
+        if input_mode == "VOICE" and feedback.is_relevant and used_target_words:
+            from app.services.active_weak_words import (
+                match_focus_words_in_text,
+                record_entertainment_vocal_word_practice,
+            )
+
+            # Enforce strict NFC tone & diacritic preservation before recording vocal pronunciation mastery.
+            exact_vocal_words = match_focus_words_in_text(
+                payload.transcript_text,
+                active_target_words,
+            )
+            if exact_vocal_words:
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repository, "db", None),
+                    child_id=updated_session.ChildProfileId,
+                    parent_id=actor_id,
+                    words=exact_vocal_words,
+                    source_module="PICTURE_DESCRIPTION",
+                    source_record_id=str(saved_attempt.Id),
+                    transcript_text=payload.transcript_text,
+                    confidence=0.65 if model_used == "guide-fallback" else 0.85,
+                    difficulty_level=updated_session.ChildGrade,
+                )
 
         session_read = await asyncio.to_thread(
             self._to_session_read, updated_session, all_attempts

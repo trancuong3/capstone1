@@ -1953,7 +1953,7 @@ class Tier1FeatureTests(unittest.TestCase, _BackendHarnessMixin, _RelayServerMix
                 c = self_outer.world.children.get(child_id)
                 return c is not None and c.ParentId == actor_id
 
-            async def eligible_verified_pages(self, book_id: UUID | None = None):
+            async def eligible_verified_pages(self, book_id: UUID | None = None, *, ocr_tokens=None, limit=None):
                 rows = []
                 for p in self_outer.world.pages.values():
                     b = self_outer.world.books[p.BookId]
@@ -2132,6 +2132,11 @@ class Tier2BoundaryTests(unittest.TestCase, _BackendHarnessMixin, _RelayServerMi
             self.assertEqual(resp.status_code, 401)
 
         self.world.active_actor_id = SUSPENDED_PARENT_ID
+        with self.subTest("suspended_profile_me_403"):
+            resp = self.client.get("/profiles/me")
+            self.assertEqual(resp.status_code, 403)
+            self.assertEqual(resp.json()["detail"]["code"], "ACCESS_DENIED")
+
         with self.subTest("suspended_profile_dashboard_summary_403"):
             resp = self.client.get("/profiles/dashboard-summary")
             self.assertEqual(resp.status_code, 403)
@@ -2289,6 +2294,25 @@ class Tier2BoundaryTests(unittest.TestCase, _BackendHarnessMixin, _RelayServerMi
                 r = http.post(self.relay_url, content=bad_from, headers=self.sign_headers(bad_from))
                 self.assertEqual(r.status_code, 422)
                 self.assertEqual(r.json()["code"], "MESSAGE_ENVELOPE_INVALID")
+
+            for label, smuggled in (
+                (
+                    "smuggled_from_adjacent_addr_422",
+                    b"From: <viread.sender@example.test><evil@example.test>\r\n"
+                    b"To: parent@example.test\r\n"
+                    b"Subject: Test\r\n\r\nBody",
+                ),
+                (
+                    "smuggled_to_adjacent_addr_422",
+                    b"From: viread.sender@example.test\r\n"
+                    b"To: <parent@example.test><evil@example.test>\r\n"
+                    b"Subject: Test\r\n\r\nBody",
+                ),
+            ):
+                with self.subTest(label):
+                    r = http.post(self.relay_url, content=smuggled, headers=self.sign_headers(smuggled))
+                    self.assertEqual(r.status_code, 422)
+                    self.assertEqual(r.json()["code"], "MESSAGE_ENVELOPE_INVALID")
 
             for hdr_name in ("Cc", "Bcc", "Resent-From"):
                 with self.subTest(forbidden_header=hdr_name):
@@ -2704,7 +2728,7 @@ class Tier4EndToEndJourneysTests(unittest.IsolatedAsyncioTestCase, _BackendHarne
             async def child_belongs_to_parent(self, child_id: UUID, actor_id: UUID):
                 return child_id == CHILD_A_ID and actor_id == PARENT_A_ID
 
-            async def eligible_verified_pages(self, book_id: UUID | None = None):
+            async def eligible_verified_pages(self, book_id: UUID | None = None, *, ocr_tokens=None, limit=None):
                 return [(
                     self_world.books[CATALOG_BOOK_ID],
                     self_world.pages[CATALOG_PAGE_1_ID],

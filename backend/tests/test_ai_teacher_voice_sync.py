@@ -344,3 +344,285 @@ class AiTeacherVoiceSyncTests(unittest.IsolatedAsyncioTestCase):
         mem_child = await MemoryGameRepository(fake_db).child_owned_by(child_id, parent_id)  # type: ignore[arg-type]
         self.assertIsInstance(mem_child, MemoryChildProjection)
         self.assertEqual(mem_child.Settings["voice_preferences"]["gender"], "male")
+
+    async def test_elevenlabs_male_never_falls_back_to_female_and_falls_through_to_google_without_cache_poisoning(
+        self,
+    ) -> None:
+        import os
+        from unittest.mock import patch
+        import httpx
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+            SynthesizedAudio,
+            VoiceProviderError,
+            clear_caches,
+        )
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+        from app.providers.local_voice_provider import (
+            LocalSynthesizedAudio,
+            LocalVoiceProvider,
+            LocalVoiceTechnicalError,
+        )
+        from app.services.voice_orchestrator import VoiceOrchestrator, VoicePolicyContext
+
+        clear_caches()
+        calls: list[str] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url: str, **kwargs):
+                calls.append(url)
+                return httpx.Response(402, json={"detail": {"status": "paid_plan_required"}})
+
+        provider = ElevenLabsVoiceProvider(api_key="sk_test_male_guard")
+        with patch("app.providers.elevenlabs_voice_provider.httpx.AsyncClient", FakeAsyncClient):
+            with self.assertRaises(VoiceProviderError):
+                await provider.synthesize(
+                    text="Thầy chào con nhé.",
+                    requested_voice_id="custom_male_voice_123",
+                    speed=0.9,
+                    expected_gender="male",
+                )
+        # Must NOT retry with female DEFAULT_VOICE_ID!
+        self.assertEqual(len(calls), 1)
+        self.assertNotIn(DEFAULT_VOICE_ID, calls[0])
+
+        # Orchestrator: when ElevenLabs male fails, fall through to Google Male TTS backup
+        down_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        down_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_VOICE_UNCONFIGURED")
+        )
+        el = ElevenLabsVoiceProvider(api_key="sk_test_key")
+        el.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=VoiceProviderError(status_code=503, code="SPEECH_UNAVAILABLE")
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="g", tts_api_key="g")
+        google.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalSynthesizedAudio(
+                content=b"google-male-mp3",
+                content_type="audio/mpeg",
+                resolved_voice_id="google_vi_vn_neural2_d",
+                region="north",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+            )
+        )
+        orch = VoiceOrchestrator(
+            local_provider=down_local,
+            google_provider=google,
+            elevenlabs_provider=el,
+        )
+        with patch.dict(os.environ, {"ELEVENLABS_MALE_VOICE_ID": "JBFqnCBsd6RMkjVDRZzb"}, clear=False):
+            res = await orch.synthesize(
+                text="Thầy chào con",
+                requested_voice_id="local_north_thien_minh",
+                speed=0.9,
+                policy=VoicePolicyContext(
+                    provider_mode="local_with_google_fallback",
+                    allow_google_tts=True,
+                ),
+            )
+        self.assertEqual(res.provider, "google")
+        self.assertEqual(res.resolved_voice_id, "google_vi_vn_neural2_d")
+        self.assertTrue(res.used_fallback_voice)
+
+    async def test_adaptive_learning_and_child_progress_adapt_to_male_teacher_persona(
+        self,
+    ) -> None:
+        from app.services.adaptive_learning_service import AdaptiveLearningService
+        from app.services.child_progress.ai import build_system_prompt
+        from app.services.child_progress_service import ChildProgressService
+
+        self.assertIn("Bạn là thầy giáo tiểu học", build_system_prompt("male"))
+        self.assertNotIn("Bạn là cô giáo tiểu học", build_system_prompt("male"))
+        self.assertIn("Bạn là cô giáo tiểu học", build_system_prompt("female"))
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        male_child = SimpleNamespace(
+            Id=child_id,
+            ParentId=parent_id,
+            Alias="Bé Khôi",
+            Grade=2,
+            Settings={
+                "voice_preferences": {
+                    "voice_id": "local_north_thien_minh",
+                    "gender": "male",
+                    "region": "north",
+                    "speed": 0.9,
+                }
+            },
+        )
+        self.assertEqual(
+            ChildProgressService._extract_child_teacher_gender(male_child),
+            "male",
+        )
+
+        fake_repo = SimpleNamespace(
+            get_owned_child=AsyncMock(return_value=male_child),
+            list_skill_evidence=AsyncMock(return_value=[]),
+            list_difficult_word_attempts=AsyncMock(return_value=[]),
+            list_picture_sessions=AsyncMock(return_value=[]),
+            list_shooter_sessions=AsyncMock(return_value=[]),
+            list_karaoke_sessions=AsyncMock(return_value=[]),
+            list_memory_sessions=AsyncMock(return_value=[]),
+        )
+        adaptive_svc = AdaptiveLearningService(fake_repo)  # type: ignore[arg-type]
+        recs = await adaptive_svc.get_entertainment_recommendations(child_id, parent_id)
+        pic_rec = next(
+            r for r in recs.recommendations if r.game_key == "PICTURE_DESCRIPTION"
+        )
+        self.assertIn("Thầy giáo AI", pic_rec.game_title_vi)
+        self.assertNotIn("Cô giáo AI", pic_rec.game_title_vi)
+        self.assertIn("Thầy giáo AI", pic_rec.reason_vi)
+
+        analytics = await adaptive_svc.get_parent_analytics(child_id, parent_id)
+        pic_mod = next(
+            m for m in analytics.module_activities if m.game_key == "PICTURE_DESCRIPTION"
+        )
+        self.assertIn("Thầy giáo AI", pic_mod.title_vi)
+        self.assertNotIn("Cô giáo AI", pic_mod.title_vi)
+
+    async def test_out_of_order_voice_preferences_patch_does_not_overwrite_newer_timestamp(
+        self,
+    ) -> None:
+        from app.api.routes.profile import ChildProfileRepository
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        fake_child = SimpleNamespace(
+            Id=child_id,
+            ParentId=parent_id,
+            Settings={},
+        )
+        fake_db = SimpleNamespace(
+            commit=AsyncMock(),
+            refresh=AsyncMock(),
+            rollback=AsyncMock(),
+        )
+        repo = ChildProfileRepository(fake_db)  # type: ignore[arg-type]
+        repo.get_by_id_and_parent = AsyncMock(return_value=fake_child)  # type: ignore[method-assign]
+
+        await repo.update_voice_preferences(
+            child_id,
+            parent_id,
+            {
+                "voice_id": "local_north_thien_minh",
+                "gender": "male",
+                "region": "north",
+                "speed": 0.9,
+                "updated_at": 2000,
+            },
+        )
+        # Stale out-of-order request from an earlier click arrives late:
+        await repo.update_voice_preferences(
+            child_id,
+            parent_id,
+            {
+                "voice_id": "local_north_truc_ly",
+                "gender": "female",
+                "region": "north",
+                "speed": 0.9,
+                "updated_at": 1000,
+            },
+        )
+        self.assertEqual(
+            fake_child.Settings["voice_preferences"]["voice_id"],
+            "local_north_thien_minh",
+        )
+        self.assertEqual(fake_child.Settings["voice_preferences"]["gender"], "male")
+        self.assertEqual(fake_child.Settings["voice_preferences"]["updated_at"], 2000)
+
+    def test_google_male_voice_markers_and_extended_coaching_phrases(self) -> None:
+        from app.services.adaptive_learning_service import AdaptiveLearningService
+        from app.services.child_progress_service import ChildProgressService
+        from app.services.tts_audio_cache_service import is_coaching_text_allowlisted
+
+        for google_male_vid, expected_region in (
+            ("google_vi_vn_neural2_d", "north"),
+            ("google_vi_vn_wavenet_b", "north"),
+        ):
+            region, gender = _resolve_local_voice_region_gender(google_male_vid)
+            self.assertEqual(region, expected_region)
+            self.assertEqual(gender, "male")
+
+            child_no_explicit_gender = SimpleNamespace(
+                Settings={"voice_preferences": {"voice_id": google_male_vid}}
+            )
+            self.assertEqual(
+                ChildProgressService._extract_child_teacher_gender(child_no_explicit_gender),
+                "male",
+            )
+            self.assertEqual(
+                AdaptiveLearningService._resolve_teacher_gender(child_no_explicit_gender),
+                "male",
+            )
+
+        for phrase in (
+            "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại rõ hơn một chút nhé.",
+            "Thầy chưa nghe rõ tiếng vừa rồi, con đọc lại rõ hơn một chút nhé.",
+            "Không sao đâu, từ này mình luyện thêm sau. Mình sang từ tiếp theo nhé!",
+        ):
+            self.assertTrue(is_coaching_text_allowlisted(phrase), phrase)
+
+    async def test_catalog_allowlist_permits_extracted_sentences_from_multi_sentence_page(self) -> None:
+        book_id = uuid4()
+        fake_repo = SimpleNamespace(
+            get_verified_catalog_texts=AsyncMock(
+                return_value=[
+                    (
+                        "Hai mươi mốt bông hoa. Hôm nay trời nắng đẹp!",
+                        [
+                            ("hai", "Hai"),
+                            ("mươi", "mươi"),
+                            ("mốt", "mốt"),
+                            ("bông", "bông"),
+                            ("hoa", "hoa."),
+                            ("hôm", "Hôm"),
+                            ("nay", "nay"),
+                            ("trời", "trời"),
+                            ("nắng", "nắng"),
+                            ("đẹp", "đẹp!"),
+                        ],
+                    )
+                ]
+            )
+        )
+        svc = TtsAudioCacheService(None)
+        svc.repo = fake_repo  # type: ignore[assignment]
+
+        # Multi-word extracted Sentence Shooter sentences from a multi-sentence verified page MUST pass
+        self.assertTrue(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Hai mươi mốt bông hoa.",
+            )
+        )
+        self.assertTrue(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Hôm nay trời nắng đẹp!",
+            )
+        )
+        # Arbitrary unverified text MUST still be rejected to prevent global CATALOG cache poisoning
+        self.assertFalse(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Con tên là Minh ở Hà Nội.",
+            )
+        )

@@ -24,13 +24,28 @@ from app.schemas.voice import (
     PhonicsAnalyzeStepRead,
     PhonicsAnalyzeToneRead,
 )
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_TEXT_MODEL,
+    build_gemini_model_chain,
+    build_groq_model_chain,
+    extract_gemini_text,
+    gemini_thinking_config,
+    is_model_in_cooldown,
+    read_model_env,
+    read_secret_env,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
 
 logger = logging.getLogger("viread.phonics_ai")
 
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 _GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-_DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-_DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+_DEFAULT_GEMINI_MODEL = DEFAULT_GEMINI_PRIMARY_MODEL
+_DEFAULT_GEMINI_FALLBACK_MODEL = DEFAULT_GEMINI_FALLBACK_MODEL
+_DEFAULT_GROQ_MODEL = DEFAULT_GROQ_TEXT_MODEL
 _CACHE_MAX_ENTRIES = 512
 
 _VALID_TONE_KEYS = {"ngang", "sac", "huyen", "hoi", "nga", "nang"}
@@ -167,14 +182,9 @@ def _unsupported_response(raw_text: str, clean: str, *, can_play: bool = True) -
 
 
 def _decode_json_text(text: str) -> dict[str, Any] | None:
-    cleaned = (text or "").strip()
+    cleaned = strip_think_tags(text or "")
     if not cleaned:
         return None
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        if cleaned.lower().startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
     try:
         parsed = json.loads(cleaned)
     except ValueError:
@@ -370,6 +380,18 @@ def _validate_ai_payload(
     )
 
 
+def _phonics_http_error_code(status_code: int) -> str:
+    if status_code in {401, 403}:
+        return "PROVIDER_AUTHENTICATION"
+    if status_code == 429:
+        return "PROVIDER_QUOTA"
+    if status_code == 404:
+        return "MODEL_UNAVAILABLE"
+    if status_code >= 500:
+        return "PROVIDER_UNAVAILABLE"
+    return "PROVIDER_REJECTED"
+
+
 async def _call_gemini_phonics(
     *,
     clean_phrase: str,
@@ -384,14 +406,19 @@ async def _call_gemini_phonics(
         prompt_lines.append(f'Ngữ cảnh câu chứa từ: "{context_phrase}"')
     prompt_lines.append("Hãy trả về JSON đúng schema quy định.")
 
+    generation_config: dict[str, Any] = {
+        "temperature": 0.1,
+        "responseMimeType": "application/json",
+        "responseJsonSchema": _RESPONSE_SCHEMA,
+    }
+    thinking_cfg = gemini_thinking_config(model)
+    if thinking_cfg is not None:
+        generation_config["thinkingConfig"] = thinking_cfg
+
     payload = {
         "systemInstruction": {"parts": [{"text": _SYSTEM_PROMPT}]},
         "contents": [{"role": "user", "parts": [{"text": "\n".join(prompt_lines)}]}],
-        "generationConfig": {
-            "temperature": 0.1,
-            "responseMimeType": "application/json",
-            "responseJsonSchema": _RESPONSE_SCHEMA,
-        },
+        "generationConfig": generation_config,
     }
     try:
         async with httpx.AsyncClient(
@@ -405,16 +432,63 @@ async def _call_gemini_phonics(
                 headers={"x-goog-api-key": api_key},
                 json=payload,
             )
-    except (httpx.TimeoutException, httpx.RequestError):
+            if response.status_code == 400 and thinking_cfg is not None:
+                generation_config.pop("thinkingConfig", None)
+                response = await client.post(
+                    f"{_GEMINI_API_BASE}/models/{model}:generateContent",
+                    headers={"x-goog-api-key": api_key},
+                    json=payload,
+                )
+    except httpx.TimeoutException:
+        logger.warning("phonics_ai_gemini_timeout model=%s", model)
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai", "gemini", model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+            )
+        return None
+    except httpx.RequestError as exc:
+        logger.warning("phonics_ai_gemini_network_error model=%s type=%s", model, type(exc).__name__)
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai", "gemini", model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+            )
         return None
     if response.status_code != 200:
+        err_code = _phonics_http_error_code(response.status_code)
+        logger.warning(
+            "phonics_ai_gemini_http_error model=%s status=%s code=%s",
+            model,
+            response.status_code,
+            err_code,
+        )
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai",
+                "gemini",
+                model,
+                ok=False,
+                error_code=err_code,
+                http_status=response.status_code,
+            )
         return None
     try:
         data = response.json()
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        text = extract_gemini_text(data)
     except (ValueError, KeyError, IndexError, TypeError):
-        return None
-    return _decode_json_text(text)
+        text = None
+    decoded = _decode_json_text(text) if isinstance(text, str) else None
+    if transport is None:
+        record_cloud_ai_outcome(
+            "phonics_ai",
+            "gemini",
+            model,
+            ok=decoded is not None,
+            error_code=None if decoded is not None else "INVALID_CONTENT",
+            http_status=response.status_code,
+        )
+    if decoded is None:
+        logger.warning("phonics_ai_gemini_invalid_json model=%s", model)
+    return decoded
 
 
 async def _call_groq_phonics(
@@ -454,23 +528,63 @@ async def _call_groq_phonics(
                 headers={"Authorization": f"Bearer {api_key}"},
                 json=payload,
             )
-    except (httpx.TimeoutException, httpx.RequestError):
+    except httpx.TimeoutException:
+        logger.warning("phonics_ai_groq_timeout model=%s", model)
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai", "groq", model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+            )
+        return None
+    except httpx.RequestError as exc:
+        logger.warning("phonics_ai_groq_network_error model=%s type=%s", model, type(exc).__name__)
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai", "groq", model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+            )
         return None
     if response.status_code != 200:
+        err_code = _phonics_http_error_code(response.status_code)
+        logger.warning(
+            "phonics_ai_groq_http_error model=%s status=%s code=%s",
+            model,
+            response.status_code,
+            err_code,
+        )
+        if transport is None:
+            record_cloud_ai_outcome(
+                "phonics_ai",
+                "groq",
+                model,
+                ok=False,
+                error_code=err_code,
+                http_status=response.status_code,
+            )
         return None
     try:
         data = response.json()
         text = data["choices"][0]["message"]["content"]
     except (ValueError, KeyError, IndexError, TypeError):
-        return None
-    return _decode_json_text(text)
+        text = None
+    decoded = _decode_json_text(text) if isinstance(text, str) else None
+    if transport is None:
+        record_cloud_ai_outcome(
+            "phonics_ai",
+            "groq",
+            model,
+            ok=decoded is not None,
+            error_code=None if decoded is not None else "INVALID_CONTENT",
+            http_status=response.status_code,
+        )
+    if decoded is None:
+        logger.warning("phonics_ai_groq_invalid_json model=%s", model)
+    return decoded
 
 
 async def analyze_phonics_with_ai(
     text: str,
     *,
     context_phrase: str | None = None,
-    timeout_seconds: float = 6.0,
+    timeout_seconds: float = 8.0,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> PhonicsAnalyzeResponse:
     """Analyze a word/phrase using AI to produce validated Grade-1 Vietnamese phonics."""
@@ -488,34 +602,64 @@ async def analyze_phonics_with_ai(
         _cache.move_to_end(cache_key)
         return cached
 
-    gemini_key = (os.getenv("GEMINI_API_KEY") or "").strip()
-    gemini_model = (
-        os.getenv("GEMINI_PHONICS_MODEL")
-        or os.getenv("GEMINI_MODEL")
-        or _DEFAULT_GEMINI_MODEL
-    ).strip()
-    groq_key = (os.getenv("GROQ_API_KEY") or "").strip()
-    groq_model = (os.getenv("GROQ_PHONICS_MODEL") or _DEFAULT_GROQ_MODEL).strip()
+    gemini_key = read_secret_env("GEMINI_API_KEY")
+    gemini_model = read_model_env(
+        "GEMINI_PHONICS_MODEL",
+        "GEMINI_MODEL",
+        "GEMINI_PRIMARY_MODEL",
+        "GEMINI_OCR_PRIMARY_MODEL",
+        default=_DEFAULT_GEMINI_MODEL,
+    )
+    gemini_fallback = read_model_env(
+        "GEMINI_PHONICS_FALLBACK_MODEL",
+        "GEMINI_FALLBACK_MODEL",
+        "GEMINI_OCR_FALLBACK_MODEL",
+        default=_DEFAULT_GEMINI_FALLBACK_MODEL,
+    )
+    groq_key = read_secret_env("GROQ_API_KEY")
+    groq_model = read_model_env(
+        "GROQ_PHONICS_MODEL",
+        "GROQ_PRIMARY_MODEL",
+        "GROQ_OCR_MODEL",
+        default=_DEFAULT_GROQ_MODEL,
+    )
 
     raw_ai: dict[str, Any] | None = None
     if gemini_key:
-        raw_ai = await _call_gemini_phonics(
-            clean_phrase=clean,
-            context_phrase=ctx_clean,
-            api_key=gemini_key,
-            model=gemini_model,
-            timeout_seconds=timeout_seconds,
-            transport=transport,
-        )
+        gemini_chain = list(build_gemini_model_chain(gemini_model, gemini_fallback))
+        if transport is None:
+            non_cooled = [m for m in gemini_chain if not is_model_in_cooldown("gemini", m)]
+            if non_cooled:
+                gemini_chain = non_cooled
+        for candidate_model in gemini_chain:
+            raw_ai = await _call_gemini_phonics(
+                clean_phrase=clean,
+                context_phrase=ctx_clean,
+                api_key=gemini_key,
+                model=candidate_model,
+                timeout_seconds=timeout_seconds,
+                transport=transport,
+            )
+            if raw_ai is not None:
+                break
+
     if raw_ai is None and groq_key:
-        raw_ai = await _call_groq_phonics(
-            clean_phrase=clean,
-            context_phrase=ctx_clean,
-            api_key=groq_key,
-            model=groq_model,
-            timeout_seconds=timeout_seconds,
-            transport=transport,
-        )
+        groq_chain = list(build_groq_model_chain(groq_model, multimodal=False))
+        if transport is None:
+            non_cooled = [m for m in groq_chain if not is_model_in_cooldown("groq", m)]
+            if non_cooled:
+                groq_chain = non_cooled
+        for candidate_model in groq_chain:
+            raw_ai = await _call_groq_phonics(
+                clean_phrase=clean,
+                context_phrase=ctx_clean,
+                api_key=groq_key,
+                model=candidate_model,
+                timeout_seconds=timeout_seconds,
+                transport=transport,
+            )
+            if raw_ai is not None:
+                break
 
     if raw_ai is None:
         return _unsupported_response(raw_nfc, clean, can_play=True)

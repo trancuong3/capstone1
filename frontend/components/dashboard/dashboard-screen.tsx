@@ -26,8 +26,10 @@ import { useI18n } from "@/hooks/use-i18n";
 import { useProfileService } from "@/hooks/use-profile-service";
 import {
   DEFAULT_USER_CACHE_TTL_MS,
+  invalidateUserCacheKey,
   PERSISTENT_USER_CACHE_MAX_STALE_MS,
   readUserCacheWithStale,
+  sanitizeChildProfileForCache,
   sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
@@ -41,6 +43,37 @@ import { AiTeacherVoiceSection } from "./ai-teacher-voice-section";
 import { FamilyReadingDesk } from "./family-reading-desk";
 
 const DASHBOARD_CHILDREN_PAGE_SIZE = 4;
+
+function getChildVoiceUpdatedAt(child: ChildProfileDTO | undefined): number {
+  const settings = child?.settings;
+  if (!settings || typeof settings !== "object") return 0;
+  const vp = (settings as Record<string, unknown>).voice_preferences;
+  if (!vp || typeof vp !== "object") return 0;
+  const ts = (vp as Record<string, unknown>).updated_at;
+  return typeof ts === "number" && Number.isFinite(ts) && ts > 0
+    ? Math.floor(ts)
+    : 0;
+}
+
+function preferFresherChildVoice(
+  incoming: ChildProfileDTO,
+  existing: ChildProfileDTO | undefined,
+): ChildProfileDTO {
+  if (!existing || existing.id !== incoming.id) return incoming;
+  const existingTs = getChildVoiceUpdatedAt(existing);
+  const incomingTs = getChildVoiceUpdatedAt(incoming);
+  if (existingTs > incomingTs) {
+    return {
+      ...incoming,
+      settings: {
+        ...(incoming.settings ?? {}),
+        voice_preferences: (existing.settings as Record<string, unknown>)
+          ?.voice_preferences,
+      },
+    };
+  }
+  return incoming;
+}
 
 type DashboardState =
   | { status: "loading" }
@@ -78,6 +111,9 @@ export function DashboardScreen() {
   const selectionSectionRef = useRef<HTMLElement | null>(null);
   const focusRequestHandledRef = useRef(false);
   const hasReadyDataRef = useRef(state.status === "ready");
+  const latestChildrenRef = useRef<ChildProfileDTO[]>(
+    state.status === "ready" ? state.children : [],
+  );
   const selectionReason = searchParams.get("reason");
   const routeSelectionPrompt =
     searchParams.get("focus") === "child-selection" &&
@@ -91,7 +127,10 @@ export function DashboardScreen() {
 
   useEffect(() => {
     hasReadyDataRef.current = state.status === "ready";
-  }, [state.status]);
+    if (state.status === "ready") {
+      latestChildrenRef.current = state.children;
+    }
+  }, [state]);
 
   useEffect(() => {
     let isActive = true;
@@ -105,6 +144,7 @@ export function DashboardScreen() {
       )?.data;
 
       if (cached && isActive) {
+        latestChildrenRef.current = cached.children;
         setState({
           status: "ready",
           children: cached.children,
@@ -119,9 +159,21 @@ export function DashboardScreen() {
         const summary = await profileService.getDashboardSummary();
         if (!isActive) return;
 
-        const cacheOwnerId = userId ?? summary.profile?.id ?? null;
+        const mergedChildren = summary.children.map((item) =>
+          preferFresherChildVoice(
+            item,
+            latestChildrenRef.current.find((prev) => prev.id === item.id),
+          ),
+        );
+        const mergedSummary: DashboardSummaryDTO = {
+          ...summary,
+          children: mergedChildren,
+        };
+
+        const cacheOwnerId = userId ?? mergedSummary.profile?.id ?? null;
         if (cacheOwnerId) {
-          const cacheableSummary = sanitizeDashboardSummaryForCache(summary);
+          const cacheableSummary =
+            sanitizeDashboardSummaryForCache(mergedSummary);
           writeUserCache(cacheOwnerId, "dashboard-summary", cacheableSummary, {
             persist: "session",
           });
@@ -130,11 +182,12 @@ export function DashboardScreen() {
           });
         }
 
+        latestChildrenRef.current = mergedChildren;
         setState({
           status: "ready",
-          children: summary.children,
-          latestSessionsByChild: summary.latest_sessions_by_child,
-          summarySource: summary.source,
+          children: mergedChildren,
+          latestSessionsByChild: mergedSummary.latest_sessions_by_child,
+          summarySource: mergedSummary.source,
         });
       } catch {
         if (!isActive) return;
@@ -376,16 +429,71 @@ export function DashboardScreen() {
       <AiTeacherVoiceSection
         selectedChild={selectedChild ?? null}
         onChildSettingsUpdated={(updatedChild) => {
+          const existing = latestChildrenRef.current.find(
+            (item) => item.id === updatedChild.id,
+          );
+          const mergedChild = preferFresherChildVoice(updatedChild, existing);
+          const nextChildren = latestChildrenRef.current.some(
+            (item) => item.id === mergedChild.id,
+          )
+            ? latestChildrenRef.current.map((item) =>
+                item.id === mergedChild.id ? mergedChild : item,
+              )
+            : latestChildrenRef.current;
+          latestChildrenRef.current = nextChildren;
+
+          const cacheOwnerId = userId ?? mergedChild.parent_id ?? null;
+          if (cacheOwnerId && nextChildren.length > 0) {
+            writeUserCache(
+              cacheOwnerId,
+              "children",
+              nextChildren.map((child) => sanitizeChildProfileForCache(child)),
+              { persist: "session" },
+            );
+            const cachedSummary = readUserCacheWithStale<DashboardSummaryDTO>(
+              cacheOwnerId,
+              "dashboard-summary",
+              DEFAULT_USER_CACHE_TTL_MS,
+              PERSISTENT_USER_CACHE_MAX_STALE_MS,
+            )?.data;
+            if (cachedSummary) {
+              const updatedSummary = sanitizeDashboardSummaryForCache({
+                ...cachedSummary,
+                profile: cachedSummary.profile
+                  ? {
+                      ...cachedSummary.profile,
+                      children: cachedSummary.profile.children.map((item) =>
+                        item.id === mergedChild.id ? mergedChild : item,
+                      ),
+                    }
+                  : null,
+                children: nextChildren,
+              });
+              writeUserCache(
+                cacheOwnerId,
+                "dashboard-summary",
+                updatedSummary,
+                {
+                  persist: "session",
+                },
+              );
+            } else {
+              invalidateUserCacheKey(cacheOwnerId, "dashboard-summary");
+            }
+          }
+
           setState((prev) => {
             if (prev.status !== "ready") return prev;
             return {
               ...prev,
               children: prev.children.map((item) =>
-                item.id === updatedChild.id ? updatedChild : item,
+                item.id === mergedChild.id
+                  ? preferFresherChildVoice(mergedChild, item)
+                  : item,
               ),
             };
           });
-          setValidatedSelectedChild(updatedChild);
+          setValidatedSelectedChild(mergedChild);
         }}
       />
 

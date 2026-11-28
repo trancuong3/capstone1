@@ -249,6 +249,11 @@
     "selectedBadge": "Selected",
     "regionLabel": "Accent region",
     "voiceListLabel": "Specific voice",
-    "voiceListAria": "Voices matching selected teacher and region"
+    "voiceListAria": "Voices matching selected teacher and region",
+    "policyLabel": "Voice engine mode",
+    "policyAria": "Choose voice engine mode",
+    "policyLocalOnly": "This device only",
+    "policyOnlineBackup": "This device + Online backup",
+    "workerOfflineHint": "The local voice worker is offline. Turn on “This device + Online backup” so your child can hear uncached book sentences and game audio."
   }
 }

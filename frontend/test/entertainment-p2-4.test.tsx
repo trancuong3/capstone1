@@ -274,6 +274,7 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
       reducedMotion: true,
       calmSound: true,
       autoPlayFlow: true,
+      autopilotEnabled: true,
     });
 
     render(<PreferenceProbe />);
@@ -318,7 +319,12 @@ describe("P2-4: Entertainment preferences, multi-child selection & propagation",
         window.localStorage.getItem(ENTERTAINMENT_PREFERENCES_STORAGE_KEY) ||
           "{}",
       ),
-    ).toEqual({ reducedMotion: false, calmSound: false, autoPlayFlow: false });
+    ).toEqual({
+      reducedMotion: false,
+      calmSound: false,
+      autoPlayFlow: false,
+      autopilotEnabled: false,
+    });
 
     act(() => {
       window.localStorage.setItem(

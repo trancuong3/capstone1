@@ -250,6 +250,11 @@ def compute_spaced_difficult_words(
     limit: int = 8,
 ) -> list[SpacedDifficultWordRead]:
     """Rank difficult words for spaced repetition across games (1d -> 3d -> 7d cadence)."""
+    from app.services.active_weak_words import (
+        classify_vietnamese_phonics_category,
+        is_word_mastered_across_contexts,
+    )
+
     ref_now = now or datetime.now(timezone.utc)
     grouped: dict[str, dict] = {}
     attempts_by_norm: dict[str, list[tuple[datetime, int, str]]] = defaultdict(list)
@@ -273,9 +278,11 @@ def compute_spaced_difficult_words(
                 "heard_as": None,
                 "feed_priority": 0.0,
                 "reinforced_count": 0,
+                "rows": [],
             },
         )
         bucket["attempts"] += 1
+        bucket["rows"].append(row)
         status_val = getattr(row, "AssessmentStatus", None)
         if status_val == "CORRECT":
             bucket["correct"] += 1
@@ -326,6 +333,7 @@ def compute_spaced_difficult_words(
                     "heard_as": target.heard_as,
                     "feed_priority": float(target.priority_score),
                     "reinforced_count": int(target.reinforced_count),
+                    "rows": [],
                 }
             else:
                 if has_reading_evidence:
@@ -353,13 +361,19 @@ def compute_spaced_difficult_words(
                         existing["last_at"] = target.last_seen_at
 
     ranked: list[SpacedDifficultWordRead] = []
-    game_cycle: tuple[GameKey, ...] = ("SENTENCE_SHOOTER", "PICTURE_DESCRIPTION", "MEMORY_GAME")
+    game_cycle: tuple[GameKey, ...] = (
+        "SENTENCE_SHOOTER",
+        "PICTURE_DESCRIPTION",
+        "MEMORY_GAME",
+        "KARAOKE",
+    )
 
     for idx, (norm, info) in enumerate(grouped.items()):
         attempts = info["attempts"]
         correct = info["correct"]
         incorrect = info["incorrect"]
         last_at = info["last_at"]
+        mastered = is_word_mastered_across_contexts(info["rows"])
         days_since: int | None = None
         if last_at is not None:
             aware_last = last_at if last_at.tzinfo else last_at.replace(tzinfo=timezone.utc)
@@ -381,6 +395,7 @@ def compute_spaced_difficult_words(
         )
         priority = round(max(0.1, error_weight * due_bonus), 2)
 
+        phonics_cat, phonics_label = classify_vietnamese_phonics_category(info["display_text"])
         recommended_game = game_cycle[idx % len(game_cycle)]
         heard_as = info.get("heard_as")
         if heard_as:
@@ -388,9 +403,13 @@ def compute_spaced_difficult_words(
                 f'Khi đọc sách bé từng đọc nhầm thành "{heard_as}"; ôn nhẹ qua trò chơi giúp bé nhớ ngay.'
             )
         elif info.get("from_reading") and incorrect > correct:
-            reason_vi = "Bé vừa gặp khó ở từ này khi đọc sách; nên ôn nhẹ trong câu ngắn."
+            reason_vi = (
+                f"Bé vừa gặp khó ở từ này ({phonics_label}) khi đọc sách; nên ôn nhẹ trong câu ngắn."
+            )
         elif incorrect > correct:
-            reason_vi = "Bé từng gặp khó ở từ này; nên ôn nhẹ trong câu ngắn."
+            reason_vi = f"Bé từng gặp khó ở từ này ({phonics_label}); nên ôn nhẹ qua trò chơi."
+        elif not mastered and correct == 1:
+            reason_vi = "Bé đã nói đúng 1 lần trong góc Giải trí; thử dùng thêm 1 lần nữa để làm chủ nhé!"
         elif days_since is not None and days_since >= target_interval:
             reason_vi = f"Đã {days_since} ngày kể từ lần ôn trước; rất hợp để nhắc lại."
         else:
@@ -406,6 +425,8 @@ def compute_spaced_difficult_words(
                 days_since_practice=days_since,
                 recommended_game=recommended_game,
                 reason_vi=reason_vi,
+                phonics_category=phonics_cat,
+                phonics_label_vi=phonics_label,
             )
         )
 
@@ -651,6 +672,37 @@ class AdaptiveLearningService:
             plans.append(compute_adaptive_difficulty(child_grade, attempts, game_key))
         return plans
 
+    @staticmethod
+    def _resolve_teacher_gender(
+        child: object,
+        explicit_gender: str | None = None,
+    ) -> str | None:
+        if explicit_gender in ("female", "male"):
+            return explicit_gender
+        settings = getattr(child, "Settings", None)
+        if isinstance(settings, dict):
+            vp = settings.get("voice_preferences")
+            if isinstance(vp, dict):
+                gender = vp.get("gender")
+                if gender in ("female", "male"):
+                    return str(gender)
+                voice_id = str(vp.get("voice_id") or "").strip().lower()
+                if any(
+                    token in voice_id
+                    for token in (
+                        "quang_son",
+                        "thien_minh",
+                        "thai_son",
+                        "neural2_d",
+                        "wavenet_b",
+                        "_male",
+                    )
+                ):
+                    return "male"
+                if voice_id:
+                    return "female"
+        return None
+
     def _build_recommendations(
         self,
         child_grade: int,
@@ -660,9 +712,12 @@ class AdaptiveLearningService:
         shooter_count: int,
         karaoke_count: int,
         memory_count: int,
+        *,
+        teacher_gender: str | None = None,
     ) -> list[CrossGameRecommendationRead]:
         plan_map = {p.game_key: p for p in plans}
         focus_words = [w.display_text for w in spaced_words[:3]]
+        teacher_label = "Thầy giáo AI" if teacher_gender == "male" else "Cô giáo AI"
         counts = {
             "PICTURE_DESCRIPTION": picture_count,
             "SENTENCE_SHOOTER": shooter_count,
@@ -717,8 +772,8 @@ class AdaptiveLearningService:
             CrossGameRecommendationRead(
                 game_key="PICTURE_DESCRIPTION",
                 zone_title_vi="Thế giới kể chuyện",
-                game_title_vi="Kể chuyện qua tranh cùng Cô giáo AI",
-                reason_vi="Luyện quan sát tranh và mở rộng câu văn cùng Cô giáo AI dịu dàng.",
+                game_title_vi=f"Kể chuyện qua tranh cùng {teacher_label}",
+                reason_vi=f"Luyện quan sát tranh và mở rộng câu văn cùng {teacher_label} dịu dàng.",
                 suggested_mode=pic_mode,
                 suggested_difficulty=plan_map["PICTURE_DESCRIPTION"].recommended_difficulty,
                 target_words=focus_words[:2],
@@ -730,10 +785,14 @@ class AdaptiveLearningService:
                 game_key="KARAOKE",
                 zone_title_vi="Sân khấu âm nhạc",
                 game_title_vi="Hát vui cùng bé",
-                reason_vi="Thư giãn cùng giai điệu thiếu nhi, tập gõ nhịp và hát rõ lời.",
+                reason_vi=(
+                    f"Hát theo âm quãng mẫu dịu nhẹ và luyện phát âm rõ chữ ({', '.join(focus_words[:2])})."
+                    if focus_words
+                    else "Thư giãn cùng giai điệu thiếu nhi, tập âm quãng mẫu và hát rõ lời."
+                ),
                 suggested_mode="RHYTHM_TAP" if counts["KARAOKE"] == 0 else "FULL_SONG",
                 suggested_difficulty=plan_map["KARAOKE"].recommended_difficulty,
-                target_words=focus_words[:2],
+                target_words=focus_words[:3],
                 href="/karaoke",
                 quick_play_href="/karaoke?autoplay=1",
                 priority=2 + counts["KARAOKE"],
@@ -767,8 +826,10 @@ class AdaptiveLearningService:
         parent_id: UUID,
         *,
         window_days: int = 30,
+        teacher_gender: str | None = None,
     ) -> AdaptiveProfileRead:
         child = await self._require_child(child_id, parent_id)
+        resolved_gender = self._resolve_teacher_gender(child, teacher_gender)
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=90)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=90)
         feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
@@ -799,6 +860,7 @@ class AdaptiveLearningService:
             len(shooter_sessions),
             len(karaoke_sessions),
             len(memory_sessions),
+            teacher_gender=resolved_gender,
         )
 
         return AdaptiveProfileRead(
@@ -824,24 +886,25 @@ class AdaptiveLearningService:
         *,
         teacher_gender: str | None = None,
     ) -> EntertainmentRecommendationsRead:
-        profile = await self.get_adaptive_profile(child_id, parent_id, window_days=7)
+        resolved_gender = teacher_gender if teacher_gender in ("female", "male") else None
+        if resolved_gender is None:
+            try:
+                child = await self._require_child(child_id, parent_id)
+                resolved_gender = self._resolve_teacher_gender(child, None)
+            except Exception:
+                resolved_gender = None
+
+        profile = await self.get_adaptive_profile(
+            child_id,
+            parent_id,
+            window_days=7,
+            teacher_gender=resolved_gender,
+        )
         today_utc = datetime.now(timezone.utc).date()
         recent_pic = await self.repository.list_picture_sessions(child_id, window_days=2)
         recent_shoot = await self.repository.list_shooter_sessions(child_id, window_days=2)
         recent_kar = await self.repository.list_karaoke_sessions(child_id, window_days=2)
         recent_mem = await self.repository.list_memory_sessions(child_id, window_days=2)
-
-        resolved_gender = teacher_gender if teacher_gender in ("female", "male") else None
-        if resolved_gender is None:
-            try:
-                child = await self._require_child(child_id, parent_id)
-                settings = getattr(child, "Settings", None)
-                if isinstance(settings, dict):
-                    vp = settings.get("voice_preferences")
-                    if isinstance(vp, dict) and vp.get("gender") in ("female", "male"):
-                        resolved_gender = vp["gender"]
-            except Exception:
-                resolved_gender = None
 
         today_count = sum(
             1
@@ -889,8 +952,11 @@ class AdaptiveLearningService:
         parent_id: UUID,
         *,
         window_days: int = 30,
+        teacher_gender: str | None = None,
     ) -> ParentEntertainmentAnalyticsRead:
         child = await self._require_child(child_id, parent_id)
+        resolved_gender = self._resolve_teacher_gender(child, teacher_gender)
+        teacher_label = "Thầy giáo AI" if resolved_gender == "male" else "Cô giáo AI"
         explicit_rows = await self.repository.list_skill_evidence(child_id, window_days=window_days)
         word_attempts = await self.repository.list_difficult_word_attempts(child_id, window_days=window_days)
         feed_targets = await self._load_feed_targets(child_id, parent_id, limit=12)
@@ -953,7 +1019,7 @@ class AdaptiveLearningService:
         module_activities = [
             ModuleActivitySummaryRead(
                 game_key="PICTURE_DESCRIPTION",
-                title_vi="Kể chuyện qua tranh cùng Cô giáo AI",
+                title_vi=f"Kể chuyện qua tranh cùng {teacher_label}",
                 sessions_count=len(picture_sessions),
                 recent_average_pct=round(sum(pic_scores) / len(pic_scores)) if pic_scores else None,
                 highlight_vi=(

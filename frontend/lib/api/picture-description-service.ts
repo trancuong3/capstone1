@@ -322,6 +322,7 @@ export function createPictureDescriptionService(): PictureDescriptionService {
             {
               method: "POST",
               body: form,
+              timeoutMs: AI_DEADLINE_MS,
             },
           ),
         signal,
@@ -339,6 +340,7 @@ export function createPictureDescriptionService(): PictureDescriptionService {
             {
               method: "POST",
               body: input,
+              timeoutMs: AI_DEADLINE_MS,
             },
           ),
         signal,
