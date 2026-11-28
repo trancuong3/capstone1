@@ -1,6 +1,12 @@
 "use client";
 
-import { ArrowRight, ChevronDown, RefreshCw } from "lucide-react";
+import {
+  ArrowRight,
+  Award,
+  ChevronDown,
+  Printer,
+  RefreshCw,
+} from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
@@ -21,6 +27,10 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
 import { isServiceError } from "@/lib/api/service-error";
 import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
+import {
+  downloadMilestoneCertificatePng,
+  triggerPrintA4Report,
+} from "@/lib/reports/milestone-certificate-canvas";
 import { formatPercent, mapReportMetrics } from "@/lib/utils/report-mappers";
 import {
   parseProgressPeriod,
@@ -676,7 +686,22 @@ function ProgressReportContent({
   ) : null;
 
   return (
-    <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-2.5 pb-2">
+    <section className="viread-print-sheet mx-auto flex w-full max-w-[1120px] flex-col gap-2.5 pb-2">
+      <div className="hidden border-b-2 border-primary pb-3 print:flex print:items-center print:justify-between">
+        <div>
+          <p className="text-xs font-extrabold uppercase tracking-wider text-primary">
+            ViRead · {t("printCertificate.brandTagline")}
+          </p>
+          <h1 className="text-2xl font-extrabold text-ink">
+            {t("overview.childTitle", { alias: child.alias })} (Lớp{" "}
+            {child.grade})
+          </h1>
+        </div>
+        <p className="text-xs font-semibold text-muted">
+          {new Intl.DateTimeFormat("vi-VN").format(new Date())}
+        </p>
+      </div>
+
       <header className="flex flex-col gap-2 border-b border-border pb-2.5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <h1 className="text-xl font-extrabold tracking-[-0.02em] text-ink sm:text-2xl">
@@ -685,15 +710,81 @@ function ProgressReportContent({
           <ReadingHubSubNav active="reports" childId={child.id} />
         </div>
 
-        <ProgressReportFilters
-          childrenProfiles={children}
-          childId={child.id}
-          hasMore={periods.next_cursor !== null}
-          loadingMore={loadingMore}
-          onLoadMore={() => void loadMore()}
-          periods={periods.items}
-          selectedPeriod={selected}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="viread-no-print flex flex-wrap items-center gap-2">
+            <Button
+              className="w-auto"
+              data-testid="print-progress-report-btn"
+              fullWidth={false}
+              onClick={() => triggerPrintA4Report()}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <Printer aria-hidden="true" className="size-4" />
+              {t("printCertificate.printA4Action")}
+            </Button>
+            <Button
+              className="w-auto"
+              data-testid="download-progress-certificate-btn"
+              fullWidth={false}
+              onClick={() => {
+                const reportData = state.report;
+                const sessionsCount = reportData?.completed_sessions ?? 0;
+                const firstPassCorrect =
+                  reportData?.assessment?.first_pass_correct ?? 0;
+                const firstPassIncorrect =
+                  reportData?.assessment?.first_pass_incorrect ?? 0;
+                const wordsRead = firstPassCorrect + firstPassIncorrect;
+                const accuracyText =
+                  wordsRead > 0
+                    ? `${Math.round((firstPassCorrect / wordsRead) * 100)}%`
+                    : reportData?.comprehension_accuracy != null
+                      ? `${Math.round(reportData.comprehension_accuracy * 100)}%`
+                      : "—";
+                void downloadMilestoneCertificatePng({
+                  brandLabel: "VIREAD · HỘ CHIẾU ĐỌC SÁCH",
+                  heading: t("printCertificate.certificateHeading"),
+                  subtitle: t("printCertificate.certificateSubtitle"),
+                  awardedToLabel: t("printCertificate.awardedTo"),
+                  childName: child.alias,
+                  gradeLabel: `Lớp ${child.grade}`,
+                  achievementLine: t("printCertificate.progressAchievement", {
+                    alias: child.alias,
+                  }),
+                  statsLine: t("printCertificate.progressStatsLine", {
+                    sessions: sessionsCount,
+                    words: wordsRead,
+                    accuracy: accuracyText,
+                  }),
+                  issuedDateLabel: t("printCertificate.issuedOn", {
+                    date: new Intl.DateTimeFormat("vi-VN").format(new Date()),
+                  }),
+                  encouragementFooter: t(
+                    "printCertificate.encouragementFooter",
+                  ),
+                  fileNameSlug: child.alias,
+                });
+              }}
+              size="compact"
+              type="button"
+              variant="secondary"
+            >
+              <Award aria-hidden="true" className="size-4" />
+              {t("printCertificate.downloadCertificateAction")}
+            </Button>
+          </div>
+
+          <ProgressReportFilters
+            childrenProfiles={children}
+            childId={child.id}
+            hasMore={periods.next_cursor !== null}
+            loadingMore={loadingMore}
+            onLoadMore={() => void loadMore()}
+            periods={periods.items}
+            selectedPeriod={selected}
+          />
+        </div>
       </header>
 
       {state.periodsError ? (

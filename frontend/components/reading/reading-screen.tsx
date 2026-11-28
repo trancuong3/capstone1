@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Users,
   Volume2,
 } from "lucide-react";
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
@@ -24,6 +25,10 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import {
+  buildDuetTurnsForPage,
+  resolveActiveDuetTurn,
+} from "@/lib/reading/duet-reading";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
@@ -66,15 +71,18 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import {
   awaitSttReadyBeforeListening,
+  awaitVoiceEnginesReadyBeforeListening,
   preloadReadingVoiceEngines,
+  warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
-  isHostedLocalVoiceUnconfigured,
+  isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,
+  markHostedLocalUnconfigured,
   recordSttEngineUsage,
   recordTtsEngineUsage,
 } from "@/lib/reading/voice-engine-status";
@@ -505,6 +513,12 @@ interface ReadingScreenProps {
   sessionId: string;
 }
 
+const EMPTY_COMPLETION_SUMMARY: ReadingCompletionSummaryUI = {
+  duration_minutes: null,
+  pages_explored: null,
+  practiced_words: null,
+};
+
 interface ReadingScreenData {
   book: BookDetailDTO;
   child: ChildProfileDTO;
@@ -600,6 +614,52 @@ type RetryWordItem = RetryWordRecord;
 
 const RETRY_CAPTURE_POLL_MS = SHORT_WORD_CAPTURE_CONFIG.pollIntervalMs;
 
+const sessionStandbyRecognizers = new Map<
+  string,
+  LocalSegmentSpeechRecognition
+>();
+
+function setSessionStandbyRecognizer(
+  sid: string,
+  rec: LocalSegmentSpeechRecognition,
+): void {
+  const prev = sessionStandbyRecognizers.get(sid);
+  if (prev && prev !== rec) {
+    try {
+      prev.cancelStandby();
+    } catch {
+      // Ignore cleanup error
+    }
+  }
+  sessionStandbyRecognizers.set(sid, rec);
+}
+
+function getSessionStandbyRecognizer(
+  sid: string,
+): LocalSegmentSpeechRecognition | null {
+  return sessionStandbyRecognizers.get(sid) ?? null;
+}
+
+function takeSessionStandbyRecognizer(
+  sid: string,
+): LocalSegmentSpeechRecognition | null {
+  const rec = sessionStandbyRecognizers.get(sid) ?? null;
+  sessionStandbyRecognizers.delete(sid);
+  return rec;
+}
+
+function cancelSessionStandbyRecognizer(sid: string): void {
+  const rec = sessionStandbyRecognizers.get(sid);
+  sessionStandbyRecognizers.delete(sid);
+  if (rec) {
+    try {
+      rec.cancelStandby();
+    } catch {
+      // Ignore standby cancel error
+    }
+  }
+}
+
 // Measure recorder duration with a monotonic clock from capture callbacks.
 function getRetryCaptureTimeMs(): number {
   return performance.now();
@@ -684,6 +744,7 @@ function ReadingSessionScreen({
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
+  const [duetModeEnabled, setDuetModeEnabled] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const retryOnRemountRef = useRef({
@@ -975,6 +1036,46 @@ function ReadingSessionScreen({
   const [companionBubble, setCompanionBubble] =
     useState<CompanionBubbleState | null>(null);
   const [presencePaused, setPresencePaused] = useState(false);
+  const duetTurns = useMemo(
+    () => (page ? buildDuetTurnsForPage(page) : []),
+    [page],
+  );
+  const activeDuetTurn = useMemo(
+    () =>
+      duetModeEnabled && duetTurns.length >= 2
+        ? resolveActiveDuetTurn(
+            duetTurns,
+            previewSnapshot?.currentWordId ?? currentWordId,
+            correctWordIds,
+          )
+        : null,
+    [
+      correctWordIds,
+      currentWordId,
+      duetModeEnabled,
+      duetTurns,
+      previewSnapshot?.currentWordId,
+    ],
+  );
+  const handleCompleteParentDuetTurn = useCallback(() => {
+    if (!activeDuetTurn || activeDuetTurn.role !== "PARENT") return;
+    for (const wId of activeDuetTurn.wordIds) {
+      helpedWordIdsRef.current.add(wId);
+      correctWordIdsRef.current.add(wId);
+    }
+    setAssistedWordIds(new Set(helpedWordIdsRef.current));
+    setCorrectWordIds(new Set(correctWordIdsRef.current));
+    const snap = alignmentEngineRef.current?.advanceParentTurnWords(
+      activeDuetTurn.wordIds,
+    );
+    if (snap) {
+      setCurrentWordId(snap.currentWordId);
+      setPreviewSnapshot(snap);
+      if (snap.currentWordId === null) {
+        void autoCompletePageAfterFinalWordRef.current(snap);
+      }
+    }
+  }, [activeDuetTurn]);
   useEffect(() => {
     automationRef.current = automationPreferences;
     coachingStyleRef.current = coachingStyle;
@@ -1060,6 +1161,7 @@ function ReadingSessionScreen({
   const sttNetworkErrorStreakRef = useRef(0);
   const sttRestartTimerRef = useRef<number | null>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const onBeforeExternalMicStartRef = useRef<(() => void) | null>(null);
   const isListeningActiveRef = useRef(false);
   const isStartingListeningRef = useRef(false);
   const recordingStartedAtRef = useRef<number | null>(null);
@@ -1342,6 +1444,7 @@ function ReadingSessionScreen({
       if (retryRecorderActiveRef.current) {
         retryRecorderActiveRef.current = false;
       }
+      cancelSessionStandbyRecognizer(sessionId);
       try {
         recognitionRef.current?.abort?.();
       } catch {
@@ -1402,7 +1505,7 @@ function ReadingSessionScreen({
           }
           return;
         }
-        hostedLocalUnconfigured = isHostedLocalVoiceUnconfigured(health);
+        hostedLocalUnconfigured = isPermanentlyHostedLocalUnconfigured(health);
         const policy = getVoicePolicyPreferences();
         const sttAllowsFallback =
           policy.providerMode === "local_with_google_fallback" &&
@@ -1479,8 +1582,16 @@ function ReadingSessionScreen({
           });
         }
 
+        if (localTtsDown) {
+          void warmWasmTtsIfNeeded(
+            resolveVoiceGender(getEffectiveVoiceId()),
+            health,
+          );
+        }
+
         const ttsUsingCachedAudio =
           currentTtsSnap.tier === "catalog_cache" ||
+          currentTtsSnap.tier === "browser_wasm" ||
           currentTtsSnap.provider === "precomputed_cache";
 
         if (ttsAllowsFallback && localTtsDown) {
@@ -1623,6 +1734,7 @@ function ReadingSessionScreen({
       }, 1000);
       return () => clearTimeout(timer);
     }
+    const finishDelayMs = getSessionStandbyRecognizer(sessionId) ? 0 : 400;
     const finishTimer = setTimeout(() => {
       if (assistantAudioPendingRef.current) {
         setCountdown(null);
@@ -1636,9 +1748,9 @@ function ReadingSessionScreen({
           }
         });
       }
-    }, 400);
+    }, finishDelayMs);
     return () => clearTimeout(finishTimer);
-  }, [countdown]);
+  }, [countdown, sessionId]);
 
   useEffect(() => {
     if (!page) return;
@@ -1706,6 +1818,10 @@ function ReadingSessionScreen({
     async function load() {
       try {
         const session = await services.readingService.get(sessionId);
+        const needsInitialCompletion =
+          initialUiState === "complete" ||
+          session.state === "FINISHED" ||
+          session.state === "ABORTED";
         // Batch startup reads in two smaller waves (3 + 3) instead of blasting
         // 6 concurrent DB queries on mobile cold start.
         const [book, child, currentPage] = await Promise.all([
@@ -1714,7 +1830,9 @@ function ReadingSessionScreen({
           services.readingService.getCurrentPage(sessionId),
         ]);
         const [completion, initialProgress, practice] = await Promise.all([
-          services.readingService.getCompletionSummary(sessionId),
+          needsInitialCompletion
+            ? services.readingService.getCompletionSummary(sessionId)
+            : Promise.resolve(null),
           services.readingService.getPageProgress(sessionId),
           (
             services.readingService.getPracticeState?.(sessionId) ??
@@ -1730,12 +1848,22 @@ function ReadingSessionScreen({
 
         if (!active) return;
 
-        hydrateTeacherVoiceFromChildProfile(child, {
+        const hydratedChildVoice = hydrateTeacherVoiceFromChildProfile(child, {
           syncActiveServerSessionLock:
             typeof voiceStudio.updateSessionVoiceLock === "function"
               ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
               : undefined,
         });
+        if (
+          hydratedChildVoice &&
+          getSessionVoiceAudit(sessionId).length === 0
+        ) {
+          lockSessionVoice(sessionId, {
+            voiceId: hydratedChildVoice.voiceId,
+            speed: hydratedChildVoice.speed,
+            forceUpdate: true,
+          });
+        }
 
         if (
           practice &&
@@ -1854,7 +1982,11 @@ function ReadingSessionScreen({
         setCanonicalState(session.state);
         setLoadState({
           status: "ready",
-          data: { book, child, completion },
+          data: {
+            book,
+            child,
+            completion: completion ?? EMPTY_COMPLETION_SUMMARY,
+          },
         });
       } catch (error) {
         if (active) {
@@ -1872,7 +2004,15 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId, t, voiceStudio]);
+  }, [
+    initialPageId,
+    initialUiState,
+    loadKey,
+    services,
+    sessionId,
+    t,
+    voiceStudio,
+  ]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -2939,6 +3079,7 @@ function ReadingSessionScreen({
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     const fullSpoken = lesson.steps.map((s) => s.spokenText).join(" ");
     echoGuard.playbackStarted(id, fullSpoken, performance.now());
+    let playbackFailed = false;
     setIsPlayingPhonicsLesson(true);
     try {
       if (typeof speechPlayer.playPhonicsLesson === "function") {
@@ -2951,9 +3092,16 @@ function ReadingSessionScreen({
           await speechPlayer.play(step.spokenText);
         }
       }
+    } catch (err) {
+      playbackFailed = true;
+      throw err;
     } finally {
       setIsPlayingPhonicsLesson(false);
-      echoGuard.playbackEnded(id, performance.now());
+      if (playbackFailed) {
+        echoGuard.discardPlayback(id);
+      } else {
+        echoGuard.playbackEnded(id, performance.now());
+      }
     }
   }
 
@@ -2977,14 +3125,22 @@ function ReadingSessionScreen({
     // the child's immediate first spoken word as `tail-overlap`).
     const id = `assistant-${(assistantPlaybackSeqRef.current += 1)}`;
     echoGuard.playbackStarted(id, spokenText, performance.now());
+    let playbackFailed = false;
     try {
       if (Object.keys(playOptions).length === 0) {
         await speechPlayer.play(spokenText);
       } else {
         await speechPlayer.play(spokenText, playOptions);
       }
+    } catch (err) {
+      playbackFailed = true;
+      throw err;
     } finally {
-      echoGuard.playbackEnded(id, performance.now());
+      if (playbackFailed) {
+        echoGuard.discardPlayback(id);
+      } else {
+        echoGuard.playbackEnded(id, performance.now());
+      }
     }
   }
 
@@ -3292,11 +3448,13 @@ function ReadingSessionScreen({
     ) {
       const freshHealth = getFreshVoiceEngineHealth();
       const localSttReady = Boolean(
-        freshHealth?.local.available && freshHealth.local.stt_ready,
+        !isPermanentlyHostedLocalUnconfigured(freshHealth) &&
+        freshHealth?.local.available &&
+        freshHealth.local.stt_ready,
       );
       if (!localSttReady) {
         setLatestTranscript("Đang khởi động nhận diện giọng nói...");
-        await awaitSttReadyBeforeListening(4_000);
+        await awaitSttReadyBeforeListening(1_500);
         if (!isCurrent()) return false;
         setLatestTranscript(null);
       }
@@ -3346,41 +3504,46 @@ function ReadingSessionScreen({
           AudioContext?: typeof AudioContext;
           webkitAudioContext?: typeof AudioContext;
         };
-        const SpeechRec = resolveLocalFirstSpeechRecognitionConstructor(
-          win,
-          speechService,
-          () => {
-            const activePage = pageRef.current;
-            const words = activePage?.words ?? [];
-            const cursorIdx = resolveWordArrayIndex(
-              words,
-              alignmentEngineRef.current?.getSnapshot(),
-              0,
-            );
-            const windowStart = Math.max(0, cursorIdx - 12);
-            const windowEnd = Math.min(words.length, cursorIdx + 48);
-            return {
-              sessionId,
-              pageId: activePage?.page_id ?? null,
-              keyterms: words
-                .slice(windowStart, windowEnd)
-                .map((w) => w.text.normalize("NFC").trim())
-                .filter(Boolean),
-            };
-          },
-          () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
-          {
-            onBeforeExternalMicStart: () => {
-              if (isUsingRecorderRef.current || speechRecorder.isRecording) {
-                isUsingRecorderRef.current = false;
-                recorderStarted = false;
-                speechRecorder.cancel({ retainStream: false });
-              }
-            },
-          },
-        ) as (new () => BrowserSpeechRecognition) | undefined;
-        if (SpeechRec) {
-          const rec = new SpeechRec();
+        onBeforeExternalMicStartRef.current = () => {
+          if (isUsingRecorderRef.current || speechRecorder.isRecording) {
+            isUsingRecorderRef.current = false;
+            recorderStarted = false;
+            speechRecorder.cancel({ retainStream: false });
+          }
+        };
+        const standbyRec = takeSessionStandbyRecognizer(sessionId);
+        const SpeechRec = standbyRec
+          ? null
+          : (resolveLocalFirstSpeechRecognitionConstructor(
+              win,
+              speechService,
+              () => {
+                const activePage = pageRef.current;
+                const words = activePage?.words ?? [];
+                const cursorIdx = resolveWordArrayIndex(
+                  words,
+                  alignmentEngineRef.current?.getSnapshot(),
+                  0,
+                );
+                const windowStart = Math.max(0, cursorIdx - 12);
+                const windowEnd = Math.min(words.length, cursorIdx + 48);
+                return {
+                  sessionId,
+                  pageId: activePage?.page_id ?? null,
+                  keyterms: words
+                    .slice(windowStart, windowEnd)
+                    .map((w) => w.text.normalize("NFC").trim())
+                    .filter(Boolean),
+                };
+              },
+              () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+              {
+                onBeforeExternalMicStart: () =>
+                  onBeforeExternalMicStartRef.current?.(),
+              },
+            ) as (new () => BrowserSpeechRecognition) | undefined);
+        if (standbyRec || SpeechRec) {
+          const rec = standbyRec ?? new SpeechRec!();
           const isLocalSegmentRec =
             rec instanceof LocalSegmentSpeechRecognition;
           if (!isLocalSegmentRec) {
@@ -3536,8 +3699,10 @@ function ReadingSessionScreen({
                     .slice(startIdx, startIdx + 6)
                     .map((w) => w.text);
                 })();
-                const isLowVolumeMatchingWindow =
-                  meta?.audioQuality?.status === "LOW_VOLUME" &&
+                const isWindowQualityMatch =
+                  (meta?.audioQuality?.status === "LOW_VOLUME" ||
+                    meta?.audioQuality?.status === "CLIPPING" ||
+                    meta?.audioQuality?.status === "AUDIO_TOO_SHORT") &&
                   Boolean(part.trim()) &&
                   hasUsableChildWindowBrowserConfidence(
                     part,
@@ -3546,7 +3711,7 @@ function ReadingSessionScreen({
                   );
                 if (
                   meta?.audioQuality &&
-                  !isLowVolumeMatchingWindow &&
+                  !isWindowQualityMatch &&
                   (meta.audioQuality.status === "LOW_VOLUME" ||
                     meta.audioQuality.status === "CLIPPING" ||
                     meta.audioQuality.status === "AUDIO_TOO_SHORT")
@@ -3992,16 +4157,38 @@ function ReadingSessionScreen({
 
               if (!result || result.isFinal) continue;
               if (!isFencedResult(result)) continue;
-              if (
+              const rawInterim = result[0]?.transcript?.trim() || "";
+              const interimQualityBad = Boolean(
                 result.audioQuality &&
                 (result.audioQuality.status === "LOW_VOLUME" ||
                   result.audioQuality.status === "CLIPPING" ||
-                  result.audioQuality.status === "AUDIO_TOO_SHORT")
-              ) {
-                continue;
+                  result.audioQuality.status === "AUDIO_TOO_SHORT"),
+              );
+              if (interimQualityBad) {
+                const activePage = pageRef.current ?? capturePage;
+                const curId = engine.getSnapshot().currentWordId;
+                const curIdx = activePage
+                  ? activePage.words.findIndex((w) => w.word_id === curId)
+                  : -1;
+                const previewWindowWords = activePage
+                  ? activePage.words
+                      .slice(
+                        Math.max(0, curIdx >= 0 ? curIdx - 1 : 0),
+                        Math.max(0, curIdx >= 0 ? curIdx - 1 : 0) + 6,
+                      )
+                      .map((w) => w.text)
+                  : [];
+                const interimMatchesWindow =
+                  Boolean(rawInterim) &&
+                  hasUsableChildWindowBrowserConfidence(
+                    rawInterim,
+                    previewWindowWords,
+                    0.9,
+                  );
+                if (!interimMatchesWindow) {
+                  continue;
+                }
               }
-
-              const rawInterim = result[0]?.transcript?.trim() || "";
               if (
                 rawInterim &&
                 !echoGuard.evaluate({
@@ -4304,6 +4491,11 @@ function ReadingSessionScreen({
       window.clearTimeout(sttRestartTimerRef.current);
       sttRestartTimerRef.current = null;
     }
+    try {
+      cancelSessionStandbyRecognizer(sessionId);
+    } catch {
+      // Ignore standby cancel errors
+    }
     const recognition = recognitionRef.current;
     if (!recognition) {
       browserTranscriptCollectorRef.current.completeRecognitionCycle();
@@ -4497,16 +4689,28 @@ function ReadingSessionScreen({
 
     const sttStatus = getVoiceEngineStatus().stt;
     const freshSttHealth = getVoiceEngineHealthForRouting();
+    const sttPolicy = getVoicePolicyPreferences();
+    const sttCloudAllowed =
+      sttPolicy.providerMode === "local_with_google_fallback" &&
+      sttPolicy.allowGoogleSttFallback;
     const elevenLabsSttUsable = Boolean(
+      sttCloudAllowed &&
       freshSttHealth?.elevenlabs?.stt_configured &&
       !freshSttHealth?.elevenlabs?.stt_cooldown,
     );
+    const googleSttUsable = Boolean(
+      sttCloudAllowed &&
+      freshSttHealth?.google.stt_configured &&
+      !freshSttHealth.google.stt_cooldown,
+    );
     const backendSttUnavailable =
-      freshSttHealth !== null &&
-      (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
-      !elevenLabsSttUsable &&
-      (!freshSttHealth.google.stt_configured ||
-        freshSttHealth.google.stt_cooldown);
+      (isPermanentlyHostedLocalUnconfigured(freshSttHealth) &&
+        !elevenLabsSttUsable &&
+        !googleSttUsable) ||
+      (freshSttHealth !== null &&
+        (!freshSttHealth.local.available || !freshSttHealth.local.stt_ready) &&
+        !elevenLabsSttUsable &&
+        !googleSttUsable);
     const alreadyUsingEmergencyBrowserStt =
       sttStatus.tier === "android_native" ||
       sttStatus.tier === "browser_wasm" ||
@@ -4692,6 +4896,7 @@ function ReadingSessionScreen({
     listeningGenerationRef.current += 1;
     const generation = ++assistantAudioGenerationRef.current;
     setCountdown(null);
+    cancelSessionStandbyRecognizer(sessionId);
     setPreviewSnapshot(null);
     let playbackFailed = false;
     let playAborted = false;
@@ -5191,11 +5396,64 @@ function ReadingSessionScreen({
       setComparisonResult(null);
       setComparisonError(null);
 
-      // Pre-warm the microphone stream during the 3s countdown on Web (never on
+      // Pre-warm the microphone stream, standby AudioContext/AudioWorklet,
+      // and WASM STT + TTS engines during the 3s countdown on Web (never on
       // Android APK where native SpeechRecognizer owns HAL mic) so the first
-      // letter/word is captured immediately when countdown hits 0.
+      // letter/word is captured & recognized immediately when countdown hits 0.
+      void awaitVoiceEnginesReadyBeforeListening(2_800).catch(() => undefined);
       if (!shouldPreferAndroidNativeStt()) {
-        void speechRecorder.prepare().catch(() => undefined);
+        cancelSessionStandbyRecognizer(sessionId);
+        const prepPromise = speechRecorder.prepare().catch(() => undefined);
+        if (typeof window !== "undefined") {
+          const win = window as unknown as WindowWithSpeech;
+          const StandbyCtor = resolveLocalFirstSpeechRecognitionConstructor(
+            win,
+            speechService,
+            () => {
+              const activePage = pageRef.current;
+              const words = activePage?.words ?? [];
+              const cursorIdx = resolveWordArrayIndex(
+                words,
+                alignmentEngineRef.current?.getSnapshot(),
+                0,
+              );
+              const windowStart = Math.max(0, cursorIdx - 12);
+              const windowEnd = Math.min(words.length, cursorIdx + 48);
+              return {
+                sessionId,
+                pageId: activePage?.page_id ?? null,
+                keyterms: words
+                  .slice(windowStart, windowEnd)
+                  .map((w) => w.text.normalize("NFC").trim())
+                  .filter(Boolean),
+              };
+            },
+            () => speechRecorder.getStream?.()?.getAudioTracks()?.[0],
+            {
+              onBeforeExternalMicStart: () =>
+                onBeforeExternalMicStartRef.current?.(),
+            },
+          );
+          if (
+            StandbyCtor &&
+            StandbyCtor.prototype instanceof LocalSegmentSpeechRecognition
+          ) {
+            const candidate =
+              new StandbyCtor() as LocalSegmentSpeechRecognition;
+            setSessionStandbyRecognizer(sessionId, candidate);
+            void prepPromise.then(() => {
+              if (
+                mountedRef.current &&
+                getSessionStandbyRecognizer(sessionId) === candidate
+              ) {
+                const track = speechRecorder
+                  .getStream?.()
+                  ?.getAudioTracks()?.[0];
+                void candidate.armStandby(track).catch(() => undefined);
+              }
+            });
+          }
+        }
       }
 
       setCountdown(3);
@@ -5273,6 +5531,7 @@ function ReadingSessionScreen({
     if (isBusy && !speechPlayer.isPlaying) return;
     setIsBusy(true);
     setCountdown(null);
+    cancelSessionStandbyRecognizer(sessionId);
     setPreviewSnapshot(null);
     listeningGenerationRef.current += 1;
     preventAssistantAudioResume();
@@ -5797,14 +6056,22 @@ function ReadingSessionScreen({
             tutorText,
             performance.now(),
           );
+          let tutorPlaybackFailed = false;
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(tutorText, {
               wordSample: isVerbatimTutorWord,
             });
+          } catch (err) {
+            tutorPlaybackFailed = true;
+            throw err;
           } finally {
             setIsPlayingTutorAudio(false);
-            echoGuard.playbackEnded(tutorPlaybackId, performance.now());
+            if (tutorPlaybackFailed) {
+              echoGuard.discardPlayback(tutorPlaybackId);
+            } else {
+              echoGuard.playbackEnded(tutorPlaybackId, performance.now());
+            }
           }
           if (
             mountedRef.current &&
@@ -5874,14 +6141,22 @@ function ReadingSessionScreen({
             retryTutorText,
             performance.now(),
           );
+          let retryTutorPlaybackFailed = false;
           setIsPlayingTutorAudio(true);
           try {
             await speechPlayer.play(retryTutorText, {
               wordSample: isVerbatimRetryTutorWord,
             });
+          } catch (err) {
+            retryTutorPlaybackFailed = true;
+            throw err;
           } finally {
             setIsPlayingTutorAudio(false);
-            echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
+            if (retryTutorPlaybackFailed) {
+              echoGuard.discardPlayback(retryTutorPlaybackId);
+            } else {
+              echoGuard.playbackEnded(retryTutorPlaybackId, performance.now());
+            }
           }
         },
         false,
@@ -6701,9 +6976,12 @@ function ReadingSessionScreen({
       // Lần 1: STT bình thường, không dùng keyterms (tự chuyển sang Browser WASM khi Voice Worker offline).
       const submittedAt = getRetryCaptureTimeMs();
       const freshHealth = getFreshVoiceEngineHealth();
+      const permanentlyUnconfigured =
+        isPermanentlyHostedLocalUnconfigured(freshHealth);
       const localSttConfirmedDown =
-        freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready);
+        permanentlyUnconfigured ||
+        (freshHealth !== null &&
+          (!freshHealth.local.available || !freshHealth.local.stt_ready));
       const tryWasmRetryTranscribe = async () => {
         const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
           recording,
@@ -6715,8 +6993,10 @@ function ReadingSessionScreen({
         );
         recordSttEngineUsage({
           provider: "wasm",
-          fallbackUsed: true,
-          fallbackReason: "LOCAL_STT_UNAVAILABLE",
+          fallbackUsed: !permanentlyUnconfigured,
+          fallbackReason: permanentlyUnconfigured
+            ? null
+            : "LOCAL_STT_UNAVAILABLE",
         });
         return {
           text: wasmRes.text.normalize("NFC"),
@@ -6724,7 +7004,7 @@ function ReadingSessionScreen({
           language_probability: 1,
           words: null,
           provider: "wasm",
-          fallback_used: true,
+          fallback_used: !permanentlyUnconfigured,
         };
       };
 
@@ -6734,6 +7014,9 @@ function ReadingSessionScreen({
           transcription = await tryWasmRetryTranscribe();
         } catch (wasmErr) {
           if (controller.signal.aborted) return;
+          if (permanentlyUnconfigured) {
+            throw wasmErr;
+          }
           console.warn("[RETRY WASM STT FALLBACK -> SERVER]", wasmErr);
           transcription = await speechService.transcribe(recording, {
             languageCode: "vi",
@@ -6750,6 +7033,13 @@ function ReadingSessionScreen({
           });
         } catch (serverErr) {
           if (controller.signal.aborted) return;
+          const serverErrText =
+            typeof serverErr === "object" && serverErr !== null
+              ? `${String((serverErr as { code?: unknown }).code ?? "")} ${String((serverErr as { providerCode?: unknown }).providerCode ?? "")} ${serverErr instanceof Error ? serverErr.message : ""}`
+              : "";
+          if (serverErrText.includes("LOCAL_VOICE_UNCONFIGURED")) {
+            markHostedLocalUnconfigured();
+          }
           if (
             detectBrowserWasmSttSupport().supported &&
             isServiceError(serverErr) &&
@@ -6826,6 +7116,7 @@ function ReadingSessionScreen({
         status = "CORRECT";
       }
       if (
+        !isPermanentlyHostedLocalUnconfigured() &&
         (!nonViLanguage || browserStatus === "CORRECT") &&
         shouldAttemptShortWordKeytermPass2({
           status,
@@ -8311,6 +8602,7 @@ function ReadingSessionScreen({
             bookId={book.id}
             startPageId={pageProgress?.start_page_id}
             endPageId={pageProgress?.end_page_id}
+            lastPageId={page.page_id}
             child={child}
             sessionId={sessionId}
             summary={sessionSummary ?? completion}
@@ -8327,8 +8619,10 @@ function ReadingSessionScreen({
     );
   }
 
+  const canUseDuetMode = !retryMode && duetTurns.length >= 2;
   const hasTopBarContent = Boolean(
     pageProgress ||
+    canUseDuetMode ||
     (pageNavigationError && pickerIndex === null) ||
     speechPlayer.fallbackNotice ||
     isWasmDownloading ||
@@ -8443,6 +8737,98 @@ function ReadingSessionScreen({
               })}
             </p>
           </div>
+        </div>
+      ) : null}
+      {canUseDuetMode ? (
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              aria-pressed={duetModeEnabled}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+                duetModeEnabled
+                  ? "border-primary bg-primary text-white shadow-2xs"
+                  : "border-border bg-white text-ink hover:bg-sky"
+              }`}
+              data-testid="duet-mode-toggle"
+              onClick={() => setDuetModeEnabled((prev) => !prev)}
+              type="button"
+            >
+              <Users aria-hidden="true" className="size-3.5 shrink-0" />
+              {duetModeEnabled ? t("duet.toggleActive") : t("duet.toggleLabel")}
+            </button>
+          </div>
+          {duetModeEnabled && activeDuetTurn ? (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-2.5 rounded-card border px-3.5 py-2.5 ${
+                activeDuetTurn.role === "PARENT"
+                  ? "border-amber-300 bg-amber-50/90"
+                  : "border-emerald-300 bg-emerald-50/90"
+              }`}
+              data-duet-role={activeDuetTurn.role}
+              data-testid="duet-turn-banner"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                      activeDuetTurn.role === "PARENT"
+                        ? "bg-amber-200/80 text-amber-950"
+                        : "bg-emerald-200/80 text-emerald-950"
+                    }`}
+                  >
+                    {activeDuetTurn.role === "PARENT"
+                      ? t("duet.parentTurnBadge")
+                      : t("duet.childTurnBadge")}
+                  </span>
+                  <span className="text-xs font-semibold text-muted">
+                    {t("duet.turnCounter", {
+                      current: formatNumber(activeDuetTurn.turnIndex + 1),
+                      total: formatNumber(duetTurns.length),
+                    })}
+                  </span>
+                </div>
+                <p
+                  className="viread-learning-content mt-1 line-clamp-2 text-sm font-bold text-ink"
+                  dir="ltr"
+                  lang="vi"
+                >
+                  {activeDuetTurn.text}
+                </p>
+              </div>
+              {activeDuetTurn.role === "PARENT" ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    className="w-auto"
+                    fullWidth={false}
+                    onClick={() => {
+                      speechPlayer.stop();
+                      void speechPlayer
+                        .play(activeDuetTurn.text, {
+                          utteranceKind: "page_sample",
+                        })
+                        .catch(() => undefined);
+                    }}
+                    size="compact"
+                    type="button"
+                    variant="secondary"
+                  >
+                    <Volume2 aria-hidden="true" className="size-3.5" />
+                    {t("duet.listenParentSample")}
+                  </Button>
+                  <Button
+                    className="w-auto"
+                    data-testid="duet-complete-parent-turn"
+                    fullWidth={false}
+                    onClick={handleCompleteParentDuetTurn}
+                    size="compact"
+                    type="button"
+                  >
+                    {t("duet.completeParentTurn")}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
       {pageNavigationError && pickerIndex === null ? (

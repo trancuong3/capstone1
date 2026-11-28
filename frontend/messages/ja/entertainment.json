@@ -538,7 +538,8 @@
       "who": "だれ・なにがいる？",
       "action": "なにをしている？",
       "where": "どこ・なにいろ？"
-    }
+    },
+    "studioIllustrationBadge": "文字なし挿絵"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "再生が検出されませんでした。再生ボタンをタップして再試行してください。",

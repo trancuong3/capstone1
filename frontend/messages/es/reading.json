@@ -468,5 +468,31 @@
     "keepTrying": "Intenta leer despacio y con claridad.",
     "wordsRead": "{count, plural, =0 {No se leyeron palabras} one {Leída # palabra} other {Leídas # palabras}}"
   },
-  "learningContentNotice": "El contenido de lectura en vietnamita se muestra de izquierda a derecha para mantener la ortografía correcta."
+  "learningContentNotice": "El contenido de lectura en vietnamita se muestra de izquierda a derecha para mantener la ortografía correcta.",
+  "pageKinds": {
+    "TEXT_ONLY": "Texto",
+    "TEXT_AND_IMAGE": "Cuento ilustrado",
+    "IMAGE_PRIMARY": "Página ilustrada",
+    "COMIC": "Cómic / Diálogo",
+    "POEM": "Poema infantil",
+    "EXERCISE": "Página de práctica",
+    "MULTI_COLUMN": "Multicolumna",
+    "TEXT_OVER_IMAGE": "Texto sobre ilustración",
+    "LOW_QUALITY": "Requiere revisión"
+  },
+  "duet": {
+    "toggleLabel": "Lectura por turnos",
+    "toggleActive": "Modo por turnos activo",
+    "parentTurnBadge": "Turno guía de mamá/papá",
+    "childTurnBadge": "¡Turno del niño para leer!",
+    "listenParentSample": "Escuchar muestra",
+    "completeParentTurn": "Leído — Turno del niño",
+    "turnCounter": "Turno {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Explora la ilustración y oraciones",
+    "subtitle": "Amplía vocabulario y oraciones directamente desde la página recién leída.",
+    "pictureCta": "Describir ilustración",
+    "shooterCta": "Armar oraciones"
+  }
 }

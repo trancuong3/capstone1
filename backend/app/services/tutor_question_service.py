@@ -98,6 +98,24 @@ class TutorQuestionService:
                 )
             )
 
+        page_ids = [pid for pid, _, _ in refs if pid is not None]
+        extractions_by_page: dict[UUID, tuple[str | None, list[dict[str, Any]]]] = {}
+        ext_fn = getattr(self.repository, "page_extractions_by_page_ids", None)
+        if callable(ext_fn) and page_ids:
+            try:
+                extractions_by_page = await ext_fn(page_ids)
+            except Exception:
+                extractions_by_page = {}
+
+        style_bible: dict[str, Any] | None = None
+        bible_fn = getattr(self.repository, "book_style_bible_context", None)
+        session_book_id = getattr(session, "BookId", None)
+        if callable(bible_fn) and session_book_id is not None:
+            try:
+                style_bible = await bible_fn(session_book_id)
+            except Exception:
+                style_bible = None
+
         pages: list[SourcePage] = []
         for index, (page_id, revision_id, page_number) in enumerate(refs):
             revision = await self.repository.revision(revision_id)
@@ -108,6 +126,7 @@ class TutorQuestionService:
             tokens = tuple(words) if words else tuple(text.split())
             if not tokens:
                 continue
+            page_kind, blocks_list = extractions_by_page.get(page_id, (None, []))
             pages.append(
                 SourcePage(
                     page_id=page_id,
@@ -115,6 +134,9 @@ class TutorQuestionService:
                     page_number=page_number if page_number is not None else index + 1,
                     text=text,
                     tokens=tokens,
+                    page_kind=page_kind,
+                    blocks=tuple(blocks_list),
+                    style_bible=style_bible,
                 )
             )
         return pages

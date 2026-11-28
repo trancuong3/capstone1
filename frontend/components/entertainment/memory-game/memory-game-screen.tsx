@@ -556,6 +556,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             echoGuard.playbackEnded(playbackId, performance.now());
             return;
           }
+          // Strictly forbid raw genderless SpeechSynthesisUtterance fallback so a
+          // male/female teacher selection never switches genders mid-session.
           finishSpeak();
         });
     },

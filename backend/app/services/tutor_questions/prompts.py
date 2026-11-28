@@ -21,9 +21,51 @@ Quy tắc bắt buộc:
 Chỉ trả về JSON đúng schema, không Markdown, không giải thích."""
 
 
+_PAGE_KIND_HINTS: dict[str, str] = {
+    "POEM": "Thơ thiếu nhi — ưu tiên hỏi hình ảnh thơ, cảm xúc hoặc điền từ vần nhịp.",
+    "COMIC": "Truyện tranh/hội thoại — ưu tiên hỏi nhân vật nào nói/làm gì qua lời thoại.",
+    "EXERCISE": "Trang bài tập — chỉ hỏi xoay quanh ngữ liệu đọc chính, bỏ qua số thứ tự câu hỏi.",
+    "MULTI_COLUMN": "Văn bản nhiều cột — bám sát trình tự nội dung câu chuyện.",
+    "TEXT_AND_IMAGE": "Trang truyện có tranh minh họa — hỏi sự kiện, hành động và từ ngữ gợi tả.",
+}
+
+
+def _style_bible_hint(pages: list[SourcePage]) -> str:
+    for page in pages:
+        bible = page.style_bible
+        if not isinstance(bible, dict) or not bible:
+            continue
+        chars = [
+            str(c.get("name") or "").strip()
+            for c in (bible.get("characters") or [])
+            if isinstance(c, dict) and str(c.get("name") or "").strip()
+        ][:4]
+        settings = [str(s).strip() for s in (bible.get("settings") or []) if str(s).strip()][:3]
+        hints: list[str] = []
+        if chars:
+            hints.append(f"nhân vật: {', '.join(chars)}")
+        if settings:
+            hints.append(f"bối cảnh: {', '.join(settings)}")
+        if hints:
+            return f"Gợi ý bối cảnh sách ({'; '.join(hints)} — lưu ý: evidence vẫn phải trích NGUYÊN VĂN từ <van_ban>).\n"
+    return ""
+
+
 def user_prompt(pages: list[SourcePage], *, count: int, max_chars: int) -> str:
+    kinds = {
+        str(p.page_kind).upper()
+        for p in pages
+        if p.page_kind and str(p.page_kind).upper() in _PAGE_KIND_HINTS
+    }
+    genre_note = ""
+    if kinds:
+        notes = " ".join(_PAGE_KIND_HINTS[k] for k in sorted(kinds))
+        genre_note = f"Lưu ý thể loại trang: {notes}\n"
+    bible_note = _style_bible_hint(pages)
     return (
         f"Hãy tạo đúng {count} câu hỏi đọc hiểu, mỗi câu hỏi một ý khác nhau (nếu văn bản quá ngắn thì tạo ít hơn nhưng tối thiểu 1).\n"
+        f"{genre_note}"
+        f"{bible_note}"
         "<van_ban>\n"
         f"{source_text(pages, max_chars=max_chars)}\n"
         "</van_ban>"
@@ -39,7 +81,8 @@ def source_text(pages: list[SourcePage], *, max_chars: int) -> str:
         if budget <= 0:
             break
         text = page.text.strip()[:budget]
-        parts.append(f"[Trang {page.page_number}]\n{text}")
+        kind_tag = f" | Loại trang: {page.page_kind}" if page.page_kind else ""
+        parts.append(f"[Trang {page.page_number}{kind_tag}]\n{text}")
         budget -= len(text)
     return "\n\n".join(parts)
 

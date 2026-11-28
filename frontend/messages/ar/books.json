@@ -291,7 +291,37 @@
     "addPagesPrimary": "إضافة صفحات",
     "managePagesSecondary": "إدارة الصفحات",
     "editModalTitle": "تعديل بيانات الكتاب",
-    "deleteModalTitle": "حذف هذا الكتاب الخاص؟"
+    "deleteModalTitle": "حذف هذا الكتاب الخاص؟",
+    "storyweaver": {
+      "openAction": "استوديو القصص العائلية",
+      "createdNotice": "تم إنشاء الكتاب العائلي الصغير وهو جاهز للقراءة!",
+      "modalTitle": "استوديو تأليف القصص العائلية القصيرة",
+      "modalDescription": "أنشئ مع طفلك كتاباً قصيراً من 3–4 صفحات بالفيتنامية يناسب صفه ويدمج كلمات التدريب بسلاسة.",
+      "stagePreparing": "جارٍ تحضير المفردات وإطار المستوى الدراسي…",
+      "stageWeaving": "جارٍ نسج القصة الفيتنامية لعائلتك…",
+      "themeRequiredError": "يرجى إدخال موضوع القصة (حرفان على الأقل).",
+      "genericError": "تعذر إنشاء الكتاب الصغير الآن. يرجى المحاولة مرة أخرى.",
+      "wordsUsedLabel": "كلمات التدريب المدمجة: {words}",
+      "readTogetherNow": "اقرأ مع طفلك الآن",
+      "openBookDetail": "فتح تفاصيل الكتاب",
+      "childLabel": "مخصص للطفل",
+      "gradeLabel": "الصف المستهدف",
+      "themeLabel": "موضوع القصة",
+      "themePlaceholder": "مثال: حديقة الصباح المشمسة، القطة اللطيفة…",
+      "titleOptionalLabel": "عنوان الكتاب (اختياري)",
+      "titleOptionalPlaceholder": "اتركه فارغاً لاقتراح عنوان تلقائياً",
+      "styleModeLabel": "أسلوب القراءة",
+      "styleDuet": "قراءة تبادلية بين الوالد والطفل (حوار)",
+      "stylePoem": "شعر أطفال من 4 أسطر",
+      "styleProse": "قصة نثرية قصيرة",
+      "pageCountLabel": "طول الكتاب الصغير",
+      "threePages": "3 صفحات موجزة",
+      "fourPages": "4 صفحات متكاملة",
+      "customWordsLabel": "كلمات إضافية لدمجها (مفصولة بفواصل)",
+      "customWordsPlaceholder": "مثال: شمس دافئة، مجتهد، زهرة",
+      "submitAction": "إنشاء الكتاب الصغير الآن",
+      "safetyFootnote": "يُفحص تلقائياً لسلامة الأطفال ويُحفظ بخصوصية في مكتبة عائلتك."
+    }
   },
   "privateManager": {
     "backToMyBooks": "العودة إلى كتبي",
@@ -539,5 +569,12 @@
     "enableError": "تعذر تحديث إعداد المساهمة بالنماذج الآن.",
     "disabledNotice": "تم إيقاف المساهمة بالنماذج لهذا الكتاب ولن يتم جمع عينات جديدة مستقبلاً.",
     "disableError": "تعذر إيقاف المساهمة بالنماذج الآن."
+  },
+  "readability": {
+    "matched": "متوافق مع الصف",
+    "tooHard": "متقدم قليلاً (الصف {min}–{max})",
+    "tooEasy": "سهل للإحماء (الصف {min}–{max})",
+    "estimatedGrade": "المستوى المقدر {min}–{max}",
+    "phonicsScore": "جاهزية التهجئة {score}%"
   }
 }
