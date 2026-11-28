@@ -492,6 +492,8 @@ class ChildSafetyOrchestrator:
         deadline = (time.monotonic() + total_timeout) if total_timeout > 0 else None
         events: list[dict[str, Any]] = []
         disabled_families: set[str] = set()
+        disabled_providers: set[str] = set()
+        healthy_providers: set[str] = set()
         aggregated_suitability = "SUITABLE"
         candidate_hash = content_hash(text)
         deduped: dict[tuple[int, int, str, str], dict[str, Any]] = {}
@@ -507,6 +509,8 @@ class ChildSafetyOrchestrator:
                     events,
                     chunk_index,
                     disabled_families=disabled_families,
+                    disabled_providers=disabled_providers,
+                    healthy_providers=healthy_providers,
                     deadline=deadline,
                 )
                 suitability, findings = response
@@ -591,6 +595,7 @@ class ChildSafetyOrchestrator:
         *,
         provider: SafetyProvider,
         disabled_families: set[str],
+        disabled_providers: set[str] | None = None,
         deadline: float | None,
     ) -> float:
         if provider.family == "ollama":
@@ -598,11 +603,13 @@ class ChildSafetyOrchestrator:
         base_timeout = float(self.config.cloud_timeout_seconds)
         if deadline is None:
             return base_timeout
+        skipped_providers = disabled_providers or set()
         current_index = self.providers.index(provider)
         remaining_after = [
             candidate
             for candidate in self.providers[current_index:]
             if candidate.family not in disabled_families
+            and candidate.name not in skipped_providers
         ]
         has_local_fallback = any(
             candidate.family == "ollama" for candidate in remaining_after
@@ -630,11 +637,17 @@ class ChildSafetyOrchestrator:
         chunk_id: int,
         *,
         disabled_families: set[str] | None = None,
+        disabled_providers: set[str] | None = None,
+        healthy_providers: set[str] | None = None,
         deadline: float | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         errors: list[str] = []
         if disabled_families is None:
             disabled_families = set()
+        if disabled_providers is None:
+            disabled_providers = set()
+        if healthy_providers is None:
+            healthy_providers = set()
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )
@@ -646,7 +659,7 @@ class ChildSafetyOrchestrator:
         attempted = False
         skipped_by_circuit = False
         for provider in self.providers:
-            if provider.family in disabled_families:
+            if provider.name in disabled_providers or provider.family in disabled_families:
                 continue
             if deadline is not None and time.monotonic() >= deadline:
                 raise ChildSafetyError("DOCUMENT_TIMEOUT", events)
@@ -677,6 +690,7 @@ class ChildSafetyOrchestrator:
             provider_timeout = self._provider_timeout_budget(
                 provider=provider,
                 disabled_families=disabled_families,
+                disabled_providers=disabled_providers,
                 deadline=deadline,
             )
             sub_chunks = (
@@ -758,6 +772,7 @@ class ChildSafetyOrchestrator:
                         ok=True,
                         http_status=last_status_code or 200,
                     )
+                healthy_providers.add(provider.name)
                 events.append(self._event(
                     provider, chunk_id, True, last_status_code, None, started,
                     output_mode=output_mode, retry_count=retry_count,
@@ -845,7 +860,20 @@ class ChildSafetyOrchestrator:
                 or (isinstance(status_code, int) and status_code >= 500)
                 or code in {"PROVIDER_TIMEOUT", "PROVIDER_NETWORK"}
             ):
-                disabled_families.add(provider.family)
+                is_family_wide_error = status_code in {401, 403, 429} or code in {
+                    "PROVIDER_AUTHENTICATION",
+                    "PROVIDER_QUOTA",
+                }
+                has_healthy_sibling = any(
+                    candidate.family == provider.family
+                    and candidate.name != provider.name
+                    and candidate.name in healthy_providers
+                    for candidate in self.providers
+                )
+                if has_healthy_sibling and not is_family_wide_error:
+                    disabled_providers.add(provider.name)
+                else:
+                    disabled_families.add(provider.family)
         if not attempted and skipped_by_circuit:
             raise ChildSafetyError("ALL_PROVIDERS_SKIPPED", events)
         raise ChildSafetyError(errors[-1] if errors else "NO_PROVIDER_CONFIGURED", events)
