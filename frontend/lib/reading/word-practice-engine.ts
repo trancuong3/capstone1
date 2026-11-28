@@ -53,10 +53,10 @@ export type WordPracticeState =
 
 export const SHORT_WORD_CAPTURE_CONFIG = {
   mode: "short-word" as const,
-  pollIntervalMs: 120,
-  acousticSettleMs: 140,
-  minCaptureMs: 600,
-  postSpeechSilenceMs: 550,
+  pollIntervalMs: 60,
+  acousticSettleMs: 45,
+  minCaptureMs: 480,
+  postSpeechSilenceMs: 520,
   noSpeechTimeoutMs: 3_500,
   maxCaptureMs: 4_800,
   softSpeechRmsThreshold: 0.015,
@@ -155,11 +155,14 @@ export interface ShortWordSpeechActivityInput {
 export function hasShortWordSpeechActivity(
   input: ShortWordSpeechActivityInput,
 ): boolean {
-  const liveRms = input.quality
-    ? input.quality.rms
-    : input.audioLevel > 1
-      ? input.audioLevel / 500
-      : input.audioLevel;
+  const normalizedAudioLevel =
+    input.audioLevel > 1 ? input.audioLevel / 500 : input.audioLevel;
+  const liveRms =
+    input.speechObserved && input.audioLevel > 0
+      ? normalizedAudioLevel
+      : input.quality
+        ? input.quality.rms
+        : normalizedAudioLevel;
   const speechDurationMs = input.quality?.speechDurationMs ?? 0;
   const noiseFloor = input.quality?.noiseFloor ?? 0;
   const initialBurstOnset = !input.speechObserved && speechDurationMs >= 40;
@@ -168,7 +171,7 @@ export function hasShortWordSpeechActivity(
     speechDurationMs > input.previousSpeechDurationMs;
   const relativeEnergyThreshold = input.speechObserved
     ? Math.max(0.012, noiseFloor * 2.2)
-    : Math.max(0.008, noiseFloor * 1.8);
+    : Math.max(0.0032, noiseFloor * 1.6);
   const hasRelativeEnergy =
     liveRms >= relativeEnergyThreshold &&
     (Boolean(input.speechObserved) ||

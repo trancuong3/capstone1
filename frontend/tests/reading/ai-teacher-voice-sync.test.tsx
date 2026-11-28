@@ -16,7 +16,9 @@ import { ReadingVoiceSettings } from "@/components/reading/reading-voice-setting
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
+import { DifficultWordsScreen } from "@/components/reports/difficult-words-screen";
 import { createSpeechService } from "@/lib/api/speech-service";
+import { BrowserWasmTtsClient } from "@/lib/reading/browser-wasm-tts";
 import {
   applyGlobalTeacherVoiceSelection,
   getActiveSessionVoiceLock,
@@ -32,6 +34,8 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
+  getVoiceEngineHealthForRouting,
+  getVoiceEngineStatus,
   mapLocalVoiceToGoogleBackup,
   resetVoiceEngineStatus,
   setCachedVoiceEngineHealth,
@@ -94,6 +98,7 @@ const { routerMock, speechPlayerMock } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/difficult-words",
   useRouter: () => ({
     ...routerMock,
     push: pushMock,
@@ -1659,6 +1664,403 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     expect(
       await screen.findByTestId("teacher-voice-worker-offline-hint"),
     ).toBeInTheDocument();
+  });
+
+  it("seeds STT/TTS status immediately from /voice/status (never stuck on Đang kiểm tra nhận diện giọng nói) and retains down local worker routing health past 30s", () => {
+    resetVoiceEngineStatus();
+    expect(getVoiceEngineStatus().stt.tier).toBe("idle");
+
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(1_000_000);
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const seeded = getVoiceEngineStatus();
+    expect(seeded.stt.tier).toBe("browser_wasm");
+    expect(seeded.stt.engineLabel).not.toContain("Đang kiểm tra");
+    expect(seeded.tts.tier).toBe("local_offline");
+    expect(seeded.tts.engineLabel).not.toContain("Đang kiểm tra");
+
+    // Advance 65s (> 30s fresh window, < 120s known-down retention): routing health MUST still remember local is down!
+    nowSpy.mockReturnValue(1_065_000);
+    const retained = getVoiceEngineHealthForRouting();
+    expect(retained).not.toBeNull();
+    expect(retained?.local.available).toBe(false);
+    nowSpy.mockRestore();
+  });
+
+  it("DifficultWordsScreen honors AppStoreContext.selectedChildId when ?childId= is omitted so Thầy giáo never resets to children[0]'s Cô giáo", async () => {
+    const childFemaleFirst: ChildProfileDTO = {
+      ...CHILD_1,
+      settings: {
+        voice_preferences: {
+          voice_id: "local_north_truc_ly",
+          gender: "female",
+          region: "north",
+          speed: 0.9,
+          updated_at: 1_900_000_000_000,
+        },
+      },
+    };
+    hydrateTeacherVoiceFromChildProfile(CHILD_2);
+    expect(getEffectiveVoiceId()).toBe("local_south_thai_son");
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+
+    const listWordsMock = vi.fn().mockResolvedValue([]);
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([childFemaleFirst, CHILD_2]),
+        get: vi.fn().mockResolvedValue(CHILD_2),
+        updateVoicePreferences: updateVoicePreferencesMock,
+      },
+      difficultWordService: {
+        list: listWordsMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    const storeValue = {
+      selectedChildId: CHILD_2.id,
+      setSelectedChildId: vi.fn(),
+      activeSessionId: null,
+      setActiveSessionId: vi.fn(),
+      clearState: vi.fn(),
+    } as unknown as React.ContextType<typeof AppStoreContext>;
+
+    render(
+      <AuthRuntimeContext.Provider value={TEST_AUTH_RUNTIME}>
+        <AppServicesContext.Provider value={services}>
+          <AppStoreContext.Provider value={storeValue}>
+            <DifficultWordsScreen />
+          </AppStoreContext.Provider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    await waitFor(() =>
+      expect(listWordsMock).toHaveBeenCalledWith(CHILD_2.id, expect.anything()),
+    );
+    expect(getEffectiveVoiceId()).toBe("local_south_thai_son");
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+  });
+
+  it("BrowserWasmTtsClient keeps both female and male Vietnamese ONNX models warm simultaneously for 0ms gender switching", async () => {
+    const postedMessages: Array<{
+      type?: string;
+      id?: string;
+      gender?: string;
+    }> = [];
+    class FakeDualWorker {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: ErrorEvent) => void) | null = null;
+      postMessage(msg: { type?: string; id?: string; gender?: string }) {
+        postedMessages.push(msg);
+        queueMicrotask(() => {
+          this.onmessage?.({
+            data: { type: "ready", id: msg.id, gender: msg.gender },
+          } as MessageEvent);
+        });
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", FakeDualWorker);
+
+    const client = new BrowserWasmTtsClient();
+    await client.init({ gender: "female" });
+    await client.init({ gender: "male" });
+
+    expect(client.isReady("female")).toBe(true);
+    expect(client.isReady("male")).toBe(true);
+    expect(postedMessages.map((m) => m.gender)).toEqual(["female", "male"]);
+    client.dispose();
+    vi.unstubAllGlobals();
+  });
+
+  it("TtsPlayback plays bundled static /audio/voice-previews/<voice_id>.mp3 instantly when voice_preview runs offline without showing preview error", async () => {
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+    });
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: false,
+        available: false,
+        stt_ready: false,
+        tts_ready: false,
+      },
+      google: {
+        stt_configured: false,
+        tts_configured: false,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+
+    const fakeMp3Bytes = new Uint8Array(512);
+    fakeMp3Bytes[0] = 0xff;
+    fakeMp3Bytes[1] = 0xfb;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.includes("/audio/voice-previews/local_north_thien_minh.mp3")) {
+          return new Response(fakeMp3Bytes, {
+            status: 200,
+            headers: { "Content-Type": "audio/mpeg" },
+          });
+        }
+        return new Response("not found", { status: 404 });
+      });
+
+    const playedSrcs: string[] = [];
+    class StaticPreviewAudio {
+      src = "";
+      currentTime = 0;
+      duration = 2.4;
+      paused = true;
+      ended = false;
+      playbackRate = 1;
+      defaultPlaybackRate = 1;
+      preservesPitch = true;
+      preload = "auto";
+      onloadedmetadata: (() => void) | null = null;
+      ontimeupdate: (() => void) | null = null;
+      onended: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      onstalled: (() => void) | null = null;
+      constructor(url = "") {
+        this.src = url;
+      }
+      play() {
+        playedSrcs.push(this.src);
+        this.paused = false;
+        queueMicrotask(() => {
+          this.currentTime = this.duration;
+          this.ended = true;
+          this.onended?.();
+        });
+        return Promise.resolve();
+      }
+      pause() {
+        this.paused = true;
+      }
+      removeAttribute() {}
+      load() {}
+    }
+    vi.stubGlobal("Audio", StaticPreviewAudio);
+
+    const speechMock = {
+      synthesize: vi.fn().mockRejectedValue(
+        Object.assign(new Error("Offline"), {
+          status: 503,
+          code: "LOCAL_VOICE_UNCONFIGURED",
+        }),
+      ),
+      synthesizePhonics: vi.fn(),
+      transcribe: vi.fn(),
+    } as unknown as SpeechService;
+
+    const player = new TtsPlayback(speechMock, {
+      listVoices: vi.fn(),
+      synthesizeTimed: vi.fn(),
+    } as unknown as VoiceStudioService);
+
+    await expect(
+      player.play(
+        "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+        {
+          coaching: true,
+          cacheScope: "COACHING",
+          isPrivateBook: false,
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        },
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "/audio/voice-previews/local_north_thien_minh.mp3",
+      ),
+      expect.anything(),
+    );
+    // Tier-0 static preview MUST NOT wait on backend /voice/text-to-speech!
+    expect(speechMock.synthesize).not.toHaveBeenCalled();
+    expect(playedSrcs).toHaveLength(1);
+
+    // Also verify ReadingScreen's playWithWordTimings(sample.split(" "), { utteranceKind: "voice_preview", bypassSessionLock: true })
+    // plays the bundled static MP3 at Tier 0 without hitting synthesizeTimed!
+    const studioTimedSpy = vi.fn();
+    const timedPlayer = new TtsPlayback(speechMock, {
+      listVoices: vi.fn(),
+      synthesizeTimed: studioTimedSpy,
+    } as unknown as VoiceStudioService);
+    const previewWords =
+      "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.".split(
+        " ",
+      );
+    await expect(
+      timedPlayer.playWithWordTimings(previewWords, {
+        cacheScope: "COACHING",
+        isPrivateBook: false,
+        bypassSessionLock: true,
+        utteranceKind: "voice_preview",
+      }),
+    ).resolves.toBeUndefined();
+    expect(studioTimedSpy).not.toHaveBeenCalled();
+    expect(playedSrcs).toHaveLength(2);
+
+    fetchSpy.mockRestore();
+    vi.unstubAllGlobals();
+  });
+
+  it("preserves and persists pre-child Dashboard Thầy giáo selection even when child profile has an older saved Cô giáo preference", async () => {
+    const updateVoicePrefsMock = vi.fn().mockResolvedValue(CHILD_1);
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePrefsMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    // 1. User picks Thầy giáo AI on Dashboard BEFORE selecting any child (childId: null)
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_north_thien_minh",
+      gender: "male",
+      region: "north",
+      updatedAt: 2_000_000_000_000,
+      childId: null,
+    });
+
+    const childWithOldFemalePref: ChildProfileDTO = {
+      ...CHILD_1,
+      settings: {
+        voice_preferences: {
+          voice_id: "local_north_truc_ly",
+          gender: "female",
+          region: "north",
+          speed: 0.9,
+          updated_at: 1_500_000_000_000,
+        },
+      },
+    };
+
+    // 2. DashboardScreen onSelect calls hydrateTeacherVoiceFromChildProfile(child, { force: true })
+    hydrateTeacherVoiceFromChildProfile(childWithOldFemalePref, {
+      force: true,
+    });
+    expect(getEffectiveVoiceId()).toBe("local_north_thien_minh");
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+
+    // 3. AiTeacherVoiceSection mounts/updates with selectedChild -> persists Thầy giáo to backend!
+    render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={childWithOldFemalePref} />
+      </AppServicesContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(updateVoicePrefsMock).toHaveBeenCalledWith(
+        CHILD_1.id,
+        expect.objectContaining({
+          voice_id: "local_north_thien_minh",
+          gender: "male",
+          region: "north",
+        }),
+      ),
+    );
+  });
+
+  it("ReadingVoiceSettings 'Dùng giọng mặc định' preserves active Thầy giáo gender and quick persona buttons play instant preview", async () => {
+    const user = userEvent.setup();
+    const onPreview = vi.fn();
+    applyGlobalTeacherVoiceSelection({
+      voiceId: "local_central_quang_son",
+      gender: "male",
+      region: "central",
+    });
+
+    render(
+      <ReadingVoiceSettings onPreview={onPreview} onStopPreview={vi.fn()} />,
+    );
+    await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
+    await screen.findByRole("radio", { name: /Thầy Quang Sơn/ });
+
+    // Clicking "Dùng giọng mặc định" resets region to north while keeping Thầy giáo AI (male)!
+    await user.click(
+      screen.getByRole("button", { name: "Dùng giọng mặc định" }),
+    );
+    expect(getEffectiveTeacherPersona().gender).toBe("male");
+    expect(getEffectiveVoiceId()).toBe("local_north_thien_minh");
+
+    // Clicking quick persona button immediately triggers adapted preview audio
+    onPreview.mockClear();
+    await user.click(screen.getByTestId("voice-modal-teacher-female"));
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith(
+        expect.stringContaining("cô trò mình"),
+      ),
+    );
+    onPreview.mockClear();
+    await user.click(screen.getByTestId("voice-modal-teacher-male"));
+    await waitFor(() =>
+      expect(onPreview).toHaveBeenCalledWith(
+        expect.stringContaining("thầy trò mình"),
+      ),
+    );
+  });
+
+  it("BrowserWasmTtsClient updates readyGenders when worker posts low-memory eviction event", async () => {
+    let workerInstance: {
+      onmessage: ((ev: MessageEvent) => void) | null;
+    } | null = null;
+    class EvictingWorker {
+      onmessage: ((ev: MessageEvent) => void) | null = null;
+      onerror: ((ev: ErrorEvent) => void) | null = null;
+      constructor() {
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        workerInstance = this;
+      }
+      postMessage(msg: { type?: string; id?: string; gender?: string }) {
+        queueMicrotask(() => {
+          if (msg.type === "init" && msg.gender === "male") {
+            this.onmessage?.({
+              data: { type: "evicted", gender: "female" },
+            } as MessageEvent);
+          }
+          this.onmessage?.({
+            data: { type: "ready", id: msg.id, gender: msg.gender },
+          } as MessageEvent);
+        });
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", EvictingWorker);
+    const client = new BrowserWasmTtsClient();
+    await client.init({ gender: "female" });
+    expect(client.isReady("female")).toBe(true);
+    await client.init({ gender: "male" });
+    expect(workerInstance).not.toBeNull();
+    expect(client.isReady("male")).toBe(true);
+    expect(client.isReady("female")).toBe(false);
+    client.dispose();
+    vi.unstubAllGlobals();
   });
 
   it("synchronizes the chosen voice end-to-end across book reading, wrong-word retry, phonics, difficult words, and bidirectional persona until changed again", async () => {

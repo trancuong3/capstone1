@@ -45,25 +45,32 @@ if _BACKEND_ROOT.is_dir() and str(_BACKEND_ROOT) not in sys.path:
 
 try:
     import av  # type: ignore[import-not-found]
-except ImportError:
+except (ImportError, OSError):
     av = None  # type: ignore[assignment]
 
 try:
     import librosa  # type: ignore[import-not-found]
-except ImportError:
+except (ImportError, OSError):
     librosa = None  # type: ignore[assignment]
 
 import numpy as np
 from scipy import signal as scipy_signal
 
 try:
+    import onnxruntime as ort  # type: ignore[import-not-found]
+except (ImportError, OSError):
+    ort = None  # type: ignore[assignment]
+
+_sherpa_import_err: Exception | None = None
+try:
     import sherpa_onnx  # type: ignore[import-not-found]
-except ImportError:
+except (ImportError, OSError) as _exc:
     sherpa_onnx = None  # type: ignore[assignment]
+    _sherpa_import_err = _exc
 
 try:
     import soundfile as sf  # type: ignore[import-not-found]
-except ImportError:
+except (ImportError, OSError):
     sf = None  # type: ignore[assignment]
 
 from fastapi import (
@@ -480,14 +487,347 @@ def _parse_stt_hotwords(raw_keyterms: list[str] | str | None) -> list[str]:
     return out
 
 
+class _OrtOfflineRecognitionResult:
+    __slots__ = ("text", "tokens", "timestamps", "ys_log_probs")
+
+    def __init__(
+        self,
+        *,
+        text: str = "",
+        tokens: list[str] | None = None,
+        timestamps: list[float] | None = None,
+        ys_log_probs: list[float] | None = None,
+    ) -> None:
+        self.text = text
+        self.tokens = tokens if tokens is not None else []
+        self.timestamps = timestamps if timestamps is not None else []
+        self.ys_log_probs = ys_log_probs if ys_log_probs is not None else []
+
+
+class _OrtOfflineStream:
+    __slots__ = ("hotwords", "sample_rate", "samples", "result")
+
+    def __init__(self, hotwords: str = "") -> None:
+        self.hotwords = hotwords
+        self.sample_rate = 16000
+        self.samples = np.zeros(0, dtype=np.float32)
+        self.result = _OrtOfflineRecognitionResult()
+
+    def accept_waveform(self, sample_rate: int, samples: Any) -> None:
+        arr = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if sample_rate != 16000 and arr.size > 0:
+            if librosa is not None:
+                arr = librosa.resample(arr, orig_sr=int(sample_rate), target_sr=16000)
+            else:
+                target_n = max(1, int(round(arr.size * 16000.0 / float(sample_rate))))
+                arr = scipy_signal.resample(arr, target_n).astype(np.float32)
+        self.sample_rate = 16000
+        self.samples = arr
+
+
+@dataclass(slots=True)
+class _BeamHyp:
+    ys: tuple[int, ...]
+    log_prob: float
+    tokens: list[str]
+    timestamps: list[float]
+    ys_log_probs: list[float]
+
+
+class OrtZipformerOfflineRecognizer:
+    """Pure ONNX Runtime + Kaldi 80-dim Mel-fbank Zipformer2 transducer recognizer.
+
+    Provides 100% offline Vietnamese STT parity on Windows 11 hosts where Smart App
+    Control / WDAC blocks unsigned `_sherpa_onnx.pyd` / `_kaldi_native_fbank.pyd`
+    while Microsoft-signed `onnxruntime` runs natively at full speed.
+    """
+
+    def __init__(
+        self,
+        *,
+        encoder_path: Path,
+        decoder_path: Path,
+        joiner_path: Path,
+        tokens_path: Path,
+        bpe_model_path: Path | None = None,
+        num_threads: int = 4,
+        max_active_paths: int = 4,
+        hotwords_score: float = 1.2,
+    ) -> None:
+        if ort is None:
+            raise RuntimeError("onnxruntime is not available for OrtZipformerOfflineRecognizer")
+        sess_opts = ort.SessionOptions()
+        sess_opts.intra_op_num_threads = max(1, int(num_threads))
+        sess_opts.inter_op_num_threads = 1
+        sess_opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        providers = ["CPUExecutionProvider"]
+
+        self._encoder = ort.InferenceSession(
+            str(encoder_path), sess_options=sess_opts, providers=providers
+        )
+        self._decoder = ort.InferenceSession(
+            str(decoder_path), sess_options=sess_opts, providers=providers
+        )
+        self._joiner = ort.InferenceSession(
+            str(joiner_path), sess_options=sess_opts, providers=providers
+        )
+
+        dec_meta = self._decoder.get_modelmeta().custom_metadata_map
+        self._context_size = int(dec_meta.get("context_size", "2") or 2)
+        self._blank_id = 0
+        self._sos_eos_id = 1
+        self._unk_id = 2
+        self._max_active_paths = max(1, int(max_active_paths))
+        self._hotwords_score = float(hotwords_score)
+
+        self._id_to_token: dict[int, str] = {}
+        for line in tokens_path.read_text(encoding="utf-8").splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2:
+                self._id_to_token[int(parts[-1])] = parts[0]
+            elif len(parts) == 1 and parts[0].isdigit():
+                self._id_to_token[int(parts[0])] = ""
+
+        self._sp: Any | None = None
+        if bpe_model_path is not None and bpe_model_path.is_file():
+            try:
+                import sentencepiece as spm  # type: ignore[import-not-found]
+
+                sp = spm.SentencePieceProcessor()
+                sp.load(str(bpe_model_path))
+                self._sp = sp
+            except Exception:
+                self._sp = None
+
+        self._frame_len = 400
+        self._frame_shift = 160
+        self._n_fft = 512
+        self._n_mels = 80
+        self._povey = np.power(
+            0.5
+            - 0.5
+            * np.cos(
+                2.0 * np.pi * np.arange(self._frame_len, dtype=np.float64) / (self._frame_len - 1)
+            ),
+            0.85,
+        ).astype(np.float32)
+        self._mel_bins_t = self._build_kaldi_mel_bins(
+            sr=16000, n_fft=self._n_fft, n_mels=self._n_mels, low_freq=20.0, high_freq=7600.0
+        )
+
+        # Warm ONNX thread pools & arenas once with 0.25s silence
+        warm_stream = self.create_stream()
+        warm_stream.accept_waveform(16000, np.zeros(4000, dtype=np.float32))
+        self.decode_stream(warm_stream)
+
+    @staticmethod
+    def _build_kaldi_mel_bins(
+        *, sr: int, n_fft: int, n_mels: int, low_freq: float, high_freq: float
+    ) -> np.ndarray:
+        def _hz_to_mel(freq: np.ndarray | float) -> np.ndarray | float:
+            return 1127.0 * np.log(1.0 + np.asarray(freq, dtype=np.float64) / 700.0)
+
+        half_bins = n_fft // 2
+        low_mel = float(_hz_to_mel(low_freq))
+        high_mel = float(_hz_to_mel(high_freq))
+        mel_pts = np.linspace(low_mel, high_mel, n_mels + 2, dtype=np.float64)
+        fft_freqs = np.arange(half_bins, dtype=np.float64) * (float(sr) / float(n_fft))
+        fft_mels = np.asarray(_hz_to_mel(fft_freqs), dtype=np.float64)
+
+        bins = np.zeros((n_mels, half_bins), dtype=np.float32)
+        for m in range(n_mels):
+            left, center, right = mel_pts[m], mel_pts[m + 1], mel_pts[m + 2]
+            up = (fft_mels - left) / max(1e-9, center - left)
+            down = (right - fft_mels) / max(1e-9, right - center)
+            bins[m] = np.maximum(0.0, np.minimum(up, down)).astype(np.float32)
+        return np.ascontiguousarray(bins.T)
+
+    def _extract_fbank_80(self, samples: np.ndarray) -> np.ndarray:
+        x = np.asarray(samples, dtype=np.float32).reshape(-1)
+        if x.size < self._frame_len:
+            return np.zeros((0, self._n_mels), dtype=np.float32)
+        windows = np.lib.stride_tricks.sliding_window_view(x, self._frame_len)[
+            :: self._frame_shift
+        ]
+        frames = np.array(windows, dtype=np.float32, copy=True)
+        frames -= np.mean(frames, axis=1, keepdims=True)
+        frames[:, 1:] -= 0.97 * frames[:, :-1]
+        frames[:, 0] *= 1.0 - 0.97
+        frames *= self._povey[None, :]
+        power_spec = np.abs(np.fft.rfft(frames, n=self._n_fft, axis=1)[:, : self._n_fft // 2]) ** 2
+        mel_energies = np.maximum(power_spec @ self._mel_bins_t, 1.1920929e-7)
+        return np.log(mel_energies).astype(np.float32, copy=False)
+
+    def _build_hotword_token_boost(self, hotwords: str) -> set[int]:
+        boosted: set[int] = set()
+        if not hotwords or self._sp is None:
+            return boosted
+        for phrase in hotwords.split("/"):
+            cleaned = unicodedata.normalize("NFC", phrase).strip().upper()
+            if not cleaned:
+                continue
+            try:
+                ids = self._sp.encode_as_ids(cleaned)
+                for tid in ids:
+                    if int(tid) > self._unk_id:
+                        boosted.add(int(tid))
+            except Exception:
+                continue
+        return boosted
+
+    def create_stream(self, hotwords: str = "") -> _OrtOfflineStream:
+        return _OrtOfflineStream(hotwords=hotwords)
+
+    def decode_stream(self, stream: _OrtOfflineStream) -> None:
+        feats = self._extract_fbank_80(stream.samples)
+        if feats.shape[0] < 4:
+            stream.result = _OrtOfflineRecognitionResult()
+            return
+
+        enc_out, enc_lens = self._encoder.run(
+            None,
+            {
+                "x": feats[None, :, :],
+                "x_lens": np.array([feats.shape[0]], dtype=np.int64),
+            },
+        )
+        t_out = int(enc_lens[0]) if enc_lens is not None and len(enc_lens) > 0 else int(enc_out.shape[1])
+        if t_out <= 0:
+            stream.result = _OrtOfflineRecognitionResult()
+            return
+
+        frame_shift_out_s = 0.04
+        ctx_size = self._context_size
+        k_beam = self._max_active_paths
+        boosted_ids = self._build_hotword_token_boost(stream.hotwords)
+        dec_cache: dict[tuple[int, ...], np.ndarray] = {}
+
+        init_ctx = tuple([self._blank_id] * ctx_size)
+        hyps: list[_BeamHyp] = [
+            _BeamHyp(
+                ys=init_ctx,
+                log_prob=0.0,
+                tokens=[],
+                timestamps=[],
+                ys_log_probs=[],
+            )
+        ]
+
+        for t in range(t_out):
+            missing_ctxs: list[tuple[int, ...]] = []
+            for h in hyps:
+                ctx = h.ys[-ctx_size:]
+                if ctx not in dec_cache and ctx not in missing_ctxs:
+                    missing_ctxs.append(ctx)
+            if missing_ctxs:
+                ctx_arr = np.asarray(missing_ctxs, dtype=np.int64)
+                dec_outs = self._decoder.run(None, {"y": ctx_arr})[0]
+                for idx_c, ctx in enumerate(missing_ctxs):
+                    dec_cache[ctx] = dec_outs[idx_c]
+
+            batch_size = len(hyps)
+            batch_dec = np.stack([dec_cache[h.ys[-ctx_size:]] for h in hyps], axis=0)
+            batch_enc = np.repeat(enc_out[:, t, :], batch_size, axis=0)
+            logits = self._joiner.run(
+                None,
+                {"encoder_out": batch_enc, "decoder_out": batch_dec},
+            )[0]
+
+            # Numerically stable log_softmax
+            max_logits = np.max(logits, axis=-1, keepdims=True)
+            shifted = logits - max_logits
+            log_probs = shifted - np.log(np.sum(np.exp(shifted), axis=-1, keepdims=True))
+
+            merged: dict[tuple[int, ...], _BeamHyp] = {}
+            ts_sec = round(t * frame_shift_out_s, 3)
+            top_n = min(logits.shape[-1], k_beam + 3)
+
+            for b_idx, h in enumerate(hyps):
+                row_lp = log_probs[b_idx]
+                # 1) Blank transition
+                blank_lp = h.log_prob + float(row_lp[self._blank_id])
+                existing_blank = merged.get(h.ys)
+                if existing_blank is None:
+                    merged[h.ys] = _BeamHyp(
+                        ys=h.ys,
+                        log_prob=blank_lp,
+                        tokens=h.tokens,
+                        timestamps=h.timestamps,
+                        ys_log_probs=h.ys_log_probs,
+                    )
+                else:
+                    combined = float(np.logaddexp(existing_blank.log_prob, blank_lp))
+                    if blank_lp > existing_blank.log_prob:
+                        merged[h.ys] = _BeamHyp(
+                            ys=h.ys,
+                            log_prob=combined,
+                            tokens=h.tokens,
+                            timestamps=h.timestamps,
+                            ys_log_probs=h.ys_log_probs,
+                        )
+                    else:
+                        existing_blank.log_prob = combined
+
+                # 2) Top non-blank token transitions
+                cand_ids = np.argpartition(row_lp, -top_n)[-top_n:]
+                for raw_tid in cand_ids:
+                    tid = int(raw_tid)
+                    if tid in (self._blank_id, self._sos_eos_id, self._unk_id):
+                        continue
+                    tok_lp = float(row_lp[tid])
+                    score_bonus = (
+                        self._hotwords_score * 0.25 if tid in boosted_ids else 0.0
+                    )
+                    cand_lp = h.log_prob + tok_lp + score_bonus
+                    next_ys = h.ys + (tid,)
+                    tok_str = self._id_to_token.get(tid, "")
+                    existing = merged.get(next_ys)
+                    if existing is None:
+                        merged[next_ys] = _BeamHyp(
+                            ys=next_ys,
+                            log_prob=cand_lp,
+                            tokens=[*h.tokens, tok_str],
+                            timestamps=[*h.timestamps, ts_sec],
+                            ys_log_probs=[*h.ys_log_probs, tok_lp],
+                        )
+                    else:
+                        combined = float(np.logaddexp(existing.log_prob, cand_lp))
+                        if cand_lp > existing.log_prob:
+                            merged[next_ys] = _BeamHyp(
+                                ys=next_ys,
+                                log_prob=combined,
+                                tokens=[*h.tokens, tok_str],
+                                timestamps=[*h.timestamps, ts_sec],
+                                ys_log_probs=[*h.ys_log_probs, tok_lp],
+                            )
+                        else:
+                            existing.log_prob = combined
+
+            hyps = sorted(merged.values(), key=lambda item: item.log_prob, reverse=True)[
+                :k_beam
+            ]
+
+        best = hyps[0]
+        raw_text = "".join(best.tokens).replace("▁", " ").strip()
+        stream.result = _OrtOfflineRecognitionResult(
+            text=raw_text,
+            tokens=best.tokens,
+            timestamps=best.timestamps,
+            ys_log_probs=best.ys_log_probs,
+        )
+
+
 class VoiceRuntimeEngine:
     def __init__(self) -> None:
         self.stt_recognizer: Any | None = None
+        self.stt_backend: str = "unloaded"
         self.stt_bpe_vocab_active: bool = False
+        self.stt_load_error: str | None = None
         self.tts_engine: Any | None = None
         self.tts_engine_fp32: Any | None = None
         self.tts_engine_int8: Any | None = None
         self.word_fp32_tts_engine: Any | None = None
+        self.tts_load_error: str | None = None
         self.stt_semaphore = asyncio.Semaphore(2)
         self.tts_semaphore = asyncio.Semaphore(1)
         self._load_lock = asyncio.Lock()
@@ -530,51 +870,92 @@ class VoiceRuntimeEngine:
         return self.tts_engine, "fp32"
 
     def load_stt_sync(self) -> None:
-        if self.stt_recognizer is None:
-            encoder_path = SHERPA_MODEL_DIR / "encoder.int8.onnx"
-            if not encoder_path.is_file():
-                encoder_path = SHERPA_MODEL_DIR / "encoder.onnx"
-            joiner_path = SHERPA_MODEL_DIR / "joiner.int8.onnx"
-            if not joiner_path.is_file():
-                joiner_path = SHERPA_MODEL_DIR / "joiner.onnx"
-            decoder_path = SHERPA_MODEL_DIR / "decoder.onnx"
-            if not decoder_path.is_file():
-                decoder_path = SHERPA_MODEL_DIR / "decoder.int8.onnx"
-            if not encoder_path.is_file() or not decoder_path.is_file():
-                raise RuntimeError(
-                    f"Missing Sherpa-ONNX Vietnamese STT model at {SHERPA_MODEL_DIR}"
+        if self.stt_recognizer is not None:
+            return
+        encoder_path = SHERPA_MODEL_DIR / "encoder.int8.onnx"
+        if not encoder_path.is_file():
+            encoder_path = SHERPA_MODEL_DIR / "encoder.onnx"
+        joiner_path = SHERPA_MODEL_DIR / "joiner.int8.onnx"
+        if not joiner_path.is_file():
+            joiner_path = SHERPA_MODEL_DIR / "joiner.onnx"
+        decoder_path = SHERPA_MODEL_DIR / "decoder.onnx"
+        if not decoder_path.is_file():
+            decoder_path = SHERPA_MODEL_DIR / "decoder.int8.onnx"
+        tokens_path = SHERPA_MODEL_DIR / "tokens.txt"
+        if not encoder_path.is_file() or not decoder_path.is_file() or not tokens_path.is_file():
+            raise RuntimeError(
+                f"Missing Sherpa-ONNX Vietnamese STT model at {SHERPA_MODEL_DIR}"
+            )
+        t0 = time.perf_counter()
+        bpe_vocab_path = _ensure_bpe_vocab(SHERPA_MODEL_DIR)
+        bpe_model_path = SHERPA_MODEL_DIR / "bpe.model"
+
+        sherpa_err: Exception | None = _sherpa_import_err
+        if sherpa_onnx is not None:
+            try:
+                transducer_kwargs: dict[str, Any] = {
+                    "encoder": str(encoder_path),
+                    "decoder": str(decoder_path),
+                    "joiner": str(joiner_path),
+                    "tokens": str(tokens_path),
+                    "num_threads": 4,
+                    "sample_rate": 16000,
+                    "feature_dim": 80,
+                    "decoding_method": "modified_beam_search",
+                    "max_active_paths": 4,
+                    "blank_penalty": 0.0,
+                }
+                if bpe_vocab_path is not None:
+                    transducer_kwargs["modeling_unit"] = "bpe"
+                    transducer_kwargs["bpe_vocab"] = str(bpe_vocab_path)
+                    transducer_kwargs["hotwords_score"] = 1.2
+                self.stt_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
+                    **transducer_kwargs
                 )
-            t0 = time.perf_counter()
-            bpe_vocab_path = _ensure_bpe_vocab(SHERPA_MODEL_DIR)
-            transducer_kwargs: dict[str, Any] = {
-                "encoder": str(encoder_path),
-                "decoder": str(decoder_path),
-                "joiner": str(joiner_path),
-                "tokens": str(SHERPA_MODEL_DIR / "tokens.txt"),
-                "num_threads": 4,
-                "sample_rate": 16000,
-                "feature_dim": 80,
-                "decoding_method": "modified_beam_search",
-                "max_active_paths": 4,
-                "blank_penalty": 0.0,
-            }
-            if bpe_vocab_path is not None:
-                transducer_kwargs["modeling_unit"] = "bpe"
-                transducer_kwargs["bpe_vocab"] = str(bpe_vocab_path)
-                transducer_kwargs["hotwords_score"] = 1.2
-            self.stt_recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-                **transducer_kwargs
-            )
-            self.stt_bpe_vocab_active = bpe_vocab_path is not None
-            logger.info(
-                "Loaded STT (%s, mode=%s, bpe_vocab=%s) in %.2fs",
-                STT_MODEL_VERSION,
-                STT_MODE,
-                self.stt_bpe_vocab_active,
-                time.perf_counter() - t0,
-            )
+                self.stt_backend = "sherpa_onnx"
+                self.stt_bpe_vocab_active = bpe_vocab_path is not None
+                self.stt_load_error = None
+                logger.info(
+                    "Loaded STT via sherpa_onnx (%s, mode=%s, bpe_vocab=%s) in %.2fs",
+                    STT_MODEL_VERSION,
+                    STT_MODE,
+                    self.stt_bpe_vocab_active,
+                    time.perf_counter() - t0,
+                )
+                return
+            except Exception as exc:
+                sherpa_err = exc
+                logger.warning(
+                    "sherpa_onnx native recognizer unavailable (%s); falling back to OrtZipformerOfflineRecognizer",
+                    type(exc).__name__,
+                )
+
+        self.stt_recognizer = OrtZipformerOfflineRecognizer(
+            encoder_path=encoder_path,
+            decoder_path=decoder_path,
+            joiner_path=joiner_path,
+            tokens_path=tokens_path,
+            bpe_model_path=bpe_model_path if bpe_model_path.is_file() else None,
+            num_threads=4,
+            max_active_paths=4,
+            hotwords_score=1.2,
+        )
+        self.stt_backend = "onnxruntime_zipformer"
+        self.stt_bpe_vocab_active = bpe_model_path.is_file()
+        self.stt_load_error = None
+        logger.info(
+            "Loaded STT via onnxruntime_zipformer (%s, mode=%s, sherpa_fallback_reason=%s) in %.2fs",
+            STT_MODEL_VERSION,
+            STT_MODE,
+            type(sherpa_err).__name__ if sherpa_err is not None else "sherpa_missing",
+            time.perf_counter() - t0,
+        )
+
+    _load_stt_sync = load_stt_sync
 
     def load_tts_sync(self) -> None:
+        if Vieneu is None:
+            raise RuntimeError("Vieneu TTS runtime is not installed")
         need_fp32 = TTS_PRECISION in ("hybrid", "fp32") and self.tts_engine_fp32 is None
         need_int8 = TTS_PRECISION in ("hybrid", "int8") and self.tts_engine_int8 is None
         if need_fp32:
@@ -627,6 +1008,7 @@ class VoiceRuntimeEngine:
                 time.perf_counter() - t0,
             )
         self.tts_engine = self.tts_engine_fp32 or self.tts_engine_int8
+        self.tts_load_error = None
 
         if (
             TTS_HYBRID_WORD_FP32
@@ -653,9 +1035,34 @@ class VoiceRuntimeEngine:
                 )
                 self.word_fp32_tts_engine = None
 
-    def load_models_sync(self) -> None:
-        self.load_stt_sync()
-        self.load_tts_sync()
+    _load_tts_sync = load_tts_sync
+
+    def load_models_sync(
+        self, capability: Literal["tts", "stt", "all"] = "all"
+    ) -> None:
+        if capability in ("stt", "all") and self.stt_recognizer is None:
+            try:
+                self.load_stt_sync()
+            except Exception as exc:
+                self.stt_load_error = f"{type(exc).__name__}: {exc}"
+                logger.error(
+                    "stt_model_load_failed error_type=%s",
+                    type(exc).__name__,
+                )
+                if capability == "stt":
+                    raise
+
+        if capability in ("tts", "all") and self.tts_engine is None:
+            try:
+                self.load_tts_sync()
+            except Exception as exc:
+                self.tts_load_error = f"{type(exc).__name__}: {exc}"
+                logger.error(
+                    "tts_model_load_failed error_type=%s",
+                    type(exc).__name__,
+                )
+                if capability == "tts":
+                    raise
 
     def get_tts_engine_for_mode(self, *, crisp: bool) -> tuple[Any, str]:
         if crisp and TTS_HYBRID_WORD_FP32:
@@ -664,6 +1071,15 @@ class VoiceRuntimeEngine:
             if TTS_PRECISION == "fp32" and self.tts_engine is not None:
                 return self.tts_engine, "fp32"
         return self.tts_engine, TTS_PRECISION
+
+    def _is_capability_ready(
+        self, capability: Literal["tts", "stt", "all"] = "all"
+    ) -> bool:
+        if capability == "tts":
+            return self.tts_engine is not None
+        if capability == "stt":
+            return self.stt_recognizer is not None
+        return self.stt_recognizer is not None and self.tts_engine is not None
 
     async def ensure_stt_loaded(self) -> None:
         if "ensure_loaded" in self.__dict__:
@@ -674,7 +1090,7 @@ class VoiceRuntimeEngine:
         async with self._stt_load_lock:
             if self.stt_recognizer is not None:
                 return
-            await asyncio.to_thread(self.load_stt_sync)
+            await asyncio.to_thread(self.load_models_sync, "stt")
 
     async def ensure_tts_loaded(self) -> None:
         if "ensure_loaded" in self.__dict__:
@@ -685,70 +1101,91 @@ class VoiceRuntimeEngine:
         async with self._tts_load_lock:
             if self.tts_engine is not None:
                 return
-            await asyncio.to_thread(self.load_tts_sync)
+            await asyncio.to_thread(self.load_models_sync, "tts")
 
-    async def ensure_loaded(self) -> None:
-        if self.stt_recognizer is not None and self.tts_engine is not None:
+    async def ensure_loaded(
+        self, capability: Literal["tts", "stt", "all"] = "all"
+    ) -> None:
+        if self._is_capability_ready(capability):
             return
         async with self._load_lock:
-            if self.stt_recognizer is not None and self.tts_engine is not None:
+            if self._is_capability_ready(capability):
                 return
             if "load_models_sync" in self.__dict__:
                 await asyncio.to_thread(self.load_models_sync)
                 return
-            await self.ensure_stt_loaded()
-            await self.ensure_tts_loaded()
+            await asyncio.to_thread(self.load_models_sync, capability)
+        if not self._is_capability_ready(capability):
+            raise RuntimeError(f"{capability} runtime not ready")
 
 
-_PREWARM_COACHING_PHRASES: tuple[str, ...] = (
-    "Con đọc tốt lắm.",
-    "Mình cùng đọc tiếp nhé.",
-    "Bây giờ con nghe câu hỏi nhé.",
-    "Con trả lời đúng rồi, giỏi quá!",
-    "Con chọn lại câu trả lời khác nhé.",
+_PREWARM_COACHING_PHRASES_BY_VOICE: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "local_north_truc_ly",
+        (
+            "Chào con, hôm nay cô trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+            "Con đọc tốt lắm.",
+            "Mình cùng đọc tiếp nhé.",
+            "Bây giờ con nghe câu hỏi nhé.",
+            "Con đọc từ trên màn hình nhé.",
+        ),
+    ),
+    (
+        "local_north_thien_minh",
+        (
+            "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+            "Con đọc tốt lắm.",
+            "Mình cùng đọc tiếp nhé.",
+            "Bây giờ con nghe câu hỏi nhé.",
+            "Con đọc từ trên màn hình nhé.",
+        ),
+    ),
 )
 
 
 async def _prewarm_coaching_phrases() -> None:
-    """Pre-warm top deterministic coaching/quiz phrases in background when idle."""
-    preset = VOICE_BY_ID[DEFAULT_VOICE_ID]
-    for phrase in _PREWARM_COACHING_PHRASES:
-        await asyncio.sleep(0.25)
-        if runtime.tts_engine is None:
-            return
-        while runtime.active_tts_jobs > 0 or runtime.tts_waiters > 0:
-            await asyncio.sleep(0.5)
-        try:
-            await runtime.tts_semaphore.acquire()
+    """Pre-warm top deterministic female & male preview/coaching phrases in background when idle."""
+    for voice_id, phrases in _PREWARM_COACHING_PHRASES_BY_VOICE:
+        preset = VOICE_BY_ID.get(voice_id)
+        if preset is None:
+            continue
+        for phrase in phrases:
+            await asyncio.sleep(0.2)
+            if runtime.tts_engine is None:
+                return
+            while runtime.active_tts_jobs > 0 or runtime.tts_waiters > 0:
+                await asyncio.sleep(0.5)
             try:
-                if runtime.tts_waiters > 0:
-                    continue
-                word_count = len(WORD_TOKEN_RE.findall(phrase))
-                engine, active_prec = runtime.select_tts_engine(
-                    word_sample=False, is_phonics=False, word_count=word_count
-                )
-                wav_bytes, duration_s = await asyncio.to_thread(
-                    synthesize_single_utterance_sync,
-                    engine,
-                    phrase,
-                    preset,
-                    1.0,
-                    False,
-                    precision_override=active_prec,
-                )
-                cache_mode = "word" if word_count <= 3 else "sentence"
-                cache_key = make_cache_key(
-                    voice_id=preset.voice_id,
-                    speed=1.0,
-                    mode=cache_mode,
-                    payload=phrase,
-                    precision=active_prec,
-                )
-                _mem_cache_put(cache_key, (wav_bytes, duration_s))
-            finally:
-                runtime.tts_semaphore.release()
-        except Exception as exc:
-            logger.debug("TTS prewarm skipped: %s", type(exc).__name__)
+                await runtime.tts_semaphore.acquire()
+                try:
+                    if runtime.tts_waiters > 0:
+                        continue
+                    word_count = len(WORD_TOKEN_RE.findall(phrase))
+                    engine, active_prec = runtime.select_tts_engine(
+                        word_sample=False, is_phonics=False, word_count=word_count
+                    )
+                    wav_bytes, duration_s = await asyncio.to_thread(
+                        synthesize_single_utterance_sync,
+                        engine,
+                        phrase,
+                        preset,
+                        1.0,
+                        False,
+                        precision_override=active_prec,
+                    )
+                    cache_mode = "word" if word_count <= 3 else "sentence"
+                    cache_key = make_cache_key(
+                        voice_id=preset.voice_id,
+                        speed=1.0,
+                        mode=cache_mode,
+                        payload=phrase,
+                        precision=active_prec,
+                    )
+                    _mem_cache_put(cache_key, (wav_bytes, duration_s))
+                finally:
+                    runtime.tts_semaphore.release()
+            except Exception as exc:
+                logger.debug("TTS prewarm skipped: %s", type(exc).__name__)
 
 
 runtime = VoiceRuntimeEngine()
@@ -2043,10 +2480,12 @@ async def get_health() -> dict[str, Any]:
         "auth_required": bool(_expected_voice_token()),
         "stt": {
             "ready": stt_ready,
+            "backend": runtime.stt_backend,
             "model_version": STT_MODEL_VERSION,
             "mode": STT_MODE,
-            "ws_stream_supported": STT_MODE == "ws",
+            "ws_stream_supported": STT_MODE == "ws" and stt_ready,
             "active_jobs": runtime.active_stt_jobs,
+            "error": runtime.stt_load_error,
         },
         "tts": {
             "ready": tts_ready,
@@ -2058,6 +2497,7 @@ async def get_health() -> dict[str, Any]:
             "active_voices": [v.voice_id for v in CURATED_VOICES],
             "regions": ["north", "central", "south"],
             "active_jobs": runtime.active_tts_jobs,
+            "error": runtime.tts_load_error,
         },
     }
 
@@ -3177,7 +3617,19 @@ async def stt_stream(websocket: WebSocket) -> None:
         await websocket.close(code=4503)
         return
 
-    await runtime.ensure_stt_loaded()
+    try:
+        await _ensure_capability_loaded("stt")
+    except HTTPException:
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "LOCAL_STT_UNAVAILABLE",
+                "message": "Bộ nhận diện giọng nói trên máy chưa sẵn sàng.",
+                "retryable": True,
+            }
+        )
+        await websocket.close(code=4503)
+        return
     session = _WsSttSession()
 
     async def _decode_and_emit_loop() -> None:

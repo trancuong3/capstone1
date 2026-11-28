@@ -283,7 +283,7 @@ function isHostedBrowserOrigin(): boolean {
  * permitted cloud server TTS is already healthy.
  */
 export function shouldWarmWasmTts(
-  health: VoiceEngineHealthSnapshot | null = getFreshVoiceEngineHealth(),
+  health: VoiceEngineHealthSnapshot | null = getVoiceEngineHealthForRouting(),
 ): boolean {
   if (
     isAndroidNativeSpeechAvailable() ||
@@ -305,7 +305,7 @@ export function warmWasmTtsIfNeeded(
   health?: VoiceEngineHealthSnapshot | null,
 ): Promise<boolean> {
   const resolvedHealth =
-    health === undefined ? getFreshVoiceEngineHealth() : health;
+    health === undefined ? getVoiceEngineHealthForRouting() : health;
   if (!shouldWarmWasmTts(resolvedHealth)) {
     return Promise.resolve(false);
   }
@@ -321,11 +321,17 @@ function hasLiveServerTts(health: VoiceEngineHealthSnapshot | null): boolean {
   const localTtsReady = Boolean(
     health.local.available && health.local.tts_ready,
   );
+  const effectiveGender = resolveVoiceGender(getEffectiveVoiceId());
+  const elevenLabsUsable = Boolean(
+    cloudTtsAllowed &&
+    health.elevenlabs?.tts_configured &&
+    !health.elevenlabs.tts_cooldown &&
+    (effectiveGender !== "male" ||
+      health.elevenlabs.male_tts_configured === true),
+  );
   return Boolean(
     localTtsReady ||
-    (cloudTtsAllowed &&
-      health.elevenlabs?.tts_configured &&
-      !health.elevenlabs.tts_cooldown) ||
+    elevenLabsUsable ||
     (cloudTtsAllowed &&
       health.google.tts_configured &&
       !health.google.tts_cooldown),
@@ -737,7 +743,7 @@ export async function awaitVoiceEnginesReadyBeforeListening(
     await getAndroidSpeechCapabilities().catch(() => null);
     return { sttReady: true, ttsReady: true };
   }
-  const health = getFreshVoiceEngineHealth();
+  const health = getVoiceEngineHealthForRouting();
   const needWasmTts =
     detectBrowserWasmTtsSupport().supported &&
     (!health ||

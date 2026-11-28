@@ -77,10 +77,17 @@ import { EchoGuard } from "@/lib/reading/echo-guard";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
 import {
+  getVoicePolicyPreferences,
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
-import { getFreshVoiceEngineHealth } from "@/lib/reading/voice-engine-status";
+import {
+  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
+  recordSttEngineUsage,
+} from "@/lib/reading/voice-engine-status";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   awaitSttReadyBeforeListening,
@@ -237,9 +244,18 @@ export function MemoryGameScreen({
   initialRecallMode,
   vocabularyService,
 }: MemoryGameScreenProps = {}) {
-  const t = useTranslations("games");
+  const tRaw = useTranslations("games");
   const tCommon = useTranslations("common");
   const tGlossary = useWordGlossaryTranslations();
+  const teacherPersona = useTeacherPersona();
+  const t = useCallback(
+    (key: string, params?: Parameters<typeof tRaw>[1], defaultValue?: string) =>
+      adaptTextToTeacherPersona(
+        tRaw(key, params, defaultValue),
+        teacherPersona.gender,
+      ),
+    [tRaw, teacherPersona.gender],
+  );
   const resolvedVocabService = useMemo(
     () => vocabularyService ?? createVocabularyNotebookService(),
     [vocabularyService],
@@ -273,7 +289,6 @@ export function MemoryGameScreen({
   const recorder = useSpeechRecorder();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const echoGuard = useMemo(() => new EchoGuard(), []);
-  const teacherPersona = useTeacherPersona();
   const {
     reducedMotion,
     calmSound,
@@ -629,6 +644,23 @@ export function MemoryGameScreen({
       }
       cancelMicCountdown();
       cancelAutoSubmit();
+      if (process.env.NODE_ENV !== "test") {
+        void recorder.prepare?.().catch(() => undefined);
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const localReady = Boolean(
+          routingHealth?.local.available && routingHealth.local.stt_ready,
+        );
+        if (
+          !isAndroidNativeSpeechAvailable() &&
+          !localReady &&
+          detectBrowserWasmSttSupport().supported &&
+          !getBrowserWasmSttClient().isReady()
+        ) {
+          void getBrowserWasmSttClient()
+            .init()
+            .catch(() => undefined);
+        }
+      }
       setMicCountdown({ target, seconds });
       let remaining = seconds;
       micCountdownTimerRef.current = window.setInterval(() => {
@@ -653,7 +685,7 @@ export function MemoryGameScreen({
         }
       }, 1000);
     },
-    [cancelAutoSubmit, cancelMicCountdown],
+    [cancelAutoSubmit, cancelMicCountdown, recorder],
   );
 
   useEffect(() => {
@@ -850,8 +882,46 @@ export function MemoryGameScreen({
               .filter(Boolean)
               .slice(0, 18)
           : combinedFocusWords;
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const policy = getVoicePolicyPreferences();
+        const cloudSttAllowed =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleSttFallback;
+        const localSttDown =
+          isPermanentlyHostedLocalUnconfigured(routingHealth) ||
+          (routingHealth !== null &&
+            (!routingHealth.local.available || !routingHealth.local.stt_ready));
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
         let transcript = "";
-        if (!isServerSttConfirmedUnavailable()) {
+
+        if (
+          ((localSttDown && !cloudSttAllowed) ||
+            isServerSttConfirmedUnavailable()) &&
+          wasmSupported
+        ) {
+          try {
+            const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+              audioBlob,
+              { timeoutMs: 12_000 },
+            );
+            if (controller.signal.aborted) return;
+            transcript = wasmRes.text.normalize("NFC").trim();
+            if (transcript) {
+              recordSttEngineUsage({
+                provider: "wasm",
+                fallbackUsed:
+                  !isPermanentlyHostedLocalUnconfigured(routingHealth),
+                fallbackReason: isPermanentlyHostedLocalUnconfigured(
+                  routingHealth,
+                )
+                  ? null
+                  : "LOCAL_STT_UNAVAILABLE",
+              });
+            }
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        } else if (!isServerSttConfirmedUnavailable()) {
           try {
             const sttRes = await speechService.transcribe(audioBlob, {
               languageCode: "vi",
@@ -862,21 +932,35 @@ export function MemoryGameScreen({
             transcript = sttRes.text?.trim() ?? "";
           } catch (sttError: unknown) {
             if (controller.signal.aborted) return;
+            const errMsg =
+              typeof sttError === "object" && sttError !== null
+                ? `${String((sttError as { code?: unknown }).code ?? "")} ${String((sttError as { providerCode?: unknown }).providerCode ?? "")} ${sttError instanceof Error ? sttError.message : ""}`
+                : "";
+            if (errMsg.includes("LOCAL_VOICE_UNCONFIGURED")) {
+              markHostedLocalUnconfigured();
+            }
             if (isServiceError(sttError) && sttError.status === 503) {
               refreshVoiceHealthQuietlyAfterSttFailure();
             }
           }
-        }
-        if (!transcript && detectBrowserWasmSttSupport().supported) {
-          try {
-            const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
-              audioBlob,
-              { timeoutMs: 12_000 },
-            );
-            if (controller.signal.aborted) return;
-            transcript = wasmRes.text.normalize("NFC").trim();
-          } catch {
-            if (controller.signal.aborted) return;
+          if (!transcript && wasmSupported) {
+            try {
+              const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+                audioBlob,
+                { timeoutMs: 12_000 },
+              );
+              if (controller.signal.aborted) return;
+              transcript = wasmRes.text.normalize("NFC").trim();
+              if (transcript) {
+                recordSttEngineUsage({
+                  provider: "wasm",
+                  fallbackUsed: true,
+                  fallbackReason: "LOCAL_STT_UNAVAILABLE",
+                });
+              }
+            } catch {
+              if (controller.signal.aborted) return;
+            }
           }
         }
         if (!transcript) {
@@ -1167,7 +1251,8 @@ export function MemoryGameScreen({
       };
 
       const beginCapture = () => {
-        const freshHealth = getFreshVoiceEngineHealth();
+        const freshHealth =
+          getVoiceEngineHealthForRouting() ?? getFreshVoiceEngineHealth();
         const localSttReady = Boolean(
           freshHealth?.local.available && freshHealth.local.stt_ready,
         );
@@ -1227,7 +1312,7 @@ export function MemoryGameScreen({
       return;
     }
     const silenceMs =
-      (session?.child_grade ?? child?.grade ?? 2) <= 2 ? 2600 : 2000;
+      (session?.child_grade ?? child?.grade ?? 2) <= 2 ? 1600 : 1250;
     clearSilenceStopTimer();
     silenceStopTimerRef.current = window.setTimeout(() => {
       silenceStopTimerRef.current = null;
@@ -2086,6 +2171,7 @@ export function MemoryGameScreen({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ReadingVoiceSettings
+            childId={child.id}
             disabled={isListeningVoice}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
