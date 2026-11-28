@@ -39,6 +39,26 @@ import {
   type StudioTasksChangedDetail,
 } from "@/types/global-tasks";
 
+export interface TaskAlertAckOptions {
+  /**
+   * Also acknowledge matching alertable tasks returned by the immediately
+   * following feed sync for the current scope. Use when a user's own
+   * synchronous action updates an entity's `updated_at` while keeping its
+   * mapped task status alertable (e.g. `ADDED_TO_BOOK` -> `SUCCEEDED`,
+   * `PENDING_ADMIN` or Admin safety decision -> `WAITING_FOR_REVIEW`).
+   */
+  readonly includeNextSync?: boolean;
+}
+
+interface PendingSyncAckRule {
+  readonly scopeKey: string;
+  readonly taskId?: string | null;
+  readonly bookId?: string | null;
+  readonly bookPageId?: string | null;
+  readonly createdAtMs: number;
+  readonly expiresAtMs: number;
+}
+
 export interface AiTaskCenterContextValue {
   readonly scopeKey: string | null;
   readonly actorId: string | null;
@@ -61,7 +81,17 @@ export interface AiTaskCenterContextValue {
   readonly closePanel: () => void;
   readonly togglePanel: () => void;
   readonly markAllAlertsSeen: () => void;
-  readonly markTaskAlertSeen: (taskOrId: GlobalTaskItem | string) => void;
+  readonly markTaskAlertSeen: (
+    taskOrId: GlobalTaskItem | string,
+    options?: TaskAlertAckOptions,
+  ) => void;
+  readonly markTargetAlertsSeen: (
+    target: {
+      readonly bookId?: string | null;
+      readonly bookPageId?: string | null;
+    },
+    options?: TaskAlertAckOptions,
+  ) => void;
   readonly refresh: () => Promise<void>;
   readonly retryTask: (jobId: string) => Promise<void>;
   readonly cancelTask: (jobId: string) => Promise<void>;
@@ -98,7 +128,28 @@ export interface AiTaskCenterProviderProps {
 const MIN_POLL_MS = 2500;
 const MAX_POLL_MS = 15000;
 const DEFAULT_ACTIVE_POLL_MS = 4000;
+const PENDING_SYNC_ACK_TTL_MS = 15_000;
 const EMPTY_TASKS: readonly GlobalTaskItem[] = [];
+
+function matchesPendingSyncAckRule(
+  task: GlobalTaskItem,
+  rule: PendingSyncAckRule,
+): boolean {
+  if (rule.taskId) {
+    return task.id === rule.taskId;
+  }
+  if (rule.bookPageId) {
+    if (task.book_page_id !== rule.bookPageId) return false;
+    if (rule.bookId && task.book_id && task.book_id !== rule.bookId) {
+      return false;
+    }
+    return true;
+  }
+  if (rule.bookId) {
+    return task.book_id === rule.bookId;
+  }
+  return false;
+}
 
 function clampPollMs(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -195,6 +246,64 @@ export function AiTaskCenterProvider({
   const prevScopeKeyRef = useRef<string | null>(scopeKey);
   const activeAbortRef = useRef<AbortController | null>(null);
   const latestScopeRef = useRef<string | null>(scopeKey);
+  const isPanelOpenRef = useRef<boolean>(false);
+  const pendingSyncAckRulesRef = useRef<PendingSyncAckRule[]>([]);
+
+  const consumePendingSyncAcks = useCallback(
+    (
+      targetScope: string,
+      targetActorId: string,
+      targetRole: GlobalTaskActorRole,
+      tasks: readonly GlobalTaskItem[],
+    ) => {
+      if (pendingSyncAckRulesRef.current.length === 0) return;
+      const now = Date.now();
+      const activeForScope: PendingSyncAckRule[] = [];
+      const remaining: PendingSyncAckRule[] = [];
+      for (const rule of pendingSyncAckRulesRef.current) {
+        if (rule.expiresAtMs <= now) {
+          continue;
+        }
+        if (rule.scopeKey === targetScope) {
+          activeForScope.push(rule);
+        } else {
+          remaining.push(rule);
+        }
+      }
+      pendingSyncAckRulesRef.current = remaining;
+      if (activeForScope.length === 0 || tasks.length === 0) {
+        return;
+      }
+      const matchedTasks = tasks.filter((task) =>
+        activeForScope.some((rule) => matchesPendingSyncAckRule(task, rule)),
+      );
+      if (matchedTasks.length > 0) {
+        acknowledgeTaskAlerts(
+          targetScope,
+          matchedTasks,
+          targetActorId,
+          targetRole,
+        );
+      }
+    },
+    [],
+  );
+
+  const dropPendingSyncAcksBefore = useCallback(
+    (targetScope: string, requestStartedAtMs: number) => {
+      if (pendingSyncAckRulesRef.current.length === 0) return;
+      const now = Date.now();
+      pendingSyncAckRulesRef.current = pendingSyncAckRulesRef.current.filter(
+        (rule) =>
+          rule.expiresAtMs > now &&
+          !(
+            rule.scopeKey === targetScope &&
+            rule.createdAtMs <= requestStartedAtMs
+          ),
+      );
+    },
+    [],
+  );
 
   // Optionally resolve actor ID from Supabase browser auth when mounted outside SSR layout.
   useEffect(() => {
@@ -237,7 +346,9 @@ export function AiTaskCenterProvider({
           const nextId =
             event === "SIGNED_OUT" ? null : (session?.user?.id ?? null);
           if (!nextId) {
+            pendingSyncAckRulesRef.current = [];
             clearGlobalTasksMemoryCache();
+            resetTaskAlertAckMemoryCache();
           }
           setSessionActorId(nextId);
         });
@@ -259,8 +370,11 @@ export function AiTaskCenterProvider({
     if (prevScopeKeyRef.current !== scopeKey) {
       activeAbortRef.current?.abort();
       activeAbortRef.current = null;
+      isPanelOpenRef.current = false;
+      pendingSyncAckRulesRef.current = [];
       if (prevScopeKeyRef.current !== null) {
         clearGlobalTasksMemoryCache();
+        resetTaskAlertAckMemoryCache();
       }
       prevScopeKeyRef.current = scopeKey;
     }
@@ -273,6 +387,8 @@ export function AiTaskCenterProvider({
       if (event.key !== ACTOR_SWITCH_BROADCAST_KEY) return;
       activeAbortRef.current?.abort();
       activeAbortRef.current = null;
+      isPanelOpenRef.current = false;
+      pendingSyncAckRulesRef.current = [];
       clearGlobalTasksMemoryCache();
       resetTaskAlertAckMemoryCache();
       setFeedState({
@@ -296,6 +412,7 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
+      const requestStartedAtMs = Date.now();
 
       try {
         const rawData = await resolvedService.listTasks({
@@ -316,6 +433,7 @@ export function AiTaskCenterProvider({
         );
         if (!sanitized) {
           // Scope mismatch (e.g. token switched mid-flight): discard cleanly & wipe cache.
+          dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
           clearGlobalTasksMemoryCache();
           setFeedState({
             scopeKey: targetScope,
@@ -325,6 +443,12 @@ export function AiTaskCenterProvider({
           });
           return;
         }
+        consumePendingSyncAcks(
+          targetScope,
+          targetActorId,
+          targetRole,
+          sanitized.tasks,
+        );
         setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
         setFeedState({
           scopeKey: targetScope,
@@ -342,6 +466,7 @@ export function AiTaskCenterProvider({
         if (err instanceof DOMException && err.name === "AbortError") {
           return;
         }
+        dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
         const message =
           err instanceof Error && err.message
             ? err.message
@@ -354,7 +479,7 @@ export function AiTaskCenterProvider({
         }));
       }
     },
-    [resolvedService],
+    [consumePendingSyncAcks, dropPendingSyncAcksBefore, resolvedService],
   );
 
   // Derive scoped data cleanly during render so logout/actor switch clears UI instantaneously!
@@ -398,6 +523,7 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       const controller = new AbortController();
       activeAbortRef.current = controller;
+      const requestStartedAtMs = Date.now();
       void resolvedService
         .listTasks({
           portal: targetRole,
@@ -418,6 +544,7 @@ export function AiTaskCenterProvider({
             targetRole,
           );
           if (!sanitized) {
+            dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
             clearGlobalTasksMemoryCache();
             setFeedState({
               scopeKey: targetScope,
@@ -427,6 +554,12 @@ export function AiTaskCenterProvider({
             });
             return;
           }
+          consumePendingSyncAcks(
+            targetScope,
+            targetActorId,
+            targetRole,
+            sanitized.tasks,
+          );
           setCachedGlobalTasksSnapshot(targetActorId, targetRole, sanitized);
           setFeedState({
             scopeKey: targetScope,
@@ -436,12 +569,17 @@ export function AiTaskCenterProvider({
           });
         })
         .catch((err: unknown) => {
-          if (!isActive || latestScopeRef.current !== targetScope) {
+          if (
+            !isActive ||
+            controller.signal.aborted ||
+            latestScopeRef.current !== targetScope
+          ) {
             return;
           }
           if (err instanceof DOMException && err.name === "AbortError") {
             return;
           }
+          dropPendingSyncAcksBefore(targetScope, requestStartedAtMs);
           const message =
             err instanceof Error && err.message
               ? err.message
@@ -457,7 +595,7 @@ export function AiTaskCenterProvider({
 
     const hasCachedSnapshot =
       getCachedGlobalTasksSnapshot(targetActorId, targetRole) !== null;
-    if (autoSyncOnMount || hasCachedSnapshot || panelState.open) {
+    if (autoSyncOnMount || hasCachedSnapshot || isPanelOpenRef.current) {
       triggerSync();
     }
 
@@ -472,7 +610,7 @@ export function AiTaskCenterProvider({
       }
       const hasLiveCache =
         getCachedGlobalTasksSnapshot(targetActorId, targetRole) !== null;
-      if (autoSyncOnMount || hasLiveCache || panelState.open) {
+      if (autoSyncOnMount || hasLiveCache || isPanelOpenRef.current) {
         triggerSync();
       }
     }
@@ -543,8 +681,9 @@ export function AiTaskCenterProvider({
   }, [
     actorRole,
     autoSyncOnMount,
+    consumePendingSyncAcks,
+    dropPendingSyncAcksBefore,
     effectiveActorId,
-    panelState.open,
     resolvedService,
     scopeKey,
   ]);
@@ -631,9 +770,18 @@ export function AiTaskCenterProvider({
     scopeKey && panelState.scopeKey === scopeKey && panelState.open,
   );
 
+  useEffect(() => {
+    isPanelOpenRef.current = isOpen;
+  }, [isOpen]);
+
   const subscribeAck = useCallback(
     (onStoreChange: () => void) =>
-      subscribeTaskAlertAck(scopeKey, effectiveActorId, actorRole, onStoreChange),
+      subscribeTaskAlertAck(
+        scopeKey,
+        effectiveActorId,
+        actorRole,
+        onStoreChange,
+      ),
     [actorRole, effectiveActorId, scopeKey],
   );
   const getAckSnapshot = useCallback(
@@ -657,16 +805,65 @@ export function AiTaskCenterProvider({
   }, [actorRole, effectiveActorId, scopeKey, scopedTasks]);
 
   const markTaskAlertSeen = useCallback(
-    (taskOrId: GlobalTaskItem | string) => {
+    (taskOrId: GlobalTaskItem | string, options?: TaskAlertAckOptions) => {
       if (!scopeKey) return;
-      const targetTask =
+      const taskId =
+        typeof taskOrId === "string" ? taskOrId.trim() : taskOrId.id.trim();
+      if (options?.includeNextSync && taskId) {
+        const now = Date.now();
+        pendingSyncAckRulesRef.current.push({
+          scopeKey,
+          taskId,
+          createdAtMs: now,
+          expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
+        });
+      }
+      const targetTasks =
         typeof taskOrId === "string"
-          ? scopedTasks.find((item) => item.id === taskOrId)
-          : taskOrId;
-      if (!targetTask) return;
+          ? scopedTasks.filter((item) => item.id === taskId)
+          : [taskOrId];
+      if (targetTasks.length === 0) return;
+      acknowledgeTaskAlerts(scopeKey, targetTasks, effectiveActorId, actorRole);
+    },
+    [actorRole, effectiveActorId, scopeKey, scopedTasks],
+  );
+
+  const markTargetAlertsSeen = useCallback(
+    (
+      target: {
+        readonly bookId?: string | null;
+        readonly bookPageId?: string | null;
+      },
+      options?: TaskAlertAckOptions,
+    ) => {
+      if (!scopeKey) return;
+      const targetBookId = target.bookId?.trim() || null;
+      const targetPageId = target.bookPageId?.trim() || null;
+      if (!targetBookId && !targetPageId) return;
+      if (options?.includeNextSync) {
+        const now = Date.now();
+        pendingSyncAckRulesRef.current.push({
+          scopeKey,
+          bookId: targetBookId,
+          bookPageId: targetPageId,
+          createdAtMs: now,
+          expiresAtMs: now + PENDING_SYNC_ACK_TTL_MS,
+        });
+      }
+      const matchedTasks = scopedTasks.filter((item) => {
+        if (targetPageId) {
+          if (item.book_page_id !== targetPageId) return false;
+          if (targetBookId && item.book_id && item.book_id !== targetBookId) {
+            return false;
+          }
+          return true;
+        }
+        return item.book_id === targetBookId;
+      });
+      if (matchedTasks.length === 0) return;
       acknowledgeTaskAlerts(
         scopeKey,
-        [targetTask],
+        matchedTasks,
         effectiveActorId,
         actorRole,
       );
@@ -792,7 +989,13 @@ export function AiTaskCenterProvider({
 
   const openPanel = useCallback(() => {
     if (!scopeKey) return;
-    markAllAlertsSeen();
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = true;
     setPanelState({ scopeKey, open: true });
     if (effectiveActorId && actorRole) {
       void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
@@ -806,14 +1009,26 @@ export function AiTaskCenterProvider({
   ]);
 
   const closePanel = useCallback(() => {
-    markAllAlertsSeen();
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = false;
     setPanelState({ scopeKey, open: false });
   }, [markAllAlertsSeen, scopeKey]);
 
   const togglePanel = useCallback(() => {
     if (!scopeKey) return;
     const nextOpen = !isOpen;
-    markAllAlertsSeen();
+    if (
+      typeof document === "undefined" ||
+      document.visibilityState !== "hidden"
+    ) {
+      markAllAlertsSeen();
+    }
+    isPanelOpenRef.current = nextOpen;
     setPanelState({ scopeKey, open: nextOpen });
     if (nextOpen && effectiveActorId && actorRole) {
       void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
@@ -830,6 +1045,8 @@ export function AiTaskCenterProvider({
   const clearForLogout = useCallback(() => {
     activeAbortRef.current?.abort();
     activeAbortRef.current = null;
+    isPanelOpenRef.current = false;
+    pendingSyncAckRulesRef.current = [];
     clearGlobalTasksMemoryCache();
     resetTaskAlertAckMemoryCache();
     setFeedState({
@@ -871,6 +1088,7 @@ export function AiTaskCenterProvider({
       togglePanel,
       markAllAlertsSeen,
       markTaskAlertSeen,
+      markTargetAlertsSeen,
       refresh,
       retryTask,
       cancelTask,
@@ -887,6 +1105,7 @@ export function AiTaskCenterProvider({
       isOpen,
       isRefreshing,
       markAllAlertsSeen,
+      markTargetAlertsSeen,
       markTaskAlertSeen,
       openPanel,
       pendingActionIds,

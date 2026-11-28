@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryGameScreen } from "@/components/entertainment/memory-game/memory-game-screen";
 import { PictureDescriptionScreen } from "@/components/entertainment/picture-description/picture-description-screen";
+import { KaraokeStage } from "@/components/karaoke/karaoke-stage";
 import { foldMidiNearTarget } from "@/components/karaoke/pitch-highway-canvas";
 import { AppServicesProvider } from "@/components/providers/app-services-provider";
 import { MusicalDspAnalyzer } from "@/lib/karaoke/musical-dsp";
@@ -592,5 +593,128 @@ describe("PictureDescriptionScreen 3-2-1 Auto-Mic Countdown & Cancellation", () 
     expect(
       (screen.getByTestId("recall-textarea") as HTMLTextAreaElement).value,
     ).toContain("diều giấy");
+  });
+
+  it("exposes KaraokeStage Autopilot toggle that arms reference melody guide and focus word badges", async () => {
+    const fakePlayer = {
+      ready: true,
+      playing: false,
+      waiting: false,
+      ended: false,
+      segmentFinished: false,
+      loopPass: 0,
+      currentMs: 0,
+      durationMs: 10000,
+      volume: 0.7,
+      muted: false,
+      rate: 1,
+      keyShift: 0,
+      error: "",
+      getCurrentMs: () => 0,
+      subscribeClock: () => () => {},
+      play: vi.fn(async () => {}),
+      pause: vi.fn(),
+      seek: vi.fn(),
+      setVolume: vi.fn(),
+      setMuted: vi.fn(),
+      setRate: vi.fn(),
+      setKeyShift: vi.fn(),
+    };
+
+    render(
+      <KaraokeStage
+        source={{
+          song_id: "91000000-0000-4000-8000-000000000001",
+          version_id: "92000000-0000-4000-8000-000000000001",
+          title: "Vườn xuân lung linh",
+          author: "ViRead CC0",
+          duration_ms: 10000,
+          audio_url: "http://127.0.0.1:8000/mock.mp3",
+          audio_url_expires_at: "2099-01-01T00:00:00Z",
+          cover_url: null,
+          lyrics: {
+            format_version: 2,
+            lines: [
+              {
+                id: "94000000-0000-4000-8000-000000000001",
+                text: "Lung linh giọt sương",
+                start_ms: 1000,
+                end_ms: 3500,
+                syllables: [
+                  {
+                    id: "95000000-0000-4000-8000-000000000001",
+                    text: "Lung",
+                    start_ms: 1000,
+                    end_ms: 1600,
+                  },
+                  {
+                    id: "95000000-0000-4000-8000-000000000002",
+                    text: "linh",
+                    start_ms: 1650,
+                    end_ms: 2250,
+                  },
+                ],
+              },
+            ],
+          },
+          melody_profile: {
+            melody_version: 1,
+            hop_ms: 80,
+            duration_ms: 10000,
+            min_midi: 64,
+            max_midi: 69,
+            median_midi: 67,
+            bpm: 94,
+            notes: [
+              {
+                start_ms: 1000,
+                end_ms: 1600,
+                midi: 67,
+                hz: 392,
+                confidence: 0.95,
+                voiced: true,
+                syllable_id: "95000000-0000-4000-8000-000000000001",
+                line_id: "94000000-0000-4000-8000-000000000001",
+                text: "Lung",
+              },
+              {
+                start_ms: 1650,
+                end_ms: 2250,
+                midi: 69,
+                hz: 440,
+                confidence: 0.95,
+                voiced: true,
+                syllable_id: "95000000-0000-4000-8000-000000000002",
+                line_id: "94000000-0000-4000-8000-000000000001",
+                text: "linh",
+              },
+            ],
+            pitch_contour: [
+              { time_ms: 1000, hz: 392, midi: 67, confidence: 0.95 },
+            ],
+          },
+        }}
+        player={fakePlayer}
+        childAlias="Bé An"
+        label="Sân khấu Karaoke của Bé An"
+        focusWords={["lung linh"]}
+      />,
+    );
+
+    expect(screen.getByTestId("karaoke-focus-words-banner")).toHaveTextContent(
+      "lung linh",
+    );
+    const autopilotToggle = screen.getByTestId("karaoke-autopilot-toggle");
+    const melodyToggle = screen.getByTestId("karaoke-melody-guide-toggle");
+    expect(autopilotToggle).toHaveAttribute("aria-pressed", "false");
+    expect(melodyToggle).toHaveAttribute("aria-pressed", "false");
+
+    await act(async () => {
+      fireEvent.click(autopilotToggle);
+      await Promise.resolve();
+    });
+
+    expect(autopilotToggle).toHaveAttribute("aria-pressed", "true");
+    expect(melodyToggle).toHaveAttribute("aria-pressed", "true");
   });
 });

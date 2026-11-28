@@ -108,9 +108,11 @@ async def get_sessions(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     sessions = await ReadingContentService(ReadingContentRepository(db)).list_sessions(actor_id)
-    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
-    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    safe_offset = offset if offset > 0 else 0
+    safe_limit = limit if limit is not None and limit > 0 else None
     if safe_offset == 0 and safe_limit is None:
         return sessions
     return sessions[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
@@ -207,6 +209,7 @@ async def get_reading_page(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    revision_id = revision_id if isinstance(revision_id, (UUID, str)) else None
     response.headers["Cache-Control"] = "private, no-store, max-age=0"
     response.headers["Vary"] = "Authorization"
     return await ReadingContentService(ReadingContentRepository(db)).get_page(
@@ -640,6 +643,8 @@ async def get_owned_history(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    cursor = cursor if isinstance(cursor, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 20
     return await HistoryService(HistoryRepository(db)).list(child_id, actor_id, cursor, limit)
 
 
@@ -1243,6 +1248,11 @@ async def scan_page_with_local_ocr(
     db: AsyncSession = Depends(get_db),
 ):
     """Run local Vietnamese OCR on an uploaded/photographed book page and match verified catalog pages."""
+    book_id = book_id if isinstance(book_id, (UUID, str)) else None
+    child_id = child_id if isinstance(child_id, (UUID, str)) else None
+    idempotency_key = (
+        idempotency_key if isinstance(idempotency_key, (UUID, str)) else None
+    )
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).scan_page(
         actor_id,
@@ -1273,6 +1283,14 @@ async def enqueue_scan_page_ocr_job(
     db: AsyncSession = Depends(get_db),
 ):
     """Enqueue an asynchronous Vietnamese OCR page scan job (safe even while remote worker is offline)."""
+    book_id = book_id if isinstance(book_id, (UUID, str)) else None
+    child_id = child_id if isinstance(child_id, (UUID, str)) else None
+    idempotency_key = (
+        idempotency_key if isinstance(idempotency_key, (UUID, str)) else None
+    )
+    idempotency_key_header = (
+        idempotency_key_header if isinstance(idempotency_key_header, str) else None
+    )
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).enqueue_scan_page_job(
         actor_id,
@@ -1297,6 +1315,8 @@ async def list_scan_page_ocr_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """List authenticated parent's own queued/recent async page scan OCR jobs."""
+    active_only = active_only if isinstance(active_only, bool) else True
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     request_id = str(getattr(request.state, "request_id", ""))
     return await LocalOcrScanService(LocalOcrScanRepository(db)).list_scan_page_jobs(
         actor_id,

@@ -70,6 +70,10 @@ async def list_voices(
 ) -> VoiceListRead:
     """List curated Bắc · Trung · Nam local voices (plus Google backup voices when enabled)."""
 
+    provider_mode = provider_mode if isinstance(provider_mode, str) else "local_only"
+    allow_google_tts = (
+        allow_google_tts if isinstance(allow_google_tts, bool) else False
+    )
     response.headers["Cache-Control"] = "no-store"
 
     policy = VoicePolicyContext(

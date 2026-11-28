@@ -9,8 +9,10 @@ import math
 import os
 import random
 import re
+import threading
+import time
 import unicodedata
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -49,11 +51,38 @@ from app.services.viread_training_storage_quota import ensure_database_capacity,
 
 logger = logging.getLogger(__name__)
 
-_OVERVIEW_MANIFEST_CACHE: dict[tuple[str, str], dict[str, Any]] = {}
+_OVERVIEW_MANIFEST_CACHE_MAXSIZE = 16
+_OVERVIEW_MANIFEST_CACHE_TTL_SECONDS = 300.0
+_OVERVIEW_MANIFEST_CACHE_LOCK = threading.Lock()
+_OVERVIEW_MANIFEST_CACHE: OrderedDict[tuple[str, str], tuple[float, dict[str, Any]]] = OrderedDict()
 
 
 def invalidate_overview_manifest_cache() -> None:
-    _OVERVIEW_MANIFEST_CACHE.clear()
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        _OVERVIEW_MANIFEST_CACHE.clear()
+
+
+def _get_cached_overview_manifest(cache_key: tuple[str, str]) -> dict[str, Any] | None:
+    now = time.monotonic()
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        entry = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
+        if entry is None:
+            return None
+        expires_at, meta = entry
+        if now >= expires_at:
+            _OVERVIEW_MANIFEST_CACHE.pop(cache_key, None)
+            return None
+        _OVERVIEW_MANIFEST_CACHE.move_to_end(cache_key)
+        return dict(meta)
+
+
+def _set_cached_overview_manifest(cache_key: tuple[str, str], meta: dict[str, Any]) -> None:
+    expires_at = time.monotonic() + _OVERVIEW_MANIFEST_CACHE_TTL_SECONDS
+    with _OVERVIEW_MANIFEST_CACHE_LOCK:
+        _OVERVIEW_MANIFEST_CACHE[cache_key] = (expires_at, dict(meta))
+        _OVERVIEW_MANIFEST_CACHE.move_to_end(cache_key)
+        while len(_OVERVIEW_MANIFEST_CACHE) > _OVERVIEW_MANIFEST_CACHE_MAXSIZE:
+            _OVERVIEW_MANIFEST_CACHE.popitem(last=False)
 
 ORIGINAL_SHA256 = "380512193a8b6cbf6fad80deacdc9b6939d10d473d199892fc6408d13775ea59"
 ORIGINAL_VOCAB_SHA256 = "b4ec9437ef82d952a65c101ea7ec6748a7168777c2d84cdb6a1bba7540bd163d"
@@ -733,7 +762,7 @@ class VireadOcrTrainingService:
                 active["source"] = "original_default"
             else:
                 cache_key = (str(active.get("checkpoint_sha256")), str(active.get("storage_path")))
-                cached_meta = _OVERVIEW_MANIFEST_CACHE.get(cache_key)
+                cached_meta = _get_cached_overview_manifest(cache_key)
                 if cached_meta is None:
                     try:
                         active_router = (
@@ -756,7 +785,7 @@ class VireadOcrTrainingService:
                             "comparison_summary": m_json.get("comparison_summary"),
                             "source": m_json.get("source"),
                         }
-                        _OVERVIEW_MANIFEST_CACHE[cache_key] = cached_meta
+                        _set_cached_overview_manifest(cache_key, cached_meta)
                     except Exception as exc:
                         logger.warning("Could not read active model manifest metadata: %s", exc)
                         cached_meta = {

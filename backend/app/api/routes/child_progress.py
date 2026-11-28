@@ -36,12 +36,14 @@ async def get_progress_assessment(
     safe_gender = (
         teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
     )
+    resolved_days = days if isinstance(days, int) and not isinstance(days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
     return await _service(db).assess(
         child_id,
         actor_id,
-        days=days,
+        days=resolved_days,
         use_ai=False,
-        teacher_gender=safe_gender,
+        **extra_kwargs,
     )
 
 

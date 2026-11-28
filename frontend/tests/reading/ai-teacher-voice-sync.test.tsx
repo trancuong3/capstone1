@@ -26,7 +26,11 @@ import {
   STATIC_LOCAL_VOICES,
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
-import { mapLocalVoiceToGoogleBackup } from "@/lib/reading/voice-engine-status";
+import {
+  mapLocalVoiceToGoogleBackup,
+  resetVoiceEngineStatus,
+  setCachedVoiceEngineHealth,
+} from "@/lib/reading/voice-engine-status";
 import {
   getSpeechPreferences,
   resetSpeechPreferencesCache,
@@ -198,6 +202,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetVoiceEngineStatus();
   vi.restoreAllMocks();
 });
 
@@ -567,11 +572,21 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     });
     await user.click(listenBtn);
 
-    // MUST route through speechPlayer.play (single source of truth) and NEVER raw window.speechSynthesis.speak
+    // MUST route through speechPlayer.play (single source of truth) with bypassSessionLock=true and NEVER raw window.speechSynthesis.speak
     expect(speechPlayerPlayMock).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ utteranceKind: "game_prompt" }),
+      expect.objectContaining({
+        utteranceKind: "game_prompt",
+        bypassSessionLock: true,
+      }),
     );
+    expect(rawSpeakSpy).not.toHaveBeenCalled();
+
+    // Even when speechPlayer.play rejects (e.g. 503 under local_only), MemoryGameScreen MUST NOT call raw window.speechSynthesis.speak directly
+    speechPlayerPlayMock.mockRejectedValueOnce(
+      new Error("503 LOCAL_TTS_UNAVAILABLE"),
+    );
+    await user.click(listenBtn);
     expect(rawSpeakSpy).not.toHaveBeenCalled();
 
     // Submit recall text -> verify teacher_gender: "male" is sent
@@ -1517,6 +1532,24 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
         cache_scope: "COACHING",
       });
 
+      // Also verify ReadingVoiceSettings "Nghe thử" inside DifficultWordPracticePanel (even on a private book) uses COACHING + voice_preview
+      speechPlayerPlayMock.mockClear();
+      await user.click(screen.getByRole("button", { name: /Giọng đọc/i }));
+      const previewBtn = await screen.findByRole("button", {
+        name: /Nghe thử/i,
+      });
+      await user.click(previewBtn);
+      expect(speechPlayerPlayMock).toHaveBeenCalledWith(
+        expect.stringContaining("Hai mươi mốt bông hoa"),
+        {
+          coaching: true,
+          cacheScope: "COACHING",
+          isPrivateBook: false,
+          bypassSessionLock: true,
+          utteranceKind: "voice_preview",
+        },
+      );
+
       fetchSpy.mockRestore();
       vi.unstubAllEnvs();
       unmount();
@@ -1525,5 +1558,97 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
         .setCacheContext;
       reportSpy.mockRestore();
     }
+  });
+
+  it("SessionComplete does NOT self-abort completion prompt when speechPlayer reference updates mid-playback, and stops only on unmount", async () => {
+    vi.stubGlobal("AudioContext", class FakeAudioCtx {});
+    speechPlayerStopMock.mockClear();
+
+    const props = {
+      booksHref: "/books",
+      bookId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      child: CHILD_1,
+      sessionId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      summary: {
+        duration_minutes: 4,
+        pages_explored: 2,
+        practiced_words: 5,
+        correct_words: ["con"],
+        mispronounced_words: ["mốt"],
+        skipped_words: [],
+      },
+    };
+
+    const { rerender, unmount } = render(<SessionComplete {...props} />);
+    await waitFor(() => expect(speechPlayerPlayMock).toHaveBeenCalledTimes(1));
+    expect(speechPlayerStopMock).not.toHaveBeenCalled();
+
+    // Simulate useSpeechPlayer() returning a new object reference on state: "idle" -> "loading" -> "playing"
+    speechPlayerMock.state = "loading";
+    speechPlayerMock.isPlaying = true;
+    rerender(<SessionComplete {...props} />);
+    speechPlayerMock.state = "playing";
+    rerender(<SessionComplete {...props} />);
+
+    expect(speechPlayerStopMock).not.toHaveBeenCalled();
+    expect(speechPlayerPlayMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(speechPlayerStopMock).toHaveBeenCalledTimes(1);
+    speechPlayerMock.state = "idle";
+    speechPlayerMock.isPlaying = false;
+  });
+
+  it("AiTeacherVoiceSection surfaces worker-offline hint under local_only even when ElevenLabs is configured on backend or stale voiceHealth was cached", async () => {
+    setCachedVoiceEngineHealth({
+      default_mode: "local_only",
+      default_voice_id: "local_north_truc_ly",
+      local: {
+        configured: true,
+        available: true,
+        stt_ready: true,
+        tts_ready: true,
+      },
+      google: {
+        stt_configured: true,
+        tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+      elevenlabs: {
+        configured: true,
+        stt_configured: true,
+        tts_configured: true,
+        male_tts_configured: true,
+        stt_cooldown: false,
+        tts_cooldown: false,
+      },
+    });
+    listVoicesMock.mockResolvedValue({
+      voices: [...STATIC_LOCAL_VOICES],
+      default_voice_id: "local_north_truc_ly",
+      local_worker_ready: false,
+      google_tts_available: true,
+    });
+
+    const services = {
+      childService: {
+        list: vi.fn().mockResolvedValue([CHILD_1]),
+        get: vi.fn().mockResolvedValue(CHILD_1),
+        updateVoicePreferences: updateVoicePreferencesMock,
+      },
+    } as unknown as React.ContextType<typeof AppServicesContext>;
+
+    render(
+      <AppServicesContext.Provider value={services}>
+        <AiTeacherVoiceSection selectedChild={CHILD_1} />
+      </AppServicesContext.Provider>,
+    );
+
+    // Because local_only blocks ElevenLabs on backend and fresh /voice/voices reported local_worker_ready=false,
+    // the parent MUST still see the offline hint prompting them to enable "Máy này + Dự phòng trực tuyến".
+    expect(
+      await screen.findByTestId("teacher-voice-worker-offline-hint"),
+    ).toBeInTheDocument();
   });
 });

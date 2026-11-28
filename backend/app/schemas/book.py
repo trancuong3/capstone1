@@ -10,7 +10,9 @@ class BookBase(BaseModel):
     Author: Optional[str] = None
     MinGrade: int = Field(..., ge=1, le=5)
     MaxGrade: int = Field(..., ge=1, le=5)
-    LifecycleStatus: Literal["ACTIVE", "RETIRED"] = Field(..., example="ACTIVE")
+    LifecycleStatus: Literal["ACTIVE", "RETIRED"] = Field(
+        ..., json_schema_extra={"example": "ACTIVE"}
+    )
 
     @field_validator("Name")
     @classmethod
@@ -62,7 +64,7 @@ class BookPageBase(BaseModel):
     Height: int
     FeaturePath: Optional[str] = None
     ProcessingMeta: Dict[str, Any] = Field(default_factory=dict)
-    LifecycleStatus: str = Field(..., example="ACTIVE")
+    LifecycleStatus: str = Field(..., json_schema_extra={"example": "ACTIVE"})
 
 class BookPageCreate(BookPageBase):
     BookId: UUID

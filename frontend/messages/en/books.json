@@ -497,7 +497,20 @@
     "retriedQueuedOfflineNotice": "Saved retry request to the OCR queue. The page will be processed automatically once OCR is back online.",
     "replacedPageImageQueuedOfflineNotice": "Replaced image for page {page} and added it to the OCR queue. Re-checking will start automatically once OCR is back online.",
     "replacedSubmissionImageQueuedOfflineNotice": "Replaced page image and added it to the OCR queue. Re-checking will start automatically once OCR is back online.",
-    "toolCheckPassedNotice": "This page passed the safety check."
+    "toolCheckPassedNotice": "This page passed the safety check.",
+    "toolScopeCloudAi": "spell check & child safety review via secure cloud AI service",
+    "taskCenterLink": "Task Center",
+    "changeCoverAction": "Change cover",
+    "closeCoverStudio": "Close cover editor",
+    "uploadPrivacyTransparency": "Privacy transparency: Private books are visible only within your family account; uploaded page text undergoes automated spelling and child-safety checks (via local models or a secure cloud AI service depending on server configuration) and is excluded from OCR training by default.",
+    "openPageIllustrationAria": "Open illustration for page {page}",
+    "closePageIllustrationAria": "Close illustration for page {page}",
+    "pageIllustrationAction": "Page illustration",
+    "closePageIllustrationAction": "Close illustration",
+    "openPageOcrBlocksAria": "View OCR text blocks for page {page}",
+    "closePageOcrBlocksAria": "Close OCR text blocks for page {page}",
+    "openPageOcrBlocksAction": "OCR text blocks",
+    "closePageOcrBlocksAction": "Close OCR blocks"
   },
   "ocrContribution": {
     "cardAria": "Contribute samples to improve ViRead page reading for {title}",

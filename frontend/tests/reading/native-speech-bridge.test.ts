@@ -4,6 +4,12 @@ import { ServiceError } from "@/lib/api/service-error";
 import type { SpeechService } from "@/lib/api/speech-service";
 import type { VoiceStudioService } from "@/lib/api/voice-studio-service";
 import {
+  acquireUnlockedAudioElement,
+  getWarmAudioContext,
+  resetAndroidAudioUnlockForTest,
+  unlockAudioNow,
+} from "@/lib/reading/android-audio-unlock";
+import {
   isTechnicalSttUnavailabilityError,
   LocalSegmentSpeechRecognition,
   resetLocalSttEmergencyStateForTests,
@@ -54,6 +60,7 @@ beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
   resetAndroidNativeSpeechBridgeForTests();
+  resetAndroidAudioUnlockForTest();
   resetVoiceLockAndPolicyForTests();
   resetSpeechPreferencesCache();
   resetVoiceEngineStatus();
@@ -63,6 +70,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetAndroidNativeSpeechBridgeForTests();
+  resetAndroidAudioUnlockForTest();
   installAndroidPort(undefined);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -215,6 +223,106 @@ describe("Android Native Speech Bridge Client (window.ViReadNativeSpeech)", () =
     expect(finals[0].onsetAt).toBe(rec.onsetAt);
     expect(errors).toEqual([]);
     expect(onEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("parses hasMaleViVoice/hasFemaleViVoice in capabilities and invokes onready on stt_ready", async () => {
+    const port = new FakeAndroidSpeechPort();
+    installAndroidPort(port);
+
+    const capPromise = getAndroidSpeechCapabilities();
+    const reqId = String(port.sent[0].requestId);
+    port.emit({
+      type: "capabilities",
+      requestId: reqId,
+      ttsAvailable: true,
+      viVoicesCount: 2,
+      hasMaleViVoice: true,
+      hasFemaleViVoice: true,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+
+    await expect(capPromise).resolves.toEqual({
+      ttsAvailable: true,
+      viVoicesCount: 2,
+      hasMaleViVoice: true,
+      hasFemaleViVoice: true,
+      sttAvailable: true,
+      onDeviceSttAvailable: true,
+      platform: "android-webview",
+    });
+
+    const rec = new AndroidNativeSpeechRecognition();
+    const onReady = vi.fn();
+    rec.onready = onReady;
+    expect(rec.ready).toBe(false);
+
+    rec.start();
+    const sttReqId = String(port.sent[1].requestId);
+    port.emit({ type: "stt_ready", requestId: sttReqId });
+    expect(rec.ready).toBe(true);
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    rec.abort();
+    expect(rec.ready).toBe(false);
+  });
+
+  it("keeps a persistent warm AudioContext and prevents silent unlock probe cleanup from interrupting active playback", async () => {
+    const closeSpy = vi.fn(async () => undefined);
+    const resumeSpy = vi.fn(async function (this: { state: string }) {
+      this.state = "running";
+    });
+    class FakeAudioContext {
+      state = "suspended";
+      resume = resumeSpy;
+      close = closeSpy;
+    }
+    vi.stubGlobal("AudioContext", FakeAudioContext);
+
+    let resolveProbePlay!: () => void;
+    const pauseSpy = vi.fn();
+    const origCreateElement = document.createElement.bind(document);
+    let createdAudio: HTMLAudioElement | null = null;
+    vi.spyOn(document, "createElement").mockImplementation(((
+      tagName: string,
+    ) => {
+      const el = origCreateElement(tagName);
+      if (tagName.toLowerCase() === "audio") {
+        const audioEl = el as HTMLAudioElement;
+        createdAudio = audioEl;
+        audioEl.pause = pauseSpy;
+        audioEl.play = vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveProbePlay = resolve;
+            }),
+        );
+      }
+      return el;
+    }) as typeof document.createElement);
+
+    unlockAudioNow();
+
+    const warmCtx = getWarmAudioContext();
+    expect(warmCtx).toBeInstanceOf(FakeAudioContext);
+    expect(resumeSpy).toHaveBeenCalled();
+    expect(closeSpy).not.toHaveBeenCalled();
+
+    // Acquire sharedAudioElement BEFORE silent probe resolves (simulating immediate tap -> TTS)
+    const borrowed = acquireUnlockedAudioElement();
+    expect(borrowed).not.toBeNull();
+    borrowed!.audio.src = "blob:real-tts-audio";
+    borrowed!.audio.muted = false;
+
+    // Resolving the earlier silent probe must NOT pause or blank the active playback!
+    resolveProbePlay();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(pauseSpy).not.toHaveBeenCalled();
+    expect(createdAudio).not.toBeNull();
+    expect(borrowed!.audio.src).toContain("blob:real-tts-audio");
+
+    borrowed!.release();
   });
 });
 

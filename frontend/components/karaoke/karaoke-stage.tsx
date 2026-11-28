@@ -372,8 +372,19 @@ export function KaraokeStage({
   const [speakerBacking, setSpeakerBacking] = useState(false);
   const [melodyGuideEnabled, setMelodyGuideEnabled] = useState(false);
   const [warmupStepLabel, setWarmupStepLabel] = useState<string | null>(null);
+  const [autopilotActive, setAutopilotActive] = useState(initialAutopilot);
+  const [autopilotSlowCountdown, setAutopilotSlowCountdown] = useState<
+    number | null
+  >(null);
+  const [autopilotKeyShiftApplied, setAutopilotKeyShiftApplied] = useState<
+    number | null
+  >(null);
   const melodySynthRef = useRef<ReferenceMelodySynth | null>(null);
   const autopilotAppliedRef = useRef(false);
+  const autopilotHandledRunRef = useRef(false);
+  const autopilotCoachTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const userToggledMelodyGuideRef = useRef(false);
   const [practiceReturnMs, setPracticeReturnMs] = useState(0);
   const [manualEnded, setManualEnded] = useState(false);
@@ -526,9 +537,17 @@ export function KaraokeStage({
     }
   }, [onLoadMusicalProfile, onLoadPracticeHistory]);
 
-  // Auto-configure scored mode + reference melody guide when launched via Hands-Free Autopilot.
+  const cancelAutopilotCoach = useCallback(() => {
+    if (autopilotCoachTimerRef.current !== null) {
+      clearTimeout(autopilotCoachTimerRef.current);
+      autopilotCoachTimerRef.current = null;
+    }
+    setAutopilotSlowCountdown(null);
+  }, []);
+
+  // Auto-configure scored mode + reference melody guide when Hands-Free Autopilot is active.
   useEffect(() => {
-    if (!initialAutopilot) return;
+    if (!autopilotActive) return;
     let cancelled = false;
     if (!autopilotAppliedRef.current) {
       autopilotAppliedRef.current = true;
@@ -553,8 +572,8 @@ export function KaraokeStage({
       cancelled = true;
     };
   }, [
+    autopilotActive,
     ensureMusicalMetadataLoaded,
-    initialAutopilot,
     player,
     scoring.supported,
     targetNotes.length,
@@ -779,6 +798,9 @@ export function KaraokeStage({
     () => () => {
       generation.current++;
       if (timer.current !== null) clearTimeout(timer.current);
+      if (autopilotCoachTimerRef.current !== null) {
+        clearTimeout(autopilotCoachTimerRef.current);
+      }
       countdownSound.current?.stop();
       melodySynthRef.current?.dispose();
       melodySynthRef.current = null;
@@ -846,6 +868,9 @@ export function KaraokeStage({
     } else tick(3);
   }
   function restartSong() {
+    cancelAutopilotCoach();
+    autopilotHandledRunRef.current = false;
+    setAutopilotKeyShiftApplied(null);
     scoring.reset();
     tapTrackerRef.current.reset();
     setRhythmTapFeedback(null);
@@ -950,6 +975,9 @@ export function KaraokeStage({
 
   function selectMode(scored: boolean) {
     if (scored === scoredMode) return;
+    cancelAutopilotCoach();
+    autopilotHandledRunRef.current = false;
+    setAutopilotKeyShiftApplied(null);
     cancelPreparation();
     player.pause();
     scoring.reset();
@@ -1114,6 +1142,7 @@ export function KaraokeStage({
   );
 
   function practiceSegmentSlow(segment: MusicalSegmentReport) {
+    cancelAutopilotCoach();
     const line = lines.find((item) => item.id === segment.lineId);
     if (!line) return;
     practice(line, {
@@ -1122,6 +1151,80 @@ export function KaraokeStage({
       loop: true,
     });
   }
+
+  // Hands-free post-song coaching: auto-apply comfortable key shift & count down 5s into 0.85x slow segment practice.
+  useEffect(() => {
+    if (!ended) {
+      autopilotHandledRunRef.current = false;
+      return;
+    }
+    if (
+      !autopilotActive ||
+      !scoredMode ||
+      practiceMode !== "FULL_SONG" ||
+      scoring.status !== "scored" ||
+      autopilotHandledRunRef.current
+    ) {
+      return;
+    }
+    autopilotHandledRunRef.current = true;
+
+    const suggestedShift = scoring.proScore?.suggestedKeyShift ?? 0;
+    if (suggestedShift !== 0 && player.keyShift === 0) {
+      queueMicrotask(() => {
+        player.setKeyShift(suggestedShift);
+        setAutopilotKeyShiftApplied(suggestedShift);
+      });
+    }
+
+    const weakest = scoring.musicalScore?.weakestSegment ?? null;
+    if (!weakest || weakest.status !== "PRACTICE") {
+      return;
+    }
+
+    let cancelled = false;
+    const stepCoach = (remaining: number) => {
+      if (cancelled) return;
+      if (remaining <= 0) {
+        autopilotCoachTimerRef.current = null;
+        setAutopilotSlowCountdown(null);
+        const target = lines.find((item) => item.id === weakest.lineId);
+        if (target) {
+          practice(target, {
+            mode: "SEGMENT",
+            rate: SEGMENT_PRACTICE_DEFAULT_RATE,
+            loop: true,
+          });
+        }
+        return;
+      }
+      setAutopilotSlowCountdown(remaining);
+      autopilotCoachTimerRef.current = setTimeout(
+        () => stepCoach(remaining - 1),
+        1000,
+      );
+    };
+    queueMicrotask(() => stepCoach(5));
+
+    return () => {
+      cancelled = true;
+      if (autopilotCoachTimerRef.current !== null) {
+        clearTimeout(autopilotCoachTimerRef.current);
+        autopilotCoachTimerRef.current = null;
+      }
+    };
+  }, [
+    autopilotActive,
+    ended,
+    lines,
+    player,
+    practice,
+    practiceMode,
+    scoredMode,
+    scoring.musicalScore,
+    scoring.proScore,
+    scoring.status,
+  ]);
 
   function leavePractice() {
     cancelPreparation();
@@ -1301,6 +1404,40 @@ export function KaraokeStage({
           <Mic aria-hidden className="size-5" />
           {t("karaoke.stage.scoredMode")}
         </Button>
+        <button
+          type="button"
+          data-testid="karaoke-autopilot-toggle"
+          aria-pressed={autopilotActive}
+          onClick={() => {
+            const next = !autopilotActive;
+            setAutopilotActive(next);
+            if (next) {
+              autopilotAppliedRef.current = false;
+              ensureMusicalMetadataLoaded();
+              if (scoring.supported && !scoredMode) {
+                setScoredMode(true);
+                setSpeakerBacking(true);
+                player.setMuted(false);
+              }
+              if (
+                targetNotes.length > 0 &&
+                !userToggledMelodyGuideRef.current
+              ) {
+                setMelodyGuideEnabled(true);
+              }
+            } else {
+              cancelAutopilotCoach();
+            }
+          }}
+          className={`inline-flex min-h-14 items-center gap-2 rounded-control border px-4 py-2.5 text-sm font-extrabold ${
+            autopilotActive
+              ? "border-emerald-400 bg-emerald-50 text-emerald-950 shadow-xs"
+              : "border-border bg-white text-slate-800 hover:bg-sky/50"
+          }`}
+        >
+          <Sparkles aria-hidden className="size-4 text-emerald-600" />
+          {autopilotActive ? "Tự động dẫn dắt: Bật" : "Tự động dẫn dắt"}
+        </button>
         {targetNotes.length > 0 && (
           <>
             <button
@@ -1497,6 +1634,63 @@ export function KaraokeStage({
               onPracticeSegment={practiceSegmentSlow}
             />
           )}
+          {autopilotKeyShiftApplied !== null && (
+            <p
+              role="status"
+              data-testid="karaoke-autopilot-keyshift-note"
+              className="mx-auto max-w-xl rounded-control border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-950"
+            >
+              🤖 Đã tự động chỉnh tông (
+              {autopilotKeyShiftApplied > 0
+                ? `+${autopilotKeyShiftApplied}`
+                : autopilotKeyShiftApplied}{" "}
+              bán cung) vừa với tầm giọng của bé cho lượt hát tiếp theo!
+            </p>
+          )}
+          {autopilotSlowCountdown !== null &&
+            scoring.musicalScore?.weakestSegment && (
+              <div
+                role="status"
+                data-testid="karaoke-autopilot-coach"
+                className="mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-3 rounded-control border border-emerald-400 bg-emerald-50 px-4 py-3 text-start shadow-xs"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-extrabold text-emerald-950">
+                    🤖 Tự động dẫn dắt: Mở tập chậm câu khó (0.85x) sau{" "}
+                    <span data-testid="karaoke-autopilot-countdown">
+                      {autopilotSlowCountdown}
+                    </span>
+                    s…
+                  </p>
+                  <p
+                    className="viread-learning-content truncate text-sm font-bold text-slate-900"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {scoring.musicalScore.weakestSegment.text}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="compact"
+                    className="sm:w-auto"
+                    onClick={() =>
+                      practiceSegmentSlow(scoring.musicalScore!.weakestSegment!)
+                    }
+                  >
+                    Tập ngay
+                  </Button>
+                  <Button
+                    size="compact"
+                    variant="secondary"
+                    className="sm:w-auto"
+                    onClick={cancelAutopilotCoach}
+                  >
+                    Dừng tự động
+                  </Button>
+                </div>
+              </div>
+            )}
           <h2 className="text-heading font-extrabold">
             {t("karaoke.stage.finishedHeading", { alias: childAlias })}
           </h2>

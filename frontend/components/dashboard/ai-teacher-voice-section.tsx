@@ -547,15 +547,11 @@ export function AiTeacherVoiceSection({
     }
   };
 
-  const isElevenLabsReady = Boolean(
-    voiceHealth?.elevenlabs?.tts_configured &&
-    !voiceHealth.elevenlabs.tts_cooldown,
-  );
   const isLocalWorkerOffline =
-    !isElevenLabsReady &&
-    (voiceHealth !== null
-      ? !voiceHealth.local.available
-      : localWorkerReady === false);
+    localWorkerReady !== null
+      ? !localWorkerReady
+      : voiceHealth !== null &&
+        (!voiceHealth.local.available || !voiceHealth.local.tts_ready);
 
   const exactVoicesForGenderAndRegion = voices.filter(
     (v) =>

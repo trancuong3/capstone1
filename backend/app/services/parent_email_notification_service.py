@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -11,6 +12,7 @@ from typing import Iterable
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from app.database import config as settings
 from app.diagnostic_logging import log_diagnostic
 from app.jobs.reading_reminder_worker import (
     ParentEmailLookupFailed,
@@ -63,6 +65,18 @@ MAX_DELIVERY_ATTEMPTS = 3
 SENDING_STALE_AFTER = timedelta(minutes=10)
 MAX_PAGINATION_PAGES = 500
 STREAK_MILESTONES = (30, 14, 7)
+DEFAULT_MAX_DAILY_EMAILS_GLOBAL = 80
+
+
+def resolve_max_daily_emails_global() -> int:
+    raw = (os.getenv("MAX_DAILY_EMAILS_GLOBAL") or "").strip()
+    if raw:
+        try:
+            return max(1, min(10000, int(raw)))
+        except ValueError:
+            pass
+    default_val = getattr(settings, "MAX_DAILY_EMAILS_GLOBAL", DEFAULT_MAX_DAILY_EMAILS_GLOBAL)
+    return max(1, min(10000, int(default_val)))
 
 
 class ParentNotificationError(Exception):
@@ -579,6 +593,33 @@ class ParentEmailNotificationService:
         if expire_retries_fn is not None:
             await expire_retries_fn(now, max_attempts=MAX_DELIVERY_ATTEMPTS)
 
+        global_cap = resolve_max_daily_emails_global()
+        global_sent_today = 0
+        count_global_fn = getattr(self.repo, "count_global_sent_since", None)
+        if inspect.iscoroutinefunction(count_global_fn):
+            try:
+                global_sent_today = max(
+                    0, int(await count_global_fn(now - timedelta(hours=24)) or 0)
+                )
+            except Exception as exc:
+                log_diagnostic(
+                    logger,
+                    logging.WARNING,
+                    event="parent_email_global_daily_count_failed",
+                    stage="engagement_dispatch",
+                    exception=exc,
+                )
+                global_sent_today = 0
+        global_remaining = max(0, global_cap - global_sent_today)
+        if global_remaining <= 0:
+            await self._release_db()
+            return 0
+        effective_max_emails = (
+            min(max_emails, global_remaining)
+            if max_emails is not None
+            else global_remaining
+        )
+
         deadline = (
             time.monotonic() + max(0.5, float(max_seconds))
             if max_seconds is not None
@@ -604,7 +645,7 @@ class ParentEmailNotificationService:
         seen_parent_ids: set[UUID] = set()
 
         for _page in range(MAX_PAGINATION_PAGES):
-            if max_emails is not None and delivered >= max_emails:
+            if delivered >= effective_max_emails:
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
@@ -750,13 +791,11 @@ class ParentEmailNotificationService:
             await self._release_db()
 
             for bundle, prefs, _zone, _local_now in candidate_entries:
-                if max_emails is not None and delivered >= max_emails:
+                if delivered >= effective_max_emails:
                     break
                 if deadline is not None and time.monotonic() >= deadline:
                     break
-                remaining_cap = (
-                    max(0, max_emails - delivered) if max_emails is not None else None
-                )
+                remaining_cap = max(0, effective_max_emails - delivered)
                 delivered += await self._process_parent_bundle(
                     bundle,
                     now,

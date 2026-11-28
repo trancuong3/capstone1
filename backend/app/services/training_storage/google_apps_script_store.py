@@ -558,6 +558,15 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 self._subfolder_ids = dict(subs)
             quota = self._quota_from_dict(res.get("quota"), incoming_bytes=0)
             email = str(res.get("account_email") or "").strip().lower() or None
+            raw_adv = res.get("advanced_drive_enabled")
+            advanced_drive_enabled = raw_adv if isinstance(raw_adv, bool) else None
+            raw_delete_mode = res.get("delete_mode")
+            delete_mode = str(raw_delete_mode).strip() if isinstance(raw_delete_mode, str) and raw_delete_mode.strip() else None
+            warnings: list[str] = []
+            if advanced_drive_enabled is False or delete_mode == "trash_fallback":
+                warnings.append(
+                    "Apps Script Advanced Drive Service (Drive API) chưa được bật: các tệp đã xóa sẽ bị chuyển vào Thùng rác Drive và tiếp tục chiếm dung lượng trong 30 ngày. Hãy bật Services (+) -> Drive API trong Apps Script."
+                )
             return StorageHealthStatus(
                 provider=StorageProvider.GOOGLE_DRIVE,
                 healthy=True,
@@ -568,6 +577,9 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 root_folder_path=DRIVE_ROOT_DISPLAY_PATH,
                 quota=quota,
                 detail="Google Drive Apps Script Bridge connected and Flow 2 folder tree verified",
+                advanced_drive_enabled=advanced_drive_enabled,
+                delete_mode=delete_mode,
+                warnings=warnings,
             )
         except TrainingStorageError as exc:
             return StorageHealthStatus(
@@ -899,19 +911,43 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
                 raise DriveIntegrityError(f"Artifact download exceeded max_bytes limit {max_bytes}")
         return bytes(buf)
 
+    def _delete_with_telemetry(
+        self,
+        reference: str,
+        *,
+        is_referenced_check: Callable[[str], bool],
+    ) -> tuple[bool, str | None, bool | None]:
+        parsed = parse_artifact_ref(reference)
+        if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
+            raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
+        if is_referenced_check(parsed.raw):
+            return False, None, None
+        res = self._call_bridge("delete_file", {"file_id": parsed.drive_file_id})
+        deleted = bool(res.get("deleted"))
+        raw_mode = res.get("delete_mode")
+        delete_mode = str(raw_mode).strip() if isinstance(raw_mode, str) and raw_mode.strip() else None
+        raw_perm = res.get("permanent_delete")
+        permanent_delete = raw_perm if isinstance(raw_perm, bool) else (
+            True if delete_mode == "permanent_delete" else (False if delete_mode == "trash_fallback" else None)
+        )
+        if res.get("trashed_fallback") is True or delete_mode == "trash_fallback":
+            logger.warning(
+                "Apps Script Drive bridge fell back to setTrashed(true) instead of permanent delete for %s; enable Services (+) -> Drive API in Apps Script to reclaim 15 GiB quota immediately.",
+                parsed.drive_file_id,
+            )
+        return deleted, delete_mode, permanent_delete
+
     def delete_if_unreferenced(
         self,
         reference: str,
         *,
         is_referenced_check: Callable[[str], bool],
     ) -> bool:
-        parsed = parse_artifact_ref(reference)
-        if parsed.provider != StorageProvider.GOOGLE_DRIVE or not parsed.drive_file_id:
-            raise ValueError("GoogleAppsScriptDriveStore only handles gdrive:// references")
-        if is_referenced_check(parsed.raw):
-            return False
-        res = self._call_bridge("delete_file", {"file_id": parsed.drive_file_id})
-        return bool(res.get("deleted"))
+        deleted, _delete_mode, _permanent_delete = self._delete_with_telemetry(
+            reference,
+            is_referenced_check=is_referenced_check,
+        )
+        return deleted
 
     def self_test(self) -> DriveSelfTestResult:
         token = uuid4().hex[:12]
@@ -927,9 +963,18 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
         )
         downloaded = self.get(stored.reference, expected_sha256=expected_sha, max_bytes=64 * 1024)
         meta = self.get_metadata(stored.reference)
-        deleted = self.delete_if_unreferenced(stored.reference, is_referenced_check=lambda _ref: False)
+        deleted, delete_mode, permanent_delete = self._delete_with_telemetry(
+            stored.reference,
+            is_referenced_check=lambda _ref: False,
+        )
         quota = self.quota_check(incoming_bytes=0)
         ok = downloaded == payload and not meta.is_public and deleted
+        warning: str | None = None
+        if delete_mode == "trash_fallback" or permanent_delete is False:
+            warning = (
+                "Apps Script Bridge đã xóa tạm thời vào Thùng rác (trash_fallback) thay vì xóa vĩnh viễn. "
+                "Hãy bật Services (+) -> Drive API trong Google Apps Script để tránh đầy dung lượng 15 GiB."
+            )
         return DriveSelfTestResult(
             ok=ok,
             logical_path=logical_path,
@@ -942,6 +987,9 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
             detail="Upload, SHA-256 verification, private read-back, and cleanup succeeded via Apps Script Bridge"
             if ok
             else "Self-test completed with one or more failed assertions",
+            permanent_delete=permanent_delete,
+            delete_mode=delete_mode,
+            warning=warning,
         )
 
     def list_resume_files(self, job_id: str) -> list[dict[str, Any]]:
@@ -1034,4 +1082,9 @@ class GoogleAppsScriptDriveStore(TrainingArtifactStore):
     def delete_resume_file(self, job_id: str, relative_path: str) -> bool:
         logical_path = validate_resume_object_path(job_id, relative_path)
         res = self._call_bridge("delete_resume_file", {"logical_path": logical_path})
+        if res.get("trashed_fallback") is True or res.get("delete_mode") == "trash_fallback":
+            logger.warning(
+                "Apps Script Drive bridge fell back to setTrashed(true) when deleting resume file %s; enable Services (+) -> Drive API in Apps Script.",
+                logical_path,
+            )
         return bool(res.get("deleted"))

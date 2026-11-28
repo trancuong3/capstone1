@@ -15,8 +15,6 @@ import android.content.res.Configuration;
 import android.graphics.Bitmap;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.ConnectivityManager;
 import android.net.Network;
@@ -190,17 +188,16 @@ public final class MainActivity extends Activity {
     private boolean webViewPausedForStop;
     private boolean oauthExternalTabLaunched;
     private boolean oauthTabLeftForeground;
-    private AudioManager audioManager;
-    private AudioFocusRequest audioFocusRequest;
     private boolean noisyReceiverRegistered;
 
     private final Runnable deferredWebViewPauseRunnable = this::pauseWebViewAfterBackgroundEvent;
 
     private final AudioManager.OnAudioFocusChangeListener audioFocusChangeListener = focusChange -> {
-        if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            dispatchAndroidBackgroundEvent(false);
-        } else if (focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
-                && (nativeSpeechBridge == null || !nativeSpeechBridge.hasActiveTtsForTest())) {
+        if (nativeSpeechBridge != null && nativeSpeechBridge.isAudioSessionActive()) {
+            return;
+        }
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS
+                || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
             dispatchAndroidBackgroundEvent(false);
         }
     };
@@ -454,6 +451,7 @@ public final class MainActivity extends Activity {
                     }
                 });
         nativeSpeechBridge.attachToWebView(webView, navigation.getOrigin());
+        nativeSpeechBridge.warmUpTts();
     }
 
     String resolveInitialStartupUrl() {
@@ -1585,44 +1583,6 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void requestAppAudioFocus() {
-        if (audioManager == null) {
-            audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-        }
-        if (audioManager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (audioFocusRequest == null) {
-                AudioAttributes attrs = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build();
-                audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
-                        .setAudioAttributes(attrs)
-                        .setOnAudioFocusChangeListener(audioFocusChangeListener, mainHandler)
-                        .build();
-            }
-            audioManager.requestAudioFocus(audioFocusRequest);
-        } else {
-            @SuppressWarnings("deprecation")
-            int ignored = audioManager.requestAudioFocus(
-                    audioFocusChangeListener,
-                    AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN);
-        }
-    }
-
-    private void abandonAppAudioFocus() {
-        if (audioManager == null) return;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (audioFocusRequest != null) {
-                audioManager.abandonAudioFocusRequest(audioFocusRequest);
-            }
-        } else {
-            @SuppressWarnings("deprecation")
-            int ignored = audioManager.abandonAudioFocus(audioFocusChangeListener);
-        }
-    }
-
     private void registerBecomingNoisyReceiver() {
         if (noisyReceiverRegistered) return;
         IntentFilter filter = new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY);
@@ -1649,7 +1609,6 @@ public final class MainActivity extends Activity {
         activityStopped = true;
         webViewPausedForStop = false;
         unregisterBecomingNoisyReceiver();
-        abandonAppAudioFocus();
         if (webView != null) {
             syncLocalePreferenceFromCookies();
             CookieManager.getInstance().flush();
@@ -1679,7 +1638,11 @@ public final class MainActivity extends Activity {
             oauthLoopbackServer.stop();
         }
         registerBecomingNoisyReceiver();
-        requestAppAudioFocus();
+        // Do NOT request permanent Activity-level AUDIOFOCUS_GAIN in onResume():
+        // Chromium WebView <audio> playback and ViReadNativeSpeechBridge TTS/STT
+        // each acquire scoped audio focus per utterance/capture, and holding a
+        // separate Activity AUDIOFOCUS_GAIN causes self-inflicted AUDIOFOCUS_LOSS
+        // / AUDIOFOCUS_LOSS_TRANSIENT callbacks that abort WebView TTS and native STT.
         if (webView != null) webView.onResume();
     }
 
@@ -1730,7 +1693,6 @@ public final class MainActivity extends Activity {
     protected void onDestroy() {
         mainHandler.removeCallbacks(deferredWebViewPauseRunnable);
         unregisterBecomingNoisyReceiver();
-        abandonAppAudioFocus();
         cancelLoadWatchdog();
         oauthExternalTabLaunched = false;
         oauthTabLeftForeground = false;

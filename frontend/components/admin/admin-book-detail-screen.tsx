@@ -33,6 +33,7 @@ import { Modal } from "@/components/common/modal";
 import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useSkippedAiPageIds } from "@/hooks/use-admin-ai-batch-skipped-pages";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useAiProgress } from "@/hooks/use-ai-progress";
@@ -44,6 +45,7 @@ import {
   retryAdminOcrJob,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { clearApiReadCache } from "@/lib/api/read-cache";
 import { isServiceError } from "@/lib/api/service-error";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
@@ -51,6 +53,7 @@ import type { AssetSourceType } from "@/types/book-assets";
 
 export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
   const { books, pages } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
@@ -186,9 +189,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       if (typeof pages.cancelOcrJob === "function") {
         await pages.cancelOcrJob(jobId);
+        emitStudioTasksChanged({ portal: "admin" });
       } else {
         await cancelAdminOcrJob(jobId);
       }
+      taskCenter?.markTaskAlertSeen(jobId);
       clearApiReadCache();
       await refreshPages();
       if (!mountedRef.current) return;
@@ -232,9 +237,11 @@ export function AdminBookDetailScreen({ bookId }: { bookId: string }) {
     try {
       if (typeof pages.retryOcrJob === "function") {
         await pages.retryOcrJob(jobId);
+        emitStudioTasksChanged({ portal: "admin" });
       } else {
         await retryAdminOcrJob(jobId);
       }
+      taskCenter?.markTaskAlertSeen(jobId);
       clearApiReadCache();
       await refreshPages();
       if (!mountedRef.current) return;

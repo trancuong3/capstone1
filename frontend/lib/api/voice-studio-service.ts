@@ -14,10 +14,12 @@ import { withRequestDeadline } from "@/lib/api/request-deadline";
 import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
 } from "@/lib/reading/session-voice-lock";
+import { getSpeechPreferences } from "@/lib/reading/speech-preferences";
 import { setSynthesizedAudioMeta } from "@/lib/reading/synthesized-audio-meta";
 import {
   buildTtsBrowserCacheKey,
@@ -297,13 +299,24 @@ export function createVoiceStudioService(): VoiceStudioService {
           scope: cacheScope,
           isPrivateBook: options.isPrivateBook,
         });
+      const speechPrefs = getSpeechPreferences();
+      const resolvedRequestVoiceId =
+        options.voiceId ??
+        activeLock?.voiceId ??
+        (options.voiceId === null
+          ? null
+          : (speechPrefs.voiceId ??
+            (policy.region !== "north" ? getEffectiveVoiceId() : null)));
       const cacheVoiceId =
-        options.voiceId ?? activeLock?.voiceId ?? DEFAULT_LOCAL_VOICE_ID;
+        resolvedRequestVoiceId ??
+        getEffectiveVoiceId() ??
+        DEFAULT_LOCAL_VOICE_ID;
       const cacheModelVersion =
         activeLock && activeLock.voiceId === cacheVoiceId
           ? activeLock.modelVersion
           : inferModelVersionForVoiceId(cacheVoiceId);
-      const cacheSpeed = options.speed ?? activeLock?.speed ?? 1;
+      const cacheSpeed =
+        options.speed ?? activeLock?.speed ?? speechPrefs.speed;
       const browserCacheKey = canUseBrowserCache
         ? buildTtsBrowserCacheKey({
             kind: "timed",
@@ -360,8 +373,14 @@ export function createVoiceStudioService(): VoiceStudioService {
           },
           body: JSON.stringify({
             words,
-            ...(options.voiceId ? { voice_id: options.voiceId } : {}),
-            ...(options.speed !== undefined ? { speed: options.speed } : {}),
+            ...(resolvedRequestVoiceId
+              ? { voice_id: resolvedRequestVoiceId }
+              : {}),
+            ...(options.speed !== undefined
+              ? { speed: options.speed }
+              : activeLock
+                ? { speed: activeLock.speed }
+                : {}),
             ...(options.audioFormat
               ? { audio_format: options.audioFormat }
               : {}),
@@ -417,8 +436,14 @@ export function createVoiceStudioService(): VoiceStudioService {
       }
       if (!audio.size) throw failure(502);
       const timedProvider = parsed.data.provider ?? "local";
+      const isElevenLabsTimed = timedProvider
+        .toLowerCase()
+        .startsWith("elevenlabs");
       const resolvedId =
-        parsed.data.resolved_voice_id ?? options.voiceId ?? null;
+        parsed.data.resolved_voice_id ??
+        resolvedRequestVoiceId ??
+        options.voiceId ??
+        null;
       const usedFallbackVoice = Boolean(parsed.data.used_fallback_voice);
       const cachedSpeed =
         parsed.data.cached_speed ??
@@ -436,9 +461,13 @@ export function createVoiceStudioService(): VoiceStudioService {
         fallbackUsed:
           usedFallbackVoice ||
           (timedProvider === "google" &&
-            !options.voiceId?.startsWith("google_")),
+            !resolvedRequestVoiceId?.startsWith("google_")),
         voiceId: resolvedId,
-        voiceGender: resolveVoiceGender(resolvedId),
+        voiceGender: resolveVoiceGender(
+          isElevenLabsTimed
+            ? (resolvedRequestVoiceId ?? resolvedId)
+            : resolvedId,
+        ),
       });
       const headerScopeRaw = headers.get("x-tts-scope")?.trim().toUpperCase();
       const effectiveScope: TtsCacheScope =
@@ -450,6 +479,7 @@ export function createVoiceStudioService(): VoiceStudioService {
       if (
         browserCacheKey &&
         !usedFallbackVoice &&
+        !isElevenLabsTimed &&
         shouldPersistTtsCacheEntry({
           scope: effectiveScope,
           cacheControl: headers.get("cache-control"),

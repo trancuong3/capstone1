@@ -51,6 +51,8 @@ async def list_practice_sessions(
     parent_id: UUID = Depends(require_parent_id),
     service: KaraokePracticeService = Depends(get_karaoke_practice_service),
 ) -> KaraokePracticeHistoryResponse:
+    song_id = song_id if isinstance(song_id, (UUID, str)) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
     return await service.list_practice_sessions(
         parent_id,
         child_id,

@@ -73,7 +73,9 @@ describe("Android WebView Audio, MediaRecorder & Speech Fallback Compatibility",
   });
 
   it("unlocks WebAudio & HTMLAudio on first touchstart/pointerdown gesture for Android WebView TTS", () => {
-    const resumeMock = vi.fn(async () => undefined);
+    const resumeMock = vi.fn(async function (this: { state: string }) {
+      this.state = "running";
+    });
     const closeMock = vi.fn(async () => undefined);
     class FakeAudioContext {
       state = "suspended";

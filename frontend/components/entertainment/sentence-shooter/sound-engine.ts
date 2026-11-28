@@ -64,43 +64,58 @@ export function playShooterSound(
   const context = getOrCreateAudioContext();
   if (!context) return;
 
+  const scheduleTone = (ctx: AudioContext): void => {
+    if (ctx.state === "closed") return;
+    try {
+      const notes = SOUND_FREQUENCIES[kind];
+      const now = ctx.currentTime;
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscillator.type = kind === "wrong" ? "triangle" : "sine";
+      notes.forEach((freq, idx) => {
+        oscillator.frequency.setValueAtTime(freq, now + idx * 0.09);
+      });
+
+      const calmOrReduced =
+        options?.reducedMotion === true ||
+        options?.calmSound === true ||
+        prefersReducedMotion();
+      const peakGain = calmOrReduced ? 0.035 : 0.055;
+      const duration = notes.length > 1 ? 0.34 : 0.16;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(peakGain, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now);
+      oscillator.stop(now + duration + 0.02);
+      oscillator.onended = () => {
+        try {
+          oscillator.disconnect();
+          gain.disconnect();
+        } catch {
+          // Ignore already-disconnected audio nodes.
+        }
+      };
+    } catch {
+      // Sound is strictly optional; audio restrictions must never disrupt a shot.
+    }
+  };
+
   try {
     if (context.state === "suspended" && typeof context.resume === "function") {
-      void Promise.resolve(context.resume()).catch(() => undefined);
+      void Promise.resolve(context.resume())
+        .then(() => {
+          if (sharedAudioContext === context) {
+            scheduleTone(context);
+          }
+        })
+        .catch(() => undefined);
+      return;
     }
-
-    const notes = SOUND_FREQUENCIES[kind];
-    const now = context.currentTime;
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-
-    oscillator.type = kind === "wrong" ? "triangle" : "sine";
-    notes.forEach((freq, idx) => {
-      oscillator.frequency.setValueAtTime(freq, now + idx * 0.09);
-    });
-
-    const calmOrReduced =
-      options?.reducedMotion === true ||
-      options?.calmSound === true ||
-      prefersReducedMotion();
-    const peakGain = calmOrReduced ? 0.035 : 0.055;
-    const duration = notes.length > 1 ? 0.34 : 0.16;
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(peakGain, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(now);
-    oscillator.stop(now + duration + 0.02);
-    oscillator.onended = () => {
-      try {
-        oscillator.disconnect();
-        gain.disconnect();
-      } catch {
-        // Ignore already-disconnected audio nodes.
-      }
-    };
+    scheduleTone(context);
   } catch {
     // Sound is strictly optional; audio restrictions must never disrupt a shot.
   }

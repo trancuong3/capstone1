@@ -115,7 +115,7 @@ class TestOcrPipelineHardening(unittest.TestCase):
             img_sha = hashlib.sha256(b"long-cpu-page").hexdigest()
             worker_id = "win-ocr-stable-host"
 
-            # Worker sends initial IDLE heartbeat, then ages past 45s TTL while running a job.
+            # Worker sends initial IDLE heartbeat, then ages past 75s TTL while running a job.
             hb = await svc.record_worker_heartbeat(
                 worker_id=worker_id,
                 hostname="WIN-HOST",
@@ -131,7 +131,7 @@ class TestOcrPipelineHardening(unittest.TestCase):
                 system_stats={"ram_total_mb": 16384},
                 last_error=None,
             )
-            hb.LastHeartbeatAt = datetime.now(timezone.utc) - timedelta(seconds=60)
+            hb.LastHeartbeatAt = datetime.now(timezone.utc) - timedelta(seconds=90)
             self.assertFalse(await svc.has_online_worker())
 
             job = await svc.enqueue_job(

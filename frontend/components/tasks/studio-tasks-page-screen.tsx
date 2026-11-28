@@ -413,12 +413,7 @@ export function StudioTasksPageScreen({
     return () => {
       document.removeEventListener("visibilitychange", acknowledgeIfVisible);
     };
-  }, [
-    effectiveAckActorId,
-    effectiveAckActorRole,
-    effectiveAckScopeKey,
-    tasks,
-  ]);
+  }, [effectiveAckActorId, effectiveAckActorRole, effectiveAckScopeKey, tasks]);
 
   const acknowledgeSingleTask = useCallback(
     (task: GlobalTaskItem) => {

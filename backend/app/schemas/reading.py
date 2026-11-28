@@ -105,11 +105,11 @@ class ReadingSessionResponse(ReadingSessionBase):
 
 # --- READING EVENT ---
 class ReadingEventBase(BaseModel):
-    Type: str = Field(..., example="MISPRONUNCIATION")
+    Type: str = Field(..., json_schema_extra={"example": "MISPRONUNCIATION"})
     StartMs: int = Field(..., ge=0, le=2147483647)
     EndMs: Optional[int] = Field(None, ge=0, le=2147483647)
     Confidence: Optional[float] = Field(None, ge=0, le=1)
-    Status: str = Field(..., example="DETECTED")
+    Status: str = Field(..., json_schema_extra={"example": "DETECTED"})
     Metadata: Dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")

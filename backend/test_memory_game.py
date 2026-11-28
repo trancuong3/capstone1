@@ -484,9 +484,9 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
         import os
         from unittest.mock import patch
 
-        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-3.5-flash-lite")
-        self.assertEqual(DEFAULT_GEMINI_FALLBACK_MODEL, "gemini-3.1-flash-lite")
-        self.assertEqual(DEFAULT_GROQ_MODEL, "qwen/qwen3.8-27b")
+        self.assertEqual(DEFAULT_GEMINI_MODEL, "gemini-2.5-flash-lite")
+        self.assertEqual(DEFAULT_GEMINI_FALLBACK_MODEL, "gemini-2.5-flash")
+        self.assertEqual(DEFAULT_GROQ_MODEL, "llama-3.3-70b-versatile")
 
         with patch.dict(
             os.environ,
@@ -497,9 +497,9 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
             clear=True,
         ):
             cfg_default = get_memory_ai_config()
-        self.assertEqual(cfg_default.gemini_model, "gemini-3.5-flash-lite")
-        self.assertEqual(cfg_default.gemini_fallback_model, "gemini-3.1-flash-lite")
-        self.assertEqual(cfg_default.groq_model, "qwen/qwen3.8-27b")
+        self.assertEqual(cfg_default.gemini_model, "gemini-2.5-flash-lite")
+        self.assertEqual(cfg_default.gemini_fallback_model, "gemini-2.5-flash")
+        self.assertEqual(cfg_default.groq_model, "llama-3.3-70b-versatile")
 
         with patch.dict(
             os.environ,
@@ -526,9 +526,9 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             called_urls.append(str(request.url))
-            if "gemini-3.5-flash-lite" in str(request.url):
+            if "gemini-2.5-flash-lite" in str(request.url):
                 return httpx.Response(429, json={"error": "rate_limited"})
-            if "gemini-3.1-flash-lite" in str(request.url):
+            if "gemini-2.5-flash" in str(request.url):
                 return httpx.Response(
                     200,
                     json={
@@ -563,9 +563,9 @@ class TestMemoryGameEvaluator(unittest.IsolatedAsyncioTestCase):
             enable_ai_enrichment=True,
         )
         self.assertEqual(len(called_urls), 2)
-        self.assertIn("gemini-3.5-flash-lite", called_urls[0])
-        self.assertIn("gemini-3.1-flash-lite", called_urls[1])
-        self.assertEqual(enriched.ai_provider, "gemini:gemini-3.1-flash-lite")
+        self.assertIn("gemini-2.5-flash-lite", called_urls[0])
+        self.assertIn("gemini-2.5-flash", called_urls[1])
+        self.assertEqual(enriched.ai_provider, "gemini:gemini-2.5-flash")
 
     def test_coaching_prompt_fences_untrusted_child_response(self):
         spec = generate_scene_spec(

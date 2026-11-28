@@ -143,14 +143,14 @@ export function ParentAccountDropdown({
         count: unreadWaitingReviewCount,
       });
     }
-    if (activeCount > 0) {
-      return t("navigation.accountMenu.taskStatusRunning", {
-        count: activeCount,
-      });
-    }
     if (unreadCompletedCount > 0) {
       return t("navigation.accountMenu.taskStatusNewDone", {
         count: unreadCompletedCount,
+      });
+    }
+    if (activeCount > 0) {
+      return t("navigation.accountMenu.taskStatusRunning", {
+        count: activeCount,
       });
     }
     return t("navigation.accountMenu.taskStatusIdle");

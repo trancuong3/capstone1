@@ -311,10 +311,12 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
         },
       });
 
-      expect(acceptedLengths).toHaveLength(1);
+      // Index 0 is the 0.25s (4000 samples @ 16kHz) JIT warmup stream inside ensureRecognizer().
+      expect(acceptedLengths).toHaveLength(2);
+      expect(acceptedLengths[0]).toBe(4000);
       // Trimmed to ~0.18s lead + 0.40s speech = ~9,280 samples (< 11,200), NOT 14,400 + 2,880 = 17,280!
-      expect(acceptedLengths[0]).toBeLessThan(Math.round(0.7 * sr));
-      expect(acceptedLengths[0]).toBeGreaterThan(Math.round(0.5 * sr));
+      expect(acceptedLengths[1]).toBeLessThan(Math.round(0.7 * sr));
+      expect(acceptedLengths[1]).toBeGreaterThan(Math.round(0.5 * sr));
 
       // 0.18s lead + 0.40s speech + 0.50s excess trailing silence => tail trimmed to <= 0.20s (~0.78s total)
       const tailSamples = new Float32Array(Math.round(1.08 * sr));
@@ -329,9 +331,9 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
           sampleRate: sr,
         },
       });
-      expect(acceptedLengths).toHaveLength(2);
-      expect(acceptedLengths[1]).toBeLessThan(Math.round(0.85 * sr));
-      expect(acceptedLengths[1]).toBeGreaterThan(Math.round(0.65 * sr));
+      expect(acceptedLengths).toHaveLength(3);
+      expect(acceptedLengths[2]).toBeLessThan(Math.round(0.85 * sr));
+      expect(acceptedLengths[2]).toBeGreaterThan(Math.round(0.65 * sr));
 
       // 20Hz sub-rumble hum stripped by 60Hz HPF must return "" with zero Sherpa decode
       // even when unfiltered client VAD passes voicedDurationMs > 0.
@@ -348,7 +350,7 @@ describe("Hosted Voice FE Hardening (STT-01..STT-10 & TTS-03..TTS-09)", () => {
           voicedDurationMs: 300,
         },
       });
-      expect(acceptedLengths).toHaveLength(2);
+      expect(acceptedLengths).toHaveLength(3);
       expect(workerGlobal.postMessage).toHaveBeenLastCalledWith({
         type: "result",
         id: "hpf-hum-silence",

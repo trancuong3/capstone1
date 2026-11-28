@@ -1,3 +1,4 @@
+import { registerCacheResetListener } from "@/lib/api/read-cache";
 import type {
   GlobalTaskActorRole,
   GlobalTaskItem,
@@ -35,7 +36,7 @@ interface ParsedCacheEntry {
 const parsedAckCache = new Map<string, ParsedCacheEntry>();
 /** Fallback used ONLY when browser localStorage throws (e.g. strict privacy mode / quota). */
 const inMemoryFallbackAckByScope = new Map<string, TaskAlertAckState>();
-const ackChangeListeners = new Set<() => void>();
+const ackChangeListenersByScope = new Map<string, Set<() => void>>();
 
 export function buildTaskAlertAckStorageKey(scopeKey: string): string {
   return `${TASK_ALERT_ACK_STORAGE_PREFIX}${scopeKey}`;
@@ -43,6 +44,17 @@ export function buildTaskAlertAckStorageKey(scopeKey: string): string {
 
 export function buildLegacyParentLastSeenKey(actorId: string): string {
   return `${LEGACY_PARENT_TASK_LAST_SEEN_PREFIX}${actorId.trim()}`;
+}
+
+/**
+ * Composite task key (`source:id`) prevents cross-source ID collisions and
+ * guarantees a non-numeric JS object key so insertion/LRU order is preserved
+ * even for numeric task IDs.
+ */
+export function buildTaskAlertKey(
+  task: Pick<GlobalTaskItem, "id" | "source">,
+): string {
+  return `${task.source}:${task.id}`;
 }
 
 export function isAlertableTaskStatus(status: GlobalTaskStatus): boolean {
@@ -61,7 +73,8 @@ export function isAlertableTaskStatus(status: GlobalTaskStatus): boolean {
  *   even under client/server clock skew.
  */
 export function buildTaskAlertSignature(task: GlobalTaskItem): string {
-  const timestamp = task.updated_at || task.completed_at || task.created_at || "";
+  const timestamp =
+    task.updated_at || task.completed_at || task.created_at || "";
   return `${task.status}|${timestamp}|${task.attempt_count}`;
 }
 
@@ -108,7 +121,9 @@ function parseStoredSeenMap(raw: string | null): Record<string, string> {
     }
     const entries = Object.entries(rawSeen as Record<string, unknown>).filter(
       (entry): entry is [string, string] =>
-        entry[0].length > 0 && typeof entry[1] === "string" && entry[1].length > 0,
+        entry[0].length > 0 &&
+        typeof entry[1] === "string" &&
+        entry[1].length > 0,
     );
     const trimmed =
       entries.length > MAX_ACK_ENTRIES_PER_SCOPE
@@ -120,9 +135,19 @@ function parseStoredSeenMap(raw: string | null): Record<string, string> {
   }
 }
 
-function notifyAckListeners(): void {
-  for (const listener of ackChangeListeners) {
-    listener();
+function notifyAckListeners(scopeKey?: string): void {
+  if (scopeKey !== undefined) {
+    const scopedListeners = ackChangeListenersByScope.get(scopeKey);
+    if (!scopedListeners) return;
+    for (const listener of scopedListeners) {
+      listener();
+    }
+    return;
+  }
+  for (const scopedListeners of ackChangeListenersByScope.values()) {
+    for (const listener of scopedListeners) {
+      listener();
+    }
   }
 }
 
@@ -193,11 +218,22 @@ export function subscribeTaskAlertAck(
     }
   };
 
-  ackChangeListeners.add(onStoreChange);
+  let scopedListeners = ackChangeListenersByScope.get(scopeKey);
+  if (!scopedListeners) {
+    scopedListeners = new Set();
+    ackChangeListenersByScope.set(scopeKey, scopedListeners);
+  }
+  scopedListeners.add(onStoreChange);
   window.addEventListener("storage", handleStorage);
 
   return () => {
-    ackChangeListeners.delete(onStoreChange);
+    const listeners = ackChangeListenersByScope.get(scopeKey);
+    if (listeners) {
+      listeners.delete(onStoreChange);
+      if (listeners.size === 0) {
+        ackChangeListenersByScope.delete(scopeKey);
+      }
+    }
     window.removeEventListener("storage", handleStorage);
   };
 }
@@ -226,15 +262,15 @@ export function acknowledgeTaskAlerts(
 
   const currentState = getTaskAlertAckState(scopeKey, actorId, actorRole);
   let hasChanges = false;
-  const nextSeen: Record<string, string> = { ...currentState.seen };
-
   for (const task of alertableTasks) {
+    const compositeKey = buildTaskAlertKey(task);
     const signature = buildTaskAlertSignature(task);
-    if (nextSeen[task.id] !== signature) {
+    if (
+      currentState.seen[compositeKey] !== signature &&
+      currentState.seen[task.id] !== signature
+    ) {
       hasChanges = true;
-      // Re-insert so the most recently acknowledged entries stay at the tail.
-      delete nextSeen[task.id];
-      nextSeen[task.id] = signature;
+      break;
     }
   }
 
@@ -242,11 +278,36 @@ export function acknowledgeTaskAlerts(
     return false;
   }
 
+  const nextSeen: Record<string, string> = { ...currentState.seen };
+  const protectedKeys = new Set<string>();
+
+  for (const task of alertableTasks) {
+    const compositeKey = buildTaskAlertKey(task);
+    const signature = buildTaskAlertSignature(task);
+    protectedKeys.add(compositeKey);
+    // Clean up any legacy bare-id key and refresh recency for ALL currently
+    // present alert tasks so active feed items are never evicted by LRU trim.
+    delete nextSeen[task.id];
+    delete nextSeen[compositeKey];
+    nextSeen[compositeKey] = signature;
+  }
+
   const keys = Object.keys(nextSeen);
   if (keys.length > MAX_ACK_ENTRIES_PER_SCOPE) {
-    const excessCount = keys.length - MAX_ACK_ENTRIES_PER_SCOPE;
-    for (let i = 0; i < excessCount; i += 1) {
-      delete nextSeen[keys[i]];
+    let remainingToEvict = keys.length - MAX_ACK_ENTRIES_PER_SCOPE;
+    for (const key of keys) {
+      if (remainingToEvict <= 0) break;
+      if (!protectedKeys.has(key)) {
+        delete nextSeen[key];
+        remainingToEvict -= 1;
+      }
+    }
+    if (remainingToEvict > 0) {
+      for (const key of Object.keys(nextSeen)) {
+        if (remainingToEvict <= 0) break;
+        delete nextSeen[key];
+        remainingToEvict -= 1;
+      }
     }
   }
 
@@ -272,7 +333,7 @@ export function acknowledgeTaskAlerts(
     inMemoryFallbackAckByScope.set(scopeKey, nextState);
   }
 
-  notifyAckListeners();
+  notifyAckListeners(scopeKey);
   return true;
 }
 
@@ -285,16 +346,17 @@ export function isTaskAlertAcknowledged(
   }
 
   const signature = buildTaskAlertSignature(task);
-  if (ackState.seen[task.id] === signature) {
+  const compositeKey = buildTaskAlertKey(task);
+  if (
+    ackState.seen[compositeKey] === signature ||
+    ackState.seen[task.id] === signature
+  ) {
     return true;
   }
 
   // Backward compatibility for existing parent sessions that only persisted
   // `viread_tasks_last_seen:<userId>` before per-task alert signatures existed.
-  if (
-    task.status === "SUCCEEDED" &&
-    ackState.legacySucceededSeenBeforeMs > 0
-  ) {
+  if (task.status === "SUCCEEDED" && ackState.legacySucceededSeenBeforeMs > 0) {
     const ts = Date.parse(
       task.updated_at || task.completed_at || task.created_at,
     );
@@ -320,10 +382,7 @@ export function computeUnreadTaskAlertCounts(
     }
     if (task.status === "WAITING_FOR_REVIEW") {
       unreadWaitingReviewCount += 1;
-    } else if (
-      task.status === "FAILED" ||
-      task.status === "PARTIAL_SUCCESS"
-    ) {
+    } else if (task.status === "FAILED" || task.status === "PARTIAL_SUCCESS") {
       unreadFailedCount += 1;
     } else if (task.status === "SUCCEEDED") {
       unreadCompletedCount += 1;
@@ -344,3 +403,5 @@ export function resetTaskAlertAckMemoryCache(): void {
   inMemoryFallbackAckByScope.clear();
   notifyAckListeners();
 }
+
+registerCacheResetListener(resetTaskAlertAckMemoryCache);

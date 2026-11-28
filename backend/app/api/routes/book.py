@@ -52,6 +52,11 @@ async def get_admin_metadata_quality(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    search = search if isinstance(search, str) else None
+    issue_type = issue_type if isinstance(issue_type, str) else None
+    lifecycle_status = lifecycle_status if isinstance(lifecycle_status, str) else None
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 10
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     service = MetadataQualityService(MetadataQualityRepository(db))
     return await service.dashboard(
         actor_id,
@@ -121,8 +126,16 @@ async def _verify_optional_active_actor(
 
 
 def _apply_optional_slice(items: list[Any], limit: int | None, offset: int) -> list[Any]:
-    safe_offset = offset if isinstance(offset, int) and offset > 0 else 0
-    safe_limit = limit if isinstance(limit, int) and limit > 0 else None
+    safe_offset = (
+        offset
+        if isinstance(offset, int) and not isinstance(offset, bool) and offset > 0
+        else 0
+    )
+    safe_limit = (
+        limit
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0
+        else None
+    )
     if safe_offset == 0 and safe_limit is None:
         return items
     return items[safe_offset : (safe_offset + safe_limit if safe_limit is not None else None)]
@@ -135,6 +148,8 @@ async def get_books(
     db: AsyncSession = Depends(get_db),
 ):
     """Return eligible catalog books without exposing internal admin creator IDs."""
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     return _apply_optional_slice(await BookService(db).list_books(), limit, offset)
 
 
@@ -254,6 +269,12 @@ async def get_parent_catalog(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    search = search if isinstance(search, str) else None
+    author = author if isinstance(author, str) else None
+    grade = grade if isinstance(grade, int) and not isinstance(grade, bool) else None
+    include_private = include_private if isinstance(include_private, bool) else False
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     service = CatalogService(db)
     await service.require_parent(actor_id)
     if include_private:
@@ -368,6 +389,13 @@ async def get_admin_catalog(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    search = search if isinstance(search, str) else None
+    lifecycle_status = lifecycle_status if isinstance(lifecycle_status, str) else None
+    verification_status = (
+        verification_status if isinstance(verification_status, str) else None
+    )
+    limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else None
+    offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
     items = await service.list(search, lifecycle_status, verification_status)
@@ -403,6 +431,7 @@ async def get_admin_image(
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    revision_id = revision_id if isinstance(revision_id, (UUID, str)) else None
     service = AdminCatalogService(db)
     await service.require_admin(actor_id)
     return await service.image(page_id, revision_id)

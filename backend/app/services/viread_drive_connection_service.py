@@ -980,6 +980,12 @@ class VireadDriveConnectionService:
             desktop_readiness=desktop_readiness,
         )
         payload["health_detail"] = health.detail
+        if health.advanced_drive_enabled is not None:
+            payload["advanced_drive_enabled"] = health.advanced_drive_enabled
+        if health.delete_mode is not None:
+            payload["delete_mode"] = health.delete_mode
+        if health.warnings:
+            payload["warnings"] = list(health.warnings)
         return payload
 
     async def run_self_test(self) -> dict[str, Any]:
@@ -1018,6 +1024,9 @@ class VireadDriveConnectionService:
             "is_private": result.is_private,
             "quota": _quota_status_to_dict(result.quota),
             "detail": result.detail,
+            "permanent_delete": result.permanent_delete,
+            "delete_mode": result.delete_mode,
+            "warning": result.warning,
         }
 
     async def disconnect(self) -> dict[str, Any]:

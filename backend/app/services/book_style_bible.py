@@ -296,7 +296,7 @@ class BookStyleBibleService:
     def _cloud_refinement_allowed(self, book: Book) -> tuple[bool, str | None, str]:
         """Strictly gate cloud Gemini refinement by PRIVATE_BOOK_ALLOW_CLOUD_AI for private books."""
         if is_book_private(book) and not OcrCorrectionConfig.private_book_allow_cloud_ai():
-            return False, None, "gemini-3.5-flash-lite"
+            return False, None, "gemini-2.5-flash-lite"
 
         cloud_enabled = (os.getenv("OCR_CLOUD_CORRECTION_ENABLED") or "").strip().lower() in {
             "1",
@@ -308,7 +308,7 @@ class BookStyleBibleService:
         model_id = (
             os.getenv("GEMINI_STYLE_BIBLE_MODEL")
             or os.getenv("GEMINI_OCR_PRIMARY_MODEL")
-            or "gemini-3.5-flash-lite"
+            or "gemini-2.5-flash-lite"
         ).strip()
         if not (cloud_enabled and api_key):
             return False, None, model_id

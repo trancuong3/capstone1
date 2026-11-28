@@ -121,6 +121,7 @@ const CLOUD_WORKER_ORDER: readonly string[] = [
   "book_quality",
   "admin_ai_workflow",
   "parent_book_submission",
+  "parent_email_dispatcher",
   "reading_reminder",
   "reading_presence",
 ];

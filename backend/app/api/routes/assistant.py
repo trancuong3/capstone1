@@ -155,10 +155,12 @@ async def get_assistant_context(
     service: ViReadAssistantService = Depends(get_assistant_service),
 ) -> AssistantContextSuggestionsResponse:
     """Return contextual starter guide prompts and quick actions for the active page."""
+    resolved_path = path if isinstance(path, str) else "/"
+    resolved_locale = locale if isinstance(locale, str) else "vi"
     return service.get_context_suggestions(
-        current_path=sanitize_current_path(path),
+        current_path=sanitize_current_path(resolved_path),
         role_scope=actor.role_scope,
-        locale=locale,
+        locale=resolved_locale,
     )
 
 

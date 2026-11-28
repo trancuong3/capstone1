@@ -37,11 +37,13 @@ async def get_child_adaptive_profile(
     safe_gender = (
         teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
     )
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
     return await _service(db).get_adaptive_profile(
         child_id,
         parent_id,
-        window_days=window_days,
-        teacher_gender=safe_gender,
+        window_days=resolved_window,
+        **extra_kwargs,
     )
 
 
@@ -79,11 +81,13 @@ async def get_child_parent_entertainment_analytics(
     safe_gender = (
         teacher_gender if isinstance(teacher_gender, str) and teacher_gender in ("female", "male") else None
     )
+    resolved_window = window_days if isinstance(window_days, int) and not isinstance(window_days, bool) else 30
+    extra_kwargs = {"teacher_gender": safe_gender} if safe_gender is not None else {}
     return await _service(db).get_parent_analytics(
         child_id,
         parent_id,
-        window_days=window_days,
-        teacher_gender=safe_gender,
+        window_days=resolved_window,
+        **extra_kwargs,
     )
 
 

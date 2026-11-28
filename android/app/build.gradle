@@ -32,6 +32,15 @@ def lanCaCertPath = providers.gradleProperty('vireadLanCaCert')
     .getOrElse('')
     .trim()
 
+// Opt-in environment-only release upload signing (never hardcode secrets or commit keystores).
+def uploadStoreFilePath = providers.environmentVariable('VIREAD_UPLOAD_STORE_FILE').getOrElse('').trim()
+def uploadStorePassword = providers.environmentVariable('VIREAD_UPLOAD_STORE_PASSWORD').getOrElse('').trim()
+def uploadKeyAlias = providers.environmentVariable('VIREAD_UPLOAD_KEY_ALIAS').getOrElse('').trim()
+def uploadKeyPassword = providers.environmentVariable('VIREAD_UPLOAD_KEY_PASSWORD').getOrElse('').trim()
+def hasReleaseUploadSigningEnv = (
+    uploadStoreFilePath && uploadStorePassword && uploadKeyAlias && uploadKeyPassword
+)
+
 def generatedLanResDir = layout.buildDirectory.dir('generated/lanAcceptanceRes').get().asFile
 
 android {
@@ -52,11 +61,27 @@ android {
         buildConfig true
     }
 
+    signingConfigs {
+        if (hasReleaseUploadSigningEnv) {
+            release {
+                storeFile file(uploadStoreFilePath)
+                storePassword uploadStorePassword
+                keyAlias uploadKeyAlias
+                keyPassword uploadKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseUploadSigningEnv) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -201,6 +226,21 @@ tasks.matching { it.name == 'preReleaseBuild' || it.name == 'assembleRelease' ||
     doFirst {
         if (lanAcceptanceMode) {
             throw new GradleException('LAN acceptance mode is strictly forbidden for release builds (assembleRelease / bundleRelease).')
+        }
+        def missingSigningVars = []
+        if (!uploadStoreFilePath) missingSigningVars.add('VIREAD_UPLOAD_STORE_FILE')
+        if (!uploadStorePassword) missingSigningVars.add('VIREAD_UPLOAD_STORE_PASSWORD')
+        if (!uploadKeyAlias) missingSigningVars.add('VIREAD_UPLOAD_KEY_ALIAS')
+        if (!uploadKeyPassword) missingSigningVars.add('VIREAD_UPLOAD_KEY_PASSWORD')
+        if (!missingSigningVars.isEmpty()) {
+            throw new GradleException(
+                'Release signing requires environment variables: ' + missingSigningVars.join(', ') +
+                '. See docs/android/RELEASE_SIGNING.md.'
+            )
+        }
+        def uploadKeystoreFile = file(uploadStoreFilePath)
+        if (!uploadKeystoreFile.isFile()) {
+            throw new GradleException('VIREAD_UPLOAD_STORE_FILE keystore not found: ' + uploadKeystoreFile.absolutePath)
         }
     }
 }

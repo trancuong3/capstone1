@@ -573,3 +573,56 @@ class AiTeacherVoiceSyncTests(unittest.IsolatedAsyncioTestCase):
             "Không sao đâu, từ này mình luyện thêm sau. Mình sang từ tiếp theo nhé!",
         ):
             self.assertTrue(is_coaching_text_allowlisted(phrase), phrase)
+
+    async def test_catalog_allowlist_permits_extracted_sentences_from_multi_sentence_page(self) -> None:
+        book_id = uuid4()
+        fake_repo = SimpleNamespace(
+            get_verified_catalog_texts=AsyncMock(
+                return_value=[
+                    (
+                        "Hai mươi mốt bông hoa. Hôm nay trời nắng đẹp!",
+                        [
+                            ("hai", "Hai"),
+                            ("mươi", "mươi"),
+                            ("mốt", "mốt"),
+                            ("bông", "bông"),
+                            ("hoa", "hoa."),
+                            ("hôm", "Hôm"),
+                            ("nay", "nay"),
+                            ("trời", "trời"),
+                            ("nắng", "nắng"),
+                            ("đẹp", "đẹp!"),
+                        ],
+                    )
+                ]
+            )
+        )
+        svc = TtsAudioCacheService(None)
+        svc.repo = fake_repo  # type: ignore[assignment]
+
+        # Multi-word extracted Sentence Shooter sentences from a multi-sentence verified page MUST pass
+        self.assertTrue(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Hai mươi mốt bông hoa.",
+            )
+        )
+        self.assertTrue(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Hôm nay trời nắng đẹp!",
+            )
+        )
+        # Arbitrary unverified text MUST still be rejected to prevent global CATALOG cache poisoning
+        self.assertFalse(
+            await svc._is_catalog_text_allowlisted(
+                book_id=book_id,
+                page_id=None,
+                page_revision_id=None,
+                normalized_text="Con tên là Minh ở Hà Nội.",
+            )
+        )

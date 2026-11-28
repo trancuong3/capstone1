@@ -47,6 +47,7 @@ export interface VoiceEngineHealthSnapshot {
     readonly male_tts_configured?: boolean;
     readonly stt_cooldown?: boolean;
     readonly tts_cooldown?: boolean;
+    readonly error_code?: string | null;
     readonly model_id?: string | null;
     readonly voice_id?: string | null;
   };
@@ -87,6 +88,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 }
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
+export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -280,6 +282,27 @@ export function getFreshVoiceEngineHealth(
   return cachedHealth;
 }
 
+/**
+ * Returns fresh voice health, or retains a confirmed `LOCAL_VOICE_UNCONFIGURED`
+ * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
+ * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
+ */
+export function getVoiceEngineHealthForRouting(
+  maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
+): VoiceEngineHealthSnapshot | null {
+  const fresh = getFreshVoiceEngineHealth(maxAgeMs);
+  if (fresh) return fresh;
+  if (
+    cachedHealth &&
+    cachedHealthFetchedAt > 0 &&
+    isHostedLocalVoiceUnconfigured(cachedHealth) &&
+    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+  ) {
+    return cachedHealth;
+  }
+  return null;
+}
+
 export function setCachedVoiceEngineHealth(
   health: VoiceEngineHealthSnapshot | null,
   fetchedAt = Date.now(),
@@ -404,9 +427,24 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
               configured: Boolean(elevenlabsRaw.configured),
               stt_configured: Boolean(elevenlabsRaw.stt_configured),
               tts_configured: Boolean(elevenlabsRaw.tts_configured),
-              male_tts_configured: Boolean(elevenlabsRaw.male_tts_configured),
-              stt_cooldown: Boolean(elevenlabsRaw.stt_cooldown),
-              tts_cooldown: Boolean(elevenlabsRaw.tts_cooldown),
+              ...(typeof elevenlabsRaw.male_tts_configured === "boolean"
+                ? { male_tts_configured: elevenlabsRaw.male_tts_configured }
+                : {}),
+              ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
+                ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.tts_cooldown === "boolean"
+                ? { tts_cooldown: elevenlabsRaw.tts_cooldown }
+                : {}),
+              ...(typeof elevenlabsRaw.error_code === "string" ||
+              elevenlabsRaw.error_code === null
+                ? {
+                    error_code:
+                      typeof elevenlabsRaw.error_code === "string"
+                        ? elevenlabsRaw.error_code
+                        : null,
+                  }
+                : {}),
               model_id:
                 typeof elevenlabsRaw.model_id === "string"
                   ? elevenlabsRaw.model_id

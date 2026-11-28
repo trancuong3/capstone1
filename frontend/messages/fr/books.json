@@ -497,7 +497,20 @@
     "retriedQueuedOfflineNotice": "Demande de nouvelle tentative enregistrée dans la file OCR. La page sera traitée automatiquement dès la réouverture de l’OCR.",
     "replacedPageImageQueuedOfflineNotice": "Image de la page {page} remplacée et ajoutée à la file OCR. La vérification reprendra automatiquement au retour de l’OCR.",
     "replacedSubmissionImageQueuedOfflineNotice": "Nouvelle image remplacée et ajoutée à la file OCR. La vérification reprendra automatiquement au retour de l’OCR.",
-    "toolCheckPassedNotice": "Cette page a réussi le contrôle de sécurité."
+    "toolCheckPassedNotice": "Cette page a réussi le contrôle de sécurité.",
+    "toolScopeCloudAi": "vérification orthographique et contrôle de sécurité via un service IA cloud sécurisé",
+    "taskCenterLink": "Centre des tâches",
+    "changeCoverAction": "Changer la couverture",
+    "closeCoverStudio": "Fermer la couverture",
+    "uploadPrivacyTransparency": "Transparence et confidentialité : les livres privés ne sont visibles que dans votre compte familial ; le texte des pages importées fait l’objet d’une vérification automatique de l’orthographe et de la sécurité enfant (modèle local ou service IA cloud sécurisé selon la configuration du serveur) et n’est pas utilisé par défaut pour l’entraînement OCR.",
+    "openPageIllustrationAria": "Ouvrir l’illustration de la page {page}",
+    "closePageIllustrationAria": "Fermer l’illustration de la page {page}",
+    "pageIllustrationAction": "Illustration",
+    "closePageIllustrationAction": "Fermer l’illustration",
+    "openPageOcrBlocksAria": "Voir les blocs de texte OCR de la page {page}",
+    "closePageOcrBlocksAria": "Fermer les blocs de texte OCR de la page {page}",
+    "openPageOcrBlocksAction": "Blocs OCR",
+    "closePageOcrBlocksAction": "Fermer les blocs OCR"
   },
   "ocrContribution": {
     "cardAria": "Contribuer à l'amélioration de la reconnaissance de texte pour {title}",

@@ -256,14 +256,14 @@ export class InteractivePromptSelector {
     const prev = this.lastIndex.get(category) ?? -1;
     const nextIdx = (prev + 1) % bank.length;
     this.lastIndex.set(category, nextIdx);
-    let template = bank[nextIdx];
+    const resolvedGender = gender ?? getEffectiveTeacherPersona().gender;
+    let template = adaptTextToTeacherPersona(bank[nextIdx], resolvedGender);
     if (vars) {
       for (const [key, value] of Object.entries(vars)) {
         template = template.replaceAll(`{${key}}`, value);
       }
     }
-    const resolvedGender = gender ?? getEffectiveTeacherPersona().gender;
-    return adaptTextToTeacherPersona(template, resolvedGender);
+    return template;
   }
 
   /**

@@ -88,6 +88,30 @@ function MoodIcon({ mood }: { readonly mood: CompanionMood }) {
   return <Volume2 aria-hidden="true" className="size-5" />;
 }
 
+const QUOTED_BOOK_SEGMENT_RE = /(“[^”]*”|"[^"]*")/gu;
+
+function adaptFramingPreservingQuotedText(
+  text: string,
+  gender: VoiceGender,
+): string {
+  if (gender !== "male" || !text) return text;
+  if (!text.includes("“") && !text.includes('"')) {
+    return adaptTextToTeacherPersona(text, gender);
+  }
+  return text
+    .split(QUOTED_BOOK_SEGMENT_RE)
+    .map((segment) => {
+      if (
+        (segment.startsWith("“") && segment.endsWith("”")) ||
+        (segment.startsWith('"') && segment.endsWith('"'))
+      ) {
+        return segment;
+      }
+      return adaptTextToTeacherPersona(segment, gender);
+    })
+    .join("");
+}
+
 /**
  * Non-intrusive elementary-school teacher companion bubble (G27, G28).
  * Renders inside the reading flow's static feedback slot so it never covers
@@ -110,7 +134,7 @@ export function ReadingCompanionBubble({
   const fallbackLabel = t(
     persona.gender === "male" ? theme.labelKeys.male : theme.labelKeys.female,
   );
-  const normalizedTitle = adaptTextToTeacherPersona(
+  const normalizedTitle = adaptFramingPreservingQuotedText(
     state.title || fallbackLabel,
     persona.gender,
   ).replace(/^(Cô giáo|Thầy giáo)(?!\s+AI)/u, localizedPersonaTitle);
@@ -119,7 +143,7 @@ export function ReadingCompanionBubble({
     normalizedTitle.includes(persona.title)
       ? normalizedTitle
       : `${localizedPersonaTitle} · ${normalizedTitle}`;
-  const displayMessage = adaptTextToTeacherPersona(
+  const displayMessage = adaptFramingPreservingQuotedText(
     state.message,
     persona.gender,
   );

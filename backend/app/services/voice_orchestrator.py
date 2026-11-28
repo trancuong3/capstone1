@@ -951,8 +951,12 @@ class VoiceOrchestrator:
                         el_resolved_voice = (
                             el_audio.resolved_voice_id
                             or el_voice_id
+                            or self.elevenlabs.get_configured_voice_id()
                         )
                         el_model = self.elevenlabs.get_configured_model_id()
+                        # NEVER cache ElevenLabs cloud fallback audio under a `local_*`
+                        # voice_id in `tts_audio_cache_entries` so VieNeu precomputed
+                        # cache rows are never contaminated across providers/voices.
                         logger.info(
                             "tts_ok provider=elevenlabs reason=%s voice=%s ms=%.1f session=%s request_id=%s",
                             local_err.code,
@@ -1293,6 +1297,8 @@ class VoiceOrchestrator:
                     }
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "expected_gender"):
                         el_timed_kwargs["expected_gender"] = el_expected_gender
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
+                        el_timed_kwargs["region"] = self._voice_region(voice_id)
                     try:
                         el_timed = await self.elevenlabs.synthesize_timed(**el_timed_kwargs)
                     except VoiceProviderError as el_err:
@@ -1307,6 +1313,8 @@ class VoiceOrchestrator:
                             get_request_id(),
                         )
                     else:
+                        el_timed = replace(el_timed, region=self._voice_region(voice_id))
+                        # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
                         logger.info(
                             "tts_timed_ok provider=elevenlabs reason=%s voice=%s words=%d ms=%.1f session=%s request_id=%s",
                             local_err.code,
@@ -1569,6 +1577,8 @@ class VoiceOrchestrator:
                     }
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "expected_gender"):
                         el_phonics_kwargs["expected_gender"] = el_expected_gender
+                    if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
+                        el_phonics_kwargs["region"] = self._voice_region(voice_id)
                     try:
                         el_phonics = await self.elevenlabs.synthesize_phonics(**el_phonics_kwargs)
                     except VoiceProviderError as el_err:
@@ -1583,6 +1593,8 @@ class VoiceOrchestrator:
                             get_request_id(),
                         )
                     else:
+                        el_phonics = replace(el_phonics, region=self._voice_region(voice_id))
+                        # NEVER store ElevenLabs fallback audio under a `local_*` voice_id.
                         logger.info(
                             "tts_phonics_ok provider=elevenlabs reason=%s voice=%s steps=%d ms=%.1f session=%s request_id=%s",
                             local_err.code,

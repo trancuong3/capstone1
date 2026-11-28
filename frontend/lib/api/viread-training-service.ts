@@ -77,6 +77,9 @@ const driveStatusSchema = z.object({
   disconnected_at: z.string().nullable(),
   health_detail: z.string().nullable().optional(),
   google_token_revoked: z.boolean().optional(),
+  advanced_drive_enabled: z.boolean().nullable().optional(),
+  delete_mode: z.string().nullable().optional(),
+  warnings: z.array(z.string()).optional(),
 });
 
 const driveConnectStartSchema = z.object({
@@ -96,6 +99,9 @@ const driveSelfTestSchema = z.object({
   is_private: z.boolean(),
   quota: driveQuotaSchema.nullable(),
   detail: z.string(),
+  permanent_delete: z.boolean().nullable().optional(),
+  delete_mode: z.string().nullable().optional(),
+  warning: z.string().nullable().optional(),
 });
 
 const runtimeModelSchema = z.object({
