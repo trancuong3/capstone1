@@ -687,6 +687,7 @@ export function ReadingPreparationScreen({
             </span>
           </div>
           <ReadingVoiceSettings
+            childId={data.child.id}
             disabled={isStarting}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}

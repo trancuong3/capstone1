@@ -21,7 +21,12 @@ import {
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
   isSyntheticClientVoiceSessionId,
+  STATIC_LOCAL_VOICES,
 } from "@/lib/reading/session-voice-lock";
+import {
+  getBrowserOnlineStatus,
+  recordTtsEngineUsage,
+} from "@/lib/reading/voice-engine-status";
 import {
   DEFAULT_SPEED,
   getSpeechPreferences,
@@ -39,7 +44,6 @@ import {
   getPreferredJsonTtsAcceptHeader,
   type TtsAudioFormat,
 } from "@/lib/reading/tts-audio-format";
-import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -244,18 +248,43 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 export function createVoiceStudioService(): VoiceStudioService {
   return {
     async listVoices(signal) {
+      const buildStaticFallback = (): VoiceList => ({
+        voices: [...STATIC_LOCAL_VOICES],
+        default_voice_id: DEFAULT_LOCAL_VOICE_ID,
+        local_worker_ready: false,
+        google_tts_available: false,
+        cached_voice_ids: ["local_north_truc_ly", "local_north_thien_minh"],
+      });
+      if (!getBrowserOnlineStatus()) {
+        return buildStaticFallback();
+      }
       const policy = getVoicePolicyPreferences();
       const query =
         policy.providerMode === "local_with_google_fallback" &&
         policy.allowGoogleTtsFallback
           ? "?provider_mode=local_with_google_fallback&allow_google_tts=true"
           : "";
-      const payload = await request(
-        `/voice/voices${query}`,
-        { method: "GET" },
-        signal,
-        15_000,
-      );
+      let payload: unknown;
+      try {
+        payload = await request(
+          `/voice/voices${query}`,
+          { method: "GET" },
+          signal,
+          4_000,
+        );
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        if (
+          isTimeoutError(error) ||
+          (error instanceof ServiceError &&
+            (error.status === 0 ||
+              error.status === 503 ||
+              error.status === 504))
+        ) {
+          return buildStaticFallback();
+        }
+        throw error;
+      }
       const parsed = voiceListSchema.safeParse(payload);
       if (!parsed.success) throw failure(502);
       const seen = new Set<string>();
@@ -339,7 +368,7 @@ export function createVoiceStudioService(): VoiceStudioService {
         options.voiceId ??
         activeLock?.voiceId ??
         (options.voiceId === null
-          ? null
+          ? defaultVoiceOverride
           : (speechPrefs.voiceId ?? defaultVoiceOverride));
       const cacheVoiceId =
         resolvedRequestVoiceId ?? effectiveVoiceId ?? DEFAULT_LOCAL_VOICE_ID;
