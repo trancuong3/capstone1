@@ -451,4 +451,78 @@ describe("AppStoreProvider", () => {
       nowSpy.mockRestore();
     }
   });
+
+  it("populates validatedSelectedChild without childService.get when auth hydrates from initializing to ready with fresh cache", async () => {
+    window.sessionStorage.setItem(
+      "viread:selected-child:parent-1",
+      "child-one",
+    );
+    const cachedChild = makeChild("child-one", "parent-1");
+    writeUserCache("parent-1", "dashboard-summary", {
+      profile: null,
+      children: [cachedChild],
+      latest_sessions_by_child: {},
+      source: "dashboard-summary",
+    });
+
+    const getChild = vi.fn().mockResolvedValue(cachedChild);
+    const services = {
+      childService: { get: getChild },
+    } as unknown as AppServices;
+
+    function HydratedProbe() {
+      const { validatedSelectedChild, selectedChildId } = useAppStore();
+      const { state } = useValidatedSelectedChild();
+      return (
+        <div>
+          <output aria-label="Hydrated selected">
+            {selectedChildId ?? "none"}
+          </output>
+          <output aria-label="Hydrated validated">
+            {validatedSelectedChild?.id ?? "none"}
+          </output>
+          <output aria-label="Hydrated status">{state.status}</output>
+        </div>
+      );
+    }
+
+    const view = render(
+      <AuthRuntimeContext.Provider
+        value={makeAuthRuntime(null, {
+          lastEvent: null,
+          status: "initializing",
+        })}
+      >
+        <AppServicesContext.Provider value={services}>
+          <AppStoreProvider>
+            <HydratedProbe />
+          </AppStoreProvider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+    expect(screen.getByLabelText("Hydrated status")).toHaveTextContent(
+      "loading",
+    );
+
+    view.rerender(
+      <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-1")}>
+        <AppServicesContext.Provider value={services}>
+          <AppStoreProvider>
+            <HydratedProbe />
+          </AppStoreProvider>
+        </AppServicesContext.Provider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Hydrated validated")).toHaveTextContent(
+        "child-one",
+      ),
+    );
+    expect(screen.getByLabelText("Hydrated selected")).toHaveTextContent(
+      "child-one",
+    );
+    expect(screen.getByLabelText("Hydrated status")).toHaveTextContent("ready");
+    expect(getChild).not.toHaveBeenCalled();
+  });
 });

@@ -15,6 +15,7 @@ import { useChildService } from "@/hooks/use-child-service";
 import { useReadingServices } from "@/hooks/use-reading-services";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import type { BookDetailDTO, BookPagePreviewDTO } from "@/types/book";
 import type { MicrophonePermissionUiState } from "@/types/reading";
 import type { ChildProfileDTO } from "@/types/child";
@@ -372,6 +373,7 @@ export function ReadingPreparationScreen({
         router.replace("/dashboard?focus=child-selection&reason=change");
         return;
       }
+      hydrateTeacherVoiceFromChildProfile(currentChild);
       const session = await readingService.create({
         book_id: state.data.book.id,
         child_id: currentChild.id,

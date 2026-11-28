@@ -5,6 +5,7 @@ import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
+  refreshBrowserAccessToken,
 } from "@/lib/api/browser-auth";
 import {
   invalidateApiReadCache,
@@ -778,16 +779,6 @@ export async function requestApi<T>(
 
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
     const explicitLocale = resolveExplicitLocale();
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
-        ? { "X-ViRead-Locale": explicitLocale }
-        : {}),
-    };
-    if (requestOptions.body !== undefined && !isFormDataBody) {
-      headers["Content-Type"] = "application/json";
-    }
     const body =
       requestOptions.body === undefined
         ? undefined
@@ -795,6 +786,8 @@ export async function requestApi<T>(
           ? requestOptions.body
           : JSON.stringify(requestOptions.body);
     const deadlineAt = Date.now() + totalDeadlineMs;
+    let activeToken = token;
+    let hasRetriedAuth = false;
     let lastError: ServiceError | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -809,6 +802,17 @@ export async function requestApi<T>(
         hasExplicitTimeout || maxRetries > 0
           ? Math.max(1, Math.min(singleAttemptTimeoutMs, remainingMs))
           : singleAttemptTimeoutMs;
+
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        Authorization: `Bearer ${activeToken}`,
+        ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
+          ? { "X-ViRead-Locale": explicitLocale }
+          : {}),
+      };
+      if (requestOptions.body !== undefined && !isFormDataBody) {
+        headers["Content-Type"] = "application/json";
+      }
 
       const attemptController = new AbortController();
       let timedOut = false;
@@ -847,6 +851,16 @@ export async function requestApi<T>(
           if (response.status === 401) {
             invalidateBrowserTokenCache();
             invalidateApiReadCache();
+            if (!hasRetriedAuth && !fetchSignal?.aborted) {
+              hasRetriedAuth = true;
+              const refreshedToken =
+                await refreshBrowserAccessToken(activeToken);
+              if (refreshedToken && refreshedToken !== activeToken) {
+                activeToken = refreshedToken;
+                attempt -= 1;
+                continue;
+              }
+            }
           }
           const backendMessage = await safeBackendMessage(response);
           const coldStartGateway =

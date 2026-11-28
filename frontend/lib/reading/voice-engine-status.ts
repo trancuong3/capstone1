@@ -44,6 +44,9 @@ export interface VoiceEngineHealthSnapshot {
     readonly configured: boolean;
     readonly stt_configured: boolean;
     readonly tts_configured: boolean;
+    readonly male_tts_configured?: boolean;
+    readonly stt_cooldown?: boolean;
+    readonly tts_cooldown?: boolean;
     readonly model_id?: string | null;
     readonly voice_id?: string | null;
   };
@@ -349,6 +352,10 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
     const rec = raw as Record<string, unknown>;
     const localRaw = rec.local as Record<string, unknown> | undefined;
     const googleRaw = rec.google as Record<string, unknown> | undefined;
+    const elevenlabsRaw =
+      rec.elevenlabs && typeof rec.elevenlabs === "object"
+        ? (rec.elevenlabs as Record<string, unknown>)
+        : undefined;
     if (!localRaw || !googleRaw) return null;
 
     const snapshot: VoiceEngineHealthSnapshot = {
@@ -391,6 +398,26 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
         stt_cooldown: Boolean(googleRaw.stt_cooldown),
         tts_cooldown: Boolean(googleRaw.tts_cooldown),
       },
+      ...(elevenlabsRaw
+        ? {
+            elevenlabs: {
+              configured: Boolean(elevenlabsRaw.configured),
+              stt_configured: Boolean(elevenlabsRaw.stt_configured),
+              tts_configured: Boolean(elevenlabsRaw.tts_configured),
+              male_tts_configured: Boolean(elevenlabsRaw.male_tts_configured),
+              stt_cooldown: Boolean(elevenlabsRaw.stt_cooldown),
+              tts_cooldown: Boolean(elevenlabsRaw.tts_cooldown),
+              model_id:
+                typeof elevenlabsRaw.model_id === "string"
+                  ? elevenlabsRaw.model_id
+                  : null,
+              voice_id:
+                typeof elevenlabsRaw.voice_id === "string"
+                  ? elevenlabsRaw.voice_id
+                  : null,
+            },
+          }
+        : {}),
     };
     setCachedVoiceEngineHealth(snapshot);
     return snapshot;

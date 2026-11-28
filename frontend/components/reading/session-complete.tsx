@@ -104,11 +104,15 @@ export function SessionComplete({
     if (!hasVoiceApi) return;
     offeredVoiceRef.current = true;
     const offerText = adaptTextToTeacherPersona(
-      "Buổi đọc xong rồi! Con có muốn luyện lại mấy từ khó vừa rồi cùng cô không? Con bấm nút Luyện ngay các từ khó nhé!",
+      "Hoan hô con đã đọc hết bài! Con có muốn đọc lại mấy từ vừa vấp không?",
       getEffectiveTeacherPersona().gender,
     );
     void speechPlayer
-      .play(offerText, { coaching: true })
+      .play(offerText, {
+        coaching: true,
+        cacheScope: "COACHING",
+        bypassSessionLock: true,
+      })
       .catch(() => undefined);
     return () => {
       speechPlayer.stop();

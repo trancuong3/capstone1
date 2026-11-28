@@ -60,6 +60,7 @@ import {
   getSessionVoiceAudit,
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
+  hydrateTeacherVoiceFromChildProfile,
   lockSessionVoice,
   setActiveVoiceSession,
   subscribeVoicePolicy,
@@ -1210,7 +1211,12 @@ function ReadingSessionScreen({
         true,
       );
     } catch (err) {
-      if (!(err instanceof Error && err.name === "AbortError")) {
+      const isAbortError =
+        typeof err === "object" &&
+        err !== null &&
+        "name" in err &&
+        (err as { name?: unknown }).name === "AbortError";
+      if (!isAbortError) {
         console.warn("Lỗi phát âm 1 từ:", err);
       }
     } finally {
@@ -1675,6 +1681,13 @@ function ReadingSessionScreen({
 
         if (!active) return;
 
+        hydrateTeacherVoiceFromChildProfile(child, {
+          syncActiveServerSessionLock:
+            typeof voiceStudio.updateSessionVoiceLock === "function"
+              ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
+              : undefined,
+        });
+
         if (
           practice &&
           (practice.pages.length > 0 || practice.legacy_evidence_present)
@@ -1810,7 +1823,7 @@ function ReadingSessionScreen({
     return () => {
       active = false;
     };
-  }, [initialPageId, loadKey, services, sessionId, t]);
+  }, [initialPageId, loadKey, services, sessionId, t, voiceStudio]);
 
   useEffect(() => {
     if (loadState.status !== "ready") return;
@@ -4741,6 +4754,7 @@ function ReadingSessionScreen({
           isPrivateBook: false,
           cacheScope: "COACHING",
           bypassSessionLock: true,
+          utteranceKind: "voice_preview",
           onPlay: () => {
             audioPlayed = true;
           },
@@ -8403,6 +8417,9 @@ function ReadingSessionScreen({
           onExit={() => setConfirmFinish(true)}
           voiceSettings={
             <ReadingVoiceSettings
+              childId={
+                loadState.status === "ready" ? loadState.data.child.id : null
+              }
               disabled={isMicRecording}
               fallbackNotice={speechPlayer.fallbackNotice}
               isPreviewing={speechPlayer.isPlaying}

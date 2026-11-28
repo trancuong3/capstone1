@@ -18,6 +18,7 @@ class AssessmentRequest(BaseModel):
     days: int = Field(default=30, ge=7, le=90)
     # Ask the AI for a new comment even when the data did not change.
     refresh: bool = False
+    teacher_gender: Literal["female", "male"] | None = None
 
 
 class ScoreComponentRead(BaseModel):

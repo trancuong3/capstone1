@@ -167,6 +167,21 @@ class ChildProfileRepository:
             return None
 
         next_settings = dict(child.Settings or {})
+        existing_vp = next_settings.get("voice_preferences")
+        incoming_updated_at = voice_preferences.get("updated_at")
+        existing_updated_at = (
+            existing_vp.get("updated_at") if isinstance(existing_vp, dict) else None
+        )
+        if (
+            isinstance(incoming_updated_at, (int, float))
+            and not isinstance(incoming_updated_at, bool)
+            and incoming_updated_at > 0
+            and isinstance(existing_updated_at, (int, float))
+            and not isinstance(existing_updated_at, bool)
+            and int(existing_updated_at) > int(incoming_updated_at)
+        ):
+            return child
+
         next_settings["voice_preferences"] = dict(voice_preferences)
         child.Settings = next_settings
         try:
@@ -619,6 +634,14 @@ async def get_current_profile(
                 "message": "Profile not found",
             },
         )
+    except ProfileAccessDeniedError:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Access denied",
+            },
+        )
 
     return ParentProfileResponse.model_validate(profile)
 
@@ -814,6 +837,14 @@ async def update_current_contact_phone(
             detail={
                 "code": "RESOURCE_NOT_FOUND",
                 "message": "Profile not found",
+            },
+        ) from error
+    except ProfileAccessDeniedError as error:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ACCESS_DENIED",
+                "message": "Access denied",
             },
         ) from error
 

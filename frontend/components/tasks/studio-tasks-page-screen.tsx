@@ -26,12 +26,14 @@ import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provi
 import { TaskProgressView } from "@/components/tasks/global-task-center";
 import { useTranslations } from "@/hooks/use-i18n";
 import {
+  buildTaskActorCacheKey,
   createGlobalTasksService,
   emitStudioTasksChanged,
   STUDIO_TASKS_CHANGED_EVENT,
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
 import type { TranslateFn } from "@/lib/i18n/types";
+import { acknowledgeTaskAlerts } from "@/lib/tasks/task-alert-acknowledgment";
 import { cn } from "@/lib/utils/cn";
 import {
   ACTIVE_GLOBAL_TASK_STATUSES,
@@ -373,6 +375,63 @@ export function StudioTasksPageScreen({
   const pendingActionIds = useProviderData
     ? (taskCenter?.pendingActionJobIds ?? new Set<string>())
     : localBusyIds;
+  const effectiveAckScopeKey = useProviderData
+    ? (taskCenter?.scopeKey ?? null)
+    : buildTaskActorCacheKey(localFeed?.actor_id, localFeed?.actor_role);
+  const effectiveAckActorId = useProviderData
+    ? (taskCenter?.actorId ?? null)
+    : (localFeed?.actor_id ?? null);
+  const effectiveAckActorRole = useProviderData
+    ? (taskCenter?.actorRole ?? null)
+    : (localFeed?.actor_role ?? null);
+
+  // Opening and viewing the full AI Tasks page acknowledges current alert tasks
+  // so the navbar / sidebar AI task bar stops displaying stale warnings.
+  useEffect(() => {
+    if (!effectiveAckScopeKey || tasks.length === 0) {
+      return;
+    }
+    const acknowledgeIfVisible = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      acknowledgeTaskAlerts(
+        effectiveAckScopeKey,
+        tasks,
+        effectiveAckActorId,
+        effectiveAckActorRole,
+      );
+    };
+    acknowledgeIfVisible();
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.addEventListener("visibilitychange", acknowledgeIfVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", acknowledgeIfVisible);
+    };
+  }, [
+    effectiveAckActorId,
+    effectiveAckActorRole,
+    effectiveAckScopeKey,
+    tasks,
+  ]);
+
+  const acknowledgeSingleTask = useCallback(
+    (task: GlobalTaskItem) => {
+      if (!effectiveAckScopeKey) return;
+      acknowledgeTaskAlerts(
+        effectiveAckScopeKey,
+        [task],
+        effectiveAckActorId,
+        effectiveAckActorRole,
+      );
+    },
+    [effectiveAckActorId, effectiveAckActorRole, effectiveAckScopeKey],
+  );
 
   useEffect(() => {
     if (activeCount <= 0) return;
@@ -394,6 +453,10 @@ export function StudioTasksPageScreen({
   const handleRetry = useCallback(
     async (jobId: string) => {
       setActionNotice(null);
+      const targetTask = tasks.find((item) => item.id === jobId);
+      if (targetTask) {
+        acknowledgeSingleTask(targetTask);
+      }
       if (useProviderData && taskCenter) {
         await taskCenter.retryTask(jobId);
         setActionNotice(
@@ -431,12 +494,25 @@ export function StudioTasksPageScreen({
         });
       }
     },
-    [fallbackService, loadLocalFeed, t, taskCenter, useProviderData, viewMode],
+    [
+      acknowledgeSingleTask,
+      fallbackService,
+      loadLocalFeed,
+      t,
+      taskCenter,
+      tasks,
+      useProviderData,
+      viewMode,
+    ],
   );
 
   const handleCancel = useCallback(
     async (jobId: string) => {
       setActionNotice(null);
+      const targetTask = tasks.find((item) => item.id === jobId);
+      if (targetTask) {
+        acknowledgeSingleTask(targetTask);
+      }
       if (useProviderData && taskCenter) {
         await taskCenter.cancelTask(jobId);
         setActionNotice(
@@ -474,7 +550,16 @@ export function StudioTasksPageScreen({
         });
       }
     },
-    [fallbackService, loadLocalFeed, t, taskCenter, useProviderData, viewMode],
+    [
+      acknowledgeSingleTask,
+      fallbackService,
+      loadLocalFeed,
+      t,
+      taskCenter,
+      tasks,
+      useProviderData,
+      viewMode,
+    ],
   );
 
   const filteredTasks = useMemo(
@@ -904,6 +989,7 @@ export function StudioTasksPageScreen({
                     <Link
                       className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas"
                       href={bookHref}
+                      onClick={() => acknowledgeSingleTask(task)}
                     >
                       <BookOpen aria-hidden="true" className="size-3.5" />
                       {t("taskCenter.openBookAction", undefined, "Mở sách")}
@@ -914,6 +1000,7 @@ export function StudioTasksPageScreen({
                     <Link
                       className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3 text-xs font-semibold text-ink transition-colors hover:bg-canvas"
                       href={pageHref}
+                      onClick={() => acknowledgeSingleTask(task)}
                     >
                       <FileText aria-hidden="true" className="size-3.5" />
                       {t("taskCenter.openPageAction", undefined, "Mở trang")}
@@ -927,6 +1014,7 @@ export function StudioTasksPageScreen({
                     <Link
                       className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-bold text-white transition-colors hover:bg-primary-hover"
                       href={task.result_href}
+                      onClick={() => acknowledgeSingleTask(task)}
                     >
                       {t(
                         "taskCenter.viewResultAction",

@@ -1,11 +1,12 @@
 "use client";
 
-import { ArrowRight, History, RefreshCw } from "lucide-react";
+import { ArrowRight, ChevronDown, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
@@ -15,8 +16,23 @@ import {
 } from "@/components/reports/metric-card";
 import { ProgressReportFilters } from "@/components/reports/progress-report-filters";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
-import { ReportPageHeader } from "@/components/reports/report-page-header";
+import { ReadingHubSubNav } from "@/components/reports/reading-hub-subnav";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
+import { useReportServices } from "@/hooks/use-report-services";
+import { isServiceError } from "@/lib/api/service-error";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
+import { formatPercent, mapReportMetrics } from "@/lib/utils/report-mappers";
+import {
+  parseProgressPeriod,
+  progressHref,
+} from "@/lib/utils/progress-report-state";
+import { REPORT_TIMEZONE } from "@/lib/utils/report-state";
+import type { ChildProfileDTO } from "@/types/child";
+import type {
+  DifficultWordPracticeStatus,
+  ProgressPeriodsDTO,
+  ProgressReportDTO,
+} from "@/types/reports";
 
 const ChildProgressAssessmentCard = dynamic(
   () =>
@@ -34,25 +50,13 @@ const ProgressChart = dynamic(
       (mod) => mod.ProgressChart,
     ),
   {
-    loading: () => <Skeleton className="h-64 w-full rounded-card" />,
+    loading: () => <Skeleton className="h-44 w-full rounded-card" />,
   },
 );
-import { useReportServices } from "@/hooks/use-report-services";
-import { isServiceError } from "@/lib/api/service-error";
-import { formatPercent, mapReportMetrics } from "@/lib/utils/report-mappers";
-import {
-  parseProgressPeriod,
-  progressHref,
-} from "@/lib/utils/progress-report-state";
-import { REPORT_TIMEZONE } from "@/lib/utils/report-state";
-import type { ChildProfileDTO } from "@/types/child";
-import type {
-  DifficultWordPracticeStatus,
-  ProgressPeriodsDTO,
-  ProgressReportDTO,
-} from "@/types/reports";
 
 type TranslateFn = ReturnType<typeof useTranslations>;
+
+type ReportFocus = "ALL" | "ASSESSMENT" | "SIGNALS" | "WORDS" | "ENTERTAINMENT";
 
 interface Props {
   readonly requestedChildId?: string;
@@ -77,20 +81,19 @@ const PRACTICE_STATUS_KEYS: Record<
 > = {
   NOT_PRACTICED: {
     key: "difficultWords:item.notPracticed",
-    className: "border border-border bg-canvas text-muted",
+    className: "bg-white text-muted",
   },
   IN_PROGRESS: {
     key: "difficultWords:item.inProgress",
-    className: "border border-primary/20 bg-sky text-primary-hover",
+    className: "bg-sky text-primary-hover",
   },
   NEEDS_MORE_PRACTICE: {
     key: "difficultWords:item.needsMorePractice",
-    className: "border border-warning/25 bg-warning-surface text-warning",
+    className: "bg-warning-surface text-warning",
   },
   COMPLETED: {
     key: "difficultWords:item.completed",
-    className:
-      "border border-success-ink/20 bg-success-surface text-success-ink",
+    className: "bg-success-surface text-success-ink",
   },
 };
 
@@ -166,11 +169,20 @@ function ProgressReportContent({
 }: Props) {
   const { formatDateTime } = useI18n();
   const t = useTranslations("reports");
+  const tCommon = useTranslations("common");
+  const tNav = useTranslations("navigation");
   const { childService, reportService } = useReportServices();
   const [state, setState] = useState<State>({ status: "loading" });
+  const loadedChild = state.status === "loaded" ? state.child : null;
+  useEffect(() => {
+    if (loadedChild) {
+      hydrateTeacherVoiceFromChildProfile(loadedChild);
+    }
+  }, [loadedChild]);
   const [retry, setRetry] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [difficultWordsPage, setDifficultWordsPage] = useState(1);
+  const [focus, setFocus] = useState<ReportFocus>("ALL");
   const DIFFICULT_WORDS_PAGE_SIZE = 6;
   const alive = useRef(true);
   const paging = useRef(false);
@@ -449,17 +461,16 @@ function ProgressReportContent({
       <section
         aria-busy="true"
         aria-label={t("overview.loadingAria")}
-        className="mx-auto flex w-full max-w-[1120px] flex-col gap-5"
+        className="mx-auto flex w-full max-w-[1120px] flex-col gap-3"
       >
-        <Skeleton className="h-24 rounded-card" />
-        <Skeleton className="h-20 rounded-card" />
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Skeleton className="h-28 rounded-card" />
-          <Skeleton className="h-28 rounded-card" />
-          <Skeleton className="h-28 rounded-card" />
-          <Skeleton className="h-28 rounded-card" />
+        <Skeleton className="h-14 rounded-card" />
+        <Skeleton className="h-10 rounded-card" />
+        <Skeleton className="h-28 rounded-card" />
+        <Skeleton className="h-56 rounded-card" />
+        <div className="grid gap-2.5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <Skeleton className="h-44 rounded-card" />
+          <Skeleton className="h-44 rounded-card" />
         </div>
-        <Skeleton className="h-64 rounded-card" />
       </section>
     );
 
@@ -580,58 +591,129 @@ function ProgressReportContent({
       })
     : [];
 
+  const focusOptions = [
+    {
+      value: "ALL" as const,
+      label: tCommon("taskCenter.filters.all"),
+    },
+    {
+      value: "ASSESSMENT" as const,
+      label: t("overview.focusAssessment"),
+    },
+    {
+      value: "SIGNALS" as const,
+      label: t("overview.focusSignals"),
+    },
+    {
+      value: "WORDS" as const,
+      label: tNav("parent.difficultWords"),
+      count: report?.difficult_words ? allDifficultWords.length : undefined,
+    },
+    {
+      value: "ENTERTAINMENT" as const,
+      label: t("overview.focusEntertainment"),
+    },
+  ] as const;
+
+  const showSignals = Boolean(
+    report && (focus === "ALL" || focus === "SIGNALS"),
+  );
+  const showAssessment = focus === "ALL" || focus === "ASSESSMENT";
+  const showWords = Boolean(report && (focus === "ALL" || focus === "WORDS"));
+  const showEntertainment = focus === "ALL" || focus === "ENTERTAINMENT";
+
+  const legacySection = report?.legacy ? (
+    <section className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-border bg-cream/70 px-3 py-2">
+      <h2 className="text-xs font-extrabold text-ink sm:text-sm">
+        {t("overview.legacyMetricsTitle")}
+      </h2>
+      <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {report.legacy.total_books !== null ? (
+          <div className="flex items-baseline gap-1.5">
+            <dt className="font-semibold text-muted">
+              {t("overview.legacyTotalBooks")}
+            </dt>
+            <dd className="font-extrabold tabular-nums text-ink">
+              {report.legacy.total_books}
+            </dd>
+          </div>
+        ) : null}
+        {report.legacy.avg_fluency !== null ? (
+          <div className="flex items-baseline gap-1.5">
+            <dt className="font-semibold text-muted">
+              {t("overview.legacyAvgFluency")}
+            </dt>
+            <dd className="font-extrabold tabular-nums text-ink">
+              {report.legacy.avg_fluency}
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+    </section>
+  ) : null;
+
+  const signalsSection = report ? (
+    report.assessment ? (
+      <div className="grid gap-2.5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:items-stretch">
+        <div className="flex min-w-0 flex-col gap-2.5">
+          <ProgressChart className="flex-1" report={report} showSubtitle />
+          {legacySection}
+        </div>
+        <ReadingAssessmentSummary
+          assessment={report.assessment}
+          compact
+          scopeLabel={`${report.period_start} → ${report.period_end}`}
+        />
+      </div>
+    ) : (
+      <div className="flex w-full min-w-0 flex-col gap-2.5 self-start">
+        <ProgressChart horizontal report={report} />
+        {legacySection}
+      </div>
+    )
+  ) : null;
+
   return (
     <section className="mx-auto flex w-full max-w-[1120px] flex-col gap-2.5 pb-2">
-      <ReportPageHeader
-        eyebrow={t("overview.eyebrow", {
-          alias: child.alias,
-          grade: child.grade,
-        })}
-        title={t("overview.childTitle", { alias: child.alias })}
-        description={t("overview.childSubtitle")}
-        action={
-          <ButtonLink
-            className="h-10 min-h-10! py-0! sm:w-auto"
-            href={`/sessions?childId=${encodeURIComponent(child.id)}`}
-            size="admin"
-            variant="secondary"
-          >
-            <History aria-hidden="true" className="size-4" />
-            {t("overview.readingHistoryAction")}
-          </ButtonLink>
-        }
-      />
+      <header className="flex flex-col gap-2 border-b border-border pb-2.5 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="text-xl font-extrabold tracking-[-0.02em] text-ink sm:text-2xl">
+            {t("overview.childTitle", { alias: child.alias })}
+          </h1>
+          <ReadingHubSubNav active="reports" childId={child.id} />
+        </div>
 
-      <ProgressReportFilters
-        childrenProfiles={children}
-        childId={child.id}
-        periods={periods.items}
-        selectedPeriod={selected}
-        hasMore={periods.next_cursor !== null}
-        loadingMore={loadingMore}
-        onLoadMore={() => void loadMore()}
-      />
+        <ProgressReportFilters
+          childrenProfiles={children}
+          childId={child.id}
+          hasMore={periods.next_cursor !== null}
+          loadingMore={loadingMore}
+          onLoadMore={() => void loadMore()}
+          periods={periods.items}
+          selectedPeriod={selected}
+        />
+      </header>
 
       {state.periodsError ? (
-        <StatusMessage tone="error" title={t("overview.periodListErrorTitle")}>
+        <StatusMessage title={t("overview.periodListErrorTitle")} tone="error">
           {t("overview.periodListErrorDesc")}
         </StatusMessage>
       ) : null}
 
       {state.reportStatus === "empty" ? (
         <EmptyState
+          description={t("overview.noReportDescription")}
           title={
             selected
               ? t("overview.noPeriodReportTitle")
               : t("overview.noSavedReportTitle")
           }
-          description={t("overview.noReportDescription")}
         />
       ) : null}
 
       {state.reportStatus === "unavailable" ? (
         <section className="flex flex-col gap-3">
-          <h2 className="text-xl font-extrabold text-ink">
+          <h2 className="text-base font-extrabold text-ink sm:text-lg">
             {t("overview.pendingReportTitle")}
           </h2>
           <StatusMessage>{t("overview.pendingReportDesc")}</StatusMessage>
@@ -639,7 +721,7 @@ function ProgressReportContent({
       ) : null}
 
       {state.reportStatus === "error" ? (
-        <StatusMessage tone="error" title={t("overview.loadErrorTitle")}>
+        <StatusMessage title={t("overview.loadErrorTitle")} tone="error">
           {t("overview.loadErrorDescription")}
         </StatusMessage>
       ) : null}
@@ -651,15 +733,22 @@ function ProgressReportContent({
         : null}
 
       {report ? (
-        <div className="flex flex-col gap-2.5">
-          <div className="flex flex-wrap items-baseline justify-between gap-2 px-0.5 text-xs text-muted">
-            <p className="font-semibold text-ink">
+        <div className="flex flex-col gap-1.5 lg:flex-row lg:items-center lg:justify-between">
+          <SegmentedFilterBar
+            ariaLabel={t("overview.focusAria")}
+            onChange={setFocus}
+            options={focusOptions}
+            value={focus}
+          />
+          <p className="text-[11px] leading-snug text-muted tabular-nums lg:text-end">
+            <span className="font-bold text-ink">
               {t("overview.periodBannerRange", {
                 start: report.period_start,
                 end: report.period_end,
               })}
-            </p>
-            <p className="text-xs">
+            </span>
+            {" · "}
+            <span>
               {t("overview.periodGeneratedAt", {
                 dateTime: formatDateTime(report.generated_at, {
                   dateStyle: "short",
@@ -667,33 +756,37 @@ function ProgressReportContent({
                   timeZone: REPORT_TIMEZONE,
                 }),
               })}
-            </p>
-          </div>
+            </span>
+          </p>
+        </div>
+      ) : null}
 
-          {report.data_status !== "complete" ? (
-            <StatusMessage
-              title={
-                report.data_status === "unsupported"
-                  ? t("overview.unsupportedFormatTitle")
-                  : t("overview.partialDataTitle")
-              }
-            >
-              {t("overview.partialDataDesc")}
-            </StatusMessage>
-          ) : null}
+      {report && report.data_status !== "complete" ? (
+        <StatusMessage
+          title={
+            report.data_status === "unsupported"
+              ? t("overview.unsupportedFormatTitle")
+              : t("overview.partialDataTitle")
+          }
+        >
+          {t("overview.partialDataDesc")}
+        </StatusMessage>
+      ) : null}
 
-          {report.assessment_coverage &&
-          report.assessment_coverage.assessed_sessions <
-            report.assessment_coverage.total_sessions ? (
-            <StatusMessage tone="info">
-              {t("overview.assessmentCoverageNote", {
-                covered: report.assessment_coverage.assessed_sessions,
-                total: report.assessment_coverage.total_sessions,
-              })}
-            </StatusMessage>
-          ) : null}
+      {report?.assessment_coverage &&
+      report.assessment_coverage.assessed_sessions <
+        report.assessment_coverage.total_sessions ? (
+        <StatusMessage tone="info">
+          {t("overview.assessmentCoverageNote", {
+            covered: report.assessment_coverage.assessed_sessions,
+            total: report.assessment_coverage.total_sessions,
+          })}
+        </StatusMessage>
+      ) : null}
 
-          <div className="report-metrics grid grid-cols-2 overflow-hidden rounded-card border border-border bg-white lg:grid-cols-4">
+      {report && showSignals ? (
+        <div className="overflow-hidden rounded-card border border-border bg-white">
+          <div className="report-metrics grid grid-cols-2 lg:grid-cols-4">
             {localizedMetrics.map((metric, index) => (
               <div
                 className={[
@@ -714,271 +807,226 @@ function ProgressReportContent({
             ))}
           </div>
 
-          <div className="grid items-stretch gap-2.5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-            <ProgressChart report={report} />
-
-            <section
-              aria-labelledby="comparison-title"
-              className="rounded-card border border-border bg-white p-3 sm:p-3.5"
+          <section
+            aria-labelledby="comparison-title"
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-border bg-canvas/55 px-3 py-1.5 text-xs"
+          >
+            <h2
+              className="shrink-0 text-xs font-extrabold text-ink"
+              id="comparison-title"
             >
-              <h2
-                className="text-base font-extrabold text-ink"
-                id="comparison-title"
-              >
-                {t("overview.comparisonTitle")}
-              </h2>
-              {report.availability.comparison === "available" &&
-              report.previous_period &&
-              report.trend_deltas ? (
-                <>
-                  <p className="mt-0.5 text-xs text-muted">
-                    {t("overview.comparisonSubtitle")}
-                  </p>
-                  <dl className="mt-2.5 divide-y divide-border">
-                    {[
-                      {
-                        label: t("overview.deltaCompletedSessionsLabel"),
-                        value: report.trend_deltas.completed_sessions,
-                        key: "overview.deltaSessions",
-                      },
-                      {
-                        label: t("overview.deltaReadingTimeLabel"),
-                        value:
-                          report.trend_deltas.reading_duration_ms === null
-                            ? null
-                            : report.trend_deltas.reading_duration_ms / 60000,
-                        key: "overview.deltaMinutes",
-                      },
-                      {
-                        label: t("overview.deltaComprehensionLabel"),
-                        value: report.trend_deltas.comprehension_accuracy,
-                        key: "overview.deltaPoints",
-                      },
-                    ].map((row) => (
-                      <div
-                        className="flex items-baseline justify-between gap-4 py-1.5 first:pt-0 last:pb-0"
-                        key={row.label}
-                      >
-                        <dt className="text-xs font-semibold text-muted sm:text-sm">
-                          {row.label}
-                        </dt>
-                        <dd className="text-sm font-extrabold tabular-nums text-ink">
-                          {typeof row.value !== "number"
-                            ? t("overview.notEnoughData")
-                            : t(row.key, {
-                                value: `${row.value > 0 ? "+" : ""}${Number(row.value.toFixed(2))}`,
-                              })}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
-                </>
-              ) : (
-                <StatusMessage
-                  className="mt-2.5"
-                  title={t("overview.comparisonUnavailableTitle")}
-                >
-                  {t("overview.comparisonUnavailableDesc")}
-                </StatusMessage>
-              )}
-            </section>
-          </div>
-
-          <ReadingAssessmentSummary
-            assessment={report.assessment}
-            scopeLabel={`${report.period_start} → ${report.period_end}`}
-          />
-
-          <section className="rounded-card border border-border bg-white p-3 sm:p-3.5">
-            <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-baseline gap-2">
-                  <h2 className="text-base font-extrabold text-ink">
-                    {t("overview.difficultWordsTitle")}
-                  </h2>
-                  {report.difficult_words?.length ? (
-                    <span className="text-xs font-bold text-muted">
-                      {t("overview.difficultWordsTotalSummary", {
-                        count: report.difficult_words.length,
-                      })}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="mt-0.5 text-xs text-muted">
-                  {t("overview.difficultWordsSubtitle")}
-                </p>
-              </div>
-              <ButtonLink
-                className="h-9 min-h-9! shrink-0 py-0! text-xs! sm:w-auto"
-                href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
-                size="admin"
-                variant="secondary"
-              >
-                {t("overview.openDifficultWordsAction")}
-                <ArrowRight
-                  aria-hidden="true"
-                  className="viread-rtl-flip size-3.5"
-                />
-              </ButtonLink>
-            </div>
-
-            {report.availability.difficult_words !== "available" ? (
-              <StatusMessage className="mt-2.5">
-                {t("overview.difficultWordsPartialNotice")}
-              </StatusMessage>
-            ) : null}
-
-            {report.difficult_words?.length ? (
-              <>
-                <ul className="mt-2.5 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleDifficultWords.map((word, index) => {
-                    const statusStyle = word.practice_status
-                      ? PRACTICE_STATUS_KEYS[word.practice_status]
-                      : null;
-                    const noteParts: string[] = [];
-                    if (word.session_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordSessions", {
-                          count: word.session_count,
-                        }),
-                      );
-                    }
-                    if ((word.mispronunciation_count ?? 0) > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordMispronounced", {
-                          count: word.mispronunciation_count ?? 0,
-                        }),
-                      );
-                    }
-                    if (word.omission_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordOmitted", {
-                          count: word.omission_count,
-                        }),
-                      );
-                    }
-                    if (word.repetition_count > 0) {
-                      noteParts.push(
-                        t("overview.difficultWordRepeated", {
-                          count: word.repetition_count,
-                        }),
-                      );
-                    }
-
-                    return (
-                      <li
-                        className="flex flex-wrap items-center justify-between gap-1.5 rounded-control border border-border bg-canvas/35 px-2.5 py-1.5"
-                        key={`${word.normalized_word}-${difficultWordsStart + index}`}
-                      >
-                        <div className="min-w-0">
-                          <span
-                            className="viread-learning-content text-sm font-extrabold text-ink"
-                            dir="ltr"
-                            lang="vi"
-                          >
-                            {word.display_text}
-                          </span>
-                          {noteParts.length > 0 ? (
-                            <span className="ms-1.5 text-[11px] text-muted">
-                              {noteParts.join(" · ")}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="flex shrink-0 items-center gap-1">
-                          <span className="text-[11px] font-bold tabular-nums text-muted">
-                            {t("overview.difficultWordScore", {
-                              score: word.difficulty_score,
-                            })}
-                          </span>
-                          {statusStyle ? (
-                            <span
-                              className={`rounded-control px-1.5 py-0.5 text-[10px] font-bold ${statusStyle.className}`}
-                            >
-                              {t(statusStyle.key)}
-                            </span>
-                          ) : null}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-                <PaginationBar
-                  ariaLabel={t("overview.difficultWordsTitle")}
-                  className="mt-2.5"
-                  compact
-                  onPageChange={setDifficultWordsPage}
-                  page={safeDifficultWordsPage}
-                  pageSize={DIFFICULT_WORDS_PAGE_SIZE}
-                  total={allDifficultWords.length}
-                />
-              </>
-            ) : report.availability.difficult_words === "available" ? (
-              <p className="mt-2.5 text-sm text-muted">
-                {t("overview.noDifficultWordsInPeriod")}
+              {t("overview.comparisonTitle")}
+            </h2>
+            {report.availability.comparison === "available" &&
+            report.previous_period &&
+            report.trend_deltas ? (
+              <dl className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                {[
+                  {
+                    label: t("overview.deltaCompletedSessionsLabel"),
+                    value: report.trend_deltas.completed_sessions,
+                    key: "overview.deltaSessions",
+                  },
+                  {
+                    label: t("overview.deltaReadingTimeLabel"),
+                    value:
+                      report.trend_deltas.reading_duration_ms === null
+                        ? null
+                        : report.trend_deltas.reading_duration_ms / 60000,
+                    key: "overview.deltaMinutes",
+                  },
+                  {
+                    label: t("overview.deltaComprehensionLabel"),
+                    value: report.trend_deltas.comprehension_accuracy,
+                    key: "overview.deltaPoints",
+                  },
+                ].map((row) => (
+                  <div className="flex items-baseline gap-1.5" key={row.label}>
+                    <dt className="font-semibold text-muted">{row.label}:</dt>
+                    <dd className="font-extrabold tabular-nums text-ink">
+                      {typeof row.value !== "number"
+                        ? t("overview.notEnoughData")
+                        : t(row.key, {
+                            value: `${row.value > 0 ? "+" : ""}${Number(row.value.toFixed(2))}`,
+                          })}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
+              <p className="text-xs text-muted">
+                <span className="font-bold text-ink">
+                  {t("overview.comparisonUnavailableTitle")}
+                </span>
+                {" · "}
+                <span>{t("overview.comparisonUnavailableDesc")}</span>
               </p>
-            ) : null}
-
-            <p className="mt-2 text-[11px] text-muted">
-              {t("overview.difficultWordsWindowNote")}
-            </p>
+            )}
           </section>
-
-          {report.legacy ? (
-            <section className="rounded-card border border-border bg-cream/60 p-4 sm:p-5">
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <div>
-                  <h2 className="text-base font-extrabold text-ink">
-                    {t("overview.legacyMetricsTitle")}
-                  </h2>
-                  <p className="mt-0.5 text-xs text-muted">
-                    {t("overview.legacyMetricsSubtitle")}
-                  </p>
-                </div>
-                <dl className="flex flex-wrap gap-5">
-                  {report.legacy.total_books !== null ? (
-                    <div>
-                      <dt className="text-xs font-semibold text-muted">
-                        {t("overview.legacyTotalBooks")}
-                      </dt>
-                      <dd className="text-base font-extrabold tabular-nums text-ink">
-                        {report.legacy.total_books}
-                      </dd>
-                    </div>
-                  ) : null}
-                  {report.legacy.avg_fluency !== null ? (
-                    <div>
-                      <dt className="text-xs font-semibold text-muted">
-                        {t("overview.legacyAvgFluency")}
-                      </dt>
-                      <dd className="text-base font-extrabold tabular-nums text-ink">
-                        {report.legacy.avg_fluency}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
-              </div>
-            </section>
-          ) : null}
         </div>
       ) : null}
 
-      <ChildProgressAssessmentCard
-        childId={child.id}
-        childName={child.alias}
-        showReadingAssessment={!report?.assessment}
-      />
+      {showAssessment ? (
+        <ChildProgressAssessmentCard
+          childId={child.id}
+          childName={child.alias}
+          showReadingAssessment={!report?.assessment}
+        />
+      ) : null}
+      {showSignals ? signalsSection : null}
 
-      <details className="rounded-card border border-border bg-white p-4 sm:p-6">
-        <summary className="cursor-pointer font-bold text-primary">
-          {t("overview.entertainmentSummaryHeading")}
-        </summary>
-        <div className="mt-4">
-          <EntertainmentLearningSummary
-            childId={child.id}
-            childName={child.alias}
-          />
-        </div>
-      </details>
+      {report && showWords ? (
+        <section className="rounded-card border border-border bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <h2 className="text-sm font-extrabold text-ink sm:text-base">
+                {t("overview.difficultWordsTitle")}
+              </h2>
+              {report.difficult_words?.length ? (
+                <span className="text-xs font-semibold tabular-nums text-muted">
+                  {t("overview.difficultWordsTotalSummary", {
+                    count: report.difficult_words.length,
+                  })}
+                </span>
+              ) : null}
+            </div>
+            <ButtonLink
+              className="h-8 min-h-8! shrink-0 px-2.5! py-0! text-xs! sm:w-auto"
+              href={`/reports/difficult-words?childId=${encodeURIComponent(child.id)}`}
+              size="admin"
+              variant="secondary"
+            >
+              {t("overview.openDifficultWordsAction")}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-3.5"
+              />
+            </ButtonLink>
+          </div>
+
+          {report.availability.difficult_words !== "available" ? (
+            <StatusMessage className="mt-2">
+              {t("overview.difficultWordsPartialNotice")}
+            </StatusMessage>
+          ) : null}
+
+          {report.difficult_words?.length ? (
+            <>
+              <ul className="mt-2 grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+                {visibleDifficultWords.map((word, index) => {
+                  const statusStyle = word.practice_status
+                    ? PRACTICE_STATUS_KEYS[word.practice_status]
+                    : null;
+                  const noteParts: string[] = [];
+                  if (word.session_count > 0) {
+                    noteParts.push(
+                      t("overview.difficultWordSessions", {
+                        count: word.session_count,
+                      }),
+                    );
+                  }
+                  if ((word.mispronunciation_count ?? 0) > 0) {
+                    noteParts.push(
+                      t("overview.difficultWordMispronounced", {
+                        count: word.mispronunciation_count ?? 0,
+                      }),
+                    );
+                  }
+                  if (word.omission_count > 0) {
+                    noteParts.push(
+                      t("overview.difficultWordOmitted", {
+                        count: word.omission_count,
+                      }),
+                    );
+                  }
+                  if (word.repetition_count > 0) {
+                    noteParts.push(
+                      t("overview.difficultWordRepeated", {
+                        count: word.repetition_count,
+                      }),
+                    );
+                  }
+
+                  return (
+                    <li
+                      className="flex min-w-0 flex-wrap items-center justify-between gap-1.5 rounded-control bg-canvas/65 px-2.5 py-1.5"
+                      key={`${word.normalized_word}-${difficultWordsStart + index}`}
+                    >
+                      <div className="min-w-0">
+                        <span
+                          className="viread-learning-content text-sm font-extrabold text-ink"
+                          dir="ltr"
+                          lang="vi"
+                        >
+                          {word.display_text}
+                        </span>
+                        {noteParts.length > 0 ? (
+                          <span className="ms-1.5 text-[11px] text-muted">
+                            {noteParts.join(" · ")}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="text-[11px] font-bold tabular-nums text-muted">
+                          {t("overview.difficultWordScore", {
+                            score: word.difficulty_score,
+                          })}
+                        </span>
+                        {statusStyle ? (
+                          <span
+                            className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${statusStyle.className}`}
+                          >
+                            {t(statusStyle.key)}
+                          </span>
+                        ) : null}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+              <PaginationBar
+                ariaLabel={t("overview.difficultWordsTitle")}
+                className="mt-2"
+                compact
+                onPageChange={setDifficultWordsPage}
+                page={safeDifficultWordsPage}
+                pageSize={DIFFICULT_WORDS_PAGE_SIZE}
+                total={allDifficultWords.length}
+              />
+            </>
+          ) : report.availability.difficult_words === "available" ? (
+            <p className="mt-2 text-xs text-muted sm:text-sm">
+              {t("overview.noDifficultWordsInPeriod")}
+            </p>
+          ) : null}
+
+          <p className="mt-1.5 text-[11px] leading-snug text-muted">
+            {t("overview.difficultWordsWindowNote")}
+          </p>
+        </section>
+      ) : null}
+
+      {showEntertainment ? (
+        <details
+          className="group rounded-card border border-border bg-white px-3 py-2.5"
+          key={focus === "ENTERTAINMENT" ? "ent-open" : "ent-default"}
+          open={focus === "ENTERTAINMENT" ? true : undefined}
+        >
+          <summary className="flex min-h-8 cursor-pointer list-none items-center justify-between gap-2 text-sm font-extrabold text-primary [&::-webkit-details-marker]:hidden">
+            <span>{t("overview.entertainmentSummaryHeading")}</span>
+            <ChevronDown
+              aria-hidden="true"
+              className="size-4 shrink-0 transition-transform group-open:rotate-180"
+            />
+          </summary>
+          <div className="mt-3 border-t border-border pt-3">
+            <EntertainmentLearningSummary
+              childId={child.id}
+              childName={child.alias}
+            />
+          </div>
+        </details>
+      ) : null}
     </section>
   );
 }

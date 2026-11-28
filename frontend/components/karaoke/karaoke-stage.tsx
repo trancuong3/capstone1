@@ -21,6 +21,7 @@ import {
   Play,
   Repeat2,
   RotateCcw,
+  Sparkles,
   Star,
   Volume2,
 } from "lucide-react";
@@ -59,6 +60,10 @@ import {
   type RhythmTapFeedback,
 } from "@/lib/karaoke/musical-practice";
 import { resolveTargetNotes } from "@/lib/karaoke/pro-karaoke-scoring";
+import {
+  createReferenceMelodySynth,
+  type ReferenceMelodySynth,
+} from "@/lib/karaoke/reference-melody-synth";
 import type { KaraokeLine, KaraokePreview } from "@/types/karaoke";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import styles from "./karaoke-stage.module.css";
@@ -316,6 +321,8 @@ export function KaraokeStage({
   player,
   childAlias,
   label,
+  focusWords = [],
+  initialAutopilot = false,
   onReload,
   onLoadMusicalProfile,
   onLoadPracticeHistory,
@@ -325,6 +332,8 @@ export function KaraokeStage({
   player: KaraokePlayerController;
   childAlias: string;
   label: string;
+  focusWords?: readonly string[];
+  initialAutopilot?: boolean;
   onReload?: () => void;
   onLoadMusicalProfile?: () => Promise<MusicalProfileData | null>;
   onLoadPracticeHistory?: () => Promise<KaraokePracticeHistorySummary | null>;
@@ -335,6 +344,7 @@ export function KaraokeStage({
       headphoneMode: boolean;
       segmentStartMs: number | null;
       segmentEndMs: number | null;
+      matchedDifficultWords?: string[];
     },
   ) => Promise<void>;
 }) {
@@ -360,6 +370,11 @@ export function KaraokeStage({
   const [scoredMode, setScoredMode] = useState(false);
   const [headphones, setHeadphones] = useState(false);
   const [speakerBacking, setSpeakerBacking] = useState(false);
+  const [melodyGuideEnabled, setMelodyGuideEnabled] = useState(false);
+  const [warmupStepLabel, setWarmupStepLabel] = useState<string | null>(null);
+  const melodySynthRef = useRef<ReferenceMelodySynth | null>(null);
+  const autopilotAppliedRef = useRef(false);
+  const userToggledMelodyGuideRef = useRef(false);
   const [practiceReturnMs, setPracticeReturnMs] = useState(0);
   const [manualEnded, setManualEnded] = useState(false);
   const [remoteProfile, setRemoteProfile] = useState<MusicalProfileData | null>(
@@ -511,6 +526,117 @@ export function KaraokeStage({
     }
   }, [onLoadMusicalProfile, onLoadPracticeHistory]);
 
+  // Auto-configure scored mode + reference melody guide when launched via Hands-Free Autopilot.
+  useEffect(() => {
+    if (!initialAutopilot) return;
+    let cancelled = false;
+    if (!autopilotAppliedRef.current) {
+      autopilotAppliedRef.current = true;
+      ensureMusicalMetadataLoaded();
+      queueMicrotask(() => {
+        if (cancelled) return;
+        if (scoring.supported) {
+          setScoredMode(true);
+          setSpeakerBacking(true);
+          player.setMuted(false);
+        }
+      });
+    }
+    if (targetNotes.length > 0 && !userToggledMelodyGuideRef.current) {
+      queueMicrotask(() => {
+        if (!cancelled && !userToggledMelodyGuideRef.current) {
+          setMelodyGuideEnabled(true);
+        }
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    ensureMusicalMetadataLoaded,
+    initialAutopilot,
+    player,
+    scoring.supported,
+    targetNotes.length,
+  ]);
+
+  // Sync Web Audio reference melody synth ("Âm quãng mẫu") with live playback clock.
+  useEffect(() => {
+    if (
+      !melodyGuideEnabled ||
+      !calmSound ||
+      !player.playing ||
+      countdown !== null
+    ) {
+      melodySynthRef.current?.stop();
+      return;
+    }
+    if (!melodySynthRef.current) {
+      melodySynthRef.current = createReferenceMelodySynth();
+    }
+    const synth = melodySynthRef.current;
+    synth.syncPlayback({
+      currentMs: player.getCurrentMs(),
+      targetNotes,
+      keyShift: player.keyShift,
+      micListening: scoring.listening,
+      headphoneMode: headphones,
+      enabled: true,
+    });
+    if (subscribeClock) {
+      return subscribeClock((ms) => {
+        synth.syncPlayback({
+          currentMs: ms,
+          targetNotes,
+          keyShift: player.keyShift,
+          micListening: scoring.listening,
+          headphoneMode: headphones,
+          enabled: true,
+        });
+      });
+    }
+    return undefined;
+  }, [
+    calmSound,
+    countdown,
+    headphones,
+    melodyGuideEnabled,
+    player,
+    player.keyShift,
+    player.playing,
+    scoring.listening,
+    subscribeClock,
+    targetNotes,
+  ]);
+
+  const songMatchedFocusWords = useMemo(() => {
+    if (!focusWords.length) return [];
+    const fullLyricNorm =
+      " " +
+      lines
+        .map((l) => l.text)
+        .join(" ")
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim() +
+      " ";
+    const matched: string[] = [];
+    for (const word of focusWords) {
+      const clean = word
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (clean.length >= 2 && fullLyricNorm.includes(` ${clean} `)) {
+        matched.push(word);
+      }
+    }
+    return matched;
+  }, [focusWords, lines]);
+
   const activeIndex = activeLyricIndex(lines, player.currentMs);
   const activeLine = lines[activeIndex];
   const next = lines.find(
@@ -540,6 +666,62 @@ export function KaraokeStage({
         ? scoring.musicalScore
         : null;
 
+  // Only credit focus words whose lyric tokens were actually recognized as "matched" by STT!
+  const sungMatchedFocusWords = useMemo(() => {
+    if (!songMatchedFocusWords.length) return [];
+    const lineScores =
+      scoring.score?.lineScores ?? scoring.liveScore?.lineScores ?? [];
+    if (!lineScores.length) return [];
+
+    const normalizeTok = (raw: string) =>
+      raw
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]/gu, "");
+
+    const matched: string[] = [];
+    for (const phrase of songMatchedFocusWords) {
+      const targetToks = phrase
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((tok) => tok.length >= 2);
+      if (!targetToks.length) continue;
+
+      let sungOk = false;
+      for (const ls of lineScores) {
+        if (ls.words.length < targetToks.length) continue;
+        for (let i = 0; i <= ls.words.length - targetToks.length; i++) {
+          let windowMatched = true;
+          for (let k = 0; k < targetToks.length; k++) {
+            const w = ls.words[i + k];
+            if (
+              w.state !== "matched" ||
+              normalizeTok(w.text) !== targetToks[k]
+            ) {
+              windowMatched = false;
+              break;
+            }
+          }
+          if (windowMatched) {
+            sungOk = true;
+            break;
+          }
+        }
+        if (sungOk) break;
+      }
+      if (sungOk) {
+        matched.push(phrase);
+      }
+    }
+    return matched;
+  }, [
+    scoring.liveScore?.lineScores,
+    scoring.score?.lineScores,
+    songMatchedFocusWords,
+  ]);
+
   useEffect(() => {
     if (!completedMusicalEval) return;
     if (lastSavedScoreRef.current === completedMusicalEval) return;
@@ -553,6 +735,11 @@ export function KaraokeStage({
         headphoneMode: headphones,
         segmentStartMs: segmentRange?.startMs ?? null,
         segmentEndMs: segmentRange?.endMs ?? null,
+        matchedDifficultWords:
+          completedMusicalEval.scoringMode !== "INSUFFICIENT_EVIDENCE" &&
+          practiceMode !== "RHYTHM_TAP"
+            ? sungMatchedFocusWords
+            : [],
       }).catch(() => {});
     }
   }, [
@@ -560,8 +747,10 @@ export function KaraokeStage({
     headphones,
     onSavePracticeSession,
     player.rate,
+    practiceMode,
     segmentRange?.endMs,
     segmentRange?.startMs,
+    sungMatchedFocusWords,
   ]);
 
   // Finalize Rhythm Tap score automatically when playback reaches the end.
@@ -591,6 +780,8 @@ export function KaraokeStage({
       generation.current++;
       if (timer.current !== null) clearTimeout(timer.current);
       countdownSound.current?.stop();
+      melodySynthRef.current?.dispose();
+      melodySynthRef.current = null;
     },
     [],
   );
@@ -1016,7 +1207,8 @@ export function KaraokeStage({
     ((practiceMode === "RHYTHM_TAP" && rhythmTapResult !== null) ||
       (scoredMode &&
         scoring.status === "scored" &&
-        scoring.musicalScore !== null));
+        scoring.musicalScore !== null &&
+        scoring.proScore === null));
   const panelEvaluation =
     practiceMode === "RHYTHM_TAP" ? rhythmTapResult : scoring.musicalScore;
 
@@ -1109,7 +1301,70 @@ export function KaraokeStage({
           <Mic aria-hidden className="size-5" />
           {t("karaoke.stage.scoredMode")}
         </Button>
+        {targetNotes.length > 0 && (
+          <>
+            <button
+              type="button"
+              data-testid="karaoke-melody-guide-toggle"
+              aria-pressed={melodyGuideEnabled}
+              onClick={() => {
+                userToggledMelodyGuideRef.current = true;
+                const nextEnabled = !melodyGuideEnabled;
+                setMelodyGuideEnabled(nextEnabled);
+                if (!nextEnabled) {
+                  melodySynthRef.current?.stop();
+                }
+              }}
+              className={`inline-flex min-h-14 items-center gap-2 rounded-control border px-4 py-2.5 text-sm font-extrabold ${
+                melodyGuideEnabled
+                  ? "border-amber-400 bg-amber-50 text-amber-950 shadow-xs"
+                  : "border-border bg-white text-slate-800 hover:bg-sky/50"
+              }`}
+            >
+              <Music2 aria-hidden className="size-4 text-amber-600" />
+              {melodyGuideEnabled ? "Đàn dẫn âm mẫu: Bật" : "Đàn dẫn âm mẫu"}
+            </button>
+            <button
+              type="button"
+              data-testid="karaoke-vocal-warmup-button"
+              disabled={player.playing || countdown !== null}
+              onClick={() => {
+                if (!melodySynthRef.current) {
+                  melodySynthRef.current = createReferenceMelodySynth();
+                }
+                void melodySynthRef.current.playWarmupSequence(
+                  player.keyShift,
+                  (_step, stepLabel) => {
+                    setWarmupStepLabel(stepLabel);
+                  },
+                );
+              }}
+              className="inline-flex min-h-14 items-center gap-2 rounded-control border border-indigo-200 bg-indigo-50/80 px-4 py-2.5 text-sm font-extrabold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
+            >
+              <Sparkles aria-hidden className="size-4 text-indigo-600" />
+              {warmupStepLabel
+                ? `Thử giọng: ${warmupStepLabel}`
+                : "Thử giọng 3 nốt (Thấp–Vừa–Cao)"}
+            </button>
+          </>
+        )}
       </div>
+      {songMatchedFocusWords.length > 0 && (
+        <div
+          data-testid="karaoke-focus-words-banner"
+          className="flex flex-wrap items-center gap-2 rounded-control border border-amber-300 bg-amber-50/90 px-3.5 py-2 text-xs font-bold text-amber-950"
+        >
+          <span>⭐ Từ bé đang luyện có trong bài hát:</span>
+          {songMatchedFocusWords.map((word) => (
+            <span
+              key={word}
+              className="rounded-full border border-amber-400 bg-white px-2.5 py-0.5 font-extrabold text-amber-900"
+            >
+              {word}
+            </span>
+          ))}
+        </div>
+      )}
       <div
         role="group"
         aria-label={t("karaoke.stage.practiceModeGroupAria")}
@@ -1260,6 +1515,18 @@ export function KaraokeStage({
               <RotateCcw aria-hidden className="size-5" />
               {t("karaoke.stage.singAgain")}
             </Button>
+            {scoring.musicalScore?.weakestSegment && !showMusicalPanel && (
+              <Button
+                variant="secondary"
+                className={`${styles.action} sm:w-auto`}
+                onClick={() =>
+                  practiceSegmentSlow(scoring.musicalScore!.weakestSegment!)
+                }
+              >
+                <Repeat2 aria-hidden className="size-5" />
+                {t("karaoke.stage.musicalSummary.retrySegmentSlow")}
+              </Button>
+            )}
             <ButtonLink
               variant="secondary"
               className={`${styles.action} sm:w-auto`}
@@ -1285,6 +1552,7 @@ export function KaraokeStage({
             beatGridMs={resolvedProfile.beatGridMs}
             phraseStartsMs={phraseStartsMs}
             reducedMotion={reducedMotion}
+            focusWords={focusWords}
           />
           <div
             className={`${styles.lyrics} rounded-card bg-white/80 px-4`}

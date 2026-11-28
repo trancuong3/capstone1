@@ -129,7 +129,13 @@ class _FakeRepo:
     async def child_belongs_to_parent(self, child_id: UUID, actor_id: UUID) -> bool:
         return (child_id, actor_id) in self._owned
 
-    async def eligible_verified_pages(self, book_id: UUID | None = None):
+    async def eligible_verified_pages(
+        self,
+        book_id: UUID | None = None,
+        *,
+        ocr_tokens=None,
+        limit=None,
+    ):
         if book_id is None:
             return list(self._pages)
         return [row for row in self._pages if row[0].Id == book_id]

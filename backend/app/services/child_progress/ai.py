@@ -40,6 +40,22 @@ Quy tắc bắt buộc:
 
 Viết bằng tiếng Việt. Chỉ trả về JSON đúng schema, không Markdown."""
 
+def build_system_prompt(teacher_gender: str | None = None) -> str:
+    if (teacher_gender or "").strip().lower() == "male":
+        return (
+            SYSTEM_PROMPT.replace(
+                "Bạn là cô giáo tiểu học",
+                "Bạn là thầy giáo tiểu học",
+                1,
+            ).replace(
+                "7. encouragement là 1 câu ngắn nói trực tiếp với bé, vui vẻ, dễ hiểu.",
+                "7. encouragement là 1 câu ngắn nói trực tiếp với bé, vui vẻ, dễ hiểu (nếu xưng hô vai giáo viên thì xưng là \"thầy\", không xưng \"cô\").",
+                1,
+            )
+        )
+    return SYSTEM_PROMPT
+
+
 RESPONSE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": [
@@ -220,7 +236,16 @@ class ChildProgressAI:
             calls.append(("groq", "groq", cfg.groq_model))
         return calls
 
-    async def _call(self, name: str, kind: str, model: str, facts: dict[str, Any]) -> Any:
+    async def _call(
+        self,
+        name: str,
+        kind: str,
+        model: str,
+        facts: dict[str, Any],
+        *,
+        teacher_gender: str | None = None,
+    ) -> Any:
+        system_prompt = build_system_prompt(teacher_gender)
         user_text = (
             "Hãy viết nhận xét tiến bộ đọc của bé dựa trên số liệu sau.\n"
             "<so_lieu>\n"
@@ -233,7 +258,7 @@ class ChildProgressAI:
                 f"{_GEMINI_API_BASE}/models/{model}:generateContent",
                 headers={"x-goog-api-key": self.config.gemini_api_key or ""},
                 payload={
-                    "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                    "systemInstruction": {"parts": [{"text": system_prompt}]},
                     "contents": [{"role": "user", "parts": [{"text": user_text}]}],
                     "generationConfig": {
                         "temperature": 0.5,
@@ -261,7 +286,7 @@ class ChildProgressAI:
                 "messages": [
                     {
                         "role": "system",
-                        "content": f"{SYSTEM_PROMPT}\n\nJSON schema phải tuân theo:\n"
+                        "content": f"{system_prompt}\n\nJSON schema phải tuân theo:\n"
                         f"{json.dumps(RESPONSE_SCHEMA, ensure_ascii=False)}",
                     },
                     {"role": "user", "content": user_text},
@@ -277,7 +302,11 @@ class ChildProgressAI:
         return _decode_json(name, text)
 
     async def assess(
-        self, facts: dict[str, Any], *, allowed_words: list[str]
+        self,
+        facts: dict[str, Any],
+        *,
+        allowed_words: list[str],
+        teacher_gender: str | None = None,
     ) -> AssessmentTextRead:
         attempts: list[str] = []
         skipped: set[str] = set()
@@ -286,7 +315,13 @@ class ChildProgressAI:
                 attempts.append(f"{name}:SKIPPED_FAMILY")
                 continue
             try:
-                payload = await self._call(name, kind, model, facts)
+                payload = await self._call(
+                    name,
+                    kind,
+                    model,
+                    facts,
+                    teacher_gender=teacher_gender,
+                )
             except QuestionProviderError as error:
                 attempts.append(f"{name}:{error.code}")
                 # A bad key or exhausted quota fails every model of that vendor; a 5xx

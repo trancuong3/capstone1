@@ -10,6 +10,7 @@ import {
   type PitchJudgement,
   type TargetNoteSpan,
 } from "@/lib/karaoke/pro-karaoke-scoring";
+import { midiToVietnameseSolfege } from "@/lib/karaoke/reference-melody-synth";
 
 export interface PitchHighwayCanvasProps {
   /** Reference melody target note bars (empty array for legacy songs without melody_profile). */
@@ -38,6 +39,8 @@ export interface PitchHighwayCanvasProps {
   reducedMotion?: boolean;
   /** Phrase start timestamps (ms) for 3-2-1 lead-in dots before each line. */
   phraseStartsMs?: readonly number[];
+  /** Child's active difficult/focus words to highlight on target note bars. */
+  focusWords?: readonly string[];
 }
 
 interface SparkleParticle {
@@ -76,6 +79,51 @@ function foldMidiNear(midi: number, centerMidi: number): number {
   while (folded - centerMidi > 6.5) folded -= 12;
   while (folded - centerMidi < -6.5) folded += 12;
   return folded;
+}
+
+/**
+ * Fold `sungMidi` into the octave of the active or nearest target note (within ±1200ms)
+ * with hysteresis against `prevFoldedMidi`, preventing high notes (e.g. C5/D5) from
+ * jumping down an octave when compared against the song-wide midpoint.
+ */
+export function foldMidiNearTarget(
+  sungMidi: number,
+  targetNotes: readonly TargetNoteSpan[],
+  timeMs: number,
+  keyShift: number,
+  fallbackCenterMidi: number,
+  prevFoldedMidi?: number | null,
+): number {
+  let anchorMidi = fallbackCenterMidi;
+  if (targetNotes.length > 0) {
+    let bestDistMs = Infinity;
+    for (let i = 0; i < targetNotes.length; i++) {
+      const n = targetNotes[i];
+      if (timeMs >= n.startMs && timeMs <= n.endMs) {
+        anchorMidi = n.midi + keyShift;
+        bestDistMs = 0;
+        break;
+      }
+      const dist = timeMs < n.startMs ? n.startMs - timeMs : timeMs - n.endMs;
+      if (dist < bestDistMs && dist <= 1200) {
+        bestDistMs = dist;
+        anchorMidi = n.midi + keyShift;
+      }
+    }
+  }
+  const candidate = foldMidiNear(sungMidi, anchorMidi);
+  if (
+    prevFoldedMidi !== null &&
+    prevFoldedMidi !== undefined &&
+    Math.abs(candidate - anchorMidi) > 5.4 &&
+    Math.abs(candidate - prevFoldedMidi) >= 10
+  ) {
+    const stay = foldMidiNear(sungMidi, prevFoldedMidi);
+    if (Math.abs(stay - anchorMidi) <= 7.2) {
+      return stay;
+    }
+  }
+  return candidate;
 }
 
 function roundRectPath(
@@ -119,6 +167,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
   beatGridMs = [],
   reducedMotion = false,
   phraseStartsMs = [],
+  focusWords = [],
 }: PitchHighwayCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const vuBarRef = useRef<HTMLDivElement | null>(null);
@@ -159,6 +208,56 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
     };
   }, [targetNotes, keyShift]);
 
+  const focusNoteIndexSet = useMemo(() => {
+    const matchedIndices = new Set<number>();
+    if (!focusWords.length || !targetNotes.length) return matchedIndices;
+
+    const normalizeSyl = (val: string | null | undefined) =>
+      (val ?? "")
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]/gu, "");
+
+    const ngramPhrases: string[][] = [];
+    for (const raw of focusWords) {
+      const toks = raw
+        .normalize("NFC")
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, " ")
+        .split(/\s+/)
+        .filter((tok) => tok.length >= 2);
+      if (toks.length >= 1 && toks.length <= 3) {
+        ngramPhrases.push(toks);
+      }
+    }
+    if (!ngramPhrases.length) return matchedIndices;
+
+    const normNoteTokens = targetNotes.map((n) => normalizeSyl(n.text));
+    for (let i = 0; i < targetNotes.length; i++) {
+      if (!normNoteTokens[i]) continue;
+      const baseLineId = targetNotes[i].lineId;
+      for (const phrase of ngramPhrases) {
+        if (i + phrase.length > targetNotes.length) continue;
+        let ok = true;
+        for (let k = 0; k < phrase.length; k++) {
+          if (
+            targetNotes[i + k].lineId !== baseLineId ||
+            normNoteTokens[i + k] !== phrase[k]
+          ) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) {
+          for (let k = 0; k < phrase.length; k++) {
+            matchedIndices.add(i + k);
+          }
+        }
+      }
+    }
+    return matchedIndices;
+  }, [focusWords, targetNotes]);
+
   const propsRef = useRef({
     targetNotes,
     keyShift,
@@ -174,6 +273,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
     minMidi,
     maxMidi,
     centerMidi,
+    focusNoteIndexSet,
   });
   propsRef.current = {
     targetNotes,
@@ -190,6 +290,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
     minMidi,
     maxMidi,
     centerMidi,
+    focusNoteIndexSet,
   };
 
   useEffect(() => {
@@ -202,6 +303,13 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (
+      typeof navigator !== "undefined" &&
+      /jsdom/i.test(navigator.userAgent) &&
+      !("mock" in canvas.getContext)
+    ) {
+      return;
+    }
     let ctx: CanvasRenderingContext2D | null = null;
     try {
       ctx = canvas.getContext("2d");
@@ -230,6 +338,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
         minMidi: loMidi,
         maxMidi: hiMidi,
         centerMidi: midMidi,
+        focusNoteIndexSet: focusIdxSet,
       } = propsRef.current;
 
       const dpr =
@@ -296,11 +405,17 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
         ctx.lineTo(cssW, y);
         ctx.stroke();
 
-        ctx.fillStyle = "rgba(186, 230, 253, 0.55)";
+        ctx.fillStyle = "rgba(186, 230, 253, 0.62)";
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
-        const noteLabel = midiToNoteName(hiMidi - level.ratio * midiSpan);
-        ctx.fillText(`${level.label} · ${noteLabel}`, 8, y - 7);
+        const gridMidi = hiMidi - level.ratio * midiSpan;
+        const solfege = midiToVietnameseSolfege(gridMidi);
+        const noteLabel = midiToNoteName(gridMidi);
+        ctx.fillText(
+          `${level.label} · ${solfege.labelVi} (${noteLabel})`,
+          8,
+          y - 7,
+        );
       }
 
       // 3. Subtle beat pulse vertical lines
@@ -362,6 +477,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
           const y = midiToY(note.midi + shift) - barHeight / 2;
           const isCurrent = note.startMs <= nowMs && nowMs <= note.endMs;
           const isPast = note.endMs < nowMs;
+          const isFocusNote = focusIdxSet.has(i);
 
           roundRectPath(ctx, x1, y, w, barHeight, barHeight / 2);
           if (isCurrent) {
@@ -370,26 +486,35 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
               (liveJudgement.judgement === "perfect" ||
                 liveJudgement.judgement === "great")
                 ? "#34D399"
-                : "#38BDF8";
+                : isFocusNote
+                  ? "#FACC15"
+                  : "#38BDF8";
             ctx.fillStyle = hitColor;
             ctx.shadowColor = hitColor;
             ctx.shadowBlur = noMotion ? 0 : 12;
             ctx.fill();
             ctx.shadowBlur = 0;
             ctx.strokeStyle = "#FFFFFF";
-            ctx.lineWidth = 1.6;
+            ctx.lineWidth = 1.8;
             ctx.stroke();
           } else if (isPast) {
             ctx.fillStyle = "rgba(129, 140, 248, 0.32)";
             ctx.fill();
           } else {
             const barGrad = ctx.createLinearGradient(x1, y, x2, y);
-            barGrad.addColorStop(0, "rgba(56, 189, 248, 0.85)");
-            barGrad.addColorStop(1, "rgba(129, 140, 248, 0.85)");
+            if (isFocusNote) {
+              barGrad.addColorStop(0, "rgba(250, 204, 21, 0.92)");
+              barGrad.addColorStop(1, "rgba(245, 158, 11, 0.92)");
+            } else {
+              barGrad.addColorStop(0, "rgba(56, 189, 248, 0.85)");
+              barGrad.addColorStop(1, "rgba(129, 140, 248, 0.85)");
+            }
             ctx.fillStyle = barGrad;
             ctx.fill();
-            ctx.strokeStyle = "rgba(224, 242, 254, 0.55)";
-            ctx.lineWidth = 1;
+            ctx.strokeStyle = isFocusNote
+              ? "#FEF08A"
+              : "rgba(224, 242, 254, 0.55)";
+            ctx.lineWidth = isFocusNote ? 1.6 : 1;
             ctx.stroke();
           }
 
@@ -400,10 +525,11 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
             ctx.rect(x1 + 4, y, w - 8, barHeight);
             ctx.clip();
             ctx.font = "700 11px system-ui, -apple-system, sans-serif";
-            ctx.fillStyle = isCurrent ? "#052E16" : "#F8FAFC";
+            ctx.fillStyle = isCurrent || isFocusNote ? "#052E16" : "#F8FAFC";
             ctx.textAlign = "left";
             ctx.textBaseline = "middle";
-            ctx.fillText(note.text, x1 + 6, y + barHeight / 2 + 0.5);
+            const displayLabel = isFocusNote ? `⭐${note.text}` : note.text;
+            ctx.fillText(displayLabel, x1 + 6, y + barHeight / 2 + 0.5);
             ctx.restore();
           }
         }
@@ -448,6 +574,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
         };
 
         let prevSampleMs = -Infinity;
+        let prevFolded: number | null = null;
         for (let i = 0; i < ring.length; i++) {
           const s = ring[i];
           if (s.timeMs < nowMs - PAST_MS - 60 || s.timeMs > nowMs + 60) {
@@ -457,11 +584,23 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
           if (!s.voiced || m === null || s.timeMs - prevSampleMs > 180) {
             flushSegment();
             prevSampleMs = s.timeMs;
+            prevFolded = null;
             if (!s.voiced || m === null) continue;
           }
           prevSampleMs = s.timeMs;
           const x = msToX(s.timeMs);
-          const folded = notes.length > 0 ? foldMidiNear(m, midMidi) : m;
+          const folded: number =
+            notes.length > 0
+              ? foldMidiNearTarget(
+                  m,
+                  notes,
+                  s.timeMs,
+                  shift,
+                  midMidi,
+                  prevFolded,
+                )
+              : m;
+          prevFolded = folded;
           const y = midiToY(folded);
           const j =
             notes.length > 0
@@ -481,7 +620,10 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
         Math.abs(nowMs - latestSample.timeMs) <= 280
       ) {
         const rawM = (latestSample.smoothedMidi ?? latestSample.rawMidi)!;
-        const foldedM = notes.length > 0 ? foldMidiNear(rawM, midMidi) : rawM;
+        const foldedM =
+          notes.length > 0
+            ? foldMidiNearTarget(rawM, notes, nowMs, shift, midMidi, null)
+            : rawM;
         const cy = midiToY(foldedM);
         const color = judgementColor(liveJudgement?.judgement ?? "great");
 
@@ -587,23 +729,39 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
         }
       }
       if (guidePillRef.current) {
+        const targetSolfege =
+          liveJudgement?.targetMidi !== null &&
+          liveJudgement?.targetMidi !== undefined
+            ? midiToVietnameseSolfege(liveJudgement.targetMidi)
+            : null;
         if (!isListening) {
           guidePillRef.current.textContent =
             notes.length > 0
-              ? "Nhìn thanh giai điệu chạy tới vạch vàng để hát đúng tông"
+              ? "Nhìn thanh âm quãng mẫu tới vạch vàng để nâng/hạ giọng theo nhịp"
               : "Sẵn sàng thu cao độ trực tiếp của bé";
         } else if (!liveJudgement || liveJudgement.judgement === "unvoiced") {
+          const sungMidiVal =
+            latestSample?.smoothedMidi ?? latestSample?.rawMidi ?? 69;
+          const sungSolfege = midiToVietnameseSolfege(sungMidiVal);
           guidePillRef.current.textContent = latestSample?.voiced
-            ? `Đang hát: ${midiToNoteName(latestSample.smoothedMidi ?? latestSample.rawMidi ?? 69)}`
+            ? `Giọng bé: ${sungSolfege.registerVi} · ${sungSolfege.labelVi}`
             : "Hát rõ tiếng vào micro nhé!";
         } else if (liveJudgement.judgement === "perfect") {
-          guidePillRef.current.textContent = "✨ Tuyệt vời! Chuẩn tông!";
+          guidePillRef.current.textContent = targetSolfege
+            ? `✨ Tuyệt vời! Chuẩn tông! (${targetSolfege.labelVi})`
+            : "✨ Tuyệt vời! Chuẩn tông!";
         } else if (liveJudgement.judgement === "great") {
-          guidePillRef.current.textContent = "🌟 Rất tốt!";
+          guidePillRef.current.textContent = targetSolfege
+            ? `🌟 Đúng quãng ${targetSolfege.solfege} (${targetSolfege.registerVi})!`
+            : "🌟 Rất tốt!";
         } else if (liveJudgement.direction === "up") {
-          guidePillRef.current.textContent = "↑ Hát cao hơn một chút";
+          guidePillRef.current.textContent = targetSolfege
+            ? `↑ Nâng giọng nhẹ lên ${targetSolfege.labelVi} (${targetSolfege.registerVi})`
+            : "↑ Hát cao hơn một chút";
         } else if (liveJudgement.direction === "down") {
-          guidePillRef.current.textContent = "↓ Hát trầm hơn một chút";
+          guidePillRef.current.textContent = targetSolfege
+            ? `↓ Hạ giọng nhẹ xuống ${targetSolfege.labelVi} (${targetSolfege.registerVi})`
+            : "↓ Hát trầm hơn một chút";
         } else {
           guidePillRef.current.textContent = "Gần chuẩn rồi, giữ đều hơi!";
         }
@@ -748,6 +906,7 @@ export const PitchHighwayCanvas = memo(function PitchHighwayCanvas({
       <div className="relative h-44 w-full sm:h-52">
         <canvas
           ref={canvasRef}
+          data-testid="pitch-highway-canvas"
           aria-label="Biểu đồ cao độ giọng hát trực tiếp"
           className="block size-full"
         />

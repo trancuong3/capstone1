@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -22,6 +23,14 @@ import {
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import {
+  acknowledgeTaskAlerts,
+  computeUnreadTaskAlertCounts,
+  EMPTY_TASK_ALERT_ACK_STATE,
+  getTaskAlertAckState,
+  resetTaskAlertAckMemoryCache,
+  subscribeTaskAlertAck,
+} from "@/lib/tasks/task-alert-acknowledgment";
 import {
   ACTIVE_GLOBAL_TASK_STATUSES,
   type GlobalTaskActorRole,
@@ -39,6 +48,10 @@ export interface AiTaskCenterContextValue {
   readonly waitingReviewCount: number;
   readonly failedCount: number;
   readonly completedCount: number;
+  readonly unreadWaitingReviewCount: number;
+  readonly unreadFailedCount: number;
+  readonly unreadCompletedCount: number;
+  readonly unreadAlertCount: number;
   readonly workerOnline: boolean | null;
   readonly isOpen: boolean;
   readonly isRefreshing: boolean;
@@ -47,6 +60,8 @@ export interface AiTaskCenterContextValue {
   readonly openPanel: () => void;
   readonly closePanel: () => void;
   readonly togglePanel: () => void;
+  readonly markAllAlertsSeen: () => void;
+  readonly markTaskAlertSeen: (taskOrId: GlobalTaskItem | string) => void;
   readonly refresh: () => Promise<void>;
   readonly retryTask: (jobId: string) => Promise<void>;
   readonly cancelTask: (jobId: string) => Promise<void>;
@@ -83,6 +98,7 @@ export interface AiTaskCenterProviderProps {
 const MIN_POLL_MS = 2500;
 const MAX_POLL_MS = 15000;
 const DEFAULT_ACTIVE_POLL_MS = 4000;
+const EMPTY_TASKS: readonly GlobalTaskItem[] = [];
 
 function clampPollMs(value: number | null | undefined): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -258,6 +274,7 @@ export function AiTaskCenterProvider({
       activeAbortRef.current?.abort();
       activeAbortRef.current = null;
       clearGlobalTasksMemoryCache();
+      resetTaskAlertAckMemoryCache();
       setFeedState({
         scopeKey: null,
         data: null,
@@ -609,6 +626,79 @@ export function AiTaskCenterProvider({
     scopeKey,
   ]);
 
+  const scopedTasks = scopedData?.tasks ?? EMPTY_TASKS;
+  const isOpen = Boolean(
+    scopeKey && panelState.scopeKey === scopeKey && panelState.open,
+  );
+
+  const subscribeAck = useCallback(
+    (onStoreChange: () => void) =>
+      subscribeTaskAlertAck(scopeKey, effectiveActorId, actorRole, onStoreChange),
+    [actorRole, effectiveActorId, scopeKey],
+  );
+  const getAckSnapshot = useCallback(
+    () => getTaskAlertAckState(scopeKey, effectiveActorId, actorRole),
+    [actorRole, effectiveActorId, scopeKey],
+  );
+  const ackState = useSyncExternalStore(
+    subscribeAck,
+    getAckSnapshot,
+    () => EMPTY_TASK_ALERT_ACK_STATE,
+  );
+
+  const unreadCounts = useMemo(
+    () => computeUnreadTaskAlertCounts(scopedTasks, ackState),
+    [ackState, scopedTasks],
+  );
+
+  const markAllAlertsSeen = useCallback(() => {
+    if (!scopeKey || scopedTasks.length === 0) return;
+    acknowledgeTaskAlerts(scopeKey, scopedTasks, effectiveActorId, actorRole);
+  }, [actorRole, effectiveActorId, scopeKey, scopedTasks]);
+
+  const markTaskAlertSeen = useCallback(
+    (taskOrId: GlobalTaskItem | string) => {
+      if (!scopeKey) return;
+      const targetTask =
+        typeof taskOrId === "string"
+          ? scopedTasks.find((item) => item.id === taskOrId)
+          : taskOrId;
+      if (!targetTask) return;
+      acknowledgeTaskAlerts(
+        scopeKey,
+        [targetTask],
+        effectiveActorId,
+        actorRole,
+      );
+    },
+    [actorRole, effectiveActorId, scopeKey, scopedTasks],
+  );
+
+  // While the AI Task Center drawer is open and visible, acknowledge any alert
+  // tasks that load asynchronously or complete while the user is reading them.
+  useEffect(() => {
+    if (!isOpen || !scopeKey || scopedTasks.length === 0) {
+      return;
+    }
+    const acknowledgeIfVisible = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      acknowledgeTaskAlerts(scopeKey, scopedTasks, effectiveActorId, actorRole);
+    };
+    acknowledgeIfVisible();
+    if (typeof document === "undefined") {
+      return;
+    }
+    document.addEventListener("visibilitychange", acknowledgeIfVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", acknowledgeIfVisible);
+    };
+  }, [actorRole, effectiveActorId, isOpen, scopeKey, scopedTasks]);
+
   const refresh = useCallback(async () => {
     if (!scopeKey || !effectiveActorId || !actorRole) return;
     setFeedState((prev) => ({
@@ -623,6 +713,7 @@ export function AiTaskCenterProvider({
   const retryTask = useCallback(
     async (jobId: string) => {
       if (!scopeKey || !effectiveActorId || !actorRole) return;
+      markTaskAlertSeen(jobId);
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
         await resolvedService.retryTask(jobId, { portal: actorRole });
@@ -653,6 +744,7 @@ export function AiTaskCenterProvider({
       actorRole,
       effectiveActorId,
       fetchTasksForScope,
+      markTaskAlertSeen,
       resolvedService,
       scopeKey,
     ],
@@ -661,6 +753,7 @@ export function AiTaskCenterProvider({
   const cancelTask = useCallback(
     async (jobId: string) => {
       if (!scopeKey || !effectiveActorId || !actorRole) return;
+      markTaskAlertSeen(jobId);
       setPendingActionIds((prev) => new Set(prev).add(jobId));
       try {
         await resolvedService.cancelTask(jobId, { portal: actorRole });
@@ -691,6 +784,7 @@ export function AiTaskCenterProvider({
       actorRole,
       effectiveActorId,
       fetchTasksForScope,
+      markTaskAlertSeen,
       resolvedService,
       scopeKey,
     ],
@@ -698,31 +792,46 @@ export function AiTaskCenterProvider({
 
   const openPanel = useCallback(() => {
     if (!scopeKey) return;
+    markAllAlertsSeen();
     setPanelState({ scopeKey, open: true });
     if (effectiveActorId && actorRole) {
       void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
     }
-  }, [actorRole, effectiveActorId, fetchTasksForScope, scopeKey]);
+  }, [
+    actorRole,
+    effectiveActorId,
+    fetchTasksForScope,
+    markAllAlertsSeen,
+    scopeKey,
+  ]);
 
   const closePanel = useCallback(() => {
+    markAllAlertsSeen();
     setPanelState({ scopeKey, open: false });
-  }, [scopeKey]);
+  }, [markAllAlertsSeen, scopeKey]);
 
   const togglePanel = useCallback(() => {
     if (!scopeKey) return;
-    setPanelState((prev) => {
-      const nextOpen = !(prev.scopeKey === scopeKey && prev.open);
-      if (nextOpen && effectiveActorId && actorRole) {
-        void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
-      }
-      return { scopeKey, open: nextOpen };
-    });
-  }, [actorRole, effectiveActorId, fetchTasksForScope, scopeKey]);
+    const nextOpen = !isOpen;
+    markAllAlertsSeen();
+    setPanelState({ scopeKey, open: nextOpen });
+    if (nextOpen && effectiveActorId && actorRole) {
+      void fetchTasksForScope(scopeKey, effectiveActorId, actorRole);
+    }
+  }, [
+    actorRole,
+    effectiveActorId,
+    fetchTasksForScope,
+    isOpen,
+    markAllAlertsSeen,
+    scopeKey,
+  ]);
 
   const clearForLogout = useCallback(() => {
     activeAbortRef.current?.abort();
     activeAbortRef.current = null;
     clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
     setFeedState({
       scopeKey: null,
       data: null,
@@ -732,9 +841,6 @@ export function AiTaskCenterProvider({
     setPanelState({ scopeKey: null, open: false });
   }, []);
 
-  const isOpen = Boolean(
-    scopeKey && panelState.scopeKey === scopeKey && panelState.open,
-  );
   const errorMessage =
     scopeKey && feedState.scopeKey === scopeKey ? feedState.error : null;
   const isRefreshing = Boolean(
@@ -746,11 +852,15 @@ export function AiTaskCenterProvider({
       scopeKey,
       actorId: effectiveActorId,
       actorRole,
-      tasks: scopedData?.tasks ?? [],
+      tasks: scopedTasks,
       activeCount,
       waitingReviewCount: scopedData?.waiting_review_count ?? 0,
       failedCount: scopedData?.failed_count ?? 0,
       completedCount: scopedData?.completed_count ?? 0,
+      unreadWaitingReviewCount: unreadCounts.unreadWaitingReviewCount,
+      unreadFailedCount: unreadCounts.unreadFailedCount,
+      unreadCompletedCount: unreadCounts.unreadCompletedCount,
+      unreadAlertCount: unreadCounts.unreadAlertCount,
       workerOnline: scopedData?.worker_online ?? null,
       isOpen,
       isRefreshing,
@@ -759,6 +869,8 @@ export function AiTaskCenterProvider({
       openPanel,
       closePanel,
       togglePanel,
+      markAllAlertsSeen,
+      markTaskAlertSeen,
       refresh,
       retryTask,
       cancelTask,
@@ -774,6 +886,8 @@ export function AiTaskCenterProvider({
       errorMessage,
       isOpen,
       isRefreshing,
+      markAllAlertsSeen,
+      markTaskAlertSeen,
       openPanel,
       pendingActionIds,
       refresh,
@@ -781,10 +895,14 @@ export function AiTaskCenterProvider({
       scopeKey,
       scopedData?.completed_count,
       scopedData?.failed_count,
-      scopedData?.tasks,
       scopedData?.waiting_review_count,
       scopedData?.worker_online,
+      scopedTasks,
       togglePanel,
+      unreadCounts.unreadAlertCount,
+      unreadCounts.unreadCompletedCount,
+      unreadCounts.unreadFailedCount,
+      unreadCounts.unreadWaitingReviewCount,
     ],
   );
 

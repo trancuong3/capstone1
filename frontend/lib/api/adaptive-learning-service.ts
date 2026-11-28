@@ -62,6 +62,8 @@ const skillMasterySchema = z.object({
 const spacedDifficultWordSchema = z.object({
   normalized_word: z.string(),
   display_text: z.string(),
+  phonics_category: z.string().optional(),
+  phonics_label_vi: z.string().optional(),
   priority_score: z.number(),
   practice_count: z.number().int(),
   last_practiced_at: z.string().nullable(),
@@ -112,6 +114,7 @@ export interface AdaptiveLearningService {
   getParentAnalytics(
     childId: string,
     windowDays?: number,
+    teacherGender?: "female" | "male",
   ): Promise<ParentEntertainmentAnalyticsDTO>;
 }
 
@@ -126,9 +129,16 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
         entertainmentRecommendationsSchema,
       );
     },
-    getParentAnalytics(childId: string, windowDays = 30) {
+    getParentAnalytics(
+      childId: string,
+      windowDays = 30,
+      teacherGender?: "female" | "male",
+    ) {
+      const genderParam = teacherGender
+        ? `&teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
       return requestApi(
-        `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}`,
+        `/learning/children/${encodeURIComponent(childId)}/parent-analytics?window_days=${windowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
       );
     },

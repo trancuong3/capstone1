@@ -473,6 +473,12 @@ ALLOWED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     "Máy chưa nghe rõ giọng của con. Con lại gần micro và thử lại nhé!",
     "Phần nhận diện giọng nói đang bận một chút. Con không bị tính sai đâu, mình thử lại sau nhé!",
     "Máy chưa nghe thật chắc chắn. Con không bị tính sai đâu, mình thử đọc lại nhé!",
+    "Buổi đọc xong rồi! Con có muốn luyện lại mấy từ khó vừa rồi cùng cô không? Con bấm nút Luyện ngay các từ khó nhé!",
+    "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại nhé.",
+    "Cô chưa nghe rõ tiếng vừa rồi, con đọc lại rõ hơn một chút nhé.",
+    "Không sao đâu, từ này mình luyện thêm sau. Mình sang từ tiếp theo nhé!",
+    "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+    "Không sao đâu con! Mình cùng sang câu tiếp theo nhé!",
 )
 TIMED_COACHING_PHRASES_RAW: tuple[str, ...] = (
     # Spoken via `/voice/text-to-speech/timed` with `cache_scope="COACHING"` (ReadingVoiceSettings "Nghe thử")

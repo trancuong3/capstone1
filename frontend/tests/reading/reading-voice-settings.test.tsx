@@ -333,4 +333,18 @@ describe("reading voice settings", () => {
     setup({ disabled: true });
     expect(screen.getByRole("button", { name: /Giọng đọc/ })).toBeDisabled();
   });
+
+  it("does not display preview error alert when preview rejects with DOMException AbortError", async () => {
+    const user = userEvent.setup();
+    setup({
+      onPreview: async () => {
+        throw { name: "AbortError", message: "Audio playback was stopped." };
+      },
+    });
+    await user.click(screen.getByRole("button", { name: /Giọng đọc/ }));
+    await screen.findByRole("radio", { name: /Jessica/ });
+    await user.click(screen.getByRole("button", { name: "Nghe thử" }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

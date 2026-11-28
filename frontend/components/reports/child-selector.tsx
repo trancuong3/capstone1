@@ -1,9 +1,11 @@
 "use client";
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useId } from "react";
+import { useContext, useId } from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useTranslations } from "@/hooks/use-i18n";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -24,6 +26,7 @@ export function ChildSelector({
   className,
 }: ChildSelectorProps) {
   const tc = useTranslations("child");
+  const appStore = useContext(AppStoreContext);
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -48,8 +51,21 @@ export function ChildSelector({
         }
         id={selectId}
         onChange={(event) => {
+          const nextChildId = event.target.value;
+          const matched = childrenProfiles.find(
+            (candidate) => candidate.id === nextChildId,
+          );
+          if (appStore) {
+            appStore.selectChild(nextChildId);
+            if (matched) {
+              appStore.setValidatedSelectedChild(matched);
+            }
+          }
+          if (matched) {
+            hydrateTeacherVoiceFromChildProfile(matched, { force: true });
+          }
           const next = new URLSearchParams(searchParams.toString());
-          next.set("childId", event.target.value);
+          next.set("childId", nextChildId);
           next.delete("page");
           if (clearQueryKeys) {
             for (const key of clearQueryKeys) {

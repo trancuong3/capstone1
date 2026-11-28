@@ -249,6 +249,11 @@
     "selectedBadge": "当前选择",
     "regionLabel": "地区口音",
     "voiceListLabel": "选择具体声音",
-    "voiceListAria": "按老师与地区筛选的声音列表"
+    "voiceListAria": "按老师与地区筛选的声音列表",
+    "policyLabel": "语音引擎模式",
+    "policyAria": "选择语音引擎模式",
+    "policyLocalOnly": "仅限本机",
+    "policyOnlineBackup": "本机 + 在线备用",
+    "workerOfflineHint": "本地语音服务当前未运行。请开启“本机 + 在线备用”，以便朗读未预缓存的绘本句子与游戏语音。"
   }
 }

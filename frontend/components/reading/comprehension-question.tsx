@@ -431,7 +431,10 @@ export function ComprehensionQuestion({
           setFeedbackNote(
             isServiceError(error)
               ? error.message
-              : "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+              : adaptTextToTeacherPersona(
+                  "Cô chưa lưu được câu trả lời. Con chọn hoặc nói lại giúp cô nhé!",
+                  getEffectiveTeacherPersona().gender,
+                ),
           );
         }
       } finally {

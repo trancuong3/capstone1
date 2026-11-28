@@ -35,6 +35,7 @@ import {
 } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
@@ -42,6 +43,11 @@ import {
   type MemoryGameService,
 } from "@/lib/api/memory-game-service";
 import { isServiceError } from "@/lib/api/service-error";
+import {
+  createSpeechService,
+  type SpeechService,
+} from "@/lib/api/speech-service";
+import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
@@ -190,9 +196,31 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
   const speechPlayer = useSpeechPlayer();
+  const recorder = useSpeechRecorder();
+  const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const teacherPersona = useTeacherPersona();
-  const { reducedMotion, calmSound, toggleCalmSound } =
-    useEntertainmentPreferences();
+  const {
+    reducedMotion,
+    calmSound,
+    autopilotEnabled,
+    toggleCalmSound,
+    toggleAutopilot,
+  } = useEntertainmentPreferences();
+
+  const [urlFocusWords] = useState<string[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const raw = params.get("focus") ?? "";
+      return raw
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 6);
+    } catch {
+      return [];
+    }
+  });
 
   // Catalog & history
   const [catalog, setCatalog] = useState<MemoryThemesCatalogDTO | null>(null);
@@ -277,26 +305,125 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     expectedDurationMs: 8_000,
   });
 
-  // Anti-TTS-Self-Capture Voice Lifecycle (matching G10)
+  // Anti-TTS-Self-Capture Voice Lifecycle (matching G10) + Hands-Free Autopilot
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [voiceTarget, setVoiceTarget] = useState<"RECALL" | "CREATIVE" | null>(
     null,
   );
   const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
   const [isSpeakingPrompt, setIsSpeakingPrompt] = useState(false);
+  const [micCountdown, setMicCountdown] = useState<{
+    target: "RECALL" | "CREATIVE";
+    seconds: number;
+  } | null>(null);
+  const [autoSubmitStage, setAutoSubmitStage] = useState<
+    "RECALL" | "CREATIVE" | null
+  >(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+  const recorderActiveRef = useRef(false);
+  const recorderTargetRef = useRef<"RECALL" | "CREATIVE" | null>(null);
+  const hadRecorderSpeechRef = useRef(false);
+  const sttAbortRef = useRef<AbortController | null>(null);
+  const recorderCancelRef = useRef(recorder.cancel);
   const isSpeakingPromptRef = useRef(false);
   const speakGenRef = useRef(0);
   const speechPlayerRef = useRef(speechPlayer);
   const ttsCooldownUntilRef = useRef<number>(0);
   const micArmTimeoutRef = useRef<number | null>(null);
   const peekIntervalRef = useRef<number | null>(null);
+  const micCountdownTimerRef = useRef<number | null>(null);
+  const silenceStopTimerRef = useRef<number | null>(null);
+  const autoSubmitTimerRef = useRef<number | null>(null);
+  const startVoiceCaptureRef = useRef<
+    (
+      target: "RECALL" | "CREATIVE",
+      options?: { fromAutopilot?: boolean },
+    ) => void
+  >(() => undefined);
+  const handleSubmitRecallRef = useRef<
+    (overrideText?: string, overrideMode?: MemoryInputMode) => Promise<void>
+  >(async () => undefined);
+  const handleSubmitCreativeRef = useRef<
+    (overrideText?: string, overrideMode?: MemoryInputMode) => Promise<void>
+  >(async () => undefined);
 
   useEffect(() => {
     speechPlayerRef.current = speechPlayer;
-  }, [speechPlayer]);
+    recorderCancelRef.current = recorder.cancel;
+  }, [recorder.cancel, speechPlayer]);
+
+  const clearSilenceStopTimer = useCallback(() => {
+    if (silenceStopTimerRef.current !== null) {
+      window.clearTimeout(silenceStopTimerRef.current);
+      silenceStopTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelMicCountdown = useCallback(() => {
+    if (micCountdownTimerRef.current !== null) {
+      window.clearInterval(micCountdownTimerRef.current);
+      micCountdownTimerRef.current = null;
+    }
+    setMicCountdown(null);
+  }, []);
+
+  const cancelAutoSubmit = useCallback(() => {
+    if (autoSubmitTimerRef.current !== null) {
+      window.clearTimeout(autoSubmitTimerRef.current);
+      autoSubmitTimerRef.current = null;
+    }
+    setAutoSubmitStage(null);
+  }, []);
+
+  const startMicCountdown = useCallback(
+    (target: "RECALL" | "CREATIVE", seconds = 3) => {
+      if (
+        isSubmittingRef.current ||
+        (typeof document !== "undefined" &&
+          document.visibilityState === "hidden")
+      ) {
+        return;
+      }
+      cancelMicCountdown();
+      cancelAutoSubmit();
+      setMicCountdown({ target, seconds });
+      let remaining = seconds;
+      micCountdownTimerRef.current = window.setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          if (micCountdownTimerRef.current !== null) {
+            window.clearInterval(micCountdownTimerRef.current);
+            micCountdownTimerRef.current = null;
+          }
+          setMicCountdown(null);
+          if (
+            !isSubmittingRef.current &&
+            !(
+              typeof document !== "undefined" &&
+              document.visibilityState === "hidden"
+            )
+          ) {
+            startVoiceCaptureRef.current(target, { fromAutopilot: true });
+          }
+        } else {
+          setMicCountdown({ target, seconds: remaining });
+        }
+      }, 1000);
+    },
+    [cancelAutoSubmit, cancelMicCountdown],
+  );
 
   const stopMicCapture = useCallback(() => {
+    cancelMicCountdown();
+    clearSilenceStopTimer();
+    hadRecorderSpeechRef.current = false;
+    sttAbortRef.current?.abort();
+    sttAbortRef.current = null;
+    if (recorderActiveRef.current) {
+      recorderActiveRef.current = false;
+      recorderTargetRef.current = null;
+      recorderCancelRef.current();
+    }
     if (micArmTimeoutRef.current !== null) {
       window.clearTimeout(micArmTimeoutRef.current);
       micArmTimeoutRef.current = null;
@@ -319,7 +446,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     }
     setIsListeningVoice(false);
     setVoiceTarget(null);
-  }, []);
+  }, [cancelMicCountdown, clearSilenceStopTimer]);
 
   const stopAllTts = useCallback(() => {
     speakGenRef.current += 1;
@@ -349,11 +476,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   }, [stopAllTts]);
 
   const speakVietnamesePrompt = useCallback(
-    (text: string) => {
+    (text: string, options?: { wordSample?: boolean }) => {
       if (!calmSound) return;
-      const adapted = adaptTextToTeacherPersona(text, teacherPersona.gender);
+      const adapted = options?.wordSample
+        ? text.trim()
+        : adaptTextToTeacherPersona(text, teacherPersona.gender);
       if (!adapted.trim()) return;
       // Anti-self-capture invariant: ALWAYS abort active mic BEFORE speaking TTS!
+      cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
       const generation = speakGenRef.current;
@@ -368,73 +498,254 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       };
 
       void speechPlayerRef.current
-        .play(adapted, { utteranceKind: "game_prompt" })
+        .play(
+          adapted,
+          options?.wordSample
+            ? { wordSample: true, speedScale: 0.92 }
+            : { coaching: true, utteranceKind: "game_prompt" },
+        )
         .catch(() => undefined)
         .finally(finishSpeak);
     },
-    [calmSound, stopAllTts, stopMicCapture, teacherPersona.gender],
+    [
+      calmSound,
+      cancelAutoSubmit,
+      stopAllTts,
+      stopMicCapture,
+      teacherPersona.gender,
+    ],
+  );
+
+  const stopRecorderAndTranscribe = useCallback(
+    async (options?: { fromAutopilot?: boolean }) => {
+      if (!recorderActiveRef.current) return;
+      clearSilenceStopTimer();
+      hadRecorderSpeechRef.current = false;
+      const target = recorderTargetRef.current ?? "RECALL";
+      recorderActiveRef.current = false;
+      recorderTargetRef.current = null;
+      setIsListeningVoice(false);
+      setVoiceTarget(null);
+
+      sttAbortRef.current?.abort();
+      const controller = new AbortController();
+      sttAbortRef.current = controller;
+
+      try {
+        const audioBlob = await recorder.stop();
+        if (controller.signal.aborted || !audioBlob || audioBlob.size === 0) {
+          return;
+        }
+        const keyterms = session
+          ? Array.from(
+              new Set([
+                ...session.scene_spec.matched_focus_words,
+                ...(session.scene_spec.creative_focus_words ?? []),
+                ...urlFocusWords,
+                ...session.scene_spec.objects.flatMap((obj) => [
+                  obj.name_vi,
+                  obj.color_vi,
+                ]),
+              ]),
+            )
+              .filter(Boolean)
+              .slice(0, 18)
+          : urlFocusWords;
+        const sttRes = await speechService.transcribe(audioBlob, {
+          languageCode: "vi",
+          keyterms,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        const transcript = sttRes.text?.trim() ?? "";
+        if (!transcript) return;
+        setVoiceNotice(null);
+        if (target === "RECALL") {
+          setRecallText((prev) =>
+            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
+          );
+          setRecallInputMode("VOICE");
+        } else {
+          setCreativeText((prev) =>
+            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
+          );
+          setCreativeInputMode("VOICE");
+        }
+        if (
+          options?.fromAutopilot &&
+          getEntertainmentPreferences().autopilotEnabled
+        ) {
+          const words = transcript.match(/\p{L}+/gu) ?? [];
+          if (words.length >= 2) {
+            cancelAutoSubmit();
+            setAutoSubmitStage(target);
+            autoSubmitTimerRef.current = window.setTimeout(() => {
+              autoSubmitTimerRef.current = null;
+              setAutoSubmitStage(null);
+              if (target === "RECALL") {
+                void handleSubmitRecallRef.current(transcript, "VOICE");
+              } else {
+                void handleSubmitCreativeRef.current(transcript, "VOICE");
+              }
+            }, 1500);
+          }
+        }
+      } catch {
+        if (!controller.signal.aborted && !options?.fromAutopilot) {
+          setVoiceNotice(t("memoryGame.voiceDisconnected"));
+        }
+      } finally {
+        if (sttAbortRef.current === controller) {
+          sttAbortRef.current = null;
+        }
+      }
+    },
+    [
+      cancelAutoSubmit,
+      clearSilenceStopTimer,
+      recorder,
+      session,
+      speechService,
+      t,
+      urlFocusWords,
+    ],
   );
 
   const startVoiceCapture = useCallback(
-    (target: "RECALL" | "CREATIVE") => {
+    (target: "RECALL" | "CREATIVE", options?: { fromAutopilot?: boolean }) => {
+      cancelMicCountdown();
+      cancelAutoSubmit();
+      clearSilenceStopTimer();
       if (isListeningVoice) {
-        stopMicCapture();
+        if (recorderActiveRef.current) {
+          void stopRecorderAndTranscribe({ fromAutopilot: false });
+        } else {
+          stopMicCapture();
+        }
         return;
       }
 
       // Anti-self-capture invariant: ALWAYS cancel TTS BEFORE arming microphone!
       stopAllTts();
 
-      const SpeechRecognition = getSpeechRecognitionCtor();
-      if (!SpeechRecognition) {
-        setVoiceNotice(t("memoryGame.voiceUnsupported"));
-        return;
-      }
+      // Enforce SessionVoiceLock `local_only` child privacy: only invoke browser
+      // SpeechRecognition when an isolated test mock is explicitly injected.
+      // All real browsers (including Firefox & iOS WebView) use local MediaRecorder + server STT with keyterms.
+      const rawCtor = getSpeechRecognitionCtor();
+      const TestSpeechRecognition = isInjectedTestSpeechRecognition(rawCtor)
+        ? rawCtor
+        : null;
 
       const beginCapture = () => {
         micArmTimeoutRef.current = null;
         setActionError(null);
-        setVoiceNotice(t("memoryGame.voiceListening"));
-        try {
-          const recognition = new SpeechRecognition();
-          recognition.lang = "vi-VN";
-          recognition.continuous = true;
-          recognition.interimResults = true;
-          recognition.onresult = (event) => {
-            const pieces: string[] = [];
-            for (let i = 0; i < event.results.length; i += 1) {
-              const part = event.results[i]?.[0]?.transcript?.trim();
-              if (part) pieces.push(part);
-            }
-            const transcript = pieces.join(" ").trim();
-            if (!transcript) return;
-            if (target === "RECALL") {
-              setRecallText(transcript);
-              setRecallInputMode("VOICE");
-            } else {
-              setCreativeText(transcript);
-              setCreativeInputMode("VOICE");
-            }
-          };
-          recognition.onerror = () => {
-            setVoiceNotice(t("memoryGame.voiceDisconnected"));
+
+        if (TestSpeechRecognition) {
+          setVoiceNotice(t("memoryGame.voiceListening"));
+          try {
+            const recognition = new TestSpeechRecognition();
+            recognition.lang = "vi-VN";
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.onresult = (event) => {
+              const pieces: string[] = [];
+              for (let i = 0; i < event.results.length; i += 1) {
+                const part = event.results[i]?.[0]?.transcript?.trim();
+                if (part) pieces.push(part);
+              }
+              const transcript = pieces.join(" ").trim();
+              if (!transcript) return;
+              if (target === "RECALL") {
+                setRecallText(transcript);
+                setRecallInputMode("VOICE");
+              } else {
+                setCreativeText(transcript);
+                setCreativeInputMode("VOICE");
+              }
+              if (getEntertainmentPreferences().autopilotEnabled) {
+                clearSilenceStopTimer();
+                const silenceMs =
+                  (session?.child_grade ?? child?.grade ?? 2) <= 2
+                    ? 2600
+                    : 2000;
+                silenceStopTimerRef.current = window.setTimeout(() => {
+                  silenceStopTimerRef.current = null;
+                  stopMicCapture();
+                  const words = transcript.trim().match(/\p{L}+/gu) ?? [];
+                  if (
+                    words.length >= 2 &&
+                    getEntertainmentPreferences().autopilotEnabled
+                  ) {
+                    cancelAutoSubmit();
+                    setAutoSubmitStage(target);
+                    autoSubmitTimerRef.current = window.setTimeout(() => {
+                      autoSubmitTimerRef.current = null;
+                      setAutoSubmitStage(null);
+                      if (target === "RECALL") {
+                        void handleSubmitRecallRef.current(transcript, "VOICE");
+                      } else {
+                        void handleSubmitCreativeRef.current(
+                          transcript,
+                          "VOICE",
+                        );
+                      }
+                    }, 1500);
+                  }
+                }, silenceMs);
+              }
+            };
+            recognition.onerror = () => {
+              clearSilenceStopTimer();
+              setVoiceNotice(t("memoryGame.voiceDisconnected"));
+              stopMicCapture();
+            };
+            recognition.onend = () => {
+              if (recognitionRef.current === recognition) {
+                recognitionRef.current = null;
+                setIsListeningVoice(false);
+                setVoiceTarget(null);
+              }
+            };
+            recognitionRef.current = recognition;
+            setIsListeningVoice(true);
+            setVoiceTarget(target);
+            recognition.start();
+          } catch {
+            setVoiceNotice(t("memoryGame.voiceUnavailable"));
             stopMicCapture();
-          };
-          recognition.onend = () => {
-            if (recognitionRef.current === recognition) {
-              recognitionRef.current = null;
-              setIsListeningVoice(false);
-              setVoiceTarget(null);
-            }
-          };
-          recognitionRef.current = recognition;
-          setIsListeningVoice(true);
-          setVoiceTarget(target);
-          recognition.start();
-        } catch {
-          setVoiceNotice(t("memoryGame.voiceUnavailable"));
-          stopMicCapture();
+          }
+          return;
         }
+
+        const hasMediaMic =
+          typeof navigator !== "undefined" &&
+          typeof navigator.mediaDevices?.getUserMedia === "function";
+        if (!hasMediaMic && typeof MediaRecorder === "undefined") {
+          if (!options?.fromAutopilot) {
+            setVoiceNotice(t("memoryGame.voiceUnsupported"));
+          }
+          return;
+        }
+
+        hadRecorderSpeechRef.current = false;
+        void recorder
+          .start()
+          .then(() => {
+            recorderActiveRef.current = true;
+            recorderTargetRef.current = target;
+            setIsListeningVoice(true);
+            setVoiceTarget(target);
+            setVoiceNotice(t("memoryGame.voiceListening"));
+          })
+          .catch(() => {
+            recorderActiveRef.current = false;
+            recorderTargetRef.current = null;
+            setIsListeningVoice(false);
+            setVoiceTarget(null);
+            if (!options?.fromAutopilot) {
+              setVoiceNotice(t("memoryGame.voiceUnavailable"));
+            }
+          });
       };
 
       const remainingCooldown = ttsCooldownUntilRef.current - Date.now();
@@ -447,18 +758,68 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         beginCapture();
       }
     },
-    [isListeningVoice, stopAllTts, stopMicCapture, t],
+    [
+      cancelAutoSubmit,
+      cancelMicCountdown,
+      child?.grade,
+      clearSilenceStopTimer,
+      isListeningVoice,
+      recorder,
+      session?.child_grade,
+      stopAllTts,
+      stopMicCapture,
+      stopRecorderAndTranscribe,
+      t,
+    ],
   );
+
+  // Grade-adaptive silence auto-stop for local MediaRecorder voice capture
+  useEffect(() => {
+    if (!isListeningVoice || !recorderActiveRef.current || !autopilotEnabled) {
+      clearSilenceStopTimer();
+      return;
+    }
+    if (recorder.isSpeaking) {
+      hadRecorderSpeechRef.current = true;
+      clearSilenceStopTimer();
+      return;
+    }
+    if (!hadRecorderSpeechRef.current) {
+      return;
+    }
+    const silenceMs =
+      (session?.child_grade ?? child?.grade ?? 2) <= 2 ? 2600 : 2000;
+    clearSilenceStopTimer();
+    silenceStopTimerRef.current = window.setTimeout(() => {
+      silenceStopTimerRef.current = null;
+      if (recorderActiveRef.current) {
+        void stopRecorderAndTranscribe({ fromAutopilot: true });
+      }
+    }, silenceMs);
+    return () => {
+      clearSilenceStopTimer();
+    };
+  }, [
+    autopilotEnabled,
+    child?.grade,
+    clearSilenceStopTimer,
+    isListeningVoice,
+    recorder.isSpeaking,
+    session?.child_grade,
+    stopRecorderAndTranscribe,
+  ]);
 
   // Stop mic, TTS, and peek timers cleanly on backgrounding / unmount
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
+        cancelAutoSubmit();
         stopMicCapture();
         stopAllTts();
       }
     };
     const handleAndroidBg = () => {
+      cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
     };
@@ -470,11 +831,12 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         "viread:android-background",
         handleAndroidBg,
       );
+      cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
       if (peekIntervalRef.current) clearInterval(peekIntervalRef.current);
     };
-  }, [stopAllTts, stopMicCapture]);
+  }, [cancelAutoSubmit, stopAllTts, stopMicCapture]);
 
   // Load theme catalog & child history
   useEffect(() => {
@@ -545,6 +907,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         if (prev === null) return null;
         if (prev <= 1) {
           setStage("RECALL");
+          if (getEntertainmentPreferences().autopilotEnabled) {
+            startMicCountdown("RECALL", 3);
+          }
           return 0;
         }
         return prev - 1;
@@ -552,10 +917,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     }, 1000);
 
     return () => window.clearInterval(id);
-  }, [remainingSeconds, sceneReady, session, stage]);
+  }, [remainingSeconds, sceneReady, session, stage, startMicCountdown]);
 
   const startNewSession = async () => {
     if (!childId || isStarting) return;
+    cancelAutoSubmit();
     stopMicCapture();
     stopAllTts();
     setIsStarting(true);
@@ -577,6 +943,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         theme_key: selectedTheme,
         timer_mode: timerMode,
         recall_mode: recallMode,
+        ...(urlFocusWords.length > 0 ? { focus_words: urlFocusWords } : {}),
       });
       setSession(created);
       setRemainingSeconds(created.timer_seconds);
@@ -591,10 +958,16 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const finishObservingEarly = () => {
     stopAllTts();
     setStage("RECALL");
+    if (getEntertainmentPreferences().autopilotEnabled) {
+      void recorder.prepare?.().catch(() => undefined);
+      startMicCountdown("RECALL", 3);
+    }
   };
 
   const handleRequestHint = async () => {
     if (!session || isLoadingHint) return;
+    cancelMicCountdown();
+    cancelAutoSubmit();
     setIsLoadingHint(true);
     setActionError(null);
     try {
@@ -614,6 +987,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
 
   const handleSupportedPeek = async () => {
     if (!session || isPeeking) return;
+    cancelAutoSubmit();
     stopMicCapture();
     setActionError(null);
     try {
@@ -644,9 +1018,15 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     }
   };
 
-  const handleSubmitRecall = async () => {
+  const handleSubmitRecall = async (
+    overrideText?: string,
+    overrideMode?: MemoryInputMode,
+  ) => {
+    cancelMicCountdown();
+    cancelAutoSubmit();
     if (!session || isSubmittingRef.current) return;
-    const trimmed = recallText.trim();
+    const trimmed = (overrideText ?? recallText).trim();
+    const effectiveMode = overrideMode ?? recallInputMode;
     if (!trimmed) {
       setActionError(t("memoryGame.recallEmptyError"));
       return;
@@ -660,7 +1040,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     try {
       const result = await memoryService.submitAttempt(session.id, {
         stage: "RECALL",
-        input_mode: recallInputMode,
+        input_mode: effectiveMode,
         response_text: trimmed,
         teacher_gender: teacherPersona.gender,
       });
@@ -669,6 +1049,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       const firstMissed = result.attempt.evaluation.missed_facts[0];
       setFocusedObjectId(firstMissed ? firstMissed.object_id : null);
       setStage("REVEAL");
+      if (
+        effectiveMode === "VOICE" &&
+        getEntertainmentPreferences().autopilotEnabled &&
+        getEntertainmentPreferences().calmSound &&
+        result.attempt.evaluation.praise_message_vi
+      ) {
+        speakVietnamesePrompt(result.attempt.evaluation.praise_message_vi);
+      }
     } catch (err: unknown) {
       // Preserve child's recall draft cleanly on transient error!
       setActionError(isServiceError(err) ? err.message : defaultErrorMessage);
@@ -678,9 +1066,15 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     }
   };
 
-  const handleSubmitCreative = async () => {
+  const handleSubmitCreative = async (
+    overrideText?: string,
+    overrideMode?: MemoryInputMode,
+  ) => {
+    cancelMicCountdown();
+    cancelAutoSubmit();
     if (!session || isSubmittingRef.current) return;
-    const trimmed = creativeText.trim();
+    const trimmed = (overrideText ?? creativeText).trim();
+    const effectiveMode = overrideMode ?? creativeInputMode;
     if (!trimmed) {
       setActionError(t("memoryGame.creativeEmptyError"));
       return;
@@ -694,13 +1088,25 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
     try {
       const result = await memoryService.submitAttempt(session.id, {
         stage: "CREATIVE",
-        input_mode: creativeInputMode,
+        input_mode: effectiveMode,
         response_text: trimmed,
         teacher_gender: teacherPersona.gender,
       });
       setSession(result.session);
       setCreativeEvaluation(result.attempt.evaluation);
       setStage("SUMMARY");
+      if (
+        effectiveMode === "VOICE" &&
+        getEntertainmentPreferences().autopilotEnabled &&
+        getEntertainmentPreferences().calmSound &&
+        (result.attempt.evaluation.story_praise_vi ||
+          result.attempt.evaluation.praise_message_vi)
+      ) {
+        speakVietnamesePrompt(
+          result.attempt.evaluation.story_praise_vi ||
+            result.attempt.evaluation.praise_message_vi,
+        );
+      }
       if (childId) {
         void memoryService
           .listSessions(childId, 6)
@@ -714,8 +1120,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       setIsSubmitting(false);
     }
   };
+  useEffect(() => {
+    startVoiceCaptureRef.current = startVoiceCapture;
+    handleSubmitRecallRef.current = handleSubmitRecall;
+    handleSubmitCreativeRef.current = handleSubmitCreative;
+  });
 
   const resetToSetup = () => {
+    cancelAutoSubmit();
     stopMicCapture();
     stopAllTts();
     if (peekIntervalRef.current) {
@@ -836,12 +1248,22 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const displayCreativeScore =
     session?.best_creative_score ?? creativeEvaluation?.creative_score ?? 0;
 
+  const creativeMagicWords = session
+    ? Array.from(
+        new Set([
+          ...(session.scene_spec.creative_focus_words ?? []),
+          ...session.scene_spec.matched_focus_words,
+        ]),
+      )
+    : [];
+
   return (
     <section
       className={cn(
         "mx-auto flex w-full max-w-[1060px] flex-col gap-5 pb-10",
         reducedMotion && "motion-reduce",
       )}
+      data-autopilot={autopilotEnabled ? "true" : "false"}
       data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
       data-stage={stage}
@@ -867,6 +1289,31 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <p className="text-body text-muted">{t("memoryGame.lead")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button
+            aria-pressed={autopilotEnabled}
+            className="min-h-11"
+            data-testid="memory-autopilot-toggle"
+            fullWidth={false}
+            onClick={() => {
+              if (autopilotEnabled) {
+                cancelMicCountdown();
+                cancelAutoSubmit();
+              }
+              toggleAutopilot();
+            }}
+            size="compact"
+            type="button"
+            variant={autopilotEnabled ? "secondary" : "quiet"}
+          >
+            <Mic aria-hidden="true" className="size-4" />
+            {autopilotEnabled
+              ? t("memoryGame.autopilotOn", undefined, "Tự động rảnh tay: Bật")
+              : t(
+                  "memoryGame.autopilotOff",
+                  undefined,
+                  "Tự động rảnh tay: Tắt",
+                )}
+          </Button>
           <Button
             aria-pressed={!calmSound}
             className="min-h-11"
@@ -1374,7 +1821,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     key={tip}
                     lang="vi"
                   >
-                    {tip}
+                    {adaptTextToTeacherPersona(tip, teacherPersona.gender)}
                   </li>
                 ))}
               </ul>
@@ -1494,7 +1941,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           {peekNotice ? (
             <div className="rounded-control border border-border bg-warning-surface/70 px-4 py-2.5 text-sm font-semibold text-warning">
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {peekNotice}
+                {adaptTextToTeacherPersona(peekNotice, teacherPersona.gender)}
               </span>
             </div>
           ) : null}
@@ -1519,7 +1966,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 dir="ltr"
                 lang="vi"
               >
-                {activeHint.hint_text_vi}
+                {adaptTextToTeacherPersona(
+                  activeHint.hint_text_vi,
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
           ) : null}
@@ -1538,7 +1988,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                     key={q}
                     lang="vi"
                   >
-                    {q}
+                    {adaptTextToTeacherPersona(q, teacherPersona.gender)}
                   </li>
                 ))}
               </ul>
@@ -1579,6 +2029,71 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               </Button>
             </div>
 
+            {micCountdown?.target === "RECALL" && !isListeningVoice ? (
+              <div
+                aria-live="polite"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-amber-300 bg-amber-50/90 px-4 py-3"
+                data-testid="memory-mic-countdown"
+                role="status"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-500 text-lg font-extrabold text-white">
+                    {micCountdown.seconds}
+                  </span>
+                  <p className="text-sm font-extrabold text-amber-950">
+                    {t(
+                      "memoryGame.countdownRecall",
+                      { seconds: micCountdown.seconds },
+                      `Tự động bật Micro sau ${micCountdown.seconds} giây để bé kể lại nhé…`,
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    fullWidth={false}
+                    onClick={() => startVoiceCapture("RECALL")}
+                    size="compact"
+                  >
+                    <Mic aria-hidden="true" className="size-4" />
+                    {t("memoryGame.speakNow", undefined, "Nói ngay")}
+                  </Button>
+                  <Button
+                    fullWidth={false}
+                    onClick={cancelMicCountdown}
+                    size="compact"
+                    variant="quiet"
+                  >
+                    {t("memoryGame.typeManually", undefined, "Tự gõ chữ")}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {autoSubmitStage === "RECALL" && !isSubmitting ? (
+              <div
+                aria-live="polite"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-emerald-300 bg-emerald-50 px-4 py-2.5"
+                data-testid="memory-autosubmit-banner"
+                role="status"
+              >
+                <p className="text-sm font-extrabold text-emerald-950">
+                  {t(
+                    "memoryGame.autoSubmittingRecall",
+                    undefined,
+                    "Đang tự động gửi câu trả lời của bé…",
+                  )}
+                </p>
+                <Button
+                  fullWidth={false}
+                  onClick={cancelAutoSubmit}
+                  size="compact"
+                  variant="secondary"
+                >
+                  {t("memoryGame.editBeforeSubmit", undefined, "Sửa lại")}
+                </Button>
+              </div>
+            ) : null}
+
             {voiceNotice ? (
               <p className="text-sm font-semibold text-primary">
                 {voiceNotice}
@@ -1592,6 +2107,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               id="memory-recall-input"
               lang="vi"
               onChange={(e) => {
+                stopMicCapture();
+                cancelAutoSubmit();
                 setRecallText(e.target.value);
                 setRecallInputMode("TEXT");
               }}
@@ -1667,7 +2184,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   dir="ltr"
                   lang="vi"
                 >
-                  {recallEvaluation.creative_followup_vi}
+                  {adaptTextToTeacherPersona(
+                    recallEvaluation.creative_followup_vi,
+                    teacherPersona.gender,
+                  )}
                 </p>
               </div>
               <div className="mt-4">
@@ -1676,6 +2196,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   onClick={() => {
                     setFocusedObjectId(null);
                     setStage("CREATIVE");
+                    if (getEntertainmentPreferences().autopilotEnabled) {
+                      void recorder.prepare?.().catch(() => undefined);
+                      startMicCountdown("CREATIVE", 3);
+                    }
                   }}
                 >
                   <Sparkles aria-hidden="true" className="size-5" />
@@ -1688,7 +2212,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           {recallEvaluation.support_summary_vi ? (
             <div className="rounded-control border border-border bg-cream px-4 py-2.5 text-sm font-semibold text-muted">
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recallEvaluation.support_summary_vi}
+                {adaptTextToTeacherPersona(
+                  recallEvaluation.support_summary_vi,
+                  teacherPersona.gender,
+                )}
               </span>
             </div>
           ) : null}
@@ -1821,7 +2348,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   dir="ltr"
                   lang="vi"
                 >
-                  {session.scene_spec.creative_prompt_vi}
+                  {adaptTextToTeacherPersona(
+                    session.scene_spec.creative_prompt_vi,
+                    teacherPersona.gender,
+                  )}
                 </p>
               </div>
               <Button
@@ -1891,6 +2421,102 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               </Button>
             </div>
 
+            {creativeMagicWords.length > 0 ? (
+              <div
+                className="flex flex-wrap items-center gap-2 rounded-control border border-amber-200 bg-amber-50/75 px-3.5 py-2.5"
+                data-testid="memory-creative-focus-words"
+              >
+                <span className="text-xs font-extrabold text-amber-900">
+                  ⭐{" "}
+                  {t(
+                    "memoryGame.magicFocusWordsLabel",
+                    undefined,
+                    "Từ khóa phép thuật bé đang luyện:",
+                  )}
+                </span>
+                {creativeMagicWords.map((word) => (
+                  <button
+                    className="viread-learning-content inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+                    dir="ltr"
+                    key={word}
+                    lang="vi"
+                    onClick={() =>
+                      speakVietnamesePrompt(word, { wordSample: true })
+                    }
+                    type="button"
+                  >
+                    <Volume2 aria-hidden="true" className="size-3.5" />
+                    {word}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {micCountdown?.target === "CREATIVE" && !isListeningVoice ? (
+              <div
+                aria-live="polite"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border-2 border-amber-300 bg-amber-50/90 px-4 py-3"
+                data-testid="memory-mic-countdown"
+                role="status"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="grid size-10 shrink-0 place-items-center rounded-full bg-amber-500 text-lg font-extrabold text-white">
+                    {micCountdown.seconds}
+                  </span>
+                  <p className="text-sm font-extrabold text-amber-950">
+                    {t(
+                      "memoryGame.countdownCreative",
+                      { seconds: micCountdown.seconds },
+                      `Tự động bật Micro sau ${micCountdown.seconds} giây để bé kể chuyện…`,
+                    )}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    fullWidth={false}
+                    onClick={() => startVoiceCapture("CREATIVE")}
+                    size="compact"
+                  >
+                    <Mic aria-hidden="true" className="size-4" />
+                    {t("memoryGame.speakNow", undefined, "Nói ngay")}
+                  </Button>
+                  <Button
+                    fullWidth={false}
+                    onClick={cancelMicCountdown}
+                    size="compact"
+                    variant="quiet"
+                  >
+                    {t("memoryGame.typeManually", undefined, "Tự gõ chữ")}
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {autoSubmitStage === "CREATIVE" && !isSubmitting ? (
+              <div
+                aria-live="polite"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-emerald-300 bg-emerald-50 px-4 py-2.5"
+                data-testid="memory-autosubmit-banner"
+                role="status"
+              >
+                <p className="text-sm font-extrabold text-emerald-950">
+                  {t(
+                    "memoryGame.autoSubmittingCreative",
+                    undefined,
+                    "Đang tự động gửi câu chuyện sáng tạo của bé…",
+                  )}
+                </p>
+                <Button
+                  fullWidth={false}
+                  onClick={cancelAutoSubmit}
+                  size="compact"
+                  variant="secondary"
+                >
+                  {t("memoryGame.editBeforeSubmit", undefined, "Sửa lại")}
+                </Button>
+              </div>
+            ) : null}
+
             {voiceNotice ? (
               <p className="text-sm font-semibold text-primary">
                 {voiceNotice}
@@ -1904,6 +2530,8 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               id="memory-creative-input"
               lang="vi"
               onChange={(e) => {
+                stopMicCapture();
+                cancelAutoSubmit();
                 setCreativeText(e.target.value);
                 setCreativeInputMode("TEXT");
               }}
@@ -2061,8 +2689,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           recallEvaluation?.support_summary_vi) ? (
             <div className="rounded-control border border-border bg-cream px-4 py-3 text-sm font-semibold text-muted">
               <span className="viread-learning-content" dir="ltr" lang="vi">
-                {creativeEvaluation?.support_summary_vi ??
-                  recallEvaluation?.support_summary_vi}
+                {adaptTextToTeacherPersona(
+                  (creativeEvaluation?.support_summary_vi ??
+                    recallEvaluation?.support_summary_vi)!,
+                  teacherPersona.gender,
+                )}
               </span>
             </div>
           ) : null}

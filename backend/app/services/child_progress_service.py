@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import logging
 import time
@@ -124,6 +125,37 @@ class ChildProgressService:
         self.ai = ai or ChildProgressAI(self.config)
         self._now = now or (lambda: datetime.now(VIETNAM_TZ))
 
+    @staticmethod
+    def _extract_child_teacher_gender(
+        child: object,
+        explicit_gender: str | None = None,
+    ) -> str | None:
+        if explicit_gender in ("female", "male"):
+            return explicit_gender
+        settings = getattr(child, "Settings", None)
+        if isinstance(settings, dict):
+            vp = settings.get("voice_preferences")
+            if isinstance(vp, dict):
+                gender = vp.get("gender")
+                if gender in ("female", "male"):
+                    return str(gender)
+                voice_id = str(vp.get("voice_id") or "").strip().lower()
+                if any(
+                    token in voice_id
+                    for token in (
+                        "quang_son",
+                        "thien_minh",
+                        "thai_son",
+                        "neural2_d",
+                        "wavenet_b",
+                        "_male",
+                    )
+                ):
+                    return "male"
+                if voice_id:
+                    return "female"
+        return None
+
     async def assess(
         self,
         child_id: UUID,
@@ -132,12 +164,17 @@ class ChildProgressService:
         days: int = 30,
         use_ai: bool = False,
         refresh: bool = False,
+        teacher_gender: str | None = None,
     ) -> ChildProgressAssessmentRead:
         if not 7 <= days <= 90:
             raise HTTPException(422, "Invalid period")
-        if await self.repository.owned_child(child_id, actor_id) is None:
+        child = await self.repository.owned_child(child_id, actor_id)
+        if child is None:
             # Same answer for a missing child and another parent's child.
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Child profile not found")
+        resolved_teacher_gender = self._extract_child_teacher_gender(
+            child, teacher_gender
+        )
 
         end: date = self._now().astimezone(VIETNAM_TZ).date()
         start = end - timedelta(days=days - 1)
@@ -171,7 +208,11 @@ class ChildProgressService:
         )
 
         text, cached = await self._comments(
-            child_id, facts, use_ai=use_ai, refresh=refresh
+            child_id,
+            facts,
+            use_ai=use_ai,
+            refresh=refresh,
+            teacher_gender=resolved_teacher_gender,
         )
         grade = grade_for(overall)
         previous_by_key = {c.key: c.score for c in previous_components}
@@ -207,7 +248,13 @@ class ChildProgressService:
         )
 
     async def _comments(
-        self, child_id: UUID, facts: AssessmentFacts, *, use_ai: bool, refresh: bool
+        self,
+        child_id: UUID,
+        facts: AssessmentFacts,
+        *,
+        use_ai: bool,
+        refresh: bool,
+        teacher_gender: str | None = None,
     ) -> tuple[AssessmentTextRead, bool]:
         fallback = rule_based_assessment(facts)
         if facts.overall is None:
@@ -217,7 +264,11 @@ class ChildProgressService:
         fingerprint = hashlib.sha256(
             json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
         ).hexdigest()
-        key = (str(child_id), facts.days, fingerprint)
+        key = (
+            (str(child_id), facts.days, fingerprint, "male")
+            if teacher_gender == "male"
+            else (str(child_id), facts.days, fingerprint)
+        )
         ttl = self.config.cache_ttl_seconds
 
         cached = assessment_cache.get(key, ttl)
@@ -228,10 +279,20 @@ class ChildProgressService:
         if not (use_ai and self.ai.available):
             return fallback, False
 
+        ai_kwargs: dict[str, object] = {
+            "allowed_words": [w["word"] for w in facts.difficult_words],
+        }
         try:
-            text = await self.ai.assess(
-                payload, allowed_words=[w["word"] for w in facts.difficult_words]
-            )
+            params = inspect.signature(self.ai.assess).parameters
+            if "teacher_gender" in params or any(
+                p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                ai_kwargs["teacher_gender"] = teacher_gender
+        except (TypeError, ValueError):
+            pass
+
+        try:
+            text = await self.ai.assess(payload, **ai_kwargs)
         except AssessmentAIError as error:
             logger.warning("Progress AI unavailable, using rule-based comments: %s", error.attempts)
             return fallback, False

@@ -350,6 +350,19 @@ async def text_to_speech(
         g_meta = GOOGLE_VOICE_BY_ID.get(audio.resolved_voice_id)
         if g_meta is not None:
             voice_gender = str(g_meta.get("gender") or "female")
+        else:
+            el_male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+            if el_male_voice_id and audio.resolved_voice_id == el_male_voice_id:
+                voice_gender = "male"
+            elif payload.voice_id:
+                for item in STATIC_LOCAL_VOICES:
+                    if item.get("voice_id") == payload.voice_id:
+                        voice_gender = str(item.get("gender") or "female")
+                        break
+                else:
+                    req_g_meta = GOOGLE_VOICE_BY_ID.get(payload.voice_id)
+                    if req_g_meta is not None:
+                        voice_gender = str(req_g_meta.get("gender") or "female")
 
     cache_headers = _tts_cache_headers(audio)
     headers = {

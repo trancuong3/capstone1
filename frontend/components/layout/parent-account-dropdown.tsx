@@ -26,6 +26,7 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { Modal } from "@/components/common/modal";
@@ -34,35 +35,9 @@ import { InlineLanguagePanel } from "@/components/i18n/inline-language-panel";
 import type { AppStore } from "@/components/providers/app-store-provider";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useI18n } from "@/hooks/use-i18n";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
-
-const TASK_LAST_SEEN_KEY_PREFIX = "viread_tasks_last_seen:";
-
-function readLastSeenTimestamp(userId: string | null): number {
-  if (!userId || typeof window === "undefined") return 0;
-  try {
-    const raw = window.localStorage.getItem(
-      `${TASK_LAST_SEEN_KEY_PREFIX}${userId}`,
-    );
-    const parsed = raw ? Number(raw) : 0;
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeLastSeenTimestamp(userId: string | null, value: number): void {
-  if (!userId || typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(
-      `${TASK_LAST_SEEN_KEY_PREFIX}${userId}`,
-      String(value),
-    );
-  } catch {
-    // Ignore storage quota / privacy mode errors.
-  }
-}
 
 function normalizePath(pathname: string): string {
   if (pathname.length > 1 && pathname.endsWith("/")) {
@@ -103,7 +78,6 @@ const GUIDE_STEPS = [
 type DropdownView = "main" | "language";
 
 export function ParentAccountDropdown({
-  userId,
   pathname,
   displayName,
   email,
@@ -123,76 +97,50 @@ export function ParentAccountDropdown({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const languageTriggerRef = useRef<HTMLButtonElement>(null);
   const openedByKeyboardRef = useRef(false);
-  const languageOpenedByKeyboardRef = useRef(false);
   const restoreLanguageFocusRef = useRef(false);
   const languagePanelId = useId();
+  const languageTitleId = useId();
 
   const [menuState, setMenuState] = useState<{
     readonly isOpen: boolean;
     readonly pathname: string;
     readonly view: DropdownView;
     readonly returningFromLanguage: boolean;
+    readonly languageOpenedByKeyboard: boolean;
   }>({
     isOpen: false,
     pathname: "",
     view: "main",
     returningFromLanguage: false,
+    languageOpenedByKeyboard: false,
   });
   const [guideOpen, setGuideOpen] = useState(false);
   const [languageAnnouncement, setLanguageAnnouncement] = useState("");
-  const [seenState, setSeenState] = useState<{
-    readonly userId: string | null;
-    readonly ms: number;
-  }>({ userId: null, ms: 0 });
 
   const isOpen = menuState.isOpen && menuState.pathname === pathname;
   const activeView: DropdownView = isOpen ? menuState.view : "main";
-  const lastSeenTaskMs =
-    seenState.userId === userId ? seenState.ms : readLastSeenTimestamp(userId);
 
   const activeCount = taskCenter?.activeCount ?? 0;
-  const waitingReviewCount = taskCenter?.waitingReviewCount ?? 0;
-  const failedCount = taskCenter?.failedCount ?? 0;
-
-  const { newlyCompletedCount, latestTaskTimestampMs } = useMemo(() => {
-    const taskList = taskCenter?.tasks ?? [];
-    let newest = 0;
-    let newlyDone = 0;
-    for (const task of taskList) {
-      const ts = Date.parse(
-        task.updated_at || task.completed_at || task.created_at,
-      );
-      if (Number.isFinite(ts) && ts > newest) {
-        newest = ts;
-      }
-      if (
-        (task.status === "SUCCEEDED" || task.status === "PARTIAL_SUCCESS") &&
-        Number.isFinite(ts) &&
-        ts > lastSeenTaskMs
-      ) {
-        newlyDone += 1;
-      }
-    }
-    return {
-      newlyCompletedCount: newlyDone,
-      latestTaskTimestampMs: newest,
-    };
-  }, [lastSeenTaskMs, taskCenter?.tasks]);
+  const unreadWaitingReviewCount = taskCenter?.unreadWaitingReviewCount ?? 0;
+  const unreadFailedCount = taskCenter?.unreadFailedCount ?? 0;
+  const unreadCompletedCount = taskCenter?.unreadCompletedCount ?? 0;
 
   const hasRedAlert =
     !hideAiTasks &&
-    (waitingReviewCount > 0 || failedCount > 0 || newlyCompletedCount > 0);
+    (unreadWaitingReviewCount > 0 ||
+      unreadFailedCount > 0 ||
+      unreadCompletedCount > 0);
   const hasRunningActivity = !hideAiTasks && !hasRedAlert && activeCount > 0;
 
   const taskSummaryText = useMemo(() => {
-    if (failedCount > 0) {
+    if (unreadFailedCount > 0) {
       return t("navigation.accountMenu.taskStatusFailed", {
-        count: failedCount,
+        count: unreadFailedCount,
       });
     }
-    if (waitingReviewCount > 0) {
+    if (unreadWaitingReviewCount > 0) {
       return t("navigation.accountMenu.taskStatusReview", {
-        count: waitingReviewCount,
+        count: unreadWaitingReviewCount,
       });
     }
     if (activeCount > 0) {
@@ -200,71 +148,71 @@ export function ParentAccountDropdown({
         count: activeCount,
       });
     }
-    if (newlyCompletedCount > 0) {
+    if (unreadCompletedCount > 0) {
       return t("navigation.accountMenu.taskStatusNewDone", {
-        count: newlyCompletedCount,
+        count: unreadCompletedCount,
       });
     }
     return t("navigation.accountMenu.taskStatusIdle");
-  }, [activeCount, failedCount, newlyCompletedCount, t, waitingReviewCount]);
+  }, [
+    activeCount,
+    t,
+    unreadCompletedCount,
+    unreadFailedCount,
+    unreadWaitingReviewCount,
+  ]);
 
   const taskBadgeCount =
-    failedCount > 0
-      ? failedCount
-      : waitingReviewCount > 0
-        ? waitingReviewCount
-        : newlyCompletedCount > 0
-          ? newlyCompletedCount
+    unreadFailedCount > 0
+      ? unreadFailedCount
+      : unreadWaitingReviewCount > 0
+        ? unreadWaitingReviewCount
+        : unreadCompletedCount > 0
+          ? unreadCompletedCount
           : activeCount > 0
             ? activeCount
             : 0;
 
   const closeMenu = useCallback(() => {
     openedByKeyboardRef.current = false;
-    languageOpenedByKeyboardRef.current = false;
     restoreLanguageFocusRef.current = false;
     setMenuState((current) => ({
       ...current,
       isOpen: false,
       view: "main",
       returningFromLanguage: false,
+      languageOpenedByKeyboard: false,
     }));
   }, []);
 
   const openLanguageView = useCallback((byKeyboard: boolean) => {
-    languageOpenedByKeyboardRef.current = byKeyboard;
     restoreLanguageFocusRef.current = false;
     setMenuState((current) => ({
       ...current,
       view: "language",
       returningFromLanguage: false,
+      languageOpenedByKeyboard: byKeyboard,
     }));
   }, []);
 
   const handleBackToMain = useCallback(
     (options?: { readonly restoreFocus?: boolean }) => {
       restoreLanguageFocusRef.current = options?.restoreFocus ?? true;
-      languageOpenedByKeyboardRef.current = false;
       setMenuState((current) => ({
         ...current,
         view: "main",
         returningFromLanguage: true,
+        languageOpenedByKeyboard: false,
       }));
     },
     [],
   );
 
-  const markTasksSeen = useCallback(() => {
-    const seenAt = Math.max(Date.now(), latestTaskTimestampMs);
-    setSeenState({ userId, ms: seenAt });
-    writeLastSeenTimestamp(userId, seenAt);
-  }, [latestTaskTimestampMs, userId]);
-
   const handleOpenAiTasks = useCallback(() => {
-    markTasksSeen();
+    taskCenter?.markAllAlertsSeen();
     closeMenu();
     taskCenter?.openPanel();
-  }, [closeMenu, markTasksSeen, taskCenter]);
+  }, [closeMenu, taskCenter]);
 
   // Restore focus cleanly when returning from Language view, or focus the first
   // menuitem only when opened via keyboard so mouse clicks avoid a focus ring.
@@ -330,6 +278,7 @@ export function ParentAccountDropdown({
       pathname,
       view: "main",
       returningFromLanguage: false,
+      languageOpenedByKeyboard: false,
     });
   }
 
@@ -344,6 +293,7 @@ export function ParentAccountDropdown({
         pathname,
         view: "main",
         returningFromLanguage: false,
+        languageOpenedByKeyboard: false,
       });
     }
   }
@@ -383,13 +333,13 @@ export function ParentAccountDropdown({
 
   const menuItemClass = (active = false) =>
     cn(
-      "group flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
+      "group flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-start text-sm font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]",
       active ? "bg-sky/75 text-primary-hover" : "text-ink hover:bg-canvas",
     );
 
   const iconTileClass = (active: boolean, tintClass: string) =>
     cn(
-      "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+      "flex size-8 shrink-0 items-center justify-center rounded-lg transition-colors sm:size-7",
       active ? "bg-white text-primary shadow-2xs" : tintClass,
     );
 
@@ -477,18 +427,31 @@ export function ParentAccountDropdown({
 
         {isOpen ? (
           <div
-            aria-label={t("navigation.accountMenu.shortMenuAria")}
-            className="avatar-menu-enter absolute end-0 top-full z-50 mt-2.5 flex max-h-[min(calc(100dvh-10rem),660px)] w-[min(22.5rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-border/90 bg-white shadow-[0_20px_44px_-14px_rgba(35,62,64,0.20),0_4px_14px_-2px_rgba(35,62,64,0.08)] xl:max-h-[min(calc(100dvh-5.5rem),680px)]"
+            aria-label={
+              activeView === "main"
+                ? t("navigation.accountMenu.shortMenuAria")
+                : undefined
+            }
+            aria-labelledby={
+              activeView === "language" ? languageTitleId : undefined
+            }
+            className={cn(
+              "avatar-menu-enter absolute end-0 top-full z-50 mt-2.5 flex w-[min(22.5rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-border/80 bg-white shadow-[0_20px_44px_-14px_rgba(35,62,64,0.18),0_4px_14px_-2px_rgba(35,62,64,0.06)] ring-1 ring-ink/[0.06]",
+              activeView === "language"
+                ? "max-h-[min(calc(100dvh-9.5rem),540px)] xl:max-h-[min(calc(100dvh-5.5rem),560px)]"
+                : "max-h-[min(calc(100dvh-9.5rem),640px)] xl:max-h-[min(calc(100dvh-5.5rem),760px)]",
+            )}
             id="parent-account-menu"
             onKeyDown={handleMenuKeyDown}
-            role="menu"
+            role={activeView === "language" ? "dialog" : "menu"}
           >
             {activeView === "language" ? (
               <InlineLanguagePanel
                 id={languagePanelId}
                 onAnnouncement={setLanguageAnnouncement}
                 onBack={handleBackToMain}
-                openedByKeyboard={languageOpenedByKeyboardRef.current}
+                openedByKeyboard={menuState.languageOpenedByKeyboard}
+                titleId={languageTitleId}
               />
             ) : (
               <div
@@ -498,13 +461,13 @@ export function ParentAccountDropdown({
                 )}
               >
                 {/* Pinned Profile Bookplate Header */}
-                <div className="flex shrink-0 items-center gap-3 border-b border-border/75 bg-sky/40 px-4 py-3.5">
+                <div className="flex shrink-0 items-center gap-3 border-b border-border/75 bg-sky/40 px-3.5 py-2.5">
                   <span className="shrink-0 rounded-full ring-2 ring-white shadow-xs">
                     <ProfileAvatar
                       ariaLabel={t("accessibility.accountAvatar")}
                       displayName={displayName}
                       imageUrl={avatarUrl}
-                      size="md"
+                      size="sm"
                     />
                   </span>
                   <div className="min-w-0 flex-1">
@@ -534,7 +497,7 @@ export function ParentAccountDropdown({
                 <div className="avatar-menu-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain p-2">
                   {/* Quick Child Switcher */}
                   {availableChildren.length > 0 && appStore ? (
-                    <div className="rounded-xl border border-border/70 bg-canvas/85 p-2.5">
+                    <div className="rounded-xl bg-canvas/90 p-2.5">
                       <div className="flex items-center justify-between gap-2 px-0.5">
                         <p className="text-xs font-bold text-muted">
                           {t("navigation.accountMenu.quickChildTitle")}
@@ -547,14 +510,14 @@ export function ParentAccountDropdown({
                           {t("navigation.childSwitcher.manageChildren")}
                         </Link>
                       </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {availableChildren.map((child) => {
                           const isSelected = selectedChild?.id === child.id;
                           return (
                             <button
                               aria-pressed={isSelected}
                               className={cn(
-                                "inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary",
+                                "inline-flex min-h-9 max-w-full items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary sm:min-h-8",
                                 isSelected
                                   ? "border-primary bg-primary text-white shadow-2xs"
                                   : "border-border bg-white text-ink hover:border-primary/45 hover:bg-sky/40",
@@ -563,6 +526,9 @@ export function ParentAccountDropdown({
                               onClick={() => {
                                 appStore.selectChild(child.id);
                                 appStore.setValidatedSelectedChild(child);
+                                hydrateTeacherVoiceFromChildProfile(child, {
+                                  force: true,
+                                });
                                 closeMenu();
                               }}
                               type="button"
@@ -589,7 +555,7 @@ export function ParentAccountDropdown({
 
                   {/* Group 1: Activity & Utilities */}
                   <div>
-                    <p className="px-2.5 pb-0.5 pt-1 text-xs font-bold text-muted">
+                    <p className="px-2.5 pb-0.5 pt-0.5 text-xs font-bold text-muted">
                       {t("navigation.accountMenu.activitiesSection")}
                     </p>
                     <div className="space-y-0.5">
@@ -602,7 +568,7 @@ export function ParentAccountDropdown({
                           tabIndex={0}
                           type="button"
                         >
-                          <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary">
+                          <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary sm:size-7">
                             <Sparkles aria-hidden="true" className="size-4" />
                             {hasRedAlert ? (
                               <span
@@ -791,14 +757,14 @@ export function ParentAccountDropdown({
                         <button
                           aria-controls={languagePanelId}
                           aria-expanded={false}
-                          aria-haspopup="listbox"
+                          aria-haspopup="dialog"
                           aria-label={t(
                             "common.languageSelector.buttonAriaLabel",
                             {
                               language: metadata.nativeName,
                             },
                           )}
-                          className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1"
+                          className="group flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-start text-sm font-semibold text-ink transition-colors outline-none hover:bg-canvas focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 sm:min-h-[38px]"
                           onClick={(event) =>
                             openLanguageView(event.detail === 0)
                           }
@@ -807,7 +773,7 @@ export function ParentAccountDropdown({
                         >
                           <span
                             aria-hidden="true"
-                            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary transition-colors group-hover:bg-sky"
+                            className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sky/80 text-primary transition-colors group-hover:bg-sky sm:size-7"
                           >
                             <Globe className="size-4" />
                           </span>
@@ -820,7 +786,7 @@ export function ParentAccountDropdown({
                             </span>
                             <ChevronRight
                               aria-hidden="true"
-                              className="size-4 shrink-0 text-muted transition-transform group-hover:translate-x-0.5 viread-rtl-flip"
+                              className="size-4 shrink-0 text-muted transition-transform ltr:group-hover:translate-x-0.5 rtl:group-hover:-translate-x-0.5 viread-rtl-flip"
                             />
                           </span>
                         </button>
@@ -889,9 +855,9 @@ export function ParentAccountDropdown({
                 </div>
 
                 {/* Pinned Sign-Out Footer */}
-                <div className="shrink-0 border-t border-border/75 bg-cream/80 p-2">
+                <div className="shrink-0 border-t border-border/75 bg-cream/80 p-1.5">
                   <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-xl px-2.5 py-2 text-start text-sm font-semibold text-danger transition-colors outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-55"
+                    className="flex min-h-11 w-full items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-start text-sm font-semibold text-danger transition-colors outline-none hover:bg-danger-surface focus-visible:ring-2 focus-visible:ring-danger focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-55 sm:min-h-[38px]"
                     disabled={isSigningOut}
                     onClick={() => void onSignOut()}
                     role="menuitem"
@@ -900,7 +866,7 @@ export function ParentAccountDropdown({
                   >
                     <span
                       aria-hidden="true"
-                      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-surface text-danger"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-danger-surface text-danger sm:size-7"
                     >
                       <LogOut className="size-4 viread-rtl-flip" />
                     </span>
@@ -917,61 +883,66 @@ export function ParentAccountDropdown({
         ) : null}
       </div>
 
-      {/* Step-by-step Quick User Guide Modal */}
-      <Modal
-        closeOnBackdropClick
-        footer={
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <ButtonLink
-              className="sm:w-auto"
-              href="/help-support"
-              onClick={() => setGuideOpen(false)}
-              variant="secondary"
+      {/* Step-by-step Quick User Guide Modal (portaled to escape header backdrop-filter) */}
+      {guideOpen && typeof document !== "undefined"
+        ? createPortal(
+            <Modal
+              closeOnBackdropClick
+              footer={
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <ButtonLink
+                    className="sm:w-auto"
+                    href="/help-support"
+                    onClick={() => setGuideOpen(false)}
+                    variant="secondary"
+                  >
+                    {t("navigation.guide.openHelpCenter")}
+                  </ButtonLink>
+                  <Button
+                    className="sm:w-auto"
+                    onClick={() => setGuideOpen(false)}
+                    type="button"
+                  >
+                    {t("navigation.guide.closeAction")}
+                  </Button>
+                </div>
+              }
+              isOpen={guideOpen}
+              onClose={() => setGuideOpen(false)}
+              title={t("navigation.guide.title")}
+              tone="paper"
             >
-              {t("navigation.guide.openHelpCenter")}
-            </ButtonLink>
-            <Button
-              className="sm:w-auto"
-              onClick={() => setGuideOpen(false)}
-              type="button"
-            >
-              {t("navigation.guide.closeAction")}
-            </Button>
-          </div>
-        }
-        isOpen={guideOpen}
-        onClose={() => setGuideOpen(false)}
-        title={t("navigation.guide.title")}
-        tone="paper"
-      >
-        <p className="mb-4 text-sm text-muted">
-          {t("navigation.guide.subtitle")}
-        </p>
-        <ol className="space-y-3">
-          {GUIDE_STEPS.map((step) => (
-            <li
-              className="flex flex-col gap-2 rounded-control border border-border bg-canvas/60 p-3.5 sm:flex-row sm:items-center sm:justify-between"
-              key={step.key}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-extrabold text-ink">
-                  {t(`navigation.guide.steps.${step.key}.title`)}
-                </p>
-                <p className="mt-0.5 text-xs leading-5 text-muted">
-                  {t(`navigation.guide.steps.${step.key}.body`)}
-                </p>
-              </div>
-              <Link
-                className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-control border border-primary/30 bg-white px-3 text-xs font-bold text-primary transition-colors hover:bg-sky"
-                href={step.href}
-                onClick={() => setGuideOpen(false)}
-              >
-                {t(`navigation.guide.steps.${step.key}.action`)}
-              </Link>
-            </li>
-          ))}
-        </ol>
-      </Modal>
+              <p className="mb-4 text-sm text-muted">
+                {t("navigation.guide.subtitle")}
+              </p>
+              <ol className="space-y-3">
+                {GUIDE_STEPS.map((step) => (
+                  <li
+                    className="flex flex-col gap-2 rounded-control border border-border bg-canvas/60 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+                    key={step.key}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-extrabold text-ink">
+                        {t(`navigation.guide.steps.${step.key}.title`)}
+                      </p>
+                      <p className="mt-0.5 text-xs leading-5 text-muted">
+                        {t(`navigation.guide.steps.${step.key}.body`)}
+                      </p>
+                    </div>
+                    <Link
+                      className="inline-flex min-h-10 shrink-0 items-center justify-center rounded-control border border-primary/30 bg-white px-3 text-xs font-bold text-primary transition-colors hover:bg-sky"
+                      href={step.href}
+                      onClick={() => setGuideOpen(false)}
+                    >
+                      {t(`navigation.guide.steps.${step.key}.action`)}
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            </Modal>,
+            document.body,
+          )
+        : null}
     </>
   );
 }
