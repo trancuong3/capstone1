@@ -664,6 +664,7 @@
     "practiceTimes": "{count} مرة",
     "karaokeWeakSegmentsTitle": "مقاطع غنائية يُنصح بتدريبها ببطء 0.85x",
     "openSongAction": "افتح الأغنية",
-    "homeTipsTitle": "نصائح للمتابعة في المنزل"
+    "homeTipsTitle": "نصائح للمتابعة في المنزل",
+    "misreadWordsReinforcedLabel": "كلمات القراءة التي تمت تقويتها عبر الألعاب"
   }
 }

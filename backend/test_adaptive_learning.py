@@ -281,5 +281,68 @@ class AdaptiveLearningEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(skill_map["sentence_ordering"].mastery_pct or 0, 80)
 
 
+class AdaptiveLearningV41FeedIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_feed_targets_populate_focus_words_quick_play_href_and_reinforced_metric(
+        self,
+    ) -> None:
+        from app.services.child_difficult_word_feed import DifficultWordTarget
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        now = datetime.now(timezone.utc)
+        child = SimpleNamespace(Id=child_id, ParentId=parent_id, Alias="Bé Na", Grade=2)
+        feed_targets = [
+            DifficultWordTarget(
+                word="chăm chỉ",
+                normalized_word="chăm chỉ",
+                error_count=3,
+                heard_as=["chậm chạp"],
+                source_book_ids=[uuid4()],
+                source_page_ids=[uuid4()],
+                priority_score=8.5,
+                last_seen_at=now - timedelta(hours=2),
+                reinforced_count=0,
+            )
+        ]
+        evidence = [
+            SimpleNamespace(
+                Id=uuid4(),
+                ChildId=child_id,
+                ParentId=parent_id,
+                SkillKey="difficult_word_mastery",
+                SourceModule="SENTENCE_SHOOTER",
+                SourceRecordId=str(uuid4()),
+                EvidenceType="OBSERVED",
+                ScoreNormalized=0.9,
+                Confidence=0.85,
+                DifficultyLevel=2,
+                PracticeWords=["chăm chỉ", "gọn gàng"],
+                CreatedAt=now - timedelta(days=1),
+            )
+        ]
+
+        repo = _FakeAdaptiveRepo(child=child, evidence=evidence)
+        repo.list_difficult_word_targets = AsyncMock(return_value=feed_targets)
+        service = AdaptiveLearningService(repo)
+
+        profile = await service.get_adaptive_profile(child_id, parent_id, window_days=30)
+        self.assertEqual(
+            [item.display_text for item in profile.spaced_difficult_words],
+            ["chăm chỉ"],
+        )
+        hub = await service.get_entertainment_recommendations(child_id, parent_id)
+        self.assertEqual(hub.focus_difficult_words, ["chăm chỉ"])
+        self.assertTrue(profile.recommendations)
+        self.assertTrue(
+            all(
+                card.quick_play_href and "autoplay=1" in card.quick_play_href
+                for card in profile.recommendations
+            )
+        )
+
+        analytics = await service.get_parent_analytics(child_id, parent_id, window_days=30)
+        self.assertEqual(analytics.reading_misread_words_reinforced, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

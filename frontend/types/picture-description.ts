@@ -25,6 +25,7 @@ export interface PictureSampleItemDTO {
   readonly theme: string;
   readonly description: string;
   readonly image_url: string;
+  readonly matched_difficult_words?: readonly string[];
 }
 
 export interface PictureBookPageItemDTO {
@@ -33,11 +34,15 @@ export interface PictureBookPageItemDTO {
   readonly page_id: string;
   readonly page_number: number;
   readonly image_url: string;
+  readonly matched_difficult_words?: readonly string[];
 }
 
 export interface PictureCatalogDTO {
   readonly samples: readonly PictureSampleItemDTO[];
   readonly book_pages: readonly PictureBookPageItemDTO[];
+  readonly focus_difficult_words?: readonly string[];
+  readonly recommended_sample_key?: string | null;
+  readonly recommended_book_page_id?: string | null;
 }
 
 export interface PictureGuideDTO {
@@ -65,6 +70,7 @@ export interface PictureEvaluationFeedbackDTO {
   readonly scaffolding_step?: PictureScaffoldingStep | null;
   readonly next_prompt_question?: string | null;
   readonly used_target_words?: readonly string[];
+  readonly practiced_difficult_words?: readonly string[];
   readonly provider_tier?: PictureProviderTier | null;
 }
 
@@ -77,6 +83,7 @@ export interface PictureAttemptDTO {
   readonly stars: number;
   readonly evaluation_source?: PictureEvaluationSource;
   readonly provider_tier?: PictureProviderTier | null;
+  readonly practiced_difficult_words?: readonly string[];
   readonly feedback: PictureEvaluationFeedbackDTO;
   readonly created_at: string;
 }
@@ -97,6 +104,8 @@ export interface PictureSessionDTO {
   readonly attempts_count: number;
   readonly teaching_mode?: PictureTeachingMode;
   readonly target_words?: readonly string[];
+  readonly target_vocabulary?: readonly string[];
+  readonly practiced_difficult_words?: readonly string[];
   readonly provider_tier?: PictureProviderTier | null;
   readonly guide: PictureGuideDTO;
   readonly attempts: readonly PictureAttemptDTO[];
@@ -123,4 +132,5 @@ export interface PictureSessionSummaryDTO {
 export interface PictureEvaluateResponseDTO {
   readonly session: PictureSessionDTO;
   readonly latest_attempt: PictureAttemptDTO;
+  readonly practiced_difficult_words?: readonly string[];
 }

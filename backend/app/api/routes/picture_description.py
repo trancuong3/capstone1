@@ -69,18 +69,31 @@ async def list_picture_sessions(
 @router.post("/sessions", response_model=PictureSessionRead, status_code=201)
 async def create_picture_session(
     child_id: UUID = Form(...),
-    source_type: SourceType = Form(...),
+    source_type: SourceType | None = Form(default=None),
     sample_key: str | None = Form(default=None),
     book_page_id: UUID | None = Form(default=None),
     teaching_mode: TeachingMode = Form(default="OBSERVE"),
     target_words: str | None = Form(default=None),
     refresh_ai_guide: bool = Form(default=False),
+    auto_select: bool = Form(default=False),
     image: UploadFile | None = File(default=None),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
+    resolved_source_type: SourceType | None = (
+        source_type if isinstance(source_type, str) else None
+    )
+    resolved_sample_key = sample_key if isinstance(sample_key, str) else None
+    resolved_book_page_id = book_page_id if isinstance(book_page_id, UUID) else None
+    resolved_mode: TeachingMode = (
+        teaching_mode if isinstance(teaching_mode, str) else "OBSERVE"
+    )
+    resolved_target_words = target_words if isinstance(target_words, str) else None
+    resolved_refresh = refresh_ai_guide if isinstance(refresh_ai_guide, bool) else False
+    resolved_auto_select = auto_select if isinstance(auto_select, bool) else False
+
     upload_bytes: bytes | None = None
-    if image is not None:
+    if image is not None and hasattr(image, "read"):
         try:
             upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
         finally:
@@ -94,13 +107,14 @@ async def create_picture_session(
     return await _service(db).create_session(
         actor_id,
         child_id=child_id,
-        source_type=source_type,
-        sample_key=sample_key,
-        book_page_id=book_page_id,
+        source_type=resolved_source_type,
+        sample_key=resolved_sample_key,
+        book_page_id=resolved_book_page_id,
         upload_bytes=upload_bytes,
-        teaching_mode=teaching_mode,
-        target_words=_parse_target_words_form(target_words),
-        refresh_ai_guide=refresh_ai_guide,
+        teaching_mode=resolved_mode,
+        target_words=_parse_target_words_form(resolved_target_words),
+        refresh_ai_guide=resolved_refresh,
+        auto_select=resolved_auto_select,
     )
 
 

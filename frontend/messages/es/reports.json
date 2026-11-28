@@ -664,6 +664,7 @@
     "practiceTimes": "{count} veces",
     "karaokeWeakSegmentsTitle": "Versos para practicar despacio a 0,85x",
     "openSongAction": "Abrir canción",
-    "homeTipsTitle": "Consejos para acompañar en casa"
+    "homeTipsTitle": "Consejos para acompañar en casa",
+    "misreadWordsReinforcedLabel": "Palabras de lectura reforzadas en juegos"
   }
 }

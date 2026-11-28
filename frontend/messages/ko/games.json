@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "선택한 {count}개 단어 확인 중…",
     "readFullSentence": "완성된 문장 듣기",
     "practicedDifficultWordsRound": "방금 연습한 단어:",
-    "practicedDifficultWordsSummary": "이번에 연습한 어려운 단어:"
+    "practicedDifficultWordsSummary": "이번에 연습한 어려운 단어:",
+    "quickStartHeading": "아이 맞춤 준비 완료",
+    "startNowButton": "바로 시작하기",
+    "autoStartingStatus": "아이에 맞는 게임을 바로 여는 중…",
+    "autoAdvanceCountdown": "{seconds}초 후 다음 문장으로 이동",
+    "stopAutoAdvance": "자동 멈춤",
+    "autoPlayFlowToggleOn": "자동 진행",
+    "autoPlayFlowToggleOff": "자동 진행 (끔)"
   },
   "memoryGame": {
     "title": "무엇을 기억하나요?",
@@ -240,6 +247,19 @@
       "svgAria": "'{theme}' 그림 ({count}개 세부 요소)",
       "svgTitle": "{theme} 그림"
     },
-    "mobileLabel": "기억력 코너"
+    "mobileLabel": "기억력 코너",
+    "quickPlayDifficultCta": "바로 놀기 (어려운 낱말 복습)",
+    "quickPlayDifficultHint": "{grade}학년에 가장 알맞은 그림과 시간을 자동으로 고릅니다.",
+    "focusWordsReviewLabel": "복습할 낱말:",
+    "autoPlayFlowOn": "자동 진행",
+    "autoPlayFlowOff": "자동 진행 (끔)",
+    "observeAutoCue": "그림 속 물건들의 색깔과 위치를 잘 살펴보세요!",
+    "autoRecallFallbackNotice": "말로 답하기를 누르거나 기억난 내용을 입력해 보세요.",
+    "autoSubmitCountdown": "{seconds}초 후 자동 제출",
+    "sendNowButton": "바로 보내기",
+    "switchToTextButton": "글자로 쓰기",
+    "turnOffAutoButton": "자동 끄기",
+    "playNewRoundNowButton": "새 판 바로 하기",
+    "practicedWordsRevealPrefix": "복습한 낱말:"
   }
 }

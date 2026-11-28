@@ -23,6 +23,19 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function MemoryGamePage() {
-  return <MemoryGameScreen />;
+interface MemoryGamePageProps {
+  readonly searchParams: Promise<{
+    autoplay?: string | string[];
+  }>;
+}
+
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function MemoryGamePage({
+  searchParams,
+}: MemoryGamePageProps) {
+  const query = await searchParams;
+  return <MemoryGameScreen autoPlay={firstValue(query.autoplay) === "1"} />;
 }

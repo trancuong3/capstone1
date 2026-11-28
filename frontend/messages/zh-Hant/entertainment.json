@@ -27,7 +27,7 @@
     "defaultGreeting": "你好小讀者！今天想看圖講故事、拼句子、開心唱歌，還是玩記憶小遊戲呢？",
     "defaultRecommendationReason": "每個活動都與孩子正在閱讀的圖書溫和連接，在毫無壓力中牢記詞彙。",
     "focusDifficultWordsLabel": "正在溫習的詞語：",
-    "playSuggestedCta": "立即開始推薦活動",
+    "playSuggestedCta": "馬上和貓頭鷹一起玩",
     "onboardingRegionAria": "趣味學習區新手引導",
     "onboardingCounter": "快速指南 ({current}/{total})",
     "onboardingStep1Title": "1. 選擇喜歡的活動角落",
@@ -57,7 +57,12 @@
     "memoryCta": "開始記憶探索",
     "breakReminderTitle": "護眼休息提示：",
     "defaultBreakReminder": "每次遊玩約 10–15 分鐘恰到好處，讓孩子眼睛更舒適、吸收更自然。",
-    "recommendationLoadError": "暫時無法載入學習推薦。"
+    "recommendationLoadError": "暫時無法載入學習推薦。",
+    "autoPlayFlowOn": "自動暢玩",
+    "autoPlayFlowOff": "自動暢玩（已關）",
+    "quickPlayCta": "快速開始",
+    "quickPlayCardAria": "快速開始：{title}",
+    "misreadWordsChipTitle": "需要複習的詞："
   },
   "karaoke": {
     "title": "兒童卡拉OK",
@@ -92,7 +97,10 @@
       "coverAlt": "{title} 的封面",
       "songInfo": "歌曲資訊",
       "gradeRange": "{min}–{max} 年級",
-      "singSongAction": "演唱 {title}"
+      "singSongAction": "演唱 {title}",
+      "reviewDifficultWordsLabel": "練習生詞：",
+      "singNowAction": "立即演唱",
+      "difficultWordsBoostHint": "包含孩子正在練習生詞的歌曲會優先排在前面。"
     },
     "playerScreen": {
       "backToLibrary": "返回歌曲庫",
@@ -250,8 +258,12 @@
         "weakestSegmentTitle": "建議多練片段 · 第 {number} 句",
         "retrySegmentSlow": "以 0.85 倍速重練此段",
         "segmentReportSummary": "分段報告（共 {count} 句）",
-        "segmentLineHeader": "第 {number} 句 ({start}–{end})"
-      }
+        "segmentLineHeader": "第 {number} 句 ({start}–{end})",
+        "practiceWeakestNow": "立即練習最弱一句 (0.85×)"
+      },
+      "autoplayPreparing": "正在自動準備歌曲…",
+      "autoplayTapToStart": "輕點一次開始播放音樂",
+      "autoplayTapHint": "瀏覽器需要輕點一次以開啟音樂和麥克風。"
     },
     "score": {
       "regionAria": "歌詞準確度",
@@ -538,7 +550,18 @@
       "who": "有誰 / 什麼動物？",
       "action": "正在做什麼？",
       "where": "在哪裡 / 什麼顏色？"
-    }
+    },
+    "practicingWordsBadge": "正在複習的詞",
+    "matchedDifficultWordBanner": "已複習生詞：{words}",
+    "autoPlayOn": "自動暢玩",
+    "autoPlayOff": "自動暢玩（已關）",
+    "quickPlayAutopilotBtn": "立即開始（自動挑選複習圖畫）",
+    "openingAutopilotPrompt": "看看這幅畫，告訴我你看到了什麼吧！",
+    "autoMicBlockedFallback": "請點擊用麥克風講述來分享你的故事！",
+    "autoSubmitCountdown": "{seconds}秒後自動提交",
+    "submitNowAction": "立即提交",
+    "pauseAutoAction": "暫停自動",
+    "autoPausedNotice": "已暫停自動提交 — 講完後請點擊提交給 AI 老師評分。"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "未偵測到播放。請點擊聽句重試。",

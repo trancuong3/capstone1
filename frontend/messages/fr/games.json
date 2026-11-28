@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "Vérification de {count} mots sélectionnés…",
     "readFullSentence": "Écouter la phrase complète",
     "practicedDifficultWordsRound": "Mots pratiqués à l'instant :",
-    "practicedDifficultWordsSummary": "Mots cibles travaillés :"
+    "practicedDifficultWordsSummary": "Mots cibles travaillés :",
+    "quickStartHeading": "Prêt pour votre enfant",
+    "startNowButton": "Commencer maintenant",
+    "autoStartingStatus": "Ouverture rapide d’une partie adaptée…",
+    "autoAdvanceCountdown": "Phrase suivante dans {seconds}s",
+    "stopAutoAdvance": "Arrêter l'auto",
+    "autoPlayFlowToggleOn": "Lecture auto",
+    "autoPlayFlowToggleOff": "Lecture auto (Désactivée)"
   },
   "memoryGame": {
     "title": "Que retiens-tu ?",
@@ -240,6 +247,19 @@
       "svgAria": "Illustration {theme} avec {count} détails",
       "svgTitle": "Illustration {theme}"
     },
-    "mobileLabel": "Coin mémoire"
+    "mobileLabel": "Coin mémoire",
+    "quickPlayDifficultCta": "Jouer maintenant (Réviser les mots difficiles)",
+    "quickPlayDifficultHint": "Choisit automatiquement la meilleure scène et le minuteur pour le niveau {grade}.",
+    "focusWordsReviewLabel": "Mots à revoir :",
+    "autoPlayFlowOn": "Lecture auto",
+    "autoPlayFlowOff": "Lecture auto (Désactivée)",
+    "observeAutoCue": "Observe bien les couleurs et la place des objets dans l'image !",
+    "autoRecallFallbackNotice": "Appuie sur Répondre à la voix ou saisis les détails retenus.",
+    "autoSubmitCountdown": "Envoi dans {seconds}s",
+    "sendNowButton": "Envoyer maintenant",
+    "switchToTextButton": "Saisir du texte",
+    "turnOffAutoButton": "Couper l'auto",
+    "playNewRoundNowButton": "Rejouer tout de suite",
+    "practicedWordsRevealPrefix": "Mots révisés :"
   }
 }

@@ -136,14 +136,30 @@ function Catalog({
       </StatusMessage>
     );
   const data = state.data;
+  const hasDifficultMatches = data.items.some((song) =>
+    song.matched_difficult_words?.some((word) => word.trim().length > 0),
+  );
   return (
     <>
       {data.items.length ? (
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {data.items.map((song) => (
-            <SongCard key={`${song.song_id}:${song.version_id}`} song={song} />
-          ))}
-        </div>
+        <>
+          {hasDifficultMatches && (
+            <p
+              data-testid="karaoke-difficult-words-boost-hint"
+              className="rounded-control border border-amber-200 bg-amber-50/80 px-4 py-2.5 text-sm font-semibold text-amber-950"
+            >
+              {t("karaoke.library.difficultWordsBoostHint")}
+            </p>
+          )}
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {data.items.map((song) => (
+              <SongCard
+                key={`${song.song_id}:${song.version_id}`}
+                song={song}
+              />
+            ))}
+          </div>
+        </>
       ) : (
         <EmptyState
           icon={<Music2 aria-hidden className="size-10 text-primary" />}

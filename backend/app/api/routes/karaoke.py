@@ -157,7 +157,16 @@ async def songs(
     limit: int = Query(default=12, ge=1, le=50), offset: int = Query(default=0, ge=0),
     actor_id: UUID = Depends(get_current_parent_id), service=Depends(get_karaoke_service),
 ):
-    return await service.catalog(actor_id, child_id, search=search, limit=limit, offset=offset)
+    resolved_search = search if isinstance(search, str) else ""
+    resolved_limit = limit if isinstance(limit, int) and not isinstance(limit, bool) else 12
+    resolved_offset = offset if isinstance(offset, int) and not isinstance(offset, bool) else 0
+    return await service.catalog(
+        actor_id,
+        child_id,
+        search=resolved_search,
+        limit=resolved_limit,
+        offset=resolved_offset,
+    )
 
 
 @router.get("/songs/{song_id}/playback", response_model=Playback)

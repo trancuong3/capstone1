@@ -12,11 +12,16 @@ from app.models import (
     Book,
     BookPage,
     ChildProfile,
+    PageRevision,
     PictureDescriptionAttempt,
     PictureDescriptionSession,
     Profile,
 )
 from app.repositories.book_repository import CatalogRepository
+from app.services.child_difficult_word_feed import (
+    ChildDifficultWordFeed,
+    DifficultWordTarget,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +38,7 @@ class BookPageCandidateProjection:
     PageId: UUID
     PageNumber: int
     ImagePath: str
+    VerifiedText: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +104,19 @@ class PictureDescriptionRepository:
             return None
         return ChildProjection(Id=row.Id, ParentId=row.ParentId, Grade=row.Grade)
 
+    async def list_difficult_word_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 8,
+    ) -> list[DifficultWordTarget]:
+        return await ChildDifficultWordFeed(self.db).list_targets(
+            child_id,
+            parent_id,
+            limit=limit,
+        )
+
     async def list_book_pages_for_grade(
         self,
         grade: int,
@@ -114,8 +133,10 @@ class PictureDescriptionRepository:
                 BookPage.Id,
                 BookPage.PageNumber,
                 BookPage.ImagePath,
+                PageRevision.VerifiedText,
             )
             .join(BookPage, BookPage.BookId == Book.Id)
+            .outerjoin(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
             .where(
                 Book.LifecycleStatus == "ACTIVE",
                 Book.MinGrade <= grade,
@@ -141,6 +162,7 @@ class PictureDescriptionRepository:
                 PageId=row[2],
                 PageNumber=row[3],
                 ImagePath=row[4],
+                VerifiedText=row[5] if len(row) > 5 else None,
             )
             if candidate.BookId not in by_book:
                 by_book[candidate.BookId] = []
@@ -175,8 +197,10 @@ class PictureDescriptionRepository:
                 BookPage.Id,
                 BookPage.PageNumber,
                 BookPage.ImagePath,
+                PageRevision.VerifiedText,
             )
             .join(BookPage, BookPage.BookId == Book.Id)
+            .outerjoin(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
             .where(
                 BookPage.Id == page_id,
                 Book.LifecycleStatus == "ACTIVE",
@@ -198,6 +222,7 @@ class PictureDescriptionRepository:
             PageId=row[2],
             PageNumber=row[3],
             ImagePath=row[4],
+            VerifiedText=row[5] if len(row) > 5 else None,
         )
 
     @staticmethod

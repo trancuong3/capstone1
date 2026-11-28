@@ -197,6 +197,48 @@ def _contains_phrase(haystack_padded: str, phrase: str) -> bool:
     return f" {phrase} " in haystack_padded
 
 
+def _collect_used_focus_words(
+    scene_spec: SceneSpec,
+    initial_words: list[str],
+    exact_padded: str,
+    folded_padded: str,
+) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for word in initial_words:
+        key = _normalize_exact_vi(word)
+        if key and key not in seen:
+            seen.add(key)
+            ordered.append(word)
+    for word in scene_spec.focus_words or scene_spec.matched_focus_words:
+        exact_w = _normalize_exact_vi(word)
+        if not exact_w or exact_w in seen:
+            continue
+        matched = _contains_phrase(exact_padded, exact_w)
+        if not matched:
+            folded_w = fold_vietnamese(word)
+            if len(folded_w.split()) >= 2 and _contains_phrase(folded_padded, folded_w):
+                matched = True
+        if matched:
+            seen.add(exact_w)
+            ordered.append(word)
+    return ordered
+
+
+def _build_focus_word_feedback_vi(
+    scene_spec: SceneSpec,
+    used_focus_words: list[str],
+) -> str | None:
+    targets = scene_spec.focus_words or scene_spec.matched_focus_words
+    if not targets:
+        return None
+    if used_focus_words:
+        preview = ", ".join(f"“{word}”" for word in used_focus_words[:3])
+        return f"Tuyệt vời! Bé đã ôn và vận dụng tự nhiên từ khó {preview} trong phần kể của mình!"
+    preview = ", ".join(f"“{word}”" for word in targets[:3])
+    return f"Góc ôn từ khó: Bé hãy đọc to lại từ {preview} và thử lồng vào câu kể tiếp theo nhé!"
+
+
 def _split_clauses(text: str) -> list[str]:
     parts = re.split(r"[.!?\n;]+|\s*,\s*", text)
     return [part.strip() for part in parts if part.strip()]
@@ -525,6 +567,14 @@ def evaluate_memory_attempt_deterministic(
                 )
             )
 
+    used_focus_words = _collect_used_focus_words(
+        scene_spec,
+        used_focus_words,
+        full_exact_padded,
+        full_folded_padded,
+    )
+    focus_word_feedback_vi = _build_focus_word_feedback_vi(scene_spec, used_focus_words)
+
     total_objects = max(1, len(scene_spec.objects))
     support_summary = _build_support_summary(hints_used, peek_count)
 
@@ -603,6 +653,7 @@ def evaluate_memory_attempt_deterministic(
             creative_followup_vi=creative_followup_vi,
             support_summary_vi=support_summary,
             used_focus_words=used_focus_words,
+            focus_word_feedback_vi=focus_word_feedback_vi,
             ai_provider="deterministic-v4",
         )
 
@@ -664,6 +715,7 @@ def evaluate_memory_attempt_deterministic(
         creative_followup_vi=creative_followup_vi,
         support_summary_vi=support_summary,
         used_focus_words=used_focus_words,
+        focus_word_feedback_vi=focus_word_feedback_vi,
         ai_provider="deterministic-v4",
     )
 

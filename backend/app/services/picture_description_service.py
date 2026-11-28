@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException, status
@@ -21,8 +22,14 @@ from app.models import (
 )
 from app.repositories.picture_description_repository import (
     AttemptProjection,
+    BookPageCandidateProjection,
     PictureDescriptionRepository,
     SessionProjection,
+)
+from app.services.child_difficult_word_feed import DifficultWordTarget
+from app.services.difficult_words_service import (
+    normalize_vietnamese_practice_word,
+    tokenize_vietnamese_practice_text,
 )
 from app.schemas.picture_description import (
     EvaluationSource,
@@ -188,6 +195,89 @@ SAMPLE_CATALOG: tuple[SamplePictureSpec, ...] = (
 SAMPLE_BY_KEY: dict[str, SamplePictureSpec] = {
     spec.sample_key: spec for spec in SAMPLE_CATALOG
 }
+GRADE_DEFAULT_SAMPLE: dict[int, str] = {
+    1: "sunny-garden",
+    2: "sunny-garden",
+    3: "lakeside-picnic",
+    4: "happy-classroom",
+    5: "happy-classroom",
+}
+
+
+def _default_sample_key_for_grade(grade: int) -> str:
+    return GRADE_DEFAULT_SAMPLE.get(max(1, min(5, int(grade))), "sunny-garden")
+
+
+def _match_words_in_text(text: str, words: list[str]) -> list[str]:
+    if not text or not words:
+        return []
+    tokens = [
+        normalize_vietnamese_practice_word(token)
+        for token in tokenize_vietnamese_practice_text(text)
+    ]
+    cleaned_tokens = [token for token in tokens if token]
+    if not cleaned_tokens:
+        return []
+    padded = f" {' '.join(cleaned_tokens)} "
+    token_set = set(cleaned_tokens)
+    matched: list[str] = []
+    seen: set[str] = set()
+    for word in words:
+        norm = normalize_vietnamese_practice_word(word)
+        if not norm or norm in seen:
+            continue
+        hit = norm in token_set if " " not in norm else f" {norm} " in padded
+        if hit:
+            seen.add(norm)
+            matched.append(word)
+    return matched
+
+
+def _sample_searchable_text(spec: SamplePictureSpec) -> str:
+    vocab_parts = [f"{item.word} {item.hint}" for item in spec.default_guide.suggested_vocabulary]
+    return " ".join(
+        [
+            spec.title,
+            spec.theme,
+            spec.description,
+            spec.default_guide.scene_title,
+            spec.default_guide.scene_summary,
+            *vocab_parts,
+            *spec.default_guide.model_sample_sentences,
+        ]
+    )
+
+
+def _best_sample_for_child(grade: int, focus_words: list[str]) -> SamplePictureSpec:
+    preferred_key = _default_sample_key_for_grade(grade)
+    ranked = sorted(
+        SAMPLE_CATALOG,
+        key=lambda spec: (
+            -len(_match_words_in_text(_sample_searchable_text(spec), focus_words)),
+            0 if spec.sample_key == preferred_key else 1,
+        ),
+    )
+    return ranked[0]
+
+
+def _select_target_words_for_scene(
+    explicit_words: list[str] | None,
+    feed_words: list[str],
+    scene_text: str,
+) -> list[str]:
+    if not feed_words:
+        return _normalize_target_words(explicit_words)
+    matched = _match_words_in_text(scene_text, feed_words)
+    matched_keys = {normalize_vietnamese_practice_word(w) for w in matched}
+    remaining = [
+        word
+        for word in feed_words
+        if normalize_vietnamese_practice_word(word) not in matched_keys
+    ]
+    woven_focus = [*matched, *remaining][:3]
+    if explicit_words:
+        return _normalize_target_words([*explicit_words, *woven_focus])
+    return _normalize_target_words(woven_focus)
 
 
 def _normalize_upload_image(raw_bytes: bytes) -> tuple[bytes, str]:
@@ -337,6 +427,43 @@ class PictureDescriptionService:
         cfg = getattr(self.ai_client, "config", None)
         return cfg if isinstance(cfg, PictureDescriptionAiConfig) else None
 
+    async def _safe_feed_targets(
+        self,
+        actor_id: UUID,
+        child_id: UUID,
+        *,
+        limit: int = 8,
+    ) -> list[DifficultWordTarget]:
+        fn = getattr(self.repository, "list_difficult_word_targets", None)
+        if fn is None:
+            return []
+        try:
+            maybe_coro = fn(child_id, actor_id, limit=limit)
+            if not inspect.isawaitable(maybe_coro):
+                return []
+            rows = await maybe_coro
+        except Exception:
+            return []
+        return list(rows) if isinstance(rows, (list, tuple)) else []
+
+    async def _safe_book_pages_for_grade(
+        self,
+        grade: int,
+        *,
+        limit: int = 12,
+    ) -> list[BookPageCandidateProjection]:
+        fn = getattr(self.repository, "list_book_pages_for_grade", None)
+        if fn is None:
+            return []
+        try:
+            maybe_coro = fn(grade, limit=limit)
+            if not inspect.isawaitable(maybe_coro):
+                return []
+            rows = await maybe_coro
+        except Exception:
+            return []
+        return list(rows) if isinstance(rows, (list, tuple)) else []
+
     def _to_attempt_read(self, attempt: AttemptProjection) -> PictureAttemptRead:
         feedback = PictureEvaluationFeedbackRead.model_validate(attempt.FeedbackPayload)
         evaluation_source: EvaluationSource = (
@@ -357,6 +484,7 @@ class PictureDescriptionService:
             evaluation_source=evaluation_source,
             provider_tier=provider_tier,
             feedback=feedback,
+            practiced_difficult_words=list(feedback.used_target_words),
             created_at=attempt.CreatedAt,
         )
 
@@ -387,6 +515,7 @@ class PictureDescriptionService:
             attempts_count=session.AttemptsCount,
             teaching_mode=guide.teaching_mode,
             target_words=list(guide.target_words),
+            target_vocabulary=list(guide.target_words),
             provider_tier=provider_tier,
             guide=guide,
             attempts=[self._to_attempt_read(item) for item in attempts],
@@ -402,6 +531,8 @@ class PictureDescriptionService:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
         child_grade = int(child.Grade)
+        feed_targets = await self._safe_feed_targets(actor_id, child_id, limit=8)
+        focus_difficult_words = [target.word for target in feed_targets if target.word]
         candidates = await self.repository.list_book_pages_for_grade(child_grade)
 
         samples = [
@@ -411,6 +542,10 @@ class PictureDescriptionService:
                 theme=spec.theme,
                 description=spec.description,
                 image_url=spec.image_url,
+                matched_difficult_words=_match_words_in_text(
+                    _sample_searchable_text(spec),
+                    focus_difficult_words,
+                ),
             )
             for spec in SAMPLE_CATALOG
         ]
@@ -423,6 +558,9 @@ class PictureDescriptionService:
                     signed_url = self._sign_url_fn(row.ImagePath)
                 except HTTPException:
                     continue
+                searchable_page = " ".join(
+                    part for part in (row.BookTitle, getattr(row, "VerifiedText", None)) if part
+                )
                 items.append(
                     PictureBookPageItem(
                         book_id=row.BookId,
@@ -430,12 +568,35 @@ class PictureDescriptionService:
                         page_id=row.PageId,
                         page_number=row.PageNumber,
                         image_url=signed_url,
+                        matched_difficult_words=_match_words_in_text(
+                            searchable_page,
+                            focus_difficult_words,
+                        ),
                     )
                 )
+            items.sort(key=lambda item: -len(item.matched_difficult_words))
             return items
 
         book_pages = await asyncio.to_thread(_sign_pages)
-        return PictureCatalogRead(samples=samples, book_pages=book_pages)
+        preferred_sample = _default_sample_key_for_grade(child_grade)
+        recommended_sample = max(
+            samples,
+            key=lambda item: (
+                len(item.matched_difficult_words),
+                1 if item.sample_key == preferred_sample else 0,
+            ),
+            default=None,
+        )
+        recommended_book_page_id = book_pages[0].page_id if book_pages else None
+        return PictureCatalogRead(
+            samples=samples,
+            book_pages=book_pages,
+            focus_difficult_words=focus_difficult_words,
+            recommended_sample_key=(
+                recommended_sample.sample_key if recommended_sample is not None else None
+            ),
+            recommended_book_page_id=recommended_book_page_id,
+        )
 
     async def list_sessions(
         self,
@@ -507,6 +668,7 @@ class PictureDescriptionService:
         input_mode: InputMode,
         feedback: PictureEvaluationFeedbackRead,
         model_used: str | None,
+        practiced_difficult_words: list[str] | None = None,
     ) -> None:
         """Persist compact skill evidence into learning_skill_evidence (gracefully skipping if unmigrated)."""
         active_mode: TeachingMode = (
@@ -553,6 +715,25 @@ class PictureDescriptionService:
             }
             for skill_key in skill_keys
         ]
+        cleaned_practiced = [w for w in (practiced_difficult_words or []) if w]
+        if cleaned_practiced:
+            rows.append(
+                {
+                    "Id": uuid4(),
+                    "ChildId": child_id,
+                    "ParentId": parent_id,
+                    "SkillKey": "difficult_word_mastery",
+                    "SourceModule": "PICTURE_DESCRIPTION",
+                    "SourceRecordId": str(attempt_id),
+                    "EvidenceType": evidence_type,
+                    "ScoreNormalized": score_normalized,
+                    "Confidence": confidence,
+                    "DifficultyLevel": difficulty_level,
+                    "PracticeWords": cleaned_practiced[:6],
+                    "MetadataJson": metadata,
+                    "CreatedAt": now,
+                }
+            )
         try:
             await self.repository.db.execute(insert(LearningSkillEvidence), rows)
             await self.repository.db.commit()
@@ -575,13 +756,14 @@ class PictureDescriptionService:
         actor_id: UUID,
         *,
         child_id: UUID,
-        source_type: SourceType,
+        source_type: SourceType | None = None,
         sample_key: str | None = None,
         book_page_id: UUID | None = None,
         upload_bytes: bytes | None = None,
         teaching_mode: TeachingMode = "OBSERVE",
         target_words: list[str] | None = None,
         refresh_ai_guide: bool = False,
+        auto_select: bool = False,
     ) -> PictureSessionRead:
         await self._require_parent(actor_id)
         child = await self._owned_child(actor_id, child_id)
@@ -590,7 +772,52 @@ class PictureDescriptionService:
         active_mode: TeachingMode = (
             teaching_mode if teaching_mode in TEACHING_MODE_SPECS else "OBSERVE"
         )
-        cleaned_targets = _normalize_target_words(target_words)
+        feed_targets = await self._safe_feed_targets(actor_id, child_id, limit=8)
+        focus_words = [target.word for target in feed_targets if target.word]
+
+        resolved_source_type: SourceType | None = source_type
+        resolved_sample_key_input = sample_key
+        resolved_book_page_id_input = book_page_id
+        preloaded_candidate: BookPageCandidateProjection | None = None
+
+        if resolved_source_type is None and auto_select:
+            candidates = await self._safe_book_pages_for_grade(child_grade)
+            best_page: BookPageCandidateProjection | None = None
+            best_page_hits = 0
+            for row in candidates:
+                page_text = " ".join(
+                    part for part in (row.BookTitle, getattr(row, "VerifiedText", None)) if part
+                )
+                hits = len(_match_words_in_text(page_text, focus_words))
+                if hits > best_page_hits:
+                    best_page_hits = hits
+                    best_page = row
+            if best_page is not None and best_page_hits > 0:
+                resolved_source_type = "BOOK_PAGE"
+                resolved_book_page_id_input = best_page.PageId
+                preloaded_candidate = best_page
+            else:
+                best_sample = _best_sample_for_child(child_grade, focus_words)
+                resolved_source_type = "SAMPLE"
+                resolved_sample_key_input = best_sample.sample_key
+        elif resolved_source_type == "SAMPLE" and not (resolved_sample_key_input or "").strip() and auto_select:
+            resolved_sample_key_input = _best_sample_for_child(child_grade, focus_words).sample_key
+        elif resolved_source_type == "BOOK_PAGE" and resolved_book_page_id_input is None and auto_select:
+            candidates = await self._safe_book_pages_for_grade(child_grade)
+            if candidates:
+                ranked = sorted(
+                    candidates,
+                    key=lambda row: -len(
+                        _match_words_in_text(
+                            " ".join(
+                                part for part in (row.BookTitle, getattr(row, "VerifiedText", None)) if part
+                            ),
+                            focus_words,
+                        )
+                    ),
+                )
+                preloaded_candidate = ranked[0]
+                resolved_book_page_id_input = preloaded_candidate.PageId
 
         resolved_book_id: UUID | None = None
         resolved_book_page_id: UUID | None = None
@@ -598,13 +825,14 @@ class PictureDescriptionService:
         storage_path: str
         uploaded_new_object = False
         context_hint: str | None = None
+        scene_match_text = ""
         image_bytes: bytes | None = None
         image_mime = "image/jpeg"
 
         sample_spec: SamplePictureSpec | None = None
 
-        if source_type == "SAMPLE":
-            spec = SAMPLE_BY_KEY.get((sample_key or "").strip())
+        if resolved_source_type == "SAMPLE":
+            spec = SAMPLE_BY_KEY.get((resolved_sample_key_input or "").strip())
             if spec is None:
                 await self.repository.db.rollback()
                 raise HTTPException(
@@ -617,18 +845,19 @@ class PictureDescriptionService:
             storage_path = spec.storage_ref
             resolved_sample_key = spec.sample_key
             context_hint = f"{spec.title}: {spec.description}"
+            scene_match_text = _sample_searchable_text(spec)
             if refresh_ai_guide:
                 image_bytes = await asyncio.to_thread(_load_sample_bytes, spec)
 
-        elif source_type == "BOOK_PAGE":
-            if book_page_id is None:
+        elif resolved_source_type == "BOOK_PAGE":
+            if resolved_book_page_id_input is None:
                 await self.repository.db.rollback()
                 raise HTTPException(
                     status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail="BOOK_PAGE_REQUIRED",
                 )
-            candidate = await self.repository.get_book_page_for_grade(
-                book_page_id, child_grade
+            candidate = preloaded_candidate or await self.repository.get_book_page_for_grade(
+                resolved_book_page_id_input, child_grade
             )
             await self.repository.db.rollback()
             if candidate is None:
@@ -640,10 +869,15 @@ class PictureDescriptionService:
             resolved_book_page_id = candidate.PageId
             storage_path = candidate.ImagePath
             context_hint = f"Trang {candidate.PageNumber} của sách {candidate.BookTitle}"
+            scene_match_text = " ".join(
+                part
+                for part in (candidate.BookTitle, getattr(candidate, "VerifiedText", None))
+                if part
+            )
             raw_bytes = await asyncio.to_thread(self._download_fn, storage_path)
             image_bytes, image_mime = await asyncio.to_thread(_normalize_mime_type, raw_bytes)
 
-        elif source_type == "CUSTOM_UPLOAD":
+        elif resolved_source_type == "CUSTOM_UPLOAD":
             await self.repository.db.rollback()
             if upload_bytes is None:
                 raise HTTPException(
@@ -659,9 +893,15 @@ class PictureDescriptionService:
                 detail="INVALID_SOURCE_TYPE",
             )
 
+        cleaned_targets = _select_target_words_for_scene(
+            target_words,
+            focus_words,
+            scene_match_text,
+        )
+
         # Static built-in samples serve curated default_guide directly with ZERO outbound cloud calls
         # unless the caller explicitly requests refresh_ai_guide=True.
-        if source_type == "SAMPLE" and sample_spec is not None and not refresh_ai_guide:
+        if resolved_source_type == "SAMPLE" and sample_spec is not None and not refresh_ai_guide:
             guide = sample_spec.default_guide.model_copy(
                 update={
                     "teaching_mode": active_mode,
@@ -698,7 +938,7 @@ class PictureDescriptionService:
                         status_code=exc.status_code,
                         detail=exc.detail,
                     ) from exc
-                if source_type == "SAMPLE" and sample_spec is not None and (
+                if resolved_source_type == "SAMPLE" and sample_spec is not None and (
                     exc.retryable or exc.code == "AI_NOT_CONFIGURED"
                 ):
                     log_diagnostic(
@@ -716,7 +956,7 @@ class PictureDescriptionService:
                         }
                     )
                     model_used = "curated-sample-v4"
-                elif source_type == "BOOK_PAGE" and (
+                elif resolved_source_type == "BOOK_PAGE" and (
                     exc.retryable or exc.code == "AI_NOT_CONFIGURED"
                 ):
                     log_diagnostic(
@@ -725,7 +965,7 @@ class PictureDescriptionService:
                         event="picture_analyze_deterministic_guide_fallback",
                         stage="picture_analyze",
                         reason_code=exc.code,
-                        source_type=source_type,
+                        source_type=resolved_source_type,
                     )
                     guide = build_deterministic_picture_guide(
                         child_grade=child_grade,
@@ -737,7 +977,10 @@ class PictureDescriptionService:
                 else:
                     raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
-        if source_type == "CUSTOM_UPLOAD":
+        if cleaned_targets and not guide.target_words:
+            guide = guide.model_copy(update={"target_words": cleaned_targets})
+
+        if resolved_source_type == "CUSTOM_UPLOAD":
             assert image_bytes is not None
             try:
                 await asyncio.to_thread(
@@ -761,7 +1004,7 @@ class PictureDescriptionService:
             ParentId=actor_id,
             BookId=resolved_book_id,
             BookPageId=resolved_book_page_id,
-            SourceType=source_type,
+            SourceType=resolved_source_type,
             SampleKey=resolved_sample_key,
             ImagePath=storage_path,
             ImageMimeType=image_mime,
@@ -877,11 +1120,22 @@ class PictureDescriptionService:
                 raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
         # Guarantee consistent V4 pedagogical fields even when mocked AI clients return legacy payloads.
-        used_target_words = (
-            list(feedback.used_target_words)
-            if feedback.used_target_words
-            else detect_used_target_words(payload.transcript_text, active_target_words)
+        detected_targets = detect_used_target_words(payload.transcript_text, active_target_words)
+        used_target_words = _normalize_target_words(
+            [*(feedback.used_target_words or ()), *detected_targets]
         )
+        practiced_difficult_words = list(used_target_words)
+        praise_message = feedback.praise_message
+        if (
+            practiced_difficult_words
+            and feedback.is_relevant
+            and not any(w.casefold() in praise_message.casefold() for w in practiced_difficult_words)
+        ):
+            words_preview = ", ".join(f"“{w}”" for w in practiced_difficult_words[:3])
+            praise_addition = f" Cô khen bé đã vận dụng tự nhiên từ {words_preview}!"
+            if len(praise_message) + len(praise_addition) <= 360:
+                praise_message = f"{praise_message.rstrip()}{praise_addition}"
+
         scaffolding_step = feedback.scaffolding_step or _select_scaffolding_step(
             is_relevant=feedback.is_relevant,
             score=feedback.score_out_of_10,
@@ -902,6 +1156,7 @@ class PictureDescriptionService:
         )
         feedback = feedback.model_copy(
             update={
+                "praise_message": praise_message,
                 "teaching_mode": active_mode,
                 "scaffolding_step": scaffolding_step,
                 "next_prompt_question": next_prompt_question,
@@ -960,10 +1215,15 @@ class PictureDescriptionService:
             input_mode=input_mode,
             feedback=feedback,
             model_used=model_used,
+            practiced_difficult_words=practiced_difficult_words,
         )
 
         session_read = await asyncio.to_thread(
             self._to_session_read, updated_session, all_attempts
         )
         attempt_read = self._to_attempt_read(saved_attempt)
-        return PictureEvaluateResponse(session=session_read, latest_attempt=attempt_read)
+        return PictureEvaluateResponse(
+            session=session_read,
+            latest_attempt=attempt_read,
+            practiced_difficult_words=practiced_difficult_words,
+        )

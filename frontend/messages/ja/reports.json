@@ -664,6 +664,7 @@
     "practiceTimes": "{count}回",
     "karaokeWeakSegmentsTitle": "0.85倍速でゆっくり練習したいフレーズ",
     "openSongAction": "曲をひらく",
-    "homeTipsTitle": "おうちでできるサポートのヒント"
+    "homeTipsTitle": "おうちでできるサポートのヒント",
+    "misreadWordsReinforcedLabel": "ゲームで復習した読み間違い語"
   }
 }

@@ -144,46 +144,13 @@ class MemoryGameRepository:
         limit: int = 8,
     ) -> list[str]:
         """Best-effort lookup of recent difficult reading words for scene personalization."""
-        try:
-            async with self.db.begin_nested():
-                result = await self.db.execute(
-                    select(PageRevisionWord.Text)
-                    .join(ReadingEvent, ReadingEvent.WordId == PageRevisionWord.Id)
-                    .join(ReadingSession, ReadingSession.Id == ReadingEvent.SessionId)
-                    .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
-                    .where(
-                        ReadingSession.ChildId == child_id,
-                        ChildProfile.ParentId == parent_id,
-                        ReadingEvent.Type.in_(
-                            (
-                                "OMISSION",
-                                "REPETITION",
-                                "LONG_PAUSE",
-                                "MISPRONUNCIATION",
-                                "SUBSTITUTION",
-                                "READ_EXAMPLE",
-                            )
-                        ),
-                        PageRevisionWord.Text.is_not(None),
-                    )
-                    .order_by(desc(ReadingEvent.CreatedAt))
-                    .limit(limit * 4)
-                )
-                rows = result.scalars().all()
-        except SQLAlchemyError:
-            return []
+        from app.services.child_difficult_word_feed import ChildDifficultWordFeed
 
-        words: list[str] = []
-        seen: set[str] = set()
-        for raw in rows:
-            cleaned = str(raw).strip()
-            key = cleaned.casefold()
-            if cleaned and key not in seen:
-                seen.add(key)
-                words.append(cleaned)
-                if len(words) >= limit:
-                    break
-        return words
+        return await ChildDifficultWordFeed(self.db).list_words(
+            child_id,
+            parent_id,
+            limit=limit,
+        )
 
     async def _table_exists(self, table_name: str) -> bool:
         try:

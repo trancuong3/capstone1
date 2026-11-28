@@ -23,6 +23,21 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-export default function PictureDescriptionPage() {
-  return <PictureDescriptionScreen />;
+interface PictureDescriptionPageProps {
+  readonly searchParams: Promise<{
+    autoplay?: string | string[];
+  }>;
+}
+
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export default async function PictureDescriptionPage({
+  searchParams,
+}: PictureDescriptionPageProps) {
+  const query = await searchParams;
+  return (
+    <PictureDescriptionScreen autoPlay={firstValue(query.autoplay) === "1"} />
+  );
 }

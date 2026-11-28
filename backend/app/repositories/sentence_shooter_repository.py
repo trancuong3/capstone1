@@ -6,13 +6,13 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import desc, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     Book,
     BookPage,
     ChildProfile,
-    DifficultWordPracticeAttempt,
     GameAttempt,
     GameRound,
     GameSession,
@@ -20,8 +20,13 @@ from app.models import (
     PageRevision,
     PageRevisionWord,
     Profile,
+    ReadingSession,
 )
 from app.repositories.book_repository import CatalogRepository
+from app.services.child_difficult_word_feed import (
+    ChildDifficultWordFeed,
+    DifficultWordTarget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -362,58 +367,61 @@ class SentenceShooterRepository:
     async def active_difficult_words(
         self,
         child_id: UUID,
+        parent_id: UUID | None = None,
         *,
         limit: int = 12,
     ) -> list[str]:
-        """Return recently struggled / unmastered difficult words for a child.
+        """Return child's active difficult reading words via shared ChildDifficultWordFeed."""
+        return await ChildDifficultWordFeed(self.db).list_words(
+            child_id,
+            parent_id,
+            limit=limit,
+        )
 
-        Gracefully returns [] if the table is unavailable in an unmigrated DB.
-        """
+    async def list_difficult_word_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID | None = None,
+        *,
+        limit: int = 12,
+    ) -> list[DifficultWordTarget]:
+        """Return full DifficultWordTarget objects via shared ChildDifficultWordFeed."""
+        return await ChildDifficultWordFeed(self.db).list_targets(
+            child_id,
+            parent_id,
+            limit=limit,
+        )
+
+    async def recent_reading_book_ids(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 20,
+    ) -> list[UUID]:
+        """Return recent book IDs from the child's reading history safely."""
         try:
-            result = await self.db.execute(
-                select(
-                    DifficultWordPracticeAttempt.NormalizedWord,
-                    DifficultWordPracticeAttempt.DisplayText,
-                    DifficultWordPracticeAttempt.AssessmentStatus,
+            async with self.db.begin_nested():
+                result = await self.db.execute(
+                    select(ReadingSession.BookId)
+                    .join(ChildProfile, ChildProfile.Id == ReadingSession.ChildId)
+                    .where(
+                        ReadingSession.ChildId == child_id,
+                        ChildProfile.ParentId == parent_id,
+                    )
+                    .order_by(desc(ReadingSession.StartedAt))
+                    .limit(limit * 3)
                 )
-                .where(DifficultWordPracticeAttempt.ChildId == child_id)
-                .order_by(desc(DifficultWordPracticeAttempt.CreatedAt))
-                .limit(60)
-            )
-            rows = result.all()
-        except Exception:
-            logger.debug("Skipping difficult word lookup for child %s", child_id, exc_info=True)
-            try:
-                await self.db.rollback()
-            except Exception:
-                pass
+                seen: list[UUID] = []
+                for book_id in result.scalars().all():
+                    if book_id is not None and book_id not in seen:
+                        seen.append(book_id)
+                        if len(seen) >= limit:
+                            break
+                return seen
+        except SQLAlchemyError:
+            logger.debug("Skipping recent reading book lookup for child %s", child_id, exc_info=True)
             return []
-
-        if not rows:
-            return []
-
-        statuses_by_word: dict[str, list[str | None]] = {}
-        display_by_word: dict[str, str] = {}
-        for normalized_word, display_text, assessment_status in rows:
-            key = str(normalized_word or "").strip().casefold()
-            if not key:
-                continue
-            statuses_by_word.setdefault(key, []).append(
-                str(assessment_status) if assessment_status is not None else None
-            )
-            if key not in display_by_word:
-                display_by_word[key] = str(display_text or normalized_word).strip()
-
-        active: list[str] = []
-        for key, statuses in statuses_by_word.items():
-            # Word is considered active unless the two most recent attempts are both CORRECT.
-            recent_two = [s for s in statuses if s is not None][:2]
-            if len(recent_two) >= 2 and all(s == "CORRECT" for s in recent_two):
-                continue
-            active.append(display_by_word.get(key, key))
-            if len(active) >= limit:
-                break
-        return active
 
     async def record_learning_evidence(
         self,

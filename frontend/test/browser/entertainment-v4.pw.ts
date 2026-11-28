@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   expect,
@@ -84,6 +84,8 @@ const AFTER_SCREENSHOT_DIR = path.resolve(
   "after",
 );
 
+const V4_1_SCREENSHOT_DIR = process.env.V4_1_SCREENSHOT_DIR?.trim() || "";
+
 function buildSilentWavBuffer(seconds = 1): Buffer {
   const rate = 8000;
   const bytes = Buffer.alloc(44 + rate * seconds * 2);
@@ -122,8 +124,28 @@ async function saveAfterScreenshot(
 ): Promise<void> {
   mkdirSync(AFTER_SCREENSHOT_DIR, { recursive: true });
   await page.evaluate(() => document.fonts?.ready);
+  const fileName = `${slug}-${projectName}.png`;
+  const targetPath = path.join(AFTER_SCREENSHOT_DIR, fileName);
   await page.screenshot({
-    path: path.join(AFTER_SCREENSHOT_DIR, `${slug}-${projectName}.png`),
+    path: targetPath,
+    fullPage: true,
+  });
+  if (V4_1_SCREENSHOT_DIR) {
+    mkdirSync(V4_1_SCREENSHOT_DIR, { recursive: true });
+    copyFileSync(targetPath, path.join(V4_1_SCREENSHOT_DIR, fileName));
+  }
+}
+
+async function saveShowcaseScreenshot(
+  page: Page,
+  projectName: string,
+  slug: string,
+): Promise<void> {
+  if (!V4_1_SCREENSHOT_DIR) return;
+  mkdirSync(V4_1_SCREENSHOT_DIR, { recursive: true });
+  await page.evaluate(() => document.fonts?.ready);
+  await page.screenshot({
+    path: path.join(V4_1_SCREENSHOT_DIR, `${slug}-${projectName}.png`),
     fullPage: true,
   });
 }
@@ -364,6 +386,9 @@ function buildRecommendations(
       href: isOlder
         ? "/entertainment/memory-game"
         : "/entertainment/picture-description",
+      quick_play_href: isOlder
+        ? "/entertainment/memory-game?autoplay=1"
+        : "/entertainment/picture-description?autoplay=1",
       priority: 1,
     },
     recommendations: [
@@ -376,6 +401,7 @@ function buildRecommendations(
         suggested_difficulty: 2,
         target_words: ["mèo mướp", "lấp lánh"],
         href: "/entertainment/picture-description",
+        quick_play_href: "/entertainment/picture-description?autoplay=1",
         priority: 1,
       },
       {
@@ -387,6 +413,7 @@ function buildRecommendations(
         suggested_difficulty: 1,
         target_words: ["sách"],
         href: "/entertainment/sentence-shooter",
+        quick_play_href: "/entertainment/sentence-shooter?autoplay=1",
         priority: 2,
       },
       {
@@ -398,6 +425,7 @@ function buildRecommendations(
         suggested_difficulty: 1,
         target_words: [],
         href: "/karaoke",
+        quick_play_href: "/karaoke?autoplay=1",
         priority: 3,
       },
       {
@@ -409,6 +437,7 @@ function buildRecommendations(
         suggested_difficulty: 2,
         target_words: ["mèo mướp"],
         href: "/entertainment/memory-game",
+        quick_play_href: "/entertainment/memory-game?autoplay=1",
         priority: 4,
       },
     ],
@@ -528,11 +557,54 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
     page.getByRole("link", { name: /Khám phá trí nhớ/i }),
   ];
 
-  // Verify first-visit onboarding (3 steps -> Done)
+  // V4.1 Hub checks: misread-word chips, 1-tap Cú Mèo quick-play, 4 "Vào nhanh" links, hub-autoplay-toggle
+  const misreadWordChips = page.getByTestId("hub-misread-word-chips");
+  await expect(misreadWordChips).toBeVisible();
+  await expect(misreadWordChips).toContainText("mèo mướp");
+  await expect(misreadWordChips).toContainText("lấp lánh");
+
+  const owlQuickPlay = page.getByTestId("hub-owl-quick-play");
+  await expect(owlQuickPlay).toBeVisible();
+  await expect(owlQuickPlay).toHaveAttribute(
+    "href",
+    "/entertainment/picture-description?autoplay=1",
+  );
+  await expect(owlQuickPlay).toContainText("Chơi ngay cùng Cú Mèo");
+
+  const quickPlayLinks = [
+    page.getByTestId("quick-play-picture-description"),
+    page.getByTestId("quick-play-sentence-shooter"),
+    page.getByTestId("quick-play-karaoke"),
+    page.getByTestId("quick-play-memory-game"),
+  ];
+  await expect(quickPlayLinks[0]).toHaveAttribute(
+    "href",
+    "/entertainment/picture-description?autoplay=1",
+  );
+  await expect(quickPlayLinks[1]).toHaveAttribute(
+    "href",
+    "/entertainment/sentence-shooter?autoplay=1",
+  );
+  await expect(quickPlayLinks[2]).toHaveAttribute(
+    "href",
+    "/karaoke?autoplay=1",
+  );
+  await expect(quickPlayLinks[3]).toHaveAttribute(
+    "href",
+    "/entertainment/memory-game?autoplay=1",
+  );
+  await expect(page.getByText("Vào nhanh", { exact: true })).toHaveCount(4);
+
+  const autoPlayToggle = page.getByTestId("hub-autoplay-toggle");
+  await expect(autoPlayToggle).toHaveAttribute("aria-pressed", "true");
+
+  // Verify first-visit onboarding is non-blocking (quick-play links stay enabled underneath) then dismiss (3 steps -> Done)
   const onboarding = page.getByRole("complementary", {
     name: "Hướng dẫn làm quen khu vực Giải trí",
   });
   await expect(onboarding).toBeVisible();
+  await expect(owlQuickPlay).toBeEnabled();
+  await expect(quickPlayLinks[1]).toBeEnabled();
   await expect(onboarding).toContainText("Hướng dẫn nhanh (1/3)");
   await onboarding.getByRole("button", { name: "Tiếp theo" }).click();
   await expect(onboarding).toContainText("Hướng dẫn nhanh (2/3)");
@@ -549,6 +621,7 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
     `Hồ sơ ${SECOND_CHILD.alias} · Lớp ${SECOND_CHILD.grade}`,
   );
   await expect(page.getByText(/Chào Bé Bông!/)).toBeVisible();
+  await expect(misreadWordChips).toContainText("thành công");
   expect(recommendedChildIds).toContain(SECOND_CHILD_ID);
 
   // Switch back to child 1 for consistent Hub AFTER screenshot
@@ -559,14 +632,22 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
 
   await assertViewportHealth(page, `hub-${testInfo.project.name}`, [
     childSelector,
+    owlQuickPlay,
+    autoPlayToggle,
+    ...quickPlayLinks,
     ...zoneLinks,
   ]);
   await saveAfterScreenshot(page, testInfo.project.name, "hub");
 
-  // Sensory toggles (reducedMotion & calmSound) + persistence across reload
+  // Sensory toggles (reducedMotion, calmSound, autoPlayFlow) + persistence across reload
   const hubSection = page.locator("section.activity-library");
   await expect(hubSection).toHaveAttribute("data-reduced-motion", "false");
   await expect(hubSection).toHaveAttribute("data-calm-sound", "true");
+  await expect(hubSection).toHaveAttribute("data-auto-play-flow", "true");
+
+  await autoPlayToggle.click();
+  await expect(autoPlayToggle).toHaveAttribute("aria-pressed", "false");
+  await expect(hubSection).toHaveAttribute("data-auto-play-flow", "false");
 
   const motionBtn = page.getByRole("button", { name: "Giảm chuyển động" });
   await motionBtn.click();
@@ -586,6 +667,11 @@ test("Flow 1: Entertainment Hub V4 (4 zones, mascot, multi-child selector, onboa
   await page.reload();
   await expect(hubSection).toHaveAttribute("data-reduced-motion", "true");
   await expect(hubSection).toHaveAttribute("data-calm-sound", "false");
+  await expect(hubSection).toHaveAttribute("data-auto-play-flow", "false");
+  await expect(page.getByTestId("hub-autoplay-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  );
 
   expect(pageErrors).toEqual([]);
   expect(base.unexpected).toEqual([]);
@@ -600,6 +686,9 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
   page.on("pageerror", (err) => pageErrors.push(err.message));
 
   const catalog: PictureCatalogDTO = {
+    focus_difficult_words: ["mèo mướp", "lấp lánh"],
+    recommended_sample_key: "sunny-garden",
+    recommended_book_page_id: null,
     samples: [
       {
         sample_key: "sunny-garden",
@@ -607,6 +696,7 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
         theme: "Thiên nhiên",
         description: "Chú mèo mướp và chú bướm trong khu vườn đầy nắng.",
         image_url: "/images/picture-description/sunny-garden.jpg",
+        matched_difficult_words: ["mèo mướp", "lấp lánh"],
       },
       {
         sample_key: "happy-classroom",
@@ -614,6 +704,7 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
         theme: "Trường học",
         description: "Các bạn nhỏ đang cùng đọc sách trong lớp.",
         image_url: "/images/picture-description/happy-classroom.jpg",
+        matched_difficult_words: [],
       },
     ],
     book_pages: [
@@ -623,6 +714,7 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
         page_id: PICTURE_BOOK_PAGE_ID,
         page_number: 1,
         image_url: "/images/picture-description/lakeside-picnic.jpg",
+        matched_difficult_words: [],
       },
     ],
   };
@@ -643,6 +735,8 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
     attempts_count: 0,
     teaching_mode: "OBSERVE",
     target_words: ["mèo mướp", "lấp lánh"],
+    target_vocabulary: ["mèo mướp", "lấp lánh"],
+    practiced_difficult_words: [],
     provider_tier: "GEMINI_PRIMARY",
     guide: {
       is_child_safe: true,
@@ -716,6 +810,7 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
             stars: 3,
             evaluation_source: "AI" as const,
             provider_tier: "GEMINI_PRIMARY" as const,
+            practiced_difficult_words: ["mèo mướp"],
             feedback: {
               is_relevant: true,
               score_out_of_10: 9,
@@ -736,6 +831,7 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
               next_prompt_question:
                 "Theo bé, chú mèo mướp sẽ làm gì tiếp theo khi thấy bạn bướm?",
               used_target_words: ["mèo mướp"],
+              practiced_difficult_words: ["mèo mướp"],
               provider_tier: "GEMINI_PRIMARY" as const,
             },
             created_at: stamp,
@@ -745,11 +841,13 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
             attempts_count: 1,
             best_score: 9,
             best_stars: 3,
+            practiced_difficult_words: ["mèo mướp"],
             attempts: [attempt],
           };
           await respondJson(route, {
             session: currentSession,
             latest_attempt: attempt,
+            practiced_difficult_words: ["mèo mướp"],
           });
           return;
         }
@@ -770,6 +868,10 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
   await expect(
     page.getByRole("tab", { name: "Tranh từ sách ViRead" }),
   ).toBeVisible();
+  await expect(
+    page.getByTestId("picture-catalog-autopilot-card"),
+  ).toBeVisible();
+  await expect(page.getByTestId("picture-quick-play-btn")).toBeVisible();
 
   await page
     .getByRole("button", { name: "Khám phá tranh này" })
@@ -818,6 +920,11 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
   await expect(page.getByTestId("live-voice-transcript")).toContainText(
     "Con mèo mướp đang nằm phơi nắng",
   );
+  await expect(
+    page
+      .getByTestId("target-words-panel")
+      .locator('[data-word-matched="true"]'),
+  ).toContainText("mèo mướp");
   await page.getByRole("button", { name: "Dừng ghi âm" }).click();
   await expect(page.locator("#picture-description-input")).toHaveValue(
     /Con mèo mướp/,
@@ -835,11 +942,14 @@ test("Flow 2: Picture Description V4 (AI Teacher modes, scaffolding, voice contr
   );
   await saveAfterScreenshot(page, testInfo.project.name, "picture-description");
 
-  // Evaluate -> Result tab -> Scaffolding follow-up
+  // Evaluate -> Result tab -> Scaffolding follow-up + practiced difficult words
   await page.getByRole("button", { name: "Gửi cô giáo AI chấm bài" }).click();
   await expect(
     page.getByText("Tuyệt vời! Bé quan sát rất tinh tế và dùng từ gợi cảm!"),
   ).toBeVisible();
+  await expect(
+    page.getByTestId("picture-practiced-difficult-words"),
+  ).toContainText("mèo mướp");
   await expect(page.getByTestId("used-target-words-result")).toContainText(
     "mèo mướp",
   );
@@ -870,6 +980,7 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
     min_grade: 1,
     max_grade: 3,
     available_rounds: 5,
+    matched_difficult_words: ["sách"],
   };
 
   const orderedTokens = [
@@ -993,6 +1104,19 @@ test("Flow 3: Sentence Shooter V4 (<100ms projectile, 3 modes, zero UI lock unde
   await expect(page).toHaveURL(/\/entertainment\/sentence-shooter$/, {
     timeout: 30_000,
   });
+
+  // Verify V4.1 quick-start card, difficult-word badge, and autoplay toggle on lobby
+  await expect(page.getByTestId("shooter-quick-start-card")).toBeVisible();
+  await expect(page.getByTestId("shooter-quick-start-btn")).toContainText(
+    "Bắt đầu ngay",
+  );
+  await expect(page.getByTestId("shooter-lobby-difficult-badge")).toContainText(
+    "Ôn từ khó: sách",
+  );
+  await expect(page.getByTestId("shooter-autoplay-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 
   // Verify 3 learning modes on lobby
   const fillBlankBtn = page.getByRole("button", {
@@ -1162,6 +1286,7 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
               min_grade: 1,
               max_grade: 3,
               cover_url: null,
+              matched_difficult_words: ["trường", "vui"],
             },
           ],
           total: 1,
@@ -1259,7 +1384,23 @@ test("Flow 4: Karaoke & Musical Karaoke Stage (modes, beat/pitch/rhythm UI, repo
     { timeout: 30_000 },
   );
 
+  // V4.1 Karaoke Library: boost hint, "Ôn từ khó" chips, 1-tap "Hát ngay" (?autoplay=1&scored=1)
+  await expect(
+    page.getByTestId("karaoke-difficult-words-boost-hint"),
+  ).toBeVisible();
+  const karaokeWordBadge = page.getByTestId("karaoke-song-difficult-words");
+  await expect(karaokeWordBadge).toBeVisible();
+  await expect(karaokeWordBadge).toContainText("Ôn từ khó:");
+  await expect(karaokeWordBadge).toContainText("trường");
+  await expect(karaokeWordBadge).toContainText("vui");
+  const singNowLink = page.getByRole("link", { name: "Hát ngay", exact: true });
+  await expect(singNowLink).toHaveAttribute(
+    "href",
+    `/karaoke/${songId}?version=${versionId}&autoplay=1&scored=1`,
+  );
+
   await assertViewportHealth(page, `karaoke-${testInfo.project.name}`, [
+    singNowLink,
     page.getByRole("link", { name: "Hát bài Ngôi sao nhỏ", exact: true }),
   ]);
   await saveAfterScreenshot(page, testInfo.project.name, "karaoke");
@@ -1739,6 +1880,8 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
       },
     ],
     total_sprites: 42,
+    focus_difficult_words: ["mèo mướp", "hoa hướng dương"],
+    recommended_theme_key: "sunny_garden",
   };
 
   const catObj = {
@@ -1805,6 +1948,7 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
     best_creative_score: 0,
     stars: 0,
     attempts_count: 0,
+    focus_words: ["mèo mướp"],
     scene_spec: {
       schema_version: "1.0",
       theme_key: "sunny_garden",
@@ -1925,6 +2069,8 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
               "Chú mèo mướp sẽ rủ ai chơi tiếp trong khu vườn?",
             support_summary_vi: "Bé đã dùng 1 gợi ý nhẹ nhàng.",
             used_focus_words: ["mèo mướp"],
+            practiced_difficult_words: ["mèo mướp"],
+            focus_word_feedback_vi: "Bé đã dùng trúng từ khó mèo mướp!",
             ai_provider: "deterministic",
           };
           const attempt = {
@@ -2015,6 +2161,16 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
   await expect(
     page.getByRole("heading", { name: "Bé nhớ được gì?" }),
   ).toBeVisible();
+  await expect(page.getByTestId("memory-quick-play-card")).toContainText(
+    "mèo mướp",
+  );
+  await expect(page.getByTestId("memory-quick-play-btn")).toContainText(
+    "Chơi ngay (Ôn từ khó)",
+  );
+  await expect(page.getByTestId("memory-autoplay-toggle")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
   await page.getByRole("button", { name: /Khu vườn nắng ấm/ }).click();
   await page.getByTestId("timer-option-20S").click();
   await page.getByRole("button", { name: /Kể có câu hỏi gợi mở/ }).click();
@@ -2049,8 +2205,15 @@ test("Flow 6: Memory Game V4 (theme/timer, SVG render, post-render timer start, 
     .fill("Có một chú mèo mướp màu cam nằm ở góc dưới trái.");
   await page.getByTestId("submit-recall-btn").click();
 
-  // Stage REVEAL: spotlight highlights & interactive matched/missed fact pills
+  // Stage REVEAL: spotlight highlights, interactive fact pills & practiced difficult words
   await expect(page.getByTestId("reveal-stage")).toBeVisible();
+  await expect(page.getByTestId("reveal-practiced-words")).toContainText(
+    "mèo mướp",
+  );
+  await expect(page.getByTestId("reveal-practiced-words")).toContainText(
+    "Bé đã dùng trúng từ khó mèo mướp!",
+  );
+  await expect(page.getByTestId("reveal-play-new-btn")).toBeVisible();
   await expect(page.getByTestId("factual-score-card")).toContainText("75/100");
   await expect(page.getByTestId("memory-spotlight-focus")).toBeVisible();
   await expect(page.getByTestId("spotlight-caption")).toContainText(
@@ -2198,6 +2361,7 @@ test("Flow 7: Parent Progress Report with non-diagnostic EntertainmentLearningSu
       "Hỏi bé kể lại 2 chi tiết thú vị sau mỗi bức tranh.",
       "Cùng bé gõ nhịp theo câu hát chậm 0.85x trước khi hát cả bài.",
     ],
+    reading_misread_words_reinforced: 6,
     generated_at: stamp,
   };
 
@@ -2230,6 +2394,9 @@ test("Flow 7: Parent Progress Report with non-diagnostic EntertainmentLearningSu
   await summaryToggle.click();
 
   await expect(page.getByText(analytics.disclaimer_vi)).toBeVisible();
+  await expect(
+    page.getByTestId("reports-misread-words-reinforced"),
+  ).toContainText("6");
   await expect(page.getByText("Kỹ năng đã quan sát rõ")).toBeVisible();
   await expect(page.getByText("Sắp xếp trật tự câu tiếng Việt")).toBeVisible();
   await expect(
@@ -2247,6 +2414,1198 @@ test("Flow 7: Parent Progress Report with non-diagnostic EntertainmentLearningSu
   ]);
   await saveAfterScreenshot(page, testInfo.project.name, "reports");
 
+  expect(pageErrors).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
+test("Flow 8: Sentence Shooter V4.1 Autopilot (1-tap Hub launch, 0-click auto_select_book, TTS + 2.5s auto-advance, stop cancel)", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const base = await installApiFixture(page);
+  await installVoiceAndTtsMock(page);
+  const ttsPayloads: Array<{ text?: string }> = [];
+  await page
+    .context()
+    .route("http://127.0.0.1:8000/voice/text-to-speech", async (route) => {
+      if (route.request().method() === "POST") {
+        ttsPayloads.push(route.request().postDataJSON() as { text?: string });
+      }
+      await route.fallback();
+    });
+
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  const shooterBook: SentenceShooterBookDTO = {
+    id: SHOOTER_BOOK_ID,
+    name: book.name,
+    title: book.title,
+    author: book.author,
+    min_grade: 1,
+    max_grade: 3,
+    available_rounds: 5,
+    matched_difficult_words: ["sách"],
+  };
+
+  const r1Tok1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb101";
+  const r1Tok2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb102";
+  const r2Tok1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb201";
+  const r2Tok2 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb202";
+  const r3Tok1 = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb301";
+  const round2Id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb002";
+  const round3Id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb003";
+
+  const round2Dto = {
+    round_id: round2Id,
+    round_number: 2,
+    token_count: 2,
+    learning_mode: "WORD_ORDER" as const,
+    practiced_difficult_words: ["mèo"],
+    prompt_hint: "Ghép câu thứ hai.",
+    tokens: [
+      { id: r2Tok2, text: "ngủ.", is_difficult_word: false },
+      { id: r2Tok1, text: "Mèo", is_difficult_word: true },
+    ],
+  };
+
+  const round3Dto = {
+    round_id: round3Id,
+    round_number: 3,
+    token_count: 1,
+    learning_mode: "WORD_ORDER" as const,
+    practiced_difficult_words: ["nắng"],
+    prompt_hint: "Ghép câu cuối.",
+    tokens: [{ id: r3Tok1, text: "Nắng.", is_difficult_word: true }],
+  };
+
+  let createBody: Record<string, unknown> | null = null;
+  let currentRound = 1;
+  let resolvedInRound = 0;
+
+  await page
+    .context()
+    .route("http://127.0.0.1:8000/games/sentence-shooter/**", async (route) => {
+      const req = route.request();
+      const url = new URL(req.url());
+      if (req.method() === "OPTIONS") {
+        await respondJson(route, null, 204);
+        return;
+      }
+      if (url.pathname === "/games/sentence-shooter/books") {
+        await respondJson(route, [shooterBook]);
+        return;
+      }
+      if (
+        url.pathname === "/games/sentence-shooter/sessions" &&
+        req.method() === "POST"
+      ) {
+        createBody = req.postDataJSON() as Record<string, unknown>;
+        currentRound = 1;
+        resolvedInRound = 0;
+        const session: SentenceShooterSessionDTO = {
+          session_id: SHOOTER_SESSION_ID,
+          book: shooterBook,
+          difficulty: "easy",
+          learning_mode: "WORD_ORDER",
+          total_rounds: 3,
+          completed_rounds: 0,
+          total_stars: 0,
+          practiced_difficult_words: ["sách"],
+          round: {
+            round_id: SHOOTER_ROUND_ID,
+            round_number: 1,
+            token_count: 2,
+            learning_mode: "WORD_ORDER",
+            practiced_difficult_words: ["sách"],
+            prompt_hint: "Ghép câu đầu tiên.",
+            tokens: [
+              { id: r1Tok2, text: "sách.", is_difficult_word: true },
+              { id: r1Tok1, text: "Bé", is_difficult_word: false },
+            ],
+          },
+        };
+        await respondJson(route, session);
+        return;
+      }
+      if (
+        url.pathname ===
+          `/games/sentence-shooter/sessions/${SHOOTER_SESSION_ID}/shots` &&
+        req.method() === "POST"
+      ) {
+        const body = req.postDataJSON() as {
+          round_id: string;
+          token_id: string;
+          client_shot_id?: string;
+        };
+        resolvedInRound += 1;
+        if (currentRound === 1) {
+          const done = resolvedInRound >= 2;
+          await respondJson(route, {
+            is_correct: true,
+            correct_count: resolvedInRound,
+            token_count: 2,
+            mistakes_total: 0,
+            completed_rounds: done ? 1 : 0,
+            total_stars: done ? 1 : 0,
+            round_completed: done,
+            session_completed: false,
+            next_expected_position: resolvedInRound,
+            stars_awarded: done ? 1 : 0,
+            score: resolvedInRound * 10,
+            completed_sentence: done ? "Bé sách." : null,
+            next_round: null,
+            message: done ? "Hoàn thành câu 1!" : "Chính xác!",
+            client_shot_id: body.client_shot_id ?? null,
+            learning_mode: "WORD_ORDER",
+            practiced_difficult_words: ["sách"],
+          });
+          return;
+        }
+        if (currentRound === 2) {
+          const done = resolvedInRound >= 2;
+          await respondJson(route, {
+            is_correct: true,
+            correct_count: resolvedInRound,
+            token_count: 2,
+            mistakes_total: 0,
+            completed_rounds: done ? 2 : 1,
+            total_stars: done ? 2 : 1,
+            round_completed: done,
+            session_completed: false,
+            next_expected_position: resolvedInRound,
+            stars_awarded: done ? 1 : 0,
+            score: 20 + resolvedInRound * 10,
+            completed_sentence: done ? "Mèo ngủ." : null,
+            next_round: null,
+            message: done ? "Hoàn thành câu 2!" : "Chính xác!",
+            client_shot_id: body.client_shot_id ?? null,
+            learning_mode: "WORD_ORDER",
+            practiced_difficult_words: ["mèo"],
+          });
+          return;
+        }
+        await respondJson(route, {
+          is_correct: true,
+          correct_count: 1,
+          token_count: 1,
+          mistakes_total: 0,
+          completed_rounds: 3,
+          total_stars: 3,
+          round_completed: true,
+          session_completed: true,
+          next_expected_position: 1,
+          stars_awarded: 1,
+          score: 50,
+          completed_sentence: "Nắng.",
+          next_round: null,
+          message: "Hoàn thành lượt chơi!",
+          client_shot_id: body.client_shot_id ?? null,
+          learning_mode: "WORD_ORDER",
+          practiced_difficult_words: ["nắng"],
+        });
+        return;
+      }
+      if (
+        url.pathname ===
+          `/games/sentence-shooter/sessions/${SHOOTER_SESSION_ID}/next-round` &&
+        req.method() === "POST"
+      ) {
+        currentRound += 1;
+        resolvedInRound = 0;
+        await respondJson(route, {
+          session_id: SHOOTER_SESSION_ID,
+          completed_rounds: currentRound - 1,
+          total_rounds: 3,
+          total_stars: currentRound - 1,
+          round: currentRound === 2 ? round2Dto : round3Dto,
+        });
+        return;
+      }
+      if (
+        url.pathname ===
+        `/games/sentence-shooter/sessions/${SHOOTER_SESSION_ID}/result`
+      ) {
+        const result: SentenceShooterResultDTO = {
+          session_id: SHOOTER_SESSION_ID,
+          book: shooterBook,
+          difficulty: "easy",
+          learning_mode: "WORD_ORDER",
+          status: "COMPLETED",
+          total_rounds: 3,
+          completed_rounds: 3,
+          correct_count: 5,
+          mistakes_total: 0,
+          hint_count: 0,
+          total_stars: 3,
+          duration_seconds: 8,
+          started_at: stamp,
+          completed_at: stamp,
+          practiced_difficult_words: ["sách", "mèo", "nắng"],
+        };
+        await respondJson(route, result);
+        return;
+      }
+      await route.fallback();
+    });
+
+  await selectChildAndEnterEntertainment(page);
+
+  // Non-blocking onboarding visible, yet 1-tap "Vào nhanh" works immediately (1 tap from Hub -> 0 setup taps!)
+  await expect(
+    page.getByRole("complementary", {
+      name: "Hướng dẫn làm quen khu vực Giải trí",
+    }),
+  ).toBeVisible();
+  await page.getByTestId("quick-play-sentence-shooter").click();
+  await expect(page).toHaveURL(
+    /\/entertainment\/sentence-shooter\?autoplay=1/,
+    {
+      timeout: 30_000,
+    },
+  );
+
+  // 0 setup clicks: session immediately enters playing stage with auto_select_book=true
+  await expect(page.getByTestId("difficult-word-badge")).toContainText(
+    /Ôn từ khó:\s*sách/,
+  );
+  expect(createBody).toMatchObject({
+    child_id: ids.child,
+    auto_select_book: true,
+    difficulty: "easy",
+    learning_mode: "WORD_ORDER",
+  });
+  expect(createBody).not.toHaveProperty("book_id");
+
+  // Complete Round 1 -> TTS + 2.5s auto-advance bar -> auto-advances to Round 2 with 0 clicks
+  const wordBank = page.getByRole("group", { name: "Các từ để ghép" });
+  await wordBank.getByRole("button", { name: "Bé", exact: true }).click();
+  await wordBank.getByRole("button", { name: "sách.", exact: true }).click();
+
+  const autoAdvanceBar = page.getByTestId("shooter-auto-advance-bar");
+  await expect(autoAdvanceBar).toBeVisible({ timeout: 10_000 });
+  await expect(autoAdvanceBar).toContainText("Tự sang câu tiếp theo sau");
+  expect(
+    ttsPayloads.some((p) => String(p.text ?? "").includes("Bé sách")),
+  ).toBe(true);
+  await saveShowcaseScreenshot(
+    page,
+    testInfo.project.name,
+    "sentence-shooter-v41-auto-advance",
+  );
+
+  // Wait for 2.5s auto-advance into Round 2 (0 clicks)
+  await expect(page.getByText("Câu 2/3")).toBeVisible({ timeout: 10_000 });
+
+  // Complete Round 2 -> test "Dừng tự động" cancels countdown cleanly
+  await wordBank.getByRole("button", { name: "Mèo", exact: true }).click();
+  await wordBank.getByRole("button", { name: "ngủ.", exact: true }).click();
+  await expect(autoAdvanceBar).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId("shooter-stop-auto-btn").click();
+  await expect(autoAdvanceBar).toHaveCount(0);
+  await page.waitForTimeout(2700);
+  await expect(page.getByText("Câu 2/3")).toBeVisible();
+
+  await page.getByRole("button", { name: "Câu tiếp theo" }).click();
+  await expect(page.getByText("Câu 3/3")).toBeVisible();
+  await wordBank.getByRole("button", { name: "Nắng.", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: /Giỏi quá, bé đã hoàn thành!/ }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  await assertViewportHealth(
+    page,
+    `sentence-shooter-v41-${testInfo.project.name}`,
+    [page.getByRole("button", { name: "Chơi lượt mới" })],
+  );
+  expect(pageErrors).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
+test("Flow 9: AI Teacher V4.1 Autopilot (1-tap hub-owl-quick-play -> auto_select -> hands-free TTS/280ms/auto-mic -> green word match -> 2.2s silence auto-submit)", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const base = await installApiFixture(page);
+  await installVoiceAndTtsMock(page);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  const catalog: PictureCatalogDTO = {
+    focus_difficult_words: ["mèo mướp", "lấp lánh"],
+    recommended_sample_key: "sunny-garden",
+    recommended_book_page_id: null,
+    samples: [
+      {
+        sample_key: "sunny-garden",
+        title: "Khu vườn đầy nắng",
+        theme: "Thiên nhiên",
+        description: "Chú mèo mướp và chú bướm trong khu vườn đầy nắng.",
+        image_url: "/images/picture-description/sunny-garden.jpg",
+        matched_difficult_words: ["mèo mướp", "lấp lánh"],
+      },
+    ],
+    book_pages: [],
+  };
+
+  const sessionBase: PictureSessionDTO = {
+    session_id: PICTURE_SESSION_ID,
+    child_id: ids.child,
+    child_grade: child.grade,
+    source_type: "SAMPLE",
+    sample_key: "sunny-garden",
+    book_id: null,
+    book_page_id: null,
+    image_url: "/images/picture-description/sunny-garden.jpg",
+    scene_title: "Khu vườn đầy nắng",
+    status: "ACTIVE",
+    best_stars: 0,
+    best_score: 0,
+    attempts_count: 0,
+    teaching_mode: "OBSERVE",
+    target_words: ["mèo mướp", "lấp lánh"],
+    target_vocabulary: ["mèo mướp", "lấp lánh"],
+    practiced_difficult_words: [],
+    provider_tier: "GEMINI_PRIMARY",
+    guide: {
+      is_child_safe: true,
+      scene_title: "Khu vườn đầy nắng",
+      scene_summary: "Khu vườn tràn ngập ánh nắng với chú mèo mướp dễ thương.",
+      guiding_questions: ["Trong khu vườn có những nhân vật nào?"],
+      suggested_vocabulary: [
+        { word: "mèo mướp", hint: "Chú mèo lông vằn cam" },
+      ],
+      model_sample_sentences: ["Trong vườn có chú mèo mướp dễ thương."],
+      teaching_mode: "OBSERVE",
+      target_words: ["mèo mướp", "lấp lánh"],
+    },
+    attempts: [],
+    created_at: stamp,
+    updated_at: stamp,
+  };
+
+  let createRawFormBody = "";
+  let evaluatePayload: Record<string, unknown> | null = null;
+  let currentSession = sessionBase;
+
+  await page
+    .context()
+    .route(
+      "http://127.0.0.1:8000/games/picture-description/**",
+      async (route) => {
+        const req = route.request();
+        const url = new URL(req.url());
+        if (req.method() === "OPTIONS") {
+          await respondJson(route, null, 204);
+          return;
+        }
+        if (url.pathname === "/games/picture-description/catalog") {
+          await respondJson(route, catalog);
+          return;
+        }
+        if (
+          url.pathname === "/games/picture-description/sessions" &&
+          req.method() === "GET"
+        ) {
+          await respondJson(route, []);
+          return;
+        }
+        if (
+          url.pathname === "/games/picture-description/sessions" &&
+          req.method() === "POST"
+        ) {
+          createRawFormBody = req.postData() ?? "";
+          currentSession = sessionBase;
+          await respondJson(route, currentSession);
+          return;
+        }
+        if (
+          url.pathname ===
+            `/games/picture-description/sessions/${PICTURE_SESSION_ID}/evaluate` &&
+          req.method() === "POST"
+        ) {
+          evaluatePayload = req.postDataJSON() as Record<string, unknown>;
+          const attempt = {
+            attempt_id: PICTURE_ATTEMPT_ID,
+            attempt_number: 1,
+            input_mode:
+              (evaluatePayload.input_mode as "VOICE" | "TEXT") ?? "VOICE",
+            transcript_text: String(evaluatePayload.transcript_text ?? ""),
+            score_out_of_10: 9,
+            stars: 3,
+            evaluation_source: "AI" as const,
+            provider_tier: "GEMINI_PRIMARY" as const,
+            practiced_difficult_words: ["mèo mướp"],
+            feedback: {
+              is_relevant: true,
+              score_out_of_10: 9,
+              stars: 3,
+              matched_details: ["Chú mèo mướp"],
+              missed_details: [],
+              praise_message: "Tuyệt vời! Bé dùng trúng từ mèo mướp rồi!",
+              improvement_tip: "Kể thêm màu ánh nắng nhé.",
+              upgraded_sentences: ["Chú mèo mướp nằm dưới nắng."],
+              vocabulary_highlights: ["mèo mướp"],
+              teaching_mode: "OBSERVE" as const,
+              scaffolding_step: "EXPAND" as const,
+              next_prompt_question: "Chú mèo mướp sẽ làm gì tiếp theo?",
+              used_target_words: ["mèo mướp"],
+              practiced_difficult_words: ["mèo mướp"],
+              provider_tier: "GEMINI_PRIMARY" as const,
+            },
+            created_at: stamp,
+          };
+          currentSession = {
+            ...sessionBase,
+            attempts_count: 1,
+            best_score: 9,
+            best_stars: 3,
+            practiced_difficult_words: ["mèo mướp"],
+            attempts: [attempt],
+          };
+          await respondJson(route, {
+            session: currentSession,
+            latest_attempt: attempt,
+            practiced_difficult_words: ["mèo mướp"],
+          });
+          return;
+        }
+        await route.fallback();
+      },
+    );
+
+  await selectChildAndEnterEntertainment(page);
+  await page.getByTestId("hub-owl-quick-play").click();
+  await expect(page).toHaveURL(
+    /\/entertainment\/picture-description\?autoplay=1/,
+    { timeout: 30_000 },
+  );
+
+  // 0 setup clicks: auto_select=true creates session directly, speaks prompt, waits 280ms, and auto-arms mic
+  await expect(page.getByTestId("target-words-panel")).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(createRawFormBody).toContain('name="auto_select"');
+  expect(createRawFormBody).toContain("true");
+
+  await expect(page.getByTestId("live-voice-transcript")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible();
+
+  await page.evaluate(() => {
+    const win = window as unknown as {
+      __v4SpeechControl?: { emitTranscript: (text: string) => boolean };
+    };
+    win.__v4SpeechControl?.emitTranscript("Con mèo mướp đang nằm phơi nắng");
+  });
+
+  // Real-time green highlight on "Từ bé đang ôn" + hands-free auto-submit bar
+  await expect(
+    page
+      .getByTestId("target-words-panel")
+      .locator('[data-word-matched="true"]'),
+  ).toContainText("mèo mướp");
+  await expect(page.getByTestId("picture-auto-submit-bar")).toBeVisible();
+  await expect(page.getByTestId("picture-auto-submit-bar")).toContainText(
+    "Tự gửi sau",
+  );
+  await expect(page.getByTestId("picture-pause-auto-btn")).toBeVisible();
+  await expect(page.getByTestId("picture-send-now-btn")).toBeVisible();
+
+  await saveShowcaseScreenshot(
+    page,
+    testInfo.project.name,
+    "picture-description-v41-autopilot",
+  );
+
+  // 2.2s silence auto-submit triggers evaluate(VOICE) automatically with 0 clicks
+  await expect(
+    page.getByText("Tuyệt vời! Bé dùng trúng từ mèo mướp rồi!"),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByTestId("picture-practiced-difficult-words"),
+  ).toContainText("mèo mướp");
+  expect(evaluatePayload).toMatchObject({ input_mode: "VOICE" });
+
+  await assertViewportHealth(
+    page,
+    `picture-description-v41-${testInfo.project.name}`,
+    [page.getByRole("button", { name: "Nghe nhận xét" })],
+  );
+  expect(pageErrors).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
+test("Flow 10: Memory Game V4.1 Autopilot (1-tap Hub launch, ?autoplay=1 auto-theme, post-render timer, voice recall -> REVEAL practiced words)", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  const base = await installApiFixture(page);
+  await installVoiceAndTtsMock(page);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  const themesCatalog: MemoryThemesCatalogDTO = {
+    themes: [
+      {
+        theme_key: "sunny_garden",
+        name_vi: "Khu vườn nắng ấm",
+        description_vi: "Chú mèo mướp và hoa hướng dương.",
+        badge_vi: "Quen thuộc",
+        accent_hex: "#F59E0B",
+        sprite_count: 7,
+        sample_items_vi: ["mèo mướp", "hoa hướng dương"],
+      },
+    ],
+    timer_options: [
+      {
+        mode: "20S",
+        seconds: 20,
+        label_vi: "20 giây",
+        recommended_for_vi: "Nhịp vừa phải",
+      },
+    ],
+    grade_recommendations: [
+      {
+        grade: 2,
+        min_objects: 3,
+        max_objects: 5,
+        recommended_timer: "20S",
+        recommended_recall_mode: "GUIDED_RECALL",
+        recommended_difficulty: 2,
+        note_vi: "Gợi ý Lớp 2.",
+      },
+    ],
+    total_sprites: 42,
+    focus_difficult_words: ["mèo mướp"],
+    recommended_theme_key: "sunny_garden",
+  };
+
+  const catObj = {
+    id: "obj-cat",
+    sprite_key: "tabby_cat",
+    name_vi: "mèo mướp",
+    category_vi: "con vật",
+    aliases_vi: ["mèo"],
+    color_vi: "cam" as const,
+    color_hex: "#FB923C",
+    color_stroke_hex: "#9A3412",
+    color_light_hex: "#FED7AA",
+    shape_cue: "circle" as const,
+    count: 1,
+    position_zone: "dưới trái" as const,
+    bbox: { x: 0.12, y: 0.62, w: 0.2, h: 0.24 },
+    action_vi: "đang nằm sưởi nắng",
+    hint_tiers: {
+      tier_1: "Ở góc dưới trái có bạn mèo cam.",
+      tier_2: "Bạn ấy kêu meo meo.",
+      tier_3: "Đó là chú mèo mướp.",
+    },
+    is_focus_word: true,
+  };
+
+  const memorySessionBase: MemorySessionDTO = {
+    id: MEMORY_SESSION_ID,
+    child_id: ids.child,
+    child_grade: child.grade,
+    theme_key: "sunny_garden",
+    theme_name_vi: "Khu vườn nắng ấm",
+    difficulty_level: 2,
+    scene_seed: 42,
+    timer_mode: "20S",
+    timer_seconds: 2,
+    recall_mode: "GUIDED_RECALL",
+    status: "OBSERVING",
+    hints_used: 0,
+    peek_count: 0,
+    best_factual_score: 0,
+    best_creative_score: 0,
+    stars: 0,
+    attempts_count: 0,
+    focus_words: ["mèo mướp"],
+    scene_spec: {
+      schema_version: "4.1",
+      theme_key: "sunny_garden",
+      theme_name_vi: "Khu vườn nắng ấm",
+      child_grade: child.grade,
+      difficulty_level: 2,
+      scene_seed: 42,
+      canvas_width: 800,
+      canvas_height: 500,
+      backdrop: {
+        theme_key: "sunny_garden",
+        sky_top_hex: "#E0F2FE",
+        sky_bottom_hex: "#FEF9C3",
+        horizon_hex: "#BBF7D0",
+        ground_hex: "#86EFAC",
+        accent_hex: "#F59E0B",
+        mood_vi: "Buổi sáng trong lành",
+      },
+      objects: [catObj],
+      observation_tips_vi: ["Nhìn kỹ góc dưới trái nhé."],
+      guided_questions_vi: ["Ở góc dưới trái có con vật gì?"],
+      creative_prompt_vi: "Chú mèo mướp sẽ làm gì tiếp theo?",
+      matched_focus_words: ["mèo mướp"],
+      focus_words: ["mèo mướp"],
+    },
+    attempts: [],
+    created_at: stamp,
+    updated_at: stamp,
+  };
+
+  let createBody: Record<string, unknown> | null = null;
+  let recallInputModeSeen: string | null = null;
+
+  await page
+    .context()
+    .route("http://127.0.0.1:8000/games/memory/**", async (route) => {
+      const req = route.request();
+      const url = new URL(req.url());
+      if (req.method() === "OPTIONS") {
+        await respondJson(route, null, 204);
+        return;
+      }
+      if (url.pathname === "/games/memory/themes") {
+        await respondJson(route, themesCatalog);
+        return;
+      }
+      if (url.pathname === "/games/memory/sessions" && req.method() === "GET") {
+        await respondJson(route, []);
+        return;
+      }
+      if (
+        url.pathname === "/games/memory/sessions" &&
+        req.method() === "POST"
+      ) {
+        createBody = req.postDataJSON() as Record<string, unknown>;
+        await respondJson(route, memorySessionBase);
+        return;
+      }
+      if (
+        url.pathname ===
+          `/games/memory/sessions/${MEMORY_SESSION_ID}/attempts` &&
+        req.method() === "POST"
+      ) {
+        const body = req.postDataJSON() as {
+          stage: "RECALL" | "CREATIVE";
+          input_mode: string;
+          response_text: string;
+        };
+        recallInputModeSeen = body.input_mode;
+        const evalRecall = {
+          stage: "RECALL" as const,
+          factual_score: 92,
+          creative_score: 0,
+          stars: 3,
+          matched_facts: [
+            {
+              object_id: catObj.id,
+              sprite_key: catObj.sprite_key,
+              name_vi: catObj.name_vi,
+              color_vi: catObj.color_vi,
+              count: catObj.count,
+              position_zone: catObj.position_zone,
+              matched_attributes: ["tên", "màu"],
+              detail_vi: "1 mèo mướp cam ở dưới trái",
+              bbox: catObj.bbox,
+            },
+          ],
+          missed_facts: [],
+          creative_highlights: [],
+          story_anchors: [],
+          praise_message_vi: "Bé nhớ rất chính xác!",
+          story_praise_vi: "Tuyệt vời!",
+          next_tip_vi: "Kể tiếp câu chuyện nhé.",
+          creative_followup_vi: "Chú mèo mướp sẽ chơi cùng ai?",
+          support_summary_vi: null,
+          used_focus_words: ["mèo mướp"],
+          practiced_difficult_words: ["mèo mướp"],
+          focus_word_feedback_vi: "Bé đã dùng trúng từ khó mèo mướp!",
+          ai_provider: "deterministic",
+        };
+        const attempt = {
+          id: MEMORY_ATTEMPT_RECALL_ID,
+          session_id: MEMORY_SESSION_ID,
+          attempt_number: 1,
+          stage: "RECALL" as const,
+          input_mode: "VOICE" as const,
+          response_text: body.response_text,
+          factual_score: 92,
+          creative_score: 0,
+          stars: 3,
+          evaluation: evalRecall,
+          ai_provider: "deterministic",
+          created_at: stamp,
+        };
+        await respondJson(route, {
+          attempt,
+          session: {
+            ...memorySessionBase,
+            status: "CREATIVE",
+            best_factual_score: 92,
+            stars: 3,
+            attempts_count: 1,
+            attempts: [attempt],
+          },
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+  await selectChildAndEnterEntertainment(page);
+  await page.getByTestId("quick-play-memory-game").click();
+  await expect(page).toHaveURL(/\/entertainment\/memory-game\?autoplay=1/, {
+    timeout: 30_000,
+  });
+
+  // 0 setup clicks -> auto-theme (theme_key omitted) + post-render timer ticks 2s -> 1s -> RECALL
+  await expect(page.getByTestId("observe-stage")).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(createBody).toMatchObject({
+    child_id: ids.child,
+    timer_mode: "20S",
+  });
+  expect(createBody).not.toHaveProperty("theme_key");
+
+  await expect(page.getByTestId("memory-scene-svg")).toHaveAttribute(
+    "data-scene-ready",
+    "true",
+  );
+  await expect(page.getByTestId("countdown-seconds")).toHaveText(
+    /2 giây|1 giây/,
+  );
+
+  // Auto-transitions to RECALL and arms mic hands-free
+  await expect(page.getByTestId("recall-stage")).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId("recall-voice-btn")).toContainText("Dừng nói", {
+    timeout: 15_000,
+  });
+
+  await page.evaluate(() => {
+    const win = window as unknown as {
+      __v4SpeechControl?: { emitTranscript: (text: string) => boolean };
+    };
+    win.__v4SpeechControl?.emitTranscript("Có một chú mèo mướp màu cam");
+  });
+
+  await expect(page.getByTestId("memory-recall-auto-submit-bar")).toBeVisible();
+  await expect(page.getByTestId("memory-recall-auto-submit-bar")).toContainText(
+    "Tự gửi sau",
+  );
+
+  // 2.5s silence auto-submits into REVEAL with practiced difficult words
+  await expect(page.getByTestId("reveal-stage")).toBeVisible({
+    timeout: 15_000,
+  });
+  expect(recallInputModeSeen).toBe("VOICE");
+  await expect(page.getByTestId("reveal-practiced-words")).toContainText(
+    "mèo mướp",
+  );
+  await expect(page.getByTestId("reveal-practiced-words")).toContainText(
+    "Bé đã dùng trúng từ khó mèo mướp!",
+  );
+
+  await saveShowcaseScreenshot(
+    page,
+    testInfo.project.name,
+    "memory-game-v41-reveal",
+  );
+  await assertViewportHealth(page, `memory-game-v41-${testInfo.project.name}`, [
+    page.getByTestId("reveal-play-new-btn"),
+  ]);
+  expect(pageErrors).toEqual([]);
+  expect(base.unexpected).toEqual([]);
+});
+
+test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=1 + calm NotAllowedError fallback + weakest segment 0.85×)", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  const base = await installApiFixture(page);
+  await installLearningRecommendationsMock(page);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (err) => pageErrors.push(err.message));
+
+  await page.addInitScript(() => {
+    const tracks = new Set<MediaStreamTrack>();
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        const ctx = new AudioContext();
+        const dest = ctx.createMediaStreamDestination();
+        const stream = dest.stream;
+        stream.getTracks().forEach((track) => tracks.add(track));
+        return stream;
+      },
+    });
+    class Recognizer {
+      static active?: Recognizer;
+      onstart: (() => void) | null = null;
+      onend: (() => void) | null = null;
+      onspeechstart: (() => void) | null = null;
+      onspeechend: (() => void) | null = null;
+      onresult: ((event: unknown) => void) | null = null;
+      start(track?: MediaStreamTrack) {
+        if (track && !tracks.has(track)) {
+          throw new Error("Unexpected track");
+        }
+        Recognizer.active = this;
+        queueMicrotask(() => this.onstart?.());
+      }
+      stop() {
+        if (Recognizer.active === this) Recognizer.active = undefined;
+        queueMicrotask(() => this.onend?.());
+      }
+      abort() {
+        if (Recognizer.active === this) Recognizer.active = undefined;
+      }
+    }
+    const control = {
+      audio: null as HTMLAudioElement | null,
+      sing(startSeconds: number, endSeconds: number, text: string) {
+        const current = Recognizer.active;
+        if (!current || !this.audio || this.audio.paused) {
+          throw new Error("Expected active karaoke capture and playback");
+        }
+        this.audio.currentTime = startSeconds;
+        current.onspeechstart?.();
+        this.audio.currentTime = endSeconds;
+        current.onspeechend?.();
+        current.onresult?.({
+          resultIndex: 0,
+          results: [
+            { isFinal: true, 0: { transcript: text, confidence: 0.99 } },
+          ],
+        });
+        this.audio.dispatchEvent(new Event("timeupdate"));
+      },
+    };
+    Object.defineProperty(window, "__v4KaraokeFixture", { value: control });
+    Object.defineProperty(window, "SpeechRecognition", {
+      value: Recognizer,
+      configurable: true,
+    });
+    let rejectedAutoplayOnce = false;
+    window.Audio = new Proxy(window.Audio, {
+      construct(target, args) {
+        const audio = Reflect.construct(target, args) as HTMLAudioElement;
+        const originalPlay = audio.play.bind(audio);
+        audio.play = () => {
+          if (!rejectedAutoplayOnce) {
+            rejectedAutoplayOnce = true;
+            return Promise.reject(
+              new DOMException("Autoplay is not allowed", "NotAllowedError"),
+            );
+          }
+          return originalPlay();
+        };
+        control.audio = audio;
+        return audio;
+      },
+    });
+  });
+
+  const demoDir = path.resolve(process.cwd(), "..", "docs", "karaoke-demo");
+  const demoMp3 = readFileSync(path.join(demoDir, "ngoi-sao-nho.mp3"));
+  const durationMs = 103366;
+  const twoLineLyrics = {
+    format_version: 2 as const,
+    lines: [
+      {
+        id: lineId,
+        text: "Em vui đến trường",
+        start_ms: 1000,
+        end_ms: 4000,
+        syllables: [
+          {
+            id: "44444444-4444-4444-8444-444444444411",
+            text: "Em",
+            start_ms: 1000,
+            end_ms: 1700,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444412",
+            text: "vui",
+            start_ms: 1700,
+            end_ms: 2400,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444413",
+            text: "đến",
+            start_ms: 2400,
+            end_ms: 3100,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444414",
+            text: "trường",
+            start_ms: 3100,
+            end_ms: 4000,
+          },
+        ],
+      },
+      {
+        id: "33333333-3333-4333-8333-333333333339",
+        text: "Ngôi sao sáng trên trời",
+        start_ms: 4200,
+        end_ms: 7800,
+        syllables: [
+          {
+            id: "44444444-4444-4444-8444-444444444421",
+            text: "Ngôi",
+            start_ms: 4200,
+            end_ms: 4900,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444422",
+            text: "sao",
+            start_ms: 4900,
+            end_ms: 5600,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444423",
+            text: "sáng",
+            start_ms: 5600,
+            end_ms: 6300,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444424",
+            text: "trên",
+            start_ms: 6300,
+            end_ms: 7000,
+          },
+          {
+            id: "44444444-4444-4444-8444-444444444425",
+            text: "trời",
+            start_ms: 7000,
+            end_ms: 7800,
+          },
+        ],
+      },
+    ],
+  };
+
+  await page.context().route("https://media.example.test/**", async (route) => {
+    const range = /^bytes=(\d+)-(\d*)$/.exec(
+      route.request().headers().range ?? "",
+    );
+    const start = range ? Number(range[1]) : 0;
+    const end = range?.[2]
+      ? Math.min(demoMp3.length - 1, Number(range[2]))
+      : demoMp3.length - 1;
+    await route.fulfill({
+      status: range ? 206 : 200,
+      contentType: "audio/mpeg",
+      body: demoMp3.subarray(start, end + 1),
+      headers: {
+        "access-control-allow-origin": "*",
+        "accept-ranges": "bytes",
+        ...(range
+          ? { "content-range": `bytes ${start}-${end}/${demoMp3.length}` }
+          : {}),
+      },
+    });
+  });
+
+  await page
+    .context()
+    .route("http://127.0.0.1:8000/karaoke/**", async (route) => {
+      const req = route.request();
+      const url = new URL(req.url());
+      if (req.method() === "OPTIONS") {
+        await respondJson(route, null, 204);
+        return;
+      }
+      if (url.pathname === "/karaoke/songs") {
+        await respondJson(route, {
+          items: [
+            {
+              song_id: songId,
+              version_id: versionId,
+              title: "Ngôi sao nhỏ",
+              author: "Nhạc thiếu nhi",
+              duration_ms: durationMs,
+              min_grade: 1,
+              max_grade: 3,
+              cover_url: null,
+              matched_difficult_words: ["trường", "vui"],
+            },
+          ],
+          total: 1,
+          limit: 12,
+          offset: 0,
+        });
+        return;
+      }
+      if (url.pathname === `/karaoke/songs/${songId}/playback`) {
+        const source = Object.fromEntries(
+          Object.entries(previewDetail()).filter(([key]) => key !== "revision"),
+        );
+        await respondJson(route, {
+          ...source,
+          title: "Ngôi sao nhỏ",
+          author: "Nhạc thiếu nhi",
+          duration_ms: durationMs,
+          version_id: versionId,
+          lyrics: twoLineLyrics,
+        });
+        return;
+      }
+      if (url.pathname === `/karaoke/songs/${songId}/musical-profile`) {
+        await respondJson(route, null, 404);
+        return;
+      }
+      if (
+        url.pathname === "/karaoke/practice-sessions" &&
+        req.method() === "GET"
+      ) {
+        await respondJson(route, {
+          child_id: ids.child,
+          song_id: songId,
+          best_full_song_score: null,
+          best_full_song_stars: 0,
+          total_sessions: 0,
+          items: [],
+          storage_ready: true,
+        });
+        return;
+      }
+      if (
+        url.pathname === "/karaoke/practice-sessions" &&
+        req.method() === "POST"
+      ) {
+        const payload = req.postDataJSON() as Record<string, unknown>;
+        await respondJson(route, {
+          id: KARAOKE_SESSION_ID,
+          child_id: ids.child,
+          song_id: songId,
+          song_version_id: versionId,
+          practice_mode: payload.practice_mode ?? "FULL_SONG",
+          scoring_mode: payload.scoring_mode ?? "LYRICS_ONLY",
+          playback_rate: Number(payload.playback_rate ?? 1),
+          headphone_mode: Boolean(payload.headphone_mode),
+          overall_score: (payload.overall_score as number | null) ?? 80,
+          rhythm_score: (payload.rhythm_score as number | null) ?? null,
+          pitch_score: (payload.pitch_score as number | null) ?? null,
+          lyrics_score: (payload.lyrics_score as number | null) ?? 80,
+          fluency_score: (payload.fluency_score as number | null) ?? null,
+          stars: Number(payload.stars ?? 2),
+          segment_start_ms: null,
+          segment_end_ms: null,
+          report_payload:
+            (payload.report_payload as Record<string, unknown>) ?? {},
+          created_at: stamp,
+          persisted: true,
+        });
+        return;
+      }
+      await route.fallback();
+    });
+
+  await selectChildAndEnterEntertainment(page, false);
+  await page.getByTestId("quick-play-karaoke").click();
+  await expect(page).toHaveURL(/\/karaoke\?autoplay=1/, { timeout: 30_000 });
+
+  await expect(page.getByTestId("karaoke-song-difficult-words")).toContainText(
+    "trường",
+  );
+  await page.getByRole("link", { name: "Hát ngay", exact: true }).click();
+  await expect(page).toHaveURL(
+    new RegExp(`/karaoke/${songId}\\?version=${versionId}&autoplay=1&scored=1`),
+    { timeout: 30_000 },
+  );
+
+  const stage = page.getByRole("region", { name: "Hát cùng bé", exact: true });
+  await expect(
+    stage.getByRole("button", { name: "Hát có chấm điểm", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+
+  // Autoplay enters 3-2-1 countdown automatically (0 stage clicks)
+  await expect(stage.getByTestId("karaoke-countdown")).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // First audio.play() rejects with NotAllowedError -> calm centered CTA, zero error alerts
+  const tapBtn = stage.getByTestId("karaoke-autoplay-tap-btn");
+  await expect(tapBtn).toBeVisible({ timeout: 10_000 });
+  await expect(tapBtn).toContainText("Chạm 1 lần để vào nhạc");
+  await expect(page.locator("main").getByRole("alert")).toHaveCount(0);
+  await expect(stage.getByRole("alert")).toHaveCount(0);
+  await saveShowcaseScreenshot(
+    page,
+    testInfo.project.name,
+    "karaoke-v41-autoplay-fallback",
+  );
+
+  await tapBtn.click();
+  await expect(
+    stage.getByRole("button", { name: "Tạm dừng", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(tapBtn).toHaveCount(0);
+
+  // Sing line 1 cleanly and skip line 2 -> weakest segment CTA appears above score report
+  await page.waitForFunction(() => {
+    const fixture = (
+      window as unknown as {
+        __v4KaraokeFixture?: { audio?: HTMLAudioElement | null };
+      }
+    ).__v4KaraokeFixture;
+    return Boolean(fixture?.audio && !fixture.audio.paused);
+  });
+  await page.evaluate(() => {
+    const fixture = (
+      window as unknown as {
+        __v4KaraokeFixture: {
+          audio: HTMLAudioElement;
+          sing: (s: number, e: number, text: string) => void;
+        };
+      }
+    ).__v4KaraokeFixture;
+    fixture.sing(1.0, 3.8, "Em vui đến trường");
+    fixture.audio.currentTime = 9.0;
+    fixture.audio.dispatchEvent(new Event("timeupdate"));
+  });
+
+  await stage
+    .getByRole("button", { name: "Kết thúc & chấm điểm", exact: true })
+    .click();
+
+  const weakestCta = stage.getByTestId("karaoke-weakest-segment-cta");
+  await expect(weakestCta).toBeVisible({ timeout: 10_000 });
+  const practiceWeakestBtn = stage.getByTestId("karaoke-practice-weakest-btn");
+  await expect(practiceWeakestBtn).toContainText(
+    "Luyện ngay câu yếu nhất (0.85×)",
+  );
+  await saveShowcaseScreenshot(
+    page,
+    testInfo.project.name,
+    "karaoke-v41-weakest-segment",
+  );
+
+  await practiceWeakestBtn.click();
+  await expect(
+    stage.getByRole("button", { name: "Luyện đoạn khó", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    await page.evaluate(
+      () =>
+        (
+          window as unknown as {
+            __v4KaraokeFixture: { audio: HTMLAudioElement };
+          }
+        ).__v4KaraokeFixture.audio.playbackRate,
+    ),
+  ).toBe(0.85);
+
+  await assertViewportHealth(page, `karaoke-v41-${testInfo.project.name}`, [
+    stage.getByRole("button", { name: "Luyện đoạn khó", exact: true }),
+  ]);
   expect(pageErrors).toEqual([]);
   expect(base.unexpected).toEqual([]);
 });

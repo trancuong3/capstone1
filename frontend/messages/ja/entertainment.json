@@ -27,7 +27,7 @@
     "defaultGreeting": "こんにちは！きょうは絵でお話、文づくり、うた、記憶ゲームのどれであそぶ？",
     "defaultRecommendationReason": "どのあそびも今読んでいる本とやさしくつながり、プレッシャーなくことばを覚えられます。",
     "focusDifficultWordsLabel": "やさしく復習中のことば：",
-    "playSuggestedCta": "おすすめであそぶ",
+    "playSuggestedCta": "フクロウとすぐ遊ぶ",
     "onboardingRegionAria": "あそび学習ゾーンのはじめ方ガイド",
     "onboardingCounter": "クイックガイド ({current}/{total})",
     "onboardingStep1Title": "1. すきなあそびコーナーをえらぼう",
@@ -57,7 +57,12 @@
     "memoryCta": "きおくゲームをひらく",
     "breakReminderTitle": "目のリフレッシュ：",
     "defaultBreakReminder": "1回10〜15分くらいのペースが目にやさしく、自然に身につきます。",
-    "recommendationLoadError": "現在、学習のおすすめを読み込めません。"
+    "recommendationLoadError": "現在、学習のおすすめを読み込めません。",
+    "autoPlayFlowOn": "おまかせ進行",
+    "autoPlayFlowOff": "おまかせ進行（オフ）",
+    "quickPlayCta": "すぐ遊ぶ",
+    "quickPlayCardAria": "すぐ遊ぶ: {title}",
+    "misreadWordsChipTitle": "復習することば："
   },
   "karaoke": {
     "title": "子ども向けカラオケ",
@@ -92,7 +97,10 @@
       "coverAlt": "{title} のカバーアート",
       "songInfo": "曲情報",
       "gradeRange": "学年 {min}–{max}",
-      "singSongAction": "{title} を歌う"
+      "singSongAction": "{title} を歌う",
+      "reviewDifficultWordsLabel": "練習することば：",
+      "singNowAction": "今すぐ歌う",
+      "difficultWordsBoostHint": "練習中のことばを含む曲がリストの先頭に表示されます。"
     },
     "playerScreen": {
       "backToLibrary": "曲ライブラリに戻る",
@@ -250,8 +258,12 @@
         "weakestSegmentTitle": "練習おすすめパート · {number}行目",
         "retrySegmentSlow": "このパートを0.85倍速で練習",
         "segmentReportSummary": "パート別レポート（{count}行）",
-        "segmentLineHeader": "{number}行目 ({start}–{end})"
-      }
+        "segmentLineHeader": "{number}行目 ({start}–{end})",
+        "practiceWeakestNow": "一番苦手な文を今すぐ練習 (0.85×)"
+      },
+      "autoplayPreparing": "曲を自動で準備しています…",
+      "autoplayTapToStart": "1回タップして音楽を開始",
+      "autoplayTapHint": "音楽とマイクをオンにするには1回軽くタップしてください。"
     },
     "score": {
       "regionAria": "歌詞の正確さ",
@@ -538,7 +550,18 @@
       "who": "だれ・なにがいる？",
       "action": "なにをしている？",
       "where": "どこ・なにいろ？"
-    }
+    },
+    "practicingWordsBadge": "復習中のことば",
+    "matchedDifficultWordBanner": "復習できたことば: {words}",
+    "autoPlayOn": "おまかせ進行",
+    "autoPlayOff": "おまかせ進行（オフ）",
+    "quickPlayAutopilotBtn": "今すぐ遊ぶ（自動で絵を選ぶ）",
+    "openingAutopilotPrompt": "この絵を見て、見えることを教えてね！",
+    "autoMicBlockedFallback": "マイクで話すを押してお話してね！",
+    "autoSubmitCountdown": "あと {seconds}秒で送信",
+    "submitNowAction": "今すぐ送信",
+    "pauseAutoAction": "自動を一時停止",
+    "autoPausedNotice": "自動送信を一時停止しました — 話し終えたら送信を押してね。"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "再生が検出されませんでした。再生ボタンをタップして再試行してください。",

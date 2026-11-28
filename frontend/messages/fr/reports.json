@@ -664,6 +664,7 @@
     "practiceTimes": "{count} fois",
     "karaokeWeakSegmentsTitle": "Passages à chanter lentement à 0,85x",
     "openSongAction": "Ouvrir la chanson",
-    "homeTipsTitle": "Conseils d'accompagnement à la maison"
+    "homeTipsTitle": "Conseils d'accompagnement à la maison",
+    "misreadWordsReinforcedLabel": "Mots de lecture consolidés en jouant"
   }
 }

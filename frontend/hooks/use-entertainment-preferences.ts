@@ -7,6 +7,8 @@ export interface EntertainmentPreferences {
   readonly reducedMotion: boolean;
   /** Gentle/calm sound enabled (`true` = gentle audio on, `false` = muted). */
   readonly calmSound: boolean;
+  /** Child Autopilot flow enabled (`true` = auto-advance, auto-speak, hands-free voice loop). */
+  readonly autoPlayFlow: boolean;
 }
 
 export const ENTERTAINMENT_PREFERENCES_STORAGE_KEY =
@@ -21,6 +23,7 @@ export const ENTERTAINMENT_PREFERENCES_EVENT =
 const SERVER_SNAPSHOT: EntertainmentPreferences = {
   reducedMotion: false,
   calmSound: true,
+  autoPlayFlow: true,
 };
 
 type Listener = () => void;
@@ -57,6 +60,7 @@ function readPreferencesFromBrowser(): EntertainmentPreferences {
 
   let reducedMotion: boolean | null = null;
   let calmSound: boolean | null = null;
+  let autoPlayFlow: boolean | null = null;
 
   try {
     const raw = window.localStorage.getItem(
@@ -70,6 +74,9 @@ function readPreferencesFromBrowser(): EntertainmentPreferences {
         }
         if (typeof parsed.calmSound === "boolean") {
           calmSound = parsed.calmSound;
+        }
+        if (typeof parsed.autoPlayFlow === "boolean") {
+          autoPlayFlow = parsed.autoPlayFlow;
         }
       }
     }
@@ -94,6 +101,7 @@ function readPreferencesFromBrowser(): EntertainmentPreferences {
   return {
     reducedMotion: reducedMotion ?? osReducedMotion,
     calmSound: calmSound ?? true,
+    autoPlayFlow: autoPlayFlow ?? true,
   };
 }
 
@@ -102,7 +110,8 @@ function syncCachedSnapshot(
 ): EntertainmentPreferences {
   if (
     cachedSnapshot.reducedMotion === next.reducedMotion &&
-    cachedSnapshot.calmSound === next.calmSound
+    cachedSnapshot.calmSound === next.calmSound &&
+    cachedSnapshot.autoPlayFlow === next.autoPlayFlow
   ) {
     return cachedSnapshot;
   }
@@ -146,6 +155,10 @@ export function setEntertainmentPreferences(
       typeof patch.calmSound === "boolean"
         ? patch.calmSound
         : current.calmSound,
+    autoPlayFlow:
+      typeof patch.autoPlayFlow === "boolean"
+        ? patch.autoPlayFlow
+        : current.autoPlayFlow,
   };
 
   if (typeof window !== "undefined") {
@@ -200,10 +213,15 @@ function attachExternalListeners(): void {
           typeof custom.detail.calmSound === "boolean"
             ? custom.detail.calmSound
             : current.calmSound,
+        autoPlayFlow:
+          typeof custom.detail.autoPlayFlow === "boolean"
+            ? custom.detail.autoPlayFlow
+            : current.autoPlayFlow,
       };
       if (
         cachedSnapshot.reducedMotion !== next.reducedMotion ||
-        cachedSnapshot.calmSound !== next.calmSound
+        cachedSnapshot.calmSound !== next.calmSound ||
+        cachedSnapshot.autoPlayFlow !== next.autoPlayFlow
       ) {
         cachedSnapshot = next;
         listeners.forEach((listener) => listener());
@@ -269,17 +287,21 @@ export interface UseEntertainmentPreferencesResult {
   readonly preferences: EntertainmentPreferences;
   readonly reducedMotion: boolean;
   readonly calmSound: boolean;
+  readonly autoPlayFlow: boolean;
   readonly update: (patch: Partial<EntertainmentPreferences>) => void;
   readonly setReducedMotion: (value: boolean) => void;
   readonly setCalmSound: (value: boolean) => void;
+  readonly setAutoPlayFlow: (value: boolean) => void;
   readonly toggleReducedMotion: () => void;
   readonly toggleCalmSound: () => void;
+  readonly toggleAutoPlayFlow: () => void;
 }
 
 /**
- * Shared sensory preferences (`reducedMotion` and `calmSound`) for the
- * Entertainment Hub, games, and Karaoke stage. Persists across reloads via
- * `localStorage` and synchronizes across mounted views and browser tabs.
+ * Shared sensory and autopilot preferences (`reducedMotion`, `calmSound`,
+ * and `autoPlayFlow`) for the Entertainment Hub, games, and Karaoke stage.
+ * Persists across reloads via `localStorage` and synchronizes across mounted
+ * views and browser tabs.
  */
 export function useEntertainmentPreferences(): UseEntertainmentPreferencesResult {
   const preferences = useSyncExternalStore(
@@ -300,6 +322,10 @@ export function useEntertainmentPreferences(): UseEntertainmentPreferencesResult
     setEntertainmentPreferences({ calmSound: value });
   }, []);
 
+  const setAutoPlayFlow = useCallback((value: boolean) => {
+    setEntertainmentPreferences({ autoPlayFlow: value });
+  }, []);
+
   const toggleReducedMotion = useCallback(() => {
     const current = getEntertainmentPreferences();
     setEntertainmentPreferences({ reducedMotion: !current.reducedMotion });
@@ -310,14 +336,22 @@ export function useEntertainmentPreferences(): UseEntertainmentPreferencesResult
     setEntertainmentPreferences({ calmSound: !current.calmSound });
   }, []);
 
+  const toggleAutoPlayFlow = useCallback(() => {
+    const current = getEntertainmentPreferences();
+    setEntertainmentPreferences({ autoPlayFlow: !current.autoPlayFlow });
+  }, []);
+
   return {
     preferences,
     reducedMotion: preferences.reducedMotion,
     calmSound: preferences.calmSound,
+    autoPlayFlow: preferences.autoPlayFlow,
     update,
     setReducedMotion,
     setCalmSound,
+    setAutoPlayFlow,
     toggleReducedMotion,
     toggleCalmSound,
+    toggleAutoPlayFlow,
   };
 }

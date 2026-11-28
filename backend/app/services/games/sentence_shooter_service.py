@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import random
 import unicodedata
 from collections import defaultdict
@@ -239,7 +240,11 @@ class SentenceShooterService:
         return list(groups.values())
 
     @staticmethod
-    def _book_read(book: Book, available_rounds: int) -> SentenceShooterBookRead:
+    def _book_read(
+        book: Book,
+        available_rounds: int,
+        matched_difficult_words: list[str] | None = None,
+    ) -> SentenceShooterBookRead:
         return SentenceShooterBookRead(
             id=book.Id,
             name=book.Name,
@@ -248,6 +253,7 @@ class SentenceShooterService:
             min_grade=book.MinGrade,
             max_grade=book.MaxGrade,
             available_rounds=available_rounds,
+            matched_difficult_words=list(matched_difficult_words or []),
         )
 
     def _sentences(
@@ -274,19 +280,77 @@ class SentenceShooterService:
         return candidates
 
     @staticmethod
-    def _matched_difficult_words(
+    def _build_focus_sets(raw_words: list[str]) -> tuple[set[str], list[tuple[str, ...]]]:
+        single_set: set[str] = set()
+        phrase_tuples: list[tuple[str, ...]] = []
+        seen_phrases: set[tuple[str, ...]] = set()
+        for raw in raw_words:
+            norm = normalize_token(str(raw))
+            if not norm:
+                continue
+            parts = tuple(p for p in norm.split() if p)
+            if not parts:
+                continue
+            if len(parts) == 1:
+                single_set.add(parts[0])
+            elif parts not in seen_phrases:
+                seen_phrases.add(parts)
+                phrase_tuples.append(parts)
+        return single_set, phrase_tuples
+
+    @staticmethod
+    def _matched_token_indices(
         sentence: ExtractedSentence,
         focus_set: set[str],
+        focus_phrases: list[tuple[str, ...]] | None = None,
+    ) -> set[int]:
+        if not focus_set and not focus_phrases:
+            return set()
+        token_norms = [normalize_token(token.text) for token in sentence.tokens]
+        matched_indices: set[int] = {
+            idx for idx, norm in enumerate(token_norms) if norm and norm in focus_set
+        }
+        for phrase in focus_phrases or ():
+            span = len(phrase)
+            if span == 0 or span > len(token_norms):
+                continue
+            for idx in range(len(token_norms) - span + 1):
+                if tuple(token_norms[idx : idx + span]) == phrase:
+                    matched_indices.update(range(idx, idx + span))
+        return matched_indices
+
+    @classmethod
+    def _matched_difficult_words(
+        cls,
+        sentence: ExtractedSentence,
+        focus_set: set[str],
+        focus_phrases: list[tuple[str, ...]] | None = None,
     ) -> list[str]:
-        if not focus_set:
+        if not focus_set and not focus_phrases:
             return []
+        token_norms = [normalize_token(token.text) for token in sentence.tokens]
         matched: list[str] = []
         seen: set[str] = set()
-        for token in sentence.tokens:
-            norm = normalize_token(token.text)
+        for idx, token in enumerate(sentence.tokens):
+            norm = token_norms[idx]
             if norm and norm in focus_set and norm not in seen:
                 seen.add(norm)
                 matched.append(_clean_display_word(token.text))
+        for phrase in focus_phrases or ():
+            span = len(phrase)
+            if span == 0 or span > len(token_norms):
+                continue
+            phrase_key = " ".join(phrase)
+            if phrase_key in seen:
+                continue
+            for idx in range(len(token_norms) - span + 1):
+                if tuple(token_norms[idx : idx + span]) == phrase:
+                    seen.add(phrase_key)
+                    display_phrase = " ".join(
+                        _clean_display_word(t.text) for t in sentence.tokens[idx : idx + span]
+                    )
+                    matched.append(display_phrase)
+                    break
         return matched
 
     @classmethod
@@ -296,13 +360,14 @@ class SentenceShooterService:
         total_rounds: int,
         focus_set: set[str],
         rng: random.SystemRandom,
+        focus_phrases: list[tuple[str, ...]] | None = None,
     ) -> list[tuple[_PageSource, ExtractedSentence]]:
-        if not focus_set:
+        if not focus_set and not focus_phrases:
             return rng.sample(candidates, total_rounds)
 
         buckets: dict[int, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
         for item in candidates:
-            score = len(cls._matched_difficult_words(item[1], focus_set))
+            score = len(cls._matched_difficult_words(item[1], focus_set, focus_phrases))
             buckets[score].append(item)
 
         chosen: list[tuple[_PageSource, ExtractedSentence]] = []
@@ -323,6 +388,7 @@ class SentenceShooterService:
         book_pool: list[str],
         fallback_pool: tuple[str, ...],
         rng: random.SystemRandom,
+        target_hint: str | None = None,
     ) -> list[tuple[UUID, str]]:
         chosen: list[tuple[UUID, str]] = []
         used = set(excluded_normalized)
@@ -331,7 +397,13 @@ class SentenceShooterService:
         shuffled_fallback = list(fallback_pool)
         rng.shuffle(shuffled_fallback)
 
-        for word in [*shuffled_book, *shuffled_fallback]:
+        combined = [*shuffled_book, *shuffled_fallback]
+        if target_hint:
+            target_clean = _clean_display_word(target_hint)
+            target_len = max(1, len(target_clean))
+            combined.sort(key=lambda w: abs(len(_clean_display_word(w)) - target_len) // 2)
+
+        for word in combined:
             clean = _clean_display_word(word)
             norm = normalize_token(clean)
             if not norm or norm in used:
@@ -352,8 +424,10 @@ class SentenceShooterService:
         focus_set: set[str],
         book_word_pool: list[str],
         rng: random.SystemRandom,
+        focus_phrases: list[tuple[str, ...]] | None = None,
     ) -> _PreparedRound:
-        practiced = cls._matched_difficult_words(sentence, focus_set)
+        practiced = cls._matched_difficult_words(sentence, focus_set, focus_phrases)
+        matched_indices = cls._matched_token_indices(sentence, focus_set, focus_phrases)
         if learning_mode == "WORD_ORDER":
             expected_ids = [token.token_id for token in sentence.tokens]
             shuffled_ids = shuffle_token_ids(expected_ids, rng=rng)
@@ -361,9 +435,9 @@ class SentenceShooterService:
                 {
                     "id": str(token.token_id),
                     "text": token.text,
-                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                    "is_difficult_word": idx in matched_indices,
                 }
-                for token in sentence.tokens
+                for idx, token in enumerate(sentence.tokens)
             ]
             tokens_snapshot.append(
                 {
@@ -388,10 +462,10 @@ class SentenceShooterService:
             scored_indices: list[tuple[int, int]] = []
             for idx, token in enumerate(sentence.tokens):
                 norm = normalize_token(token.text)
-                is_diff = 1 if norm in focus_set else 0
+                is_diff = 1 if idx in matched_indices else 0
                 is_non_first = 1 if idx > 0 else 0
                 has_length = 1 if len(norm) >= 2 else 0
-                scored_indices.append((is_diff * 10 + has_length * 3 + is_non_first, idx))
+                scored_indices.append((is_diff * 100 + has_length * 3 + is_non_first, idx))
             scored_indices.sort(key=lambda pair: (-pair[0], pair[1]))
             blank_indices = sorted(idx for _, idx in scored_indices[:blank_count])
             blank_set = set(blank_indices)
@@ -399,13 +473,14 @@ class SentenceShooterService:
             expected_tokens = [sentence.tokens[idx] for idx in blank_indices]
             expected_ids = [token.token_id for token in expected_tokens]
             excluded_norms = {normalize_token(token.text) for token in sentence.tokens}
-            distractor_count = 3 if len(expected_ids) == 1 else 3
+            distractor_count = 3
             distractors = cls._pick_distractors(
                 count=distractor_count,
                 excluded_normalized=excluded_norms,
                 book_pool=book_word_pool,
                 fallback_pool=_FALLBACK_DISTRACTORS_VI,
                 rng=rng,
+                target_hint=expected_tokens[0].text if expected_tokens else None,
             )
             choice_ids = [*expected_ids, *(d_id for d_id, _ in distractors)]
             shuffled_ids = shuffle_token_ids(choice_ids, rng=rng)
@@ -415,7 +490,7 @@ class SentenceShooterService:
                     "position": idx,
                     "text": None if idx in blank_set else token.text,
                     "is_blank": idx in blank_set,
-                    "is_difficult_word": normalize_token(token.text) in focus_set,
+                    "is_difficult_word": idx in matched_indices,
                 }
                 for idx, token in enumerate(sentence.tokens)
             ]
@@ -430,8 +505,12 @@ class SentenceShooterService:
                 prompt_hint = "Bắn lần lượt các từ phù hợp vào từng chỗ trống nhé!"
 
             tokens_snapshot = [
-                {"id": str(token.token_id), "text": token.text, "is_difficult_word": False}
-                for token in expected_tokens
+                {
+                    "id": str(sentence.tokens[idx].token_id),
+                    "text": sentence.tokens[idx].text,
+                    "is_difficult_word": idx in matched_indices,
+                }
+                for idx in blank_indices
             ] + [
                 {"id": str(d_id), "text": d_text, "is_difficult_word": False, "is_distractor": True}
                 for d_id, d_text in distractors
@@ -454,36 +533,52 @@ class SentenceShooterService:
                 learning_mode="FILL_BLANK",
             )
 
-        # GRAMMAR_FOCUS: focus on Vietnamese punctuation, connectors, or action words.
+        # GRAMMAR_FOCUS: strongly prioritize child's difficult words when present,
+        # otherwise focus on Vietnamese punctuation, connectors, or action words.
         last_idx = len(sentence.tokens) - 1
         last_text = sentence.tokens[last_idx].text
         last_punct = last_text[-1] if last_text and last_text[-1] in ".!?" else ""
 
         target_idx: int | None = None
         focus_kind = "structure"
-        for idx, token in enumerate(sentence.tokens):
-            norm = normalize_token(token.text)
-            if norm in _VI_CONNECTORS:
-                target_idx = idx
+        difficult_hits = sorted(matched_indices)
+        if difficult_hits:
+            preferred = [idx for idx in difficult_hits if len(normalize_token(sentence.tokens[idx].text)) >= 2]
+            target_idx = preferred[0] if preferred else difficult_hits[0]
+            hit_norm = normalize_token(sentence.tokens[target_idx].text)
+            if hit_norm in _VI_CONNECTORS:
                 focus_kind = "connector"
-                break
+            elif hit_norm in _VI_ACTION_WORDS:
+                focus_kind = "action"
+            elif target_idx == last_idx and last_punct in {"?", "!"}:
+                focus_kind = "punctuation"
+            else:
+                focus_kind = "difficult_word"
 
-        if last_punct in {"?", "!"}:
-            target_idx = last_idx
-            focus_kind = "punctuation"
-        elif target_idx is None:
+        if target_idx is None:
             for idx, token in enumerate(sentence.tokens):
                 norm = normalize_token(token.text)
-                if norm in _VI_ACTION_WORDS:
+                if norm in _VI_CONNECTORS:
                     target_idx = idx
-                    focus_kind = "action"
+                    focus_kind = "connector"
                     break
-        if target_idx is None and last_punct == ".":
-            target_idx = last_idx
-            focus_kind = "punctuation"
-        if target_idx is None:
-            target_idx = min(len(sentence.tokens) - 1, max(1, len(sentence.tokens) // 2))
-            focus_kind = "structure"
+
+            if last_punct in {"?", "!"}:
+                target_idx = last_idx
+                focus_kind = "punctuation"
+            elif target_idx is None:
+                for idx, token in enumerate(sentence.tokens):
+                    norm = normalize_token(token.text)
+                    if norm in _VI_ACTION_WORDS:
+                        target_idx = idx
+                        focus_kind = "action"
+                        break
+            if target_idx is None and last_punct == ".":
+                target_idx = last_idx
+                focus_kind = "punctuation"
+            if target_idx is None:
+                target_idx = min(len(sentence.tokens) - 1, max(1, len(sentence.tokens) // 2))
+                focus_kind = "structure"
 
         target_token = sentence.tokens[target_idx]
         target_norm = normalize_token(target_token.text)
@@ -527,6 +622,18 @@ class SentenceShooterService:
             )
             grammar_tip = f'Từ "{target_clean}" là từ chỉ hoạt động giúp câu kể rõ nhân vật đang làm gì.'
             prompt_hint = "Chọn từ chỉ hoạt động phù hợp với câu nhé!"
+        elif focus_kind == "difficult_word":
+            excluded = {normalize_token(t.text) for t in sentence.tokens} | {target_norm}
+            distractors = cls._pick_distractors(
+                count=3,
+                excluded_normalized=excluded,
+                book_pool=book_word_pool,
+                fallback_pool=(*_FALLBACK_DISTRACTORS_VI, *_VI_NON_ACTION_DISTRACTORS),
+                rng=rng,
+                target_hint=target_clean,
+            )
+            grammar_tip = f'Từ "{target_clean}" là từ khó bé đang ôn luyện — chọn đúng từ giúp câu văn thật chuẩn xác!'
+            prompt_hint = "Chọn đúng từ bé đang ôn luyện để hoàn thành câu nhé!"
         else:
             excluded = {normalize_token(t.text) for t in sentence.tokens} | {target_norm}
             distractors = cls._pick_distractors(
@@ -535,6 +642,7 @@ class SentenceShooterService:
                 book_pool=book_word_pool,
                 fallback_pool=_FALLBACK_DISTRACTORS_VI,
                 rng=rng,
+                target_hint=target_clean,
             )
             grammar_tip = f'Từ "{target_clean}" đặt đúng vị trí giúp câu tiếng Việt tròn nghĩa và tự nhiên.'
             prompt_hint = "Chọn từ đúng ngữ pháp để hoàn thành câu nhé!"
@@ -546,12 +654,16 @@ class SentenceShooterService:
                 "position": idx,
                 "text": None if idx == target_idx else token.text,
                 "is_blank": idx == target_idx,
-                "is_difficult_word": normalize_token(token.text) in focus_set,
+                "is_difficult_word": idx in matched_indices,
             }
             for idx, token in enumerate(sentence.tokens)
         ]
         tokens_snapshot = [
-            {"id": str(target_token.token_id), "text": target_token.text, "is_difficult_word": False}
+            {
+                "id": str(target_token.token_id),
+                "text": target_token.text,
+                "is_difficult_word": target_idx in matched_indices,
+            }
         ] + [
             {"id": str(d_id), "text": d_text, "is_difficult_word": False, "is_distractor": True}
             for d_id, d_text in distractors
@@ -574,6 +686,51 @@ class SentenceShooterService:
             learning_mode="GRAMMAR_FOCUS",
         )
 
+    async def _load_difficult_context(
+        self,
+        child_id: UUID,
+        actor_id: UUID,
+    ) -> tuple[list[str], set[UUID]]:
+        words: list[str] = []
+        history_book_ids: set[UUID] = set()
+
+        targets_fn = getattr(self.repository, "list_difficult_word_targets", None)
+        if callable(targets_fn):
+            res = targets_fn(child_id, actor_id)
+            if inspect.isawaitable(res):
+                targets = await res
+                for target in targets or []:
+                    if getattr(target, "word", None):
+                        words.append(str(target.word))
+                    for bid in getattr(target, "source_book_ids", ()) or ():
+                        history_book_ids.add(bid)
+
+        if not words:
+            active_fn = getattr(self.repository, "active_difficult_words", None)
+            if callable(active_fn):
+                sig = inspect.signature(active_fn)
+                pos_params = [
+                    p
+                    for p in sig.parameters.values()
+                    if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)
+                ]
+                if len(pos_params) >= 2:
+                    res = active_fn(child_id, actor_id)
+                else:
+                    res = active_fn(child_id)
+                if inspect.isawaitable(res):
+                    words = list(await res or [])
+
+        history_fn = getattr(self.repository, "recent_reading_book_ids", None)
+        if callable(history_fn):
+            res = history_fn(child_id, actor_id)
+            if inspect.isawaitable(res):
+                for bid in await res or []:
+                    if bid is not None:
+                        history_book_ids.add(bid)
+
+        return words, history_book_ids
+
     async def list_books(
         self,
         actor_id: UUID,
@@ -585,28 +742,51 @@ class SentenceShooterService:
         child = await self._owned_child(actor_id, child_id)
         if not 1 <= total_rounds <= 5:
             raise HTTPException(status_code=422, detail="Invalid round count")
+        child_id_val = child.Id
+        child_grade_val = child.Grade
 
-        rows = await self.repository.verified_word_rows(child.Grade)
+        difficult_words, history_book_ids = await self._load_difficult_context(
+            child_id_val,
+            actor_id,
+        )
+        focus_set, focus_phrases = self._build_focus_sets(difficult_words)
+
+        rows = await self.repository.verified_word_rows(child_grade_val)
         sources = self._group_page_sources(rows)
-        by_book: dict[UUID, tuple[Book, int]] = {}
+        by_book: dict[UUID, tuple[Book, int, list[str], set[str]]] = {}
         seen_by_book: dict[UUID, set[tuple[str, ...]]] = defaultdict(set)
         for source in sources:
             book_id = source.book.Id
-            count = by_book.get(book_id, (source.book, 0))[1]
+            book_obj, count, matched_list, matched_seen = by_book.get(
+                book_id, (source.book, 0, [], set())
+            )
             for _, sentence in self._sentences([source], difficulty):
                 key = tuple(normalize_token(token.text) for token in sentence.tokens)
                 if key in seen_by_book[book_id]:
                     continue
                 seen_by_book[book_id].add(key)
                 count += 1
-            by_book[book_id] = (source.book, count)
+                for word in self._matched_difficult_words(sentence, focus_set, focus_phrases):
+                    norm = normalize_token(word)
+                    if norm and norm not in matched_seen and len(matched_list) < 6:
+                        matched_seen.add(norm)
+                        matched_list.append(word)
+            by_book[book_id] = (book_obj, count, matched_list, matched_seen)
 
         result = [
-            self._book_read(book, count)
-            for book, count in by_book.values()
+            self._book_read(book, count, matched_list)
+            for book, count, matched_list, _ in by_book.values()
             if count >= total_rounds
         ]
-        return sorted(result, key=lambda item: (item.title.casefold(), str(item.id)))
+        return sorted(
+            result,
+            key=lambda item: (
+                -len(item.matched_difficult_words),
+                0 if item.id in history_book_ids else 1,
+                item.title.casefold(),
+                str(item.id),
+            ),
+        )
 
     async def create_session(
         self,
@@ -619,35 +799,74 @@ class SentenceShooterService:
         # transaction with rollback and would expire ORM instances.
         child_id = child.Id
         child_grade = child.Grade
-        rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
-        sources = self._group_page_sources(rows)
-        candidates = self._sentences(sources, payload.difficulty)
-        if not candidates:
-            book = await self.repository.book_for_session(payload.book_id)
-            if (
-                book is None
-                or book.LifecycleStatus != "ACTIVE"
-                or not book.MinGrade <= child_grade <= book.MaxGrade
-            ):
-                raise HTTPException(status_code=404, detail="Resource not found")
-            raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
-        book = candidates[0][0].book
-        if book.Id != payload.book_id or book.LifecycleStatus != "ACTIVE":
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if not book.MinGrade <= child_grade <= book.MaxGrade:
-            raise HTTPException(status_code=404, detail="Resource not found")
-        if len(candidates) < payload.total_rounds:
-            raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
 
-        # Gather active difficult words safely (explicit payload + child practice history).
-        repo_difficult_words: list[str] = []
-        if hasattr(self.repository, "active_difficult_words"):
-            repo_difficult_words = await self.repository.active_difficult_words(child_id)
-        focus_set = {
-            norm
-            for raw in [*payload.focus_words, *repo_difficult_words]
-            if (norm := normalize_token(str(raw)))
-        }
+        # Gather active difficult words safely (explicit payload + child reading/practice history).
+        repo_difficult_words, history_book_ids = await self._load_difficult_context(
+            child_id,
+            actor_id,
+        )
+        focus_set, focus_phrases = self._build_focus_sets(
+            [*payload.focus_words, *repo_difficult_words]
+        )
+
+        if payload.book_id is not None and not payload.auto_select_book:
+            rows = await self.repository.verified_word_rows(child_grade, payload.book_id)
+            sources = self._group_page_sources(rows)
+            candidates = self._sentences(sources, payload.difficulty)
+            if not candidates:
+                book = await self.repository.book_for_session(payload.book_id)
+                if (
+                    book is None
+                    or book.LifecycleStatus != "ACTIVE"
+                    or not book.MinGrade <= child_grade <= book.MaxGrade
+                ):
+                    raise HTTPException(status_code=404, detail="Resource not found")
+                raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
+            book = candidates[0][0].book
+            if book.Id != payload.book_id or book.LifecycleStatus != "ACTIVE":
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if not book.MinGrade <= child_grade <= book.MaxGrade:
+                raise HTTPException(status_code=404, detail="Resource not found")
+            if len(candidates) < payload.total_rounds:
+                raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
+        else:
+            rows = await self.repository.verified_word_rows(child_grade, None)
+            sources = self._group_page_sources(rows)
+            all_candidates = self._sentences(sources, payload.difficulty)
+            by_book: dict[UUID, list[tuple[_PageSource, ExtractedSentence]]] = defaultdict(list)
+            for item in all_candidates:
+                by_book[item[0].book.Id].append(item)
+            eligible_books = [
+                (bid, book_cands)
+                for bid, book_cands in by_book.items()
+                if len(book_cands) >= payload.total_rounds
+                and book_cands[0][0].book.LifecycleStatus == "ACTIVE"
+                and book_cands[0][0].book.MinGrade <= child_grade <= book_cands[0][0].book.MaxGrade
+            ]
+            if not eligible_books:
+                raise HTTPException(status_code=409, detail="INSUFFICIENT_CONTENT")
+
+            def _book_rank_key(entry: tuple[UUID, list[tuple[_PageSource, ExtractedSentence]]]):
+                bid, book_cands = entry
+                book_obj = book_cands[0][0].book
+                matched_norms: set[str] = set()
+                for _, sent in book_cands:
+                    for word in self._matched_difficult_words(sent, focus_set, focus_phrases):
+                        norm = normalize_token(word)
+                        if norm:
+                            matched_norms.add(norm)
+                return (
+                    -len(matched_norms),
+                    0 if bid in history_book_ids else 1,
+                    0 if (payload.book_id is not None and bid == payload.book_id) else 1,
+                    -len(book_cands),
+                    book_obj.Title.casefold(),
+                    str(bid),
+                )
+
+            eligible_books.sort(key=_book_rank_key)
+            _, candidates = eligible_books[0]
+            book = candidates[0][0].book
 
         rng = random.SystemRandom()
         chosen = self._select_prioritized_candidates(
@@ -655,6 +874,7 @@ class SentenceShooterService:
             payload.total_rounds,
             focus_set,
             rng,
+            focus_phrases=focus_phrases,
         )
         book_word_pool = [
             token.text
@@ -688,6 +908,7 @@ class SentenceShooterService:
                 focus_set=focus_set,
                 book_word_pool=book_word_pool,
                 rng=rng,
+                focus_phrases=focus_phrases,
             )
             for word in prepared.practiced_difficult_words:
                 norm = normalize_token(word)
@@ -714,9 +935,19 @@ class SentenceShooterService:
                 )
             )
 
+        matched_for_book = list(session_practiced_words)
+        if not matched_for_book and (focus_set or focus_phrases):
+            seen_book_matched: set[str] = set()
+            for _, sent in candidates:
+                for w in self._matched_difficult_words(sent, focus_set, focus_phrases):
+                    n = normalize_token(w)
+                    if n and n not in seen_book_matched and len(matched_for_book) < 6:
+                        seen_book_matched.add(n)
+                        matched_for_book.append(w)
+
         response = SentenceShooterSessionRead(
             session_id=game_session_id,
-            book=self._book_read(book, len(candidates)),
+            book=self._book_read(book, len(candidates), matched_for_book),
             difficulty=payload.difficulty,
             learning_mode=payload.learning_mode,
             total_rounds=payload.total_rounds,

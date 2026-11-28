@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "Đang kiểm tra {count} từ bé chọn…",
     "readFullSentence": "Nghe lại câu hoàn chỉnh",
     "practicedDifficultWordsRound": "Từ bé vừa luyện:",
-    "practicedDifficultWordsSummary": "Từ khó bé vừa luyện:"
+    "practicedDifficultWordsSummary": "Từ khó bé vừa luyện:",
+    "quickStartHeading": "Sẵn sàng cho bé",
+    "startNowButton": "Bắt đầu ngay",
+    "autoStartingStatus": "Đang mở nhanh trò chơi phù hợp cho bé…",
+    "autoAdvanceCountdown": "Tự sang câu tiếp theo sau {seconds}s",
+    "stopAutoAdvance": "Dừng tự động",
+    "autoPlayFlowToggleOn": "Tự động chơi",
+    "autoPlayFlowToggleOff": "Tự động chơi (Tắt)"
   },
   "memoryGame": {
     "title": "Bé nhớ được gì?",
@@ -240,6 +247,19 @@
       "svgAria": "Bức tranh {theme} với {count} chi tiết minh họa",
       "svgTitle": "Tranh minh họa {theme}"
     },
-    "mobileLabel": "Góc trí nhớ"
+    "mobileLabel": "Góc trí nhớ",
+    "quickPlayDifficultCta": "Chơi ngay (Ôn từ khó)",
+    "quickPlayDifficultHint": "Hệ thống tự chọn tranh và thời gian phù hợp nhất với lớp {grade} của bé.",
+    "focusWordsReviewLabel": "Từ bé cần ôn:",
+    "autoPlayFlowOn": "Tự động chơi",
+    "autoPlayFlowOff": "Tự động chơi (Tắt)",
+    "observeAutoCue": "Bé nhìn kỹ màu sắc và vị trí các đồ vật trong tranh nhé!",
+    "autoRecallFallbackNotice": "Bé chạm Kể bằng giọng nói hoặc gõ chữ những chi tiết bé nhớ được nhé.",
+    "autoSubmitCountdown": "Tự gửi sau {seconds}s",
+    "sendNowButton": "Gửi ngay",
+    "switchToTextButton": "Gõ chữ",
+    "turnOffAutoButton": "Tắt tự động",
+    "playNewRoundNowButton": "Chơi ván mới ngay",
+    "practicedWordsRevealPrefix": "Bé đã ôn các từ:"
   }
 }

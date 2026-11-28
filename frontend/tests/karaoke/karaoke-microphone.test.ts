@@ -5,6 +5,7 @@ import { useKaraokeScoring } from "@/hooks/use-karaoke-scoring";
 import type { BrowserRecognitionEventLike } from "@/lib/reading/browser-transcript-collector";
 import type { KaraokeLyrics } from "@/types/karaoke";
 import * as signalMonitor from "@/lib/karaoke/microphone-signal";
+import * as musicalDsp from "@/lib/karaoke/musical-dsp";
 
 class FakeRecognizer {
   static instances: FakeRecognizer[] = [];
@@ -852,5 +853,244 @@ describe("the child's singing microphone", () => {
     expect(result.current.status).toBe("scored");
     expect(result.current.score?.matchedWords).toBe(3);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("flushes trailing quiet signal slice into observeAudio before settleThrough on slice boundary and finish", async () => {
+    const [probe, firstInput, secondInput] = [
+      microphoneStream(),
+      microphoneStream(),
+      microphoneStream(),
+    ];
+    microphoneInput(
+      vi
+        .fn()
+        .mockResolvedValueOnce(probe.stream)
+        .mockResolvedValueOnce(firstInput.stream)
+        .mockResolvedValueOnce(secondInput.stream),
+    );
+    const observes: signalMonitor.SignalObserver[] = [];
+    const stops: ReturnType<typeof vi.fn>[] = [];
+    let lastObservedEnd = 0;
+    vi.spyOn(signalMonitor, "monitorSingingTrack").mockImplementation(
+      (_stream, getClock, callback) => {
+        observes.push(callback);
+        const stop = vi.fn(() => {
+          const end = getClock();
+          if (end > lastObservedEnd) {
+            callback(lastObservedEnd, end, "quiet");
+            lastObservedEnd = end;
+          }
+        });
+        stops.push(stop);
+        return stop;
+      },
+    );
+
+    const twoLineSong: KaraokeLyrics = {
+      format_version: 1,
+      lines: [
+        {
+          id: "0e1139c9-0269-4bed-a815-a4b2d88e1f5c",
+          text: "Bé đi học",
+          start_ms: 0,
+          end_ms: 3000,
+        },
+        {
+          id: "1e1139c9-0269-4bed-a815-a4b2d88e1f5c",
+          text: "Cùng vui hát",
+          start_ms: 5000,
+          end_ms: 8000,
+        },
+      ],
+    };
+
+    const view = mount(twoLineSong);
+    await act(async () => {
+      expect(await view.result.current.arm()).toBe(true);
+    });
+    await act(async () => view.result.current.resume());
+
+    const first = latest();
+    act(() => first.onstart?.());
+
+    // Line 1: feed quiet up to 2930ms (< 0.98 * 3000 = 2940ms), then advance media to 3000ms
+    // so only the trailing flush inside stop() at scheduleSlice boundary pushes quietMs >= 2940ms.
+    act(() => {
+      for (let ms = 0; ms < 2900; ms += 50) {
+        mediaMs = ms + 50;
+        observes[0](ms, mediaMs, "quiet");
+        lastObservedEnd = mediaMs;
+        view.result.current.observePlayback(ms, mediaMs);
+      }
+      mediaMs = 2930;
+      observes[0](2900, 2930, "quiet");
+      lastObservedEnd = 2930;
+      mediaMs = 3000;
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(stops[0]).toHaveBeenCalledOnce();
+    expect(first.stop).toHaveBeenCalledOnce();
+    await act(async () => first.onend?.());
+
+    expect(
+      view.result.current.liveScore?.lineScores[0].words.map((w) => w.state),
+    ).toEqual(["omitted", "omitted", "omitted"]);
+
+    // Line 2: start slice 2, feed quiet up to 7930ms (< 5000 + 0.98 * 3000 = 7940ms),
+    // then call finish() at 8000ms and drain; stop() must flush [7930, 8000] before settleThrough.
+    const second = latest();
+    act(() => second.onstart?.());
+    act(() => {
+      lastObservedEnd = 5000;
+      for (let ms = 5000; ms < 7900; ms += 50) {
+        mediaMs = ms + 50;
+        observes[1](ms, mediaMs, "quiet");
+        lastObservedEnd = mediaMs;
+        view.result.current.observePlayback(ms, mediaMs);
+      }
+      mediaMs = 7930;
+      observes[1](7900, 7930, "quiet");
+      lastObservedEnd = 7930;
+      mediaMs = 8000;
+      view.result.current.finish();
+    });
+
+    expect(stops[1]).toHaveBeenCalledOnce();
+    act(() => second.onend?.());
+
+    expect(view.result.current.status).toBe("scored");
+    expect(
+      view.result.current.score?.lineScores[1].words.map((w) => w.state),
+    ).toEqual(["omitted", "omitted", "omitted"]);
+  });
+
+  it("pre-warms shared signalContext during arm(), reuses it across slices, and closes it on pause, finish, and reset", async () => {
+    const contexts: MockSignalAudioContext[] = [];
+    class MockSignalAudioContext {
+      state: AudioContextState = "suspended";
+      resume = vi.fn(async () => {
+        this.state = "running";
+      });
+      close = vi.fn(async () => {
+        this.state = "closed";
+      });
+      createMediaStreamSource = vi.fn(() => ({
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      }));
+      createAnalyser = vi.fn(() => ({
+        fftSize: 2048,
+        disconnect: vi.fn(),
+        getFloatTimeDomainData: vi.fn(),
+      }));
+      constructor() {
+        contexts.push(this);
+      }
+    }
+    vi.stubGlobal("AudioContext", MockSignalAudioContext);
+    vi.spyOn(musicalDsp, "createBrowserMusicalMonitor").mockReturnValue(null);
+    const monitorSpy = vi
+      .spyOn(signalMonitor, "monitorSingingTrack")
+      .mockImplementation(() => vi.fn());
+
+    const [probe1, slice1, slice2, resumedAfterPause, probe2] = [
+      microphoneStream(),
+      microphoneStream(),
+      microphoneStream(),
+      microphoneStream(),
+      microphoneStream(),
+    ];
+    microphoneInput(
+      vi
+        .fn()
+        .mockResolvedValueOnce(probe1.stream)
+        .mockResolvedValueOnce(slice1.stream)
+        .mockResolvedValueOnce(slice2.stream)
+        .mockResolvedValueOnce(resumedAfterPause.stream)
+        .mockResolvedValueOnce(probe2.stream),
+    );
+
+    const twoLineSong: KaraokeLyrics = {
+      format_version: 1,
+      lines: [
+        {
+          id: "0e1139c9-0269-4bed-a815-a4b2d88e1f5c",
+          text: "Bé đi học",
+          start_ms: 0,
+          end_ms: 3000,
+        },
+        {
+          id: "1e1139c9-0269-4bed-a815-a4b2d88e1f5c",
+          text: "Cùng vui hát",
+          start_ms: 5000,
+          end_ms: 8000,
+        },
+      ],
+    };
+
+    const view = mount(twoLineSong);
+    // 1. Pre-warm happens during InvalidStateError arming path before status is "armed".
+    await act(async () => {
+      expect(await view.result.current.arm()).toBe(true);
+    });
+    expect(contexts).toHaveLength(1);
+    const firstContext = contexts[0];
+    expect(firstContext.resume).toHaveBeenCalledOnce();
+    expect(firstContext.close).not.toHaveBeenCalled();
+
+    // 2. Capture starts and passes the warmed sharedContext to monitorSingingTrack.
+    await act(async () => view.result.current.resume());
+    const capture1 = latest();
+    act(() => capture1.onstart?.());
+    expect(contexts).toHaveLength(1);
+    expect(monitorSpy).toHaveBeenCalledTimes(1);
+    expect(monitorSpy.mock.calls[0][4]).toBe(firstContext);
+
+    // 3. Slice boundary preserves signalContext (keepStream === true) and passes it to slice 2.
+    act(() => {
+      mediaMs = 3000;
+      vi.advanceTimersByTime(100);
+    });
+    await act(async () => capture1.onend?.());
+    expect(firstContext.close).not.toHaveBeenCalled();
+
+    const capture2 = latest();
+    act(() => capture2.onstart?.());
+    expect(contexts).toHaveLength(1);
+    expect(monitorSpy).toHaveBeenCalledTimes(2);
+    expect(monitorSpy.mock.calls[1][4]).toBe(firstContext);
+
+    // 4. pause() closes signalContext; subsequent resume() opens a fresh signalContext; finish() closes it.
+    act(() => view.result.current.pause());
+    expect(firstContext.close).toHaveBeenCalledOnce();
+
+    await act(async () => view.result.current.resume());
+    const capture3 = latest();
+    act(() => capture3.onstart?.());
+    expect(contexts).toHaveLength(2);
+    const secondContext = contexts[1];
+    expect(monitorSpy).toHaveBeenCalledTimes(3);
+    expect(monitorSpy.mock.calls[2][4]).toBe(secondContext);
+    expect(secondContext.close).not.toHaveBeenCalled();
+
+    act(() => view.result.current.finish());
+    expect(secondContext.close).toHaveBeenCalledOnce();
+
+    // 5. Probe onstart arming path also pre-warms signalContext and reset() closes it while armed.
+    vi.stubGlobal("SpeechRecognition", FakeRecognizer);
+    await act(async () => {
+      const pending = view.result.current.arm();
+      await Promise.resolve();
+      latest().onstart?.();
+      expect(await pending).toBe(true);
+    });
+    expect(contexts).toHaveLength(3);
+    const thirdContext = contexts[2];
+    expect(thirdContext.resume).toHaveBeenCalledOnce();
+    expect(thirdContext.close).not.toHaveBeenCalled();
+
+    act(() => view.result.current.reset());
+    expect(thirdContext.close).toHaveBeenCalledOnce();
   });
 });

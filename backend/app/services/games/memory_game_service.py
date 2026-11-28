@@ -34,6 +34,7 @@ from app.services.games.memory_scene_generator import (
     default_difficulty_for_grade,
     generate_scene_spec,
     get_themes_catalog,
+    recommend_theme_for_words,
     resolve_theme_key,
     timer_seconds_for_mode,
 )
@@ -78,6 +79,7 @@ def _to_session_read(session: MemorySessionProjection) -> MemorySessionRead:
         best_creative_score=session.BestCreativeScore,
         stars=session.Stars,
         attempts_count=session.AttemptsCount,
+        focus_words=list(scene_spec.focus_words or scene_spec.matched_focus_words),
         scene_spec=scene_spec,
         attempts=[_to_attempt_read(item) for item in session.Attempts],
         created_at=session.CreatedAt,
@@ -150,7 +152,6 @@ class MemoryGameService:
             if payload.scene_seed is not None
             else secrets.randbelow(2_147_483_647)
         )
-        theme_key = resolve_theme_key(payload.theme_key, seed)
         difficulty = (
             payload.difficulty_level
             if payload.difficulty_level is not None
@@ -161,6 +162,13 @@ class MemoryGameService:
         focus_words = list(payload.focus_words)
         if not focus_words:
             focus_words = await self.repo.recent_difficult_words(child.Id, parent_id, limit=8)
+
+        if payload.theme_key in THEME_BY_KEY:
+            theme_key = resolve_theme_key(payload.theme_key, seed)
+        elif focus_words:
+            theme_key = recommend_theme_for_words(focus_words, child.Grade, seed)
+        else:
+            theme_key = resolve_theme_key(payload.theme_key, seed)
 
         scene_spec = generate_scene_spec(
             theme_key=theme_key,
@@ -445,6 +453,17 @@ class MemoryGameService:
                         "metadata_json": metadata,
                     }
                 )
+
+        if evaluation.used_focus_words:
+            evidence_items.append(
+                {
+                    "skill_key": "difficult_word_mastery",
+                    "score_normalized": min(1.0, 0.75 + 0.08 * len(evaluation.used_focus_words)),
+                    "confidence": 0.8,
+                    "practice_words": evaluation.used_focus_words[:6],
+                    "metadata_json": metadata,
+                }
+            )
 
         await self.repo.record_skill_evidence(
             child_id=session.ChildId,

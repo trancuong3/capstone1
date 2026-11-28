@@ -664,6 +664,7 @@
     "practiceTimes": "{count} 次",
     "karaokeWeakSegmentsTitle": "建议以 0.85 倍速慢练的歌词片段",
     "openSongAction": "打开歌曲",
-    "homeTipsTitle": "家长居家陪伴小建议"
+    "homeTipsTitle": "家长居家陪伴小建议",
+    "misreadWordsReinforcedLabel": "通过游戏巩固的易错阅读词"
   }
 }

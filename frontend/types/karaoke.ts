@@ -143,6 +143,20 @@ export const karaokePreviewSchema = z.object({
   cover_url: mediaUrl.nullable(),
   lyrics: lyricsSchema,
 });
+export const songCardSchema = karaokePreviewSchema
+  .pick({
+    song_id: true,
+    version_id: true,
+    title: true,
+    author: true,
+    duration_ms: true,
+    cover_url: true,
+  })
+  .extend({
+    min_grade: z.number().int().min(1).max(5),
+    max_grade: z.number().int().min(1).max(5),
+    matched_difficult_words: z.array(z.string()).optional(),
+  });
 export const karaokeValidationSchema = z.object({
   valid: z.boolean(),
   revision: z.number().int().positive(),
@@ -183,6 +197,8 @@ export type KaraokeSyllable = z.infer<typeof syllableSchema>;
 export type AdminKaraokeDetail = z.infer<typeof adminKaraokeDetailSchema>;
 export type AdminKaraokeList = z.infer<typeof adminKaraokeListSchema>;
 export type KaraokePreview = z.infer<typeof karaokePreviewSchema>;
+export type SongCard = z.infer<typeof songCardSchema>;
+export type KaraokeSongCard = SongCard;
 export type KaraokeValidation = z.infer<typeof karaokeValidationSchema>;
 export type KaraokeDraftWrite = KaraokeMetadata & {
   expected_revision: number;

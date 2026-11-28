@@ -27,7 +27,7 @@
     "defaultGreeting": "Hallo! Möchtest du heute eine Bildergeschichte erzählen, Sätze bauen, mitsingen oder dein Gedächtnis testen?",
     "defaultRecommendationReason": "Jedes Spiel knüpft sanft an die gelesenen Bücher an, damit Wörter ganz ohne Druck im Gedächtnis bleiben.",
     "focusDifficultWordsLabel": "Wörter zum sanften Üben:",
-    "playSuggestedCta": "Empfohlenes Spiel starten",
+    "playSuggestedCta": "Jetzt mit der Eule spielen",
     "onboardingRegionAria": "Einstiegshilfe für den Spiel- und Lernbereich",
     "onboardingCounter": "Kurzanleitung ({current}/{total})",
     "onboardingStep1Title": "1. Wähle deinen Lieblingsbereich",
@@ -57,7 +57,12 @@
     "memoryCta": "Gedächtnisspiel starten",
     "breakReminderTitle": "Gesunde Augenpause:",
     "defaultBreakReminder": "Etwa 10–15 Minuten pro Sitzung halten die Augen fit und fördern entspanntes Lernen.",
-    "recommendationLoadError": "Lernempfehlungen konnten gerade nicht geladen werden."
+    "recommendationLoadError": "Lernempfehlungen konnten gerade nicht geladen werden.",
+    "autoPlayFlowOn": "Automatik-Modus",
+    "autoPlayFlowOff": "Automatik-Modus (Aus)",
+    "quickPlayCta": "Schnellstart",
+    "quickPlayCardAria": "Schnellstart: {title}",
+    "misreadWordsChipTitle": "Wörter zum Üben:"
   },
   "karaoke": {
     "title": "Kinder-Karaoke",
@@ -92,7 +97,10 @@
       "coverAlt": "Coverbild für {title}",
       "songInfo": "Liedinformationen",
       "gradeRange": "Klasse {min}–{max}",
-      "singSongAction": "{title} singen"
+      "singSongAction": "{title} singen",
+      "reviewDifficultWordsLabel": "Übungswörter:",
+      "singNowAction": "Jetzt singen",
+      "difficultWordsBoostHint": "Lieder mit Wörtern, die dein Kind übt, stehen ganz oben."
     },
     "playerScreen": {
       "backToLibrary": "Zurück zur Liederbibliothek",
@@ -250,8 +258,12 @@
         "weakestSegmentTitle": "Übungsabschnitt · Zeile {number}",
         "retrySegmentSlow": "Diesen Abschnitt üben (0,85x)",
         "segmentReportSummary": "Zeilenbericht ({count} Zeilen)",
-        "segmentLineHeader": "Zeile {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "Zeile {number} ({start}–{end})",
+        "practiceWeakestNow": "Schwächste Zeile jetzt üben (0.85×)"
+      },
+      "autoplayPreparing": "Das Lied wird automatisch vorbereitet…",
+      "autoplayTapToStart": "Einmal tippen für Musik",
+      "autoplayTapHint": "Dein Browser braucht ein kurzes Tippen, um Musik und Mikrofon zu starten."
     },
     "score": {
       "regionAria": "Textgenauigkeit",
@@ -538,7 +550,18 @@
       "who": "Wer oder welches Tier?",
       "action": "Was passiert gerade?",
       "where": "Wo und welche Farbe?"
-    }
+    },
+    "practicingWordsBadge": "Aktuelle Übungswörter",
+    "matchedDifficultWordBanner": "Geübte Wörter: {words}",
+    "autoPlayOn": "Automatik-Modus",
+    "autoPlayOff": "Automatik-Modus (Aus)",
+    "quickPlayAutopilotBtn": "Jetzt spielen (Bild automatisch wählen)",
+    "openingAutopilotPrompt": "Schau dir dieses Bild an und erzähle, was du siehst!",
+    "autoMicBlockedFallback": "Tippe auf Mit Mikrofon sprechen, um deine Geschichte zu erzählen!",
+    "autoSubmitCountdown": "Wird in {seconds}s gesendet",
+    "submitNowAction": "Jetzt senden",
+    "pauseAutoAction": "Automatik pausieren",
+    "autoPausedNotice": "Automatisches Senden pausiert — tippe auf Senden, wenn du fertig bist."
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Endloswiedergabe fehlgeschlagen. Tippen Sie zum erneuten Versuch auf Anhören.",

@@ -26,6 +26,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
 interface SentenceShooterPageProps {
   searchParams: Promise<{
+    autoplay?: string | string[];
     book_id?: string | string[];
     reading_session_id?: string | string[];
     source?: string | string[];
@@ -50,6 +51,7 @@ export default async function SentenceShooterPage({
 
   return (
     <SentenceShooterScreen
+      autoPlay={firstValue(query.autoplay) === "1"}
       initialBookId={firstValue(query.book_id)}
       readingSessionId={readingSessionId}
     />

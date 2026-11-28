@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "Prüfe {count} ausgewählte Wörter…",
     "readFullSentence": "Ganzen Satz anhören",
     "practicedDifficultWordsRound": "Gerade geübte Wörter:",
-    "practicedDifficultWordsSummary": "Geübte schwierige Wörter:"
+    "practicedDifficultWordsSummary": "Geübte schwierige Wörter:",
+    "quickStartHeading": "Bereit für dein Kind",
+    "startNowButton": "Jetzt starten",
+    "autoStartingStatus": "Passendes Spiel wird geöffnet…",
+    "autoAdvanceCountdown": "Nächster Satz in {seconds}s",
+    "stopAutoAdvance": "Automatik stoppen",
+    "autoPlayFlowToggleOn": "Automatik-Modus",
+    "autoPlayFlowToggleOff": "Automatik-Modus (Aus)"
   },
   "memoryGame": {
     "title": "Was merkst du dir?",
@@ -240,6 +247,19 @@
       "svgAria": "Illustration „{theme}“ mit {count} Details",
       "svgTitle": "Illustration {theme}"
     },
-    "mobileLabel": "Erinnerungsecke"
+    "mobileLabel": "Erinnerungsecke",
+    "quickPlayDifficultCta": "Jetzt spielen (Schwere Wörter üben)",
+    "quickPlayDifficultHint": "Wählt automatisch das beste Bild und die passende Zeit für Klasse {grade}.",
+    "focusWordsReviewLabel": "Wörter zum Üben:",
+    "autoPlayFlowOn": "Automatik-Modus",
+    "autoPlayFlowOff": "Automatik-Modus (Aus)",
+    "observeAutoCue": "Schau dir Farben und Positionen der Dinge im Bild genau an!",
+    "autoRecallFallbackNotice": "Tippe auf Antwort sprechen oder schreibe auf, woran du dich erinnerst.",
+    "autoSubmitCountdown": "Wird in {seconds}s gesendet",
+    "sendNowButton": "Jetzt senden",
+    "switchToTextButton": "Text tippen",
+    "turnOffAutoButton": "Automatik aus",
+    "playNewRoundNowButton": "Neue Runde sofort spielen",
+    "practicedWordsRevealPrefix": "Geübte Wörter:"
   }
 }

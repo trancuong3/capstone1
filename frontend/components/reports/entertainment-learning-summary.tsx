@@ -111,8 +111,14 @@ export function EntertainmentLearningSummary({
         </p>
       </div>
 
-      {/* 3 Honest Evidence Counters */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* 3 Honest Evidence Counters (+ V4.1 Reinforced Misread Words when provided) */}
+      <div
+        className={`grid gap-3 ${
+          typeof data.reading_misread_words_reinforced === "number"
+            ? "sm:grid-cols-2 lg:grid-cols-4"
+            : "sm:grid-cols-3"
+        }`}
+      >
         <div className="rounded-control border border-border bg-white p-4">
           <p className="text-xs font-semibold text-muted">
             {t("entertainmentSummary.observedCounterLabel")}
@@ -137,6 +143,19 @@ export function EntertainmentLearningSummary({
             {data.unknown_skills_count}
           </p>
         </div>
+        {typeof data.reading_misread_words_reinforced === "number" ? (
+          <div
+            className="rounded-control border border-amber-200 bg-amber-50/70 p-4"
+            data-testid="reports-misread-words-reinforced"
+          >
+            <p className="text-xs font-semibold text-amber-900">
+              {t("entertainmentSummary.misreadWordsReinforcedLabel")}
+            </p>
+            <p className="mt-1 text-2xl font-extrabold tabular-nums text-amber-950">
+              {data.reading_misread_words_reinforced}
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {/* Activity per Game Module */}

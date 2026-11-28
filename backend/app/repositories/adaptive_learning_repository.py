@@ -19,6 +19,10 @@ from app.models import (
     MemoryGameSession,
     PictureDescriptionSession,
 )
+from app.services.child_difficult_word_feed import (
+    ChildDifficultWordFeed,
+    DifficultWordTarget,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +144,19 @@ class AdaptiveLearningRepository:
             if _is_missing_table_error(exc):
                 return []
             raise
+
+    async def list_difficult_word_targets(
+        self,
+        child_id: UUID,
+        parent_id: UUID,
+        *,
+        limit: int = 12,
+    ) -> list[DifficultWordTarget]:
+        return await ChildDifficultWordFeed(self.db).list_targets(
+            child_id,
+            parent_id,
+            limit=limit,
+        )
 
     async def list_picture_sessions(
         self,

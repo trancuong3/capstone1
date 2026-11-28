@@ -8,6 +8,7 @@ import {
   Coffee,
   HelpCircle,
   Music2,
+  Play,
   Sparkles,
   Volume2,
   VolumeX,
@@ -31,6 +32,7 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { createChildService } from "@/lib/api/child-service";
+import { appendAutoplayParam } from "@/lib/entertainment/autopilot";
 import { cn } from "@/lib/utils/cn";
 import type {
   CrossGameRecommendationDTO,
@@ -196,8 +198,14 @@ export function EntertainmentScreen({
   const childSelectId = useId();
   const appStore = useContext(AppStoreContext);
   const appServices = useContext(AppServicesContext);
-  const { reducedMotion, calmSound, toggleReducedMotion, toggleCalmSound } =
-    useEntertainmentPreferences();
+  const {
+    reducedMotion,
+    calmSound,
+    autoPlayFlow,
+    toggleReducedMotion,
+    toggleCalmSound,
+    toggleAutoPlayFlow,
+  } = useEntertainmentPreferences();
 
   const [childrenList, setChildrenList] = useState<readonly ChildProfileDTO[]>(
     [],
@@ -355,6 +363,7 @@ export function EntertainmentScreen({
         "activity-library mx-auto flex w-full max-w-[1140px] flex-col gap-5 pb-8",
         reducedMotion && "motion-reduce",
       )}
+      data-auto-play-flow={autoPlayFlow ? "true" : "false"}
       data-calm-sound={calmSound ? "true" : "false"}
       data-reduced-motion={reducedMotion ? "true" : "false"}
       data-sound-muted={calmSound ? "false" : "true"}
@@ -398,6 +407,19 @@ export function EntertainmentScreen({
             </div>
           ) : null}
 
+          <Button
+            aria-pressed={autoPlayFlow}
+            className="min-h-12 px-4"
+            data-testid="hub-autoplay-toggle"
+            fullWidth={false}
+            onClick={toggleAutoPlayFlow}
+            size="compact"
+            type="button"
+            variant={autoPlayFlow ? "secondary" : "quiet"}
+          >
+            <Play aria-hidden="true" className="size-4" />
+            {autoPlayFlow ? t("hub.autoPlayFlowOn") : t("hub.autoPlayFlowOff")}
+          </Button>
           <Button
             aria-pressed={!calmSound}
             className="min-h-12 px-4"
@@ -446,131 +468,92 @@ export function EntertainmentScreen({
       </header>
 
       {/* Mascot Guide & Gentle Adaptive Recommendation */}
-      <div className="flex flex-col gap-4 rounded-card border border-amber-200 bg-gradient-to-r from-amber-50/90 via-cream to-sky/60 p-5 sm:flex-row sm:items-center sm:p-6">
-        <ViReadMascot reducedMotion={reducedMotion} />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-amber-800 shadow-xs">
-              <Sparkles aria-hidden="true" className="size-3.5" />
-              {t("hub.mascotBadge")}
-            </span>
-            {profileBadgeAlias && profileBadgeGrade !== null ? (
-              <span
-                className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted"
-                data-testid="hub-active-child-badge"
-              >
-                {t("hub.childProfileBadge", {
-                  alias: profileBadgeAlias,
-                  grade: profileBadgeGrade,
-                })}
+      <div className="flex flex-col gap-4 rounded-card border border-amber-200 bg-gradient-to-r from-amber-50/90 via-cream to-sky/60 p-5 sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <ViReadMascot reducedMotion={reducedMotion} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-xs font-extrabold text-amber-800 shadow-xs">
+                <Sparkles aria-hidden="true" className="size-3.5" />
+                {t("hub.mascotBadge")}
               </span>
+              {profileBadgeAlias && profileBadgeGrade !== null ? (
+                <span
+                  className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-muted"
+                  data-testid="hub-active-child-badge"
+                >
+                  {t("hub.childProfileBadge", {
+                    alias: profileBadgeAlias,
+                    grade: profileBadgeGrade,
+                  })}
+                </span>
+              ) : null}
+            </div>
+            <p className="text-lg font-extrabold text-ink">
+              {recommendations?.mascot_greeting_vi ? (
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {recommendations.mascot_greeting_vi}
+                </span>
+              ) : (
+                t("hub.defaultGreeting")
+              )}
+            </p>
+            <p className="text-sm leading-6 text-muted">
+              {primaryRec?.reason_vi ? (
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {primaryRec.reason_vi}
+                </span>
+              ) : (
+                t("hub.defaultRecommendationReason")
+              )}
+            </p>
+          </div>
+        </div>
+        {(recommendations?.focus_difficult_words.length ?? 0) > 0 ||
+        primaryRec ? (
+          <div className="flex flex-col gap-3 border-t border-amber-200/70 pt-3">
+            {recommendations?.focus_difficult_words.length ? (
+              <div
+                className="flex flex-wrap items-center gap-2"
+                data-testid="hub-misread-word-chips"
+              >
+                <span className="text-xs font-bold text-ink">
+                  {t("hub.misreadWordsChipTitle")}
+                </span>
+                {recommendations.focus_difficult_words.map((word) => (
+                  <span
+                    className="viread-learning-content rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900 shadow-2xs"
+                    dir="ltr"
+                    key={word}
+                    lang="vi"
+                  >
+                    {word}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {primaryRec ? (
+              <div>
+                <ButtonLink
+                  className="min-h-12 w-full sm:w-auto"
+                  data-testid="hub-owl-quick-play"
+                  href={
+                    primaryRec.quick_play_href ??
+                    appendAutoplayParam(primaryRec.href)
+                  }
+                  size="compact"
+                >
+                  {t("hub.playSuggestedCta")}{" "}
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="viread-rtl-flip size-4"
+                  />
+                </ButtonLink>
+              </div>
             ) : null}
           </div>
-          <p className="text-lg font-extrabold text-ink">
-            {recommendations?.mascot_greeting_vi ? (
-              <span className="viread-learning-content" dir="ltr" lang="vi">
-                {recommendations.mascot_greeting_vi}
-              </span>
-            ) : (
-              t("hub.defaultGreeting")
-            )}
-          </p>
-          <p className="text-sm leading-6 text-muted">
-            {primaryRec?.reason_vi ? (
-              <span className="viread-learning-content" dir="ltr" lang="vi">
-                {primaryRec.reason_vi}
-              </span>
-            ) : (
-              t("hub.defaultRecommendationReason")
-            )}
-          </p>
-          {recommendations?.focus_difficult_words.length ? (
-            <div className="flex flex-wrap items-center gap-2 pt-1">
-              <span className="text-xs font-bold text-ink">
-                {t("hub.focusDifficultWordsLabel")}
-              </span>
-              {recommendations.focus_difficult_words.map((word) => (
-                <span
-                  className="viread-learning-content rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-bold text-amber-900"
-                  dir="ltr"
-                  key={word}
-                  lang="vi"
-                >
-                  {word}
-                </span>
-              ))}
-            </div>
-          ) : null}
-        </div>
-        {primaryRec ? (
-          <ButtonLink
-            className="min-h-12 w-full shrink-0 sm:w-auto"
-            href={primaryRec.href}
-            size="compact"
-          >
-            {t("hub.playSuggestedCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
         ) : null}
       </div>
-
-      {/* Interactive First-Visit Onboarding (Calm, Zero Dark Patterns) */}
-      {showOnboarding ? (
-        <aside
-          aria-label={t("hub.onboardingRegionAria")}
-          className="rounded-card border border-primary/25 bg-white p-5 shadow-xs sm:p-6"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
-                {t("hub.onboardingCounter", {
-                  current: onboardingStep + 1,
-                  total: ONBOARDING_STEP_KEYS.length,
-                })}
-              </p>
-              <h2 className="mt-1 text-xl font-extrabold text-ink">
-                {t(activeStep.titleKey)}
-              </h2>
-              <p className="mt-1 text-body text-muted">
-                {t(activeStep.bodyKey)}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              {onboardingStep < ONBOARDING_STEP_KEYS.length - 1 ? (
-                <Button
-                  className="min-h-12"
-                  fullWidth={false}
-                  onClick={() => setOnboardingStep((s) => s + 1)}
-                  size="compact"
-                  type="button"
-                >
-                  {t("hub.onboardingNext")}
-                </Button>
-              ) : (
-                <Button
-                  className="min-h-12"
-                  fullWidth={false}
-                  onClick={finishOnboarding}
-                  size="compact"
-                  type="button"
-                >
-                  {t("hub.onboardingDone")}
-                </Button>
-              )}
-              <Button
-                className="min-h-12"
-                fullWidth={false}
-                onClick={finishOnboarding}
-                size="compact"
-                type="button"
-                variant="quiet"
-              >
-                {t("hub.onboardingClose")}
-              </Button>
-            </div>
-          </div>
-        </aside>
-      ) : null}
 
       {/* 4 Child-First Play & Learn Zones */}
       <div className="grid items-stretch gap-5 md:grid-cols-2">
@@ -613,14 +596,37 @@ export function EntertainmentScreen({
               </span>
             </p>
           ) : null}
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href="/entertainment/picture-description"
-            size="compact"
-          >
-            {t("hub.pictureCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.pictureTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-picture-description"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("PICTURE_DESCRIPTION")
+                  ?.quick_play_href ??
+                "/entertainment/picture-description?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href="/entertainment/picture-description"
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.pictureCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 2: Word Adventure */}
@@ -662,14 +668,36 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.shooterDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href="/entertainment/sentence-shooter"
-            size="compact"
-          >
-            {t("hub.shooterCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.shooterTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-sentence-shooter"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("SENTENCE_SHOOTER")?.quick_play_href ??
+                "/entertainment/sentence-shooter?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href="/entertainment/sentence-shooter"
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.shooterCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 3: Music Stage */}
@@ -710,14 +738,36 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.karaokeDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href="/karaoke"
-            size="compact"
-          >
-            {t("hub.karaokeCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.karaokeTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-karaoke"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("KARAOKE")?.quick_play_href ??
+                "/karaoke?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href="/karaoke"
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.karaokeCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
 
         {/* Zone 4: Memory Explorer */}
@@ -744,16 +794,96 @@ export function EntertainmentScreen({
           <p className="text-body leading-6 text-muted">
             {t("hub.memoryDesc")}
           </p>
-          <ButtonLink
-            className="mt-auto min-h-12"
-            href="/entertainment/memory-game"
-            size="compact"
-          >
-            {t("hub.memoryCta")}{" "}
-            <ArrowRight aria-hidden="true" className="viread-rtl-flip size-4" />
-          </ButtonLink>
+          <div className="mt-auto flex flex-wrap gap-2">
+            <ButtonLink
+              aria-label={t("hub.quickPlayCardAria", {
+                title: t("hub.memoryTitle"),
+              })}
+              className="min-h-12 shrink-0"
+              data-testid="quick-play-memory-game"
+              fullWidth={false}
+              href={
+                recommendationByGame.get("MEMORY_GAME")?.quick_play_href ??
+                "/entertainment/memory-game?autoplay=1"
+              }
+              size="compact"
+            >
+              <Play aria-hidden="true" className="size-4" />
+              {t("hub.quickPlayCta")}
+            </ButtonLink>
+            <ButtonLink
+              className="min-h-12 flex-1"
+              href="/entertainment/memory-game"
+              size="compact"
+              variant="secondary"
+            >
+              {t("hub.memoryCta")}{" "}
+              <ArrowRight
+                aria-hidden="true"
+                className="viread-rtl-flip size-4"
+              />
+            </ButtonLink>
+          </div>
         </article>
       </div>
+
+      {/* Non-blocking Dismissible Onboarding Strip (never blocks quick-play) */}
+      {showOnboarding ? (
+        <aside
+          aria-label={t("hub.onboardingRegionAria")}
+          className="rounded-card border border-primary/25 bg-white px-4 py-3.5 shadow-xs sm:px-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
+                {t("hub.onboardingCounter", {
+                  current: onboardingStep + 1,
+                  total: ONBOARDING_STEP_KEYS.length,
+                })}
+              </p>
+              <h2 className="mt-0.5 text-lg font-extrabold text-ink">
+                {t(activeStep.titleKey)}
+              </h2>
+              <p className="mt-0.5 text-sm text-muted">
+                {t(activeStep.bodyKey)}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {onboardingStep < ONBOARDING_STEP_KEYS.length - 1 ? (
+                <Button
+                  className="min-h-11"
+                  fullWidth={false}
+                  onClick={() => setOnboardingStep((s) => s + 1)}
+                  size="compact"
+                  type="button"
+                >
+                  {t("hub.onboardingNext")}
+                </Button>
+              ) : (
+                <Button
+                  className="min-h-11"
+                  fullWidth={false}
+                  onClick={finishOnboarding}
+                  size="compact"
+                  type="button"
+                >
+                  {t("hub.onboardingDone")}
+                </Button>
+              )}
+              <Button
+                className="min-h-11"
+                fullWidth={false}
+                onClick={finishOnboarding}
+                size="compact"
+                type="button"
+                variant="quiet"
+              >
+                {t("hub.onboardingClose")}
+              </Button>
+            </div>
+          </div>
+        </aside>
+      ) : null}
 
       {/* Healthy Natural Break Cue (Anti-Addiction, Zero Dark Patterns) */}
       <footer className="flex items-center gap-3 rounded-card border border-border bg-white/80 px-5 py-4 text-sm text-muted">

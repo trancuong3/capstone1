@@ -25,6 +25,8 @@ export function KaraokePlayer(props: {
   presentation?: "preview" | "child";
   childAlias?: string;
   onReload?: () => void;
+  autoPlay?: boolean;
+  autoScored?: boolean;
 }) {
   // Remount resets pending play promises, clocks and errors even when a signed URL is renewed.
   return (
@@ -43,6 +45,8 @@ function PlayerSession({
   presentation = "preview",
   childAlias,
   onReload,
+  autoPlay = false,
+  autoScored = false,
 }: {
   source: AudioSource;
   label?: string;
@@ -52,6 +56,8 @@ function PlayerSession({
   presentation?: "preview" | "child";
   childAlias?: string;
   onReload?: () => void;
+  autoPlay?: boolean;
+  autoScored?: boolean;
 }) {
   const t = useTranslations("entertainment");
   const resolvedLabel = label ?? t("karaoke.playerScreen.previewLabel");
@@ -72,6 +78,8 @@ function PlayerSession({
         childAlias={resolvedAlias}
         label={resolvedLabel}
         onReload={onReload}
+        autoPlay={autoPlay}
+        autoScored={autoScored}
       />
     );
   return (

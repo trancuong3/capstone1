@@ -27,7 +27,7 @@
     "defaultGreeting": "שלום קורא צעיר! מה תרצה היום: סיפור מתמונה, הרכבת משפטים, שירה או משחק זיכרון?",
     "defaultRecommendationReason": "כל פעילות מתחברת בעדינות לספרים שהילד קורא כדי לזכור מילים לאורך זמן בלי לחץ.",
     "focusDifficultWordsLabel": "מילים שהילד מתרגל בעדינות:",
-    "playSuggestedCta": "שחק בפעילות המומלצת",
+    "playSuggestedCta": "שחק עכשיו עם הינשוף",
     "onboardingRegionAria": "מדריך היכרות לאזור המשחק והלמידה",
     "onboardingCounter": "מדריך מהיר ({current}/{total})",
     "onboardingStep1Title": "1. בחר את אזור המשחק האהוב",
@@ -57,7 +57,12 @@
     "memoryCta": "התחל משחק זיכרון",
     "breakReminderTitle": "הפסקת מנוחה לעיניים:",
     "defaultBreakReminder": "כ-10–15 דקות בכל סשן שומרות על עיניים רעננות ועל למידה טבעית.",
-    "recommendationLoadError": "לא ניתן לטעון המלצות למידה כעת."
+    "recommendationLoadError": "לא ניתן לטעון המלצות למידה כעת.",
+    "autoPlayFlowOn": "הפעלה אוטומטית",
+    "autoPlayFlowOff": "הפעלה אוטומטית (כבוי)",
+    "quickPlayCta": "כניסה מהירה",
+    "quickPlayCardAria": "כניסה מהירה: {title}",
+    "misreadWordsChipTitle": "מילים לחזרה:"
   },
   "karaoke": {
     "title": "קריוקי לילדים",
@@ -92,7 +97,10 @@
       "coverAlt": "תמונת נושא עבור {title}",
       "songInfo": "פרטי השיר",
       "gradeRange": "שנה {min}–{max}",
-      "singSongAction": "שיר את {title}"
+      "singSongAction": "שיר את {title}",
+      "reviewDifficultWordsLabel": "מילים לתרגול:",
+      "singNowAction": "שיר עכשיו",
+      "difficultWordsBoostHint": "שירים הכוללים מילים שהילד מתרגל מופיעים ראשונים ברשימה."
     },
     "playerScreen": {
       "backToLibrary": "חזרה לספריית השירים",
@@ -250,8 +258,12 @@
         "weakestSegmentTitle": "קטע מומלץ לתרגול · שורה {number}",
         "retrySegmentSlow": "תרגל קטע זה שוב (0.85x)",
         "segmentReportSummary": "דוח לפי שורות ({count} שורות)",
-        "segmentLineHeader": "שורה {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "שורה {number} ({start}–{end})",
+        "practiceWeakestNow": "תרגל עכשיו את השורה החלשה (0.85×)"
+      },
+      "autoplayPreparing": "מכין את השיר באופן אוטומטי…",
+      "autoplayTapToStart": "הקש פעם אחת להפעלת המוזיקה",
+      "autoplayTapHint": "הדפדפן זקוק להקשה אחת להפעלת המוזיקה והמיקרופון."
     },
     "score": {
       "regionAria": "דיוק במילים",
@@ -538,7 +550,18 @@
       "who": "מי או איזו חיה יש?",
       "action": "מה עושים בתמונה?",
       "where": "היכן ובאיזה צבע?"
-    }
+    },
+    "practicingWordsBadge": "מילים בתרגול",
+    "matchedDifficultWordBanner": "מילים שתורגלו: {words}",
+    "autoPlayOn": "הפעלה אוטומטית",
+    "autoPlayOff": "הפעלה אוטומטית (כבוי)",
+    "quickPlayAutopilotBtn": "שחק עכשיו (בחירת תמונה אוטומטית)",
+    "openingAutopilotPrompt": "הבט בתמונה הזו וספר לי מה אתה רואה!",
+    "autoMicBlockedFallback": "הקש על דבר במיקרופון כדי לספר את הסיפור!",
+    "autoSubmitCountdown": "נשלח בעוד {seconds} שנ׳",
+    "submitNowAction": "שלח עכשיו",
+    "pauseAutoAction": "השהה אוטומטי",
+    "autoPausedNotice": "השליחה האוטומטית הושהתה — הקש שלח כשתסיים."
   },
   "karaokeRuntime": {
     "loopPlayFailed": "ההשמעה החוזרת לא הופעלה. יש להקיש על האזנה כדי לנסות שוב.",

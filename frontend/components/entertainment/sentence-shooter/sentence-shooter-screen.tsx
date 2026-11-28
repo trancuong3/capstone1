@@ -17,6 +17,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -49,6 +50,10 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { useSentenceShooterService } from "@/hooks/use-sentence-shooter-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import {
+  formatCountdownSeconds,
+  resolveAutoPlayFlag,
+} from "@/lib/entertainment/autopilot";
 import { cn } from "@/lib/utils/cn";
 import type { BookListItemDTO } from "@/types/book";
 import type {
@@ -129,10 +134,22 @@ const LEARNING_MODE_LABEL_KEYS: Record<SentenceShooterLearningMode, string> = {
 };
 
 const MAX_ACTIVE_PROJECTILES = 6;
+const AUTO_ADVANCE_DURATION_MS = 2500;
+const AUTO_ADVANCE_TICK_MS = 250;
 
 interface SentenceShooterScreenProps {
+  autoPlay?: boolean;
   initialBookId?: string;
   readingSessionId?: string;
+}
+
+function resolveAdaptiveDifficultyForGrade(
+  grade: number | undefined,
+): SentenceShooterDifficulty {
+  if (typeof grade !== "number") return "easy";
+  if (grade >= 4) return "challenge";
+  if (grade >= 3) return "medium";
+  return "easy";
 }
 
 function toBookCover(book: SentenceShooterBookDTO): BookListItemDTO {
@@ -358,6 +375,7 @@ function SentenceShooterResultView({
 }
 
 export function SentenceShooterScreen({
+  autoPlay,
   initialBookId,
   readingSessionId,
 }: SentenceShooterScreenProps = {}) {
@@ -371,9 +389,18 @@ export function SentenceShooterScreen({
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
 
-  const { reducedMotion, calmSound, setCalmSound } =
-    useEntertainmentPreferences();
+  const {
+    reducedMotion,
+    calmSound,
+    autoPlayFlow,
+    setCalmSound,
+    toggleAutoPlayFlow,
+  } = useEntertainmentPreferences();
   const soundEnabled = calmSound;
+  const autoPlayRequested = useMemo(
+    () => resolveAutoPlayFlag(autoPlay),
+    [autoPlay],
+  );
 
   const [difficulty, setDifficulty] =
     useState<SentenceShooterDifficulty>("easy");
@@ -423,10 +450,21 @@ export function SentenceShooterScreen({
   const [projectiles, setProjectiles] = useState<readonly ActiveProjectile[]>(
     [],
   );
+  const [autoAdvanceRemainingMs, setAutoAdvanceRemainingMs] = useState<
+    number | null
+  >(null);
+  const [autoAdvanceStoppedForRound, setAutoAdvanceStoppedForRound] =
+    useState(false);
 
   const arenaRef = useRef<HTMLDivElement>(null);
   const cannonRef = useRef<HTMLDivElement>(null);
   const roundCompletedRef = useRef(false);
+  const autoStartedRef = useRef(false);
+  const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const autoAdvanceTtsRoundKeyRef = useRef<string | null>(null);
+  const continueToNextRoundRef = useRef<() => Promise<void>>(async () => {});
   const [layoutCache] = useState(() => new StageLayoutCache());
   const tokenRefCallbacks = useMemo(() => {
     const callbacks = new Map<
@@ -485,6 +523,13 @@ export function SentenceShooterScreen({
   useEffect(() => {
     shootErrorRef.current = shootError;
   }, [shootError]);
+
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current !== null) {
+      clearInterval(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, []);
 
   function clearProjectileTimers() {
     for (const timer of projectileTimersRef.current.values()) {
@@ -574,6 +619,8 @@ export function SentenceShooterScreen({
                 : current,
             );
             if (response.session_completed) {
+              clearAutoAdvanceTimer();
+              setAutoAdvanceRemainingMs(null);
               setFinalSentence(completedText);
               setResult(null);
               setMode("result");
@@ -582,6 +629,8 @@ export function SentenceShooterScreen({
                 sessionEpochRef.current,
               );
             } else {
+              setAutoAdvanceStoppedForRound(false);
+              setAutoAdvanceRemainingMs(null);
               setPrefetchedNextRound(response.next_round ?? null);
             }
           }
@@ -640,9 +689,19 @@ export function SentenceShooterScreen({
     );
     shotQueueRef.current = shotQueue;
 
-    const onBackground = () => suspendShooterAudio();
+    const onBackground = () => {
+      suspendShooterAudio();
+      speechPlayerRef.current.stop();
+      clearAutoAdvanceTimer();
+      setAutoAdvanceRemainingMs(null);
+    };
     const onVisibility = () => {
-      if (document.hidden) suspendShooterAudio();
+      if (document.hidden) {
+        suspendShooterAudio();
+        speechPlayerRef.current.stop();
+        clearAutoAdvanceTimer();
+        setAutoAdvanceRemainingMs(null);
+      }
     };
     document.addEventListener("viread:android-background", onBackground);
     document.addEventListener("visibilitychange", onVisibility);
@@ -652,13 +711,15 @@ export function SentenceShooterScreen({
       document.removeEventListener("visibilitychange", onVisibility);
       sessionEpochRef.current += 1;
       controlAbortRef.current?.abort();
+      controlAbortRef.current = null;
       shotQueue.resetEpoch();
       shotQueueRef.current = null;
       layoutCache.dispose();
       clearProjectileTimers();
+      clearAutoAdvanceTimer();
       disposeShooterAudio();
     };
-  }, [layoutCache]);
+  }, [clearAutoAdvanceTimer, layoutCache]);
 
   useEffect(() => {
     if (!childId) return;
@@ -693,12 +754,16 @@ export function SentenceShooterScreen({
   }, [childId, difficulty, reloadKey, shooterService, totalRounds]);
 
   const effectiveSelectedBookId =
-    !hasManuallySelectedBook &&
-    initialBookId &&
-    bookState.status === "ready" &&
-    bookState.books.some((book) => book.id === initialBookId)
-      ? initialBookId
-      : selectedBookId;
+    !hasManuallySelectedBook && initialBookId
+      ? bookState.status === "ready" &&
+        bookState.books.some((book) => book.id === initialBookId)
+        ? initialBookId
+        : ""
+      : !hasManuallySelectedBook &&
+          bookState.status === "ready" &&
+          bookState.books.length > 0
+        ? bookState.books[0].id
+        : selectedBookId;
 
   const selectedBook = useMemo(
     () =>
@@ -806,22 +871,37 @@ export function SentenceShooterScreen({
     });
   }
 
-  async function startGame() {
-    if (!child || !selectedBook || isStartingSession) return;
+  async function startGame(options?: {
+    autoSelectBook?: boolean;
+    difficultyOverride?: SentenceShooterDifficulty;
+  }) {
+    if (!child || isStartingSession) return;
+    const autoSelectBook = Boolean(options?.autoSelectBook);
+    if (!autoSelectBook && !selectedBook) return;
+    const targetDifficulty = options?.difficultyOverride ?? difficulty;
+    if (options?.difficultyOverride) {
+      setDifficulty(options.difficultyOverride);
+    }
     sessionEpochRef.current += 1;
     const epoch = sessionEpochRef.current;
     shotQueueRef.current?.resetEpoch();
     controlAbortRef.current?.abort();
     const controller = new AbortController();
     controlAbortRef.current = controller;
+    clearAutoAdvanceTimer();
+    setAutoAdvanceRemainingMs(null);
+    setAutoAdvanceStoppedForRound(false);
+    autoAdvanceTtsRoundKeyRef.current = null;
     setIsStartingSession(true);
     setError("");
     try {
       const created = await shooterService.createSession(
         {
           child_id: child.id,
-          book_id: selectedBook.id,
-          difficulty,
+          ...(autoSelectBook
+            ? { auto_select_book: true }
+            : { book_id: selectedBook?.id }),
+          difficulty: targetDifficulty,
           total_rounds: totalRounds,
           learning_mode: learningMode,
         },
@@ -858,7 +938,10 @@ export function SentenceShooterScreen({
       if (controlAbortRef.current === controller) {
         controlAbortRef.current = null;
       }
-      if (epoch === sessionEpochRef.current) {
+      if (
+        epoch === sessionEpochRef.current ||
+        controlAbortRef.current === null
+      ) {
         setIsStartingSession(false);
       }
     }
@@ -904,6 +987,9 @@ export function SentenceShooterScreen({
 
   async function continueToNextRound() {
     if (!session || !round || isLoadingNextRound) return;
+    clearAutoAdvanceTimer();
+    setAutoAdvanceRemainingMs(null);
+    setAutoAdvanceStoppedForRound(false);
     setError("");
     speechPlayer.stop();
     if (
@@ -1003,6 +1089,8 @@ export function SentenceShooterScreen({
     controlAbortRef.current?.abort();
     controlAbortRef.current = null;
     clearProjectileTimers();
+    clearAutoAdvanceTimer();
+    setAutoAdvanceRemainingMs(null);
     speechPlayer.stop();
     setProjectiles([]);
     setIsExiting(true);
@@ -1022,6 +1110,10 @@ export function SentenceShooterScreen({
     controlAbortRef.current?.abort();
     controlAbortRef.current = null;
     clearProjectileTimers();
+    clearAutoAdvanceTimer();
+    setAutoAdvanceRemainingMs(null);
+    setAutoAdvanceStoppedForRound(false);
+    autoAdvanceTtsRoundKeyRef.current = null;
     layoutCache.clearTokens();
     roundCompletedRef.current = false;
     setSessionScore(0);
@@ -1053,9 +1145,140 @@ export function SentenceShooterScreen({
 
   function playSentenceAudio(text: string) {
     if (!calmSound || !text.trim()) return;
+    clearAutoAdvanceTimer();
+    setAutoAdvanceStoppedForRound(true);
+    setAutoAdvanceRemainingMs(null);
     speechPlayer.stop();
     void speechPlayer.play(text).catch(() => undefined);
   }
+
+  const startGameRef = useRef(startGame);
+  useEffect(() => {
+    startGameRef.current = startGame;
+  });
+
+  useEffect(() => {
+    continueToNextRoundRef.current = continueToNextRound;
+  });
+
+  // V4.1 ?autoplay=1: immediately auto-start with adaptive difficulty & best book (0 setup clicks).
+  useEffect(() => {
+    if (
+      !autoPlayRequested ||
+      !child ||
+      mode !== "lobby" ||
+      autoStartedRef.current
+    ) {
+      return;
+    }
+    let active = true;
+    const adaptiveDiff = resolveAdaptiveDifficultyForGrade(child.grade);
+    void Promise.resolve().then(() => {
+      if (!active || autoStartedRef.current) return;
+      autoStartedRef.current = true;
+      void startGameRef.current({
+        autoSelectBook: !initialBookId,
+        difficultyOverride: adaptiveDiff,
+      });
+    });
+    return () => {
+      active = false;
+    };
+  }, [autoPlayRequested, child, initialBookId, mode]);
+
+  const isRoundCompletedReady =
+    mode === "playing" &&
+    Boolean(session) &&
+    Boolean(round) &&
+    placedTokens.length === (round?.token_count ?? 0) &&
+    (session?.completed_rounds ?? 0) < (session?.total_rounds ?? 0);
+
+  const completedRoundDisplaySentence =
+    roundCompletedSentence || placedTokens.map((token) => token.text).join(" ");
+
+  // V4.1 Round-Complete Autopilot: speak completed sentence if calmSound, then 2.5s calm countdown -> next round.
+  useEffect(() => {
+    if (!isRoundCompletedReady || !session || !round) {
+      clearAutoAdvanceTimer();
+      return;
+    }
+
+    if (isPaused || autoAdvanceStoppedForRound) {
+      clearAutoAdvanceTimer();
+      return;
+    }
+
+    const roundKey = `${session.session_id}:${round.round_id}`;
+    const shouldSpeak =
+      calmSound &&
+      completedRoundDisplaySentence.trim().length > 0 &&
+      autoAdvanceTtsRoundKeyRef.current !== roundKey;
+
+    let cancelled = false;
+    const epochAtStart = sessionEpochRef.current;
+
+    const beginCountdown = () => {
+      if (
+        cancelled ||
+        sessionEpochRef.current !== epochAtStart ||
+        !autoPlayFlow ||
+        isPaused ||
+        autoAdvanceStoppedForRound ||
+        (typeof document !== "undefined" && document.hidden)
+      ) {
+        return;
+      }
+      clearAutoAdvanceTimer();
+      let remaining = AUTO_ADVANCE_DURATION_MS;
+      setAutoAdvanceRemainingMs(remaining);
+      autoAdvanceTimerRef.current = setInterval(() => {
+        if (
+          cancelled ||
+          sessionEpochRef.current !== epochAtStart ||
+          (typeof document !== "undefined" && document.hidden)
+        ) {
+          clearAutoAdvanceTimer();
+          setAutoAdvanceRemainingMs(null);
+          return;
+        }
+        remaining = Math.max(0, remaining - AUTO_ADVANCE_TICK_MS);
+        setAutoAdvanceRemainingMs(remaining);
+        if (remaining <= 0) {
+          clearAutoAdvanceTimer();
+          setAutoAdvanceRemainingMs(null);
+          void continueToNextRoundRef.current();
+        }
+      }, AUTO_ADVANCE_TICK_MS);
+    };
+
+    if (shouldSpeak) {
+      autoAdvanceTtsRoundKeyRef.current = roundKey;
+      speechPlayerRef.current.stop();
+      void speechPlayerRef.current
+        .play(completedRoundDisplaySentence)
+        .catch(() => undefined)
+        .finally(() => {
+          beginCountdown();
+        });
+    } else if (autoPlayFlow) {
+      beginCountdown();
+    }
+
+    return () => {
+      cancelled = true;
+      clearAutoAdvanceTimer();
+    };
+  }, [
+    autoAdvanceStoppedForRound,
+    autoPlayFlow,
+    calmSound,
+    clearAutoAdvanceTimer,
+    completedRoundDisplaySentence,
+    isPaused,
+    isRoundCompletedReady,
+    round,
+    session,
+  ]);
 
   if (childState.status === "loading" || childState.status === "redirecting") {
     return (
@@ -1615,15 +1838,48 @@ export function SentenceShooterScreen({
                 ) : null}
                 <div className="mt-4">
                   {session.completed_rounds < session.total_rounds ? (
-                    <Button
-                      className="mx-auto max-w-sm"
-                      disabled={isLoadingNextRound}
-                      isLoading={isLoadingNextRound}
-                      onClick={() => void continueToNextRound()}
-                    >
-                      <Play aria-hidden="true" className="size-5" />{" "}
-                      {t("sentenceShooter.nextRound")}
-                    </Button>
+                    <div className="flex flex-col items-center gap-2.5">
+                      {autoAdvanceRemainingMs !== null &&
+                      autoPlayFlow &&
+                      !autoAdvanceStoppedForRound &&
+                      !isPaused ? (
+                        <div
+                          className="flex flex-wrap items-center justify-center gap-2 rounded-control border border-[#98D4A2] bg-white/95 px-3.5 py-2 text-sm font-bold text-success-ink"
+                          data-testid="shooter-auto-advance-bar"
+                          role="status"
+                        >
+                          <span>
+                            {t("sentenceShooter.autoAdvanceCountdown", {
+                              seconds: formatCountdownSeconds(
+                                autoAdvanceRemainingMs,
+                              ),
+                            })}
+                          </span>
+                          <Button
+                            data-testid="shooter-stop-auto-btn"
+                            fullWidth={false}
+                            onClick={() => {
+                              clearAutoAdvanceTimer();
+                              setAutoAdvanceStoppedForRound(true);
+                              setAutoAdvanceRemainingMs(null);
+                            }}
+                            size="compact"
+                            variant="quiet"
+                          >
+                            {t("sentenceShooter.stopAutoAdvance")}
+                          </Button>
+                        </div>
+                      ) : null}
+                      <Button
+                        className="mx-auto max-w-sm"
+                        disabled={isLoadingNextRound}
+                        isLoading={isLoadingNextRound}
+                        onClick={() => void continueToNextRound()}
+                      >
+                        <Play aria-hidden="true" className="size-5" />{" "}
+                        {t("sentenceShooter.nextRound")}
+                      </Button>
+                    </div>
                   ) : (
                     <Button
                       className="mx-auto max-w-sm"
@@ -1735,19 +1991,89 @@ export function SentenceShooterScreen({
             : t("sentenceShooter.mobilePlayZoneLabel")
         }
       />
-      <header className="flex flex-col gap-2 border-b border-border pb-5">
-        <p className="font-extrabold text-primary">
-          {t("sentenceShooter.eyebrow")}
-        </p>
-        <h1 className="text-heading font-extrabold text-ink">
-          {t("sentenceShooter.lobbyTitle")}
-        </h1>
-        <p className="text-body text-muted">
-          {t("sentenceShooter.lobbySubtitle")}
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-5">
+        <div>
+          <p className="font-extrabold text-primary">
+            {t("sentenceShooter.eyebrow")}
+          </p>
+          <h1 className="text-heading font-extrabold text-ink">
+            {t("sentenceShooter.lobbyTitle")}
+          </h1>
+          <p className="text-body text-muted">
+            {t("sentenceShooter.lobbySubtitle")}
+          </p>
+        </div>
+        <Button
+          aria-pressed={autoPlayFlow}
+          className="min-h-11 shrink-0"
+          data-testid="shooter-autoplay-toggle"
+          fullWidth={false}
+          onClick={toggleAutoPlayFlow}
+          size="compact"
+          type="button"
+          variant={autoPlayFlow ? "secondary" : "quiet"}
+        >
+          <Play aria-hidden="true" className="size-4" />
+          {autoPlayFlow
+            ? t("sentenceShooter.autoPlayFlowToggleOn")
+            : t("sentenceShooter.autoPlayFlowToggleOff")}
+        </Button>
       </header>
 
+      {autoPlayRequested && isStartingSession ? (
+        <div
+          aria-live="polite"
+          className="rounded-card border border-primary/25 bg-sky/30 px-4 py-3 text-sm font-bold text-primary"
+          role="status"
+        >
+          {t("sentenceShooter.autoStartingStatus")}
+        </div>
+      ) : null}
+
       {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
+
+      {bookState.status === "ready" && selectedBook ? (
+        <div
+          className="flex flex-col justify-between gap-4 rounded-card border-2 border-primary/30 bg-sky/25 p-5 sm:flex-row sm:items-center"
+          data-testid="shooter-quick-start-card"
+        >
+          <div className="min-w-0 space-y-1.5">
+            <p className="text-xs font-extrabold tracking-wide text-primary uppercase">
+              {t("sentenceShooter.quickStartHeading")}
+            </p>
+            <h2
+              className="viread-learning-content text-xl font-extrabold text-ink"
+              dir="ltr"
+              lang="vi"
+            >
+              {selectedBook.title}
+            </h2>
+            {(selectedBook.matched_difficult_words?.length ?? 0) > 0 ? (
+              <span
+                className="inline-flex flex-wrap items-center gap-1.5 rounded-full bg-warning-surface px-3 py-1 text-xs font-extrabold text-warning"
+                data-testid="shooter-lobby-difficult-badge"
+              >
+                <Sparkles aria-hidden="true" className="size-3.5" />
+                {t("sentenceShooter.difficultWordReviewPrefix")}{" "}
+                <span className="viread-learning-content" dir="ltr" lang="vi">
+                  {selectedBook.matched_difficult_words?.join(", ")}
+                </span>
+              </span>
+            ) : null}
+          </div>
+          <Button
+            className="min-h-12 shrink-0 sm:w-auto"
+            data-testid="shooter-quick-start-btn"
+            disabled={isStartingSession}
+            fullWidth={false}
+            isLoading={isStartingSession}
+            onClick={() => void startGame()}
+          >
+            <Play aria-hidden="true" className="size-5" />
+            {t("sentenceShooter.startNowButton")}
+          </Button>
+        </div>
+      ) : null}
 
       {initialBookId &&
       bookState.status === "ready" &&
@@ -1973,6 +2299,21 @@ export function SentenceShooterScreen({
                             count: book.available_rounds,
                           })}
                         </span>
+                        {(book.matched_difficult_words?.length ?? 0) > 0 ? (
+                          <span className="mt-2 inline-flex flex-wrap items-center gap-1 rounded-full bg-warning-surface px-2.5 py-0.5 text-xs font-extrabold text-warning">
+                            <Sparkles aria-hidden="true" className="size-3" />
+                            {t(
+                              "sentenceShooter.difficultWordReviewPrefix",
+                            )}{" "}
+                            <span
+                              className="viread-learning-content"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {book.matched_difficult_words?.join(", ")}
+                            </span>
+                          </span>
+                        ) : null}
                       </span>
                     </button>
                   );

@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "正在检查所选的 {count} 个词语…",
     "readFullSentence": "朗读完整句子",
     "practicedDifficultWordsRound": "刚刚练习的词语：",
-    "practicedDifficultWordsSummary": "本轮练习的重点词："
+    "practicedDifficultWordsSummary": "本轮练习的重点词：",
+    "quickStartHeading": "已为孩子准备好",
+    "startNowButton": "立即开始",
+    "autoStartingStatus": "正在为孩子快速打开合适的练习…",
+    "autoAdvanceCountdown": "{seconds}秒后自动进入下一句",
+    "stopAutoAdvance": "停止自动",
+    "autoPlayFlowToggleOn": "自动畅玩",
+    "autoPlayFlowToggleOff": "自动畅玩（已关）"
   },
   "memoryGame": {
     "title": "你记住了什么？",
@@ -240,6 +247,19 @@
       "svgAria": "“{theme}”主题插画，包含 {count} 处细节",
       "svgTitle": "{theme} 插画"
     },
-    "mobileLabel": "记忆角"
+    "mobileLabel": "记忆角",
+    "quickPlayDifficultCta": "立即开始（复习生词）",
+    "quickPlayDifficultHint": "系统自动为{grade}年级挑选最合适的图画和时长。",
+    "focusWordsReviewLabel": "需要复习的词：",
+    "autoPlayFlowOn": "自动畅玩",
+    "autoPlayFlowOff": "自动畅玩（已关）",
+    "observeAutoCue": "仔细看看画里每样东西的颜色和位置哦！",
+    "autoRecallFallbackNotice": "请点击语音回答或输入你记住的细节。",
+    "autoSubmitCountdown": "{seconds}秒后自动提交",
+    "sendNowButton": "立即提交",
+    "switchToTextButton": "打字输入",
+    "turnOffAutoButton": "关闭自动",
+    "playNewRoundNowButton": "马上玩新一局",
+    "practicedWordsRevealPrefix": "已复习的词："
   }
 }

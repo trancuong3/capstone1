@@ -27,7 +27,7 @@
     "defaultGreeting": "Bonjour petit lecteur ! Veux-tu raconter une image, former des phrases, chanter ou jouer à mémoriser aujourd'hui ?",
     "defaultRecommendationReason": "Chaque jeu s'appuie en douceur sur les livres lus pour mémoriser les mots sans aucune pression.",
     "focusDifficultWordsLabel": "Mots révisés en douceur :",
-    "playSuggestedCta": "Lancer l'activité suggérée",
+    "playSuggestedCta": "Jouer avec le Hibou",
     "onboardingRegionAria": "Guide de prise en main de l'espace Jeux et apprentissage",
     "onboardingCounter": "Guide rapide ({current}/{total})",
     "onboardingStep1Title": "1. Choisis ton atelier préféré",
@@ -57,7 +57,12 @@
     "memoryCta": "Explorer le jeu mémoire",
     "breakReminderTitle": "Pause repos des yeux :",
     "defaultBreakReminder": "Environ 10 à 15 minutes par séance gardent les yeux reposés et rendent l'apprentissage naturel.",
-    "recommendationLoadError": "Impossible de charger les recommandations pour le moment."
+    "recommendationLoadError": "Impossible de charger les recommandations pour le moment.",
+    "autoPlayFlowOn": "Lecture auto",
+    "autoPlayFlowOff": "Lecture auto (Désactivée)",
+    "quickPlayCta": "Accès rapide",
+    "quickPlayCardAria": "Accès rapide : {title}",
+    "misreadWordsChipTitle": "Mots à revoir :"
   },
   "karaoke": {
     "title": "Karaoké pour enfants",
@@ -92,7 +97,10 @@
       "coverAlt": "Pochette de {title}",
       "songInfo": "Informations sur la chanson",
       "gradeRange": "Niveau {min}–{max}",
-      "singSongAction": "Chanter {title}"
+      "singSongAction": "Chanter {title}",
+      "reviewDifficultWordsLabel": "Mots à pratiquer :",
+      "singNowAction": "Chanter maintenant",
+      "difficultWordsBoostHint": "Les chansons contenant les mots travaillés apparaissent en premier."
     },
     "playerScreen": {
       "backToLibrary": "Retour à la bibliothèque de chansons",
@@ -250,8 +258,12 @@
         "weakestSegmentTitle": "Passage à travailler · Ligne {number}",
         "retrySegmentSlow": "Travailler ce passage (0,85x)",
         "segmentReportSummary": "Bilan par ligne ({count} lignes)",
-        "segmentLineHeader": "Ligne {number} ({start}–{end})"
-      }
+        "segmentLineHeader": "Ligne {number} ({start}–{end})",
+        "practiceWeakestNow": "Travailler la phrase la plus faible (0.85×)"
+      },
+      "autoplayPreparing": "Préparation automatique de la chanson…",
+      "autoplayTapToStart": "Touchez une fois pour lancer la musique",
+      "autoplayTapHint": "Le navigateur demande un appui léger pour activer le son et le micro."
     },
     "score": {
       "regionAria": "Précision des paroles",
@@ -538,7 +550,18 @@
       "who": "Qui ou quel animal ?",
       "action": "Que fait-il ?",
       "where": "Où et quelle couleur ?"
-    }
+    },
+    "practicingWordsBadge": "Mots en révision",
+    "matchedDifficultWordBanner": "Mots révisés : {words}",
+    "autoPlayOn": "Lecture auto",
+    "autoPlayOff": "Lecture auto (Désactivée)",
+    "quickPlayAutopilotBtn": "Jouer maintenant (Image auto)",
+    "openingAutopilotPrompt": "Regarde cette image et raconte-moi ce que tu vois !",
+    "autoMicBlockedFallback": "Appuie sur Parler au micro pour raconter ton histoire !",
+    "autoSubmitCountdown": "Envoi dans {seconds}s",
+    "submitNowAction": "Envoyer maintenant",
+    "pauseAutoAction": "Mettre l'auto en pause",
+    "autoPausedNotice": "Envoi automatique en pause — appuie sur Envoyer quand tu as fini."
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Lecture en boucle impossible. Appuyez sur Écouter pour réessayer.",

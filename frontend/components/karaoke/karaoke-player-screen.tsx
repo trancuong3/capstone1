@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { KaraokeChildBoundary } from "@/components/karaoke/karaoke-child-boundary";
 import {
   KaraokeStage,
@@ -24,10 +25,21 @@ import type { ChildProfileDTO } from "@/types/child";
 export function KaraokePlayerScreen({
   songId,
   expectedVersionId,
+  autoPlay,
+  autoScored,
 }: {
   songId: string;
   expectedVersionId?: string;
+  autoPlay?: boolean;
+  autoScored?: boolean;
 }) {
+  const searchParams = useSearchParams();
+  const resolvedAutoPlay = autoPlay ?? searchParams?.get("autoplay") === "1";
+  const scoredParam = searchParams?.get("scored");
+  const resolvedAutoScored =
+    autoScored ??
+    (scoredParam === "1" || (resolvedAutoPlay && scoredParam !== "0"));
+
   return (
     <KaraokeChildBoundary>
       {(child) => (
@@ -36,6 +48,8 @@ export function KaraokePlayerScreen({
           child={child}
           songId={songId}
           expectedVersionId={expectedVersionId}
+          autoPlay={resolvedAutoPlay}
+          autoScored={resolvedAutoScored}
         />
       )}
     </KaraokeChildBoundary>
@@ -46,10 +60,14 @@ function Song({
   child,
   songId,
   expectedVersionId,
+  autoPlay,
+  autoScored,
 }: {
   child: ChildProfileDTO;
   songId: string;
   expectedVersionId?: string;
+  autoPlay: boolean;
+  autoScored: boolean;
 }) {
   const t = useTranslations("entertainment");
   const [request, setRequest] = useState({
@@ -69,6 +87,8 @@ function Song({
         child={child}
         songId={songId}
         expectedVersionId={request.version}
+        autoPlay={autoPlay}
+        autoScored={autoScored}
         onRefresh={(version) =>
           setRequest({ version, attempt: request.attempt + 1 })
         }
@@ -84,10 +104,14 @@ function Song({
 function ChildKaraokeSession({
   source,
   child,
+  autoPlay,
+  autoScored,
   onReload,
 }: {
   source: KaraokePlayback;
   child: ChildProfileDTO;
+  autoPlay: boolean;
+  autoScored: boolean;
   onReload: () => void;
 }) {
   const t = useTranslations("entertainment");
@@ -159,6 +183,8 @@ function ChildKaraokeSession({
       onLoadMusicalProfile={onLoadMusicalProfile}
       onLoadPracticeHistory={onLoadPracticeHistory}
       onSavePracticeSession={onSavePracticeSession}
+      autoPlay={autoPlay}
+      autoScored={autoScored}
     />
   );
 }
@@ -167,11 +193,15 @@ function Playback({
   child,
   songId,
   expectedVersionId,
+  autoPlay,
+  autoScored,
   onRefresh,
 }: {
   child: ChildProfileDTO;
   songId: string;
   expectedVersionId?: string;
+  autoPlay: boolean;
+  autoScored: boolean;
   onRefresh: (version?: string) => void;
 }) {
   const t = useTranslations("entertainment");
@@ -230,6 +260,8 @@ function Playback({
       key={`${source.version_id}:${source.audio_url}`}
       source={source}
       child={child}
+      autoPlay={autoPlay}
+      autoScored={autoScored}
       onReload={() => onRefresh(source.version_id)}
     />
   );

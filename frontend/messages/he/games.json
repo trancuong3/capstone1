@@ -110,7 +110,14 @@
     "checkingMultipleTokensStatus": "בודק {count} מילים שנבחרו…",
     "readFullSentence": "שמע משפט שלם",
     "practicedDifficultWordsRound": "מילים שתורגלו כעת:",
-    "practicedDifficultWordsSummary": "מילים קשות שתורגלו:"
+    "practicedDifficultWordsSummary": "מילים קשות שתורגלו:",
+    "quickStartHeading": "מוכן לילד שלך",
+    "startNowButton": "התחל עכשיו",
+    "autoStartingStatus": "פותח משחק מותאם לילד שלך…",
+    "autoAdvanceCountdown": "מעבר למשפט הבא בעוד {seconds} שנ׳",
+    "stopAutoAdvance": "עצור אוטומטי",
+    "autoPlayFlowToggleOn": "הפעלה אוטומטית",
+    "autoPlayFlowToggleOff": "הפעלה אוטומטית (כבוי)"
   },
   "memoryGame": {
     "title": "מה אתה זוכר?",
@@ -240,6 +247,19 @@
       "svgAria": "איור של {theme} עם {count} פרטים",
       "svgTitle": "איור {theme}"
     },
-    "mobileLabel": "פינת הזיכרון"
+    "mobileLabel": "פינת הזיכרון",
+    "quickPlayDifficultCta": "שחק עכשיו (חזרה על מילים קשות)",
+    "quickPlayDifficultHint": "בוחר אוטומטית את התמונה והזמן המתאימים ביותר לכיתה {grade}.",
+    "focusWordsReviewLabel": "מילים לחזרה:",
+    "autoPlayFlowOn": "הפעלה אוטומטית",
+    "autoPlayFlowOff": "הפעלה אוטומטית (כבוי)",
+    "observeAutoCue": "התבונן היטב בצבעים ובמיקום של הפריטים בתמונה!",
+    "autoRecallFallbackNotice": "הקש על תשובה קולית או הקלד את הפרטים שזכרת.",
+    "autoSubmitCountdown": "נשלח בעוד {seconds} שנ׳",
+    "sendNowButton": "שלח עכשיו",
+    "switchToTextButton": "הקלד טקסט",
+    "turnOffAutoButton": "כבה אוטומטי",
+    "playNewRoundNowButton": "שחק סיבוב חדש עכשיו",
+    "practicedWordsRevealPrefix": "מילים שתורגלו:"
   }
 }

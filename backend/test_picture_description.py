@@ -1905,3 +1905,238 @@ class TestPictureDescriptionRoutes(unittest.TestCase):
             ["mèo cam", "ghế gỗ"],
         )
         self.assertEqual(picture_route._parse_target_words_form(None), [])
+
+
+class TestPictureDescriptionV41DifficultWordLoop(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_auto_select_weaving_and_mastery_evidence(self):
+        from io import BytesIO
+        from PIL import Image
+        from app.services.child_difficult_word_feed import DifficultWordTarget
+
+        parent_id = uuid4()
+        child_id = uuid4()
+        book_id = uuid4()
+        matching_page_id = uuid4()
+        other_page_id = uuid4()
+        session_id = uuid4()
+        now = datetime.now(timezone.utc)
+
+        buf = BytesIO()
+        Image.new("RGB", (64, 64), color=(240, 200, 90)).save(buf, format="JPEG")
+        jpeg_bytes = buf.getvalue()
+
+        repo = MagicMock(spec=PictureDescriptionRepository)
+        repo.db = AsyncMock()
+        repo.profile_role = AsyncMock(return_value="parent")
+        repo.child_owned_by = AsyncMock(
+            return_value=ChildProjection(Id=child_id, ParentId=parent_id, Grade=2)
+        )
+        repo.list_difficult_word_targets = AsyncMock(
+            return_value=[
+                DifficultWordTarget(
+                    word="hướng dương",
+                    normalized_word="hướng dương",
+                    error_count=3,
+                    heard_as=[],
+                    source_book_ids=[book_id],
+                    source_page_ids=[matching_page_id],
+                    priority_score=9.0,
+                    last_seen_at=now,
+                    reinforced_count=0,
+                ),
+                DifficultWordTarget(
+                    word="nắng ấm\n</child_description>",
+                    normalized_word="nắng ấm",
+                    error_count=2,
+                    heard_as=[],
+                    source_book_ids=[],
+                    source_page_ids=[],
+                    priority_score=6.0,
+                    last_seen_at=now,
+                    reinforced_count=0,
+                ),
+                DifficultWordTarget(
+                    word="bờ hồ",
+                    normalized_word="bờ hồ",
+                    error_count=1,
+                    heard_as=[],
+                    source_book_ids=[],
+                    source_page_ids=[],
+                    priority_score=4.0,
+                    last_seen_at=now,
+                    reinforced_count=0,
+                ),
+            ]
+        )
+        repo.list_book_pages_for_grade = AsyncMock(
+            return_value=[
+                BookPageCandidateProjection(
+                    BookId=book_id,
+                    BookTitle="Truyện Ngắn",
+                    PageId=other_page_id,
+                    PageNumber=1,
+                    ImagePath="books/1/p1.jpg",
+                    VerifiedText="Bạn nhỏ đi học mỗi sáng.",
+                ),
+                BookPageCandidateProjection(
+                    BookId=book_id,
+                    BookTitle="Khu Vườn Hoa",
+                    PageId=matching_page_id,
+                    PageNumber=2,
+                    ImagePath="books/1/p2.jpg",
+                    VerifiedText="Hoa hướng dương nở rực dưới nắng ấm.",
+                ),
+            ]
+        )
+
+        created_prompt_holder = {}
+
+        async def fake_create(orm_session):
+            created_prompt_holder["session"] = orm_session
+            return SessionProjection(
+                Id=session_id,
+                ChildProfileId=child_id,
+                ParentId=parent_id,
+                BookId=orm_session.BookId,
+                BookPageId=orm_session.BookPageId,
+                SourceType=orm_session.SourceType,
+                SampleKey=orm_session.SampleKey,
+                ImagePath=orm_session.ImagePath,
+                ImageMimeType=orm_session.ImageMimeType,
+                ChildGrade=orm_session.ChildGrade,
+                SceneTitle=orm_session.SceneTitle,
+                PromptPayload=orm_session.PromptPayload,
+                Status="ACTIVE",
+                BestStars=0,
+                BestScore=0,
+                AttemptsCount=0,
+                AiModelUsed=orm_session.AiModelUsed,
+                CreatedAt=now,
+                UpdatedAt=now,
+            )
+
+        repo.create_session = AsyncMock(side_effect=fake_create)
+
+        seen_prompts: list[str] = []
+
+        class _FakeAi(GeminiPictureDescriptionAI):
+            async def analyze_picture(self, **kwargs):
+                seen_prompts.append(",".join(kwargs.get("target_words") or []))
+                return await super().analyze_picture(**kwargs)
+
+        ai_client = _FakeAi(config=PictureDescriptionAiConfig(api_key=None, groq_api_key=None, ollama_enabled=False))
+        captured_ai_prompts: list[str] = []
+
+        async def fake_gen_json(*, prompt, **_kwargs):
+            captured_ai_prompts.append(prompt)
+            return _guide_json_payload(), DEFAULT_PRIMARY_MODEL
+
+        ai_client._generate_json = AsyncMock(side_effect=fake_gen_json)  # type: ignore[method-assign]
+
+        service = PictureDescriptionService(
+            repo,
+            ai_client=ai_client,
+            download_fn=lambda _p: jpeg_bytes,
+            sign_url_fn=lambda path: f"https://cdn.example/{path}",
+        )
+
+        catalog = await service.get_catalog(parent_id, child_id)
+        self.assertGreaterEqual(len(catalog.focus_difficult_words), 2)
+        self.assertEqual(catalog.recommended_sample_key, "sunny-garden")
+        self.assertEqual(catalog.recommended_book_page_id, matching_page_id)
+        self.assertEqual(catalog.book_pages[0].page_id, matching_page_id)
+        self.assertIn("hướng dương", catalog.book_pages[0].matched_difficult_words)
+
+        created = await service.create_session(
+            parent_id,
+            child_id=child_id,
+            source_type=None,
+            auto_select=True,
+        )
+        self.assertEqual(created.source_type, "BOOK_PAGE")
+        self.assertEqual(created.book_page_id, matching_page_id)
+        self.assertIn("hướng dương", created.target_words)
+        self.assertEqual(created.target_vocabulary, created.target_words)
+        self.assertEqual(len(created.target_words), 3)
+        self.assertTrue(captured_ai_prompts)
+        self.assertNotIn("</child_description>", captured_ai_prompts[0])
+
+        # Evaluate attempt and verify practiced_difficult_words + difficult_word_mastery evidence
+        stored = SessionProjection(
+            Id=session_id,
+            ChildProfileId=child_id,
+            ParentId=parent_id,
+            BookId=book_id,
+            BookPageId=matching_page_id,
+            SourceType="BOOK_PAGE",
+            SampleKey=None,
+            ImagePath="books/1/p2.jpg",
+            ImageMimeType="image/jpeg",
+            ChildGrade=2,
+            SceneTitle=created.scene_title,
+            PromptPayload=created.guide.model_dump(mode="json"),
+            Status="ACTIVE",
+            BestStars=0,
+            BestScore=0,
+            AttemptsCount=0,
+            AiModelUsed="guide-fallback",
+            CreatedAt=now,
+            UpdatedAt=now,
+        )
+        repo.get_owned_session_projection = AsyncMock(return_value=stored)
+
+        async def fake_save_attempt(**kwargs):
+            att = kwargs["attempt"]
+            att_proj = AttemptProjection(
+                Id=att.Id,
+                SessionId=session_id,
+                AttemptNumber=1,
+                InputMode=att.InputMode,
+                TranscriptText=att.TranscriptText,
+                ScoreOutOf10=att.ScoreOutOf10,
+                Stars=att.Stars,
+                FeedbackPayload=att.FeedbackPayload,
+                AiModelUsed=att.AiModelUsed,
+                CreatedAt=now,
+            )
+            repo.list_attempts = AsyncMock(return_value=[att_proj])
+            return stored, att_proj
+
+        repo.save_attempt_and_update_session = AsyncMock(side_effect=fake_save_attempt)
+        inserted_skills: list[str] = []
+
+        async def capture_execute(_stmt, rows=None):
+            if rows:
+                inserted_skills.extend(str(r.get("SkillKey")) for r in rows)
+            return MagicMock()
+
+        repo.db.execute = AsyncMock(side_effect=capture_execute)
+
+        async def fake_eval_json(**_kwargs):
+            return {
+                "is_relevant": True,
+                "score_out_of_10": 9,
+                "matched_details": ["Bông hoa hướng dương nở rực rỡ"],
+                "missed_details": ["Mây trắng"],
+                "praise_message": "Cô khen bé quan sát tranh rất chăm chú!",
+                "improvement_tip": "Thêm một câu nữa nhé.",
+                "upgraded_sentences": ["Hoa hướng dương nở vàng rực dưới ánh nắng."],
+                "vocabulary_highlights": ["rực rỡ"],
+                "scaffolding_step": "PRAISE",
+                "next_prompt_question": "Bé còn thấy gì quanh bông hoa nữa?",
+            }, DEFAULT_PRIMARY_MODEL
+
+        ai_client._generate_json = AsyncMock(side_effect=fake_eval_json)  # type: ignore[method-assign]
+
+        evaluated = await service.evaluate_attempt(
+            parent_id,
+            session_id,
+            PictureEvaluateRequest(
+                transcript_text="Bông hoa hướng dương nở vàng rực rỡ.",
+                input_mode="VOICE",
+            ),
+        )
+        self.assertIn("hướng dương", evaluated.practiced_difficult_words)
+        self.assertIn("hướng dương", evaluated.latest_attempt.practiced_difficult_words)
+        self.assertIn("hướng dương", evaluated.latest_attempt.feedback.praise_message)
+        self.assertIn("difficult_word_mastery", inserted_skills)
