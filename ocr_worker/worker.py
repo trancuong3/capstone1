@@ -28,8 +28,11 @@ logger = logging.getLogger("ocr_worker.worker")
 DEFAULT_BACKEND_TIMEOUT_SECONDS = 75.0
 DEFAULT_WAKE_BURST_SECONDS = 90.0
 DEFAULT_DRAIN_STRAGGLER_SECONDS = 3.0
+DEFAULT_MAX_DEGRADED_SECONDS = 180.0
+DEGRADED_RETRY_BACKOFF_SCHEDULE: tuple[float, ...] = (15.0, 30.0, 60.0)
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _is_ocr_exception(exc: BaseException, class_name: str) -> bool:
@@ -81,6 +84,96 @@ def resolve_quiet_standby_keepalive_seconds(
     if parsed <= 0.0:
         return 0.0
     return max(10.0, min(180.0, parsed))
+
+
+def is_loopback_bind_host(bind_host: str | None) -> bool:
+    clean = (bind_host or "").strip().lower().strip("[]")
+    return clean in _LOOPBACK_HOSTS
+
+
+def apply_loopback_quiet_standby_keepalive_guard(
+    *,
+    use_quiet_standby: bool,
+    use_scale_to_zero: bool,
+    bind_host: str,
+    keepalive_seconds: float,
+) -> float:
+    """Clamp keepalive_seconds=20.0 on loopback QuietStandby without SPACE_ID or scale-to-zero."""
+    if (
+        use_quiet_standby
+        and not use_scale_to_zero
+        and is_loopback_bind_host(bind_host)
+        and not (os.getenv("SPACE_ID") or "").strip()
+        and keepalive_seconds <= 0.0
+    ):
+        return 20.0
+    return keepalive_seconds
+
+
+def resolve_max_degraded_seconds(explicit: float | None = None) -> float:
+    """Resolve max continuous degraded duration before self-exit (<=0 disables self-exit)."""
+    raw = (
+        str(explicit).strip()
+        if explicit is not None
+        else (os.getenv("VIREAD_OCR_MAX_DEGRADED_SECONDS") or "").strip()
+    )
+    if not raw:
+        return DEFAULT_MAX_DEGRADED_SECONDS
+    try:
+        parsed = float(raw)
+    except ValueError:
+        return DEFAULT_MAX_DEGRADED_SECONDS
+    return 0.0 if parsed <= 0.0 else parsed
+
+
+def compute_degraded_retry_backoff(attempt_index: int) -> float:
+    """Return progressive retry backoff (15s -> 30s -> 60s) before retrying degraded init."""
+    idx = max(0, int(attempt_index))
+    if idx >= len(DEGRADED_RETRY_BACKOFF_SCHEDULE):
+        return DEGRADED_RETRY_BACKOFF_SCHEDULE[-1]
+    return DEGRADED_RETRY_BACKOFF_SCHEDULE[idx]
+
+
+def _are_primary_engines_installed(runtime: OcrRuntimeManager) -> bool:
+    engines = runtime.engines_snapshot()
+    return bool(
+        (engines.get("paddleocr") or {}).get("installed")
+        and (engines.get("vietocr") or {}).get("installed")
+    )
+
+
+def _sleep_degraded_backoff(
+    stop_event: threading.Event,
+    wait_seconds: float,
+    *,
+    client: Any | None = None,
+    runtime: OcrRuntimeManager | None = None,
+    heartbeat_seconds: float = 25.0,
+) -> float:
+    """Wait during degraded retry backoff while keeping periodic heartbeats alive."""
+    last_hb = 0.0
+    remaining = max(0.0, float(wait_seconds))
+    while remaining > 0.0 and not stop_event.is_set():
+        chunk = (
+            min(remaining, max(5.0, float(heartbeat_seconds)))
+            if client is not None and heartbeat_seconds > 0.0
+            else remaining
+        )
+        if stop_event.wait(timeout=chunk):
+            break
+        remaining -= chunk
+        if (
+            remaining > 0.0
+            and client is not None
+            and runtime is not None
+            and not stop_event.is_set()
+        ):
+            try:
+                client.send_worker_heartbeat(runtime.heartbeat_payload())
+                last_hb = time.monotonic()
+            except Exception as exc:
+                logger.warning("Worker heartbeat failed: %s", type(exc).__name__)
+    return last_hb
 
 
 def compute_adaptive_poll_delay(
@@ -680,6 +773,8 @@ def drain_queue_synchronously(
                 client.send_worker_heartbeat(runtime.heartbeat_payload())
             except Exception:
                 pass
+            if not runtime.is_ready():
+                return drained_jobs
 
         while stop_event is None or not stop_event.is_set():
             job: dict[str, Any] | None = None
@@ -691,6 +786,12 @@ def drain_queue_synchronously(
                         direct_url_fetcher=client.download_direct_url,
                         run_smoke_inference=True,
                     )
+                if not runtime.is_ready():
+                    try:
+                        client.send_worker_heartbeat(runtime.heartbeat_payload())
+                    except Exception:
+                        pass
+                    break
                 job = client.claim_next_job(runtime.worker_id, lease_seconds=lease_seconds)
                 if job is not None:
                     try:
@@ -810,7 +911,8 @@ def run_worker_forever(
     quiet_standby: bool | None = None,
     wake_burst_seconds: float | None = None,
     quiet_standby_keepalive_seconds: float | None = None,
-) -> None:
+    max_degraded_seconds: float | None = None,
+) -> int:
     if apply_priority:
         set_windows_below_normal_priority()
 
@@ -824,6 +926,13 @@ def run_worker_forever(
         if use_quiet_standby and not use_scale_to_zero
         else 0.0
     )
+    keepalive_seconds = apply_loopback_quiet_standby_keepalive_guard(
+        use_quiet_standby=use_quiet_standby,
+        use_scale_to_zero=use_scale_to_zero,
+        bind_host=bind_host,
+        keepalive_seconds=keepalive_seconds,
+    )
+    resolved_max_degraded_seconds = resolve_max_degraded_seconds(max_degraded_seconds)
     try:
         resolved_burst_seconds = (
             float(wake_burst_seconds)
@@ -948,7 +1057,13 @@ def run_worker_forever(
     except ValueError:
         model_sync_seconds = 120.0
 
-    warmup_recovery_attempts = 0
+    degraded_since: float | None = (
+        time.monotonic()
+        if (not runtime.is_ready() and _are_primary_engines_installed(runtime))
+        else None
+    )
+    degraded_retry_attempts = 0
+    exit_code = 0
     try:
         if client is not None and not stop_event.is_set():
             try:
@@ -978,20 +1093,134 @@ def run_worker_forever(
         while not stop_event.is_set():
             now = time.monotonic()
 
-            if use_quiet_standby and now >= runtime.burst_until_monotonic():
+            if runtime.is_draining():
+                _wait_for_wake_or_stop(stop_event, runtime.wake_event, 1.0)
+                continue
+
+            if not runtime.is_ready():
+                if _are_primary_engines_installed(runtime):
+                    if degraded_since is None:
+                        degraded_since = now
+                else:
+                    degraded_since = None
+
                 if (
-                    client is not None
-                    and not runtime.is_ready()
-                    and not runtime.is_draining()
-                    and warmup_recovery_attempts < 5
+                    resolved_max_degraded_seconds > 0.0
+                    and degraded_since is not None
+                    and (now - degraded_since) >= resolved_max_degraded_seconds
                 ):
-                    backoff = min(60.0, 15.0 * (2**warmup_recovery_attempts))
-                    warmup_recovery_attempts += 1
-                    _wait_for_wake_or_stop(stop_event, runtime.wake_event, backoff)
-                    if stop_event.is_set():
+                    logger.error(
+                        "OCR worker remained degraded for %.1fs (max=%.1fs, last_error=%s); exiting with code 2 for clean restart.",
+                        now - degraded_since,
+                        resolved_max_degraded_seconds,
+                        runtime.health_payload().get("last_error"),
+                    )
+                    exit_code = 2
+                    break
+
+                if client is not None and (now - last_hb) >= heartbeat_seconds:
+                    try:
+                        client.send_worker_heartbeat(runtime.heartbeat_payload())
+                        last_hb = time.monotonic()
+                    except Exception as exc:
+                        logger.warning("Worker heartbeat failed: %s", type(exc).__name__)
+
+                backoff = compute_degraded_retry_backoff(degraded_retry_attempts)
+                degraded_retry_attempts += 1
+                wait_seconds = backoff
+                if resolved_max_degraded_seconds > 0.0 and degraded_since is not None:
+                    remaining_budget = max(
+                        0.0, resolved_max_degraded_seconds - (time.monotonic() - degraded_since)
+                    )
+                    wait_seconds = min(wait_seconds, remaining_budget)
+
+                hb_sent = _sleep_degraded_backoff(
+                    stop_event,
+                    wait_seconds,
+                    client=client,
+                    runtime=runtime,
+                    heartbeat_seconds=heartbeat_seconds,
+                )
+                if hb_sent > 0.0:
+                    last_hb = hb_sent
+                if stop_event.is_set():
+                    break
+
+                now_after_wait = time.monotonic()
+                if (
+                    resolved_max_degraded_seconds > 0.0
+                    and degraded_since is not None
+                    and wait_seconds < backoff
+                    and (now_after_wait - degraded_since) >= resolved_max_degraded_seconds
+                ):
+                    logger.error(
+                        "OCR worker remained degraded for %.1fs (max=%.1fs, last_error=%s); exiting with code 2 for clean restart.",
+                        now_after_wait - degraded_since,
+                        resolved_max_degraded_seconds,
+                        runtime.health_payload().get("last_error"),
+                    )
+                    exit_code = 2
+                    break
+
+                try:
+                    with runtime.cycle_lock:
+                        if not runtime.is_ready():
+                            runtime.initialize_and_verify_engines(
+                                manifest_fetcher=client.get_active_model if client else None,
+                                artifact_fetcher=client.download_model_artifact if client else None,
+                                direct_url_fetcher=client.download_direct_url if client else None,
+                                run_smoke_inference=True,
+                            )
+                            last_model_check = time.monotonic()
+                            runtime.clear_model_resync_needed()
+                except Exception as exc:
+                    logger.warning(
+                        "Degraded OCR warmup retry #%s failed: %s",
+                        degraded_retry_attempts,
+                        type(exc).__name__,
+                    )
+
+                if runtime.is_ready():
+                    degraded_since = None
+                    degraded_retry_attempts = 0
+                    if use_quiet_standby and client is not None:
+                        runtime.extend_burst_window(resolved_burst_seconds)
+                    if client is not None:
+                        try:
+                            recovered_hb = runtime.heartbeat_payload()
+                            recovered_hb["status"] = "IDLE"
+                            client.send_worker_heartbeat(recovered_hb)
+                            last_hb = time.monotonic()
+                        except Exception as exc:
+                            logger.warning(
+                                "Recovered worker heartbeat failed: %s", type(exc).__name__
+                            )
+                else:
+                    now_post_retry = time.monotonic()
+                    if _are_primary_engines_installed(runtime):
+                        if degraded_since is None:
+                            degraded_since = now_post_retry
+                    else:
+                        degraded_since = None
+                    if (
+                        resolved_max_degraded_seconds > 0.0
+                        and degraded_since is not None
+                        and (now_post_retry - degraded_since) >= resolved_max_degraded_seconds
+                    ):
+                        logger.error(
+                            "OCR worker remained degraded for %.1fs (max=%.1fs, last_error=%s); exiting with code 2 for clean restart.",
+                            now_post_retry - degraded_since,
+                            resolved_max_degraded_seconds,
+                            runtime.health_payload().get("last_error"),
+                        )
+                        exit_code = 2
                         break
-                    runtime.extend_burst_window(20.0)
-                    continue
+                continue
+
+            degraded_since = None
+            degraded_retry_attempts = 0
+
+            if use_quiet_standby and now >= runtime.burst_until_monotonic():
                 if not runtime.is_draining():
                     runtime.set_standby_mode(idle_standby_label)
                 # Quiet Standby / Scale-to-Zero idle: 0 outbound HTTP requests unless keepalive is enabled.
@@ -1004,16 +1233,38 @@ def run_worker_forever(
                 if stop_event.is_set():
                     break
                 if woken:
-                    warmup_recovery_attempts = 0
                     last_activity_at = time.monotonic()
                     runtime.mark_model_resync_needed()
                 elif keepalive_wait is not None and client is not None and not runtime.is_draining():
                     try:
                         with runtime.cycle_lock:
+                            if runtime.is_ready() and (
+                                runtime.needs_model_resync()
+                                or (time.monotonic() - last_model_check) >= model_sync_seconds
+                            ):
+                                forced_resync = runtime.needs_model_resync()
+                                try:
+                                    runtime.maybe_resync_active_model(
+                                        manifest_fetcher=client.get_active_model,
+                                        artifact_fetcher=client.download_model_artifact,
+                                        direct_url_fetcher=client.download_direct_url,
+                                        force=forced_resync,
+                                    )
+                                    last_model_check = time.monotonic()
+                                    runtime.clear_model_resync_needed()
+                                except Exception as exc:
+                                    logger.warning(
+                                        "Quiet standby active-model resync failed: %s",
+                                        type(exc).__name__,
+                                    )
                             client.send_worker_heartbeat(runtime.heartbeat_payload())
                             last_hb = time.monotonic()
-                            job = client.claim_next_job(
-                                runtime.worker_id, lease_seconds=lease_seconds
+                            job = (
+                                client.claim_next_job(
+                                    runtime.worker_id, lease_seconds=lease_seconds
+                                )
+                                if runtime.is_ready()
+                                else None
                             )
                             if job is not None:
                                 hb_at = _run_claimed_job_cycle(
@@ -1035,10 +1286,6 @@ def run_worker_forever(
                         )
                 continue
 
-            if runtime.is_draining():
-                _wait_for_wake_or_stop(stop_event, runtime.wake_event, 1.0)
-                continue
-
             if client is not None and (now - last_hb) >= heartbeat_seconds:
                 try:
                     client.send_worker_heartbeat(runtime.heartbeat_payload())
@@ -1051,16 +1298,10 @@ def run_worker_forever(
             if client is not None:
                 try:
                     with runtime.cycle_lock:
-                        if not runtime.is_ready():
-                            runtime.initialize_and_verify_engines(
-                                manifest_fetcher=client.get_active_model,
-                                artifact_fetcher=client.download_model_artifact,
-                                direct_url_fetcher=client.download_direct_url,
-                                run_smoke_inference=True,
-                            )
-                            last_model_check = time.monotonic()
-                            runtime.clear_model_resync_needed()
-                        elif runtime.needs_model_resync() or (now - last_model_check) >= model_sync_seconds:
+                        if runtime.is_ready() and (
+                            runtime.needs_model_resync()
+                            or (now - last_model_check) >= model_sync_seconds
+                        ):
                             forced_resync = runtime.needs_model_resync()
                             resynced = runtime.maybe_resync_active_model(
                                 manifest_fetcher=client.get_active_model,
@@ -1077,10 +1318,14 @@ def run_worker_forever(
                                 except Exception:
                                     pass
 
-                        job = client.claim_next_job(runtime.worker_id, lease_seconds=lease_seconds)
-                        poll_error_streak = 0
+                        job = (
+                            client.claim_next_job(
+                                runtime.worker_id, lease_seconds=lease_seconds
+                            )
+                            if runtime.is_ready()
+                            else None
+                        )
                         if job is not None:
-                            did_work = True
                             hb_at = _run_claimed_job_cycle(
                                 client,
                                 runtime,
@@ -1093,6 +1338,8 @@ def run_worker_forever(
                             if hb_at > 0.0:
                                 last_hb = hb_at
                             last_activity_at = time.monotonic()
+                            did_work = True
+                        poll_error_streak = 0
                 except Exception as exc:
                     had_poll_error = True
                     poll_error_streak += 1
@@ -1102,7 +1349,7 @@ def run_worker_forever(
                         type(exc).__name__,
                     )
 
-            if did_work:
+            if did_work and not had_poll_error:
                 continue
 
             idle_for = max(0.0, time.monotonic() - last_activity_at)
@@ -1136,6 +1383,7 @@ def run_worker_forever(
             except Exception:
                 pass
             client.close()
+    return exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1184,17 +1432,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     token = os.getenv("VIREAD_OCR_WORKER_TOKEN", "")
-    run_worker_forever(
-        backend_url=args.backend_url,
-        worker_token=token,
-        bind_host=args.host,
-        bind_port=args.port,
-        poll_seconds=args.poll_seconds,
-        apply_priority=not args.no_priority,
-        quiet_standby=args.quiet_standby,
-        quiet_standby_keepalive_seconds=args.quiet_standby_keepalive_seconds,
+    return int(
+        run_worker_forever(
+            backend_url=args.backend_url,
+            worker_token=token,
+            bind_host=args.host,
+            bind_port=args.port,
+            poll_seconds=args.poll_seconds,
+            apply_priority=not args.no_priority,
+            quiet_standby=args.quiet_standby,
+            quiet_standby_keepalive_seconds=args.quiet_standby_keepalive_seconds,
+        )
+        or 0
     )
-    return 0
 
 
 if __name__ == "__main__":

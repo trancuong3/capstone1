@@ -35,15 +35,87 @@ afterEach(() => {
 });
 
 describe("fetchOcrWorkerHealth", () => {
-  it("maps ready, unavailable, probe_degraded, missing ocr, 503, and network errors accurately", async () => {
+  it("maps ready, degraded worker with ready=false, fallback statuses, probe_degraded, missing ocr, 503, and network errors accurately", async () => {
+    // Authoritative ocr.ready = true -> ready
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        status: "ok",
+        ocr: {
+          mode: "remote_worker",
+          ready: true,
+          workers: [{ worker_id: "win-1", online: true, status: "IDLE" }],
+          queue: { queued: 3 },
+        },
+      }),
+    );
+    expect(await fetchOcrWorkerHealth()).toEqual({
+      status: "ready",
+      mode: "remote_worker",
+      ready: true,
+      workerOnline: true,
+      queuedCount: 3,
+      queueDepth: 3,
+      probeDegraded: false,
+    });
+
+    // Regression: ocr.ready = false MUST NOT report ready even when a DEGRADED worker has online: true
     apiFetchFixture.mockResolvedValueOnce(
       Response.json({
         status: "ok",
         ocr: {
           mode: "remote_worker",
           ready: false,
-          workers: [{ worker_id: "win-1", online: true }],
+          workers: [{ worker_id: "win-1", online: true, status: "DEGRADED" }],
           queue: { queued: 3 },
+        },
+      }),
+    );
+    expect(await fetchOcrWorkerHealth()).toEqual({
+      status: "unavailable",
+      mode: "remote_worker",
+      ready: false,
+      workerOnline: false,
+      queuedCount: 3,
+      queueDepth: 3,
+      probeDegraded: false,
+    });
+
+    // Fallback when ocr.ready is omitted: DEGRADED / STARTING / OFFLINE / ready:false workers are ignored
+    for (const fallbackWorker of [
+      { worker_id: "win-1", online: true, status: "DEGRADED" },
+      { worker_id: "win-1", online: true, status: "STARTING" },
+      { worker_id: "win-1", online: true, status: "OFFLINE" },
+      { worker_id: "win-1", online: true, ready: false },
+    ]) {
+      apiFetchFixture.mockResolvedValueOnce(
+        Response.json({
+          status: "ok",
+          ocr: {
+            mode: "remote_worker",
+            workers: [fallbackWorker],
+            queue: { queued: 1 },
+          },
+        }),
+      );
+      expect(await fetchOcrWorkerHealth()).toEqual({
+        status: "unavailable",
+        mode: "remote_worker",
+        ready: false,
+        workerOnline: false,
+        queuedCount: 1,
+        queueDepth: 1,
+        probeDegraded: false,
+      });
+    }
+
+    // Fallback when ocr.ready is omitted and an IDLE worker is online -> ready
+    apiFetchFixture.mockResolvedValueOnce(
+      Response.json({
+        status: "ok",
+        ocr: {
+          mode: "remote_worker",
+          workers: [{ worker_id: "win-1", online: true, status: "IDLE" }],
+          queue: { queued: 0 },
         },
       }),
     );
@@ -52,8 +124,8 @@ describe("fetchOcrWorkerHealth", () => {
       mode: "remote_worker",
       ready: false,
       workerOnline: true,
-      queuedCount: 3,
-      queueDepth: 3,
+      queuedCount: 0,
+      queueDepth: 0,
       probeDegraded: false,
     });
 
