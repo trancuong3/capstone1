@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import inspect
 from typing import Any
 from uuid import UUID
 
@@ -603,4 +604,8 @@ class ParentPrivateBookRepository:
         await self.db.commit()
 
     async def rollback(self) -> None:
-        await self.db.rollback()
+        rollback_fn = getattr(self.db, "rollback", None)
+        if callable(rollback_fn):
+            result = rollback_fn()
+            if inspect.isawaitable(result):
+                await result
