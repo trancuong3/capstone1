@@ -2072,6 +2072,11 @@ function ParentPrivateBookManagerContent({
                   sub.tool_check_error_code,
                   t,
                 );
+                const parentNotice =
+                  sub.tool_check_parent_notice ||
+                  sub.tool_check_findings_count > 0
+                    ? parentNoticeMeta(sub, t)
+                    : null;
 
                 return (
                   <article
@@ -2239,62 +2244,52 @@ function ParentPrivateBookManagerContent({
                         </p>
 
                         {/* Parent Notice from Tool Check (non-sensitive summary) */}
-                        {sub.tool_check_parent_notice ||
-                        sub.tool_check_findings_count > 0
-                          ? (() => {
-                              const notice = parentNoticeMeta(sub, t);
-                              return (
-                                <div
-                                  className={`rounded-control border p-3 text-xs ${notice.className}`}
+                        {parentNotice ? (
+                          <div
+                            className={`rounded-control border p-3 text-xs ${parentNotice.className}`}
+                          >
+                            <p className="flex items-center gap-1.5 font-bold">
+                              {sub.workflow_status === "PASSED_READY_TO_ADD" ||
+                              sub.workflow_status === "APPROVED_READY_TO_ADD" ||
+                              sub.workflow_status === "ADDED_TO_BOOK" ? (
+                                <ShieldCheck
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              ) : (
+                                <AlertTriangle
+                                  aria-hidden="true"
+                                  className="size-4 shrink-0"
+                                />
+                              )}
+                              {parentNotice.title}
+                            </p>
+                            {sub.tool_check_parent_notice ? (
+                              <p className="mt-1">
+                                {sub.tool_check_parent_notice}
+                              </p>
+                            ) : null}
+                            {sub.workflow_status === "CHECK_FAILED" &&
+                            sub.can_retry ? (
+                              <div className="mt-2.5">
+                                <Button
+                                  className="min-h-10 w-auto px-3.5 text-xs"
+                                  disabled={isSubBusy || isSuspended}
+                                  isLoading={busyKey === `retry:${sub.id}`}
+                                  onClick={() => void handleRetry(sub)}
+                                  type="button"
+                                  variant="secondary"
                                 >
-                                  <p className="flex items-center gap-1.5 font-bold">
-                                    {sub.workflow_status ===
-                                      "PASSED_READY_TO_ADD" ||
-                                    sub.workflow_status ===
-                                      "APPROVED_READY_TO_ADD" ||
-                                    sub.workflow_status === "ADDED_TO_BOOK" ? (
-                                      <ShieldCheck
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    ) : (
-                                      <AlertTriangle
-                                        aria-hidden="true"
-                                        className="size-4 shrink-0"
-                                      />
-                                    )}
-                                    {notice.title}
-                                  </p>
-                                  {sub.tool_check_parent_notice ? (
-                                    <p className="mt-1">
-                                      {sub.tool_check_parent_notice}
-                                    </p>
-                                  ) : null}
-                                  {sub.workflow_status === "CHECK_FAILED" &&
-                                  sub.can_retry ? (
-                                    <div className="mt-2.5">
-                                      <Button
-                                        className="min-h-10 w-auto px-3.5 text-xs"
-                                        disabled={isSubBusy || isSuspended}
-                                        isLoading={
-                                          busyKey === `retry:${sub.id}`
-                                        }
-                                        onClick={() => void handleRetry(sub)}
-                                        type="button"
-                                        variant="secondary"
-                                      >
-                                        <RotateCcw
-                                          aria-hidden="true"
-                                          className="size-3.5"
-                                        />
-                                        {t("privateManager.retryCheckAction")}
-                                      </Button>
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })()
-                          : null}
+                                  <RotateCcw
+                                    aria-hidden="true"
+                                    className="size-3.5"
+                                  />
+                                  {t("privateManager.retryCheckAction")}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
 
                         {/* Candidate Text Preview */}
                         {sub.candidate_text ? (

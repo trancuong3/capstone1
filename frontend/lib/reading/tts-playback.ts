@@ -85,7 +85,6 @@ import { normalizeVietnameseWord } from "@/lib/reading/vietnamese-text";
 import {
   getCachedVoiceEngineHealth,
   getVoiceEngineHealthForRouting,
-  isHostedLocalVoiceUnconfigured,
   isLocalVoiceConfirmedUnavailable,
   isPermanentlyHostedLocalUnconfigured,
   mapLocalVoiceToGoogleBackup,

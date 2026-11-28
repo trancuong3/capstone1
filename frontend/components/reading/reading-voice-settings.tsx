@@ -52,7 +52,6 @@ import {
   SPEED_STEP,
   getSpeechPreferences,
   type setSpeechPreferences,
-  getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
 import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
 import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
