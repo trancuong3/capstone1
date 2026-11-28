@@ -56,6 +56,7 @@ import { isServiceError } from "@/lib/api/service-error";
 import { preprocessScanImage } from "@/lib/reading/scan-image-preprocess";
 import { CHILD_GRADES } from "@/types/child";
 import type { BookPresentationAssetDTO } from "@/types/book-assets";
+import type { GlobalTaskStatus } from "@/types/global-tasks";
 import {
   SOURCE_USAGE_OPTIONS,
   type ParentPageSubmissionDTO,
@@ -93,6 +94,30 @@ const STAGE_LABEL_KEYS: Record<string, string> = {
   SKIPPED: "privateManager.statusLabels.SKIPPED",
   FAILED: "privateManager.statusLabels.FAILED",
 };
+
+function mapSubmissionStatusToGlobalTaskStatus(
+  status: SubmissionWorkflowStatus | undefined,
+): GlobalTaskStatus | undefined {
+  switch (status) {
+    case "PASSED_READY_TO_ADD":
+    case "APPROVED_READY_TO_ADD":
+    case "ADDED_TO_BOOK":
+      return "SUCCEEDED";
+    case "NEEDS_ADMIN_REVIEW":
+    case "PENDING_ADMIN":
+    case "NEEDS_RECHECK":
+      return "WAITING_FOR_REVIEW";
+    case "CHECK_FAILED":
+    case "REJECTED":
+      return "FAILED";
+    case "CANCELLED":
+      return "CANCELLED";
+    case "CHECKING":
+      return "RUNNING";
+    default:
+      return undefined;
+  }
+}
 
 function generateClientKey(): string {
   if (
@@ -746,7 +771,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.acceptSpelling(
+      const updated = await service.acceptSpelling(
         bookId,
         sub.id,
         sub.submission_version,
@@ -757,7 +782,18 @@ function ParentPrivateBookManagerContent({
           page: sub.source_page_number,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status: mapSubmissionStatusToGlobalTaskStatus(
+                updated.workflow_status,
+              ),
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -789,7 +825,20 @@ function ParentPrivateBookManagerContent({
               page: result.page_number,
             }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: result.submission?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  result.submission.workflow_status,
+                ) ?? "SUCCEEDED",
+              updated_at: result.submission.updated_at,
+              completed_at: result.submission.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -806,7 +855,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.requestAdminReview(bookId, sub.id, {
+      const updated = await service.requestAdminReview(bookId, sub.id, {
         expected_submission_version: sub.submission_version,
         expected_candidate_hash: sub.candidate_hash,
         source_type: reviewSourceType,
@@ -820,7 +869,19 @@ function ParentPrivateBookManagerContent({
           version: sub.submission_version,
         }),
       );
-      taskCenter?.markTaskAlertSeen(sub.id, { includeNextSync: true });
+      taskCenter?.markTaskAlertSeen(sub.id, {
+        includeNextSync: true,
+        optimisticTask: updated?.updated_at
+          ? {
+              source: "parent_submission",
+              status:
+                mapSubmissionStatusToGlobalTaskStatus(
+                  updated.workflow_status,
+                ) ?? "WAITING_FOR_REVIEW",
+              updated_at: updated.updated_at,
+            }
+          : undefined,
+      });
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -871,7 +932,18 @@ function ParentPrivateBookManagerContent({
         sub.id,
         updated?.workflow_status === "CHECKING"
           ? undefined
-          : { includeNextSync: true },
+          : {
+              includeNextSync: true,
+              optimisticTask: updated?.updated_at
+                ? {
+                    source: "parent_submission",
+                    status: mapSubmissionStatusToGlobalTaskStatus(
+                      updated.workflow_status,
+                    ),
+                    updated_at: updated.updated_at,
+                  }
+                : undefined,
+            },
       );
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
@@ -932,6 +1004,7 @@ function ParentPrivateBookManagerContent({
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
       if (updated.pending_submission_count > 0) {
+        taskCenter?.markTargetAlertsSeen({ bookId });
         emitStudioTasksChanged({ portal: "parent" });
       }
       await loadDetail(true);
@@ -977,7 +1050,7 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.editCommittedPage(bookId, page.page_id, {
+      const updated = await service.editCommittedPage(bookId, page.page_id, {
         candidate_text: editPageText,
         page_number: editPageNumber,
         source_type: editPageSourceType,
@@ -989,6 +1062,25 @@ function ParentPrivateBookManagerContent({
         t("privateManager.editedPageNotice", { page: page.page_number }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(
+          updated.id,
+          updated.workflow_status === "CHECKING"
+            ? undefined
+            : {
+                includeNextSync: true,
+                optimisticTask: updated.updated_at
+                  ? {
+                      source: "parent_submission",
+                      status: mapSubmissionStatusToGlobalTaskStatus(
+                        updated.workflow_status,
+                      ),
+                      updated_at: updated.updated_at,
+                    }
+                  : undefined,
+              },
+        );
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
@@ -1008,7 +1100,11 @@ function ParentPrivateBookManagerContent({
     setActionError(null);
     setActionNotice(null);
     try {
-      await service.replaceCommittedPageFile(bookId, page.page_id, file);
+      const updated = await service.replaceCommittedPageFile(
+        bookId,
+        page.page_id,
+        file,
+      );
       setEditingPageId(null);
       setActionNotice(
         ocrWorkerOffline
@@ -1020,6 +1116,9 @@ function ParentPrivateBookManagerContent({
             }),
       );
       taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: page.page_id });
+      if (updated?.id) {
+        taskCenter?.markTaskAlertSeen(updated.id);
+      }
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {

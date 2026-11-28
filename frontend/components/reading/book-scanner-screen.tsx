@@ -28,11 +28,13 @@ import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-b
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
 import { CameraPreview } from "@/components/reading/camera-preview";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import {
   cancelScanPageOcrJob,
   enqueueScanPageOcrJob,
@@ -53,9 +55,7 @@ import { cn } from "@/lib/utils/cn";
 import type { ReadingPageDTO } from "@/types/reading";
 
 function dispatchTasksChanged(): void {
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("viread:tasks-changed"));
-  }
+  emitStudioTasksChanged({ portal: "parent" });
 }
 
 interface BookScannerScreenProps {
@@ -266,6 +266,11 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
   const tc = useTranslations("child");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const taskCenter = useOptionalAiTaskCenter();
+  const taskCenterRef = useRef(taskCenter);
+  useEffect(() => {
+    taskCenterRef.current = taskCenter;
+  }, [taskCenter]);
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const [cameraStarted, setCameraStarted] = useState(false);
   const [cameraUnavailable, setCameraUnavailable] = useState(false);
@@ -381,6 +386,14 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(actorUserId, null);
+          if (
+            typeof document === "undefined" ||
+            document.visibilityState !== "hidden"
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(currentJob.job_id, {
+              includeNextSync: true,
+            });
+          }
           dispatchTasksChanged();
           void refreshQueuedJobs();
           setOcrState({
@@ -399,6 +412,14 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           activeJobIdRef.current = null;
           activeJobWorkerOnlineRef.current = false;
           writeStoredScanJobId(actorUserId, null);
+          if (
+            typeof document === "undefined" ||
+            document.visibilityState !== "hidden"
+          ) {
+            taskCenterRef.current?.markTaskAlertSeen(currentJob.job_id, {
+              includeNextSync: true,
+            });
+          }
           dispatchTasksChanged();
           const remaining = queuedJobsRef.current.filter(
             (item) => item.job_id !== currentJob.job_id,
@@ -654,6 +675,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
           if (!active || restoreController.signal.aborted) return;
           if (savedJob.status === "SUCCEEDED" && savedJob.result) {
             writeStoredScanJobId(actorUserId, null);
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(savedJob.job_id, {
+                includeNextSync: true,
+              });
+            }
+            dispatchTasksChanged();
             setOcrState({
               status: "succeeded",
               fileName: savedJob.file_name || "book-page.jpg",
@@ -665,6 +695,15 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
             savedJob.status === "CANCELLED"
           ) {
             writeStoredScanJobId(actorUserId, null);
+            if (
+              typeof document === "undefined" ||
+              document.visibilityState !== "hidden"
+            ) {
+              taskCenterRef.current?.markTaskAlertSeen(savedJob.job_id, {
+                includeNextSync: true,
+              });
+            }
+            dispatchTasksChanged();
           }
         }
       } catch {
@@ -878,6 +917,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         (item) => item.job_id !== jobId,
       );
       setQueuedJobs(remaining);
+      taskCenterRef.current?.markTaskAlertSeen(jobId);
       void cancelScanPageOcrJob(jobId)
         .catch(() => undefined)
         .finally(() => {
@@ -917,6 +957,7 @@ export function BookScannerScreen({ bookId }: BookScannerScreenProps) {
         (item) => item.job_id !== jobIdToCancel,
       );
       setQueuedJobs(remaining);
+      taskCenterRef.current?.markTaskAlertSeen(jobIdToCancel);
       void cancelScanPageOcrJob(jobIdToCancel)
         .catch(() => undefined)
         .finally(() => {

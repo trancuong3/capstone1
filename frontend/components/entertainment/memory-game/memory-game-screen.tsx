@@ -344,6 +344,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const [autoSubmitStage, setAutoSubmitStage] = useState<
     "RECALL" | "CREATIVE" | null
   >(null);
+  const [revealAutopilotCountdown, setRevealAutopilotCountdown] = useState<
+    number | null
+  >(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const recorderActiveRef = useRef(false);
   const recorderTargetRef = useRef<"RECALL" | "CREATIVE" | null>(null);
@@ -360,6 +363,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   const micCountdownTimerRef = useRef<number | null>(null);
   const silenceStopTimerRef = useRef<number | null>(null);
   const autoSubmitTimerRef = useRef<number | null>(null);
+  const revealAutopilotTimerRef = useRef<number | null>(null);
+  const recallTextRef = useRef(recallText);
+  const creativeTextRef = useRef(creativeText);
   const startVoiceCaptureRef = useRef<
     (
       target: "RECALL" | "CREATIVE",
@@ -376,7 +382,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   useEffect(() => {
     speechPlayerRef.current = speechPlayer;
     recorderCancelRef.current = recorder.cancel;
-  }, [recorder.cancel, speechPlayer]);
+    recallTextRef.current = recallText;
+    creativeTextRef.current = creativeText;
+  }, [creativeText, recallText, recorder.cancel, speechPlayer]);
 
   const clearSilenceStopTimer = useCallback(() => {
     if (silenceStopTimerRef.current !== null) {
@@ -399,6 +407,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       autoSubmitTimerRef.current = null;
     }
     setAutoSubmitStage(null);
+  }, []);
+
+  const cancelRevealAutopilot = useCallback(() => {
+    if (revealAutopilotTimerRef.current !== null) {
+      window.clearTimeout(revealAutopilotTimerRef.current);
+      revealAutopilotTimerRef.current = null;
+    }
+    setRevealAutopilotCountdown(null);
   }, []);
 
   const startMicCountdown = useCallback(
@@ -613,22 +629,25 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         const transcript = sttRes.text?.trim() ?? "";
         if (!transcript) return;
         setVoiceNotice(null);
+        const priorDraft =
+          target === "RECALL"
+            ? recallTextRef.current.trim()
+            : creativeTextRef.current.trim();
+        const combinedText = priorDraft
+          ? `${priorDraft} ${transcript}`
+          : transcript;
         if (target === "RECALL") {
-          setRecallText((prev) =>
-            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
-          );
+          setRecallText(combinedText);
           setRecallInputMode("VOICE");
         } else {
-          setCreativeText((prev) =>
-            prev.trim() ? `${prev.trim()} ${transcript}` : transcript,
-          );
+          setCreativeText(combinedText);
           setCreativeInputMode("VOICE");
         }
         if (
           options?.fromAutopilot &&
           getEntertainmentPreferences().autopilotEnabled
         ) {
-          const words = transcript.match(/\p{L}+/gu) ?? [];
+          const words = combinedText.match(/\p{L}+/gu) ?? [];
           if (words.length >= 2) {
             cancelAutoSubmit();
             setAutoSubmitStage(target);
@@ -636,9 +655,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               autoSubmitTimerRef.current = null;
               setAutoSubmitStage(null);
               if (target === "RECALL") {
-                void handleSubmitRecallRef.current(transcript, "VOICE");
+                void handleSubmitRecallRef.current(undefined, "VOICE");
               } else {
-                void handleSubmitCreativeRef.current(transcript, "VOICE");
+                void handleSubmitCreativeRef.current(undefined, "VOICE");
               }
             }, 1500);
           }
@@ -814,6 +833,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         void recorder
           .start()
           .then(() => {
+            if (
+              !mountedRef.current ||
+              micGenerationRef.current !== captureGen ||
+              isSpeakingPromptRef.current
+            ) {
+              recorderCancelRef.current();
+              return;
+            }
             recorderActiveRef.current = true;
             recorderTargetRef.current = target;
             setIsListeningVoice(true);
@@ -917,12 +944,14 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === "hidden") {
+        cancelRevealAutopilot();
         cancelAutoSubmit();
         stopMicCapture();
         stopAllTts();
       }
     };
     const handleAndroidBg = () => {
+      cancelRevealAutopilot();
       cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
@@ -935,12 +964,13 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         "viread:android-background",
         handleAndroidBg,
       );
+      cancelRevealAutopilot();
       cancelAutoSubmit();
       stopMicCapture();
       stopAllTts();
       if (peekIntervalRef.current) clearInterval(peekIntervalRef.current);
     };
-  }, [cancelAutoSubmit, stopAllTts, stopMicCapture]);
+  }, [cancelAutoSubmit, cancelRevealAutopilot, stopAllTts, stopMicCapture]);
 
   // Load theme catalog & child history
   useEffect(() => {
@@ -1155,11 +1185,39 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
       setStage("REVEAL");
       if (
         effectiveMode === "VOICE" &&
-        getEntertainmentPreferences().autopilotEnabled &&
-        getEntertainmentPreferences().calmSound &&
-        result.attempt.evaluation.praise_message_vi
+        getEntertainmentPreferences().autopilotEnabled
       ) {
-        speakVietnamesePrompt(result.attempt.evaluation.praise_message_vi);
+        if (
+          getEntertainmentPreferences().calmSound &&
+          result.attempt.evaluation.praise_message_vi
+        ) {
+          speakVietnamesePrompt(result.attempt.evaluation.praise_message_vi);
+        }
+        cancelRevealAutopilot();
+        const stepRevealToCreative = (remaining: number) => {
+          if (
+            !mountedRef.current ||
+            !getEntertainmentPreferences().autopilotEnabled
+          ) {
+            setRevealAutopilotCountdown(null);
+            return;
+          }
+          if (remaining <= 0) {
+            revealAutopilotTimerRef.current = null;
+            setRevealAutopilotCountdown(null);
+            setFocusedObjectId(null);
+            setStage("CREATIVE");
+            void recorder.prepare?.().catch(() => undefined);
+            startMicCountdown("CREATIVE", 3);
+            return;
+          }
+          setRevealAutopilotCountdown(remaining);
+          revealAutopilotTimerRef.current = window.setTimeout(
+            () => stepRevealToCreative(remaining - 1),
+            1000,
+          );
+        };
+        stepRevealToCreative(6);
       }
     } catch (err: unknown) {
       // Preserve child's recall draft cleanly on transient error!
@@ -1231,6 +1289,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
   });
 
   const resetToSetup = () => {
+    cancelRevealAutopilot();
     cancelAutoSubmit();
     stopMicCapture();
     stopAllTts();
@@ -1411,6 +1470,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             fullWidth={false}
             onClick={() => {
               if (autopilotEnabled) {
+                cancelRevealAutopilot();
                 cancelMicCountdown();
                 cancelAutoSubmit();
               }
@@ -2305,10 +2365,11 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   )}
                 </p>
               </div>
-              <div className="mt-4">
+              <div className="mt-4 flex flex-col gap-2.5">
                 <Button
                   data-testid="go-creative-stage-btn"
                   onClick={() => {
+                    cancelRevealAutopilot();
                     setFocusedObjectId(null);
                     setStage("CREATIVE");
                     if (getEntertainmentPreferences().autopilotEnabled) {
@@ -2320,6 +2381,30 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   <Sparkles aria-hidden="true" className="size-5" />
                   {t("memoryGame.goCreativeButton")}
                 </Button>
+                {revealAutopilotCountdown !== null ? (
+                  <div
+                    aria-live="polite"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-extrabold text-emerald-950"
+                    data-testid="memory-autopilot-reveal-coach"
+                    role="status"
+                  >
+                    <span>
+                      🤖 Tự động sang Vòng 2 sau{" "}
+                      <span data-testid="memory-reveal-autopilot-countdown">
+                        {revealAutopilotCountdown}
+                      </span>
+                      s…
+                    </span>
+                    <button
+                      className="cursor-pointer rounded-full bg-white px-2.5 py-1 font-extrabold text-primary underline hover:bg-cream"
+                      data-testid="memory-cancel-reveal-autopilot"
+                      onClick={cancelRevealAutopilot}
+                      type="button"
+                    >
+                      Dừng tự động
+                    </button>
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>
@@ -2340,9 +2425,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
             matchedObjectIds={matchedObjectIds}
             missedObjectIds={missedObjectIds}
             mode="reveal"
-            onSelectObject={(id) =>
-              setFocusedObjectId((prev) => (prev === id ? null : id))
-            }
+            onSelectObject={(id) => {
+              cancelRevealAutopilot();
+              setFocusedObjectId((prev) => (prev === id ? null : id));
+            }}
             reducedMotion={reducedMotion}
             sceneSpec={session.scene_spec}
             showColorCues={showColorCues}
@@ -2400,7 +2486,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       data-testid={`matched-fact-${fact.object_id}`}
                       dir="ltr"
                       lang="vi"
-                      onClick={() => setFocusedObjectId(fact.object_id)}
+                      onClick={() => {
+                        cancelRevealAutopilot();
+                        setFocusedObjectId(fact.object_id);
+                      }}
                       type="button"
                     >
                       ✓ {fact.detail_vi}
@@ -2433,7 +2522,10 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                       data-testid={`missed-fact-${fact.object_id}`}
                       dir="ltr"
                       lang="vi"
-                      onClick={() => setFocusedObjectId(fact.object_id)}
+                      onClick={() => {
+                        cancelRevealAutopilot();
+                        setFocusedObjectId(fact.object_id);
+                      }}
                       type="button"
                     >
                       ★ {fact.detail_vi}

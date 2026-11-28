@@ -573,6 +573,7 @@ export function SentenceShooterScreen({
   const reducedMotionRef = useRef(reducedMotion);
   const calmSoundRef = useRef(calmSound);
   const autopilotEnabledRef = useRef(autopilotEnabled);
+  const userToggledAutopilotOnRef = useRef(false);
   const roundRef = useRef(round);
   const sessionBookIdRef = useRef<string | null>(
     session?.book.id ??
@@ -707,6 +708,25 @@ export function SentenceShooterScreen({
               calmSound: calmSoundRef.current,
             },
           );
+          const autopilotAudioActive =
+            autopilotEnabledRef.current &&
+            (hasUrlAutopilot || userToggledAutopilotOnRef.current);
+          if (
+            !response.round_completed &&
+            shot.token.is_difficult_word &&
+            autopilotAudioActive &&
+            calmSoundRef.current &&
+            shot.token.text.trim()
+          ) {
+            speechPlayerRef.current.stop();
+            void speechPlayerRef.current
+              .play(shot.token.text.trim(), {
+                wordSample: true,
+                speedScale: 0.92,
+                bypassSessionLock: true,
+              })
+              .catch(() => undefined);
+          }
           if (response.round_completed) {
             roundCompletedRef.current = true;
             const completedText = response.completed_sentence ?? "";
@@ -739,7 +759,7 @@ export function SentenceShooterScreen({
             } else {
               setPrefetchedNextRound(response.next_round ?? null);
               if (
-                hasUrlAutopilot &&
+                autopilotAudioActive &&
                 calmSoundRef.current &&
                 completedText.trim()
               ) {
@@ -2205,7 +2225,10 @@ export function SentenceShooterScreen({
                   : "border-border bg-white text-muted",
               )}
               data-testid="shooter-autopilot-toggle"
-              onClick={toggleAutopilot}
+              onClick={() => {
+                userToggledAutopilotOnRef.current = !autopilotEnabled;
+                toggleAutopilot();
+              }}
               type="button"
             >
               <Sparkles aria-hidden="true" className="size-3.5" />

@@ -893,6 +893,24 @@ class DocumentRasterizerHardeningTests(unittest.TestCase):
         self.assertEqual(ctx_tif.exception.status_code, 413)
         self.assertEqual(Image.MAX_IMAGE_PIXELS, original_max_pixels)
 
+    def test_iter_rasterized_spooled_document_rejects_unsafe_docx_with_422_not_unbound_local_error(self):
+        malicious = _make_docx_zip({
+            "[Content_Types].xml": '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><Types/>',
+        })
+        spool = rasterizer.SpooledUploadDocument(
+            file_name="evil.docx",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            byte_length=len(malicious),
+            header_bytes=malicious[:8192],
+            source_sha256="0" * 64,
+            spool_file=BytesIO(malicious),
+        )
+        with self.assertRaises(HTTPException) as ctx:
+            with rasterizer.iter_rasterized_spooled_document(spool):
+                pass
+        self.assertEqual(ctx.exception.status_code, 422)
+        self.assertIn("unsafe", str(ctx.exception.detail).lower())
+
 
 if __name__ == "__main__":
     unittest.main()

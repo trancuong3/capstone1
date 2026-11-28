@@ -2213,6 +2213,212 @@ describe("AdminOcrReviewScreen safety boundaries", () => {
     });
     await waitFor(() => expect(trigger).toHaveTextContent("Cần xác minh (2)"));
   });
+
+  it("never silently acknowledges runCombinedWorkflow when the tab is hidden, and clears stale warnings when updateWorkflowCandidate re-queues safety", async () => {
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    const WF_ID = "85000000-0000-4000-8000-000000000011";
+    const makeAdminTask = (
+      overrides: Partial<GlobalTaskItem> = {},
+    ): GlobalTaskItem => ({
+      id: WF_ID,
+      source: "admin_ai_workflow",
+      job_type: "ADMIN_AI_WORKFLOW",
+      title_vi: "Soát lỗi AI & Kiểm tra an toàn",
+      book_id: ADMIN_BOOK_ID,
+      book_page_id: ADMIN_PAGE_ID,
+      book_title: "Chuyện Rừng Xanh",
+      page_number: 1,
+      source_revision_id: ADMIN_R2_ID,
+      actor_id: "admin-1",
+      actor_role: "admin",
+      portal: "admin",
+      status: "WAITING_FOR_REVIEW",
+      status_label_vi: "Cần xác minh",
+      stage: "WAITING_FOR_REVIEW",
+      stage_label_vi: "Chờ người dùng xác minh",
+      priority: 60,
+      attempt_count: 1,
+      max_attempts: 3,
+      progress_completed: 1,
+      progress_total: 1,
+      progress_unit: "đoạn",
+      progress_pct: 100,
+      progress_mode: "measured",
+      is_indeterminate: false,
+      can_retry: false,
+      can_cancel: false,
+      result_href: `/admin/books/${ADMIN_BOOK_ID}/pages/${ADMIN_PAGE_ID}`,
+      result_ref: {},
+      checkpoints: {},
+      error_code: null,
+      error_message_vi: null,
+      created_at: "2026-11-28T09:00:00.000Z",
+      updated_at: "2026-11-28T09:00:00.000Z",
+      started_at: "2026-11-28T09:00:00.000Z",
+      completed_at: null,
+      ...overrides,
+    });
+
+    let currentTasks: GlobalTaskItem[] = [];
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => ({
+        actor_id: "admin-1",
+        actor_role: "admin" as const,
+        portal: "admin" as const,
+        active_count: currentTasks.filter(
+          (item) => item.status === "QUEUED" || item.status === "RUNNING",
+        ).length,
+        waiting_review_count: currentTasks.filter(
+          (item) => item.status === "WAITING_FOR_REVIEW",
+        ).length,
+        failed_count: currentTasks.filter((item) => item.status === "FAILED")
+          .length,
+        completed_count: currentTasks.filter(
+          (item) => item.status === "SUCCEEDED",
+        ).length,
+        worker_online: true,
+        recommended_poll_ms: null,
+        tasks: currentTasks,
+      })),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const services = createAdminServiceFixture();
+    const editable = makeEditableDetail();
+    const readyWorkflow: AdminAiWorkflowDTO = {
+      ...makeReadyWorkflow(editable.draft_text ?? ""),
+      workflow_id: WF_ID,
+      updated_at: "2026-11-28T09:01:00.000Z",
+    };
+
+    let resolveWorkflow!: (wf: AdminAiWorkflowDTO) => void;
+    services.ocr.getRevision.mockResolvedValue(editable);
+    services.ocr.getLatestWorkflow.mockResolvedValue(null);
+    services.ocr.runCombinedWorkflow.mockImplementation(
+      () =>
+        new Promise<AdminAiWorkflowDTO>((resolve) => {
+          resolveWorkflow = resolve;
+        }),
+    );
+    services.ocr.updateWorkflowCandidate.mockImplementation(async () => {
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "QUEUED",
+          status_label_vi: "Chờ xử lý",
+          stage: "CHILD_SAFETY_SCANNING",
+          stage_label_vi: "Kiểm tra an toàn trẻ em",
+          progress_pct: 10,
+          updated_at: "2026-11-28T09:02:00.000Z",
+        }),
+      ];
+      return {
+        ...readyWorkflow,
+        status: "QUEUED",
+        stage: "CHILD_SAFETY_SCANNING",
+        safety_status: "STALE",
+        candidate_version: 2,
+        updated_at: "2026-11-28T09:02:00.000Z",
+      };
+    });
+
+    const prevVisibilityDescriptor = Object.getOwnPropertyDescriptor(
+      document,
+      "visibilityState",
+    );
+    const user = userEvent.setup();
+
+    try {
+      render(
+        <AiTaskCenterProvider
+          actorId="admin-1"
+          actorRole="admin"
+          service={taskService}
+        >
+          <GlobalTaskCenter variant="sidebar" />
+          {withAdminFixture(
+            <AdminOcrReviewScreen
+              bookId={ADMIN_BOOK_ID}
+              pageId={ADMIN_PAGE_ID}
+            />,
+            services,
+          )}
+        </AiTaskCenterProvider>,
+      );
+
+      const trigger = await screen.findByTestId("global-task-center-trigger");
+      await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ AI"));
+
+      // 1) Start runCombinedWorkflow, then hide the tab before it finishes!
+      await user.click(
+        await screen.findByRole("button", { name: /XÁC NHẬN & CHẠY AI/ }),
+      );
+      await waitFor(() =>
+        expect(services.ocr.runCombinedWorkflow).toHaveBeenCalledTimes(1),
+      );
+
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+
+      currentTasks = [
+        makeAdminTask({
+          id: WF_ID,
+          status: "WAITING_FOR_REVIEW",
+          updated_at: "2026-11-28T09:01:00.000Z",
+        }),
+      ];
+      await act(async () => {
+        resolveWorkflow(readyWorkflow);
+        await Promise.resolve();
+      });
+
+      // Because tab was hidden, the finished workflow MUST NOT be silently acknowledged!
+      await waitFor(() =>
+        expect(trigger).toHaveTextContent("Cần xác minh (1)"),
+      );
+
+      // Restore tab visibility and edit the draft text -> debounced updateWorkflowCandidate
+      // clears the stale warning and transitions GlobalTaskCenter to active running state!
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      const textarea = screen.getByLabelText("Nội dung trang");
+      await user.clear(textarea);
+      await user.type(textarea, "Nội dung revision mới hành");
+
+      await waitFor(
+        () =>
+          expect(services.ocr.updateWorkflowCandidate).toHaveBeenCalledTimes(1),
+        { timeout: 2500 },
+      );
+      await waitFor(() =>
+        expect(trigger).toHaveTextContent("AI đang chạy (1)"),
+      );
+      expect(trigger).not.toHaveTextContent("Cần xác minh");
+    } finally {
+      if (prevVisibilityDescriptor) {
+        Object.defineProperty(
+          document,
+          "visibilityState",
+          prevVisibilityDescriptor,
+        );
+      } else {
+        Object.defineProperty(document, "visibilityState", {
+          configurable: true,
+          value: "visible",
+        });
+      }
+    }
+  });
 });
 
 vi.mock("next/navigation", async (importOriginal) => {

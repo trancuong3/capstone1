@@ -82,6 +82,7 @@ import {
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
+import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import { cn } from "@/lib/utils/cn";
 import type {
   PictureAttemptDTO,
@@ -542,6 +543,9 @@ export function PictureDescriptionScreen() {
   const micCountdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(
     null,
   );
+  const micCountdownSoundRef = useRef<ReturnType<
+    typeof createCountdownSound
+  > | null>(null);
   const silenceStopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -606,6 +610,8 @@ export function PictureDescriptionScreen() {
       clearInterval(micCountdownTimerRef.current);
       micCountdownTimerRef.current = null;
     }
+    micCountdownSoundRef.current?.stop();
+    micCountdownSoundRef.current = null;
     setMicCountdown(null);
   }, []);
 
@@ -628,6 +634,11 @@ export function PictureDescriptionScreen() {
       }
       cancelMicCountdown();
       cancelAutoSubmit();
+      const sound = getEntertainmentPreferences().calmSound
+        ? createCountdownSound()
+        : null;
+      micCountdownSoundRef.current = sound;
+      sound?.play(seconds);
       setMicCountdown(seconds);
       let remaining = seconds;
       micCountdownTimerRef.current = setInterval(() => {
@@ -637,6 +648,12 @@ export function PictureDescriptionScreen() {
             clearInterval(micCountdownTimerRef.current);
             micCountdownTimerRef.current = null;
           }
+          if (getEntertainmentPreferences().calmSound) {
+            micCountdownSoundRef.current?.play(0);
+          } else {
+            micCountdownSoundRef.current?.stop();
+          }
+          micCountdownSoundRef.current = null;
           setMicCountdown(null);
           if (
             mountedRef.current &&
@@ -647,6 +664,9 @@ export function PictureDescriptionScreen() {
             void startVoiceRecordingRef.current();
           }
         } else {
+          if (getEntertainmentPreferences().calmSound) {
+            micCountdownSoundRef.current?.play(remaining);
+          }
           setMicCountdown(remaining);
         }
       }, 1000);
@@ -777,6 +797,8 @@ export function PictureDescriptionScreen() {
         clearInterval(micCountdownTimerRef.current);
         micCountdownTimerRef.current = null;
       }
+      micCountdownSoundRef.current?.stop();
+      micCountdownSoundRef.current = null;
       if (autoSubmitTimerRef.current !== null) {
         clearTimeout(autoSubmitTimerRef.current);
         autoSubmitTimerRef.current = null;

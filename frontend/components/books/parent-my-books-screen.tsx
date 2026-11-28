@@ -33,10 +33,12 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   DEFAULT_USER_CACHE_TTL_MS,
@@ -117,6 +119,7 @@ function ParentMyBooksContent({
 }) {
   const t = useTranslations("books");
   const service = useParentPrivateBookService();
+  const taskCenter = useOptionalAiTaskCenter();
   const router = useRouter();
   const requestIdRef = useRef(0);
 
@@ -434,6 +437,10 @@ function ParentMyBooksContent({
             })
           : t("myBooks.updatedNotice", { title: updated.title }),
       );
+      if (totalRecheck > 0) {
+        taskCenter?.markTargetAlertsSeen({ bookId: book.id });
+        emitStudioTasksChanged({ portal: "parent" });
+      }
       setReloadKey((prev) => prev + 1);
     } catch (error) {
       setActionError(getErrorText(error, t("myBooks.updateErrorFallback")));
@@ -448,6 +455,8 @@ function ParentMyBooksContent({
     setDeletingBookId(book.id);
     try {
       await service.delete(book.id);
+      taskCenter?.markTargetAlertsSeen({ bookId: book.id });
+      emitStudioTasksChanged({ portal: "parent" });
       setConfirmDeleteBookId(null);
       if (editingBookId === book.id) {
         setEditingBookId(null);
