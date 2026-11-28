@@ -446,7 +446,20 @@ class VoiceOrchestrator:
         fn = getattr(self.elevenlabs, "is_tts_in_cooldown", None)
         if callable(fn) and fn():
             return True
-        return time.monotonic() < _elevenlabs_tts_cooldown_until
+        if time.monotonic() < _elevenlabs_tts_cooldown_until:
+            return True
+        fp = getattr(self.elevenlabs, "_key_fingerprint", None)
+        gender_fn = getattr(self.elevenlabs, "get_voice_id_for_gender", None)
+        if callable(gender_fn):
+            from app.providers.elevenlabs_voice_provider import is_voice_marked_unavailable
+
+            female_vid = gender_fn("female")
+            male_vid = gender_fn("male")
+            female_blocked = not female_vid or is_voice_marked_unavailable(fp, female_vid)
+            male_blocked = not male_vid or is_voice_marked_unavailable(fp, male_vid)
+            if female_blocked and male_blocked:
+                return True
+        return False
 
     def _is_elevenlabs_stt_in_cooldown(self) -> bool:
         fn = getattr(self.elevenlabs, "is_stt_in_cooldown", None)
@@ -941,7 +954,7 @@ class VoiceOrchestrator:
                     }
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize, "expected_gender"):
                         el_kwargs["expected_gender"] = req_gender
-                    if req_gender == "male" and self._fn_accepts_kwarg(
+                    if self._fn_accepts_kwarg(
                         self.elevenlabs.synthesize, "allow_default_fallback"
                     ):
                         el_kwargs["allow_default_fallback"] = False
@@ -1311,7 +1324,7 @@ class VoiceOrchestrator:
                         el_timed_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
                         el_timed_kwargs["region"] = self._voice_region(voice_id)
-                    if req_gender == "male" and self._fn_accepts_kwarg(
+                    if self._fn_accepts_kwarg(
                         self.elevenlabs.synthesize_timed, "allow_default_fallback"
                     ):
                         el_timed_kwargs["allow_default_fallback"] = False
@@ -1596,7 +1609,7 @@ class VoiceOrchestrator:
                         el_phonics_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
                         el_phonics_kwargs["region"] = self._voice_region(voice_id)
-                    if req_gender == "male" and self._fn_accepts_kwarg(
+                    if self._fn_accepts_kwarg(
                         self.elevenlabs.synthesize_phonics, "allow_default_fallback"
                     ):
                         el_phonics_kwargs["allow_default_fallback"] = False

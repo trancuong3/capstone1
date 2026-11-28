@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 
 from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
@@ -13,11 +14,19 @@ WORKSPACE_ROOT = REPOSITORY_ROOT.parent
 
 def _load_missing_dotenv_values() -> None:
     """Load known dotenv paths without replacing non-empty process settings."""
-    for dotenv_path in (
+    is_test_runtime = (
+        (os.getenv("APP_ENVIRONMENT") or "").strip().lower() == "test"
+        or "unittest" in sys.modules
+        or "pytest" in sys.modules
+    )
+    candidate_paths: list[Path] = [
         BACKEND_ROOT / ".env",
         REPOSITORY_ROOT / ".env",
         WORKSPACE_ROOT / ".env",
-    ):
+    ]
+    if not is_test_runtime:
+        candidate_paths.append(WORKSPACE_ROOT / "capstone1" / "backend" / ".env")
+    for dotenv_path in candidate_paths:
         if not dotenv_path.is_file():
             continue
         for key, value in dotenv_values(dotenv_path).items():

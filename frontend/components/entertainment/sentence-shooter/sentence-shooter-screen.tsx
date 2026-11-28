@@ -1490,11 +1490,18 @@ export function SentenceShooterScreen({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <ReadingVoiceSettings
+                childId={child?.id ?? childId}
                 fallbackNotice={speechPlayer.fallbackNotice}
                 isPreviewing={speechPlayer.isPlaying}
                 onPreview={(sample) => {
                   speechPlayer.stop();
-                  return speechPlayer.play(sample, { bypassSessionLock: true });
+                  return speechPlayer.play(sample, {
+                    coaching: true,
+                    cacheScope: "COACHING",
+                    isPrivateBook: false,
+                    bypassSessionLock: true,
+                    utteranceKind: "voice_preview",
+                  });
                 }}
                 onStopPreview={speechPlayer.stop}
               />
@@ -2084,11 +2091,18 @@ export function SentenceShooterScreen({
           </p>
         </div>
         <ReadingVoiceSettings
+          childId={child?.id ?? childId}
           fallbackNotice={speechPlayer.fallbackNotice}
           isPreviewing={speechPlayer.isPlaying}
           onPreview={(sample) => {
             speechPlayer.stop();
-            return speechPlayer.play(sample, { bypassSessionLock: true });
+            return speechPlayer.play(sample, {
+              coaching: true,
+              cacheScope: "COACHING",
+              isPrivateBook: false,
+              bypassSessionLock: true,
+              utteranceKind: "voice_preview",
+            });
           }}
           onStopPreview={speechPlayer.stop}
         />

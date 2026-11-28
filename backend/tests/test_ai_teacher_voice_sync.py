@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -10,6 +11,10 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
+
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/test")
+os.environ.setdefault("SUPABASE_URL", "https://example.supabase.co")
+os.environ.setdefault("SUPABASE_KEY", "test-anon-key")
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
@@ -703,3 +708,187 @@ def test_voice_routes_lookup_voice_gender_recognizes_elevenlabs_male_env(monkeyp
     assert lookup_voice_gender("google_vi_vn_wavenet_b") == "male"
     assert lookup_voice_gender("male-env-voice") == "male"
     assert lookup_voice_gender("female-env-voice") == "female"
+
+
+class OfflineZeroErrorVoiceRegressionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_voice_orchestrator_female_never_falls_back_to_foreign_default_voice_on_402(
+        self,
+    ) -> None:
+        import httpx
+        from app.providers.elevenlabs_voice_provider import (
+            DEFAULT_VOICE_ID,
+            ElevenLabsVoiceProvider,
+        )
+        from app.providers.google_voice_provider import GoogleCloudVoiceProvider
+        from app.providers.local_voice_provider import (
+            LocalSynthesizedAudio,
+            LocalVoiceProvider,
+            LocalVoiceTechnicalError,
+        )
+        from app.services.voice_orchestrator import (
+            VoiceOrchestrator,
+            VoicePolicyContext,
+            clear_voice_orchestrator_caches,
+        )
+
+        clear_voice_orchestrator_caches()
+        called_urls: list[str] = []
+
+        class FakeAsyncClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            async def post(self, url: str, **kwargs):
+                called_urls.append(url)
+                return httpx.Response(
+                    status_code=402,
+                    json={"detail": {"status": "payment_required"}},
+                )
+
+        down_local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")
+        down_local.synthesize = AsyncMock(  # type: ignore[method-assign]
+            side_effect=LocalVoiceTechnicalError(503, "LOCAL_VOICE_UNCONFIGURED")
+        )
+        google = GoogleCloudVoiceProvider(stt_api_key="g", tts_api_key="g")
+        google.synthesize = AsyncMock(  # type: ignore[method-assign]
+            return_value=LocalSynthesizedAudio(
+                content=b"google-female-mp3",
+                content_type="audio/mpeg",
+                resolved_voice_id="google_vi_vn_neural2_a",
+                region="north",
+                model_version="google-cloud-tts-v1",
+                provider="google",
+            )
+        )
+        with (
+            patch.dict(
+                "os.environ",
+                {
+                    "ELEVENLABS_API_KEY": "test-el-key",
+                    "ELEVENLABS_FEMALE_VOICE_ID": "custom-vi-female-402",
+                },
+                clear=False,
+            ),
+            patch("app.providers.elevenlabs_voice_provider.httpx.AsyncClient", FakeAsyncClient),
+        ):
+            orchestrator = VoiceOrchestrator(
+                local_provider=down_local,
+                google_provider=google,
+                elevenlabs_provider=ElevenLabsVoiceProvider(api_key="test-el-key"),
+            )
+            res = await orchestrator.synthesize(
+                text="Cô chào con nhé.",
+                requested_voice_id="local_north_truc_ly",
+                speed=1.0,
+                policy=VoicePolicyContext(
+                    provider_mode="local_with_google_fallback",
+                    allow_google_tts=True,
+                ),
+            )
+            self.assertEqual(res.provider, "google")
+            self.assertEqual(res.resolved_voice_id, "google_vi_vn_neural2_a")
+            self.assertEqual(len(called_urls), 1)
+            self.assertNotIn(DEFAULT_VOICE_ID, "".join(called_urls))
+
+    async def test_difficult_words_wasm_verified_offline_skips_dead_server_stt_and_avoids_engine_error(
+        self,
+    ) -> None:
+        from app.providers.elevenlabs_voice_provider import VoiceProviderError
+        from app.services.difficult_words_service import DifficultWordsService
+        from app.services.voice_orchestrator import VoicePolicyContext
+
+        svc = DifficultWordsService.__new__(DifficultWordsService)
+        fake_orchestrator = SimpleNamespace(
+            local=SimpleNamespace(is_configured=lambda: False),
+            transcribe=AsyncMock(
+                side_effect=VoiceProviderError(
+                    status_code=503,
+                    code="LOCAL_VOICE_UNCONFIGURED",
+                )
+            ),
+        )
+        svc.voice_provider = fake_orchestrator  # type: ignore[assignment]
+
+        # 1) Non-exact WASM-verified transcript under local_only skips dead server STT completely
+        status_mis, source_mis, spoken_mis, conf_mis = await svc._evaluate_audio_payload(
+            display_text="bông hoa",
+            audio_bytes=b"RIFF" + b"\x00" * 512,
+            filename="practice.wav",
+            content_type="audio/wav",
+            audio_quality_status="BROWSER_WASM_VERIFIED",
+            browser_transcript="bông hồng",
+            browser_confidence=0.82,
+            context_phrase=None,
+            policy=VoicePolicyContext(provider_mode="local_only"),
+        )
+        self.assertEqual(status_mis, "INCORRECT")
+        self.assertEqual(source_mis, "BROWSER_SPEECH")
+        self.assertEqual(spoken_mis, "bông hồng")
+        self.assertEqual(conf_mis, 0.82)
+        fake_orchestrator.transcribe.assert_not_awaited()
+
+        # 2) Empty WASM-verified turn when server STT fails returns NO_CLEAR_AUDIO instead of ENGINE_ERROR
+        fake_orchestrator.local = SimpleNamespace(is_configured=lambda: True)
+        status_empty, source_empty, _, _ = await svc._evaluate_audio_payload(
+            display_text="bông hoa",
+            audio_bytes=b"RIFF" + b"\x00" * 512,
+            filename="practice.wav",
+            content_type="audio/wav",
+            audio_quality_status="BROWSER_WASM_VERIFIED",
+            browser_transcript="",
+            browser_confidence=0.0,
+            context_phrase=None,
+            policy=VoicePolicyContext(provider_mode="local_only"),
+        )
+        self.assertEqual(status_empty, "NO_CLEAR_AUDIO")
+        self.assertEqual(source_empty, "BROWSER_SPEECH")
+
+    async def test_private_book_phonics_reuses_coaching_cache_fallback(self) -> None:
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+
+        fake_db = SimpleNamespace(commit=AsyncMock(), rollback=AsyncMock())
+        real_repo = TtsAudioCacheRepository(fake_db)  # type: ignore[arg-type]
+        real_repo.get_daily_usage = AsyncMock(  # type: ignore[method-assign]
+            return_value={"bytes_served": 0, "hit_count": 0, "miss_count": 0}
+        )
+        real_repo.get_best_active_entries = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        real_repo.record_miss = AsyncMock()  # type: ignore[method-assign]
+
+        svc = TtsAudioCacheService(None)
+        svc.db = fake_db  # type: ignore[assignment]
+        svc.repo = real_repo
+        private_target = ResolvedCacheTarget(
+            scope="PRIVATE",
+            owner_parent_id=uuid4(),
+            book_id=uuid4(),
+            page_id=None,
+            page_revision_id=None,
+            can_store_on_miss=True,
+        )
+        with patch(
+            "app.services.tts_audio_cache_service.is_tts_cache_enabled",
+            return_value=True,
+        ):
+            await svc.lookup_cached_audio(
+                target=private_target,
+                normalized_text="phonics:bờ|ông|bông",
+                voice_id="local_north_thien_minh",
+                speed=0.9,
+            )
+            kwargs = real_repo.get_best_active_entries.await_args.kwargs
+            self.assertIs(kwargs["include_coaching_fallback"], True)
+
+            await svc.lookup_cached_audio(
+                target=private_target,
+                normalized_text="Câu văn riêng tư của phụ huynh.",
+                voice_id="local_north_thien_minh",
+                speed=0.9,
+            )
+            kwargs_plain = real_repo.get_best_active_entries.await_args.kwargs
+            self.assertIs(kwargs_plain["include_coaching_fallback"], False)

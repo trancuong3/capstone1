@@ -586,19 +586,25 @@ export function ReadingVoiceSettings({
     setIsOpen(false);
   }
 
+  const hasRegionalMetadata =
+    loadState.status === "ready" &&
+    loadState.data.voices.some((v) => resolveVoiceRegion(v) !== null);
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
-  const selectedVoiceId = preferences.voiceId ?? defaultVoiceId;
+  const selectedVoiceId =
+    preferences.voiceId ??
+    (hasRegionalMetadata && teacherPersona.gender === "male"
+      ? getDefaultVoiceIdForRegionAndGender(
+          policy.region,
+          teacherPersona.gender,
+        )
+      : defaultVoiceId);
   const isYouthful = (voice: VoiceOption) =>
     ["young", "young_adult", "youthful"].includes(
       voice.age?.toLowerCase() ?? "",
     );
   const isChildVoice = (voice: VoiceOption) =>
     voice.age?.toLowerCase() === "child";
-
-  const hasRegionalMetadata =
-    loadState.status === "ready" &&
-    loadState.data.voices.some((v) => resolveVoiceRegion(v) !== null);
 
   const matchesFilter = (voice: VoiceOption) => {
     if (regionTab !== "all" && hasRegionalMetadata) {
@@ -679,7 +685,10 @@ export function ReadingVoiceSettings({
                   setIsSynthesizingPreview(true);
                   const previewText = adaptTextToTeacherPersona(
                     PREVIEW_TEXT,
-                    resolveVoiceGender(selectedVoiceId, selectedVoice?.gender),
+                    resolveVoiceGender(
+                      selectedVoiceId,
+                      selectedVoice?.gender ?? teacherPersona.gender,
+                    ),
                   );
                   void Promise.resolve()
                     .then(() => onPreview(previewText))

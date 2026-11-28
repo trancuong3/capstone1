@@ -61,7 +61,7 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   fetchVoiceEngineHealth,
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
@@ -609,7 +609,7 @@ export function DifficultWordPracticePanel({
     if (isAndroidNativeSpeechAvailable()) {
       void getAndroidSpeechCapabilities().catch(() => null);
     }
-    if (!getFreshVoiceEngineHealth()) {
+    if (!getVoiceEngineHealthForRouting()) {
       void fetchVoiceEngineHealth().catch(() => null);
     }
     return () => {
@@ -1450,7 +1450,8 @@ export function DifficultWordPracticePanel({
         ? transcript.normalize("NFC").trim()
         : null;
       let effectiveConfidence = browserBestConfRef.current;
-      const freshHealth = getFreshVoiceEngineHealth();
+      let wasmRanCleanly = false;
+      const freshHealth = getVoiceEngineHealthForRouting();
       const permanentlyUnconfigured =
         isPermanentlyHostedLocalUnconfigured(freshHealth);
       const localSttDown =
@@ -1473,9 +1474,11 @@ export function DifficultWordPracticePanel({
           if (!mountedRef.current || generation !== flowGenerationRef.current) {
             return;
           }
+          wasmRanCleanly = true;
           const wasmText = wasmRes.text.normalize("NFC").trim();
           if (wasmText) {
             effectiveTranscript = wasmText;
+            effectiveConfidence = Math.max(effectiveConfidence ?? 0, 0.95);
             recordSttEngineUsage({
               provider: "wasm",
               fallbackUsed: !permanentlyUnconfigured,
@@ -1483,12 +1486,6 @@ export function DifficultWordPracticePanel({
                 ? null
                 : "LOCAL_STT_UNAVAILABLE",
             });
-            if (
-              normalizeVietnameseWord(wasmText) ===
-              normalizeVietnameseWord(word.display_text)
-            ) {
-              effectiveConfidence = Math.max(effectiveConfidence ?? 0, 0.95);
-            }
           }
         } catch {
           // Proceed to backend evaluation cleanly if WASM decode fails.
@@ -1499,7 +1496,9 @@ export function DifficultWordPracticePanel({
         requestId: createRequestUuid(),
         audioBlob: recording,
         durationMs: elapsed,
-        audioQualityStatus: quality?.status,
+        audioQualityStatus: wasmRanCleanly
+          ? "BROWSER_WASM_VERIFIED"
+          : quality?.status,
         browserTranscript: effectiveTranscript,
         browserConfidence: effectiveConfidence,
       };
@@ -1539,7 +1538,7 @@ export function DifficultWordPracticePanel({
         detectBrowserWasmSttSupport().supported &&
         !getBrowserWasmSttClient().isReady()
       ) {
-        const freshHealth = getFreshVoiceEngineHealth();
+        const freshHealth = getVoiceEngineHealthForRouting();
         const localSttReady = Boolean(
           freshHealth?.local.available && freshHealth.local.stt_ready,
         );
@@ -1874,7 +1873,7 @@ export function DifficultWordPracticePanel({
         detectBrowserWasmSttSupport().supported &&
         !getBrowserWasmSttClient().isReady()
       ) {
-        const freshHealth = getFreshVoiceEngineHealth();
+        const freshHealth = getVoiceEngineHealthForRouting();
         const localSttReady = Boolean(
           freshHealth?.local.available && freshHealth.local.stt_ready,
         );
@@ -2111,6 +2110,7 @@ export function DifficultWordPracticePanel({
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
           <ReadingVoiceSettings
+            childId={child.id}
             disabled={flowState === "LISTENING"}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}

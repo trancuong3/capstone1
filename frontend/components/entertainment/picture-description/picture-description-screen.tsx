@@ -77,15 +77,17 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import {
   getEffectiveTeacherPersona,
+  getVoicePolicyPreferences,
   lockSessionVoice,
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   markHostedLocalUnconfigured,
+  recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { cn } from "@/lib/utils/cn";
 import type {
@@ -644,6 +646,23 @@ export function PictureDescriptionScreen({
       }
       cancelMicCountdown();
       cancelAutoSubmit();
+      if (process.env.NODE_ENV !== "test") {
+        void recorder.prepare?.().catch(() => undefined);
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const localReady = Boolean(
+          routingHealth?.local.available && routingHealth.local.stt_ready,
+        );
+        if (
+          !shouldPreferAndroidNativeStt() &&
+          !localReady &&
+          detectBrowserWasmSttSupport().supported &&
+          !getBrowserWasmSttClient().isReady()
+        ) {
+          void getBrowserWasmSttClient()
+            .init()
+            .catch(() => undefined);
+        }
+      }
       setMicCountdown(seconds);
       let remaining = seconds;
       micCountdownTimerRef.current = setInterval(() => {
@@ -667,7 +686,7 @@ export function PictureDescriptionScreen({
         }
       }, 1000);
     },
-    [cancelAutoSubmit, cancelMicCountdown],
+    [cancelAutoSubmit, cancelMicCountdown, recorder],
   );
 
   const abortActiveVoiceCapture = useCallback(
@@ -1287,17 +1306,22 @@ export function PictureDescriptionScreen({
     setVoiceMessage(t("pictureDescription.micListening"));
 
     const rawCtor = getSpeechRecognitionCtor();
-    const SpeechRecognition = preferAndroidNativeStt
-      ? ((resolveLocalFirstSpeechRecognitionConstructor(
-          window as unknown as Parameters<
-            typeof resolveLocalFirstSpeechRecognitionConstructor
-          >[0],
-          speechService,
-          () => ({ sessionId: pictureVoiceSessionId }),
-        ) as BrowserSpeechRecognitionCtor | undefined) ?? null)
-      : isInjectedTestSpeechRecognition(rawCtor)
-        ? rawCtor
-        : null;
+    const hasSharedWebTrack =
+      process.env.NODE_ENV !== "test" &&
+      Boolean(recorder.getStream?.()?.getAudioTracks()?.[0]);
+    const SpeechRecognition =
+      preferAndroidNativeStt || hasSharedWebTrack
+        ? ((resolveLocalFirstSpeechRecognitionConstructor(
+            window as unknown as Parameters<
+              typeof resolveLocalFirstSpeechRecognitionConstructor
+            >[0],
+            speechService,
+            () => ({ sessionId: pictureVoiceSessionId }),
+            () => recorder.getStream?.()?.getAudioTracks()?.[0],
+          ) as BrowserSpeechRecognitionCtor | undefined) ?? null)
+        : isInjectedTestSpeechRecognition(rawCtor)
+          ? rawCtor
+          : null;
     if (SpeechRecognition) {
       try {
         const recognition = new SpeechRecognition();
@@ -1407,11 +1431,20 @@ export function PictureDescriptionScreen({
               .filter(Boolean)
               .slice(0, 16)
           : [];
-        const localUnconfigured = isPermanentlyHostedLocalUnconfigured(
-          getFreshVoiceEngineHealth(),
-        );
+        const routingHealth = getVoiceEngineHealthForRouting();
+        const policy = getVoicePolicyPreferences();
+        const cloudSttAllowed =
+          policy.providerMode === "local_with_google_fallback" &&
+          policy.allowGoogleSttFallback;
+        const localUnconfiguredOrDown =
+          isPermanentlyHostedLocalUnconfigured(routingHealth) ||
+          (!cloudSttAllowed &&
+            routingHealth !== null &&
+            (!routingHealth.local.available || !routingHealth.local.stt_ready));
         const wasmSupported = detectBrowserWasmSttSupport().supported;
-        if (localUnconfigured && wasmSupported) {
+        if (localUnconfiguredOrDown && browserFallback) {
+          sttTranscript = browserFallback;
+        } else if (localUnconfiguredOrDown && wasmSupported) {
           try {
             const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
               audioBlob,
@@ -1419,6 +1452,18 @@ export function PictureDescriptionScreen({
             );
             if (isStaleCapture()) return;
             sttTranscript = wasmResult.text.normalize("NFC").trim() || null;
+            if (sttTranscript) {
+              recordSttEngineUsage({
+                provider: "wasm",
+                fallbackUsed:
+                  !isPermanentlyHostedLocalUnconfigured(routingHealth),
+                fallbackReason: isPermanentlyHostedLocalUnconfigured(
+                  routingHealth,
+                )
+                  ? null
+                  : "LOCAL_STT_UNAVAILABLE",
+              });
+            }
           } catch {
             if (isStaleCapture()) return;
             sttTranscript = null;
@@ -1732,13 +1777,20 @@ export function PictureDescriptionScreen({
 
           <div className="flex flex-wrap items-center gap-2">
             <ReadingVoiceSettings
+              childId={selectedChildForHeader.id}
               disabled={isRecordingVoice}
               fallbackNotice={speechPlayer.fallbackNotice}
               isPreviewing={speechPlayer.isPlaying}
               onPreview={(sample) => {
                 abortActiveVoiceCapture({ preserveDraft: true });
                 stopSpeechPlayback();
-                return speechPlayer.play(sample, { bypassSessionLock: true });
+                return speechPlayer.play(sample, {
+                  coaching: true,
+                  cacheScope: "COACHING",
+                  isPrivateBook: false,
+                  bypassSessionLock: true,
+                  utteranceKind: "voice_preview",
+                });
               }}
               onStopPreview={stopSpeechPlayback}
             />

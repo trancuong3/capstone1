@@ -119,8 +119,7 @@ let piperPromise = null;
 let piperModule = null;
 let ttsRuntimePromise = null;
 let ttsRuntimeModule = null;
-let activeTtsInstance = null;
-let activeGender = null;
+const ttsInstancesByGender = { female: null, male: null };
 let loadPromise = null;
 let loadingGender = null;
 let loadEpoch = 0;
@@ -436,17 +435,17 @@ async function ensureTtsRuntimeReady(epoch) {
 
 async function ensureTtsReadyForGender(rawGender) {
   const gender = normalizeGender(rawGender);
-  if (activeTtsInstance && activeGender === gender && piperModule) {
-    return { piper: piperModule, tts: activeTtsInstance, gender };
+  if (ttsInstancesByGender[gender] && piperModule) {
+    return { piper: piperModule, tts: ttsInstancesByGender[gender], gender };
   }
   if (loadPromise && loadingGender === gender) {
     return loadPromise;
   }
   if (loadPromise && loadingGender !== gender) {
-    // Wait for in-flight model load to settle before switching genders cleanly.
+    // Wait for in-flight model load to settle before loading the other gender.
     await loadPromise.catch(() => undefined);
-    if (activeTtsInstance && activeGender === gender && piperModule) {
-      return { piper: piperModule, tts: activeTtsInstance, gender };
+    if (ttsInstancesByGender[gender] && piperModule) {
+      return { piper: piperModule, tts: ttsInstancesByGender[gender], gender };
     }
   }
 
@@ -564,24 +563,19 @@ async function ensureTtsReadyForGender(rawGender) {
       throw new Error("WASM TTS init disposed");
     }
 
-    if (activeTtsInstance) {
-      try {
-        activeTtsInstance.free();
-      } catch {
-        // Ignore previous instance free errors
-      }
-      activeTtsInstance = null;
-      activeGender = null;
-    }
-
     const FS = M.__exposeFS || M.FS;
+    const modelMemPath = `./model-${gender}.onnx`;
+    const tokensMemPath = `./tokens-${gender}.txt`;
     for (const { spec: mf, bytes } of modelAssets) {
+      const targetMemPath = mf.localName.endsWith(".onnx")
+        ? modelMemPath
+        : tokensMemPath;
       try {
-        FS.unlink(`./${mf.localName}`);
+        FS.unlink(targetMemPath);
       } catch {
         // Ignore if missing
       }
-      FS.writeFile(`./${mf.localName}`, bytes);
+      FS.writeFile(targetMemPath, bytes);
     }
 
     const emptyModelPart = {
@@ -619,9 +613,9 @@ async function ensureTtsReadyForGender(rawGender) {
     const customConfig = {
       offlineTtsModelConfig: {
         offlineTtsVitsModelConfig: {
-          model: "./model.onnx",
+          model: modelMemPath,
           lexicon: "",
-          tokens: "./tokens.txt",
+          tokens: tokensMemPath,
           dataDir: "",
           noiseScale: spec.noiseScale,
           noiseScaleW: spec.noiseScaleW,
@@ -642,14 +636,31 @@ async function ensureTtsReadyForGender(rawGender) {
       maxNumSentences: 1,
     };
 
-    const instance = self.createOfflineTts(M, customConfig);
-
-    // Free ~63 MB weights copy from MEMFS immediately after ONNX Runtime session loads them.
-    for (const mf of spec.files) {
-      try {
-        FS.unlink(`./${mf.localName}`);
-      } catch {
-        // Ignore cleanup failure
+    let instance = null;
+    try {
+      instance = self.createOfflineTts(M, customConfig);
+    } catch (allocErr) {
+      // Low-memory fallback: evict opposite gender ONNX session if resident and retry once.
+      const otherGender = gender === "male" ? "female" : "male";
+      if (ttsInstancesByGender[otherGender]) {
+        try {
+          ttsInstancesByGender[otherGender].free();
+        } catch {
+          // Ignore free error
+        }
+        ttsInstancesByGender[otherGender] = null;
+        instance = self.createOfflineTts(M, customConfig);
+      } else {
+        throw allocErr;
+      }
+    } finally {
+      // Free ~63 MB weights copy from MEMFS immediately after ONNX Runtime session loads them.
+      for (const memPath of [modelMemPath, tokensMemPath]) {
+        try {
+          FS.unlink(memPath);
+        } catch {
+          // Ignore cleanup failure
+        }
       }
     }
 
@@ -662,8 +673,7 @@ async function ensureTtsReadyForGender(rawGender) {
       throw new Error("WASM TTS init disposed");
     }
 
-    activeTtsInstance = instance;
-    activeGender = gender;
+    ttsInstancesByGender[gender] = instance;
     return { piper, tts: instance, gender };
   })().finally(() => {
     if (loadPromise === pending) {
@@ -764,14 +774,15 @@ self.onmessage = async (event) => {
       }
     }
     activeFetchControllers.clear();
-    if (activeTtsInstance) {
-      try {
-        activeTtsInstance.free();
-      } catch {
-        // Ignore
+    for (const gKey of ["female", "male"]) {
+      if (ttsInstancesByGender[gKey]) {
+        try {
+          ttsInstancesByGender[gKey].free();
+        } catch {
+          // Ignore
+        }
+        ttsInstancesByGender[gKey] = null;
       }
-      activeTtsInstance = null;
-      activeGender = null;
     }
     loadPromise = null;
     loadingGender = null;

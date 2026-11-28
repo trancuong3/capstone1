@@ -1173,6 +1173,12 @@ export function hydrateTeacherVoiceFromChildProfile(
         syncActiveServerSessionLock: options?.syncActiveServerSessionLock,
       });
     }
+    if (currentMeta.globalSelectionUpdatedAt > 0 && !currentMeta.childId) {
+      setSpeechPreferencesMeta({
+        ...currentMeta,
+        childId: child.id,
+      });
+    }
     return null;
   }
 

@@ -19,7 +19,7 @@ import {
   getBrowserWasmSttClient,
 } from "@/lib/reading/browser-wasm-stt";
 import {
-  getFreshVoiceEngineHealth,
+  getVoiceEngineHealthForRouting,
   isPermanentlyHostedLocalUnconfigured,
   markHostedLocalUnconfigured,
   recordSttEngineUsage,
@@ -53,8 +53,8 @@ export type WordPracticeState =
 
 export const SHORT_WORD_CAPTURE_CONFIG = {
   mode: "short-word" as const,
-  pollIntervalMs: 120,
-  acousticSettleMs: 140,
+  pollIntervalMs: 60,
+  acousticSettleMs: 45,
   minCaptureMs: 800,
   postSpeechSilenceMs: 950,
   noSpeechTimeoutMs: 4500,
@@ -155,19 +155,23 @@ export interface ShortWordSpeechActivityInput {
 export function hasShortWordSpeechActivity(
   input: ShortWordSpeechActivityInput,
 ): boolean {
-  const liveRms = input.quality
-    ? input.quality.rms
-    : input.audioLevel > 1
-      ? input.audioLevel / 500
-      : input.audioLevel;
+  const normalizedAudioLevel =
+    input.audioLevel > 1 ? input.audioLevel / 500 : input.audioLevel;
+  const liveRms =
+    input.speechObserved && input.audioLevel > 0
+      ? normalizedAudioLevel
+      : input.quality
+        ? input.quality.rms
+        : normalizedAudioLevel;
   const speechDurationMs = input.quality?.speechDurationMs ?? 0;
   const noiseFloor = input.quality?.noiseFloor ?? 0;
   const initialBurstOnset = !input.speechObserved && speechDurationMs >= 40;
   const speechDurationGrew =
     input.previousSpeechDurationMs !== undefined &&
     speechDurationMs > input.previousSpeechDurationMs;
+  const minEnergyFloor = input.speechObserved ? 0.008 : 0.0038;
   const hasRelativeEnergy =
-    liveRms >= Math.max(0.008, noiseFloor * 1.8) &&
+    liveRms >= Math.max(minEnergyFloor, noiseFloor * 1.6) &&
     (Boolean(input.speechObserved) ||
       (input.consecutiveEnergyPolls ?? 0) >= 2 ||
       speechDurationMs >= 40);
@@ -312,7 +316,7 @@ export async function evaluateRecordedShortWord({
     };
   }
 
-  const freshHealth = getFreshVoiceEngineHealth();
+  const freshHealth = getVoiceEngineHealthForRouting();
   const permanentlyUnconfigured =
     isPermanentlyHostedLocalUnconfigured(freshHealth);
   const localSttUnavailable =

@@ -18,7 +18,12 @@ import {
   getVoicePolicyPreferences,
   hasPendingSessionVoiceSwitch,
   inferModelVersionForVoiceId,
+  STATIC_LOCAL_VOICES,
 } from "@/lib/reading/session-voice-lock";
+import {
+  getBrowserOnlineStatus,
+  recordTtsEngineUsage,
+} from "@/lib/reading/voice-engine-status";
 import {
   getSpeechPreferences,
   getSpeechPreferencesMeta,
@@ -35,7 +40,6 @@ import {
   getPreferredJsonTtsAcceptHeader,
   type TtsAudioFormat,
 } from "@/lib/reading/tts-audio-format";
-import { recordTtsEngineUsage } from "@/lib/reading/voice-engine-status";
 import { resolveVoiceGender } from "@/lib/reading/voice-persona";
 import { getApiBaseUrl } from "@/lib/supabase/config";
 
@@ -239,6 +243,14 @@ function base64ToBlob(base64: string, contentType: string): Blob {
 export function createVoiceStudioService(): VoiceStudioService {
   return {
     async listVoices(signal) {
+      if (!getBrowserOnlineStatus()) {
+        return {
+          voices: [...STATIC_LOCAL_VOICES],
+          default_voice_id: DEFAULT_LOCAL_VOICE_ID,
+          local_worker_ready: false,
+          google_tts_available: false,
+        };
+      }
       const policy = getVoicePolicyPreferences();
       const query =
         policy.providerMode === "local_with_google_fallback" &&
@@ -312,7 +324,7 @@ export function createVoiceStudioService(): VoiceStudioService {
         options.voiceId ??
         activeLock?.voiceId ??
         (options.voiceId === null
-          ? null
+          ? defaultVoiceOverride
           : (speechPrefs.voiceId ?? defaultVoiceOverride));
       const cacheVoiceId =
         resolvedRequestVoiceId ??

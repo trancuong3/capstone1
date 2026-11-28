@@ -1,6 +1,9 @@
 import { getBrowserAccessToken } from "@/lib/api/browser-auth";
 import {
+  getEffectiveVoiceId,
+  getVoicePolicyPreferences,
   inferRegionFromVoiceId,
+  subscribeVoicePolicy,
   type VoiceRegion,
 } from "@/lib/reading/session-voice-lock";
 import {
@@ -89,6 +92,7 @@ function createIdleSnapshot(kind: "stt" | "tts"): EngineSourceSnapshot {
 
 export const VOICE_HEALTH_FRESHNESS_MS = 30_000;
 export const VOICE_UNCONFIGURED_ROUTING_TTL_MS = 10 * 60_000;
+export const VOICE_LOCAL_DOWN_ROUTING_TTL_MS = 2 * 60_000;
 
 let state: VoiceEngineStatusState = {
   stt: createIdleSnapshot("stt"),
@@ -306,18 +310,113 @@ export function getFreshVoiceEngineHealth(
  * hosted-backend health snapshot for up to 10 minutes so mobile/web sessions do
  * not regress into doomed localhost-worker roundtrips after 30 seconds idle.
  */
+function seedIdleStatusFromHealth(
+  health: VoiceEngineHealthSnapshot,
+  forceRefresh = false,
+): void {
+  const policy = getVoicePolicyPreferences();
+  const allowCloudStt =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleSttFallback;
+  const allowCloudTts =
+    policy.providerMode === "local_with_google_fallback" &&
+    policy.allowGoogleTtsFallback;
+  const effectiveVoiceId = getEffectiveVoiceId();
+  const effectiveGender = resolveVoiceGender(effectiveVoiceId);
+
+  let changed = false;
+  let nextStt = state.stt;
+  let nextTts = state.tts;
+
+  if (state.stt.tier === "idle" || forceRefresh) {
+    const sttProvider =
+      health.local.available && health.local.stt_ready
+        ? "local"
+        : allowCloudStt &&
+            health.elevenlabs?.stt_configured &&
+            !health.elevenlabs.stt_cooldown
+          ? "elevenlabs"
+          : allowCloudStt &&
+              health.google.stt_configured &&
+              !health.google.stt_cooldown
+            ? "google"
+            : "wasm";
+    nextStt = mapProviderToEngineSnapshot({
+      kind: "stt",
+      provider: sttProvider,
+      fallbackUsed: false,
+      fallbackReason: null,
+    });
+    changed = true;
+  }
+
+  if (state.tts.tier === "idle" || forceRefresh) {
+    const elevenLabsTtsUsable = Boolean(
+      allowCloudTts &&
+      health.elevenlabs?.tts_configured &&
+      !health.elevenlabs.tts_cooldown &&
+      (effectiveGender !== "male" ||
+        health.elevenlabs.male_tts_configured === true),
+    );
+    const ttsProvider =
+      health.local.available && health.local.tts_ready
+        ? "local"
+        : elevenLabsTtsUsable
+          ? "elevenlabs"
+          : allowCloudTts &&
+              health.google.tts_configured &&
+              !health.google.tts_cooldown
+            ? "google"
+            : "precomputed_cache";
+    nextTts = mapProviderToEngineSnapshot({
+      kind: "tts",
+      provider: ttsProvider,
+      fallbackUsed: false,
+      fallbackReason: null,
+      voiceId: effectiveVoiceId,
+      voiceGender: effectiveGender,
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    state = { stt: nextStt, tts: nextTts };
+    emit();
+  }
+}
+
+subscribeVoicePolicy(() => {
+  if (cachedHealth) {
+    seedIdleStatusFromHealth(cachedHealth, state.stt.tier === "idle");
+  }
+});
+
 export function getVoiceEngineHealthForRouting(
   maxAgeMs = VOICE_HEALTH_FRESHNESS_MS,
 ): VoiceEngineHealthSnapshot | null {
   const fresh = getFreshVoiceEngineHealth(maxAgeMs);
   if (fresh) return fresh;
-  if (
-    cachedHealth &&
-    cachedHealthFetchedAt > 0 &&
-    isHostedLocalVoiceUnconfigured(cachedHealth) &&
-    Date.now() - cachedHealthFetchedAt <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
-  ) {
-    return cachedHealth;
+  if (cachedHealth && cachedHealthFetchedAt > 0) {
+    const age = Date.now() - cachedHealthFetchedAt;
+    if (
+      isHostedLocalVoiceUnconfigured(cachedHealth) &&
+      age <= VOICE_UNCONFIGURED_ROUTING_TTL_MS
+    ) {
+      return cachedHealth;
+    }
+    if (
+      !cachedHealth.local.available &&
+      age <= VOICE_LOCAL_DOWN_ROUTING_TTL_MS
+    ) {
+      if (
+        typeof window !== "undefined" &&
+        process.env.NODE_ENV !== "test" &&
+        !inFlightHealthPromise
+      ) {
+        void fetchVoiceEngineHealth().catch(() => null);
+      }
+      return cachedHealth;
+    }
   }
   return null;
 }
@@ -337,6 +436,7 @@ export function setCachedVoiceEngineHealth(
     } else if (health.local.configured === true && health.local.available) {
       permanentlyHostedLocalUnconfigured = false;
     }
+    seedIdleStatusFromHealth(health);
   }
   emitHealth();
 }

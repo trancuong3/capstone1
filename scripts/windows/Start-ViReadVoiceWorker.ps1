@@ -60,6 +60,7 @@ function Resolve-VoiceWorkerToken([string]$explicitToken) {
     }
     $envFiles = @(
         (Join-Path $repoRoot "backend\.env"),
+        (Join-Path (Split-Path $repoRoot -Parent) "capstone1\backend\.env"),
         "F:\c1\tools\viread-workers.env",
         "F:\c1\capstone1\backend\.env"
     ) | Select-Object -Unique
@@ -203,7 +204,7 @@ while ((Get-Date) -lt $deadline) {
         exit 5
     }
     try {
-        $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -TimeoutSec 3
+        $health = Invoke-RestMethod -Uri "http://${BindHost}:${Port}/health" -Headers $healthHeaders -TimeoutSec 3
         if ($health -and $health.status -eq "ok") {
             $ready = $true
             break

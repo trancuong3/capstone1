@@ -36,6 +36,7 @@ DEFAULT_LOCAL_TTS_PRECISION = "hybrid"
 DEFAULT_LOCAL_STT_MODE = "ws"
 LOCAL_STT_MODEL_VERSION = "sherpa-onnx-zipformer-vi-30m-int8-2026-02-09"
 CONNECT_TIMEOUT_SECONDS = 5.0
+LOOPBACK_CONNECT_TIMEOUT_SECONDS = 0.4
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 # Shared per-(event_loop, base_url) AsyncClient pool so persistent TLS connections
@@ -541,7 +542,7 @@ class LocalVoiceProvider:
 
     @staticmethod
     def _make_timeout(read_timeout: float, connect_timeout: float = CONNECT_TIMEOUT_SECONDS) -> httpx.Timeout:
-        connect = min(CONNECT_TIMEOUT_SECONDS, max(0.5, float(connect_timeout)))
+        connect = min(CONNECT_TIMEOUT_SECONDS, max(0.25, float(connect_timeout)))
         read = max(0.5, float(read_timeout))
         return httpx.Timeout(read, connect=connect, write=min(15.0, read), pool=5.0)
 
@@ -661,7 +662,14 @@ class LocalVoiceProvider:
         headers = self._request_headers(include_auth=True)
         if extra_headers:
             headers.update(extra_headers)
-        http_timeout = self._make_timeout(timeout)
+        http_timeout = self._make_timeout(
+            timeout,
+            connect_timeout=(
+                LOOPBACK_CONNECT_TIMEOUT_SECONDS
+                if self.is_loopback
+                else CONNECT_TIMEOUT_SECONDS
+            ),
+        )
         retry_limit = max(0, int(max_retries))
         busy_retry_limit = max(3, retry_limit)
         retries_used = 0

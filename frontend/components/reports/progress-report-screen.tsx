@@ -8,9 +8,10 @@ import {
   RefreshCw,
 } from "lucide-react";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
 import { Skeleton } from "@/components/common/skeleton";
@@ -181,6 +182,9 @@ function ProgressReportContent({
   const t = useTranslations("reports");
   const tCommon = useTranslations("common");
   const tNav = useTranslations("navigation");
+  const appStore = useContext(AppStoreContext);
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? undefined;
   const { childService, reportService } = useReportServices();
   const [state, setState] = useState<State>({ status: "loading" });
   const loadedChild = state.status === "loaded" ? state.child : null;
@@ -323,7 +327,10 @@ function ProgressReportContent({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const child = children[0];
+        const child =
+          (preferredChildId
+            ? children.find((item) => item.id === preferredChildId)
+            : undefined) ?? children[0];
         const periodsPromise = reportService
           .listPeriods(child.id)
           .catch(() => null);
@@ -383,6 +390,7 @@ function ProgressReportContent({
     };
   }, [
     childService,
+    preferredChildId,
     reportService,
     requestedChildId,
     requestedPeriodStart,

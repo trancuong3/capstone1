@@ -1,11 +1,20 @@
 "use client";
 
 import { ArrowLeft, Mic, RefreshCw, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { AppStoreContext } from "@/components/providers/app-store-provider";
+import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { SelectField } from "@/components/common/select-field";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -17,6 +26,7 @@ import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useReportServices } from "@/hooks/use-report-services";
+import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { groupDifficultWordsByBook } from "@/lib/api/difficult-word-service";
 import { isServiceError } from "@/lib/api/service-error";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
@@ -70,8 +80,12 @@ export function DifficultWordsScreen({
   const { formatNumber } = useI18n();
   const t = useTranslations("difficultWords");
   const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const speechPlayer = useSpeechPlayer();
   const userId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? undefined;
   const { childService, difficultWordService } = useReportServices();
   const [requestKey, setRequestKey] = useState(0);
   const [periodDays, setPeriodDays] = useState<number>(
@@ -164,8 +178,9 @@ export function DifficultWordsScreen({
           PERSISTENT_USER_CACHE_MAX_STALE_MS,
         )?.data;
         const cachedChild = cachedChildren?.length
-          ? requestedChildId
-            ? cachedChildren.find((item) => item.id === requestedChildId)
+          ? preferredChildId
+            ? (cachedChildren.find((item) => item.id === preferredChildId) ??
+              (!requestedChildId ? cachedChildren[0] : undefined))
             : cachedChildren[0]
           : undefined;
         if (cachedChildren && cachedChild) {
@@ -199,12 +214,14 @@ export function DifficultWordsScreen({
             setState({ status: "no-children" });
           return;
         }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
         const child = matchedChild
           ? matchedChild
-          : await childService.get(requestedChildId!);
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(currentDateInReportTimezone(), periodDays),
@@ -256,6 +273,7 @@ export function DifficultWordsScreen({
     childService,
     difficultWordService,
     periodDays,
+    preferredChildId,
     requestKey,
     requestedChildId,
     userId,
@@ -507,17 +525,37 @@ export function DifficultWordsScreen({
       <div className={selectedPracticeWord ? "hidden sm:block" : undefined}>
         <ReportPageHeader
           action={
-            <ButtonLink
-              className="sm:w-auto"
-              href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
-              variant="secondary"
-            >
-              <ArrowLeft
-                aria-hidden="true"
-                className="viread-rtl-flip size-5"
-              />
-              {t("screen.backToReports")}
-            </ButtonLink>
+            <div className="flex flex-wrap items-center gap-2">
+              {!selectedPracticeWord ? (
+                <ReadingVoiceSettings
+                  childId={state.child.id}
+                  fallbackNotice={speechPlayer.fallbackNotice}
+                  isPreviewing={speechPlayer.isPlaying}
+                  onPreview={(sample) => {
+                    speechPlayer.stop();
+                    return speechPlayer.play(sample, {
+                      coaching: true,
+                      cacheScope: "COACHING",
+                      isPrivateBook: false,
+                      bypassSessionLock: true,
+                      utteranceKind: "voice_preview",
+                    });
+                  }}
+                  onStopPreview={speechPlayer.stop}
+                />
+              ) : null}
+              <ButtonLink
+                className="sm:w-auto"
+                href={`/reports?childId=${encodeURIComponent(state.child.id)}`}
+                variant="secondary"
+              >
+                <ArrowLeft
+                  aria-hidden="true"
+                  className="viread-rtl-flip size-5"
+                />
+                {t("screen.backToReports")}
+              </ButtonLink>
+            </div>
           }
           description={t("screen.headerDescription", { days: periodDays })}
           eyebrow={t("screen.eyebrow")}

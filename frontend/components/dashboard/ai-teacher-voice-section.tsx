@@ -40,6 +40,7 @@ import {
 import {
   clampSpeed,
   getSpeechPreferences,
+  getSpeechPreferencesMeta,
   SPEED_MAX,
   SPEED_MIN,
   SPEED_STEP,
@@ -362,6 +363,49 @@ export function AiTeacherVoiceSection({
     },
     [childService, onChildSettingsUpdated],
   );
+
+  const syncedPreChildSelectionRef = useRef<string | null>(null);
+  const savedChildVoiceId = (() => {
+    const prefsRecord = selectedChild?.settings?.voice_preferences as
+      { readonly voice_id?: unknown } | undefined;
+    return typeof prefsRecord?.voice_id === "string"
+      ? prefsRecord.voice_id.trim()
+      : "";
+  })();
+  useEffect(() => {
+    const childId = selectedChild?.id;
+    if (!childId) return;
+    if (savedChildVoiceId) {
+      syncedPreChildSelectionRef.current = childId;
+      return;
+    }
+    const meta = getSpeechPreferencesMeta();
+    if (
+      meta.globalSelectionUpdatedAt <= 0 ||
+      meta.childId !== null ||
+      syncedPreChildSelectionRef.current === childId
+    ) {
+      return;
+    }
+    syncedPreChildSelectionRef.current = childId;
+    const prefs = getSpeechPreferences();
+    const resolvedVoiceId =
+      prefs.voiceId?.trim() ||
+      getDefaultVoiceIdForRegionAndGender(activeRegion, activeGender);
+    void persistChildVoice(childId, {
+      voice_id: resolvedVoiceId,
+      gender: resolveVoiceGender(resolvedVoiceId),
+      region: inferRegionFromVoiceId(resolvedVoiceId, activeRegion),
+      speed: clampSpeed(prefs.speed),
+      updated_at: meta.globalSelectionUpdatedAt,
+    });
+  }, [
+    activeGender,
+    activeRegion,
+    persistChildVoice,
+    savedChildVoiceId,
+    selectedChild?.id,
+  ]);
 
   const stopPreview = useCallback(() => {
     previewGenRef.current += 1;
