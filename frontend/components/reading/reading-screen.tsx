@@ -169,7 +169,6 @@ import {
 } from "@/lib/reading/browser-transcript-collector";
 import { ReadingStatusDialog } from "@/components/reading/reading-status-dialog";
 import { StatusBanner } from "@/components/reading/status-banner";
-import { TutorMessage } from "@/components/reading/tutor-message";
 import { OfflineOutboxStatusPill } from "@/components/offline/offline-pack-controls";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";

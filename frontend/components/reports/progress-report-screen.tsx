@@ -17,7 +17,6 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
-import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { EntertainmentLearningSummary } from "@/components/reports/entertainment-learning-summary";
 import {
   MetricCard,
