@@ -28,7 +28,7 @@
     "clearFilter": "Filter löschen",
     "paginationAria": "Paginierung der Bücherbibliothek",
     "paginationItemLabel": "Bücher",
-    "savedStatusError": "Status der gespeicherten Bücher konnte nicht geladen werden. Bitte überprüfen Sie das Backend und die Reading Management-Migration.",
+    "savedStatusError": "Status der gespeicherten Bücher konnte nicht geladen werden. Bitte versuchen Sie es gleich noch einmal.",
     "removedFromCollection": "Buch aus der Sammlung entfernt.",
     "savedForChild": "Buch im Profil des Kindes gespeichert.",
     "saveCollectionFailed": "Änderungen konnten nicht gespeichert werden. Bitte versuchen Sie es erneut; der Status wurde nicht aktualisiert.",

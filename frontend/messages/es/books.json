@@ -28,7 +28,7 @@
     "clearFilter": "Borrar filtros",
     "paginationAria": "Paginación de la biblioteca de libros",
     "paginationItemLabel": "libros",
-    "savedStatusError": "Error al cargar el estado de los libros guardados. Por favor, verifica el backend y la migración de Reading Management.",
+    "savedStatusError": "No se pudo cargar el estado de los libros guardados. Vuelve a intentarlo en unos minutos.",
     "removedFromCollection": "Libro eliminado de la colección.",
     "savedForChild": "Libro guardado en el perfil del niño.",
     "saveCollectionFailed": "No se pudieron guardar los cambios. Por favor, inténtalo de nuevo; el estado no se ha actualizado.",

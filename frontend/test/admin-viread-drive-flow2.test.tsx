@@ -642,13 +642,13 @@ describe("AdminVireadTrainingScreen - Flow 2 Google Drive & Safety Controls", ()
         screen.getByRole("button", { name: /Kiểm tra kết nối/i }),
       ).toBeInTheDocument();
     });
-    await user.click(
-      screen.getByRole("button", { name: /Kiểm tra kết nối/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /Kiểm tra kết nối/i }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Cảnh báo xóa tạm thời \(Google Drive Trash Fallback\)/i),
+        screen.getByText(
+          /Cảnh báo xóa tạm thời \(Google Drive Trash Fallback\)/i,
+        ),
       ).toBeInTheDocument();
     });
   });

@@ -93,13 +93,16 @@ async def create_picture_session(
     resolved_target_words = target_words if isinstance(target_words, str) else None
     resolved_refresh = refresh_ai_guide if isinstance(refresh_ai_guide, bool) else False
     resolved_auto_select = auto_select if isinstance(auto_select, bool) else False
+    resolved_image = (
+        image if image is not None and not isinstance(image, bool) and hasattr(image, "read") else None
+    )
 
     upload_bytes: bytes | None = None
-    if image is not None and hasattr(image, "read"):
+    if resolved_image is not None:
         try:
-            upload_bytes = await image.read(MAX_UPLOAD_BYTES + 1)
+            upload_bytes = await resolved_image.read(MAX_UPLOAD_BYTES + 1)
         finally:
-            await image.close()
+            await resolved_image.close()
         if len(upload_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

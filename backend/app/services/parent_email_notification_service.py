@@ -1181,6 +1181,7 @@ class ParentEmailNotificationService:
                                     f"{snap.child.Alias} đã duy trì đọc sách đều đặn "
                                     f"{streak} ngày liên tiếp trên ViRead."
                                 ),
+                                milestone_kind="STREAK",
                             ),
                         )
                     )
@@ -1214,6 +1215,7 @@ class ParentEmailNotificationService:
                                     f"{snap.child.Alias} đã đạt {value}/{goal.TargetValue} "
                                     f"{unit} cho mục tiêu đọc {period_text}."
                                 ),
+                                milestone_kind="GOAL",
                             ),
                         )
                     )
@@ -1243,6 +1245,7 @@ class ParentEmailNotificationService:
                                 f"{snap.child.Alias} vừa hoàn thành buổi đọc đầu tiên trên ViRead. "
                                 "Khởi đầu thật tuyệt vời!"
                             ),
+                            milestone_kind="FIRST_SESSION",
                         ),
                     )
                 )

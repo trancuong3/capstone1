@@ -51,22 +51,52 @@ async def simple_import_song(
     actor_id: UUID = Depends(require_admin_id),
     service: KaraokeSimpleImportService = Depends(get_karaoke_simple_import_service),
 ):
+    resolved_title = title if isinstance(title, str) else None
+    resolved_author = author if isinstance(author, str) else None
+    resolved_min_grade = (
+        min_grade if isinstance(min_grade, int) and not isinstance(min_grade, bool) else 1
+    )
+    resolved_max_grade = (
+        max_grade if isinstance(max_grade, int) and not isinstance(max_grade, bool) else 5
+    )
+    resolved_lyrics_text = lyrics_text if isinstance(lyrics_text, str) else None
+    resolved_audio_type: AudioType = (
+        audio_type
+        if isinstance(audio_type, str)
+        and audio_type in ("VOCAL_FULL", "INSTRUMENTAL_ONLY", "DUAL_TRACK", "UNKNOWN")
+        else "UNKNOWN"
+    )
+    resolved_bpm = (
+        float(bpm) if isinstance(bpm, (int, float)) and not isinstance(bpm, bool) else None
+    )
+    resolved_auto_transcribe = auto_transcribe if isinstance(auto_transcribe, bool) else True
+    resolved_enable_bg = (
+        enable_background_processing
+        if isinstance(enable_background_processing, bool)
+        else True
+    )
+    resolved_source_note = source_note if isinstance(source_note, str) else None
+    resolved_usage_note = usage_note if isinstance(usage_note, str) else None
+    resolved_rights_confirmed = rights_confirmed if isinstance(rights_confirmed, bool) else False
+    resolved_child_safe_confirmed = (
+        child_safe_confirmed if isinstance(child_safe_confirmed, bool) else False
+    )
     return await service.simple_import(
         actor_id,
         audio=audio,
-        title=title,
-        author=author,
-        min_grade=min_grade,
-        max_grade=max_grade,
-        lyrics_text=lyrics_text,
-        audio_type=audio_type,
-        bpm=bpm,
-        auto_transcribe=auto_transcribe,
-        enable_background_processing=enable_background_processing,
-        source_note=source_note,
-        usage_note=usage_note,
-        rights_confirmed=rights_confirmed,
-        child_safe_confirmed=child_safe_confirmed,
+        title=resolved_title,
+        author=resolved_author,
+        min_grade=resolved_min_grade,
+        max_grade=resolved_max_grade,
+        lyrics_text=resolved_lyrics_text,
+        audio_type=resolved_audio_type,
+        bpm=resolved_bpm,
+        auto_transcribe=resolved_auto_transcribe,
+        enable_background_processing=resolved_enable_bg,
+        source_note=resolved_source_note,
+        usage_note=resolved_usage_note,
+        rights_confirmed=resolved_rights_confirmed,
+        child_safe_confirmed=resolved_child_safe_confirmed,
     )
 
 

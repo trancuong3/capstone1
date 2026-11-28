@@ -419,7 +419,7 @@
     "errorTitle": "문제가 발생했습니다",
     "savedTitle": "저장됨",
     "loadChildFailed": "아이 프로필을 불러올 수 없습니다. 다시 시도해 주세요.",
-    "loadManagementFailed": "독서 관리 데이터를 불러올 수 없습니다. 백엔드 및 독서 관리 마이그레이션을 확인한 후 다시 시도하세요.",
+    "loadManagementFailed": "독서 관리 데이터를 불러올 수 없습니다. 잠시 후 다시 시도해 주세요.",
     "mutationUnconfirmed": "작업을 완료할 수 없습니다. 데이터가 저장된 것으로 확인되지 않았습니다. 다시 시도해 주세요.",
     "overviewAria": "독서 습관 개요",
     "summaryRunningGoals": "진행 중인 목표",

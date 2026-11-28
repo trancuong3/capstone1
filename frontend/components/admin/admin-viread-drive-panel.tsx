@@ -633,11 +633,14 @@ export function AdminVireadDrivePanel({
                 <>
                   {" "}
                   · Delete mode:{" "}
-                  <code className="font-mono">{selfTestResult.delete_mode}</code>
+                  <code className="font-mono">
+                    {selfTestResult.delete_mode}
+                  </code>
                 </>
               ) : null}
             </p>
-            {selfTestResult.warning || selfTestResult.delete_mode === "trash_fallback" ? (
+            {selfTestResult.warning ||
+            selfTestResult.delete_mode === "trash_fallback" ? (
               <p className="mt-2 rounded-control border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-amber-900">
                 {selfTestResult.warning ||
                   "Apps Script Bridge đang fallback sang Thùng rác (trash_fallback). Hãy bật Services (+) -> Drive API trong Google Apps Script để xóa vĩnh viễn."}
@@ -646,8 +649,10 @@ export function AdminVireadDrivePanel({
           </div>
         ) : null}
 
-        {(status.delete_mode ?? healthTelemetry?.delete_mode) === "trash_fallback" ||
-        (status.advanced_drive_enabled ?? healthTelemetry?.advanced_drive_enabled) === false ||
+        {(status.delete_mode ?? healthTelemetry?.delete_mode) ===
+          "trash_fallback" ||
+        (status.advanced_drive_enabled ??
+          healthTelemetry?.advanced_drive_enabled) === false ||
         (status.warnings && status.warnings.length > 0) ||
         (healthTelemetry?.warnings && healthTelemetry.warnings.length > 0) ? (
           <div className="rounded-control border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">

@@ -28,7 +28,7 @@
     "clearFilter": "Effacer les filtres",
     "paginationAria": "Pagination de la bibliothèque",
     "paginationItemLabel": "livres",
-    "savedStatusError": "Échec du chargement du statut des livres enregistrés. Veuillez vérifier le backend et la migration de Reading Management.",
+    "savedStatusError": "Impossible de charger le statut des livres enregistrés. Veuillez réessayer dans quelques instants.",
     "removedFromCollection": "Livre retiré de la collection.",
     "savedForChild": "Livre enregistré dans le profil de l'enfant.",
     "saveCollectionFailed": "Échec de l'enregistrement des modifications. Veuillez réessayer ; le statut n'a pas été mis à jour.",

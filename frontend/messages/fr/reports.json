@@ -419,7 +419,7 @@
     "errorTitle": "Une erreur s'est produite",
     "savedTitle": "Enregistré",
     "loadChildFailed": "Impossible de charger le profil de l'enfant. Veuillez réessayer.",
-    "loadManagementFailed": "Impossible de charger les données de gestion de la lecture. Vérifiez le backend et les migrations de gestion de la lecture, puis réessayez.",
+    "loadManagementFailed": "Impossible de charger les données de gestion de la lecture. Veuillez réessayer dans quelques instants.",
     "mutationUnconfirmed": "L'action n'a pas pu être exécutée. Les données n'ont pas été confirmées comme enregistrées ; veuillez réessayer.",
     "overviewAria": "Aperçu des habitudes de lecture",
     "summaryRunningGoals": "Objectifs actifs",

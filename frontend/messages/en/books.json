@@ -28,7 +28,7 @@
     "clearFilter": "Clear filters",
     "paginationAria": "Book library pagination",
     "paginationItemLabel": "books",
-    "savedStatusError": "Failed to load saved book status. Please check backend and Reading Management migration.",
+    "savedStatusError": "Could not load saved book status. Please try again in a moment.",
     "removedFromCollection": "Book removed from collection.",
     "savedForChild": "Book saved to child's profile.",
     "saveCollectionFailed": "Failed to save changes. Please try again; status not updated.",
