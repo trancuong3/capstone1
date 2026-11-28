@@ -8,14 +8,28 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
 from app.schemas.child_progress import ActionRead, AssessmentTextRead, WeaknessRead
-from app.services.tutor_questions.config import _bool, _int, _model, _secret
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_TEXT_MODEL,
+    build_gemini_model_chain,
+    build_groq_model_chain,
+    extract_gemini_text,
+    gemini_thinking_config,
+    is_model_in_cooldown,
+    read_model_env,
+    read_secret_env,
+    record_cloud_ai_outcome,
+    strip_think_tags,
+)
+from app.services.tutor_questions.config import _bool, _int
 from app.services.tutor_questions.providers import _decode_json, _post
 from app.services.tutor_questions.types import QuestionProviderError
 
@@ -100,12 +114,43 @@ RESPONSE_SCHEMA: dict[str, Any] = {
 }
 
 
+_PRIMARY_REASON_PRIORITY: tuple[str, ...] = (
+    "PROVIDER_QUOTA",
+    "PROVIDER_AUTHENTICATION",
+    "PROVIDER_TIMEOUT",
+    "MODEL_UNAVAILABLE",
+    "PROVIDER_UNAVAILABLE",
+    "INVALID_CONTENT",
+)
+
+_ERROR_CODE_TO_REASON: dict[str, str] = {
+    "PROVIDER_QUOTA": "PROVIDER_QUOTA",
+    "PROVIDER_AUTHENTICATION": "PROVIDER_AUTHENTICATION",
+    "PROVIDER_TIMEOUT": "PROVIDER_TIMEOUT",
+    "MODEL_UNAVAILABLE": "MODEL_UNAVAILABLE",
+    "PROVIDER_UNAVAILABLE": "PROVIDER_UNAVAILABLE",
+    "PROVIDER_NETWORK": "PROVIDER_UNAVAILABLE",
+    "PROVIDER_REJECTED": "PROVIDER_UNAVAILABLE",
+    "INVALID_CONTENT": "INVALID_CONTENT",
+    "INVALID_RESPONSE": "INVALID_CONTENT",
+}
+
+
+def _classify_primary_reason(error_codes: list[str]) -> str:
+    normalized = {_ERROR_CODE_TO_REASON.get(code, "UNKNOWN") for code in error_codes}
+    for reason in _PRIMARY_REASON_PRIORITY:
+        if reason in normalized:
+            return reason
+    return "UNKNOWN"
+
+
 class AssessmentAIError(RuntimeError):
     """No provider produced a usable assessment."""
 
-    def __init__(self, attempts: list[str]) -> None:
+    def __init__(self, attempts: list[str], primary_reason: str = "UNKNOWN") -> None:
         super().__init__("ALL_PROVIDERS_FAILED")
         self.attempts = attempts
+        self.primary_reason = primary_reason
 
 
 @dataclass(frozen=True)
@@ -113,10 +158,10 @@ class ChildProgressConfig:
     enabled: bool = True
     gemini_api_key: str | None = field(default=None, repr=False)
     groq_api_key: str | None = field(default=None, repr=False)
-    gemini_model: str = "gemini-2.5-flash-lite"
-    gemini_fallback_model: str = "gemini-2.5-flash"
-    groq_model: str = "llama-3.3-70b-versatile"
-    timeout_seconds: int = 20
+    gemini_model: str = DEFAULT_GEMINI_PRIMARY_MODEL
+    gemini_fallback_model: str = DEFAULT_GEMINI_FALLBACK_MODEL
+    groq_model: str = DEFAULT_GROQ_TEXT_MODEL
+    timeout_seconds: int = 12
     cache_ttl_seconds: int = 24 * 3600
     refresh_cooldown_seconds: int = 60
 
@@ -124,14 +169,27 @@ class ChildProgressConfig:
     def from_environment(cls) -> "ChildProgressConfig":
         return cls(
             enabled=_bool("CHILD_PROGRESS_AI_ENABLED", True),
-            gemini_api_key=_secret("GEMINI_API_KEY"),
-            groq_api_key=_secret("GROQ_API_KEY"),
-            gemini_model=_model("CHILD_PROGRESS_GEMINI_MODEL", "gemini-2.5-flash-lite"),
-            gemini_fallback_model=_model(
-                "CHILD_PROGRESS_GEMINI_FALLBACK_MODEL", "gemini-2.5-flash"
+            gemini_api_key=read_secret_env("GEMINI_API_KEY"),
+            groq_api_key=read_secret_env("GROQ_API_KEY"),
+            gemini_model=read_model_env(
+                "CHILD_PROGRESS_GEMINI_MODEL",
+                "GEMINI_PRIMARY_MODEL",
+                "GEMINI_OCR_PRIMARY_MODEL",
+                default=DEFAULT_GEMINI_PRIMARY_MODEL,
             ),
-            groq_model=_model("CHILD_PROGRESS_GROQ_MODEL", "llama-3.3-70b-versatile"),
-            timeout_seconds=_int("CHILD_PROGRESS_TIMEOUT_SECONDS", 20, 1, 120),
+            gemini_fallback_model=read_model_env(
+                "CHILD_PROGRESS_GEMINI_FALLBACK_MODEL",
+                "GEMINI_FALLBACK_MODEL",
+                "GEMINI_OCR_FALLBACK_MODEL",
+                default=DEFAULT_GEMINI_FALLBACK_MODEL,
+            ),
+            groq_model=read_model_env(
+                "CHILD_PROGRESS_GROQ_MODEL",
+                "GROQ_PRIMARY_MODEL",
+                "GROQ_OCR_MODEL",
+                default=DEFAULT_GROQ_TEXT_MODEL,
+            ),
+            timeout_seconds=_int("CHILD_PROGRESS_TIMEOUT_SECONDS", 12, 1, 120),
             cache_ttl_seconds=_int("CHILD_PROGRESS_CACHE_TTL_SECONDS", 24 * 3600, 60, 7 * 24 * 3600),
             refresh_cooldown_seconds=_int("CHILD_PROGRESS_REFRESH_COOLDOWN_SECONDS", 60, 0, 3600),
         )
@@ -224,16 +282,45 @@ class ChildProgressAI:
     def available(self) -> bool:
         return self.config.has_provider
 
-    def _calls(self):
+    def _calls(self) -> list[tuple[str, str, str]]:
         cfg = self.config
         if not cfg.enabled:
             return []
-        calls = []
+        calls: list[tuple[str, str, str]] = []
         if cfg.gemini_api_key:
-            calls.append(("gemini-primary", "gemini", cfg.gemini_model))
-            calls.append(("gemini-fallback", "gemini", cfg.gemini_fallback_model))
+            gemini_models = build_gemini_model_chain(
+                cfg.gemini_model, cfg.gemini_fallback_model
+            )
+            alias_used = False
+            extra_idx = 0
+            for idx, model in enumerate(gemini_models):
+                if idx == 0:
+                    name = "gemini-primary"
+                elif idx == 1:
+                    name = "gemini-fallback"
+                elif model == DEFAULT_GEMINI_ALIAS_MODEL and not alias_used:
+                    name = "gemini-alias"
+                    alias_used = True
+                else:
+                    extra_idx += 1
+                    name = f"gemini-extra-{extra_idx}"
+                calls.append((name, "gemini", model))
         if cfg.groq_api_key:
-            calls.append(("groq", "groq", cfg.groq_model))
+            groq_models = build_groq_model_chain(cfg.groq_model, multimodal=False)
+            for idx, model in enumerate(groq_models):
+                if idx == 0:
+                    name = "groq"
+                elif idx == 1:
+                    name = "groq-fallback"
+                else:
+                    name = f"groq-extra-{idx - 1}"
+                calls.append((name, "groq", model))
+        if self._transport is None and calls:
+            non_cooled = [
+                entry for entry in calls if not is_model_in_cooldown(entry[1], entry[2])
+            ]
+            if non_cooled:
+                return non_cooled
         return calls
 
     async def _call(
@@ -253,27 +340,49 @@ class ChildProgressAI:
             "</so_lieu>"
         )
         if kind == "gemini":
-            data = await _post(
-                name,
-                f"{_GEMINI_API_BASE}/models/{model}:generateContent",
-                headers={"x-goog-api-key": self.config.gemini_api_key or ""},
-                payload={
-                    "systemInstruction": {"parts": [{"text": system_prompt}]},
-                    "contents": [{"role": "user", "parts": [{"text": user_text}]}],
-                    "generationConfig": {
-                        "temperature": 0.5,
-                        "responseMimeType": "application/json",
-                        "responseJsonSchema": RESPONSE_SCHEMA,
-                    },
-                },
-                timeout_seconds=self.config.timeout_seconds,
-                transport=self._transport,
-            )
+            thinking_cfg = gemini_thinking_config(model)
+            generation_config: dict[str, Any] = {
+                "temperature": 0.5,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": RESPONSE_SCHEMA,
+            }
+            if thinking_cfg is not None:
+                generation_config["thinkingConfig"] = thinking_cfg
+            payload = {
+                "systemInstruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": user_text}]}],
+                "generationConfig": generation_config,
+            }
+            url = f"{_GEMINI_API_BASE}/models/{model}:generateContent"
+            headers = {"x-goog-api-key": self.config.gemini_api_key or ""}
             try:
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-            except (KeyError, IndexError, TypeError) as exc:
-                raise QuestionProviderError(provider=name, code="INVALID_RESPONSE") from exc
-            return _decode_json(name, text)
+                data = await _post(
+                    name,
+                    url,
+                    headers=headers,
+                    payload=payload,
+                    timeout_seconds=self.config.timeout_seconds,
+                    transport=self._transport,
+                )
+            except QuestionProviderError as error:
+                if error.code == "PROVIDER_REJECTED" and thinking_cfg is not None:
+                    retry_gen_cfg = dict(generation_config)
+                    retry_gen_cfg.pop("thinkingConfig", None)
+                    retry_payload = {**payload, "generationConfig": retry_gen_cfg}
+                    data = await _post(
+                        name,
+                        url,
+                        headers=headers,
+                        payload=retry_payload,
+                        timeout_seconds=self.config.timeout_seconds,
+                        transport=self._transport,
+                    )
+                else:
+                    raise
+            text = extract_gemini_text(data)
+            if text is None:
+                raise QuestionProviderError(provider=name, code="INVALID_RESPONSE")
+            return _decode_json(name, strip_think_tags(text))
 
         data = await _post(
             name,
@@ -299,6 +408,8 @@ class ChildProgressAI:
             text = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise QuestionProviderError(provider=name, code="INVALID_RESPONSE") from exc
+        if isinstance(text, str):
+            text = strip_think_tags(text)
         return _decode_json(name, text)
 
     async def assess(
@@ -309,6 +420,7 @@ class ChildProgressAI:
         teacher_gender: str | None = None,
     ) -> AssessmentTextRead:
         attempts: list[str] = []
+        error_codes: list[str] = []
         skipped: set[str] = set()
         for name, kind, model in self._calls():
             if kind in skipped:
@@ -324,6 +436,21 @@ class ChildProgressAI:
                 )
             except QuestionProviderError as error:
                 attempts.append(f"{name}:{error.code}")
+                error_codes.append(error.code)
+                if self._transport is None:
+                    record_cloud_ai_outcome(
+                        "child_progress",
+                        kind,
+                        model,
+                        ok=False,
+                        error_code=error.code,
+                    )
+                logger.warning(
+                    "child_progress_ai_attempt_failed provider=%s model=%s code=%s",
+                    name,
+                    model,
+                    error.code,
+                )
                 # A bad key or exhausted quota fails every model of that vendor; a 5xx
                 # (overload) is per model, so the fallback model is still worth trying.
                 if error.code in {"PROVIDER_AUTHENTICATION", "PROVIDER_QUOTA"}:
@@ -331,8 +458,37 @@ class ChildProgressAI:
                 continue
             parsed = parse_assessment(payload, allowed_words=allowed_words, model=model)
             if parsed is not None:
-                logger.info("child_progress_ai_ok provider=%s attempts=%s", name, ",".join(attempts) or "-")
+                if self._transport is None:
+                    record_cloud_ai_outcome(
+                        "child_progress", kind, model, ok=True, http_status=200
+                    )
+                logger.info(
+                    "child_progress_ai_ok provider=%s model=%s attempts=%s",
+                    name,
+                    model,
+                    ",".join(attempts) or "-",
+                )
                 return parsed
             attempts.append(f"{name}:INVALID_CONTENT")
-        logger.warning("child_progress_ai_failed attempts=%s", ",".join(attempts) or "none")
-        raise AssessmentAIError(attempts)
+            error_codes.append("INVALID_CONTENT")
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "child_progress",
+                    kind,
+                    model,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                )
+            logger.warning(
+                "child_progress_ai_attempt_failed provider=%s model=%s code=%s",
+                name,
+                model,
+                "INVALID_CONTENT",
+            )
+        primary_reason = _classify_primary_reason(error_codes)
+        logger.warning(
+            "child_progress_ai_failed reason=%s attempts=%s",
+            primary_reason,
+            ",".join(attempts) or "none",
+        )
+        raise AssessmentAIError(attempts, primary_reason=primary_reason)

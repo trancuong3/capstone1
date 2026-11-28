@@ -2741,6 +2741,13 @@ async def _default_semantic_layout_provider_call(
         AiProviderCallError,
         classify_http_error,
     )
+    from app.services.cloud_ai_defaults import (
+        extract_gemini_text,
+        gemini_thinking_config,
+        read_secret_env,
+        record_cloud_ai_outcome,
+        strip_think_tags,
+    )
 
     family = str(getattr(provider, "family", "") or "").lower()
     model_id = str(getattr(provider, "model_id", "") or "")
@@ -2752,7 +2759,7 @@ async def _default_semantic_layout_provider_call(
         follow_redirects=False,
     ) as client:
         if family == "google":
-            api_key = (os.getenv("GEMINI_API_KEY") or "").strip()
+            api_key = read_secret_env("GEMINI_API_KEY") or ""
             if not api_key:
                 raise AiProviderCallError(
                     provider_id=provider_id,
@@ -2763,38 +2770,73 @@ async def _default_semantic_layout_provider_call(
                 f"https://generativelanguage.googleapis.com/v1beta/models/"
                 f"{model_id}:generateContent"
             )
+            generation_config: dict[str, Any] = {
+                "temperature": 0,
+                "responseMimeType": "application/json",
+            }
+            thinking_cfg = gemini_thinking_config(model_id)
+            if thinking_cfg is not None:
+                generation_config["thinkingConfig"] = thinking_cfg
+            payload = {
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": generation_config,
+            }
             response = await client.post(
                 url,
                 headers={"x-goog-api-key": api_key},
-                json={
-                    "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0,
-                        "responseMimeType": "application/json",
-                    },
-                },
+                json=payload,
             )
+            if response.status_code == 400 and thinking_cfg is not None:
+                generation_config.pop("thinkingConfig", None)
+                response = await client.post(
+                    url,
+                    headers={"x-goog-api-key": api_key},
+                    json=payload,
+                )
             if response.status_code != 200:
-                raise classify_http_error(
+                err = classify_http_error(
                     provider_id=provider_id,
                     status_code=response.status_code,
                     body_text=response.text[:1024],
                     retry_after_header=response.headers.get("retry-after"),
                 )
+                record_cloud_ai_outcome(
+                    "ocr_layout",
+                    "gemini",
+                    model_id,
+                    ok=False,
+                    error_code=err.code,
+                    http_status=response.status_code,
+                )
+                raise err
             data = response.json()
-            candidates = data.get("candidates") if isinstance(data, dict) else None
-            parts = candidates[0]["content"]["parts"] if candidates else []
-            text_out = parts[0].get("text") if parts and isinstance(parts[0], dict) else None
-            if not isinstance(text_out, str) or not text_out.strip():
+            text_out = extract_gemini_text(data)
+            cleaned_out = strip_think_tags(text_out) if isinstance(text_out, str) else ""
+            if not cleaned_out:
+                record_cloud_ai_outcome(
+                    "ocr_layout",
+                    "gemini",
+                    model_id,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
                 raise AiProviderCallError(
                     provider_id=provider_id,
                     kind=AiErrorKind.INVALID_OUTPUT,
                     code="EMPTY_GEMINI_LAYOUT_RESPONSE",
                 )
-            return text_out
+            record_cloud_ai_outcome(
+                "ocr_layout",
+                "gemini",
+                model_id,
+                ok=True,
+                http_status=response.status_code,
+            )
+            return cleaned_out
 
         if family == "groq":
-            api_key = (os.getenv("GROQ_API_KEY") or "").strip()
+            api_key = read_secret_env("GROQ_API_KEY") or ""
             if not api_key:
                 raise AiProviderCallError(
                     provider_id=provider_id,
@@ -2812,23 +2854,48 @@ async def _default_semantic_layout_provider_call(
                 },
             )
             if response.status_code != 200:
-                raise classify_http_error(
+                err = classify_http_error(
                     provider_id=provider_id,
                     status_code=response.status_code,
                     body_text=response.text[:1024],
                     retry_after_header=response.headers.get("retry-after"),
                 )
+                record_cloud_ai_outcome(
+                    "ocr_layout",
+                    "groq",
+                    model_id,
+                    ok=False,
+                    error_code=err.code,
+                    http_status=response.status_code,
+                )
+                raise err
             data = response.json()
             choices = data.get("choices") if isinstance(data, dict) else None
             msg = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
             text_out = msg.get("content") if isinstance(msg, dict) else None
-            if not isinstance(text_out, str) or not text_out.strip():
+            cleaned_out = strip_think_tags(text_out) if isinstance(text_out, str) else ""
+            if not cleaned_out:
+                record_cloud_ai_outcome(
+                    "ocr_layout",
+                    "groq",
+                    model_id,
+                    ok=False,
+                    error_code="INVALID_CONTENT",
+                    http_status=response.status_code,
+                )
                 raise AiProviderCallError(
                     provider_id=provider_id,
                     kind=AiErrorKind.INVALID_OUTPUT,
                     code="EMPTY_GROQ_LAYOUT_RESPONSE",
                 )
-            return text_out
+            record_cloud_ai_outcome(
+                "ocr_layout",
+                "groq",
+                model_id,
+                ok=True,
+                http_status=response.status_code,
+            )
+            return cleaned_out
 
         if family == "ollama":
             try:

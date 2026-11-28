@@ -31,6 +31,13 @@ from urllib.parse import urlparse
 
 import httpx
 
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_MULTIMODAL_MODEL,
+    strip_env_value,
+)
 from app.services.smart_studio_flags import SmartStudioFlags
 
 logger = logging.getLogger(__name__)
@@ -520,7 +527,7 @@ def _env_bool(env: Mapping[str, str], key: str, default: bool) -> bool:
 
 
 def _has_secret(env: Mapping[str, str], key: str) -> bool:
-    return bool((env.get(key) or "").strip())
+    return bool(strip_env_value(env.get(key)))
 
 
 _MAX_IMAGE_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap on generated image responses
@@ -572,19 +579,33 @@ def build_default_provider_registry(
         source_env, "GEMINI_IMAGE_GEN_PAID_OPT_IN", False
     ) or _env_bool(source_env, "GEMINI_IMAGE_BILLING_ENABLED", False)
 
-    gemini_primary = (source_env.get("GEMINI_OCR_PRIMARY_MODEL") or "gemini-2.5-flash-lite").strip()
-    gemini_fallback = (source_env.get("GEMINI_OCR_FALLBACK_MODEL") or "gemini-2.5-flash").strip()
-    groq_model = (source_env.get("GROQ_OCR_MODEL") or "llama-3.3-70b-versatile").strip()
-    ollama_model = (source_env.get("LOCAL_OCR_MODEL") or "qwen3-vl:4b-instruct-q4_K_M").strip()
+    gemini_primary = (
+        strip_env_value(source_env.get("GEMINI_OCR_PRIMARY_MODEL"))
+        or strip_env_value(source_env.get("GEMINI_PRIMARY_MODEL"))
+        or DEFAULT_GEMINI_PRIMARY_MODEL
+    )
+    gemini_fallback = (
+        strip_env_value(source_env.get("GEMINI_OCR_FALLBACK_MODEL"))
+        or strip_env_value(source_env.get("GEMINI_FALLBACK_MODEL"))
+        or DEFAULT_GEMINI_FALLBACK_MODEL
+    )
+    groq_model = (
+        strip_env_value(source_env.get("GROQ_OCR_MODEL"))
+        or strip_env_value(source_env.get("GROQ_PRIMARY_MODEL"))
+        or DEFAULT_GROQ_MULTIMODAL_MODEL
+    )
+    ollama_model = strip_env_value(source_env.get("LOCAL_OCR_MODEL")) or "qwen3-vl:4b-instruct-q4_K_M"
     cloudflare_model = (
-        source_env.get("CLOUDFLARE_IMAGE_MODEL") or "@cf/black-forest-labs/flux-1-schnell"
-    ).strip()
+        strip_env_value(source_env.get("CLOUDFLARE_IMAGE_MODEL"))
+        or "@cf/black-forest-labs/flux-1-schnell"
+    )
     local_diffusers_model = (
-        source_env.get("LOCAL_IMAGE_GEN_MODEL") or "Lykon/dreamshaper-8+lcm-lora-sdv1-5"
-    ).strip()
+        strip_env_value(source_env.get("LOCAL_IMAGE_GEN_MODEL"))
+        or "Lykon/dreamshaper-8+lcm-lora-sdv1-5"
+    )
     gemini_image_model = (
-        source_env.get("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image"
-    ).strip()
+        strip_env_value(source_env.get("GEMINI_IMAGE_MODEL")) or "gemini-2.5-flash-image"
+    )
 
     return (
         ProviderSpec(
@@ -614,7 +635,7 @@ def build_default_provider_registry(
         ProviderSpec(
             provider_id="gemini_alias",
             family="google",
-            model_id="gemini-flash-lite-latest",
+            model_id=DEFAULT_GEMINI_ALIAS_MODEL,
             capabilities=ALL_TEXT_VISION_CAPABILITIES,
             quota_group="gemini_free_shared",
             is_local=False,

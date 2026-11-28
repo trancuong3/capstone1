@@ -29,6 +29,7 @@ import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import type { ChildProgressAssessment } from "@/lib/api/child-progress-service";
+import { ServiceError } from "@/lib/api/service-error";
 import { getSpeechPreferencesMeta } from "@/lib/reading/speech-preferences";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
@@ -48,7 +49,38 @@ type View =
       status: "ready";
       data: ChildProgressAssessment;
       ai: "idle" | "writing" | "failed";
+      readonly aiReason?: string | null;
     };
+
+function classifyClientAiFailure(error: unknown): string {
+  if (error instanceof ServiceError) {
+    if (error.status === 429) return "PROVIDER_QUOTA";
+    if (error.status === 401 || error.status === 403) {
+      return "PROVIDER_AUTHENTICATION";
+    }
+    if (error.status === 504 || error.status === 0) return "PROVIDER_TIMEOUT";
+    if (error.status >= 500) return "PROVIDER_UNAVAILABLE";
+  }
+  return "UNKNOWN";
+}
+
+function resolveAiFallbackMessage(
+  reason: string | null | undefined,
+  t: ReturnType<typeof useTranslations>,
+): string {
+  switch (reason) {
+    case "PROVIDER_QUOTA":
+      return t("overview.assessmentCard.aiFallbackQuota");
+    case "PROVIDER_TIMEOUT":
+      return t("overview.assessmentCard.aiFallbackTimeout");
+    case "AI_NOT_CONFIGURED":
+    case "AI_DISABLED":
+    case "PROVIDER_AUTHENTICATION":
+      return t("overview.assessmentCard.aiFallbackConfig");
+    default:
+      return t("overview.assessmentCard.aiFallbackHint");
+  }
+}
 
 function useShortDate(): (iso: string) => string {
   const { formatDate, locale } = useI18n();
@@ -271,6 +303,7 @@ export function ChildProgressAssessmentCard({
   const [view, setView] = useState<View>({ status: "loading" });
   const [reloadKey, setReloadKey] = useState(0);
   const requestRef = useRef(0);
+  const refreshControllerRef = useRef<AbortController | null>(null);
   const initialLoadProgress = useAiProgress({
     active: Boolean(service) && view.status === "loading",
     expectedDurationMs: 8_000,
@@ -301,7 +334,12 @@ export function ChildProgressAssessmentCard({
         if (!isCurrent()) return;
         const needsAi =
           data.data_status === "OK" && data.assessment.source !== "AI";
-        setView({ status: "ready", data, ai: needsAi ? "writing" : "idle" });
+        setView({
+          status: "ready",
+          data,
+          ai: needsAi ? "writing" : "idle",
+          aiReason: null,
+        });
         if (!needsAi) return;
         service
           .generate(childId, days, {
@@ -310,17 +348,23 @@ export function ChildProgressAssessmentCard({
           })
           .then((next) => {
             if (!isCurrent()) return;
+            const aiSucceeded = next.assessment.source === "AI";
             setView({
               status: "ready",
               data: next,
-              ai: next.assessment.source === "AI" ? "idle" : "failed",
+              ai: aiSucceeded ? "idle" : "failed",
+              aiReason: aiSucceeded ? null : (next.ai_fallback_reason ?? null),
             });
           })
-          .catch(() => {
-            if (!isCurrent()) return;
+          .catch((error: unknown) => {
+            if (!isCurrent() || controller.signal.aborted) return;
             setView((current) =>
               current.status === "ready"
-                ? { ...current, ai: "failed" }
+                ? {
+                    ...current,
+                    ai: "failed",
+                    aiReason: classifyClientAiFailure(error),
+                  }
                 : current,
             );
           });
@@ -332,11 +376,16 @@ export function ChildProgressAssessmentCard({
     return () => {
       requestRef.current += 1;
       controller.abort();
+      refreshControllerRef.current?.abort();
+      refreshControllerRef.current = null;
     };
   }, [service, childId, days, reloadKey, teacherPersona.gender]);
 
   const refreshAi = useCallback(() => {
     if (!service || view.status !== "ready") return;
+    refreshControllerRef.current?.abort();
+    const controller = new AbortController();
+    refreshControllerRef.current = controller;
     const request = ++requestRef.current;
     const explicitGender =
       teacherPersona.gender === "male"
@@ -344,24 +393,33 @@ export function ChildProgressAssessmentCard({
         : getSpeechPreferencesMeta().updatedAt > 0
           ? ("female" as const)
           : undefined;
-    setView({ ...view, ai: "writing" });
+    setView({ ...view, ai: "writing", aiReason: null });
     service
       .generate(childId, days, {
         refresh: true,
+        signal: controller.signal,
         ...(explicitGender ? { teacherGender: explicitGender } : {}),
       })
       .then((next) => {
-        if (requestRef.current !== request) return;
+        if (requestRef.current !== request || controller.signal.aborted) return;
+        const aiSucceeded = next.assessment.source === "AI";
         setView({
           status: "ready",
           data: next,
-          ai: next.assessment.source === "AI" ? "idle" : "failed",
+          ai: aiSucceeded ? "idle" : "failed",
+          aiReason: aiSucceeded ? null : (next.ai_fallback_reason ?? null),
         });
       })
-      .catch(() => {
-        if (requestRef.current !== request) return;
+      .catch((error: unknown) => {
+        if (requestRef.current !== request || controller.signal.aborted) return;
         setView((current) =>
-          current.status === "ready" ? { ...current, ai: "failed" } : current,
+          current.status === "ready"
+            ? {
+                ...current,
+                ai: "failed",
+                aiReason: classifyClientAiFailure(error),
+              }
+            : current,
         );
       });
   }, [service, view, childId, days, teacherPersona.gender]);
@@ -497,7 +555,7 @@ function AssessmentBody({
   );
   const aiWritingProgress = useAiProgress({
     active: view.ai === "writing",
-    expectedDurationMs: 10_000,
+    expectedDurationMs: 12_000,
     stages: [
       { atPct: 0, label: tCommon("aiProgress.writingAssessment") },
       { atPct: 45, label: tCommon("aiProgress.analyzing") },
@@ -679,7 +737,7 @@ function AssessmentBody({
 
         {view.ai === "failed" ? (
           <StatusMessage tone="warning">
-            {t("overview.assessmentCard.aiFallbackHint")}
+            {resolveAiFallbackMessage(view.aiReason, t)}
           </StatusMessage>
         ) : null}
 

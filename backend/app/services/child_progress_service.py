@@ -7,13 +7,14 @@ import logging
 import time
 from collections import OrderedDict
 from datetime import date, datetime, time as day_time, timedelta
-from typing import Callable
+from typing import Callable, get_args
 from uuid import UUID
 
 from fastapi import HTTPException, status
 
 from app.repositories.child_progress_repository import ChildProgressRepository
 from app.schemas.child_progress import (
+    AiFallbackReason,
     AssessmentTextRead,
     ChildProgressAssessmentRead,
     ComprehensionTypeRead,
@@ -207,7 +208,7 @@ class ChildProgressService:
             difficult_words=top_difficult_words(current),
         )
 
-        text, cached = await self._comments(
+        text, cached, fallback_reason = await self._comments(
             child_id,
             facts,
             use_ai=use_ai,
@@ -245,6 +246,7 @@ class ChildProgressService:
             difficult_words=[DifficultWordStatRead(**word) for word in facts.difficult_words],
             assessment=text,
             ai_cached=cached,
+            ai_fallback_reason=fallback_reason,
         )
 
     async def _comments(
@@ -255,10 +257,10 @@ class ChildProgressService:
         use_ai: bool,
         refresh: bool,
         teacher_gender: str | None = None,
-    ) -> tuple[AssessmentTextRead, bool]:
+    ) -> tuple[AssessmentTextRead, bool, AiFallbackReason | None]:
         fallback = rule_based_assessment(facts)
         if facts.overall is None:
-            return fallback, False  # nothing meaningful to ask an AI about
+            return fallback, False, None  # nothing meaningful to ask an AI about
 
         payload = facts_payload(facts)
         fingerprint = hashlib.sha256(
@@ -275,9 +277,13 @@ class ChildProgressService:
         if cached is not None:
             age = time.monotonic() - cached[0]
             if not (use_ai and refresh and age >= self.config.refresh_cooldown_seconds):
-                return cached[1], True
-        if not (use_ai and self.ai.available):
-            return fallback, False
+                return cached[1], True, None
+        if not use_ai:
+            return fallback, False, None
+        if not self.config.enabled:
+            return fallback, False, "AI_DISABLED"
+        if not self.ai.available:
+            return fallback, False, "AI_NOT_CONFIGURED"
 
         ai_kwargs: dict[str, object] = {
             "allowed_words": [w["word"] for w in facts.difficult_words],
@@ -294,7 +300,16 @@ class ChildProgressService:
         try:
             text = await self.ai.assess(payload, **ai_kwargs)
         except AssessmentAIError as error:
-            logger.warning("Progress AI unavailable, using rule-based comments: %s", error.attempts)
-            return fallback, False
+            raw_reason = getattr(error, "primary_reason", "UNKNOWN")
+            valid_reasons = set(get_args(AiFallbackReason))
+            reason: AiFallbackReason = (
+                raw_reason if raw_reason in valid_reasons else "UNKNOWN"  # type: ignore[assignment]
+            )
+            logger.warning(
+                "Progress AI unavailable, using rule-based comments: reason=%s attempts=%s",
+                reason,
+                error.attempts,
+            )
+            return fallback, False, reason
         assessment_cache.put(key, text)
-        return text, False
+        return text, False, None
