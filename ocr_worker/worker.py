@@ -20,6 +20,7 @@ from ocr_worker.service import (
     OcrRuntimeManager,
     apply_windows_process_priority,
     build_worker_http_app,
+    is_cuda_oom_error,
     is_scale_to_zero_enabled,
     set_windows_below_normal_priority,
 )
@@ -32,6 +33,8 @@ DEFAULT_WAKE_BURST_SECONDS = 90.0
 DEFAULT_DRAIN_STRAGGLER_SECONDS = 3.0
 DEFAULT_MAX_DEGRADED_SECONDS = 180.0
 DEGRADED_RETRY_BACKOFF_SCHEDULE: tuple[float, ...] = (15.0, 30.0, 60.0)
+_ALL_5XX_STATUSES: frozenset[int] = frozenset(range(500, 600))
+_RETRYABLE_HTTP_STATUSES: frozenset[int] = frozenset({429, *range(500, 600)})
 _TRUTHY = {"1", "true", "yes", "on"}
 _FALSY = {"0", "false", "no", "off"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -214,32 +217,74 @@ class BackendOcrClient:
         transport: httpx.BaseTransport | None = None,
         storage_transport: httpx.BaseTransport | None = None,
         timeout_seconds: float | None = None,
-        completion_retry_attempts: int = 5,
+        completion_retry_attempts: int = 8,
         completion_retry_base_delay: float = 1.5,
     ):
         self.backend_url = backend_url.rstrip("/")
         if not worker_token or len(worker_token.strip()) < 32:
             raise ValueError("VIREAD_OCR_WORKER_TOKEN must be at least 32 characters.")
+        self._worker_token = worker_token.strip()
+        self._transport = transport
+        self._storage_transport = storage_transport
         self._completion_retry_attempts = max(1, int(completion_retry_attempts))
         self._completion_retry_base_delay = max(0.0, float(completion_retry_base_delay))
         resolved_timeout = resolve_backend_timeout_seconds(timeout_seconds)
         self.timeout_seconds = resolved_timeout
-        self._client = httpx.Client(
-            base_url=self.backend_url,
-            headers={"X-ViRead-Ocr-Worker-Token": worker_token.strip()},
-            timeout=resolved_timeout,
-            transport=transport,
-        )
-        # Never attach X-ViRead-Ocr-Worker-Token when downloading directly from signed storage URLs.
-        self._storage_client = httpx.Client(
-            timeout=max(resolved_timeout, 90.0),
-            follow_redirects=True,
-            transport=storage_transport,
-        )
+        self._local = threading.local()
+        self._clients_lock = threading.Lock()
+        self._all_clients: list[httpx.Client] = []
+
+    def _get_client(self) -> httpx.Client:
+        cli = getattr(self._local, "client", None)
+        if cli is None:
+            cli = httpx.Client(
+                base_url=self.backend_url,
+                headers={"X-ViRead-Ocr-Worker-Token": self._worker_token},
+                timeout=self.timeout_seconds,
+                transport=self._transport,
+            )
+            self._local.client = cli
+            with self._clients_lock:
+                self._all_clients.append(cli)
+        return cli
+
+    def _get_storage_client(self) -> httpx.Client:
+        cli = getattr(self._local, "storage_client", None)
+        if cli is None:
+            # Never attach X-ViRead-Ocr-Worker-Token when downloading directly from signed storage URLs.
+            cli = httpx.Client(
+                timeout=max(self.timeout_seconds, 90.0),
+                follow_redirects=True,
+                transport=self._storage_transport,
+            )
+            self._local.storage_client = cli
+            with self._clients_lock:
+                self._all_clients.append(cli)
+        return cli
+
+    @property
+    def _client(self) -> httpx.Client:
+        return self._get_client()
+
+    @property
+    def _storage_client(self) -> httpx.Client:
+        return self._get_storage_client()
 
     def close(self) -> None:
-        self._client.close()
-        self._storage_client.close()
+        with self._clients_lock:
+            clients = list(self._all_clients)
+            self._all_clients.clear()
+        for cli in clients:
+            try:
+                cli.close()
+            except Exception:
+                pass
+        for attr in ("client", "storage_client"):
+            if hasattr(self._local, attr):
+                try:
+                    delattr(self._local, attr)
+                except Exception:
+                    pass
 
     def _request_with_retry(
         self,
@@ -247,14 +292,16 @@ class BackendOcrClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
-        retryable_statuses: frozenset[int],
-        retryable_exceptions: tuple[type[Exception], ...],
+        retryable_statuses: frozenset[int] = _RETRYABLE_HTTP_STATUSES,
+        retryable_exceptions: tuple[type[Exception], ...] = (httpx.RequestError,),
         return_on_409: dict[str, Any] | None = None,
         timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         max_attempts = max(1, min(3, self._completion_retry_attempts))
         last_exc: Exception | None = None
-        request_kwargs: dict[str, Any] = {"json": json_body}
+        request_kwargs: dict[str, Any] = {}
+        if json_body is not None:
+            request_kwargs["json"] = json_body
         if timeout_seconds is not None:
             request_kwargs["timeout"] = float(timeout_seconds)
         for attempt in range(1, max_attempts + 1):
@@ -289,19 +336,18 @@ class BackendOcrClient:
             "POST",
             "/internal/ocr-jobs/worker-heartbeat",
             json_body=payload,
-            retryable_statuses=frozenset({429, 500, 502, 503, 504}),
+            retryable_statuses=_RETRYABLE_HTTP_STATUSES,
             retryable_exceptions=(httpx.RequestError,),
             timeout_seconds=timeout_seconds,
         )
 
     def get_active_model(self) -> dict[str, Any]:
-        retryable_statuses = {429, 500, 502, 503, 504}
         max_attempts = max(1, min(3, self._completion_retry_attempts))
         last_exc: Exception | None = None
         for attempt in range(1, max_attempts + 1):
             try:
                 resp = self._client.get("/internal/ocr-jobs/active-model")
-                if resp.status_code in retryable_statuses and attempt < max_attempts:
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < max_attempts:
                     delay = min(6.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
                     if delay > 0:
                         time.sleep(delay)
@@ -320,11 +366,29 @@ class BackendOcrClient:
 
     def download_direct_url(self, url: str) -> bytes | None:
         """Download shard/config directly from a signed Storage URL without worker auth headers."""
-        resp = self._storage_client.get(url)
-        if resp.status_code in (400, 401, 403, 404):
-            return None
-        resp.raise_for_status()
-        return bytes(resp.content)
+        max_attempts = max(1, min(3, self._completion_retry_attempts))
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._storage_client.get(url)
+                if resp.status_code in (400, 401, 403, 404):
+                    return None
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < max_attempts:
+                    delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return bytes(resp.content)
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def download_model_artifact(self, kind: str, shard_index: int | None = None) -> bytes:
         path = (
@@ -332,9 +396,27 @@ class BackendOcrClient:
             if kind == "config"
             else f"/internal/ocr-jobs/active-model/shard/{int(shard_index or 0)}"
         )
-        resp = self._client.get(path, timeout=120.0)
-        resp.raise_for_status()
-        return bytes(resp.content)
+        max_attempts = max(1, min(3, self._completion_retry_attempts))
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._client.get(path, timeout=120.0)
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < max_attempts:
+                    delay = min(6.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return bytes(resp.content)
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(6.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def claim_next_job(self, worker_id: str, *, lease_seconds: int = 120) -> dict[str, Any] | None:
         # Retry only pre-commit gateway/connect failures; never retry ReadTimeout to avoid double-leasing.
@@ -342,7 +424,7 @@ class BackendOcrClient:
             "POST",
             "/internal/ocr-jobs/claim",
             json_body={"worker_id": worker_id, "lease_seconds": lease_seconds},
-            retryable_statuses=frozenset({502, 503, 504}),
+            retryable_statuses=_RETRYABLE_HTTP_STATUSES,
             retryable_exceptions=(httpx.ConnectError, httpx.ConnectTimeout),
         )
         return data.get("job")
@@ -365,7 +447,7 @@ class BackendOcrClient:
                 "lease_seconds": lease_seconds,
                 "phase": phase,
             },
-            retryable_statuses=frozenset({429, 500, 502, 503, 504}),
+            retryable_statuses=_RETRYABLE_HTTP_STATUSES,
             retryable_exceptions=(httpx.RequestError,),
             return_on_409={"cancelled": True, "status": "CONFLICT"},
         )
@@ -373,12 +455,42 @@ class BackendOcrClient:
     def refresh_source_url(
         self, job_id: str, *, worker_id: str, fencing_token: int
     ) -> dict[str, Any]:
-        resp = self._client.post(
+        return self._request_with_retry(
+            "POST",
             f"/internal/ocr-jobs/{job_id}/refresh-source-url",
-            json={"worker_id": worker_id, "fencing_token": fencing_token},
+            json_body={"worker_id": worker_id, "fencing_token": fencing_token},
+            retryable_statuses=_RETRYABLE_HTTP_STATUSES,
+            retryable_exceptions=(httpx.RequestError,),
         )
-        resp.raise_for_status()
-        return dict(resp.json())
+
+    def _download_fallback_source_with_retry(self, fallback_path: str) -> bytes:
+        max_attempts = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._client.get(fallback_path)
+                if resp.status_code == 409:
+                    raise SourceImageDownloadError(
+                        "JOB_SUPERSEDED",
+                        "Source fetch rejected because lease is no longer active.",
+                        retryable=False,
+                    )
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < max_attempts:
+                    delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return bytes(resp.content)
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def download_job_source(self, job: dict[str, Any], *, worker_id: str) -> bytes:
         job_id = str(job["job_id"])
@@ -386,26 +498,41 @@ class BackendOcrClient:
         expected_sha = str(job["image_sha256"]).lower()
         source_url = job.get("source_url")
         fallback_path = job.get("source_fallback_path")
+        clean_fallback = fallback_path.strip() if isinstance(fallback_path, str) else ""
 
         raw: bytes | None = None
+        signed_exc: Exception | None = None
         if isinstance(source_url, str) and source_url.strip():
-            raw = self._fetch_signed_url_with_refresh(
-                source_url.strip(),
-                job_id=job_id,
-                worker_id=worker_id,
-                fencing_token=fencing_token,
-            )
-
-        if raw is None and isinstance(fallback_path, str) and fallback_path.strip():
-            resp = self._client.get(fallback_path.strip())
-            if resp.status_code == 409:
-                raise SourceImageDownloadError(
-                    "JOB_SUPERSEDED", "Source fetch rejected because lease is no longer active.", retryable=False
+            try:
+                raw = self._fetch_signed_url_with_refresh(
+                    source_url.strip(),
+                    job_id=job_id,
+                    worker_id=worker_id,
+                    fencing_token=fencing_token,
                 )
-            resp.raise_for_status()
-            raw = bytes(resp.content)
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                is_transient = isinstance(exc, httpx.RequestError) or (
+                    isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response is not None
+                    and exc.response.status_code in _RETRYABLE_HTTP_STATUSES
+                )
+                if not (clean_fallback and is_transient):
+                    raise
+                signed_exc = exc
+                logger.warning(
+                    "Signed URL source download failed for job %s (%s); falling back to %s.",
+                    job_id,
+                    type(exc).__name__,
+                    clean_fallback,
+                )
+                raw = None
+
+        if raw is None and clean_fallback:
+            raw = self._download_fallback_source_with_retry(clean_fallback)
 
         if raw is None:
+            if signed_exc is not None:
+                raise signed_exc
             raise SourceImageDownloadError("SOURCE_URL_UNAVAILABLE", "No source image URL available.")
 
         actual_sha = hashlib.sha256(raw).hexdigest()
@@ -425,20 +552,44 @@ class BackendOcrClient:
         worker_id: str,
         fencing_token: int,
     ) -> bytes | None:
-        resp = self._storage_client.get(initial_url)
-        if resp.status_code in (400, 401, 403):
-            refreshed = self.refresh_source_url(
-                job_id, worker_id=worker_id, fencing_token=fencing_token
-            )
-            new_url = refreshed.get("source_url")
-            if isinstance(new_url, str) and new_url.strip():
-                resp = self._storage_client.get(new_url.strip())
-            else:
-                return None
-        if resp.status_code == 404:
-            raise SourceImageDownloadError("SOURCE_NOT_FOUND", "Signed source image missing.", retryable=True)
-        resp.raise_for_status()
-        return bytes(resp.content)
+        current_url = initial_url
+        refreshed_once = False
+        max_attempts = 3
+        last_exc: Exception | None = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = self._storage_client.get(current_url)
+                if resp.status_code in (400, 401, 403) and not refreshed_once:
+                    refreshed_once = True
+                    refreshed = self.refresh_source_url(
+                        job_id, worker_id=worker_id, fencing_token=fencing_token
+                    )
+                    new_url = refreshed.get("source_url")
+                    if isinstance(new_url, str) and new_url.strip():
+                        current_url = new_url.strip()
+                        resp = self._storage_client.get(current_url)
+                    else:
+                        return None
+                if resp.status_code == 404:
+                    raise SourceImageDownloadError(
+                        "SOURCE_NOT_FOUND", "Signed source image missing.", retryable=True
+                    )
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < max_attempts:
+                    delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                    if delay > 0:
+                        time.sleep(delay)
+                    continue
+                resp.raise_for_status()
+                return bytes(resp.content)
+            except httpx.RequestError as exc:
+                last_exc = exc
+                if attempt >= max_attempts:
+                    raise
+                delay = min(4.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if delay > 0:
+                    time.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     def _post_idempotent_with_retry(
         self,
@@ -446,15 +597,14 @@ class BackendOcrClient:
         payload: dict[str, Any],
     ) -> tuple[int, dict[str, Any]]:
         """Post idempotent job completion/failure with bounded jittered backoff on 5xx/429/network errors."""
-        retryable_statuses = {429, 500, 502, 503, 504}
         last_exc: Exception | None = None
         for attempt in range(1, self._completion_retry_attempts + 1):
             try:
                 resp = self._client.post(path, json=payload)
                 if resp.status_code == 409:
                     return 409, dict(resp.json() if resp.content else {"detail": "conflict"})
-                if resp.status_code in retryable_statuses and attempt < self._completion_retry_attempts:
-                    delay = min(10.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                if resp.status_code in _RETRYABLE_HTTP_STATUSES and attempt < self._completion_retry_attempts:
+                    delay = min(18.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
                     jitter = delay * random.uniform(0.8, 1.2)
                     logger.warning(
                         "Transient HTTP %s posting %s (attempt %s/%s); retrying in %.2fs",
@@ -473,7 +623,7 @@ class BackendOcrClient:
                 last_exc = exc
                 if attempt >= self._completion_retry_attempts:
                     raise
-                delay = min(10.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
+                delay = min(18.0, self._completion_retry_base_delay * (2 ** (attempt - 1)))
                 jitter = delay * random.uniform(0.8, 1.2)
                 logger.warning(
                     "Transient network error posting %s (%s, attempt %s/%s); retrying in %.2fs",
@@ -568,6 +718,7 @@ def process_claimed_job(
         daemon=True,
         name=f"ocr_job_hb_{job_id[:8]}",
     )
+    runtime.mark_job_claimed(job_id)
     hb_thread.start()
 
     try:
@@ -661,30 +812,47 @@ def process_claimed_job(
             )
             return {"outcome": "failed_no_text", "status_code": status_code, "response": body}
 
-        err_code = (
-            "OCR_ENGINE_UNAVAILABLE"
-            if _is_ocr_exception(exc, "OcrEngineUnavailable")
-            else f"OCR_{type(exc).__name__}"[:64]
-        )
-        try:
-            status_code, body = client.fail_job(
-                job_id,
-                {
-                    "worker_id": worker_id,
-                    "fencing_token": fencing_token,
-                    "error_code": err_code,
-                    "error_message": f"{type(exc).__name__}",
-                    "retryable": True,
-                    "engine_diagnostics": {"engines": runtime.engines_snapshot()},
-                },
+        cuda_poisoned = bool(getattr(runtime, "is_cuda_poisoned", lambda: False)())
+        cuda_oom = is_cuda_oom_error(exc)
+        if cuda_poisoned:
+            err_code = "CUDA_CONTEXT_CORRUPTED"
+            retry_delay_seconds: int | None = 30
+        elif cuda_oom:
+            err_code = "CUDA_OOM"
+            retry_delay_seconds = 30
+        else:
+            err_code = (
+                "OCR_ENGINE_UNAVAILABLE"
+                if _is_ocr_exception(exc, "OcrEngineUnavailable")
+                else f"OCR_{type(exc).__name__}"[:64]
             )
+            retry_delay_seconds = None
+        fail_payload: dict[str, Any] = {
+            "worker_id": worker_id,
+            "fencing_token": fencing_token,
+            "error_code": err_code,
+            "error_message": f"{type(exc).__name__}",
+            "retryable": True,
+            "engine_diagnostics": {"engines": runtime.engines_snapshot()},
+        }
+        if retry_delay_seconds is not None:
+            fail_payload["retry_delay_seconds"] = retry_delay_seconds
+        try:
+            status_code, body = client.fail_job(job_id, fail_payload)
         except Exception:
             status_code, body = 500, {}
-        return {"outcome": "failed", "error_code": err_code, "status_code": status_code, "response": body}
+        return {
+            "outcome": "cuda_poisoned" if cuda_poisoned else "failed",
+            "error_code": err_code,
+            "status_code": status_code,
+            "response": body,
+            "cuda_poisoned": cuda_poisoned,
+        }
 
     finally:
         stop_hb.set()
         hb_thread.join(timeout=2.0)
+        runtime.clear_job_claimed(job_id)
         gc.collect()
 
 
@@ -796,22 +964,37 @@ def drain_queue_synchronously(
                     break
                 job = client.claim_next_job(runtime.worker_id, lease_seconds=lease_seconds)
                 if job is not None:
+                    claimed_id = str(job["job_id"])
+                    runtime.mark_job_claimed(claimed_id)
                     try:
-                        busy_hb = runtime.heartbeat_payload()
-                        busy_hb["status"] = "BUSY"
-                        busy_hb["active_job_id"] = str(job["job_id"])
-                        busy_hb["active_job_count"] = 1
-                        client.send_worker_heartbeat(busy_hb)
-                    except Exception:
-                        pass
-                    process_claimed_job(
-                        client,
-                        runtime,
-                        job,
-                        lease_seconds=lease_seconds,
-                        heartbeat_interval_seconds=hb_interval,
-                    )
-                    drained_jobs += 1
+                        try:
+                            busy_hb = runtime.heartbeat_payload()
+                            busy_hb["status"] = "BUSY"
+                            busy_hb["active_job_id"] = claimed_id
+                            busy_hb["active_job_count"] = 1
+                            client.send_worker_heartbeat(busy_hb)
+                        except Exception:
+                            pass
+                        process_claimed_job(
+                            client,
+                            runtime,
+                            job,
+                            lease_seconds=lease_seconds,
+                            heartbeat_interval_seconds=hb_interval,
+                        )
+                        drained_jobs += 1
+                    finally:
+                        runtime.clear_job_claimed(claimed_id)
+                    if runtime.is_cuda_poisoned():
+                        try:
+                            deg_hb = runtime.heartbeat_payload()
+                            deg_hb["status"] = "DEGRADED"
+                            deg_hb["active_job_id"] = None
+                            deg_hb["active_job_count"] = 0
+                            client.send_worker_heartbeat(deg_hb)
+                        except Exception:
+                            pass
+                        break
                     try:
                         idle_hb = runtime.heartbeat_payload()
                         if idle_hb.get("status") == "BUSY":
@@ -864,39 +1047,46 @@ def _run_claimed_job_cycle(
     on_heartbeat_sent: Callable[[float], Any] | None = None,
 ) -> float:
     """Execute one claimed OCR job with BUSY/IDLE heartbeats and burst renewal."""
-    if use_quiet_standby:
-        runtime.extend_burst_window(resolved_burst_seconds)
+    claimed_id = str(job["job_id"])
+    runtime.mark_job_claimed(claimed_id)
     last_hb = 0.0
     try:
-        busy_hb = runtime.heartbeat_payload()
-        busy_hb["status"] = "BUSY"
-        busy_hb["active_job_id"] = str(job["job_id"])
-        busy_hb["active_job_count"] = 1
-        client.send_worker_heartbeat(busy_hb)
-        last_hb = time.monotonic()
-        if on_heartbeat_sent is not None:
-            on_heartbeat_sent(last_hb)
-    except Exception:
-        pass
-    process_claimed_job(
-        client,
-        runtime,
-        job,
-        lease_seconds=lease_seconds,
-        heartbeat_interval_seconds=min(
-            max(5.0, heartbeat_seconds),
-            max(10.0, lease_seconds / 4.0),
-        ),
-    )
-    if use_quiet_standby:
+        if use_quiet_standby:
+            runtime.extend_burst_window(resolved_burst_seconds)
+        try:
+            busy_hb = runtime.heartbeat_payload()
+            busy_hb["status"] = "BUSY"
+            busy_hb["active_job_id"] = claimed_id
+            busy_hb["active_job_count"] = 1
+            client.send_worker_heartbeat(busy_hb)
+            last_hb = time.monotonic()
+            if on_heartbeat_sent is not None:
+                on_heartbeat_sent(last_hb)
+        except Exception:
+            pass
+        process_claimed_job(
+            client,
+            runtime,
+            job,
+            lease_seconds=lease_seconds,
+            heartbeat_interval_seconds=min(
+                max(5.0, heartbeat_seconds),
+                max(10.0, lease_seconds / 4.0),
+            ),
+        )
+    finally:
+        runtime.clear_job_claimed(claimed_id)
+    if use_quiet_standby and not runtime.is_cuda_poisoned():
         runtime.extend_burst_window(resolved_burst_seconds)
     try:
-        idle_hb = runtime.heartbeat_payload()
-        if idle_hb.get("status") == "BUSY":
-            idle_hb["status"] = "IDLE"
-        idle_hb["active_job_id"] = None
-        idle_hb["active_job_count"] = 0
-        client.send_worker_heartbeat(idle_hb)
+        post_hb = runtime.heartbeat_payload()
+        if runtime.is_cuda_poisoned():
+            post_hb["status"] = "DEGRADED"
+        elif post_hb.get("status") == "BUSY":
+            post_hb["status"] = "IDLE"
+        post_hb["active_job_id"] = None
+        post_hb["active_job_count"] = 0
+        client.send_worker_heartbeat(post_hb)
         last_hb = time.monotonic()
         if on_heartbeat_sent is not None:
             on_heartbeat_sent(last_hb)
@@ -1015,6 +1205,7 @@ def run_worker_forever(
     )
     http_thread = threading.Thread(target=server.run, daemon=True, name="ocr_worker_http")
     http_thread.start()
+    runtime.start_system_stats_updater(interval_seconds=15.0)
 
     try:
         runtime.initialize_and_verify_engines(
@@ -1093,6 +1284,8 @@ def run_worker_forever(
                 with runtime._state_lock:
                     in_quiet_idle = (
                         runtime._active_job_count == 0
+                        and runtime._claimed_job_id is None
+                        and not runtime._resyncing
                         and runtime._standby_mode in ("quiet_standby", "scale_to_zero")
                     )
                 if in_quiet_idle:
@@ -1163,6 +1356,24 @@ def run_worker_forever(
 
         while not stop_event.is_set():
             now = time.monotonic()
+
+            if runtime.is_cuda_poisoned():
+                logger.error(
+                    "CUDA context is corrupted (last_error=%s); sending DEGRADED heartbeat and exiting with code 3 for supervisor respawn.",
+                    runtime.health_payload().get("last_error"),
+                )
+                if client is not None:
+                    try:
+                        deg_hb = runtime.heartbeat_payload()
+                        deg_hb["status"] = "DEGRADED"
+                        deg_hb["active_job_id"] = None
+                        deg_hb["active_job_count"] = 0
+                        client.send_worker_heartbeat(deg_hb, timeout_seconds=5.0)
+                        _record_hb()
+                    except Exception:
+                        pass
+                exit_code = 3
+                break
 
             if runtime.is_draining():
                 _wait_for_wake_or_stop(stop_event, runtime.wake_event, 1.0)
@@ -1423,6 +1634,13 @@ def run_worker_forever(
                     )
 
             if did_work and not had_poll_error:
+                if runtime.is_cuda_poisoned():
+                    logger.error(
+                        "CUDA context corrupted during job execution (last_error=%s); exiting with code 3 for supervisor respawn.",
+                        runtime.health_payload().get("last_error"),
+                    )
+                    exit_code = 3
+                    break
                 continue
 
             idle_for = max(0.0, time.monotonic() - last_activity_at)
@@ -1448,6 +1666,7 @@ def run_worker_forever(
         stop_event.set()
         runtime.wake_event.set()
         server.should_exit = True
+        runtime.stop_system_stats_updater(timeout=2.0)
         if hb_thread is not None:
             hb_thread.join(timeout=2.0)
         if client is not None:

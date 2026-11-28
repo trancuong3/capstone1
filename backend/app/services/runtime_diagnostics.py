@@ -575,10 +575,11 @@ _OCR_WORKER_QUEUE_BRANCH: tuple[str, str] = (
     """
     SELECT
         'ocr_worker'::text AS worker_key,
-        COALESCE(COUNT(*) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')), 0)::int AS queue_depth,
-        MIN(created_at) FILTER (WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING'))::timestamptz AS oldest_pending,
-        MAX(completed_at) FILTER (WHERE status = 'SUCCEEDED')::timestamptz AS last_success
+        COALESCE(COUNT(*), 0)::int AS queue_depth,
+        MIN(created_at)::timestamptz AS oldest_pending,
+        (SELECT MAX(completed_at) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED')::timestamptz AS last_success
     FROM public.ocr_inference_jobs
+    WHERE status IN ('QUEUED','FAILED_RETRYABLE','CLAIMED','RUNNING')
     """,
 )
 
@@ -901,17 +902,27 @@ async def collect_remote_ocr_health() -> dict[str, Any]:
                                     SELECT row_to_json(q)
                                     FROM (
                                         SELECT
-                                            COALESCE(SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END), 0)::int AS queued,
-                                            COALESCE(SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END), 0)::int AS claimed,
-                                            COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0)::int AS running,
-                                            COALESCE(SUM(CASE WHEN status = 'FAILED_RETRYABLE' THEN 1 ELSE 0 END), 0)::int AS failed_retryable,
-                                            COALESCE(SUM(CASE WHEN status = 'DEAD_LETTER' THEN 1 ELSE 0 END), 0)::int AS dead_letter,
-                                            COALESCE(SUM(CASE WHEN status = 'SUCCEEDED' THEN 1 ELSE 0 END), 0)::int AS succeeded,
-                                            COALESCE(SUM(CASE WHEN status = 'CANCELLED' THEN 1 ELSE 0 END), 0)::int AS cancelled,
-                                            COALESCE(SUM(CASE WHEN status IN ('CLAIMED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= :now_ts THEN 1 ELSE 0 END), 0)::int AS expired_leases,
-                                            MIN(CASE WHEN status IN ('QUEUED', 'FAILED_RETRYABLE', 'CLAIMED', 'RUNNING') THEN created_at ELSE NULL END) AS oldest_pending_created,
-                                            MAX(CASE WHEN status = 'SUCCEEDED' THEN completed_at ELSE NULL END) AS latest_succeeded_at
-                                        FROM public.ocr_inference_jobs
+                                            COALESCE(a.queued, 0)::int AS queued,
+                                            COALESCE(a.claimed, 0)::int AS claimed,
+                                            COALESCE(a.running, 0)::int AS running,
+                                            COALESCE(a.failed_retryable, 0)::int AS failed_retryable,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'DEAD_LETTER'), 0)::int AS dead_letter,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED'), 0)::int AS succeeded,
+                                            COALESCE((SELECT COUNT(*) FROM public.ocr_inference_jobs WHERE status = 'CANCELLED'), 0)::int AS cancelled,
+                                            COALESCE(a.expired_leases, 0)::int AS expired_leases,
+                                            a.oldest_pending_created,
+                                            (SELECT MAX(completed_at) FROM public.ocr_inference_jobs WHERE status = 'SUCCEEDED') AS latest_succeeded_at
+                                        FROM (
+                                            SELECT
+                                                COALESCE(SUM(CASE WHEN status = 'QUEUED' THEN 1 ELSE 0 END), 0)::int AS queued,
+                                                COALESCE(SUM(CASE WHEN status = 'CLAIMED' THEN 1 ELSE 0 END), 0)::int AS claimed,
+                                                COALESCE(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0)::int AS running,
+                                                COALESCE(SUM(CASE WHEN status = 'FAILED_RETRYABLE' THEN 1 ELSE 0 END), 0)::int AS failed_retryable,
+                                                COALESCE(SUM(CASE WHEN status IN ('CLAIMED', 'RUNNING') AND lease_expires_at IS NOT NULL AND lease_expires_at <= :now_ts THEN 1 ELSE 0 END), 0)::int AS expired_leases,
+                                                MIN(created_at) AS oldest_pending_created
+                                            FROM public.ocr_inference_jobs
+                                            WHERE status IN ('QUEUED', 'CLAIMED', 'RUNNING', 'FAILED_RETRYABLE')
+                                        ) a
                                     ) q
                                 ) AS queue_json
                             """

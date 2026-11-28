@@ -462,6 +462,7 @@ class AiCapabilityRouterContractTests(unittest.IsolatedAsyncioTestCase):
             max_cooldown_seconds=300.0,
             auth_cooldown_seconds=3600.0,
             limit_zero_cooldown_seconds=21600.0,
+            transient_failure_threshold=1,
         )
         cache = TenantAiCache(clock=clk, default_ttl_seconds=600.0)
         return AiCapabilityRouter(providers=providers, circuit_breaker=cb, cache=cache, clock=clk), clk
@@ -840,6 +841,55 @@ class AiCapabilityRouterContractTests(unittest.IsolatedAsyncioTestCase):
             router.circuit_breaker.get_state("quota_group:cloudflare_workers_ai_daily"),
             CircuitState.OPEN,
         )
+
+    async def test_default_two_strike_transient_threshold_stays_closed_after_one_5xx_and_opens_on_second(
+        self,
+    ):
+        clk = _FakeClock()
+        cb = CircuitBreakerRegistry(clock=clk, base_cooldown_seconds=30.0)
+        providers = (
+            ProviderSpec(
+                provider_id="groq_qwen",
+                family="groq",
+                model_id="qwen/qwen3.8-27b",
+                capabilities=ALL_TEXT_VISION_CAPABILITIES,
+                quota_group="groq_free_shared",
+                is_local=False,
+                enabled=True,
+                max_attempt_timeout_seconds=5.0,
+                priority_order=10,
+            ),
+            ProviderSpec(
+                provider_id="ollama_local",
+                family="ollama",
+                model_id="qwen3-vl:4b-instruct-q4_K_M",
+                capabilities=ALL_TEXT_VISION_CAPABILITIES,
+                quota_group=None,
+                is_local=True,
+                enabled=True,
+                max_attempt_timeout_seconds=10.0,
+                priority_order=20,
+            ),
+        )
+        router = AiCapabilityRouter(providers=providers, circuit_breaker=cb, clock=clk)
+
+        async def fail_groq_503(spec: ProviderSpec, _timeout: float) -> str:
+            if spec.provider_id == "groq_qwen":
+                raise classify_http_error(provider_id="groq_qwen", status_code=503)
+            return f"ok:{spec.provider_id}"
+
+        # 1st transient 503 falls back cleanly while keeping circuit CLOSED
+        res1 = await router.route_and_execute(AiCapability.TEXT_ANALYSIS, fail_groq_503)
+        self.assertEqual(res1.provider_id, "ollama_local")
+        self.assertEqual(cb.get_state("provider:groq_qwen"), CircuitState.CLOSED)
+        self.assertEqual(cb.remaining_cooldown_seconds("provider:groq_qwen"), 0.0)
+
+        # 2nd consecutive transient 503 opens the provider circuit for 30s
+        res2 = await router.route_and_execute(AiCapability.TEXT_ANALYSIS, fail_groq_503)
+        self.assertEqual(res2.provider_id, "ollama_local")
+        self.assertEqual(cb.get_state("provider:groq_qwen"), CircuitState.OPEN)
+        self.assertAlmostEqual(cb.remaining_cooldown_seconds("provider:groq_qwen"), 30.0)
+        self.assertAlmostEqual(cb.max_cloud_cooldown_seconds(), 30.0)
 
 
 # ---------------------------------------------------------------------------

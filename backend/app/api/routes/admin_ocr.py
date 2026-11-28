@@ -221,6 +221,21 @@ async def retire_admin_page(
     return await AdminOcrService(db).retire_page(actor_id, page_id)
 
 
+@router.delete(
+    "/admin/books/{book_id}/pages/{page_id}/discard-failed-reservation",
+    response_model=AdminPageLifecycleRead,
+)
+async def discard_admin_failed_page_reservation(
+    book_id: UUID,
+    page_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    return await AdminOcrService(db).discard_failed_page_reservation(
+        actor_id, book_id, page_id
+    )
+
+
 @router.post("/admin/pages/{page_id}/reprocess", response_model=AdminRevisionDetailRead, status_code=201)
 async def reprocess_admin_page(
     page_id: UUID,

@@ -1795,6 +1795,16 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
     apiFetchFixture.mockImplementation(async (input, init) => {
       const url = new URL(String(input));
       const method = (init?.method ?? "GET").toUpperCase();
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: {
+            mode: "remote_worker",
+            ready: true,
+            workers: [{ worker_id: "w1", online: true }],
+          },
+        });
+      }
       if (url.pathname.endsWith("/image")) {
         return new Response(new Blob(["png"], { type: "image/png" }), {
           status: 200,
@@ -2014,5 +2024,246 @@ describe("Parent Private Books UI (Sách của tôi)", () => {
         screen.queryByTestId("avatar-notification-dot"),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("supports batch 'Thử lại tất cả trang lỗi' with progress bar, partial queue-full notice, and 429 OCR_QUEUE_FULL handling", async () => {
+    const SUB_2_ID = "bb000000-0000-4000-8000-000000000002";
+    let resolveBatchRetry: ((res: Response) => void) | null = null;
+    let batchRetryCalls = 0;
+    let currentDetail: ParentPrivateBookDetailDTO = {
+      book: makeBookSummary({ failed_submission_count: 2 }),
+      pages: [],
+      submissions: [
+        makeSubmission({
+          id: SUB_ID,
+          source_page_number: 1,
+          workflow_status: "CHECK_FAILED",
+          workflow_status_label: "Kiểm tra lỗi",
+          ocr_status: "FAILED",
+          ocr_error_code: "OCR_TIMEOUT",
+          can_add_to_book: false,
+          can_request_admin_review: false,
+          can_retry: true,
+        }),
+        makeSubmission({
+          id: SUB_2_ID,
+          source_page_number: 2,
+          workflow_status: "CHECK_FAILED",
+          workflow_status_label: "Kiểm tra lỗi",
+          ocr_status: "FAILED",
+          ocr_error_code: "OCR_TIMEOUT",
+          can_add_to_book: false,
+          can_request_admin_review: false,
+          can_retry: true,
+        }),
+      ],
+    };
+
+    apiFetchFixture.mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: {
+            mode: "remote_worker",
+            ready: true,
+            workers: [{ worker_id: "w1", online: true }],
+          },
+        });
+      }
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}` && method === "GET") {
+        return Response.json(currentDetail);
+      }
+      if (
+        url.pathname ===
+          `/books/my-books/${BOOK_ID}/submissions/retry-failed` &&
+        method === "POST"
+      ) {
+        batchRetryCalls += 1;
+        return new Promise<Response>((resolve) => {
+          resolveBatchRetry = resolve;
+        });
+      }
+      if (
+        url.pathname === `/books/my-books/${BOOK_ID}/submissions` &&
+        method === "POST"
+      ) {
+        return Response.json(
+          {
+            detail: {
+              code: "OCR_QUEUE_FULL",
+              message: "Hàng chờ OCR đang đầy",
+              retry_after_seconds: 30,
+              queue_depth: 250,
+            },
+          },
+          { status: 429 },
+        );
+      }
+      throw new Error(`Unexpected ${method} ${url.pathname}`);
+    });
+
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLocale="vi">
+        <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+          <AppServicesProvider>
+            <ParentPrivateBookManager bookId={BOOK_ID} />
+          </AppServicesProvider>
+        </AuthRuntimeContext.Provider>
+      </I18nProvider>,
+    );
+
+    const retryAllBtn = await screen.findByTestId(
+      "retry-all-failed-submissions",
+    );
+    expect(retryAllBtn).toHaveTextContent("Thử lại tất cả trang lỗi (2)");
+
+    await user.click(retryAllBtn);
+    expect(
+      await screen.findByTestId("private-book-retry-all-progress"),
+    ).toBeInTheDocument();
+
+    currentDetail = {
+      ...currentDetail,
+      submissions: [
+        makeSubmission({
+          id: SUB_ID,
+          source_page_number: 1,
+          workflow_status: "CHECKING",
+          workflow_status_label: "Đang kiểm tra",
+          ocr_status: "PENDING",
+          can_retry: false,
+        }),
+        currentDetail.submissions[1],
+      ],
+    };
+    await act(async () => {
+      resolveBatchRetry?.(
+        Response.json({
+          retried_count: 1,
+          skipped_count: 1,
+          failed_count: 0,
+          queue_full_retry_after_seconds: 45,
+        }),
+      );
+    });
+
+    expect(batchRetryCalls).toBe(1);
+    expect(
+      await screen.findByText(/Đã xếp hàng thử lại 1 trang lỗi.*45 giây/),
+    ).toBeInTheDocument();
+
+    // 429 OCR_QUEUE_FULL during upload renders friendly localized message
+    const fileInput = screen.getByLabelText(
+      /Chọn tệp trang sách hoặc tài liệu/,
+    );
+    await user.upload(
+      fileInput,
+      new File(["img"], "p3.png", { type: "image/png" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /Tải lên & kiểm tra/ }),
+    );
+    expect(
+      await screen.findByText(/Hàng chờ OCR đang đầy.*30 giây/),
+    ).toBeInTheDocument();
+  });
+
+  it("uses summary_only=true during background polling and triggers full refresh when submission status transitions", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let phase: "checking" | "ready" = "checking";
+    const requestedUrls: string[] = [];
+
+    const buildDetail = (): ParentPrivateBookDetailDTO => ({
+      book: makeBookSummary({
+        pending_submission_count: phase === "checking" ? 1 : 0,
+        ready_to_add_count: phase === "ready" ? 1 : 0,
+      }),
+      pages: [],
+      submissions: [
+        makeSubmission({
+          workflow_status:
+            phase === "checking" ? "CHECKING" : "PASSED_READY_TO_ADD",
+          workflow_status_label:
+            phase === "checking" ? "Đang kiểm tra" : "Đạt — có thể thêm trang",
+          ocr_status: phase === "checking" ? "RUNNING" : "COMPLETED",
+          proofread_status: phase === "checking" ? "PENDING" : "COMPLETED",
+          tool_check_status: phase === "checking" ? "PENDING" : "PASSED",
+          tool_check_findings_count: 0,
+          can_add_to_book: phase === "ready",
+          can_request_admin_review: false,
+          can_retry: false,
+        }),
+      ],
+    });
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: {
+            mode: "remote_worker",
+            ready: true,
+            workers: [{ worker_id: "w1", online: true }],
+          },
+        });
+      }
+      if (url.pathname.endsWith("/image")) {
+        return new Response(new Blob(["png"], { type: "image/png" }), {
+          status: 200,
+        });
+      }
+      if (url.pathname === `/books/my-books/${BOOK_ID}`) {
+        requestedUrls.push(`${url.pathname}${url.search}`);
+        return Response.json(buildDetail());
+      }
+      throw new Error(`Unexpected ${url.pathname}`);
+    });
+
+    try {
+      render(
+        <I18nProvider initialLocale="vi">
+          <AuthRuntimeContext.Provider value={makeAuthRuntime("parent-a")}>
+            <AppServicesProvider>
+              <ParentPrivateBookManager bookId={BOOK_ID} />
+            </AppServicesProvider>
+          </AuthRuntimeContext.Provider>
+        </I18nProvider>,
+      );
+
+      await waitFor(() => {
+        expect(requestedUrls).toContain(`/books/my-books/${BOOK_ID}`);
+      });
+
+      // Advance past initial 3s online poll tick -> must send summary_only=true
+      phase = "ready";
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_500);
+      });
+
+      await waitFor(() => {
+        expect(requestedUrls).toContain(
+          `/books/my-books/${BOOK_ID}?summary_only=true`,
+        );
+      });
+
+      // Status transitioned from CHECKING -> PASSED_READY_TO_ADD -> triggers full refresh without summary_only
+      await waitFor(() => {
+        const fullCalls = requestedUrls.filter(
+          (u) => u === `/books/my-books/${BOOK_ID}`,
+        );
+        expect(fullCalls.length).toBeGreaterThanOrEqual(2);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

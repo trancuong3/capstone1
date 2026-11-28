@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "הצגת בלוקי טקסט OCR לעמוד {page}",
     "closePageOcrBlocksAria": "סגירת בלוקי טקסט OCR לעמוד {page}",
     "openPageOcrBlocksAction": "בלוקי OCR",
-    "closePageOcrBlocksAction": "סגירת בלוקי OCR"
+    "closePageOcrBlocksAction": "סגירת בלוקי OCR",
+    "retryAllFailedAction": "נסה שוב את כל העמודים שנכשלו ({count})",
+    "retryingAllFailedButton": "מוסיף עמודים שנכשלו לתור הניסיון החוזר…",
+    "retryAllSuccessNotice": "{count} עמודים שנכשלו נוספו לתור הניסיון החוזר (שלבים שכבר הושלמו נשמרו).",
+    "retryAllQueuedOfflineNotice": "בקשות ניסיון חוזר עבור {count} עמודים נשמרו בתור ה-OCR. הן יעובדו אוטומטית כשהשירות יחזור לפעול.",
+    "retryAllPartialQueueFullNotice": "{retried} עמודים נוספו לתור הניסיון החוזר; {skipped} עמודים נותרים הושהו כי תור ה-OCR מלא. נסה שוב בעוד {seconds} שניות.",
+    "retryAllPartialFailedNotice": "{retried} עמודים נוספו לתור הניסיון החוזר; לא ניתן היה להוסיף {failed} עמודים כעת.",
+    "retryAllNoneNotice": "אין כרגע עמודים שנכשלו לניסיון חוזר.",
+    "queueFullNotice": "תור ה-OCR מלא כרגע. נסה שוב בעוד כ-{seconds} שניות."
   },
   "ocrContribution": {
     "cardAria": "תרומת דוגמאות לשיפור זיהוי הטקסט עבור {title}",

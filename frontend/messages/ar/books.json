@@ -540,7 +540,15 @@
     "openPageOcrBlocksAria": "عرض كتل نص OCR للصفحة {page}",
     "closePageOcrBlocksAria": "إغلاق كتل نص OCR للصفحة {page}",
     "openPageOcrBlocksAction": "كتل نص OCR",
-    "closePageOcrBlocksAction": "إغلاق كتل OCR"
+    "closePageOcrBlocksAction": "إغلاق كتل OCR",
+    "retryAllFailedAction": "إعادة محاولة كل الصفحات الفاشلة ({count})",
+    "retryingAllFailedButton": "جارٍ إضافة الصفحات الفاشلة لإعادة المحاولة…",
+    "retryAllSuccessNotice": "تمت جدولة إعادة محاولة {count} صفحة فاشلة (مع الاحتفاظ بالخطوات المكتملة سابقًا).",
+    "retryAllQueuedOfflineNotice": "تم حفظ طلبات إعادة المحاولة لـ {count} صفحة فاشلة في قائمة انتظار OCR. ستُعالج تلقائيًا عند عودة الخدمة.",
+    "retryAllPartialQueueFullNotice": "تمت جدولة إعادة محاولة {retried} صفحة فاشلة؛ تم إيقاف {skipped} صفحة مؤقتًا لأن قائمة انتظار OCR ممتلئة. يرجى المحاولة مرة أخرى بعد {seconds} ثانية.",
+    "retryAllPartialFailedNotice": "تمت جدولة إعادة محاولة {retried} صفحة فاشلة؛ تعذرت جدولة {failed} صفحة الآن.",
+    "retryAllNoneNotice": "لا توجد صفحات فاشلة لإعادة محاولتها حاليًا.",
+    "queueFullNotice": "قائمة انتظار OCR ممتلئة حاليًا. يرجى المحاولة مرة أخرى بعد حوالي {seconds} ثانية."
   },
   "ocrContribution": {
     "cardAria": "المساهمة بنماذج لتحسين قراءة الصفحات لـ {title}",

@@ -136,6 +136,75 @@ function errorText(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isOcrQueueFullError(error: unknown): boolean {
+  if (!isServiceError(error)) return false;
+  return error.status === 429 || error.provider_code === "OCR_QUEUE_FULL";
+}
+
+function extractRetryAfterSeconds(error: unknown): number {
+  if (typeof error === "object" && error !== null) {
+    const record = error as Record<string, unknown>;
+    for (const key of ["retry_after_seconds", "retryAfterSeconds"]) {
+      const val = record[key];
+      if (typeof val === "number" && Number.isFinite(val) && val > 0) {
+        return Math.ceil(val);
+      }
+    }
+  }
+  if (isServiceError(error) && error.message) {
+    const match = error.message.match(/(\d+)\s*(?:s|sec|giây)/i);
+    if (match) {
+      const parsed = Number(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) return parsed;
+    }
+  }
+  return 30;
+}
+
+function formatActionError(
+  error: unknown,
+  fallback: string,
+  t: BooksTranslateFn,
+): string {
+  if (isOcrQueueFullError(error)) {
+    return t("privateManager.queueFullNotice", {
+      seconds: extractRetryAfterSeconds(error),
+    });
+  }
+  return errorText(error, fallback);
+}
+
+function buildSubmissionTransitionSignature(
+  data: ParentPrivateBookDetailDTO,
+): string {
+  const subs = data.submissions
+    .map((s) => `${s.id}:${s.workflow_status}:${s.committed_page_id ?? ""}`)
+    .join(",");
+  return `${data.pages.length}|${subs}`;
+}
+
+function mergeSummaryOnlyDetail(
+  prev: ParentPrivateBookDetailDTO | null,
+  next: ParentPrivateBookDetailDTO,
+): ParentPrivateBookDetailDTO {
+  if (!prev || prev.book.id !== next.book.id) return next;
+  const prevPageReadability = new Map(
+    prev.pages.map((p) => [p.page_id, p.readability ?? null]),
+  );
+  return {
+    ...next,
+    book: {
+      ...next.book,
+      readability: next.book.readability ?? prev.book.readability ?? null,
+    },
+    pages: next.pages.map((page) => ({
+      ...page,
+      readability:
+        page.readability ?? prevPageReadability.get(page.page_id) ?? null,
+    })),
+  };
+}
+
 const VALID_SOURCE_TYPES = new Set<string>(
   SOURCE_USAGE_OPTIONS.map((opt) => opt.value),
 );
@@ -462,6 +531,7 @@ function ParentPrivateBookManagerContent({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const detailRequestIdRef = useRef(0);
+  const submissionSignatureRef = useRef<string | null>(null);
   const backHref =
     returnPage > 1 ? `/my-books?page=${Math.floor(returnPage)}` : "/my-books";
 
@@ -472,6 +542,11 @@ function ParentPrivateBookManagerContent({
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [retryingAllFailed, setRetryingAllFailed] = useState(false);
+  const retryAllProgress = useAiProgress({
+    active: retryingAllFailed,
+    expectedDurationMs: 6_000,
+  });
   const [statusFilter, setStatusFilter] =
     useState<SubmissionFilterGroup>("ALL");
   const [overviewPage, setOverviewPage] = useState(1);
@@ -550,7 +625,7 @@ function ParentPrivateBookManagerContent({
   const [smartOcrPageId, setSmartOcrPageId] = useState<string | null>(null);
 
   const loadDetail = useCallback(
-    async (silent = false) => {
+    async (silent = false, options?: { readonly summaryOnly?: boolean }) => {
       const requestId = ++detailRequestIdRef.current;
       if (!silent) {
         setLoading(true);
@@ -558,9 +633,29 @@ function ParentPrivateBookManagerContent({
       setLoadError(null);
       setNotFound(false);
       try {
-        const data = await service.get(bookId);
+        const useSummaryOnly = Boolean(options?.summaryOnly);
+        const data = await service.get(
+          bookId,
+          undefined,
+          useSummaryOnly ? { summaryOnly: true } : undefined,
+        );
         if (requestId !== detailRequestIdRef.current) return;
-        setDetail(data);
+        const nextSignature = buildSubmissionTransitionSignature(data);
+        const transitioned =
+          useSummaryOnly &&
+          submissionSignatureRef.current !== null &&
+          submissionSignatureRef.current !== nextSignature;
+        submissionSignatureRef.current = nextSignature;
+        setDetail((prev) =>
+          useSummaryOnly ? mergeSummaryOnlyDetail(prev, data) : data,
+        );
+        if (transitioned) {
+          const fullData = await service.get(bookId);
+          if (requestId !== detailRequestIdRef.current) return;
+          submissionSignatureRef.current =
+            buildSubmissionTransitionSignature(fullData);
+          setDetail(fullData);
+        }
       } catch (error) {
         if (requestId !== detailRequestIdRef.current) return;
         if (isServiceError(error) && error.status === 404) {
@@ -580,12 +675,15 @@ function ParentPrivateBookManagerContent({
 
   useEffect(() => {
     clearPrivateMediaMemoryCache();
+    submissionSignatureRef.current = null;
     const requestId = ++detailRequestIdRef.current;
     const controller = new AbortController();
     void service
       .get(bookId, controller.signal)
       .then((data) => {
         if (requestId !== detailRequestIdRef.current) return;
+        submissionSignatureRef.current =
+          buildSubmissionTransitionSignature(data);
         setDetail(data);
         setNotFound(false);
         setLoadError(null);
@@ -688,7 +786,7 @@ function ParentPrivateBookManagerContent({
       }
       pollInFlightRef.current = true;
       try {
-        await loadDetail(true);
+        await loadDetail(true, { summaryOnly: true });
         idleTicks += 1;
       } finally {
         pollInFlightRef.current = false;
@@ -760,7 +858,7 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, t("privateManager.uploadFailedFallback")),
+        formatActionError(error, t("privateManager.uploadFailedFallback"), t),
       );
     } finally {
       setUploading(false);
@@ -910,8 +1008,100 @@ function ParentPrivateBookManagerContent({
       emitStudioTasksChanged({ portal: "parent" });
       await loadDetail(true);
     } catch (error) {
-      setActionError(errorText(error, t("privateManager.retryErrorFallback")));
+      setActionError(
+        formatActionError(error, t("privateManager.retryErrorFallback"), t),
+      );
     } finally {
+      setBusyKey(null);
+    }
+  }
+
+  async function handleRetryAllFailed(
+    retryableSubs: readonly ParentPageSubmissionDTO[],
+  ) {
+    if (retryableSubs.length === 0) return;
+    setRetryingAllFailed(true);
+    setBusyKey("retry:all");
+    setActionError(null);
+    setActionNotice(null);
+    try {
+      let result: {
+        readonly retried_count: number;
+        readonly skipped_count: number;
+        readonly failed_count: number;
+        readonly queue_full_retry_after_seconds: number | null;
+      };
+      if (service.retryAllFailedSubmissions) {
+        result = await service.retryAllFailedSubmissions(bookId);
+      } else {
+        let retried = 0;
+        let failed = 0;
+        for (const sub of retryableSubs) {
+          try {
+            await service.retrySubmission(bookId, sub.id, "AUTO");
+            retried += 1;
+          } catch {
+            failed += 1;
+          }
+        }
+        result = {
+          retried_count: retried,
+          skipped_count: 0,
+          failed_count: failed,
+          queue_full_retry_after_seconds: null,
+        };
+      }
+
+      if (result.retried_count > 0) {
+        for (const sub of retryableSubs) {
+          taskCenter?.markTaskAlertSeen(sub.id);
+        }
+        emitStudioTasksChanged({ portal: "parent" });
+      }
+
+      if (result.queue_full_retry_after_seconds !== null) {
+        if (result.retried_count > 0) {
+          setActionNotice(
+            t("privateManager.retryAllPartialQueueFullNotice", {
+              retried: result.retried_count,
+              skipped: result.skipped_count,
+              seconds: result.queue_full_retry_after_seconds,
+            }),
+          );
+        } else {
+          setActionError(
+            t("privateManager.queueFullNotice", {
+              seconds: result.queue_full_retry_after_seconds,
+            }),
+          );
+        }
+      } else if (result.failed_count > 0) {
+        setActionNotice(
+          t("privateManager.retryAllPartialFailedNotice", {
+            retried: result.retried_count,
+            failed: result.failed_count,
+          }),
+        );
+      } else if (result.retried_count > 0) {
+        setActionNotice(
+          ocrWorkerOffline
+            ? t("privateManager.retryAllQueuedOfflineNotice", {
+                count: result.retried_count,
+              })
+            : t("privateManager.retryAllSuccessNotice", {
+                count: result.retried_count,
+              }),
+        );
+      } else {
+        setActionNotice(t("privateManager.retryAllNoneNotice"));
+      }
+      await loadDetail(true);
+    } catch (error) {
+      setActionError(
+        formatActionError(error, t("privateManager.retryErrorFallback"), t),
+      );
+    } finally {
+      setRetryingAllFailed(false);
       setBusyKey(null);
     }
   }
@@ -1125,7 +1315,11 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(error, t("privateManager.replaceImageErrorFallback")),
+        formatActionError(
+          error,
+          t("privateManager.replaceImageErrorFallback"),
+          t,
+        ),
       );
     } finally {
       setBusyKey(null);
@@ -1180,9 +1374,10 @@ function ParentPrivateBookManagerContent({
       await loadDetail(true);
     } catch (error) {
       setActionError(
-        errorText(
+        formatActionError(
           error,
           t("privateManager.replaceSubmissionImageErrorFallback"),
+          t,
         ),
       );
     } finally {
@@ -1292,6 +1487,9 @@ function ParentPrivateBookManagerContent({
       Boolean(item.tool_check_error_code) ||
       item.workflow_status === "CHECK_FAILED",
   ).length;
+  const retryableFailedSubmissions = activeSubmissions.filter(
+    (item) => item.workflow_status === "CHECK_FAILED" && item.can_retry,
+  );
   const filteredSubmissions =
     statusFilter === "ALL"
       ? activeSubmissions
@@ -1999,11 +2197,48 @@ function ParentPrivateBookManagerContent({
                 data-testid="private-book-ocr-queue-banner"
               >
                 {workerFailureCount > 0 ? (
-                  <p className="font-semibold">
-                    {t("privateManager.workerFailuresSummary", {
-                      count: workerFailureCount,
-                    })}
-                  </p>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="font-semibold">
+                        {t("privateManager.workerFailuresSummary", {
+                          count: workerFailureCount,
+                        })}
+                      </p>
+                      {retryableFailedSubmissions.length >= 1 &&
+                      !isSuspended ? (
+                        <Button
+                          className="min-h-9 w-auto px-3 text-xs"
+                          data-testid="retry-all-failed-submissions"
+                          disabled={busyKey !== null || retryingAllFailed}
+                          isLoading={retryingAllFailed}
+                          onClick={() =>
+                            void handleRetryAllFailed(
+                              retryableFailedSubmissions,
+                            )
+                          }
+                          type="button"
+                          variant="secondary"
+                        >
+                          <RotateCcw aria-hidden="true" className="size-3.5" />
+                          {retryingAllFailed
+                            ? t("privateManager.retryingAllFailedButton")
+                            : t("privateManager.retryAllFailedAction", {
+                                count: retryableFailedSubmissions.length,
+                              })}
+                        </Button>
+                      ) : null}
+                    </div>
+                    {retryingAllFailed ? (
+                      <AiProgressBar
+                        active
+                        elapsedSeconds={retryAllProgress.elapsedSeconds}
+                        label={t("privateManager.retryingAllFailedButton")}
+                        percent={retryAllProgress.percent}
+                        size="sm"
+                        testId="private-book-retry-all-progress"
+                      />
+                    ) : null}
+                  </div>
                 ) : ocrWorkerOffline && pendingOcrCount > 0 ? (
                   <p className="font-semibold">
                     {t("privateManager.windowsOcrQueueWaiting", {

@@ -21,6 +21,7 @@ from app.repositories.admin_ai_workflow_repository import (
 )
 from app.repositories.book_content_quality_repository import BookContentQualityRepository
 from app.services.admin_ocr_service import AdminOcrService, PreparedLocalOcrCorrection
+from app.services.ai_capability_router import get_shared_ai_circuit_breaker
 from app.services.book_content_quality_service import BookContentQualityService
 from app.services.ocr_ai.child_safety import (
     ChildSafetyError,
@@ -40,10 +41,35 @@ from app.services.worker_telemetry import (
 logger = logging.getLogger(__name__)
 POLL_SECONDS = 2
 LEASE_SECONDS = 1200
-MAX_ATTEMPTS = MAX_WORKFLOW_ATTEMPTS
+MAX_ATTEMPTS = 5
+MAX_QUOTA_CIRCUIT_ATTEMPTS = max(6, int(MAX_WORKFLOW_ATTEMPTS))
+_QUOTA_OR_CIRCUIT_ERROR_CODES = frozenset({
+    "ALL_PROVIDERS_SKIPPED",
+    "PROVIDER_QUOTA",
+    "QUOTA_EXHAUSTED",
+    "RATE_LIMIT",
+})
 DEFAULT_MAX_CONCURRENT_JOBS = 2
 PROOFREAD_PROMPT_VERSION = "viread-ocr-proofread-v1"
 CHILD_SAFETY_PROMPT_VERSION = "viread-child-safety-v2"
+
+
+def _effective_max_attempts(error_code: str) -> int:
+    normalized = (error_code or "").strip().upper()
+    if normalized in _QUOTA_OR_CIRCUIT_ERROR_CODES:
+        return max(MAX_ATTEMPTS, MAX_QUOTA_CIRCUIT_ATTEMPTS)
+    return MAX_ATTEMPTS
+
+
+def _compute_retry_delay_seconds(attempts: int) -> float:
+    cb_cooldown = 0.0
+    try:
+        cb_cooldown = float(get_shared_ai_circuit_breaker().max_cloud_cooldown_seconds())
+    except Exception:
+        cb_cooldown = 0.0
+    exp_backoff = 35.0 * (2 ** max(0, attempts - 1))
+    raw_delay = max(cb_cooldown + 5.0, exp_backoff)
+    return max(35.0, min(600.0, raw_delay))
 
 
 def _owns_active_claim(row: AdminAiWorkflow, worker_id: str, now: datetime) -> bool:
@@ -493,6 +519,8 @@ async def _fail(
     workflow_id: UUID, worker_id: str, stage: str, error_code: str,
     provider_events: list[dict[str, object]] | None = None,
 ) -> None:
+    effective_max_attempts = _effective_max_attempts(error_code)
+    retry_delay_seconds: float | None = None
     async with AsyncSessionLocal() as session:
         row = await AdminAiWorkflowRepository(session).get(workflow_id, lock=True)
         now = datetime.now(timezone.utc)
@@ -510,11 +538,13 @@ async def _fail(
             "created_at": now.isoformat(),
         }]
         row.ErrorCode = error_code[:80]
-        if attempts < MAX_ATTEMPTS:
+        if attempts < effective_max_attempts:
+            retry_delay_seconds = _compute_retry_delay_seconds(attempts)
             row.Status = "QUEUED"
-            row.RetryAfter = now + timedelta(seconds=min(300, 5 * (2 ** (attempts - 1))))
+            row.RetryAfter = now + timedelta(seconds=retry_delay_seconds)
         else:
             row.Status = "FAILED"
+            row.RetryAfter = None
             if stage == "CHILD_SAFETY_SCANNING":
                 row.SafetyStatus = "FAILED"
         row.Stage = stage
@@ -522,6 +552,8 @@ async def _fail(
         row.LeaseExpiresAt = None
         row.UpdatedAt = now
         await session.commit()
+    if retry_delay_seconds is not None:
+        _schedule_delayed_admin_ai_wakeup(retry_delay_seconds)
     log_diagnostic(
         logger,
         logging.ERROR,
@@ -529,7 +561,7 @@ async def _fail(
         workflow_id=str(workflow_id),
         stage=stage,
         attempt=attempts,
-        terminal=attempts >= MAX_ATTEMPTS,
+        terminal=attempts >= effective_max_attempts,
         error_code=error_code,
     )
 
@@ -624,6 +656,57 @@ def _reap_done_tasks(tasks: set[asyncio.Task[None]]) -> set[asyncio.Task[None]]:
 
 _EVENT_WORKFLOW_TASKS: set[asyncio.Task[None]] = set()
 _EVENT_WORKFLOW_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+_DELAYED_WAKEUP_HANDLES: dict[int, tuple[float, asyncio.TimerHandle]] = {}
+
+
+def _cancel_delayed_admin_ai_wakeup(loop_id: int | None = None) -> None:
+    if loop_id is None:
+        for key in list(_DELAYED_WAKEUP_HANDLES.keys()):
+            item = _DELAYED_WAKEUP_HANDLES.pop(key, None)
+            if item is not None:
+                item[1].cancel()
+        return
+    item = _DELAYED_WAKEUP_HANDLES.pop(loop_id, None)
+    if item is not None:
+        item[1].cancel()
+
+
+def _schedule_delayed_admin_ai_wakeup(
+    delay_seconds: float,
+    *,
+    force: bool = False,
+) -> asyncio.TimerHandle | None:
+    """Arm one coalesced delayed wake-up timer so deferred workflows auto-resume after RetryAfter."""
+    from app.database.config import APP_ENVIRONMENT
+    from app.services.ocr_inference_job_service import is_heavy_workers_disabled
+
+    if not force:
+        app_env = (os.getenv("APP_ENVIRONMENT") or APP_ENVIRONMENT or "").strip().lower()
+        if app_env == "test" or not is_heavy_workers_disabled() or not _configured_enabled():
+            return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    clamped_delay = max(0.05, float(delay_seconds))
+    fire_at = time.monotonic() + clamped_delay
+    loop_id = id(loop)
+    existing = _DELAYED_WAKEUP_HANDLES.get(loop_id)
+    if existing is not None:
+        existing_fire_at, existing_handle = existing
+        if not existing_handle.cancelled() and existing_fire_at <= fire_at:
+            return existing_handle
+        existing_handle.cancel()
+
+    def _on_timer() -> None:
+        current_entry = _DELAYED_WAKEUP_HANDLES.get(loop_id)
+        if current_entry is not None and current_entry[1] is handle:
+            _DELAYED_WAKEUP_HANDLES.pop(loop_id, None)
+        schedule_admin_ai_workflow(force=force, source="retry_wakeup")
+
+    handle = loop.call_later(clamped_delay, _on_timer)
+    _DELAYED_WAKEUP_HANDLES[loop_id] = (fire_at, handle)
+    return handle
 
 
 def _event_workflow_semaphore() -> asyncio.Semaphore:
@@ -729,16 +812,18 @@ async def _run_event_workflow_once(*, worker_id: str | None = None) -> bool:
 
 async def _drain_scheduled_admin_ai_workflows(
     *,
-    max_steps: int = 8,
+    max_steps: int = 64,
     source: str = "event",
 ) -> None:
     await asyncio.sleep(0)
     sem = _event_workflow_semaphore()
     processed = 0
     had_error: str | None = None
+    limit = max(1, int(max_steps))
+    hit_step_cap = False
     async with sem:
         try:
-            for _ in range(max(1, max_steps)):
+            for step_idx in range(limit):
                 did_work = await run_once(
                     source=source,
                     execution_mode="on_demand",
@@ -747,6 +832,8 @@ async def _drain_scheduled_admin_ai_workflows(
                 if not did_work:
                     break
                 processed += 1
+                if step_idx + 1 == limit:
+                    hit_step_cap = True
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -761,6 +848,8 @@ async def _drain_scheduled_admin_ai_workflows(
             source=source,
             error_code=had_error,
         )
+    if hit_step_cap and had_error is None:
+        schedule_admin_ai_workflow(source=source)
 
 
 def schedule_admin_ai_workflow(
@@ -793,6 +882,7 @@ def schedule_admin_ai_workflow(
 
 
 async def shutdown_scheduled_admin_ai_workflows(*, timeout_seconds: float = 5.0) -> None:
+    _cancel_delayed_admin_ai_wakeup()
     if not _EVENT_WORKFLOW_TASKS:
         return
     pending = [task for task in list(_EVENT_WORKFLOW_TASKS) if not task.done()]

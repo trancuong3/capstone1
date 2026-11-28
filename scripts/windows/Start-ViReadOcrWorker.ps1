@@ -277,6 +277,17 @@ if ($existing) {
 $stdoutLog = Join-Path $logsDir "ocr-worker.stdout.log"
 $stderrLog = Join-Path $logsDir "ocr-worker.stderr.log"
 
+foreach ($logPath in @($stdoutLog, $stderrLog)) {
+    try {
+        if (Test-Path -LiteralPath $logPath) {
+            $logItem = Get-Item -LiteralPath $logPath -ErrorAction SilentlyContinue
+            if ($null -ne $logItem -and $logItem.Length -gt 10485760) {
+                Move-Item -LiteralPath $logPath -Destination "$logPath.1" -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { }
+}
+
 $envKeys = @(
     "LMDB_FORCE_CPYTHON",
     "OMP_NUM_THREADS",
@@ -308,8 +319,8 @@ foreach ($k in $envKeys) {
 
 try {
     [Environment]::SetEnvironmentVariable("LMDB_FORCE_CPYTHON", "1", "Process")
-    [Environment]::SetEnvironmentVariable("OMP_NUM_THREADS", "$boundedThreads", "Process")
-    [Environment]::SetEnvironmentVariable("OPENBLAS_NUM_THREADS", "$boundedThreads", "Process")
+    [Environment]::SetEnvironmentVariable("OMP_NUM_THREADS", "1", "Process")
+    [Environment]::SetEnvironmentVariable("OPENBLAS_NUM_THREADS", "1", "Process")
     [Environment]::SetEnvironmentVariable("MKL_NUM_THREADS", "$boundedThreads", "Process")
     [Environment]::SetEnvironmentVariable("NUMEXPR_NUM_THREADS", "$boundedThreads", "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_CPU_THREADS", "$boundedThreads", "Process")

@@ -343,6 +343,7 @@ export function ViReadAssistantWidget() {
 
   useEffect(() => {
     let active = true;
+    let authEventReceived = false;
     let subscription: { unsubscribe: () => void } | null = null;
 
     try {
@@ -350,22 +351,43 @@ export function ViReadAssistantWidget() {
       void supabase.auth
         .getSession()
         .then(({ data }) => {
-          if (!active) return;
-          setActiveUserId(data.session?.user?.id ?? null);
+          if (!active || authEventReceived) return;
+          const initialUserId = data.session?.user?.id ?? null;
+          if (
+            prevUserIdRef.current !== undefined &&
+            prevUserIdRef.current !== initialUserId
+          ) {
+            setMessages([]);
+          }
+          prevUserIdRef.current = initialUserId;
+          setActiveUserId(initialUserId);
         })
         .catch(() => {
-          if (!active) return;
+          if (!active || authEventReceived) return;
+          prevUserIdRef.current = null;
           setActiveUserId(null);
         });
 
-      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
         if (!active) return;
-        setActiveUserId(session?.user?.id ?? null);
+        authEventReceived = true;
+        const nextUserId = session?.user?.id ?? null;
+        const shouldResetHistory =
+          event === "SIGNED_OUT" ||
+          (prevUserIdRef.current !== undefined &&
+            prevUserIdRef.current !== nextUserId) ||
+          (event === "SIGNED_IN" && prevUserIdRef.current === undefined);
+        prevUserIdRef.current = nextUserId;
+        if (shouldResetHistory) {
+          setMessages([]);
+        }
+        setActiveUserId(nextUserId);
       });
       subscription = data.subscription;
     } catch {
       queueMicrotask(() => {
-        if (active) {
+        if (active && !authEventReceived) {
+          prevUserIdRef.current = null;
           setActiveUserId(null);
         }
       });

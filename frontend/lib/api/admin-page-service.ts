@@ -307,7 +307,8 @@ export async function pollAdminBookOcrJobsBatch(
     baseIntervalMs,
     Math.min(8_000, baseIntervalMs * 5),
   );
-  const maxAttempts = options.maxAttempts ?? 60;
+  const maxStagnantAttempts = options.maxAttempts ?? 60;
+  const maxTotalPolls = Math.max(240, maxStagnantAttempts);
   const jobMap = new Map<string, AdminOcrJobDTO>();
   for (const job of initialJobs) {
     jobMap.set(job.id, job);
@@ -316,21 +317,42 @@ export async function pollAdminBookOcrJobsBatch(
   let batchRouteSupported = true;
   let consecutiveErrors = 0;
 
-  const report = () => {
+  const computeProgressSnapshot = () => {
     let completedCount = 0;
     let failedCount = 0;
+    let minQueuePosition: number | null = null;
     for (const job of jobMap.values()) {
-      if (job.status === "SUCCEEDED") completedCount += 1;
-      else if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") {
+      if (job.status === "SUCCEEDED") {
+        completedCount += 1;
+      } else if (job.status === "DEAD_LETTER" || job.status === "CANCELLED") {
         failedCount += 1;
+      } else if (
+        typeof job.queue_position === "number" &&
+        Number.isFinite(job.queue_position)
+      ) {
+        minQueuePosition =
+          minQueuePosition === null
+            ? job.queue_position
+            : Math.min(minQueuePosition, job.queue_position);
       }
     }
+    return {
+      completedCount,
+      failedCount,
+      doneCount: completedCount + failedCount,
+      minQueuePosition,
+    };
+  };
+
+  const report = () => {
+    const { completedCount, failedCount, doneCount } =
+      computeProgressSnapshot();
     options.onProgress?.({
       completedCount,
       failedCount,
       totalCount: jobMap.size,
     });
-    return completedCount + failedCount >= jobMap.size;
+    return doneCount >= jobMap.size;
   };
 
   const allPendingOffline = () => {
@@ -349,17 +371,22 @@ export async function pollAdminBookOcrJobsBatch(
 
   if (report() || allPendingOffline()) return Array.from(jobMap.values());
 
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+  let prevProgress = computeProgressSnapshot();
+  let stagnantAttempts = 0;
+  let totalPolls = 0;
+
+  while (stagnantAttempts < maxStagnantAttempts && totalPolls < maxTotalPolls) {
     if (options.signal?.aborted) {
       throw new DOMException("OCR job polling cancelled", "AbortError");
     }
-    const backoffStep = Math.min(4, Math.floor(attempt / 4));
+    const backoffStep = Math.min(4, Math.floor(stagnantAttempts / 4));
     const delayMs = Math.min(
       maxIntervalMs,
       Math.round(baseIntervalMs * Math.pow(1.4, backoffStep)),
     );
     await waitAdminPollDelay(delayMs, options.signal);
     await waitForVisibleTab(options.signal);
+    totalPolls += 1;
 
     try {
       if (batchRouteSupported) {
@@ -402,12 +429,26 @@ export async function pollAdminBookOcrJobsBatch(
       if (!isTransientAdminPollError(error) || consecutiveErrors > 3) {
         throw error;
       }
+      stagnantAttempts += 1;
       continue;
     }
 
     if (report() || allPendingOffline()) {
       return Array.from(jobMap.values());
     }
+
+    const nextProgress = computeProgressSnapshot();
+    const doneAdvanced = nextProgress.doneCount > prevProgress.doneCount;
+    const queueAdvanced =
+      nextProgress.minQueuePosition !== null &&
+      (prevProgress.minQueuePosition === null ||
+        nextProgress.minQueuePosition < prevProgress.minQueuePosition);
+    if (doneAdvanced || queueAdvanced) {
+      stagnantAttempts = 0;
+    } else {
+      stagnantAttempts += 1;
+    }
+    prevProgress = nextProgress;
   }
   return Array.from(jobMap.values());
 }

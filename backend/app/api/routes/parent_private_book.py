@@ -15,6 +15,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_parent_id, get_db
@@ -214,17 +215,29 @@ async def create_storyweaver_private_book(
     )
 
 
+class ParentRetryFailedSubmissionsResponse(BaseModel):
+    retried_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    queue_full_retry_after_seconds: int | None = Field(default=None, ge=1)
+
+
 @router.get("/my-books/{book_id}", response_model=ParentPrivateBookDetailRead)
 async def get_my_private_book(
     book_id: UUID,
     request: Request,
     response: Response,
+    summary_only: bool = Query(default=False),
     actor_id: UUID = Depends(get_current_parent_id),
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    summary_only = summary_only if isinstance(summary_only, bool) else False
     return await ParentPrivateBookService(db).get_book(
-        actor_id, book_id, base_url=str(request.base_url)
+        actor_id,
+        book_id,
+        base_url=str(request.base_url),
+        summary_only=summary_only,
     )
 
 
@@ -365,6 +378,22 @@ async def submit_my_private_book_pages(
         )
     finally:
         await file.close()
+
+
+@router.post(
+    "/my-books/{book_id}/submissions/retry-failed",
+    response_model=ParentRetryFailedSubmissionsResponse,
+)
+async def retry_all_my_failed_submissions(
+    book_id: UUID,
+    response: Response,
+    actor_id: UUID = Depends(get_current_parent_id),
+    db: AsyncSession = Depends(get_db),
+):
+    _apply_no_store(response)
+    return await ParentPrivateBookService(db).retry_failed_submissions(
+        actor_id, book_id
+    )
 
 
 @router.get(
