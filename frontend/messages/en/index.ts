@@ -16,6 +16,7 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
+import { scanInstantEn } from "../features/scan_instant";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 const messages: MessagesDictionary = {
@@ -37,6 +38,7 @@ const messages: MessagesDictionary = {
   validation,
   notifications,
   accessibility,
+  scanInstant: scanInstantEn,
 };
 
 export default messages;

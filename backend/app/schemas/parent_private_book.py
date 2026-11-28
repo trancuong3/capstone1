@@ -374,6 +374,19 @@ class ParentAddPageResponse(BaseModel):
     book_readable_for_children: bool
 
 
+ScanSaveMode = Literal["create_book", "append_page"]
+
+
+class ParentSaveFromScanResponse(BaseModel):
+    book_id: UUID
+    page_id: UUID
+    page_number: int
+    revision_id: UUID
+    title: str
+    visibility_scope: Literal["PARENT_PRIVATE"] = "PARENT_PRIVATE"
+    reader_href: str
+
+
 class ParentDeletePrivateBookResponse(BaseModel):
     status: Literal["deleted"] = "deleted"
     book_id: UUID
