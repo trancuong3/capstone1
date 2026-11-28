@@ -353,6 +353,9 @@ async def text_to_speech(
         g_meta = GOOGLE_VOICE_BY_ID.get(candidate_voice_id)
         if g_meta is not None:
             return str(g_meta.get("gender") or "female")
+        el_male_voice_id = os.getenv("ELEVENLABS_MALE_VOICE_ID", "").strip()
+        if el_male_voice_id and candidate_voice_id == el_male_voice_id:
+            return "male"
         return None
 
     voice_gender = (

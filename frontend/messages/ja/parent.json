@@ -249,6 +249,11 @@
     "selectedBadge": "選択中",
     "regionLabel": "地域アクセント",
     "voiceListLabel": "具体的な声",
-    "voiceListAria": "先生と地域に合う声の一覧"
+    "voiceListAria": "先生と地域に合う声の一覧",
+    "policyLabel": "音声エンジンモード",
+    "policyAria": "音声エンジンモードを選択",
+    "policyLocalOnly": "この端末のみ",
+    "policyOnlineBackup": "この端末 + オンライン予備",
+    "workerOfflineHint": "ローカル音声ワーカーが停止中です。事前生成されていない本やゲームの音声を再生するには「この端末 + オンライン予備」をオンにしてください。"
   }
 }

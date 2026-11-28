@@ -26,6 +26,7 @@ import {
   sanitizeChildProfileForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
+import { hydrateTeacherVoiceFromChildProfile } from "@/lib/reading/session-voice-lock";
 import {
   createCalendarWindow,
   currentDateInReportTimezone,
@@ -130,6 +131,13 @@ export function DifficultWordsScreen({
   );
 
   const [state, setState] = useState<WordsState>({ status: "loading" });
+  const activeChild = state.status === "ready" ? state.child : null;
+
+  useEffect(() => {
+    if (activeChild) {
+      hydrateTeacherVoiceFromChildProfile(activeChild);
+    }
+  }, [activeChild]);
 
   useEffect(() => {
     mountedRef.current = true;

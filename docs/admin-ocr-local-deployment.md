@@ -2,7 +2,7 @@
 
 ## Trạng thái hiện tại
 
-AI sửa OCR xử lý từng chunk theo thứ tự `Gemini 3.5 Flash-Lite` → `Groq Qwen 3.8 27B` → `Gemini 3.1 Flash-Lite` → `Ollama Qwen3-VL` cục bộ. Backend gửi ảnh crop cùng văn bản từng đoạn, kiểm tra JSON/schema, số token, token không chắc chắn và dấu câu trước khi ghép kết quả. Việc giữ nguyên số từ giúp bảo toàn bounding box, đồng thời có nghĩa model không tự sửa lỗi cần thêm, bớt, tách hoặc gộp từ.
+AI sửa OCR xử lý từng chunk theo thứ tự `Gemini 3.1 Flash-Lite` → `Gemini 3.5 Flash-Lite` → `Groq Qwen 3.8 27B` → `Ollama Qwen3-VL` cục bộ (mặc định tập trung trong `backend/app/services/cloud_ai_defaults.py`, có thể ghi đè tùy chọn qua biến môi trường). Backend gửi ảnh crop cùng văn bản từng đoạn, kiểm tra JSON/schema, số token, token không chắc chắn và dấu câu trước khi ghép kết quả. Việc giữ nguyên số từ giúp bảo toàn bounding box, đồng thời có nghĩa model không tự sửa lỗi cần thêm, bớt, tách hoặc gộp từ.
 
 Đặt `OCR_CLOUD_CORRECTION_ENABLED=false` để chỉ chạy Ollama. Khi bật cloud nhưng thiếu `GEMINI_API_KEY` hoặc `GROQ_API_KEY`, provider tương ứng bị bỏ qua an toàn; Ollama vẫn là phương án cuối. Lỗi xác thực, quota hoặc lỗi dịch vụ cấp Google sẽ bỏ qua Gemini còn lại dùng cùng credential. Nếu provider trả `uncertain_word_indices`, backend chuyển các từ đó cho provider tiếp theo; từ đã được xác nhận sẽ được giữ cố định. Sau Ollama, từ vẫn chưa chắc chắn được giữ nguyên OCR gốc và được ghi nhận bằng diagnostic event an toàn. Nếu mọi provider chỉ trả lỗi hoặc response không hợp lệ, toàn bộ job thất bại đóng và draft không bị thay đổi.
 
@@ -29,8 +29,9 @@ Các kích thước hiện hành có thể thay đổi theo tag: Qwen3-VL 4B Q4_
 OCR_CLOUD_CORRECTION_ENABLED=true
 GEMINI_API_KEY=
 GROQ_API_KEY=
-GEMINI_OCR_PRIMARY_MODEL=gemini-3.5-flash-lite
-GEMINI_OCR_FALLBACK_MODEL=gemini-3.1-flash-lite
+# Ghi đè model tùy chọn (để trống sẽ tự dùng mặc định đã kiểm chứng trong cloud_ai_defaults.py):
+GEMINI_OCR_PRIMARY_MODEL=gemini-3.1-flash-lite
+GEMINI_OCR_FALLBACK_MODEL=gemini-3.5-flash-lite
 GROQ_OCR_MODEL=qwen/qwen3.8-27b
 ```
 

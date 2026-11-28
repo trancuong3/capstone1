@@ -89,6 +89,7 @@ const assessmentSchema = z.object({
     encouragement: z.string(),
   }),
   ai_cached: z.boolean(),
+  ai_fallback_reason: z.string().nullable().optional(),
 });
 
 export type ChildProgressAssessment = z.infer<typeof assessmentSchema>;
@@ -99,12 +100,17 @@ export interface ChildProgressService {
     childId: string,
     days: number,
     signal?: AbortSignal,
+    teacherGender?: "female" | "male",
   ): Promise<ChildProgressAssessment>;
   /** Asks the AI to write the assessment (cached while the data is unchanged). */
   generate(
     childId: string,
     days: number,
-    options?: { readonly refresh?: boolean; readonly signal?: AbortSignal },
+    options?: {
+      readonly refresh?: boolean;
+      readonly signal?: AbortSignal;
+      readonly teacherGender?: "female" | "male";
+    },
   ): Promise<ChildProgressAssessment>;
 }
 
@@ -114,12 +120,16 @@ function path(childId: string): string {
 
 export function createChildProgressService(): ChildProgressService {
   return {
-    get: (childId, days, signal) =>
-      requestApi(
-        `${path(childId)}?days=${encodeURIComponent(String(days))}`,
+    get: (childId, days, signal, teacherGender) => {
+      const genderSuffix = teacherGender
+        ? `&teacher_gender=${encodeURIComponent(teacherGender)}`
+        : "";
+      return requestApi(
+        `${path(childId)}?days=${encodeURIComponent(String(days))}${genderSuffix}`,
         assessmentSchema.refine((value) => value.child_id === childId),
         signal,
-      ),
+      );
+    },
     generate: (childId, days, options = {}) =>
       requestApi(
         path(childId),
@@ -127,7 +137,15 @@ export function createChildProgressService(): ChildProgressService {
         options.signal,
         {
           method: "POST",
-          body: { days, refresh: options.refresh ?? false },
+          body: {
+            days,
+            refresh: options.refresh ?? false,
+            ...(options.teacherGender
+              ? { teacher_gender: options.teacherGender }
+              : {}),
+          },
+          timeoutMs: 45_000,
+          retryOnColdStart: true,
         },
       ),
   };

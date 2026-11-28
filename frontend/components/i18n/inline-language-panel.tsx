@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils/cn";
 
 export interface InlineLanguagePanelProps {
   readonly id: string;
+  readonly titleId: string;
   readonly openedByKeyboard?: boolean;
   readonly publishedOnly?: boolean;
   readonly locales?: readonly LocaleMetadata[];
@@ -28,6 +29,7 @@ export interface InlineLanguagePanelProps {
 
 export function InlineLanguagePanel({
   id,
+  titleId,
   openedByKeyboard = false,
   publishedOnly = true,
   locales,
@@ -43,7 +45,6 @@ export function InlineLanguagePanel({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const titleId = useId();
   const searchId = useId();
 
   useEffect(() => {
@@ -191,49 +192,47 @@ export function InlineLanguagePanel({
           <span className="block truncate text-sm font-bold leading-snug">
             {item.nativeName}
           </span>
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
-            {item.englishName !== item.nativeName ? (
-              <span className="truncate text-xs text-muted">
-                {item.englishName}
-              </span>
-            ) : null}
-            <span
-              className={cn(
-                "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide",
-                isSelected
-                  ? "bg-white/90 text-primary-hover"
-                  : "bg-surface-subtle text-muted",
-              )}
-            >
-              {item.code}
+          {item.englishName !== item.nativeName ? (
+            <span className="mt-0.5 block truncate text-xs text-muted">
+              {item.englishName}
             </span>
-          </span>
+          ) : null}
         </span>
-        {isSelected ? (
+        <span className="flex shrink-0 items-center gap-2">
           <span
-            aria-hidden="true"
-            className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-2xs"
+            className={cn(
+              "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-bold tracking-wide",
+              isSelected
+                ? "bg-white/90 text-primary-hover"
+                : "bg-surface-subtle text-muted",
+            )}
           >
-            <Check className="size-3.5" strokeWidth={2.5} />
+            {item.code}
           </span>
-        ) : null}
+          {isSelected ? (
+            <span
+              aria-hidden="true"
+              className="flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-white shadow-2xs"
+            >
+              <Check className="size-3.5" strokeWidth={2.5} />
+            </span>
+          ) : null}
+        </span>
       </button>
     );
   }
 
   return (
     <div
-      aria-labelledby={titleId}
       className="avatar-menu-view-forward flex min-h-0 flex-1 flex-col bg-white"
       data-language-inline="true"
       id={id}
-      role="group"
     >
       {/* Pinned sub-view header */}
       <div className="flex shrink-0 items-center gap-2.5 border-b border-border/75 bg-sky/40 px-3 py-2.5">
         <button
           aria-label={t("common.actions.back")}
-          className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border/75 bg-white/90 text-ink shadow-2xs transition-colors hover:border-primary/40 hover:bg-white hover:text-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-white/85 text-ink shadow-2xs transition-colors hover:bg-white hover:text-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
           onClick={() => onBack({ restoreFocus: true })}
           ref={backButtonRef}
           type="button"
@@ -267,7 +266,7 @@ export function InlineLanguagePanel({
           />
           <input
             aria-label={t("common.languageSelector.searchLabel")}
-            className="min-h-11 w-full rounded-xl border border-border/90 bg-canvas/75 pe-10 ps-9 text-sm text-ink placeholder:text-muted transition-colors focus:border-primary focus:bg-white focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-primary"
+            className="avatar-menu-search min-h-11 w-full rounded-xl border border-border/90 bg-canvas/75 pe-10 ps-9 text-sm text-ink placeholder:text-muted transition-colors focus:border-primary focus:bg-white focus:ring-2 focus:ring-primary/25"
             id={searchId}
             onChange={(event) => setSearchQuery(event.target.value)}
             onKeyDown={handleSearchKeyDown}

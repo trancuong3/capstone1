@@ -6,10 +6,11 @@ import base64
 import io
 import json
 import os
+import shutil
 import struct
 import tempfile
 import unittest
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -1019,7 +1020,16 @@ class M1CacheBoundsAndMultiLayerQuotaTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         from test_zero_cost_phase2_backend import _InMemoryTtsRepo
 
-        with tempfile.TemporaryDirectory() as tmpdir:
+        @contextmanager
+        def _longpath_tempdir():
+            with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
+                try:
+                    yield d
+                finally:
+                    if os.name == "nt":
+                        shutil.rmtree(f"\\\\?\\{Path(d).resolve()}", ignore_errors=True)
+
+        with _longpath_tempdir() as tmpdir:
             repo = _InMemoryTtsRepo()
             fake_db = MagicMock(spec=AsyncSession)
             fake_db.commit = AsyncMock()

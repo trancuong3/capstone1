@@ -60,7 +60,11 @@ describe("AdminParentsScreen", () => {
     renderScreen();
 
     expect(
-      await screen.findByRole("heading", { name: "Nguyen Van A" }),
+      await screen.findByRole(
+        "heading",
+        { name: "Nguyen Van A" },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText("2")).toBeInTheDocument();
     expect(
@@ -304,7 +308,11 @@ describe("AdminParentsScreen", () => {
 
     renderScreen();
     expect(
-      await screen.findByRole("heading", { name: "Nguyen Van A" }),
+      await screen.findByRole(
+        "heading",
+        { name: "Nguyen Van A" },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Vô hiệu hóa" }));

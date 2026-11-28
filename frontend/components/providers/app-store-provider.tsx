@@ -26,6 +26,10 @@ import {
   writeSessionSelectedChildId,
   type ChildSyncMessage,
 } from "@/lib/cache/selected-child-storage";
+import {
+  hydrateTeacherVoiceFromChildProfile,
+  resetTeacherVoiceForActorSwitch,
+} from "@/lib/reading/session-voice-lock";
 import type { ChildProfileDTO } from "@/types/child";
 
 export interface AppStore {
@@ -72,11 +76,13 @@ export function AppStoreProvider({
 
     if (authRuntime.lastEvent === "SIGNED_OUT") {
       clearPersistedSelectedChild();
+      resetTeacherVoiceForActorSwitch();
       if (previousUserId && previousUserId !== activeUserId) {
         broadcastChildSelection(previousUserId, null, syncChannelRef.current);
       }
     } else if (previousUserId && previousUserId !== activeUserId) {
       clearPersistedSelectedChild();
+      resetTeacherVoiceForActorSwitch();
       broadcastChildSelection(previousUserId, null, syncChannelRef.current);
     } else if (activeUserId) {
       clearPersistedSelectedChild(activeUserId);
@@ -239,6 +245,12 @@ export function AppStoreProvider({
     }
   }, [activeUserId, effectiveSelection.childId]);
 
+  useEffect(() => {
+    if (effectiveSelection.child) {
+      hydrateTeacherVoiceFromChildProfile(effectiveSelection.child);
+    }
+  }, [effectiveSelection.child]);
+
   const selectChild = useCallback(
     (childId: string) => {
       const normalized = normalizeSelectedChildId(childId);
@@ -263,10 +275,22 @@ export function AppStoreProvider({
   const setValidatedSelectedChild = useCallback(
     (child: ChildProfileDTO) => {
       setSelection((current) => {
-        if (current.userId !== activeUserId || current.childId !== child.id) {
+        const effectiveUserId =
+          current.userId === null && activeUserId !== null
+            ? activeUserId
+            : current.userId;
+        const effectiveChildId =
+          current.userId === null && activeUserId !== null
+            ? (current.childId ?? readSessionSelectedChildId(activeUserId))
+            : current.childId;
+        if (effectiveUserId !== activeUserId || effectiveChildId !== child.id) {
           return current;
         }
-        return { userId: activeUserId, childId: current.childId, child };
+        return {
+          userId: activeUserId,
+          childId: effectiveChildId,
+          child,
+        };
       });
     },
     [activeUserId],

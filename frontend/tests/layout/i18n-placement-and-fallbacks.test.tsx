@@ -224,6 +224,104 @@ describe("SiteHeader, AppShell, AccountAvatarMenu and fallbacks i18n", () => {
     expect(screen.getByRole("menuitem", { name: "Đăng xuất" })).toHaveFocus();
   });
 
+  it("renders the ParentAccountDropdown language picker inline without popover/sheet clipping, switches locale, and handles coarse touch focus", async () => {
+    const user = userEvent.setup();
+    const authService = createAuthServiceFixture();
+    const loadMessages = vi.fn(async () => englishTestMessages);
+    const originalMatchMedia = window.matchMedia;
+
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: query.includes("pointer: coarse"),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+
+    try {
+      const { container } = render(
+        withAuthFixture(
+          <I18nProvider loadMessages={loadMessages}>
+            <AppStoreProvider>
+              <AppShell>
+                <div>Body</div>
+              </AppShell>
+            </AppStoreProvider>
+          </I18nProvider>,
+          authService,
+          { session: authSessionFixture },
+        ),
+      );
+
+      await user.click(
+        screen.getByRole("button", { name: "Mở menu tài khoản" }),
+      );
+      const menu = screen.getByRole("menu", { name: "Menu tài khoản" });
+      const langButton = within(menu).getByRole("button", {
+        name: /Chọn ngôn ngữ giao diện/i,
+      });
+
+      await user.click(langButton);
+
+      // In-card language sub-view switches shell to role="dialog" with zero popover/sheet overlays
+      const languageDialog = screen.getByRole("dialog", {
+        name: "Chọn ngôn ngữ",
+      });
+      expect(
+        languageDialog.querySelector('[data-language-inline="true"]'),
+      ).not.toBeNull();
+      expect(
+        container.querySelector('[data-language-popover="true"]'),
+      ).toBeNull();
+      expect(
+        container.querySelector('[data-language-sheet="true"]'),
+      ).toBeNull();
+
+      // Coarse touch pointers focus Back button instead of triggering a virtual keyboard
+      const backButton = within(languageDialog).getByRole("button", {
+        name: "Quay lại",
+      });
+      expect(backButton).toHaveFocus();
+
+      const search = within(languageDialog).getByRole("searchbox", {
+        name: "Tìm ngôn ngữ",
+      });
+      await user.type(search, "English");
+      await user.click(
+        within(languageDialog).getByRole("option", { name: /English/ }),
+      );
+
+      await waitFor(() => {
+        expect(document.documentElement.lang).toBe("en");
+        expect(
+          screen.getByRole("menu", { name: "Menu tài khoản" }),
+        ).toBeInTheDocument();
+      });
+
+      expect(
+        within(screen.getByRole("menu", { name: "Menu tài khoản" })).getByRole(
+          "button",
+          {
+            name: /Chọn ngôn ngữ giao diện|Select interface language/i,
+          },
+        ),
+      ).toHaveTextContent("English");
+    } finally {
+      Object.defineProperty(window, "matchMedia", {
+        configurable: true,
+        writable: true,
+        value: originalMatchMedia,
+      });
+    }
+  });
+
   it("renders localized NotFoundFallback and RouteErrorFallback in vi and switched locales", () => {
     const onRetry = vi.fn();
     const { rerender } = render(

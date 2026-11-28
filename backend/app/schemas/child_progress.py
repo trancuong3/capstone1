@@ -10,6 +10,17 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ComponentKey = Literal["ACCURACY", "FLUENCY", "COMPREHENSION", "CONSISTENCY"]
 Grade = Literal["EXCELLENT", "GOOD", "FAIR", "NEEDS_SUPPORT"]
+AiFallbackReason = Literal[
+    "AI_DISABLED",
+    "AI_NOT_CONFIGURED",
+    "PROVIDER_AUTHENTICATION",
+    "PROVIDER_QUOTA",
+    "MODEL_UNAVAILABLE",
+    "PROVIDER_TIMEOUT",
+    "PROVIDER_UNAVAILABLE",
+    "INVALID_CONTENT",
+    "UNKNOWN",
+]
 
 
 class AssessmentRequest(BaseModel):
@@ -18,6 +29,7 @@ class AssessmentRequest(BaseModel):
     days: int = Field(default=30, ge=7, le=90)
     # Ask the AI for a new comment even when the data did not change.
     refresh: bool = False
+    teacher_gender: Literal["female", "male"] | None = None
 
 
 class ScoreComponentRead(BaseModel):
@@ -118,3 +130,4 @@ class ChildProgressAssessmentRead(BaseModel):
     difficult_words: list[DifficultWordStatRead]
     assessment: AssessmentTextRead
     ai_cached: bool
+    ai_fallback_reason: AiFallbackReason | None = None

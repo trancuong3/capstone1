@@ -45,6 +45,7 @@ import { Modal } from "@/components/common/modal";
 import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { ResponsiveTable } from "@/components/common/responsive-table";
 import { StatusMessage } from "@/components/common/status-message";
+import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
 import { useAdminServices } from "@/hooks/use-admin-services";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -56,6 +57,7 @@ import {
   isAdminOcrJobQueuedSignal,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import { emitStudioTasksChanged } from "@/lib/api/global-tasks-service";
 import { cn } from "@/lib/utils/cn";
 import { isServiceError } from "@/lib/api/service-error";
 import { translateMessage } from "@/lib/i18n/formatter";
@@ -875,6 +877,7 @@ export function AdminOcrReviewScreen({
   pageId: string;
 }) {
   const { books, pages, ocr, revisions } = useAdminServices();
+  const taskCenter = useOptionalAiTaskCenter();
   const t = useTranslations("admin");
   const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber } = useI18n();
@@ -1612,6 +1615,7 @@ export function AdminOcrReviewScreen({
     setAiAcceptedChanges(new Set());
     setAiDiffPage(0);
     setNotice(null);
+    taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
     try {
       const workflow = await ocr.runCombinedWorkflow(
         pageId,
@@ -1631,6 +1635,14 @@ export function AdminOcrReviewScreen({
         return;
       }
       setAiWorkflow(workflow);
+      taskCenter?.markTaskAlertSeen(workflow.workflow_id, {
+        includeNextSync: true,
+      });
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       const correctedText = workflow.proofread_text?.normalize("NFC");
       if (!correctedText) {
         setAiCheckUnavailable(true);
@@ -1729,15 +1741,23 @@ export function AdminOcrReviewScreen({
     setBusy("workflow");
     setNotice(null);
     try {
-      setAiWorkflow(
-        await ocr.decideWorkflowSafety(
-          pageId,
-          aiWorkflow.workflow_id,
-          aiWorkflow.candidate_hash,
-          confirmed,
-          reason || undefined,
-        ),
+      const updatedWorkflow = await ocr.decideWorkflowSafety(
+        pageId,
+        aiWorkflow.workflow_id,
+        aiWorkflow.candidate_hash,
+        confirmed,
+        reason || undefined,
       );
+      if (!mountedRef.current) return;
+      setAiWorkflow(updatedWorkflow);
+      taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
+        includeNextSync: true,
+      });
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
     } catch (cause) {
       setNotice(
         isServiceError(cause)
@@ -1764,15 +1784,23 @@ export function AdminOcrReviewScreen({
     setBusy("workflow");
     setNotice(null);
     try {
-      setAiWorkflow(
-        await ocr.decideWorkflowImageSafety(
-          pageId,
-          aiWorkflow.workflow_id,
-          status,
-          aiWorkflow.source_image_sha256 ?? undefined,
-          reason || undefined,
-        ),
+      const updatedWorkflow = await ocr.decideWorkflowImageSafety(
+        pageId,
+        aiWorkflow.workflow_id,
+        status,
+        aiWorkflow.source_image_sha256 ?? undefined,
+        reason || undefined,
       );
+      if (!mountedRef.current) return;
+      setAiWorkflow(updatedWorkflow);
+      taskCenter?.markTaskAlertSeen(updatedWorkflow.workflow_id, {
+        includeNextSync: true,
+      });
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(
         status === "ADMIN_CONFIRMED_SAFE"
           ? t("ocrReview.notices.imageMarkedSafe")
@@ -1804,6 +1832,9 @@ export function AdminOcrReviewScreen({
     setNotice(null);
     try {
       setAiWorkflow(await ocr.retryWorkflow(pageId, aiWorkflow.workflow_id));
+      taskCenter?.markTaskAlertSeen(aiWorkflow.workflow_id);
+      taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(
         retryingSafety || aiWorkflow.stage === "CHILD_SAFETY_SCANNING"
           ? t("ocrReview.notices.retrySafetyQueued")
@@ -2031,6 +2062,16 @@ export function AdminOcrReviewScreen({
       applyDetail(saved);
       setAiWorkflow(latestWorkflow);
       restoreWorkflowReview(latestWorkflow, saved);
+      if (latestWorkflow) {
+        taskCenter?.markTaskAlertSeen(latestWorkflow.workflow_id, {
+          includeNextSync: true,
+        });
+      }
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(t("ocrReview.notices.draftSaved"));
       try {
         setHistory(await revisions.list(pageId));
@@ -2108,6 +2149,16 @@ export function AdminOcrReviewScreen({
         return;
       }
       applyDetail(verifiedResult);
+      if (aiWorkflow) {
+        taskCenter?.markTaskAlertSeen(aiWorkflow.workflow_id, {
+          includeNextSync: true,
+        });
+      }
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setNotice(t("ocrReview.notices.verifiedSaved"));
       try {
         setHistory(await revisions.list(pageId));
@@ -2182,6 +2233,17 @@ export function AdminOcrReviewScreen({
         setImage(nextImage);
         applyDetail(nextDetail);
         setHistory(nextHistory);
+        if (
+          typeof document === "undefined" ||
+          document.visibilityState !== "hidden"
+        ) {
+          taskCenter?.markTaskAlertSeen(nextJob.id, { includeNextSync: true });
+          taskCenter?.markTargetAlertsSeen(
+            { bookId, bookPageId: pageId },
+            { includeNextSync: true },
+          );
+        }
+        emitStudioTasksChanged({ portal: "admin" });
         setNotice(
           nextJob.job_kind === "ADMIN_PAGE_REUPLOAD"
             ? t("ocrReview.notices.reuploadCreated")
@@ -2191,6 +2253,18 @@ export function AdminOcrReviewScreen({
       }
       if (nextJob.status === "DEAD_LETTER" || nextJob.status === "CANCELLED") {
         setQueuedOcrJob(null);
+        if (
+          mountedRef.current &&
+          (typeof document === "undefined" ||
+            document.visibilityState !== "hidden")
+        ) {
+          taskCenter?.markTaskAlertSeen(nextJob.id, { includeNextSync: true });
+          taskCenter?.markTargetAlertsSeen(
+            { bookId, bookPageId: pageId },
+            { includeNextSync: true },
+          );
+        }
+        emitStudioTasksChanged({ portal: "admin" });
         setNotice(
           nextJob.error_message || t("ocrReview.notices.reprocessError"),
           "error",
@@ -2200,7 +2274,17 @@ export function AdminOcrReviewScreen({
       setQueuedOcrJob(nextJob);
       return "pending";
     },
-    [applyDetail, ocr, pageId, pages, revisions, setNotice, t],
+    [
+      applyDetail,
+      bookId,
+      ocr,
+      pageId,
+      pages,
+      revisions,
+      setNotice,
+      t,
+      taskCenter,
+    ],
   );
 
   const checkQueuedOcrJobNow = useCallback(async () => {
@@ -2235,9 +2319,11 @@ export function AdminOcrReviewScreen({
     try {
       if (typeof pages.cancelOcrJob === "function") {
         await pages.cancelOcrJob(queuedOcrJobId);
+        emitStudioTasksChanged({ portal: "admin" });
       } else {
         await cancelAdminOcrJob(queuedOcrJobId);
       }
+      taskCenter?.markTaskAlertSeen(queuedOcrJobId);
       if (!mountedRef.current) return;
       setQueuedOcrJob(null);
       setNotice(
@@ -2262,7 +2348,7 @@ export function AdminOcrReviewScreen({
     } finally {
       if (mountedRef.current) setBusyQueuedJobAction(null);
     }
-  }, [busyQueuedJobAction, pages, queuedOcrJobId, setNotice, t]);
+  }, [busyQueuedJobAction, pages, queuedOcrJobId, setNotice, t, taskCenter]);
 
   const ocrWorkerStatus = useOcrWorkerStatus({
     onRecovered: () => {
@@ -2367,6 +2453,11 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setActiveTab("draft");
       setNotice(t("ocrReview.notices.reprocessCreated"));
     } catch (cause) {
@@ -2377,6 +2468,7 @@ export function AdminOcrReviewScreen({
         return;
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
+        taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
         setNotice(cause.message, "info");
         return;
       }
@@ -2428,6 +2520,11 @@ export function AdminOcrReviewScreen({
       setImage(nextImage);
       applyDetail(result);
       setHistory(nextHistory);
+      taskCenter?.markTargetAlertsSeen(
+        { bookId, bookPageId: pageId },
+        { includeNextSync: true },
+      );
+      emitStudioTasksChanged({ portal: "admin" });
       setReplacementFile(null);
       const input = document.getElementById(
         "replacement-page-image",
@@ -2443,6 +2540,7 @@ export function AdminOcrReviewScreen({
         return;
       if (isAdminOcrJobQueuedSignal(cause)) {
         setQueuedOcrJob(cause.job);
+        taskCenter?.markTargetAlertsSeen({ bookId, bookPageId: pageId });
         setReplacementFile(null);
         const input = document.getElementById(
           "replacement-page-image",

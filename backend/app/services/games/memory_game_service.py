@@ -384,6 +384,31 @@ class MemoryGameService:
             evaluation=evaluation,
             scene_spec=scene_spec,
         )
+        if payload.input_mode == "VOICE" and evaluation.used_focus_words:
+            from app.services.active_weak_words import (
+                match_focus_words_in_text,
+                record_entertainment_vocal_word_practice,
+            )
+
+            exact_vocal_words = match_focus_words_in_text(
+                cleaned_response,
+                [
+                    *scene_spec.matched_focus_words,
+                    *getattr(scene_spec, "creative_focus_words", []),
+                ],
+            )
+            if exact_vocal_words:
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repo, "db", None),
+                    child_id=updated_session.ChildId,
+                    parent_id=parent_id,
+                    words=exact_vocal_words,
+                    source_module="MEMORY_GAME",
+                    source_record_id=str(attempt_proj.Id),
+                    transcript_text=cleaned_response,
+                    confidence=0.84,
+                    difficulty_level=updated_session.DifficultyLevel,
+                )
 
         return MemoryAttemptSubmitRead(
             attempt=_to_attempt_read(attempt_proj),

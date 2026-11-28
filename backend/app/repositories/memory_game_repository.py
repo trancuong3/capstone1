@@ -156,6 +156,17 @@ class MemoryGameRepository:
         limit: int = 8,
     ) -> list[str]:
         """Best-effort lookup of recent difficult reading words for scene personalization."""
+        from app.services.active_weak_words import list_active_weak_words_for_child
+
+        unified = await list_active_weak_words_for_child(
+            self.db,
+            child_id,
+            parent_id=parent_id,
+            limit=limit,
+        )
+        if unified:
+            return unified
+
         try:
             async with self.db.begin_nested():
                 result = await self.db.execute(

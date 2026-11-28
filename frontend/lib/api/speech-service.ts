@@ -373,9 +373,12 @@ export function createSpeechService(): SpeechService {
       const activeLock = options.bypassSessionLock
         ? null
         : getActiveSessionVoiceLock();
-      const sessionId = options.bypassSessionLock
+      const rawSessionId = options.bypassSessionLock
         ? null
         : (options.sessionId ?? activeLock?.sessionId ?? null);
+      const sessionId = rawSessionId?.startsWith("practice_")
+        ? null
+        : rawSessionId;
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
@@ -582,9 +585,12 @@ export function createSpeechService(): SpeechService {
       const activeLock = options.bypassSessionLock
         ? null
         : getActiveSessionVoiceLock();
-      const sessionId = options.bypassSessionLock
+      const rawSessionId = options.bypassSessionLock
         ? null
         : (options.sessionId ?? activeLock?.sessionId ?? null);
+      const sessionId = rawSessionId?.startsWith("practice_")
+        ? null
+        : rawSessionId;
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "COACHING");
       const canUseBrowserCache =

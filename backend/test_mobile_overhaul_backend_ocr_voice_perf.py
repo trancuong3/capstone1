@@ -316,7 +316,7 @@ class TestAsyncScanPageOcrJobsAndMatchPageCache(unittest.TestCase):
             async def child_belongs_to_parent(self, child_id, actor_id):
                 return True
 
-            async def eligible_verified_pages(self, book_id=None):
+            async def eligible_verified_pages(self, book_id=None, *, ocr_tokens=None, limit=None):
                 fake_book = SimpleNamespace(Id=book_id or uuid4(), Title="Chú mèo đi hia")
                 fake_page = SimpleNamespace(Id=page_id, PageNumber=3, Width=800, Height=1000)
                 fake_rev = SimpleNamespace(Id=rev_id, VerifiedText="Con mèo trèo cây cau", OriginalOcrText="Con mèo trèo cây cau")

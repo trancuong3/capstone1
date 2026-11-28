@@ -15,9 +15,12 @@
 
 import {
   clampSpeed,
+  DEFAULT_SPEED,
   getSpeechPreferences,
   getSpeechPreferencesMeta,
+  resetSpeechPreferencesForActorSwitch,
   setSpeechPreferences,
+  setSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
 import {
   getTeacherPersonaForVoice,
@@ -431,7 +434,14 @@ export function getVoicePolicyPreferences(): VoicePolicyPreferences {
 export function setVoicePolicyPreferences(
   update: Partial<VoicePolicyPreferences>,
 ): VoicePolicyPreferences {
-  const next = sanitizePolicy({ ...getVoicePolicyPreferences(), ...update });
+  const current = getVoicePolicyPreferences();
+  const next = sanitizePolicy({ ...current, ...update });
+  const changed =
+    current.region !== next.region ||
+    current.providerMode !== next.providerMode ||
+    current.allowGoogleSttFallback !== next.allowGoogleSttFallback ||
+    current.allowGoogleTtsFallback !== next.allowGoogleTtsFallback ||
+    current.modelVersion !== next.modelVersion;
   cachedPolicy = next;
   if (typeof window !== "undefined") {
     try {
@@ -440,7 +450,9 @@ export function setVoicePolicyPreferences(
       // In-memory state still applies for this page view.
     }
   }
-  notifyPolicyListeners();
+  if (changed) {
+    notifyPolicyListeners();
+  }
   return next;
 }
 
@@ -961,17 +973,22 @@ export function applyGlobalTeacherVoiceSelection(
   // 1. Update local preferences (notifies useSpeechPreferences, useTeacherPersona, TtsPlayback)
   const storedVoiceId =
     input.storedVoiceId !== undefined ? input.storedVoiceId : targetVoiceId;
+  const resolvedChildId =
+    input.childId !== undefined
+      ? input.childId
+      : (getSpeechPreferencesMeta().childId ?? null);
   setSpeechPreferences({
     voiceId: storedVoiceId,
     gender: targetGender,
     speed: finalSpeed,
     updatedAt: finalUpdatedAt,
     globalSelectionUpdatedAt: finalUpdatedAt,
+    childId: resolvedChildId,
   });
   // Keep child hydration cache consistent so switching Child A -> Child B (change voice) -> Child A
   // always restores Child A's persisted voice instead of skipping due to a stale cache key.
-  lastHydratedChildVoiceKey = input.childId
-    ? `${input.childId}:${targetVoiceId}:${targetGender}:${finalRegion}:${finalSpeed}:${finalUpdatedAt}`
+  lastHydratedChildVoiceKey = resolvedChildId
+    ? `${resolvedChildId}:${targetVoiceId}:${targetGender}:${finalRegion}:${finalSpeed}:${finalUpdatedAt}`
     : null;
 
   // 2. Update voice policy region & model version
@@ -1049,58 +1066,171 @@ export function hydrateTeacherVoiceFromChildProfile(
       }
     | null
     | undefined,
-  options?: { readonly force?: boolean },
+  options?: {
+    readonly force?: boolean;
+    readonly syncActiveServerSessionLock?: (input: {
+      readonly sessionId: string;
+      readonly voiceId: string;
+    }) => Promise<unknown>;
+  },
 ): GlobalTeacherVoiceSelectionResult | null {
-  if (!child?.id || !child.settings || typeof child.settings !== "object") {
+  if (!child?.id) {
     lastHydratedChildVoiceKey = null;
     return null;
   }
-  const raw = (child.settings as Record<string, unknown>).voice_preferences;
-  if (!raw || typeof raw !== "object") {
-    lastHydratedChildVoiceKey = null;
-    return null;
-  }
-  const rec = raw as Record<string, unknown>;
+  const raw =
+    child.settings && typeof child.settings === "object"
+      ? (child.settings as Record<string, unknown>).voice_preferences
+      : undefined;
+  const rec =
+    raw && typeof raw === "object"
+      ? (raw as Record<string, unknown>)
+      : undefined;
   const rawVoiceId =
+    rec &&
     typeof rec.voice_id === "string" &&
     /^[A-Za-z0-9_-]{1,100}$/.test(rec.voice_id)
       ? rec.voice_id
       : null;
-  if (!rawVoiceId) return null;
+
+  const currentMeta = getSpeechPreferencesMeta();
+  const isSiblingSwitch = Boolean(
+    currentMeta.childId && currentMeta.childId !== child.id,
+  );
+  if (!rawVoiceId) {
+    lastHydratedChildVoiceKey = null;
+    // Prevent sibling voice leak: if the currently active voice explicitly belonged to
+    // ANOTHER child profile, reset cleanly to the default female northern voice for this child.
+    if (isSiblingSwitch) {
+      const activeLock = getActiveSessionVoiceLock();
+      const alreadyDefault =
+        getEffectiveVoiceId() === DEFAULT_LOCAL_VOICE_ID &&
+        getEffectiveTeacherPersona().gender === "female" &&
+        getVoicePolicyPreferences().region === "north" &&
+        getSpeechPreferences().speed === DEFAULT_SPEED &&
+        (!activeLock ||
+          (activeLock.voiceId === DEFAULT_LOCAL_VOICE_ID &&
+            activeLock.gender === "female" &&
+            activeLock.speed === DEFAULT_SPEED));
+      if (alreadyDefault) {
+        setSpeechPreferencesMeta({
+          gender: "female",
+          updatedAt: 0,
+          globalSelectionUpdatedAt: 0,
+          childId: child.id,
+        });
+        return {
+          voiceId: DEFAULT_LOCAL_VOICE_ID,
+          gender: "female",
+          region: "north",
+          speed: DEFAULT_SPEED,
+          modelVersion: getVoicePolicyPreferences().modelVersion,
+          updatedAt: 0,
+        };
+      }
+      return applyGlobalTeacherVoiceSelection({
+        voiceId: DEFAULT_LOCAL_VOICE_ID,
+        storedVoiceId: null,
+        gender: "female",
+        region: "north",
+        speed: DEFAULT_SPEED,
+        childId: child.id,
+        syncActiveServerSessionLock: options?.syncActiveServerSessionLock,
+      });
+    }
+    return null;
+  }
 
   const rawGender: VoiceGender =
-    rec.gender === "male" || rec.gender === "female"
+    rec?.gender === "male" || rec?.gender === "female"
       ? rec.gender
       : resolveVoiceGender(rawVoiceId);
   const rawRegion: VoiceRegion =
-    rec.region === "north" || rec.region === "central" || rec.region === "south"
+    rec?.region === "north" ||
+    rec?.region === "central" ||
+    rec?.region === "south"
       ? rec.region
       : inferRegionFromVoiceId(rawVoiceId, "north");
   const rawSpeed =
-    typeof rec.speed === "number"
+    typeof rec?.speed === "number"
       ? clampSpeed(rec.speed)
-      : getSpeechPreferences().speed;
+      : isSiblingSwitch
+        ? DEFAULT_SPEED
+        : getSpeechPreferences().speed;
   const rawUpdatedAt =
-    typeof rec.updated_at === "number" &&
+    typeof rec?.updated_at === "number" &&
     Number.isFinite(rec.updated_at) &&
     rec.updated_at > 0
       ? Math.floor(rec.updated_at)
-      : Date.now();
+      : 0;
 
   const key = `${child.id}:${rawVoiceId}:${rawGender}:${rawRegion}:${rawSpeed}:${rawUpdatedAt}`;
   if (!options?.force && lastHydratedChildVoiceKey === key) {
     return null;
   }
 
-  // If the same child already has a newer local selection in this browser session, keep local.
-  const currentMeta = getSpeechPreferencesMeta();
+  // Never overwrite a newer local selection for the SAME child (even when force=true on child card re-click).
   const sameChildPrefix = `${child.id}:`;
+  const isSameChild =
+    lastHydratedChildVoiceKey?.startsWith(sameChildPrefix) ||
+    currentMeta.childId === child.id;
   if (
-    !options?.force &&
-    lastHydratedChildVoiceKey?.startsWith(sameChildPrefix) &&
-    currentMeta.updatedAt > rawUpdatedAt
+    isSameChild &&
+    currentMeta.updatedAt > 0 &&
+    (rawUpdatedAt === 0 || currentMeta.updatedAt > rawUpdatedAt)
   ) {
     return null;
+  }
+
+  const currentPolicy = getVoicePolicyPreferences();
+  const effectiveTargetVoiceId =
+    inferProviderFromVoiceId(rawVoiceId) === "google" &&
+    (currentPolicy.providerMode !== "local_with_google_fallback" ||
+      !currentPolicy.allowGoogleTtsFallback)
+      ? getDefaultVoiceIdForRegionAndGender(rawRegion, rawGender)
+      : rawVoiceId;
+  const finalRegion = inferRegionFromVoiceId(effectiveTargetVoiceId, rawRegion);
+  const finalModelVersion = inferModelVersionForVoiceId(
+    effectiveTargetVoiceId,
+    currentPolicy.modelVersion,
+  );
+  const effectiveUpdatedAt = rawUpdatedAt > 0 ? rawUpdatedAt : Date.now();
+  const activeLock = getActiveSessionVoiceLock();
+  const lockMatches =
+    !activeLock ||
+    (activeLock.voiceId === effectiveTargetVoiceId &&
+      activeLock.gender === rawGender &&
+      activeLock.region === finalRegion &&
+      activeLock.speed === rawSpeed);
+  const activeVoiceMatches =
+    lockMatches &&
+    getEffectiveVoiceId() === effectiveTargetVoiceId &&
+    getEffectiveTeacherPersona().gender === rawGender &&
+    currentPolicy.region === finalRegion &&
+    getSpeechPreferences().speed === rawSpeed;
+
+  // Avoid firing preference/policy change listeners (which call `TtsPlayback.stop()`)
+  // when background hydration resolves for the exact voice/gender/region/speed already playing.
+  if (activeVoiceMatches) {
+    const nextStamp = Math.max(currentMeta.updatedAt, effectiveUpdatedAt);
+    setSpeechPreferencesMeta({
+      gender: rawGender,
+      updatedAt: nextStamp,
+      globalSelectionUpdatedAt: Math.max(
+        currentMeta.globalSelectionUpdatedAt,
+        nextStamp,
+      ),
+      childId: child.id,
+    });
+    lastHydratedChildVoiceKey = key;
+    return {
+      voiceId: effectiveTargetVoiceId,
+      gender: rawGender,
+      region: finalRegion,
+      speed: rawSpeed,
+      modelVersion: finalModelVersion,
+      updatedAt: nextStamp,
+    };
   }
 
   const applied = applyGlobalTeacherVoiceSelection({
@@ -1108,11 +1238,46 @@ export function hydrateTeacherVoiceFromChildProfile(
     gender: rawGender,
     region: rawRegion,
     speed: rawSpeed,
-    updatedAt: rawUpdatedAt,
+    updatedAt: effectiveUpdatedAt,
     childId: child.id,
+    syncActiveServerSessionLock: options?.syncActiveServerSessionLock,
   });
   lastHydratedChildVoiceKey = key;
   return applied;
+}
+
+/**
+ * Clears persisted teacher voice preferences and session voice locks on sign-out
+ * or parent account switch so one family's voice selection never leaks to another account.
+ */
+export function resetTeacherVoiceForActorSwitch(): void {
+  lastHydratedChildVoiceKey = null;
+  activeSessionId = null;
+  memoryLocks.clear();
+  voiceSwitchedSessions.clear();
+  utteranceAudits.clear();
+  if (typeof window !== "undefined") {
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < window.sessionStorage.length; i += 1) {
+        const k = window.sessionStorage.key(i);
+        if (k && k.startsWith(LOCK_STORAGE_PREFIX)) {
+          keysToRemove.push(k);
+        }
+      }
+      for (const k of keysToRemove) {
+        window.sessionStorage.removeItem(k);
+      }
+    } catch {
+      // Ignore restricted sessionStorage
+    }
+  }
+  resetSpeechPreferencesForActorSwitch();
+  setVoicePolicyPreferences({
+    region: DEFAULT_POLICY.region,
+    modelVersion: DEFAULT_POLICY.modelVersion,
+  });
+  invalidateRegisteredVoiceCaches();
 }
 
 export function approveSessionVoiceSwitch(

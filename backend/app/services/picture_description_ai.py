@@ -31,18 +31,25 @@ from app.services.admin_ocr_local import (
     LocalCorrectionError,
     _validate_loopback_url,
 )
+from app.services.cloud_ai_defaults import (
+    DEFAULT_GEMINI_ALIAS_MODEL,
+    DEFAULT_GEMINI_FALLBACK_MODEL,
+    DEFAULT_GEMINI_PRIMARY_MODEL,
+    DEFAULT_GROQ_MULTIMODAL_MODEL,
+    record_cloud_ai_outcome,
+)
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
 
-DEFAULT_PRIMARY_MODEL = "gemini-2.5-flash-lite"
-DEFAULT_FALLBACK_MODEL = "gemini-2.5-flash"
+DEFAULT_PRIMARY_MODEL = DEFAULT_GEMINI_PRIMARY_MODEL
+DEFAULT_FALLBACK_MODEL = DEFAULT_GEMINI_FALLBACK_MODEL
 DEFAULT_EXTRA_GEMINI_MODELS: tuple[str, ...] = (
-    "gemini-flash-lite-latest",
+    DEFAULT_GEMINI_ALIAS_MODEL,
 )
-DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL = DEFAULT_GROQ_MULTIMODAL_MODEL
 DEFAULT_TIMEOUT_SECONDS = 15
 DEFAULT_HEDGE_STAGGER_SECONDS = 3.5
 DEFAULT_MAX_OUTPUT_TOKENS = 1280
@@ -1090,14 +1097,14 @@ def evaluate_description_with_guide_fallback(
             bonus = 1
         elif active_mode in {"STORY", "CREATE"} and has_story_or_create_marker:
             bonus = 1
-        elif active_mode == "VOCABULARY" and used_target_words:
+        elif used_target_words:
             bonus = 1
         base = 9 if (matched_concepts >= 3 or word_count >= min_words_for_3_stars + 5) else 8
         raw_score = min(10, base + bonus)
     elif total_signal >= 2:
-        raw_score = 7
+        raw_score = 8 if used_target_words else 7
     else:
-        raw_score = 5
+        raw_score = 6 if used_target_words else 5
 
     score, stars, override_tip = _apply_evaluation_rubric(
         raw_score=raw_score,
@@ -1332,6 +1339,25 @@ class GeminiPictureDescriptionAI:
         if self._transport is None:
             _clear_model_cooldown(model)
 
+    def _record_outcome(
+        self,
+        provider: str,
+        model: str,
+        *,
+        ok: bool,
+        error_code: str | None = None,
+        http_status: int | None = None,
+    ) -> None:
+        if self._transport is None:
+            record_cloud_ai_outcome(
+                "picture_description",
+                provider,
+                model,
+                ok=ok,
+                error_code=error_code,
+                http_status=http_status,
+            )
+
     async def _call_single_gemini_model(
         self,
         client: httpx.AsyncClient,
@@ -1369,6 +1395,9 @@ class GeminiPictureDescriptionAI:
                 response = await client.post(endpoint, headers=headers, json=request_body)
             except httpx.TimeoutException as exc:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1393,6 +1422,9 @@ class GeminiPictureDescriptionAI:
                 )
             except httpx.HTTPError as exc:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1418,6 +1450,13 @@ class GeminiPictureDescriptionAI:
 
             elapsed_ms = int((time.perf_counter() - started) * 1000)
             if response.status_code in {401, 403}:
+                self._record_outcome(
+                    "gemini",
+                    model,
+                    ok=False,
+                    error_code="PROVIDER_AUTHENTICATION",
+                    http_status=response.status_code,
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1454,6 +1493,9 @@ class GeminiPictureDescriptionAI:
                 continue
             if response.status_code == 429:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_QUOTA", http_status=429
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1478,6 +1520,9 @@ class GeminiPictureDescriptionAI:
                 )
             if response.status_code == 503:
                 self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="PROVIDER_UNAVAILABLE", http_status=503
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1503,6 +1548,19 @@ class GeminiPictureDescriptionAI:
             if response.status_code != 200:
                 if response.status_code >= 500:
                     self._note_model_failure(model)
+                self._record_outcome(
+                    "gemini",
+                    model,
+                    ok=False,
+                    error_code=(
+                        "MODEL_UNAVAILABLE"
+                        if response.status_code == 404
+                        else "PROVIDER_UNAVAILABLE"
+                        if response.status_code >= 500
+                        else "PROVIDER_REJECTED"
+                    ),
+                    http_status=response.status_code,
+                )
                 log_diagnostic(
                     logger,
                     logging.WARNING,
@@ -1537,6 +1595,7 @@ class GeminiPictureDescriptionAI:
                         safety_reason=_clean_text(parsed.get("safety_reason"), max_len=160)
                     )
                 self._note_model_success(model)
+                self._record_outcome("gemini", model, ok=True, http_status=200)
                 log_diagnostic(
                     logger,
                     logging.INFO,
@@ -1560,6 +1619,9 @@ class GeminiPictureDescriptionAI:
                 )
                 raise
             except (ValueError, TypeError, json.JSONDecodeError) as exc:
+                self._record_outcome(
+                    "gemini", model, ok=False, error_code="INVALID_CONTENT", http_status=200
+                )
                 last_error = PictureAiError(
                     code="AI_INVALID_RESPONSE",
                     status_code=502,
@@ -1812,6 +1874,9 @@ class GeminiPictureDescriptionAI:
                     json=payload,
                 )
         except httpx.TimeoutException as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="PROVIDER_TIMEOUT", http_status=504
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1830,6 +1895,9 @@ class GeminiPictureDescriptionAI:
                 retryable=True,
             )
         except httpx.HTTPError as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="PROVIDER_NETWORK", http_status=503
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1852,6 +1920,23 @@ class GeminiPictureDescriptionAI:
         if response.status_code != 200:
             code = "AI_RATE_LIMITED" if response.status_code == 429 else "AI_UNAVAILABLE"
             status_code = 429 if response.status_code == 429 else 502
+            self._record_outcome(
+                "groq",
+                self.config.groq_model,
+                ok=False,
+                error_code=(
+                    "PROVIDER_AUTHENTICATION"
+                    if response.status_code in {401, 403}
+                    else "PROVIDER_QUOTA"
+                    if response.status_code == 429
+                    else "MODEL_UNAVAILABLE"
+                    if response.status_code == 404
+                    else "PROVIDER_UNAVAILABLE"
+                    if response.status_code >= 500
+                    else "PROVIDER_REJECTED"
+                ),
+                http_status=response.status_code,
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -1883,6 +1968,7 @@ class GeminiPictureDescriptionAI:
                     safety_reason=_clean_text(parsed.get("safety_reason"), max_len=160)
                 )
             model_tag = f"groq:{self.config.groq_model}"[:64]
+            self._record_outcome("groq", self.config.groq_model, ok=True, http_status=200)
             log_diagnostic(
                 logger,
                 logging.INFO,
@@ -1896,6 +1982,9 @@ class GeminiPictureDescriptionAI:
         except PictureSafetyError:
             raise
         except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            self._record_outcome(
+                "groq", self.config.groq_model, ok=False, error_code="INVALID_CONTENT", http_status=200
+            )
             log_diagnostic(
                 logger,
                 logging.WARNING,
@@ -2242,7 +2331,7 @@ class GeminiPictureDescriptionAI:
             "3. scene_title: tên chủ đề thật ngắn gọn bằng tiếng Việt (2 đến 5 từ, ví dụ: 'Trong lớp học', 'Khu vườn nhỏ'), KHÔNG tóm tắt hay làm lộ nội dung tranh.\n"
             "4. scene_summary: tóm tắt ngắn 1 câu để hệ thống lưu trữ nội bộ.\n"
             f"5. guiding_questions: đúng 3 câu hỏi mở thật ngắn bằng tiếng Việt xưng 'bé' phù hợp Lớp {grade} (ví dụ: 'Trong tranh có những ai?', 'Mọi người đang làm gì?', 'Khung cảnh có gì đặc biệt?'), TUYỆT ĐỐI KHÔNG nêu đáp án hay tiết lộ chi tiết/màu sắc cụ thể để bé tự quan sát và suy nghĩ.\n"
-            "6. suggested_vocabulary: danh sách 5 đến 7 từ vựng gợi ý đơn lẻ hoặc cụm 2 chữ (word + hint giải thích nghĩa chung, KHÔNG chép sẵn câu mô tả tranh).\n"
+            "6. suggested_vocabulary: danh sách 5 đến 7 từ vựng gợi ý đơn lẻ hoặc cụm 2-3 chữ (word + hint giải thích nghĩa dễ hiểu, KHÔNG chép sẵn câu mô tả tranh). Nếu có 1 đến 3 từ trong danh sách 'Từ khó bé đang luyện tập' phù hợp tự nhiên với khung cảnh/cảm xúc/sự vật trong tranh, hãy ưu tiên đưa lên đầu danh sách với hint bắt đầu bằng '⭐ Từ bé đang luyện: ...' (tuyệt đối không ép đưa từ sai lệch nội dung tranh).\n"
             f"7. model_sample_sentences: 2 đến 3 câu văn mẫu mô tả đúng bức tranh, phù hợp trình độ Lớp {grade} (chỉ mở cho bé xem sau khi bé đã tự làm bài).\n"
             "Luôn viết 100% bằng tiếng Việt, tuyệt đối không bịa chi tiết không có trong tranh."
             f"{hint_line}{target_words_line}"
@@ -2391,21 +2480,22 @@ class GeminiPictureDescriptionAI:
             f"<child_description>{fenced_transcript}</child_description>\n\n"
             "Hãy đối chiếu bài mô tả với các chi tiết CÓ THẬT trong bức tranh đính kèm và chấm theo tiêu chí hợp lý cho Lớp "
             f"{grade} rồi trả về 1 JSON object:\n"
+            "- LƯU Ý BAO DUNG CHO GIỌNG NÓI TRẺ EM (STT): Bài làm thường được thu trực tiếp từ giọng nói của trẻ qua micro nên có thể thiếu dấu chấm/phẩy, không viết hoa, có từ đệm nói tự nhiên ('à', 'ờ', 'dạ thưa', 'em thấy') hoặc nhiễu đồng âm nhẹ do STT vùng miền. TUYỆT ĐỐI KHÔNG trừ điểm lỗi dấu câu hay chữ hoa nếu ý diễn đạt đúng bức tranh!\n"
             "- is_relevant: true nếu bài nói/viết thật sự mô tả các nhân vật, vật thể hoặc khung cảnh có trong bức tranh; false nếu là chữ vô nghĩa, lệch hoàn toàn sang chủ đề không có trong tranh hoặc chỉ toàn ký tự linh tinh.\n"
             "- score_out_of_10: số nguyên từ 0 đến 10 theo thang rõ ràng:\n"
             "  + 0-1: chữ vô nghĩa hoặc không liên quan bức tranh.\n"
             "  + 2-4: mới chỉ nêu 1-2 từ rời rạc, chưa thành câu hoàn chỉnh hoặc nói sai chi tiết chính.\n"
             "  + 5-7: đã có câu đúng nội dung tranh nhưng còn ngắn, mới kể được 1 chi tiết cơ bản.\n"
-            f"  + 8-10: câu văn trọn ý (ít nhất {min_words_for_3_stars} từ), kể đúng từ 2 chi tiết/hoạt động/màu sắc trở lên trong tranh phù hợp Lớp {grade}.\n"
+            f"  + 8-9: câu văn trọn ý (ít nhất {min_words_for_3_stars} từ), kể đúng từ 2 chi tiết/hoạt động/màu sắc trở lên trong tranh phù hợp Lớp {grade} (10 điểm dành cho bài thật xuất sắc, nhiều câu giàu hình ảnh; KHÔNG tự cộng điểm thưởng từ khó mục tiêu vào score_out_of_10 vì hệ thống sẽ tự cộng +1 sau đó).\n"
             "- matched_details: 1 đến 4 chi tiết đúng mà bé đã kể được dựa trên tranh thật (để mảng rỗng nếu chưa có chi tiết đúng).\n"
             "- missed_details: 1 đến 3 chi tiết thú vị khác đang có trong tranh mà bé có thể bổ sung thêm.\n"
-            f"- praise_message: lời khen ấm áp 100% tiếng Việt, luôn xưng '{pronoun}' và gọi học sinh là 'bé' (không dùng 'con'), nhắc lại điểm hay hoặc sự tiến bộ cụ thể trong câu của bé (1-2 câu).\n"
+            f"- praise_message: lời khen ấm áp 100% tiếng Việt, luôn xưng '{pronoun}' và gọi học sinh là 'bé' (không dùng 'con'), nhắc lại điểm hay, từ khó mục tiêu bé đã dùng tốt, hoặc sự tiến bộ cụ thể trong câu của bé (1-2 câu).\n"
             "- improvement_tip: 1 mẹo ngắn gọn, cụ thể bằng tiếng Việt để lần nói/viết sau câu của bé hay và đầy đủ hơn (gợi ý nối câu: Ai + đang làm gì + ở đâu/như thế nào).\n"
             "- upgraded_sentences: 1 đến 2 câu gợi ý viết lại phát triển trực tiếp từ ý của bé sao cho mượt mà, giàu hình ảnh hơn với trình độ Lớp "
             f"{grade}.\n"
             "- vocabulary_highlights: 2 đến 5 từ vựng miêu tả hay gắn với bức tranh này để bé học thêm.\n"
             "- scaffolding_step: chọn 1 trong 4 bước PEER phù hợp nhất: 'PROMPT', 'EXPAND', 'PRAISE', 'NEXT_CHALLENGE'.\n"
-            f"- next_prompt_question: 1 câu hỏi gợi mở PEER/CROWD ngắn gọn, ấm áp bằng tiếng Việt xưng 'cô'-'bé' phù hợp Lớp {grade} và chế độ {mode_spec.label_vi} để khuyến khích bé nói tiếp lượt sau."
+            f"- next_prompt_question: 1 câu hỏi gợi mở PEER/CROWD ngắn gọn, ấm áp bằng tiếng Việt xưng '{pronoun}'-'bé' phù hợp Lớp {grade} và chế độ {mode_spec.label_vi} để khuyến khích bé nói tiếp lượt sau (nếu còn từ khó mục tiêu hợp tranh mà bé chưa dùng, hãy khéo léo mời bé đặt câu với 1 từ đó)."
         )
 
         # Build verified text-grounded prompt for Cloud 3 Groq Free fallback when vision quota is exhausted.
@@ -2445,6 +2535,8 @@ class GeminiPictureDescriptionAI:
             parsed_score = int(raw_score)
         except (TypeError, ValueError):
             parsed_score = 6 if is_relevant else 1
+        if is_relevant and parsed_score >= 6 and used_target_words:
+            parsed_score = min(10, parsed_score + 1)
 
         score, stars, override_tip = _apply_evaluation_rubric(
             raw_score=parsed_score,

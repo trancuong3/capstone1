@@ -5,6 +5,7 @@ import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
 import {
   getBrowserAccessToken,
   invalidateBrowserTokenCache,
+  refreshBrowserAccessToken,
 } from "@/lib/api/browser-auth";
 import {
   invalidateApiReadCache,
@@ -564,8 +565,9 @@ async function safeBackendMessage(response: Response): Promise<string> {
 
 async function shouldRetryColdStartResponse(
   response: Response,
+  statuses: ReadonlySet<number> = COLD_START_RETRY_STATUSES,
 ): Promise<boolean> {
-  if (!COLD_START_RETRY_STATUSES.has(response.status)) {
+  if (!statuses.has(response.status)) {
     return false;
   }
   const detail = await extractBackendDetail(response);
@@ -584,6 +586,7 @@ export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
 const DEFAULT_COLD_START_DEADLINE_MS = 65_000;
 const DEFAULT_GET_RETRY_DELAY_MS = 800;
+const POST_COLD_START_RETRY_DELAY_MS = 1_200;
 
 function createAbortError(): Error {
   if (typeof DOMException !== "undefined") {
@@ -720,6 +723,7 @@ export interface RequestApiOptions {
   readonly timeoutMs?: number;
   readonly maxRetries?: number;
   readonly retryDelayMs?: number;
+  readonly retryOnColdStart?: boolean;
 }
 
 /**
@@ -749,13 +753,16 @@ export async function requestApi<T>(
   const method = requestOptions.method ?? "GET";
   const isTestEnv =
     typeof process !== "undefined" && process.env.NODE_ENV === "test";
-  const maxRetries =
-    method !== "GET"
-      ? 0
-      : typeof requestOptions.maxRetries === "number" &&
-          Number.isFinite(requestOptions.maxRetries) &&
-          requestOptions.maxRetries >= 0
-        ? Math.floor(requestOptions.maxRetries)
+  const allowRetryMethod =
+    method === "GET" || requestOptions.retryOnColdStart === true;
+  const maxRetries = !allowRetryMethod
+    ? 0
+    : typeof requestOptions.maxRetries === "number" &&
+        Number.isFinite(requestOptions.maxRetries) &&
+        requestOptions.maxRetries >= 0
+      ? Math.floor(requestOptions.maxRetries)
+      : requestOptions.retryOnColdStart === true
+        ? 1
         : isTestEnv
           ? 0
           : 2;
@@ -764,7 +771,9 @@ export async function requestApi<T>(
     Number.isFinite(requestOptions.retryDelayMs) &&
     requestOptions.retryDelayMs >= 0
       ? requestOptions.retryDelayMs
-      : DEFAULT_GET_RETRY_DELAY_MS;
+      : method !== "GET" && requestOptions.retryOnColdStart === true
+        ? POST_COLD_START_RETRY_DELAY_MS
+        : DEFAULT_GET_RETRY_DELAY_MS;
   const isFormDataBody =
     typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
   const hasExplicitTimeout =
@@ -776,24 +785,17 @@ export async function requestApi<T>(
     : isFormDataBody
       ? DEFAULT_UPLOAD_TIMEOUT_MS
       : DEFAULT_REQUEST_TIMEOUT_MS;
-  const totalDeadlineMs = hasExplicitTimeout
-    ? requestOptions.timeoutMs!
-    : maxRetries > 0
-      ? Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
-      : singleAttemptTimeoutMs;
+  const totalDeadlineMs =
+    requestOptions.retryOnColdStart === true && hasExplicitTimeout
+      ? singleAttemptTimeoutMs + baseRetryDelayMs + 1_000
+      : hasExplicitTimeout
+        ? requestOptions.timeoutMs!
+        : maxRetries > 0
+          ? Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
+          : singleAttemptTimeoutMs;
 
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
     const explicitLocale = resolveExplicitLocale();
-    const headers: Record<string, string> = {
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
-        ? { "X-ViRead-Locale": explicitLocale }
-        : {}),
-    };
-    if (requestOptions.body !== undefined && !isFormDataBody) {
-      headers["Content-Type"] = "application/json";
-    }
     const body =
       requestOptions.body === undefined
         ? undefined
@@ -801,6 +803,8 @@ export async function requestApi<T>(
           ? requestOptions.body
           : JSON.stringify(requestOptions.body);
     const deadlineAt = Date.now() + totalDeadlineMs;
+    let activeToken = token;
+    let hasRetriedAuth = false;
     let lastError: ServiceError | null = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -816,10 +820,21 @@ export async function requestApi<T>(
           ? Math.max(1, Math.min(singleAttemptTimeoutMs, remainingMs))
           : singleAttemptTimeoutMs;
 
+      const headers: Record<string, string> = {
+        Accept: "application/json",
+        Authorization: `Bearer ${activeToken}`,
+        ...(explicitLocale && explicitLocale !== DEFAULT_LOCALE
+          ? { "X-ViRead-Locale": explicitLocale }
+          : {}),
+      };
+      if (requestOptions.body !== undefined && !isFormDataBody) {
+        headers["Content-Type"] = "application/json";
+      }
+
       const attemptController = new AbortController();
       let timedOut = false;
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const onParentAbort = () => attemptController.abort();
+      const onParentAbort = () => attemptController.abort(fetchSignal?.reason);
       fetchSignal?.addEventListener("abort", onParentAbort, { once: true });
 
       let response: Response | null = null;
@@ -829,7 +844,11 @@ export async function requestApi<T>(
       try {
         timeoutId = setTimeout(() => {
           timedOut = true;
-          attemptController.abort();
+          attemptController.abort(
+            typeof DOMException !== "undefined"
+              ? new DOMException("Request timed out", "TimeoutError")
+              : undefined,
+          );
         }, attemptTimeoutMs);
         response = await fetch(`${getApiBaseUrl()}${path}`, {
           method,
@@ -842,7 +861,7 @@ export async function requestApi<T>(
         });
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
-        allowColdStartAutoRetry = true;
+        allowColdStartAutoRetry = method === "GET" || !timedOut;
         attemptError = failure(0, "", true);
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -855,13 +874,27 @@ export async function requestApi<T>(
           if (response.status === 401) {
             invalidateBrowserTokenCache();
             invalidateApiReadCache();
+            if (!hasRetriedAuth && !fetchSignal?.aborted) {
+              hasRetriedAuth = true;
+              const refreshedToken =
+                await refreshBrowserAccessToken(activeToken);
+              if (refreshedToken && refreshedToken !== activeToken) {
+                activeToken = refreshedToken;
+                attempt -= 1;
+                continue;
+              }
+            }
           }
           const backendMessage = await safeBackendMessage(response);
           const coldStartGateway =
             !COLD_START_RETRY_STATUSES.has(response.status) ||
             (await shouldRetryColdStartResponse(response));
           allowColdStartAutoRetry =
-            COLD_START_RETRY_STATUSES.has(response.status) && coldStartGateway;
+            method === "GET"
+              ? COLD_START_RETRY_STATUSES.has(response.status) &&
+                coldStartGateway
+              : (response.status === 502 || response.status === 504) &&
+                coldStartGateway;
           attemptError = failure(
             response.status,
             requestId,
@@ -898,12 +931,17 @@ export async function requestApi<T>(
 
       lastError = attemptError ?? failure(0, "", true);
       if (
-        method === "GET" &&
+        allowRetryMethod &&
         attempt < maxRetries &&
         !fetchSignal?.aborted &&
         allowColdStartAutoRetry &&
-        isColdStartRetryableGetError(lastError)
+        (method === "GET"
+          ? isColdStartRetryableGetError(lastError)
+          : lastError.status === 0 ||
+            lastError.status === 502 ||
+            lastError.status === 504)
       ) {
+        await response?.body?.cancel().catch(() => undefined);
         const remainingAfterAttempt = deadlineAt - Date.now();
         if (remainingAfterAttempt <= 0) {
           throw lastError;
