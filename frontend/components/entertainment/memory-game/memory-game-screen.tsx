@@ -954,76 +954,78 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                   <Skeleton key={n} className="h-28 rounded-card" />
                 ))}
               </div>
-            ) : (() => {
-              const allThemes = catalog?.themes ?? [];
-              const totalThemesPages = Math.max(
-                1,
-                Math.ceil(allThemes.length / MEMORY_THEMES_PAGE_SIZE),
-              );
-              const safeThemesPage = Math.min(
-                Math.max(1, themesPage),
-                totalThemesPages,
-              );
-              const visibleThemes = allThemes.slice(
-                (safeThemesPage - 1) * MEMORY_THEMES_PAGE_SIZE,
-                safeThemesPage * MEMORY_THEMES_PAGE_SIZE,
-              );
-              return (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {visibleThemes.map((theme) => {
-                      const isActive = selectedTheme === theme.theme_key;
-                      return (
-                        <button
-                          key={theme.theme_key}
-                          aria-pressed={isActive}
-                          className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-start transition-colors ${
-                            isActive
-                              ? "border-primary bg-sky/70"
-                              : "border-border bg-cream hover:border-primary/50"
-                          }`}
-                          onClick={() => setSelectedTheme(theme.theme_key)}
-                          type="button"
-                        >
-                          <div className="flex w-full items-center justify-between gap-2">
-                            <span
-                              className="viread-learning-content text-lg font-extrabold text-ink"
-                              dir="ltr"
-                              lang="vi"
-                            >
-                              {theme.name_vi}
-                            </span>
-                            <span
-                              className="viread-learning-content rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
-                              dir="ltr"
-                              lang="vi"
-                              style={{ backgroundColor: theme.accent_hex }}
-                            >
-                              {theme.badge_vi}
-                            </span>
-                          </div>
-                          <p
-                            className="viread-learning-content text-sm leading-5 text-muted"
-                            dir="ltr"
-                            lang="vi"
+            ) : (
+              (() => {
+                const allThemes = catalog?.themes ?? [];
+                const totalThemesPages = Math.max(
+                  1,
+                  Math.ceil(allThemes.length / MEMORY_THEMES_PAGE_SIZE),
+                );
+                const safeThemesPage = Math.min(
+                  Math.max(1, themesPage),
+                  totalThemesPages,
+                );
+                const visibleThemes = allThemes.slice(
+                  (safeThemesPage - 1) * MEMORY_THEMES_PAGE_SIZE,
+                  safeThemesPage * MEMORY_THEMES_PAGE_SIZE,
+                );
+                return (
+                  <>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {visibleThemes.map((theme) => {
+                        const isActive = selectedTheme === theme.theme_key;
+                        return (
+                          <button
+                            key={theme.theme_key}
+                            aria-pressed={isActive}
+                            className={`flex flex-col items-start gap-2 rounded-card border-2 p-4 text-start transition-colors ${
+                              isActive
+                                ? "border-primary bg-sky/70"
+                                : "border-border bg-cream hover:border-primary/50"
+                            }`}
+                            onClick={() => setSelectedTheme(theme.theme_key)}
+                            type="button"
                           >
-                            {theme.description_vi}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <PaginationBar
-                    className="mt-4"
-                    compact
-                    onPageChange={setThemesPage}
-                    page={safeThemesPage}
-                    pageSize={MEMORY_THEMES_PAGE_SIZE}
-                    total={allThemes.length}
-                  />
-                </>
-              );
-            })()}
+                            <div className="flex w-full items-center justify-between gap-2">
+                              <span
+                                className="viread-learning-content text-lg font-extrabold text-ink"
+                                dir="ltr"
+                                lang="vi"
+                              >
+                                {theme.name_vi}
+                              </span>
+                              <span
+                                className="viread-learning-content rounded-full px-2.5 py-0.5 text-xs font-bold text-white"
+                                dir="ltr"
+                                lang="vi"
+                                style={{ backgroundColor: theme.accent_hex }}
+                              >
+                                {theme.badge_vi}
+                              </span>
+                            </div>
+                            <p
+                              className="viread-learning-content text-sm leading-5 text-muted"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {theme.description_vi}
+                            </p>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <PaginationBar
+                      className="mt-4"
+                      compact
+                      onPageChange={setThemesPage}
+                      page={safeThemesPage}
+                      pageSize={MEMORY_THEMES_PAGE_SIZE}
+                      total={allThemes.length}
+                    />
+                  </>
+                );
+              })()
+            )}
           </div>
 
           {/* Timer & Recall mode */}
@@ -1146,78 +1148,80 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           </div>
 
           {/* Recent sessions */}
-          {history.length > 0 ? (() => {
-            const totalHistoryPages = Math.max(
-              1,
-              Math.ceil(history.length / MEMORY_HISTORY_PAGE_SIZE),
-            );
-            const safeHistoryPage = Math.min(
-              Math.max(1, historyPage),
-              totalHistoryPages,
-            );
-            const visibleHistory = history.slice(
-              (safeHistoryPage - 1) * MEMORY_HISTORY_PAGE_SIZE,
-              safeHistoryPage * MEMORY_HISTORY_PAGE_SIZE,
-            );
-            return (
-              <div className="rounded-card border border-border bg-cream p-5">
-                <h2 className="mb-3 text-lg font-extrabold text-ink">
-                  {t("memoryGame.recentHeading")}
-                </h2>
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {visibleHistory.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-col gap-1.5 rounded-control border border-border bg-white p-3.5"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span
-                          className="viread-learning-content font-extrabold text-ink"
-                          dir="ltr"
-                          lang="vi"
+          {history.length > 0
+            ? (() => {
+                const totalHistoryPages = Math.max(
+                  1,
+                  Math.ceil(history.length / MEMORY_HISTORY_PAGE_SIZE),
+                );
+                const safeHistoryPage = Math.min(
+                  Math.max(1, historyPage),
+                  totalHistoryPages,
+                );
+                const visibleHistory = history.slice(
+                  (safeHistoryPage - 1) * MEMORY_HISTORY_PAGE_SIZE,
+                  safeHistoryPage * MEMORY_HISTORY_PAGE_SIZE,
+                );
+                return (
+                  <div className="rounded-card border border-border bg-cream p-5">
+                    <h2 className="mb-3 text-lg font-extrabold text-ink">
+                      {t("memoryGame.recentHeading")}
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {visibleHistory.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex flex-col gap-1.5 rounded-control border border-border bg-white p-3.5"
                         >
-                          {item.theme_name_vi}
-                        </span>
-                        {renderStars(
-                          item.stars,
-                          t("memoryGame.starsAria", { count: item.stars }),
-                        )}
-                      </div>
-                      <p className="text-xs text-muted">
-                        {t("memoryGame.historyDetailsCount", {
-                          count: item.object_count,
-                        })}{" "}
-                        ·{" "}
-                        {item.timer_seconds
-                          ? `${item.timer_seconds}s`
-                          : t("memoryGame.timers.UNLIMITED.label")}
-                      </p>
-                      <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
-                        <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-success-ink">
-                          {t("memoryGame.historyMemoryScore", {
-                            score: item.best_factual_score,
-                          })}
-                        </span>
-                        <span className="rounded-full bg-purple px-2.5 py-0.5 text-purple-ink">
-                          {t("memoryGame.historyCreativeScore", {
-                            score: item.best_creative_score,
-                          })}
-                        </span>
-                      </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="viread-learning-content font-extrabold text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {item.theme_name_vi}
+                            </span>
+                            {renderStars(
+                              item.stars,
+                              t("memoryGame.starsAria", { count: item.stars }),
+                            )}
+                          </div>
+                          <p className="text-xs text-muted">
+                            {t("memoryGame.historyDetailsCount", {
+                              count: item.object_count,
+                            })}{" "}
+                            ·{" "}
+                            {item.timer_seconds
+                              ? `${item.timer_seconds}s`
+                              : t("memoryGame.timers.UNLIMITED.label")}
+                          </p>
+                          <div className="mt-1 flex flex-wrap gap-2 text-xs font-bold">
+                            <span className="rounded-full bg-success-surface px-2.5 py-0.5 text-success-ink">
+                              {t("memoryGame.historyMemoryScore", {
+                                score: item.best_factual_score,
+                              })}
+                            </span>
+                            <span className="rounded-full bg-purple px-2.5 py-0.5 text-purple-ink">
+                              {t("memoryGame.historyCreativeScore", {
+                                score: item.best_creative_score,
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-                <PaginationBar
-                  className="mt-4"
-                  compact
-                  onPageChange={setHistoryPage}
-                  page={safeHistoryPage}
-                  pageSize={MEMORY_HISTORY_PAGE_SIZE}
-                  total={history.length}
-                />
-              </div>
-            );
-          })() : null}
+                    <PaginationBar
+                      className="mt-4"
+                      compact
+                      onPageChange={setHistoryPage}
+                      page={safeHistoryPage}
+                      pageSize={MEMORY_HISTORY_PAGE_SIZE}
+                      total={history.length}
+                    />
+                  </div>
+                );
+              })()
+            : null}
         </div>
       ) : null}
 
@@ -1962,3 +1966,34 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
                 {creativeEvaluation?.support_summary_vi ??
                   recallEvaluation?.support_summary_vi}
               </span>
+            </div>
+          ) : null}
+
+          <MemorySceneCanvas
+            focusedObjectId={focusedObjectId}
+            matchedObjectIds={matchedObjectIds}
+            missedObjectIds={missedObjectIds}
+            mode="reveal"
+            onSelectObject={(id) =>
+              setFocusedObjectId((prev) => (prev === id ? null : id))
+            }
+            reducedMotion={reducedMotion}
+            sceneSpec={session.scene_spec}
+            showColorCues={showColorCues}
+          />
+
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button
+              data-testid="play-again-btn"
+              fullWidth={false}
+              onClick={resetToSetup}
+            >
+              <RefreshCw aria-hidden="true" className="size-4" />
+              {t("memoryGame.playAgainButton")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+}

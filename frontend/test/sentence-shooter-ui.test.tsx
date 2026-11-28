@@ -1173,7 +1173,7 @@ describe("Sentence Shooter", () => {
     ).not.toBeInTheDocument();
     expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Sau/i }));
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
     expect(
       await screen.findByRole("button", { name: /Sách xạ thủ 7/ }),
     ).toBeInTheDocument();

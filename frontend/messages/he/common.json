@@ -130,5 +130,33 @@
     "tierOllama": "Ollama מקומי",
     "tierFallback": "מדריך גיבוי",
     "tierOffline": "מדריך לא מקוון"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "מעבד ברקע…",
+    "closeAria": "סגור מרכז משימות AI",
+    "defaultBookLabel": "ספר",
+    "elapsedHours": "{hours} שע'",
+    "elapsedHoursMinutes": "{hours} שע' {minutes} דק'",
+    "elapsedMinutes": "{minutes} דק'",
+    "elapsedMinutesSeconds": "{minutes} דק' {seconds} שנ'",
+    "elapsedRunning": "רץ כבר {elapsed}",
+    "elapsedSeconds": "{seconds} שנ'",
+    "emptyDescription": "כאשר מעלים עמודי ספר, מפעילים OCR או יוצרים כריכות, ההתקדמות החיה תופיע כאן.",
+    "emptyTitle": "אין עדיין משימות AI",
+    "openAria": "פתח מרכז משימות AI",
+    "pageSeparator": " • עמוד {pageNumber}",
+    "pillFailed": "משימות שנכשלו ({count})",
+    "pillIdle": "משימות AI",
+    "pillRunning": "AI פועל ({count})",
+    "pillWaitingReview": "דורש אימות ({count})",
+    "processingAria": "מעבד {title}",
+    "progressAria": "התקדמות עבור {title}",
+    "refreshAria": "רענן רשימת משימות",
+    "stagePrefix": "שלב: {stage}",
+    "subtitle": "משימות רקע ממשיכות לרוץ בבטחה גם בעת מעבר בין עמודים.",
+    "title": "מרכז משימות AI",
+    "viewResultAction": "הצג תוצאה",
+    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
+    "pillWaitingForWorker": "תור OCR ({count})"
   }
 }

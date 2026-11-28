@@ -664,7 +664,11 @@ class BookAssetsV2WiringAndTextFreeGateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_ocr_gate_mode_reporting_and_route_wiring(self) -> None:
         # 1) Remote worker mode returns None -> explicitly reports opencv_only_remote_worker
-        with patch.dict(os.environ, {"VIREAD_OCR_MODE": "remote_worker"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"VIREAD_OCR_MODE": "remote_worker", "VIREAD_OCR_WORKER_PROCESS": ""},
+            clear=False,
+        ):
             self.assertIsNone(_build_default_ocr_check_fn())
 
         page_png, word_bboxes, canonical_text = _make_storybook_page_png()

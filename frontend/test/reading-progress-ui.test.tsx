@@ -356,7 +356,9 @@ describe("Saved reading progress UI", () => {
       read_example_count: 0,
       session_count: 2,
       last_seen_at: "2026-10-01T01:00:00Z",
-      evidence_word_ids: [`word-${idx + 1}`],
+      evidence_word_ids: [
+        `50000000-0000-4000-8000-0000000000${String(idx + 1).padStart(2, "0")}`,
+      ],
     }));
     current = {
       ...report,
@@ -387,5 +389,61 @@ describe("Saved reading progress UI", () => {
     expect(screen.getByText("Từ khó 13")).toBeInTheDocument();
     expect(screen.getByText("Từ khó 15")).toBeInTheDocument();
     expect(within(pagination).getByText("Trang 3 / 3")).toBeInTheDocument();
+  });
+
+  it("parallelizes child list, saved periods, and exact-window report when requestedChildId and period are provided", async () => {
+    let resolveChildren!: (res: Response) => void;
+    let resolvePeriods!: (res: Response) => void;
+    let resolveReport!: (res: Response) => void;
+
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/profiles/children")) {
+        return new Promise<Response>((resolve) => {
+          resolveChildren = resolve;
+        });
+      }
+      if (url.includes("/periods")) {
+        return new Promise<Response>((resolve) => {
+          resolvePeriods = resolve;
+        });
+      }
+      if (url.includes(`/system/progress/${TEST_CHILD_ID}`)) {
+        return new Promise<Response>((resolve) => {
+          resolveReport = resolve;
+        });
+      }
+      return Promise.resolve(respond(url));
+    });
+
+    renderReport({
+      requestedChildId: TEST_CHILD_ID,
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls.some((u) => u.endsWith("/profiles/children"))).toBe(true);
+      expect(
+        urls.some((u) =>
+          u.includes(`/system/progress/${TEST_CHILD_ID}/periods`),
+        ),
+      ).toBe(true);
+      expect(
+        urls.some((u) =>
+          u.includes(
+            `/system/progress/${TEST_CHILD_ID}?period_start=${report.period_start}`,
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      resolveChildren(Response.json([child, second]));
+      resolvePeriods(Response.json({ items: [option], next_cursor: null }));
+      resolveReport(Response.json(report));
+    });
+
+    await screen.findByText("4 buổi");
   });
 });

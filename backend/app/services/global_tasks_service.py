@@ -14,11 +14,11 @@ Implements:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import datetime, timedelta, timezone
 import logging
 import time
-from typing import Any
+from typing import Any, TypeVar
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -1259,7 +1259,7 @@ async def _execute_ocr_extract_job(
     from app.services.ocr_content_extraction import extract_ocr_content
     from app.services.ocr_document_boundary import detect_document_boundary
     from app.services.smart_studio_flags import SmartStudioFlags
-    from app.services.storage_service import download_object
+    from app.services.storage_service import download_object_async
     from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
     from app.services.gpu_workload_scheduler import WorkloadPriority
 
@@ -1321,9 +1321,10 @@ async def _execute_ocr_extract_job(
                     if is_book_private(book)
                     else (SUPABASE_STORAGE_BUCKET or "books")
                 )
-                img_bytes = download_object(page.ImagePath, bucket_name=bucket)
+                img_bytes = await download_object_async(page.ImagePath, bucket_name=bucket)
                 if img_bytes:
-                    boundary = detect_document_boundary(
+                    boundary = await asyncio.to_thread(
+                        detect_document_boundary,
                         img_bytes,
                         word_bboxes_norm=[w.bbox for w in words] if words else None,
                     )
@@ -1390,6 +1391,38 @@ async def _execute_ocr_extract_job(
         progress_total=1,
         progress_unit="trang",
     )
+
+
+_T = TypeVar("_T")
+
+
+async def _await_shielded(
+    awaitable: Awaitable[_T],
+    *,
+    suppress_cancel: bool = False,
+) -> _T:
+    """Await ``awaitable`` to completion without cancelling it on outer Task.cancel()."""
+    task = asyncio.ensure_future(awaitable)
+    cancelled_exc: asyncio.CancelledError | None = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as exc:
+            if task.cancelled():
+                if cancelled_exc is None:
+                    cancelled_exc = exc
+                break
+            if cancelled_exc is None:
+                cancelled_exc = exc
+        except BaseException:
+            if cancelled_exc is not None and not suppress_cancel:
+                raise cancelled_exc
+            raise
+    if cancelled_exc is not None and not suppress_cancel:
+        if not task.cancelled():
+            task.exception()
+        raise cancelled_exc
+    return task.result()
 
 
 async def _execute_batch_book_import_job(
@@ -1461,6 +1494,7 @@ async def _execute_batch_book_import_job(
 
     # Mode A: Stored multi-page PDF/DOCX rasterization & page ingestion
     if isinstance(source_storage_path, str) and source_storage_path.strip() and job.ActorRole == "admin":
+        import hashlib
         from tempfile import SpooledTemporaryFile
         from starlette.concurrency import run_in_threadpool
         from app.database.config import SUPABASE_PRIVATE_BOOKS_BUCKET, SUPABASE_STORAGE_BUCKET
@@ -1469,28 +1503,42 @@ async def _execute_batch_book_import_job(
             SpooledUploadDocument,
             iter_rasterized_spooled_document,
         )
-        from app.services.storage_service import download_object
+        from app.services.storage_service import download_object_async
 
         bucket = (
             SUPABASE_PRIVATE_BOOKS_BUCKET
             if is_book_private(book)
             else (SUPABASE_STORAGE_BUCKET or "books")
         )
-        doc_bytes = download_object(source_storage_path.strip(), bucket_name=bucket)
+        doc_bytes = await download_object_async(source_storage_path.strip(), bucket_name=bucket)
         file_name = str(
             checkpoints.get("file_name")
             or req_opts.get("file_name")
             or source_storage_path.rsplit("/", 1)[-1]
         )
-        spool_file = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
-        spool_file.write(doc_bytes)
-        spool_file.seek(0)
-        spooled = SpooledUploadDocument(
-            file_name=file_name,
-            content_type=str(checkpoints.get("content_type") or "application/pdf"),
-            size_bytes=len(doc_bytes),
-            file_obj=spool_file,
-        )
+        content_type = str(checkpoints.get("content_type") or "application/pdf")
+
+        def _build_spooled_document(raw_bytes: bytes) -> SpooledUploadDocument:
+            spool_file = SpooledTemporaryFile(max_size=2 * 1024 * 1024, mode="w+b")
+            try:
+                spool_file.write(raw_bytes)
+                spool_file.seek(0)
+                return SpooledUploadDocument(
+                    file_name=file_name,
+                    content_type=content_type,
+                    byte_length=len(raw_bytes),
+                    source_sha256=hashlib.sha256(raw_bytes).hexdigest(),
+                    spool_file=spool_file,
+                    header_bytes=raw_bytes[:8192],
+                )
+            except Exception:
+                spool_file.close()
+                raise
+
+        try:
+            spooled = await run_in_threadpool(_build_spooled_document, doc_bytes)
+        finally:
+            del doc_bytes
         completed_source_pages = {
             int(p)
             for p in (checkpoints.get("completed_source_pages") or [])
@@ -1508,15 +1556,38 @@ async def _execute_batch_book_import_job(
                 workload_id=f"batch-import:{job.Id}",
                 estimated_vram_mb=1500,
             ) as handle:
-                with iter_rasterized_spooled_document(spooled) as (
-                    _fname,
-                    _fmt,
-                    _sha,
-                    page_iter,
-                ):
-                    rasterized = list(page_iter)
-                    total_source_pages = max(total_source_pages, len(rasterized))
-                    for item in rasterized:
+                ctx_mgr = iter_rasterized_spooled_document(spooled)
+                enter_task = asyncio.ensure_future(run_in_threadpool(ctx_mgr.__enter__))
+                entered = False
+                page_iter = None
+
+                def _close_and_exit(exc_type, exc_val, exc_tb):
+                    close_fn = getattr(page_iter, "close", None)
+                    if callable(close_fn):
+                        try:
+                            close_fn()
+                        except Exception:
+                            pass
+                    return ctx_mgr.__exit__(exc_type, exc_val, exc_tb)
+
+                try:
+                    _fname, _fmt, _sha, page_iter = await _await_shielded(enter_task)
+                    entered = True
+                    seen_source_pages = 0
+
+                    def _next_page(it):
+                        return next(it, None)
+
+                    while True:
+                        item = await _await_shielded(run_in_threadpool(_next_page, page_iter))
+                        if item is None:
+                            break
+                        seen_source_pages += 1
+                        total_source_pages = max(
+                            total_source_pages,
+                            seen_source_pages,
+                            int(getattr(item, "source_page", 0) or 0),
+                        )
                         if item.source_page in completed_source_pages:
                             continue
                         handle.checkpoint(
@@ -1560,8 +1631,31 @@ async def _execute_batch_book_import_job(
                             progress_total=max(1, total_source_pages),
                             progress_unit="trang",
                         )
+                except BaseException as exc:
+                    if not entered:
+                        try:
+                            _fname, _fmt, _sha, page_iter = await _await_shielded(
+                                enter_task, suppress_cancel=True
+                            )
+                            entered = True
+                        except BaseException:
+                            entered = False
+                    if entered:
+                        suppress = await _await_shielded(
+                            run_in_threadpool(
+                                _close_and_exit, type(exc), exc, exc.__traceback__
+                            )
+                        )
+                        if not suppress:
+                            raise
+                    else:
+                        raise
+                else:
+                    await _await_shielded(
+                        run_in_threadpool(_close_and_exit, None, None, None)
+                    )
         finally:
-            spooled.close()
+            await _await_shielded(run_in_threadpool(spooled.close))
 
         final_status: GlobalTaskStatus
         if created_page_ids and not failed_source_pages:

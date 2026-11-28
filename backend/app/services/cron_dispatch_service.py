@@ -903,7 +903,8 @@ async def run_scheduled_cron_dispatch(
     # ── Phase 3: Persist all worker heartbeats in 1 single SQL UPSERT RTT ─────
     await _persist_cron_heartbeats_batch(list(pending_heartbeats.values()))
 
-        # 11. Non-blocking Smart Studio worker wake/drain for queued or stale-lease jobs
+    # 14. Non-blocking Smart Studio worker wake/drain for queued or stale-lease jobs
+    if run_remote_sweeps:
         budget = _remaining_budget(deadline, DEFAULT_SUBSYSTEM_TIMEOUT_SECONDS)
         if budget > 0.25:
             try:

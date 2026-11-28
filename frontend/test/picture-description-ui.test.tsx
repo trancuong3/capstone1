@@ -1248,4 +1248,101 @@ describe("PictureDescriptionScreen", () => {
     await screen.findByText("9/10 điểm");
     expect(evalPosts).toBe(1);
   });
+
+  it("paginates samples, recent sessions, and multi-attempt history at 6 per page", async () => {
+    const manySamples = Array.from({ length: 8 }, (_, index) => ({
+      sample_key: `sample-${index + 1}`,
+      title: `Tranh mẫu số ${index + 1}`,
+      theme: "Thiên nhiên",
+      description: `Mô tả tranh ${index + 1}`,
+      image_url: "/images/picture-description/sunny-garden.jpg",
+    }));
+    const manySessions = Array.from({ length: 8 }, (_, index) => ({
+      session_id: `51000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      child_id: TEST_CHILD_ID,
+      source_type: "SAMPLE" as const,
+      sample_key: index === 0 ? "sample-1" : `other-${index + 1}`,
+      scene_title: `Phiên kể chuyện ${index + 1}`,
+      image_url: "/images/picture-description/sunny-garden.jpg",
+      status: "COMPLETED" as const,
+      best_stars: 3,
+      best_score: 9,
+      attempts_count: 8,
+      created_at: baseSession.created_at,
+      updated_at: "2026-11-15T08:08:00Z",
+    }));
+    const manyAttempts = Array.from({ length: 8 }, (_, index) => ({
+      attempt_id: `41000000-0000-4000-8000-${String(8 - index).padStart(12, "0")}`,
+      attempt_number: 8 - index,
+      input_mode: "TEXT" as const,
+      transcript_text: `Bài kể lượt ${8 - index}.`,
+      score_out_of_10: 9,
+      stars: 3,
+      feedback: evaluatedFeedback,
+      created_at: "2026-11-15T08:05:00Z",
+    }));
+
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      if (path === `/profiles/children/${TEST_CHILD_ID}`) {
+        return Response.json(childFixture);
+      }
+      if (path === "/games/picture-description/catalog") {
+        return Response.json({
+          ...catalogPayload,
+          samples: manySamples,
+        });
+      }
+      if (
+        path === "/games/picture-description/sessions" &&
+        (!init?.method || init.method === "GET")
+      ) {
+        return Response.json(manySessions);
+      }
+      if (
+        path ===
+        `/games/picture-description/sessions/${manySessions[0]!.session_id}`
+      ) {
+        return Response.json({
+          ...baseSession,
+          session_id: manySessions[0]!.session_id,
+          status: "COMPLETED",
+          best_stars: 3,
+          best_score: 9,
+          attempts_count: manyAttempts.length,
+          attempts: manyAttempts,
+        });
+      }
+      throw new Error(`Unexpected test route ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderScreen();
+
+    expect(await screen.findByText("Tranh mẫu số 1")).toBeInTheDocument();
+    expect(screen.getByText("Tranh mẫu số 6")).toBeInTheDocument();
+    expect(screen.queryByText("Tranh mẫu số 7")).not.toBeInTheDocument();
+    expect(screen.getByText("Phiên kể chuyện 1")).toBeInTheDocument();
+    expect(screen.getByText("Phiên kể chuyện 6")).toBeInTheDocument();
+    expect(screen.queryByText("Phiên kể chuyện 7")).not.toBeInTheDocument();
+
+    // Open first recent session -> RESULT tab paginates 8 attempts at 6/page
+    await user.click(screen.getByRole("button", { name: /Phiên kể chuyện 1/ }));
+    expect(
+      await screen.findByRole("button", { name: /Lượt #8/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Lượt #3/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Lượt #2/ }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(
+      await screen.findByRole("button", { name: /Lượt #2/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Lượt #1/ })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Lượt #8/ }),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -12,7 +12,7 @@ import { AdminUserBooksQualitySection } from "@/components/admin/admin-user-book
 import {
   ADMIN_BOOK_ID,
   ADMIN_PAGE_ID,
-  ADMIN_REVISION_ID,
+  ADMIN_R2_ID,
   adminBookListItemFixture,
   createAdminServiceFixture,
   withAdminFixture,
@@ -97,24 +97,27 @@ describe("Admin screens bounded pagination", () => {
 
   it("paginates AdminBookDetailScreen pages at 12 per page and queued OCR jobs at 5 per page", async () => {
     const services = createAdminServiceFixture();
-    const pages: AdminPageListItemUI[] = Array.from({ length: 16 }, (_, idx) => {
-      const n = idx + 1;
-      return {
-        book_id: ADMIN_BOOK_ID,
-        page_number: n,
-        processing: {
-          page_id: makeUuid("2000", n),
-          page_revision_id: makeUuid("3000", n),
-          revision_no: 1,
-          verification_status: "VERIFIED",
-          lifecycle_status: "ACTIVE",
-          ocr_preview_metadata: {},
-          verified_at: NOW,
-          current_verified_revision_id: makeUuid("3000", n),
-        },
-        text_preview: `Nội dung trang ${n}`,
-      };
-    });
+    const pages: AdminPageListItemUI[] = Array.from(
+      { length: 16 },
+      (_, idx) => {
+        const n = idx + 1;
+        return {
+          book_id: ADMIN_BOOK_ID,
+          page_number: n,
+          processing: {
+            page_id: makeUuid("2000", n),
+            page_revision_id: makeUuid("3000", n),
+            revision_no: 1,
+            verification_status: "VERIFIED",
+            lifecycle_status: "ACTIVE",
+            ocr_preview_metadata: {},
+            verified_at: NOW,
+            current_verified_revision_id: makeUuid("3000", n),
+          },
+          text_preview: `Nội dung trang ${n}`,
+        };
+      },
+    );
     const queuedJobs: AdminOcrJobDTO[] = Array.from({ length: 7 }, (_, idx) => {
       const n = idx + 1;
       return {
@@ -133,11 +136,21 @@ describe("Admin screens bounded pagination", () => {
       } as AdminOcrJobDTO;
     });
     services.pages.list.mockResolvedValue(pages);
-    services.pages.listOcrJobs = vi.fn().mockResolvedValue(queuedJobs);
+    const listOcrJobs = vi.fn().mockResolvedValue(queuedJobs);
+    const customServices = {
+      ...services,
+      pages: {
+        ...services.pages,
+        listOcrJobs,
+      },
+    };
 
     const user = userEvent.setup();
     render(
-      withAdminFixture(<AdminBookDetailScreen bookId={ADMIN_BOOK_ID} />, services),
+      withAdminFixture(
+        <AdminBookDetailScreen bookId={ADMIN_BOOK_ID} />,
+        customServices,
+      ),
     );
 
     expect(
@@ -153,22 +166,30 @@ describe("Admin screens bounded pagination", () => {
     // Queued jobs banner paginates at 5 per page
     const queueBanner = screen.getByTestId("admin-book-ocr-queue-banner");
     expect(
-      within(queueBanner).getByTestId(`admin-queued-new-page-row-${makeUuid("4000", 1)}`),
+      within(queueBanner).getByTestId(
+        `admin-queued-new-page-row-${makeUuid("4000", 1)}`,
+      ),
     ).toBeInTheDocument();
     expect(
-      within(queueBanner).queryByTestId(`admin-queued-new-page-row-${makeUuid("4000", 6)}`),
+      within(queueBanner).queryByTestId(
+        `admin-queued-new-page-row-${makeUuid("4000", 6)}`,
+      ),
     ).not.toBeInTheDocument();
     await user.click(within(queueBanner).getByRole("button", { name: "Tiếp" }));
     expect(
-      within(queueBanner).getByTestId(`admin-queued-new-page-row-${makeUuid("4000", 6)}`),
+      within(queueBanner).getByTestId(
+        `admin-queued-new-page-row-${makeUuid("4000", 6)}`,
+      ),
     ).toBeInTheDocument();
 
     // Book pages pagination moves to page 2 (pages 13..16)
     const pagesNavs = screen.getAllByRole("navigation", {
-      name: /Phân trang/i,
+      name: /Điều hướng danh sách/i,
     });
-    const bookPagesNav = pagesNavs[pagesNavs.length - 1];
-    await user.click(within(bookPagesNav).getByRole("button", { name: "Tiếp" }));
+    const bookPagesNav = pagesNavs[0];
+    await user.click(
+      within(bookPagesNav).getByRole("button", { name: "Tiếp" }),
+    );
 
     expect(
       await screen.findByRole("heading", { name: "Trang 13" }),
@@ -210,7 +231,9 @@ describe("Admin screens bounded pagination", () => {
     expect(
       await screen.findByRole("heading", { name: "Bé Số 1" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Bé Số 6" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Bé Số 6" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Bé Số 7" }),
     ).not.toBeInTheDocument();
@@ -220,7 +243,9 @@ describe("Admin screens bounded pagination", () => {
     expect(
       await screen.findByRole("heading", { name: "Bé Số 7" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Bé Số 9" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Bé Số 9" }),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Bé Số 1" }),
     ).not.toBeInTheDocument();
@@ -363,10 +388,15 @@ describe("Admin screens bounded pagination", () => {
       history: Array.from({ length: 7 }, (_, idx) => ({
         request_id: makeUuid("8200", idx + 1),
         submission_version: idx + 1,
+        snapshot_hash: "a".repeat(64),
         status: "APPROVED",
+        previous_status: "PENDING_ADMIN",
+        parent_source_type: "OWNED_PHYSICAL_BOOK",
+        parent_source_note: null,
         decided_by_label: "Admin",
         decision_reason: `Lý do lịch sử số ${idx + 1}`,
         parent_request_note: null,
+        decided_at: NOW,
         created_at: NOW,
       })),
       created_at: NOW,
@@ -393,7 +423,9 @@ describe("Admin screens bounded pagination", () => {
       );
     });
 
-    await user.click(await screen.findByRole("button", { name: "Mở để duyệt" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Mở để duyệt" }),
+    );
 
     expect(
       await screen.findByText("Giải thích cảnh báo số 1"),
@@ -422,63 +454,67 @@ describe("Admin screens bounded pagination", () => {
   it("paginates AdminBookContentQualityScreen drawer diagnostics, AI workflows, and scan pages/findings", async () => {
     const services = createAdminServiceFixture();
     const scanId = makeUuid("9000", 1);
+    const scanSummary: BookQualityBookDetailDTO["scans"][number] = {
+      id: scanId,
+      book_id: ADMIN_BOOK_ID,
+      book_title: "Sách Chất Lượng Nhiều Trang",
+      trigger_type: "MANUAL",
+      scope: "BOOK",
+      target_page_id: null,
+      status: "COMPLETED",
+      total_pages: 7,
+      completed_pages: 7,
+      skipped_pages: 0,
+      failed_pages: 0,
+      ai_completed_pages: 7,
+      ai_unavailable_pages: 0,
+      error_summary: null,
+      started_at: NOW,
+      created_at: NOW,
+      completed_at: NOW,
+    };
     const bookDetail: BookQualityBookDetailDTO = {
       book_id: ADMIN_BOOK_ID,
       book_title: "Sách Chất Lượng Nhiều Trang",
       reports: [],
-      scans: [
-        {
-          id: scanId,
-          book_id: ADMIN_BOOK_ID,
-          status: "COMPLETED",
-          total_pages: 7,
-          completed_pages: 7,
-          skipped_pages: 0,
-          failed_pages: 0,
-          ai_completed_pages: 7,
-          ai_unavailable_pages: 0,
-          error_summary: null,
-          created_at: NOW,
-          completed_at: NOW,
-        },
-      ],
+      scans: [scanSummary],
       latest_scan_detail: {
-        id: scanId,
-        book_id: ADMIN_BOOK_ID,
-        status: "COMPLETED",
-        total_pages: 7,
-        completed_pages: 7,
-        skipped_pages: 0,
-        failed_pages: 0,
-        ai_completed_pages: 7,
-        ai_unavailable_pages: 0,
-        error_summary: null,
-        created_at: NOW,
-        completed_at: NOW,
+        ...scanSummary,
         pages: Array.from({ length: 7 }, (_, idx) => ({
           id: makeUuid("9100", idx + 1),
           page_id: ADMIN_PAGE_ID,
-          page_revision_id: ADMIN_REVISION_ID,
+          page_revision_id: ADMIN_R2_ID,
           page_number: idx + 1,
+          page_lifecycle_status: "ACTIVE",
+          content_hash: "d".repeat(64),
           status: "COMPLETED",
           rule_check_status: "COMPLETED",
           ai_analysis_status: "COMPLETED",
+          rejected_ai_finding_count: 0,
           error_code: null,
           error_summary: null,
           findings:
             idx === 0
               ? Array.from({ length: 7 }, (__, fIdx) => ({
                   id: makeUuid("9200", fIdx + 1),
+                  page_scan_id: makeUuid("9100", 1),
+                  book_id: ADMIN_BOOK_ID,
                   page_id: ADMIN_PAGE_ID,
-                  page_revision_id: ADMIN_REVISION_ID,
+                  page_revision_id: ADMIN_R2_ID,
                   page_number: 1,
                   issue_type: "SPELLING_ERROR",
                   severity: "MEDIUM",
                   status: "NEEDS_REVIEW",
                   detection_source: "RULE",
                   original_excerpt: `Trích đoạn lỗi quét ${fIdx + 1}`,
+                  excerpt_start: 0,
+                  excerpt_end: 10,
                   explanation: `Mô tả lỗi quét ${fIdx + 1}`,
                   suggested_correction: null,
+                  model_name: null,
+                  confidence: null,
+                  review_note: null,
+                  created_at: NOW,
                 }))
               : [],
         })),
@@ -486,17 +522,37 @@ describe("Admin screens bounded pagination", () => {
       ai_workflows: Array.from({ length: 7 }, (_, idx) => ({
         workflow_id: makeUuid("9300", idx + 1),
         page_id: ADMIN_PAGE_ID,
-        page_revision_id: ADMIN_REVISION_ID,
-        status: "COMPLETED",
+        book_id: ADMIN_BOOK_ID,
+        page_revision_id: ADMIN_R2_ID,
+        status: "READY_FOR_ADMIN_REVIEW",
+        stage: "READY_FOR_ADMIN_REVIEW",
+        progress: { completed_chunks: 1, total_chunks: 1 },
+        attempts: 1,
         safety_status: "CONFIRMED",
         suitability: "SUITABLE",
         candidate_version: idx + 1,
+        original_ocr_hash: "a".repeat(64),
+        admin_input_hash: "b".repeat(64),
+        proofread_text: "Nội dung mẫu",
+        proofread_output_hash: "c".repeat(64),
+        corrections: [],
+        uncertain_word_indices: [],
+        proofread_metadata: {},
+        safety_metadata: {},
+        candidate_text: "Nội dung mẫu",
+        candidate_hash: "c".repeat(64),
+        safety_input_hash: "c".repeat(64),
         hash_match: true,
         error_code: null,
         findings: [],
+        provider_events: [],
         safety_history: [],
         candidate_history: [],
         review_history: [],
+        ocr_approved_at: null,
+        final_approved_text_hash: null,
+        created_at: NOW,
+        updated_at: NOW,
       })),
       ai_workflow_summary: {
         pages_total: 10,
@@ -553,7 +609,7 @@ describe("Admin screens bounded pagination", () => {
         codes: ["OK"],
         summary: `Chẩn đoán trang ${idx + 1}`,
       })),
-      completeness_disclaimer: null,
+      completeness_disclaimer: undefined,
       decision_history: [],
     };
 
@@ -586,10 +642,14 @@ describe("Admin screens bounded pagination", () => {
       ),
     );
 
-    await user.click(await screen.findByRole("button", { name: "Xem kết quả" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Xem kết quả" }),
+    );
 
     // Diagnostics paginate at 8 per page
-    const diagnosticsSection = await screen.findByTestId("book-page-diagnostics");
+    const diagnosticsSection = await screen.findByTestId(
+      "book-page-diagnostics",
+    );
     expect(
       within(diagnosticsSection).getByText("Chẩn đoán trang 1"),
     ).toBeInTheDocument();
@@ -622,18 +682,29 @@ describe("Admin screens bounded pagination", () => {
           book_title: `Sách Flow2 ${offset + 1}`,
           page_id: ADMIN_PAGE_ID,
           page_number: 1,
+          revision_id: ADMIN_R2_ID,
           line_index: 0,
+          consent_version: 1,
+          image_sha256: "e".repeat(64),
           proposed_label: `Dòng mẫu ${offset + 1}`,
           verified_label: null,
-          status: "PENDING_VERIFICATION",
-          status_label: "Chờ xác minh",
+          rights_basis: "SELF_AUTHORED",
           rights_basis_label: "Phụ huynh đồng ý",
           pii_check_status: "CLEAR",
           pii_flags: [],
+          quality_metrics: {},
+          status: "PENDING_VERIFICATION",
+          status_label: "Chờ xác minh",
           crop_image_url: "http://127.0.0.1:8000/crop.png",
+          verified_at: null,
+          rejection_code: null,
           rejection_reason: null,
+          outbox_event_id: null,
+          sample_id: null,
+          revoked_at: null,
           revoke_reason: null,
           created_at: NOW,
+          updated_at: NOW,
         },
       ],
       total: 15,
@@ -642,24 +713,29 @@ describe("Admin screens bounded pagination", () => {
       summary: { PENDING_VERIFICATION: 15 },
     });
 
-    services.bookContentQuality.listFlow2Candidates = vi
+    const listFlow2Candidates = vi
       .fn()
       .mockResolvedValueOnce(makePage(0))
       .mockResolvedValueOnce(makePage(10));
+    const customServices = {
+      ...services,
+      bookContentQuality: {
+        ...services.bookContentQuality,
+        listFlow2Candidates,
+      },
+    };
 
     const user = userEvent.setup();
-    render(withAdminFixture(<AdminFlow2CandidatesPanel />, services));
+    render(withAdminFixture(<AdminFlow2CandidatesPanel />, customServices));
 
     expect(await screen.findByText("Sách Flow2 1")).toBeInTheDocument();
-    expect(
-      services.bookContentQuality.listFlow2Candidates,
-    ).toHaveBeenCalledWith(expect.objectContaining({ limit: 10, offset: 0 }));
+    expect(listFlow2Candidates).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 10, offset: 0 }),
+    );
 
     await user.click(screen.getByRole("button", { name: "Tiếp" }));
     expect(await screen.findByText("Sách Flow2 11")).toBeInTheDocument();
-    expect(
-      services.bookContentQuality.listFlow2Candidates,
-    ).toHaveBeenLastCalledWith(
+    expect(listFlow2Candidates).toHaveBeenLastCalledWith(
       expect.objectContaining({ limit: 10, offset: 10 }),
     );
   });

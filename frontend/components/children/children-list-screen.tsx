@@ -53,10 +53,7 @@ export function ChildrenListScreen() {
   }, [childService, requestKey]);
 
   const totalChildren = state.status === "ready" ? state.children.length : 0;
-  const totalPages = Math.max(
-    1,
-    Math.ceil(totalChildren / CHILDREN_PAGE_SIZE),
-  );
+  const totalPages = Math.max(1, Math.ceil(totalChildren / CHILDREN_PAGE_SIZE));
   const safePage = Math.min(Math.max(1, page), totalPages);
   const visibleChildren =
     state.status === "ready"

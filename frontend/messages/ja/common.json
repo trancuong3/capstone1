@@ -130,5 +130,33 @@
     "tierOllama": "ローカル Ollama",
     "tierFallback": "フォールバックガイド",
     "tierOffline": "オフラインガイド"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "バックグラウンド処理中…",
+    "closeAria": "AIタスクセンターを閉じる",
+    "defaultBookLabel": "書籍",
+    "elapsedHours": "{hours}時間",
+    "elapsedHoursMinutes": "{hours}時間{minutes}分",
+    "elapsedMinutes": "{minutes}分",
+    "elapsedMinutesSeconds": "{minutes}分{seconds}秒",
+    "elapsedRunning": "{elapsed} 経過",
+    "elapsedSeconds": "{seconds}秒",
+    "emptyDescription": "ページのアップロード、OCR抽出、表紙生成を行うと、リアルタイムの進捗がここに表示されます。",
+    "emptyTitle": "AIタスクはまだありません",
+    "openAria": "AIタスクセンターを開く",
+    "pageSeparator": " • ページ {pageNumber}",
+    "pillFailed": "失敗タスク ({count})",
+    "pillIdle": "AIタスク",
+    "pillRunning": "AI実行中 ({count})",
+    "pillWaitingReview": "要確認 ({count})",
+    "processingAria": "{title} を処理中",
+    "progressAria": "{title} の進捗",
+    "refreshAria": "タスクリストを更新",
+    "stagePrefix": "工程: {stage}",
+    "subtitle": "別ページへ移動してもバックグラウンドタスクは安全に継続されます。",
+    "title": "AIタスクセンター",
+    "viewResultAction": "結果を見る",
+    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
+    "pillWaitingForWorker": "OCR待機中 ({count})"
   }
 }

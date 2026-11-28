@@ -8,6 +8,7 @@ import {
 } from "@/lib/api/browser-auth";
 import {
   invalidateApiReadCache,
+  invalidateApiReadCacheByPrefix,
   runCoalescedApiGet,
 } from "@/lib/api/read-cache";
 import { translateMessage } from "@/lib/i18n/formatter";
@@ -542,6 +543,131 @@ async function safeBackendMessage(response: Response): Promise<string> {
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_UPLOAD_TIMEOUT_MS = 90_000;
+const DEFAULT_COLD_START_DEADLINE_MS = 65_000;
+const DEFAULT_GET_RETRY_DELAY_MS = 800;
+
+function createAbortError(): Error {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException("The operation was aborted.", "AbortError");
+  }
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
+function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError());
+  }
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      globalThis.clearTimeout(timerId);
+      reject(createAbortError());
+    };
+    const timerId = globalThis.setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function isColdStartRetryableGetError(error: ServiceError): boolean {
+  return (
+    (error.status === 0 && error.retryable) ||
+    error.status === 502 ||
+    error.status === 503 ||
+    error.status === 504
+  );
+}
+
+function invalidateReadCacheForMutationPath(path: string): void {
+  const pathname = path.split("?")[0] ?? path;
+  if (
+    pathname === "/reading" ||
+    pathname.startsWith("/reading/") ||
+    pathname === "/reading-presence" ||
+    pathname.startsWith("/reading-presence/")
+  ) {
+    invalidateApiReadCacheByPrefix([
+      "/reading",
+      "/sessions",
+      "/profiles/dashboard-summary",
+      "/reports",
+      "/system/progress",
+      "/system/difficult-words",
+      "/tutor",
+      "/learning",
+    ]);
+    return;
+  }
+  if (
+    pathname === "/reading-management" ||
+    pathname.startsWith("/reading-management/")
+  ) {
+    invalidateApiReadCacheByPrefix([
+      "/reading-management",
+      "/profiles/dashboard-summary",
+      "/learning",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/books") || pathname.startsWith("/studio")) {
+    invalidateApiReadCacheByPrefix([
+      "/books",
+      "/studio",
+      "/profiles/dashboard-summary",
+      "/reading-management",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/profiles")) {
+    invalidateApiReadCacheByPrefix(["/profiles"]);
+    return;
+  }
+  if (pathname.startsWith("/karaoke")) {
+    invalidateApiReadCacheByPrefix(["/karaoke", "/learning"]);
+    return;
+  }
+  if (pathname.startsWith("/games")) {
+    invalidateApiReadCacheByPrefix([
+      "/games",
+      "/learning",
+      "/system/difficult-words",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/tutor")) {
+    invalidateApiReadCacheByPrefix([
+      "/tutor",
+      "/reading",
+      "/system/progress",
+      "/learning",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/system/difficult-words")) {
+    invalidateApiReadCacheByPrefix([
+      "/system/difficult-words",
+      "/system/progress",
+      "/learning",
+      "/tutor",
+    ]);
+    return;
+  }
+  if (pathname.startsWith("/support")) {
+    invalidateApiReadCacheByPrefix(["/support"]);
+    return;
+  }
+  if (pathname.startsWith("/parent-notifications")) {
+    invalidateApiReadCacheByPrefix(["/parent-notifications"]);
+    return;
+  }
+  invalidateApiReadCache();
+}
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
@@ -550,6 +676,8 @@ export interface RequestApiOptions {
   readonly bypassCache?: boolean;
   readonly cacheTtlMs?: number;
   readonly timeoutMs?: number;
+  readonly maxRetries?: number;
+  readonly retryDelayMs?: number;
 }
 
 /**
@@ -577,11 +705,42 @@ export async function requestApi<T>(
   }
 
   const method = requestOptions.method ?? "GET";
+  const isTestEnv =
+    typeof process !== "undefined" && process.env.NODE_ENV === "test";
+  const maxRetries =
+    method !== "GET"
+      ? 0
+      : typeof requestOptions.maxRetries === "number" &&
+          Number.isFinite(requestOptions.maxRetries) &&
+          requestOptions.maxRetries >= 0
+        ? Math.floor(requestOptions.maxRetries)
+        : isTestEnv
+          ? 0
+          : 2;
+  const baseRetryDelayMs =
+    typeof requestOptions.retryDelayMs === "number" &&
+    Number.isFinite(requestOptions.retryDelayMs) &&
+    requestOptions.retryDelayMs >= 0
+      ? requestOptions.retryDelayMs
+      : DEFAULT_GET_RETRY_DELAY_MS;
+  const isFormDataBody =
+    typeof FormData !== "undefined" && requestOptions.body instanceof FormData;
+  const hasExplicitTimeout =
+    typeof requestOptions.timeoutMs === "number" &&
+    Number.isFinite(requestOptions.timeoutMs) &&
+    requestOptions.timeoutMs > 0;
+  const singleAttemptTimeoutMs = hasExplicitTimeout
+    ? requestOptions.timeoutMs!
+    : isFormDataBody
+      ? DEFAULT_UPLOAD_TIMEOUT_MS
+      : DEFAULT_REQUEST_TIMEOUT_MS;
+  const totalDeadlineMs = hasExplicitTimeout
+    ? requestOptions.timeoutMs!
+    : maxRetries > 0
+      ? Math.max(singleAttemptTimeoutMs, DEFAULT_COLD_START_DEADLINE_MS)
+      : singleAttemptTimeoutMs;
+
   const executeFetch = async (fetchSignal?: AbortSignal): Promise<T> => {
-    let response: Response;
-    const isFormDataBody =
-      typeof FormData !== "undefined" &&
-      requestOptions.body instanceof FormData;
     const explicitLocale = resolveExplicitLocale();
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -599,98 +758,132 @@ export async function requestApi<T>(
         : isFormDataBody
           ? requestOptions.body
           : JSON.stringify(requestOptions.body);
-    const effectiveTimeoutMs =
-      typeof requestOptions.timeoutMs === "number" &&
-      Number.isFinite(requestOptions.timeoutMs) &&
-      requestOptions.timeoutMs > 0
-        ? requestOptions.timeoutMs
-        : isFormDataBody
-          ? DEFAULT_UPLOAD_TIMEOUT_MS
-          : DEFAULT_REQUEST_TIMEOUT_MS;
-    const timeoutController = fetchSignal ? null : new AbortController();
-    let timedOut = false;
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const effectiveSignal = fetchSignal ?? timeoutController!.signal;
+    const deadlineAt = Date.now() + totalDeadlineMs;
+    let lastError: ServiceError | null = null;
 
-    try {
-      const fetchPromise = fetch(`${getApiBaseUrl()}${path}`, {
-        method,
-        headers,
-        ...(body !== undefined ? { body: body as BodyInit } : {}),
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: effectiveSignal,
-      });
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      if (fetchSignal?.aborted) {
+        throw createAbortError();
+      }
+      const remainingMs = deadlineAt - Date.now();
+      if (attempt > 0 && remainingMs <= 0) {
+        break;
+      }
+      const attemptTimeoutMs =
+        hasExplicitTimeout || maxRetries > 0
+          ? Math.max(1, Math.min(singleAttemptTimeoutMs, remainingMs))
+          : singleAttemptTimeoutMs;
 
-      if (timeoutController) {
+      const attemptController = new AbortController();
+      let timedOut = false;
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const onParentAbort = () => attemptController.abort();
+      fetchSignal?.addEventListener("abort", onParentAbort, { once: true });
+
+      let response: Response | null = null;
+      let attemptError: ServiceError | null = null;
+
+      try {
         timeoutId = setTimeout(() => {
           timedOut = true;
-          timeoutController.abort();
-        }, effectiveTimeoutMs);
-        response = await fetchPromise;
-      } else {
-        const timeoutPromise = new Promise<never>((_resolve, reject) => {
-          timeoutId = setTimeout(() => {
-            timedOut = true;
-            reject(failure(0, "", true));
-          }, effectiveTimeoutMs);
+          attemptController.abort();
+        }, attemptTimeoutMs);
+        response = await fetch(`${getApiBaseUrl()}${path}`, {
+          method,
+          headers,
+          ...(body !== undefined ? { body: body as BodyInit } : {}),
+          cache: "no-store",
+          credentials: "omit",
+          redirect: "error",
+          signal: attemptController.signal,
         });
-        response = await Promise.race([fetchPromise, timeoutPromise]);
+      } catch (error) {
+        if (fetchSignal?.aborted && !timedOut) throw error;
+        attemptError = failure(0, "", true);
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+        fetchSignal?.removeEventListener("abort", onParentAbort);
       }
-    } catch (error) {
-      if (fetchSignal?.aborted && !timedOut) throw error;
-      throw failure(0, "", true);
-    } finally {
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-    }
 
-    const requestId = response.headers.get("x-request-id") ?? "";
-    if (!response.ok) {
-      if (response.status === 401) {
-        invalidateBrowserTokenCache();
-        invalidateApiReadCache();
+      if (response !== null) {
+        const requestId = response.headers.get("x-request-id") ?? "";
+        if (!response.ok) {
+          if (response.status === 401) {
+            invalidateBrowserTokenCache();
+            invalidateApiReadCache();
+          }
+          const backendMessage = await safeBackendMessage(response);
+          attemptError = failure(
+            response.status,
+            requestId,
+            response.status >= 500,
+            backendMessage,
+          );
+        } else if (response.status === 204 || response.status === 205) {
+          const parsed = schema.safeParse(undefined);
+          if (!parsed.success) {
+            throw failure(response.status, requestId);
+          }
+          return parsed.data;
+        } else {
+          let payload: unknown;
+          try {
+            payload = await response.json();
+          } catch {
+            throw failure(response.status, requestId);
+          }
+          const parsed = schema.safeParse(payload);
+
+          if (!parsed.success) {
+            console.error("[API schema validation failed]", {
+              issueCount: parsed.error.issues.length,
+            });
+
+            throw failure(response.status, requestId);
+          }
+
+          return parsed.data;
+        }
       }
-      const backendMessage = await safeBackendMessage(response);
-      throw failure(
-        response.status,
-        requestId,
-        response.status >= 500,
-        backendMessage,
-      );
+
+      lastError = attemptError ?? failure(0, "", true);
+      if (
+        method === "GET" &&
+        attempt < maxRetries &&
+        !fetchSignal?.aborted &&
+        isColdStartRetryableGetError(lastError)
+      ) {
+        const remainingAfterAttempt = deadlineAt - Date.now();
+        if (remainingAfterAttempt <= 0) {
+          throw lastError;
+        }
+        const boundedDelayMs = Math.min(
+          baseRetryDelayMs * 2 ** attempt,
+          Math.max(0, remainingAfterAttempt - 1),
+        );
+        await sleepWithAbort(boundedDelayMs, fetchSignal);
+        continue;
+      }
+
+      throw lastError;
     }
 
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw failure(response.status, requestId);
-    }
-    const parsed = schema.safeParse(payload);
-
-    if (!parsed.success) {
-      console.error("[API schema validation failed]", {
-        issueCount: parsed.error.issues.length,
-      });
-
-      throw failure(response.status, requestId);
-    }
-
-    return parsed.data;
+    throw lastError ?? failure(0, "", true);
   };
 
   if (method !== "GET") {
-    invalidateApiReadCache();
+    invalidateReadCacheForMutationPath(path);
     try {
       return await executeFetch(signal);
     } finally {
-      invalidateApiReadCache();
+      invalidateReadCacheForMutationPath(path);
     }
   }
 
   return runCoalescedApiGet(path, token, signal, executeFetch, {
     bypassCache: requestOptions.bypassCache,
     cacheTtlMs: requestOptions.cacheTtlMs,
+    locale: getActiveLocale(),
   });
 }
 

@@ -365,7 +365,7 @@ function describeStageErrorHint(
 
 const OVERVIEW_CHIPS_PAGE_SIZE = 16;
 const SUBMISSIONS_PAGE_SIZE = 10;
-const COMMITTED_PAGES_PAGE_SIZE = 9;
+const COMMITTED_PAGES_PAGE_SIZE = 12;
 
 interface ParentPrivateBookManagerProps {
   bookId: string;
@@ -1980,7 +1980,7 @@ function ParentPrivateBookManagerContent({
                               {sub.ocr_status === "PENDING" && ocrWorkerOffline
                                 ? t("privateManager.waitingWindowsOcrShort")
                                 : stageStatusLabel(sub.ocr_status, "ocr", t)}
-                              {sub.ocr_error_code
+                              {sub.ocr_error_code && !ocrHint
                                 ? ` (${sub.ocr_error_code})`
                                 : ""}
                             </p>
@@ -2008,6 +2008,9 @@ function ParentPrivateBookManagerContent({
                                     },
                                   )
                                 : ""}
+                              {sub.proofread_error_code && !proofreadHint
+                                ? ` (${sub.proofread_error_code})`
+                                : ""}
                             </p>
                             {proofreadHint ? (
                               <p className="mt-1 text-[11px] font-medium text-rose-800">
@@ -2029,6 +2032,9 @@ function ParentPrivateBookManagerContent({
                                 ? t("privateManager.safetyFindingsSuffix", {
                                     count: sub.tool_check_findings_count,
                                   })
+                                : ""}
+                              {sub.tool_check_error_code && !toolCheckHint
+                                ? ` (${sub.tool_check_error_code})`
                                 : ""}
                             </p>
                             {toolCheckHint ? (

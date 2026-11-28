@@ -2,16 +2,15 @@ import type { Metadata } from "next";
 import { AdminLoginScreen } from "@/components/admin/admin-login-screen";
 import { AdminServicesProvider } from "@/components/providers/admin-services-provider";
 import { translateMessage } from "@/lib/i18n/formatter";
-import { getServerI18n } from "@/lib/i18n/server";
+import { getServerAdminI18n } from "@/lib/i18n/server";
 import { resolveAdminAuthRuntime } from "@/lib/utils/admin-scenario";
-import { viMessages } from "@/messages/vi";
 
 export async function generateMetadata(): Promise<Metadata> {
-  const { locale, messages } = await getServerI18n();
+  const { locale, messages, fallbackMessages } = await getServerAdminI18n();
   return {
     title: translateMessage(
       messages,
-      viMessages,
+      fallbackMessages,
       locale,
       "admin.routes.loginTitle",
     ),

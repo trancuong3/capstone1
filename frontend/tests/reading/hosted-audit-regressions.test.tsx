@@ -671,7 +671,7 @@ describe("Hosted Audit Regressions (DEF-H01..DEF-H10)", () => {
     });
     expect(
       screen.getByTestId("voice-offline-cache-notice").textContent,
-    ).toContain("chuẩn bị trước");
+    ).toContain("Wi-Fi tự lập");
   });
 
   it("ReadingVoiceSettings shows Wi-Fi badges and lists all cached regional voices when offline", async () => {

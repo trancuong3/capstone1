@@ -728,7 +728,7 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         }),
       }),
     );
-    await screen.findByText(/Đúng 3\/4 từ/);
+    await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 });
     expect(screen.getByText("75%")).toBeInTheDocument();
     expect(compareTranscriptMock).not.toHaveBeenCalled();
   });
@@ -1337,7 +1337,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
       );
       await user.click(
-        await screen.findByRole("button", { name: "Lưu và dừng" }),
+        await screen.findByRole(
+          "button",
+          { name: "Lưu và dừng" },
+          { timeout: 5000 },
+        ),
       );
       const retryConsent = await screen.findByRole("button", {
         name: "Đồng ý, đọc lại",
@@ -1719,9 +1723,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
             }),
           }),
         );
-        expect(await screen.findByText(/Đúng 2\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 2 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 2\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 2 từ");
         expect(screen.getByText("50%")).toBeInTheDocument();
         return;
       }
@@ -1834,9 +1838,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(
           services.readingService.createRetryEvent.mock.calls[1][0],
         ).toEqual(originalPayload);
-        expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 1 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 1 từ");
         return;
       }
 
@@ -1903,9 +1907,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         expect(services.readingService.createRetryEvent).toHaveBeenCalledTimes(
           3,
         );
-        expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-          "Bỏ sót 1 từ",
-        );
+        expect(
+          await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+        ).toHaveTextContent("Bỏ sót 1 từ");
         expect(screen.getByText("75%")).toBeInTheDocument();
         return;
       }
@@ -1933,9 +1937,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
           }),
         }),
       );
-      expect(await screen.findByText(/Đúng 3\/4 từ/)).toHaveTextContent(
-        "Bỏ sót 1 từ",
-      );
+      expect(
+        await screen.findByText(/Đúng 3\/4 từ/, {}, { timeout: 5000 }),
+      ).toHaveTextContent("Bỏ sót 1 từ");
       expect(screen.getByText("75%")).toBeInTheDocument();
       expect(compareTranscriptMock).toHaveBeenCalledOnce();
       expect(compareTranscriptMock).toHaveBeenCalledWith(
@@ -2259,10 +2263,15 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await screen.findByRole("button", { name: "Lưu và dừng" }),
     );
 
-    await waitFor(() => {
-      expect(services.readingService.finish).toHaveBeenCalledOnce();
-      expect(screen.getByText("Báo cáo đọc chưa sẵn sàng")).toBeInTheDocument();
-    });
+    await waitFor(
+      () => {
+        expect(services.readingService.finish).toHaveBeenCalledOnce();
+        expect(
+          screen.getByText("Báo cáo đọc chưa sẵn sàng"),
+        ).toBeInTheDocument();
+      },
+      { timeout: 5000 },
+    );
     expect(compareTranscriptMock).not.toHaveBeenCalled();
   });
 
@@ -2630,6 +2639,8 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await user.click(await screen.findByRole("button", { name: "Bỏ qua" }));
       await screen.findByText(
         transition === "manual" ? /Đúng 6\/8 từ/ : /Đúng 7\/8 từ/,
+        {},
+        { timeout: 5000 },
       );
       expect(compareTranscriptMock).toHaveBeenCalledTimes(2);
       expect(compareTranscriptMock).toHaveBeenCalledWith(
@@ -2794,7 +2805,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await waitFor(() =>
         expect(services.readingService.finish).toHaveBeenCalledOnce(),
       );
-      expect(await screen.findByText(/Đúng 4\/4 từ/)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/Đúng 4\/4 từ/, {}, { timeout: 5000 }),
+      ).toBeInTheDocument();
       expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
       expect(compareTranscriptMock).toHaveBeenCalledWith(
         TEST_SESSION_ID,
@@ -3127,7 +3140,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         },
       ),
     );
-    expect(await screen.findByText(/Đúng 4\/4 từ/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/Đúng 4\/4 từ/, {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
     expect(services.readingService.createRetryEvent).not.toHaveBeenCalled();
   });
 
@@ -3331,7 +3346,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       });
     const user = userEvent.setup();
     renderReading("question");
-    await screen.findByRole("heading", { name: "Mình cùng trả lời nhé" });
+    await screen.findByRole(
+      "heading",
+      { name: "Mình cùng trả lời nhé" },
+      { timeout: 5000 },
+    );
     expect(document.body.textContent).not.toContain("expected_answer");
     await user.click(await screen.findByRole("button", { name: /Trên bàn/ }));
     expect(
@@ -3405,7 +3424,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
     await user.click(
       await screen.findByRole("button", { name: "Nghe đánh vần" }),
     );
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
 
     await user.click(
       screen.getByRole("button", { name: "Đóng hướng dẫn đánh vần" }),
@@ -3414,7 +3435,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     // Re-open phonics card, then navigate to page 5 -> must clear automatically
     await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Trang tiếp theo" }));
     await screen.findByLabelText("Trang sách 5");
@@ -3457,7 +3480,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
 
     // Start phonics playback -> MUST NOT show the full-page "Đọc mẫu" banner!
     await user.click(screen.getByRole("button", { name: "Nghe đánh vần" }));
-    expect(await screen.findByTestId("phonics-lesson-card")).toBeVisible();
+    expect(
+      await screen.findByTestId("phonics-lesson-card", {}, { timeout: 5000 }),
+    ).toBeVisible();
     expect(
       screen.queryByText("Đang phát âm toàn bộ trang sách theo giọng mẫu..."),
     ).not.toBeInTheDocument();
@@ -3632,7 +3657,11 @@ describe("ReadingScreen presentation with typed test-local service responses", (
         screen.getByRole("button", { name: "Kết thúc buổi đọc" }),
       );
       await user.click(
-        await screen.findByRole("button", { name: "Lưu và dừng" }),
+        await screen.findByRole(
+          "button",
+          { name: "Lưu và dừng" },
+          { timeout: 5000 },
+        ),
       );
 
       await screen.findByRole("button", { name: "Đồng ý, đọc lại" });

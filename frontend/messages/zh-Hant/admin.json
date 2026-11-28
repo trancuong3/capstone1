@@ -2903,33 +2903,5 @@
       "userBooks": "User Books & Data Contributions"
     },
     "tabsAria": "圖書品質管理分區"
-  },
-  "taskCenter": {
-    "backgroundProcessing": "正在背景處理…",
-    "closeAria": "關閉 AI 任務中心",
-    "defaultBookLabel": "圖書",
-    "elapsedHours": "{hours} 小時",
-    "elapsedHoursMinutes": "{hours} 小時 {minutes} 分鐘",
-    "elapsedMinutes": "{minutes} 分鐘",
-    "elapsedMinutesSeconds": "{minutes} 分鐘 {seconds} 秒",
-    "elapsedRunning": "已執行 {elapsed}",
-    "elapsedSeconds": "{seconds} 秒",
-    "emptyDescription": "當您上傳書頁、擷取 OCR 或生成封面時，即時進度將顯示於此。",
-    "emptyTitle": "尚無 AI 任務",
-    "openAria": "開啟 AI 任務中心",
-    "pageSeparator": " • 第 {pageNumber} 頁",
-    "pillFailed": "失敗任務 ({count})",
-    "pillIdle": "AI 任務",
-    "pillRunning": "AI 執行中 ({count})",
-    "pillWaitingReview": "待核驗 ({count})",
-    "processingAria": "正在處理 {title}",
-    "progressAria": "{title} 進度",
-    "refreshAria": "重新整理任務清單",
-    "stagePrefix": "階段：{stage}",
-    "subtitle": "即使切換頁面，背景任務仍會安全持續執行。",
-    "title": "AI 任務中心",
-    "viewResultAction": "檢視結果",
-    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
-    "pillWaitingForWorker": "OCR 佇列 ({count})"
   }
 }

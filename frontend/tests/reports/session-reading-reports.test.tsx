@@ -488,11 +488,13 @@ describe("SessionReadingReports", () => {
     expect(pageNav).toHaveTextContent("…");
 
     // Additional comparisons inside <details> are paginated at 5 per page
+    // Order: immutable v1 first (lượt 1), then additional newest-first (lượt 7, 6, 5, 4 on page 1; lượt 3, 2 on page 2)
     fireEvent.click(
       screen.getByText("Các lượt đối chiếu khác của trang này (6)"),
     );
-    expect(screen.getByText("Lời đọc lượt 5")).toBeInTheDocument();
-    expect(screen.queryByText("Lời đọc lượt 6")).not.toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt 7")).toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt 4")).toBeInTheDocument();
+    expect(screen.queryByText("Lời đọc lượt 3")).not.toBeInTheDocument();
 
     const cmpNav = screen.getByRole("navigation", {
       name: "Phân trang lượt đối chiếu bổ sung",
@@ -503,8 +505,8 @@ describe("SessionReadingReports", () => {
         b.textContent?.includes("Tiếp"),
       )!,
     );
-    expect(screen.getByText("Lời đọc lượt 6")).toBeInTheDocument();
-    expect(screen.getByText("Lời đọc lượt 7")).toBeInTheDocument();
-    expect(screen.queryByText("Lời đọc lượt 5")).not.toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt 3")).toBeInTheDocument();
+    expect(screen.getByText("Lời đọc lượt 2")).toBeInTheDocument();
+    expect(screen.queryByText("Lời đọc lượt 7")).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 import inspect
 from uuid import UUID
@@ -96,7 +97,7 @@ async def resolve_assistant_actor(
         return AssistantActorContext(role_scope="public", subject_key=ip_subject)
 
     try:
-        actor_id = get_current_parent_id(credentials)
+        actor_id = await asyncio.to_thread(get_current_parent_id, credentials)
         actor_uuid = actor_id if isinstance(actor_id, UUID) else UUID(str(actor_id))
     except (HTTPException, ValueError, TypeError):
         return AssistantActorContext(role_scope="public", subject_key=ip_subject)

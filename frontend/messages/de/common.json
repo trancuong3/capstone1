@@ -130,5 +130,33 @@
     "tierOllama": "Lokales Ollama",
     "tierFallback": "Ersatz-Anleitung",
     "tierOffline": "Offline-Anleitung"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Hintergrundverarbeitung läuft…",
+    "closeAria": "KI-Aufgabenzentrum schließen",
+    "defaultBookLabel": "Buch",
+    "elapsedHours": "{hours} Std.",
+    "elapsedHoursMinutes": "{hours} Std. {minutes} Min.",
+    "elapsedMinutes": "{minutes} Min.",
+    "elapsedMinutesSeconds": "{minutes} Min. {seconds} Sek.",
+    "elapsedRunning": "Läuft seit {elapsed}",
+    "elapsedSeconds": "{seconds} Sek.",
+    "emptyDescription": "Wenn Sie Buchseiten hochladen, OCR ausführen oder Cover erstellen, erscheint der Live-Fortschritt hier.",
+    "emptyTitle": "Noch keine KI-Aufgaben",
+    "openAria": "KI-Aufgabenzentrum öffnen",
+    "pageSeparator": " • Seite {pageNumber}",
+    "pillFailed": "Fehlgeschlagen ({count})",
+    "pillIdle": "KI-Aufgaben",
+    "pillRunning": "KI aktiv ({count})",
+    "pillWaitingReview": "Prüfung nötig ({count})",
+    "processingAria": "{title} wird verarbeitet",
+    "progressAria": "Fortschritt für {title}",
+    "refreshAria": "Aufgabenliste aktualisieren",
+    "stagePrefix": "Schritt: {stage}",
+    "subtitle": "Hintergrundaufgaben laufen auch beim Seitenwechsel sicher weiter.",
+    "title": "KI-Aufgabenzentrum",
+    "viewResultAction": "Ergebnis ansehen",
+    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
+    "pillWaitingForWorker": "OCR-Warteschlange ({count})"
   }
 }

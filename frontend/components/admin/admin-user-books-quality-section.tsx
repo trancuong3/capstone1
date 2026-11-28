@@ -1202,46 +1202,46 @@ export const AdminUserBooksQualitySection = memo(
                           <>
                             <ul className="mt-2 space-y-2 text-xs">
                               {visibleDetailHistory.map((hist) => (
-                              <li
-                                className="rounded-control border border-border bg-surface-subtle/50 p-2"
-                                key={hist.request_id}
-                              >
-                                <div className="flex flex-wrap items-center justify-between gap-1">
-                                  <span className="font-bold text-ink">
-                                    Phiên bản {hist.submission_version} ·{" "}
-                                    {hist.status === "APPROVED"
-                                      ? "Đã duyệt"
-                                      : hist.status === "REJECTED"
-                                        ? "Từ chối"
-                                        : hist.status === "CHANGES_REQUESTED"
-                                          ? "Yêu cầu sửa"
-                                          : hist.status === "SUSPENDED"
-                                            ? "Đình chỉ"
-                                            : "Chờ duyệt"}
-                                    {hist.decided_by_label
-                                      ? ` · ${hist.decided_by_label}`
-                                      : ""}
-                                  </span>
-                                  <span className="text-[11px] tabular-nums text-muted">
-                                    {formatDateTime(hist.created_at)}
-                                  </span>
-                                </div>
-                                {hist.decision_reason ? (
-                                  <p className="mt-1 text-ink">
-                                    {t("userBooks.historyReason", {
-                                      reason: hist.decision_reason,
-                                    })}
-                                  </p>
-                                ) : null}
-                                {hist.parent_request_note ? (
-                                  <p className="mt-0.5 text-muted">
-                                    {t("userBooks.historyParentNote")}{" "}
-                                    {hist.parent_request_note}
-                                  </p>
-                                ) : null}
-                              </li>
-                            ))}
-                          </ul>
+                                <li
+                                  className="rounded-control border border-border bg-surface-subtle/50 p-2"
+                                  key={hist.request_id}
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-1">
+                                    <span className="font-bold text-ink">
+                                      Phiên bản {hist.submission_version} ·{" "}
+                                      {hist.status === "APPROVED"
+                                        ? "Đã duyệt"
+                                        : hist.status === "REJECTED"
+                                          ? "Từ chối"
+                                          : hist.status === "CHANGES_REQUESTED"
+                                            ? "Yêu cầu sửa"
+                                            : hist.status === "SUSPENDED"
+                                              ? "Đình chỉ"
+                                              : "Chờ duyệt"}
+                                      {hist.decided_by_label
+                                        ? ` · ${hist.decided_by_label}`
+                                        : ""}
+                                    </span>
+                                    <span className="text-[11px] tabular-nums text-muted">
+                                      {formatDateTime(hist.created_at)}
+                                    </span>
+                                  </div>
+                                  {hist.decision_reason ? (
+                                    <p className="mt-1 text-ink">
+                                      {t("userBooks.historyReason", {
+                                        reason: hist.decision_reason,
+                                      })}
+                                    </p>
+                                  ) : null}
+                                  {hist.parent_request_note ? (
+                                    <p className="mt-0.5 text-muted">
+                                      {t("userBooks.historyParentNote")}{" "}
+                                      {hist.parent_request_note}
+                                    </p>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
                             <PaginationBar
                               className="mt-2.5"
                               compact

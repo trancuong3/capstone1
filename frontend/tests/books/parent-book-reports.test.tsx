@@ -212,7 +212,7 @@ describe("Parent book content reports dialog & inbox", () => {
     expect(screen.queryByText("Sách báo cáo 11")).not.toBeInTheDocument();
     expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /Sau/i }));
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
     expect(await screen.findByText("Sách báo cáo 11")).toBeInTheDocument();
     expect(screen.getByText("Sách báo cáo 12")).toBeInTheDocument();
     expect(screen.queryByText("Sách báo cáo 1")).not.toBeInTheDocument();

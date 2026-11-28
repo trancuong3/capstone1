@@ -15,6 +15,7 @@ import {
   setEntertainmentPreferences,
   useEntertainmentPreferences,
 } from "@/hooks/use-entertainment-preferences";
+import type { EntertainmentRecommendationsDTO } from "@/types/adaptive-learning";
 import type { ChildProfileDTO } from "@/types/child";
 import type { MemoryThemesCatalogDTO, SceneSpecDTO } from "@/types/memory-game";
 import {
@@ -158,26 +159,28 @@ const memoryCatalog: MemoryThemesCatalogDTO = {
   total_sprites: 10,
 };
 
-function makeRecommendationPayload(child: ChildProfileDTO) {
+function makeRecommendationPayload(
+  child: ChildProfileDTO,
+): EntertainmentRecommendationsDTO {
+  const focusWord = child.id === CHILD_TWO_ID ? "bình minh" : "nắng mai";
   return {
     child_id: child.id,
     child_alias: child.alias,
     child_grade: child.grade,
     mascot_greeting_vi: `Chào ${child.alias}! Hôm nay mình học vui nhé!`,
-    recommended_daily_minutes: 15,
-    break_reminder_vi: "Nghỉ mắt nhẹ sau 15 phút nhé!",
-    focus_difficult_words: [
-      child.id === CHILD_TWO_ID ? "bình minh" : "nắng mai",
-    ],
+    natural_break_reminder_vi: "Nghỉ mắt nhẹ sau 15 phút nhé!",
+    today_activities_count: 1,
+    focus_difficult_words: [focusWord],
     primary_recommendation: {
       game_key: "PICTURE_DESCRIPTION",
-      title_vi: "Kể chuyện qua tranh",
-      href: "/entertainment/picture-description",
+      zone_title_vi: "Góc kể chuyện",
+      game_title_vi: "Kể chuyện qua tranh",
       reason_vi: `Gợi ý dành riêng cho ${child.alias}`,
-      priority_score: 90,
-      suggested_words: [child.id === CHILD_TWO_ID ? "bình minh" : "nắng mai"],
-      suggested_difficulty: "easy",
-      suggested_theme: "sunny-garden",
+      suggested_mode: "GUIDED_STORY",
+      suggested_difficulty: 1,
+      target_words: [focusWord],
+      href: "/entertainment/picture-description",
+      priority: 1,
     },
     recommendations: [],
   };

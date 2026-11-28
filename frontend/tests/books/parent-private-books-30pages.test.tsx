@@ -227,6 +227,12 @@ describe("ParentPrivateBookManager 30-page mixed state view", () => {
       screen.getByText(/Hệ thống kiểm tra đang tạm nghỉ hoặc khởi động/),
     ).toBeInTheDocument();
 
+    // Overview chips paginate at 16/page and submissions paginate at 10/page (30 total)
+    expect(screen.getByText("Đang xem 1–16 / 30 trang")).toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("Đang xem 1–10 / 30 trang")).toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 3")).toBeInTheDocument();
+
     // Filter to failed pages -> focuses cleanly on Page 7 with Retry button
     fireEvent.click(
       within(filterGroup).getByRole("button", { name: "Lỗi kiểm tra (1)" }),

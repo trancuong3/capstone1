@@ -21,6 +21,7 @@ from starlette.websockets import WebSocketDisconnect
 from app.api.deps import require_active_profile_id
 from app.api.routes import voice as voice_routes
 from app.api.routes import voice_studio as studio_routes
+from app.providers.elevenlabs_voice_provider import ElevenLabsVoiceProvider
 from app.providers.google_voice_provider import (
     GoogleCloudVoiceProvider,
     reset_google_cooldowns,
@@ -65,6 +66,8 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
 
 class Phase1ReadingVoiceRegressionTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
         reset_google_cooldowns()
         clear_voice_orchestrator_caches()
         self._orig_voice_factory = voice_routes.get_voice_orchestrator
@@ -73,6 +76,7 @@ class Phase1ReadingVoiceRegressionTests(unittest.TestCase):
     def tearDown(self) -> None:
         voice_routes.get_voice_orchestrator = self._orig_voice_factory
         studio_routes.get_voice_orchestrator = self._orig_studio_factory
+        self._env_patch.stop()
 
     def test_ws_stt_stream_fast_fails_when_local_worker_unconfigured(self) -> None:
         local = LocalVoiceProvider(base_url="")
@@ -207,7 +211,11 @@ class Phase1ReadingVoiceRegressionTests(unittest.TestCase):
                 used_fallback_voice=False,
             )
         )
-        orchestrator = VoiceOrchestrator(local_provider=local_unconfigured, google_provider=google)
+        orchestrator = VoiceOrchestrator(
+            local_provider=local_unconfigured,
+            google_provider=google,
+            elevenlabs_provider=ElevenLabsVoiceProvider(api_key=""),
+        )
 
         with _make_app(orchestrator) as client:
             r_local_only = client.post(
@@ -256,7 +264,11 @@ class Phase1ReadingVoiceRegressionTests(unittest.TestCase):
             side_effect=LocalVoiceTechnicalError(status_code=503, code="LOCAL_TTS_UNAVAILABLE")
         )
         google.synthesize.reset_mock()
-        orch_down = VoiceOrchestrator(local_provider=local_down, google_provider=google)
+        orch_down = VoiceOrchestrator(
+            local_provider=local_down,
+            google_provider=google,
+            elevenlabs_provider=ElevenLabsVoiceProvider(api_key=""),
+        )
         with _make_app(orch_down) as client:
             r_outage = client.post(
                 "/voice/text-to-speech",

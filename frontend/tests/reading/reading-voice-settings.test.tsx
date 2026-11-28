@@ -11,7 +11,6 @@ import {
 import {
   getVoicePolicyPreferences,
   resetVoiceLockAndPolicyForTests,
-  setVoicePolicyPreferences,
 } from "@/lib/reading/session-voice-lock";
 
 const { voiceStudioMock } = vi.hoisted(() => ({

@@ -190,29 +190,129 @@ function ProgressReportContent({
     async function load() {
       setState({ status: "loading" });
       try {
-        const children = await childService.list();
-        if (!children.length) {
-          if (active) setState({ status: "no-children" });
-          return;
-        }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
-          : children[0];
-        const child = matchedChild
-          ? matchedChild
-          : await childService.get(requestedChildId!);
-        if (!children.some((item) => item.id === child.id)) {
-          if (active) setState({ status: "not-found" });
-          return;
-        }
         const window = parseProgressPeriod(
           requestedPeriodStart,
           requestedPeriodEnd,
         );
         if (window === "invalid") return;
-        const periods = await reportService
+
+        type ReportFetchOutcome =
+          | { ok: true; value: ProgressReportDTO }
+          | { ok: false; failure: unknown };
+
+        const toReportOutcome = (
+          promise: Promise<ProgressReportDTO>,
+        ): Promise<ReportFetchOutcome> =>
+          promise.then(
+            (value) => ({ ok: true as const, value }),
+            (failure: unknown) => ({ ok: false as const, failure }),
+          );
+
+        const resolveReportStatus = (
+          outcome: ReportFetchOutcome,
+        ): {
+          report: ProgressReportDTO | null;
+          reportStatus: "ready" | "empty" | "unavailable" | "error";
+        } => {
+          if (outcome.ok) {
+            return { report: outcome.value, reportStatus: "ready" };
+          }
+          const failure = outcome.failure;
+          return {
+            report: null,
+            reportStatus:
+              isServiceError(failure) && failure.status === 404
+                ? "empty"
+                : isServiceError(failure) &&
+                    (failure.status === 501 || failure.status === 503)
+                  ? "unavailable"
+                  : "error",
+          };
+        };
+
+        if (requestedChildId) {
+          const childrenPromise = childService.list();
+          const periodsPromise = reportService
+            .listPeriods(requestedChildId)
+            .catch(() => null);
+          const reportPromise =
+            window !== null
+              ? toReportOutcome(reportService.get(requestedChildId, window))
+              : null;
+
+          const children = await childrenPromise;
+          if (!children.length) {
+            if (active) setState({ status: "no-children" });
+            return;
+          }
+          const matchedChild = children.find(
+            (item) => item.id === requestedChildId,
+          );
+          const child = matchedChild
+            ? matchedChild
+            : await childService.get(requestedChildId);
+          if (!children.some((item) => item.id === child.id)) {
+            if (active) setState({ status: "not-found" });
+            return;
+          }
+
+          const [periods, prefetchedReportOutcome] = await Promise.all([
+            periodsPromise,
+            reportPromise ?? Promise.resolve(null),
+          ]);
+          if (!active) return;
+
+          const periodsValue = periods ?? { items: [], next_cursor: null };
+          const periodsError = periods === null;
+          if (!window && periods !== null && periods.items.length === 0) {
+            setState({
+              status: "loaded",
+              children,
+              child,
+              report: null,
+              reportStatus: "empty",
+              periods: periodsValue,
+              periodsError: false,
+            });
+            return;
+          }
+
+          const finalOutcome =
+            prefetchedReportOutcome ??
+            (await toReportOutcome(
+              reportService.get(child.id, window ?? undefined),
+            ));
+          if (!active) return;
+          const { report, reportStatus } = resolveReportStatus(finalOutcome);
+          setState({
+            status: "loaded",
+            children,
+            child,
+            report,
+            reportStatus,
+            periods: periodsValue,
+            periodsError,
+          });
+          return;
+        }
+
+        const children = await childService.list();
+        if (!children.length) {
+          if (active) setState({ status: "no-children" });
+          return;
+        }
+        const child = children[0];
+        const periodsPromise = reportService
           .listPeriods(child.id)
           .catch(() => null);
+        const reportPromise =
+          window !== null
+            ? toReportOutcome(reportService.get(child.id, window))
+            : null;
+        const [periods, prefetchedReportOutcome] = await Promise.all([
+          periodsPromise,
+          reportPromise ?? Promise.resolve(null),
+        ]);
         if (!active) return;
         const periodsValue = periods ?? { items: [], next_cursor: null };
         const periodsError = periods === null;
@@ -228,21 +328,13 @@ function ProgressReportContent({
           });
           return;
         }
-        let report: ProgressReportDTO | null = null;
-        let reportStatus: "ready" | "empty" | "unavailable" | "error" = "error";
-        try {
-          report = await reportService.get(child.id, window ?? undefined);
-          reportStatus = "ready";
-        } catch (failure) {
-          reportStatus =
-            isServiceError(failure) && failure.status === 404
-              ? "empty"
-              : isServiceError(failure) &&
-                  (failure.status === 501 || failure.status === 503)
-                ? "unavailable"
-                : "error";
-        }
+        const finalOutcome =
+          prefetchedReportOutcome ??
+          (await toReportOutcome(
+            reportService.get(child.id, window ?? undefined),
+          ));
         if (!active) return;
+        const { report, reportStatus } = resolveReportStatus(finalOutcome);
         setState({
           status: "loaded",
           children,

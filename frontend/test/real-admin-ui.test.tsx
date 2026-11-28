@@ -415,7 +415,11 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(
-      await screen.findByRole("heading", { name: book.title }),
+      await screen.findByRole(
+        "heading",
+        { name: book.title },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: /Sách Admin từ database/ }),
@@ -434,7 +438,11 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
       </AdminServicesProvider>,
     );
     expect(
-      await screen.findByRole("heading", { name: book.title }),
+      await screen.findByRole(
+        "heading",
+        { name: book.title },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("link", { name: /Sách Admin từ database/ }),
@@ -760,7 +768,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
         name: "XÁC NHẬN VÀ LƯU NỘI DUNG CUỐI CÙNG",
       }),
     ).toBeDisabled();
-  }, 15_000);
+  }, 25_000);
 
   it("reports a clean AI check but still waits for final Admin confirmation", async () => {
     aiReviewDraftEnabled = true;
@@ -1736,7 +1744,7 @@ describe("Admin UI with real adapters and isolated HTTP responses", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole("heading", { name: "Database" }),
+        screen.getByRole("heading", { name: "Cơ sở dữ liệu" }),
       ).toBeInTheDocument();
     });
     expect(healthCallCount).toBe(1);

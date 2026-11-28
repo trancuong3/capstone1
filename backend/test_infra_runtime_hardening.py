@@ -296,6 +296,7 @@ class ExpandedInternalCronDispatchTests(unittest.TestCase):
             patch.object(internal_cron_route, "is_remote_ocr_mode", return_value=True),
             patch.object(internal_cron_route, "process_due_reminders_once", new=AsyncMock(return_value=2)),
             patch.object(internal_cron_route, "process_due_alerts_once", new=AsyncMock(return_value=1)),
+            patch.object(internal_cron_route, "process_engagement_emails_once", new=AsyncMock(return_value=0)),
             patch.object(
                 internal_cron_route.parent_book_submission_worker,
                 "cleanup_expired_temp_submissions",
@@ -378,6 +379,7 @@ class ExpandedInternalCronDispatchTests(unittest.TestCase):
             patch.object(internal_cron_route, "is_remote_ocr_mode", return_value=True),
             patch.object(internal_cron_route, "process_due_reminders_once", new=AsyncMock(return_value=0)),
             patch.object(internal_cron_route, "process_due_alerts_once", new=AsyncMock(return_value=0)),
+            patch.object(internal_cron_route, "process_engagement_emails_once", new=AsyncMock(return_value=0)),
             patch.object(
                 internal_cron_route.parent_book_submission_worker,
                 "cleanup_expired_temp_submissions",

@@ -642,7 +642,9 @@ class Wave2TtsCacheAndVoiceTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(stale, list)
                 self.assertEqual(len(stale), 1)
                 priv_bucket, priv_path = stale[0]
-                priv_file = Path(tmpdir) / priv_bucket / priv_path
+                priv_file = (Path(tmpdir) / priv_bucket / priv_path).resolve()
+                if os.name == "nt" and len(str(priv_file)) >= 248 and not str(priv_file).startswith("\\\\?\\"):
+                    priv_file = Path(f"\\\\?\\{priv_file}")
                 self.assertTrue(priv_file.is_file())
                 await delete_stale_tts_objects(stale)
                 self.assertFalse(priv_file.is_file())

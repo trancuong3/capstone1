@@ -1,27 +1,18 @@
-import { z, type ZodType } from "zod";
+import { z } from "zod";
 
+import { requestApi, type RequestApiOptions } from "@/lib/api/api-client";
+import { ServiceError } from "@/lib/api/service-error";
+import { clearUserCache } from "@/lib/cache/user-query-cache";
+import { translateRuntime } from "@/lib/i18n/runtime";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import type { ChildProfileDTO } from "@/types/child";
+import type { ZodType } from "zod";
 import type {
   DashboardLatestSessionDTO,
   DashboardSummaryDTO,
   ParentProfileDTO,
   ParentProfileUpdateInput,
 } from "@/types/profile";
-
-import {
-  getBrowserAccessToken,
-  invalidateBrowserTokenCache,
-} from "@/lib/api/browser-auth";
-import {
-  invalidateApiReadCache,
-  runCoalescedApiGet,
-} from "@/lib/api/read-cache";
-import { ServiceError, type ServiceErrorCode } from "@/lib/api/service-error";
-import { clearUserCache } from "@/lib/cache/user-query-cache";
-import { translateRuntime } from "@/lib/i18n/runtime";
-
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 
 export interface ProfileService {
   get(): Promise<ParentProfileDTO>;
@@ -33,29 +24,6 @@ export interface ProfileService {
   uploadAvatar(file: File): Promise<ParentProfileDTO>;
   removeAvatar(): Promise<ParentProfileDTO>;
 }
-
-const DEFAULT_PROFILE_ERROR_MESSAGE =
-  "Có lỗi xảy ra. Ba mẹ vui lòng thử lại sau.";
-
-// Only explicitly allowlisted backend codes/details may produce specific copy.
-const SAFE_PROFILE_BACKEND_MESSAGES: Readonly<Record<string, string>> = {
-  "Unsupported upload format; use JPEG, PNG, or WebP":
-    "Định dạng ảnh chưa hỗ trợ. Ba mẹ hãy chọn ảnh PNG, JPG hoặc WEBP nhé.",
-  "Image exceeds the 12 MB limit":
-    "Ảnh tải lên vượt quá giới hạn dung lượng cho phép.",
-  "Image decoding failed": "Không đọc được tệp ảnh tải lên. Hãy chọn ảnh khác.",
-  "Image dimensions are invalid": "Kích thước ảnh đại diện chưa hợp lệ.",
-  INVALID_IMAGE:
-    "Ảnh tải lên chưa hợp lệ. Ba mẹ hãy chọn ảnh PNG, JPG hoặc WEBP nhé.",
-  PARENT_CONFLICT:
-    "Thông tin tài khoản phụ huynh bị xung đột hoặc đã tồn tại. Ba mẹ vui lòng thử lại.",
-  AUTH_PROVIDER_UNAVAILABLE:
-    "Dịch vụ xác thực đang tạm thời gián đoạn. Ba mẹ vui lòng thử lại sau.",
-  DATABASE_OPERATION_FAILED:
-    "Hệ thống dữ liệu đang gặp sự cố tạm thời. Ba mẹ vui lòng thử lại sau.",
-  PARENT_AUTH_OPERATION_FAILED:
-    "Không thể hoàn tất thao tác tài khoản lúc này. Ba mẹ vui lòng thử lại sau.",
-};
 
 const parentRoleSchema = z.enum(["parent", "admin"]);
 const contactInfoStatusSchema = z.enum([
@@ -153,210 +121,40 @@ const fallbackChildProfileListSchema = z.array(
   }),
 );
 
-function mapErrorCode(status: number): ServiceErrorCode {
-  if (status === 401) {
-    return "AUTH_REQUIRED";
-  }
-
-  if (status === 403) {
-    return "FORBIDDEN";
-  }
-
-  if (status === 404) {
-    return "RESOURCE_NOT_FOUND";
-  }
-
-  if (status === 422) {
-    return "VALIDATION_ERROR";
-  }
-
-  return "NETWORK_ERROR";
-}
-
-function safeStatusMessage(status: number): string {
-  switch (status) {
-    case 401:
-      return "Phiên đăng nhập đã hết hạn. Ba mẹ vui lòng đăng nhập lại.";
-    case 403:
-      return "Ba mẹ không có quyền truy cập thông tin hồ sơ này.";
-    case 404:
-      return "Không tìm thấy thông tin hồ sơ được yêu cầu.";
-    case 422:
-      return "Thông tin hồ sơ chưa hợp lệ. Ba mẹ vui lòng kiểm tra lại.";
-    default:
-      return DEFAULT_PROFILE_ERROR_MESSAGE;
-  }
-}
-
-async function resolveSafeErrorMessage(response: Response): Promise<string> {
-  try {
-    const payload: unknown = await response.clone().json();
-    if (typeof payload === "object" && payload !== null) {
-      if ("detail" in payload) {
-        if (typeof payload.detail === "string") {
-          const translated = SAFE_PROFILE_BACKEND_MESSAGES[payload.detail];
-          if (translated) return translated;
-        } else if (
-          typeof payload.detail === "object" &&
-          payload.detail !== null &&
-          "code" in payload.detail &&
-          typeof payload.detail.code === "string"
-        ) {
-          const translated = SAFE_PROFILE_BACKEND_MESSAGES[payload.detail.code];
-          if (translated) return translated;
-        }
-      }
-      if ("code" in payload && typeof payload.code === "string") {
-        const translated = SAFE_PROFILE_BACKEND_MESSAGES[payload.code];
-        if (translated) return translated;
-      }
-    }
-  } catch {
-    // Non-JSON error bodies must never be reflected to the UI.
-  }
-
-  return safeStatusMessage(response.status);
-}
-
-async function createHttpError(response: Response): Promise<ServiceError> {
-  const message = await resolveSafeErrorMessage(response);
-  return new ServiceError({
-    code: mapErrorCode(response.status),
-    message,
-    status: response.status,
-    request_id: response.headers.get("x-request-id") ?? "",
-    retryable: response.status >= 500,
-  });
-}
-
-function unauthorizedError(): ServiceError {
-  return new ServiceError({
-    code: "AUTH_REQUIRED",
-    message: "Authentication required.",
-    status: 401,
-    request_id: "",
-    retryable: false,
-  });
-}
-
-async function resolveProfileAccessToken(): Promise<string> {
-  return getBrowserAccessToken({
-    onUnauthorized: unauthorizedError,
-  });
-}
-
-async function request<T>(
+async function requestProfileApi<T>(
   path: string,
   schema: ZodType<T>,
-  init?: RequestInit,
+  options?: RequestApiOptions,
 ): Promise<T> {
-  if (!path.startsWith("/") || path.startsWith("//")) {
-    throw new ServiceError({
-      code: "NETWORK_ERROR",
-      message: DEFAULT_PROFILE_ERROR_MESSAGE,
-      status: 0,
-      request_id: "",
-      retryable: false,
-    });
-  }
-
-  let token: string;
-
   try {
-    token = await resolveProfileAccessToken();
+    return await requestApi(path, schema, undefined, options);
   } catch (error) {
-    if (error instanceof ServiceError) {
-      throw error;
+    if (
+      error instanceof ServiceError &&
+      error.message === translateRuntime("errors.generic")
+    ) {
+      throw new ServiceError({
+        code: error.code,
+        message:
+          error.status === 401
+            ? translateRuntime("errors.clientRuntime.sessionExpiredParent")
+            : translateRuntime("errors.clientRuntime.genericParentRetry"),
+        status: error.status,
+        request_id: error.request_id,
+        retryable: error.retryable,
+      });
     }
-
-    throw unauthorizedError();
+    throw error;
   }
+}
 
-  const method = (init?.method ?? "GET").toUpperCase();
-  const execute = async (signal?: AbortSignal): Promise<T> => {
-    const headers = new Headers({
-      Accept: "application/json",
-      Authorization: `Bearer ${token}`,
-    });
-    if (typeof init?.body === "string") {
-      headers.set("Content-Type", "application/json");
-    }
-
-    let response: Response;
-
-    try {
-      response = await fetch(`${getApiBaseUrl()}${path}`, {
-        ...init,
-        headers: {
-          ...Object.fromEntries(headers.entries()),
-          ...(init?.headers ?? {}),
-        },
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-        signal: signal ?? init?.signal,
-      });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: 0,
-        request_id: "",
-        retryable: true,
-      });
-    }
-
-    const requestId = response.headers.get("x-request-id") ?? "";
-    if (!response.ok) {
-      if (response.status === 401) {
-        invalidateBrowserTokenCache();
-        invalidateApiReadCache();
-      }
-      throw await createHttpError(response);
-    }
-
-    let payload: unknown;
-    try {
-      payload = await response.json();
-    } catch {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: translateRuntime("errors.clientRuntime.genericParentRetry"),
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
-
-    const parsed = schema.safeParse(payload);
-    if (!parsed.success) {
-      throw new ServiceError({
-        code: "NETWORK_ERROR",
-        message: DEFAULT_PROFILE_ERROR_MESSAGE,
-        status: response.status,
-        request_id: requestId,
-        retryable: false,
-      });
-    }
-
-    return parsed.data;
-  };
-
-  if (method !== "GET") {
-    invalidateApiReadCache();
+async function runProfileMutation<T>(operation: () => Promise<T>): Promise<T> {
+  clearUserCache();
+  try {
+    return await operation();
+  } finally {
     clearUserCache();
-    try {
-      return await execute();
-    } finally {
-      invalidateApiReadCache();
-      clearUserCache();
-    }
   }
-
-  return runCoalescedApiGet(path, token, undefined, (sharedSignal) =>
-    execute(sharedSignal),
-  );
 }
 
 function normalizeSummaryChild(
@@ -526,13 +324,16 @@ function getProfileEmailRedirectUrl(): string {
 export function createProfileService(): ProfileService {
   return {
     async get(): Promise<ParentProfileDTO> {
-      const response = await request("/profiles/me", parentProfileApiSchema);
+      const response = await requestProfileApi(
+        "/profiles/me",
+        parentProfileApiSchema,
+      );
       return normalizeParentProfile(response);
     },
 
     async getDashboardSummary(): Promise<DashboardSummaryDTO> {
       try {
-        const response = await request(
+        const response = await requestProfileApi(
           "/profiles/dashboard-summary",
           dashboardSummaryApiSchema,
         );
@@ -560,7 +361,7 @@ export function createProfileService(): ProfileService {
           (error.status === 404 || error.code === "RESOURCE_NOT_FOUND")
         ) {
           const [profileResult, children] = await Promise.all([
-            request("/profiles/me", parentProfileApiSchema)
+            requestProfileApi("/profiles/me", parentProfileApiSchema)
               .then((res) => normalizeParentProfile(res))
               .catch((profileError: unknown) => {
                 if (
@@ -572,7 +373,10 @@ export function createProfileService(): ProfileService {
                 }
                 return null;
               }),
-            request("/profiles/children", fallbackChildProfileListSchema),
+            requestProfileApi(
+              "/profiles/children",
+              fallbackChildProfileListSchema,
+            ),
           ]);
           return {
             profile: profileResult,
@@ -588,25 +392,27 @@ export function createProfileService(): ProfileService {
     async update(
       requestBody: ParentProfileUpdateInput,
     ): Promise<ParentProfileDTO> {
-      const currentProfileResponse = await request(
-        "/profiles/me",
-        parentProfileApiSchema,
-      );
-      const currentProfile = normalizeParentProfile(currentProfileResponse);
+      return runProfileMutation(async () => {
+        const currentProfileResponse = await requestProfileApi(
+          "/profiles/me",
+          parentProfileApiSchema,
+        );
+        const currentProfile = normalizeParentProfile(currentProfileResponse);
 
-      const response = await request(
-        `/profiles/${encodeURIComponent(currentProfile.id)}`,
-        profileUpdateApiSchema,
-        {
-          method: "PUT",
-          body: JSON.stringify({
-            Role: currentProfile.role,
-            displayname: requestBody.display_name,
-          }),
-        },
-      );
+        const response = await requestProfileApi(
+          `/profiles/${encodeURIComponent(currentProfile.id)}`,
+          profileUpdateApiSchema,
+          {
+            method: "PUT",
+            body: {
+              Role: currentProfile.role,
+              displayname: requestBody.display_name,
+            },
+          },
+        );
 
-      return normalizeUpdatedProfile(response, currentProfile);
+        return normalizeUpdatedProfile(response, currentProfile);
+      });
     },
 
     async updateContactPhone(
@@ -615,35 +421,41 @@ export function createProfileService(): ProfileService {
       const normalizedPhone = contactPhone
         ? normalizeVietnamesePhone(contactPhone)
         : null;
-      const response = await request(
-        "/profiles/me/contact-phone",
-        parentProfileApiSchema,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ contact_phone: normalizedPhone }),
-        },
-      );
-      return normalizeParentProfile(response);
+      return runProfileMutation(async () => {
+        const response = await requestProfileApi(
+          "/profiles/me/contact-phone",
+          parentProfileApiSchema,
+          {
+            method: "PATCH",
+            body: { contact_phone: normalizedPhone },
+          },
+        );
+        return normalizeParentProfile(response);
+      });
     },
 
     async uploadAvatar(file: File): Promise<ParentProfileDTO> {
       const body = new FormData();
       body.append("file", file);
-      const response = await request(
-        "/profiles/me/avatar",
-        parentProfileApiSchema,
-        { method: "POST", body },
-      );
-      return normalizeParentProfile(response);
+      return runProfileMutation(async () => {
+        const response = await requestProfileApi(
+          "/profiles/me/avatar",
+          parentProfileApiSchema,
+          { method: "POST", body },
+        );
+        return normalizeParentProfile(response);
+      });
     },
 
     async removeAvatar(): Promise<ParentProfileDTO> {
-      const response = await request(
-        "/profiles/me/avatar",
-        parentProfileApiSchema,
-        { method: "DELETE" },
-      );
-      return normalizeParentProfile(response);
+      return runProfileMutation(async () => {
+        const response = await requestProfileApi(
+          "/profiles/me/avatar",
+          parentProfileApiSchema,
+          { method: "DELETE" },
+        );
+        return normalizeParentProfile(response);
+      });
     },
 
     async requestEmailChange(email: string): Promise<void> {

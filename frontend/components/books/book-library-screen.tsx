@@ -166,7 +166,7 @@ export function BookLibraryScreen() {
       return;
     }
 
-    const scopeKey = `${currentUserId}:${selectedChildId}`;
+    const scopeKey = currentUserId;
     if (knownNonEmptyCatalogRef.current.scopeKey !== scopeKey) {
       knownNonEmptyCatalogRef.current = { scopeKey, nonEmpty: false };
     }
@@ -410,45 +410,49 @@ export function BookLibraryScreen() {
           />
         ) : null}
 
-        {catalogState.status === "ready" && catalogState.books.length > 0 ? (() => {
-          const totalBooksPages = Math.max(
-            1,
-            Math.ceil(catalogState.books.length / BOOKS_PAGE_SIZE),
-          );
-          const safePage = Math.min(Math.max(1, page), totalBooksPages);
-          const visibleBooks = catalogState.books.slice(
-            (safePage - 1) * BOOKS_PAGE_SIZE,
-            safePage * BOOKS_PAGE_SIZE,
-          );
-          return (
-            <>
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleBooks.map((book) => (
-                  <BookCard
-                    book={book}
-                    key={book.id}
-                    savedTypes={visibleSavedCollections
-                      .filter((item) => item.book_id === book.id)
-                      .map((item) => item.collection_type)}
-                    collectionBusy={collectionBusyKey.startsWith(book.id + ":")}
-                    onToggleCollection={(type) =>
-                      void toggleSavedCollection(book.id, type)
-                    }
+        {catalogState.status === "ready" && catalogState.books.length > 0
+          ? (() => {
+              const totalBooksPages = Math.max(
+                1,
+                Math.ceil(catalogState.books.length / BOOKS_PAGE_SIZE),
+              );
+              const safePage = Math.min(Math.max(1, page), totalBooksPages);
+              const visibleBooks = catalogState.books.slice(
+                (safePage - 1) * BOOKS_PAGE_SIZE,
+                safePage * BOOKS_PAGE_SIZE,
+              );
+              return (
+                <>
+                  <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleBooks.map((book) => (
+                      <BookCard
+                        book={book}
+                        key={book.id}
+                        savedTypes={visibleSavedCollections
+                          .filter((item) => item.book_id === book.id)
+                          .map((item) => item.collection_type)}
+                        collectionBusy={collectionBusyKey.startsWith(
+                          book.id + ":",
+                        )}
+                        onToggleCollection={(type) =>
+                          void toggleSavedCollection(book.id, type)
+                        }
+                      />
+                    ))}
+                  </div>
+                  <PaginationBar
+                    ariaLabel={t("catalog.paginationAria")}
+                    compact
+                    itemLabel={t("catalog.paginationItemLabel")}
+                    onPageChange={setPage}
+                    page={safePage}
+                    pageSize={BOOKS_PAGE_SIZE}
+                    total={catalogState.books.length}
                   />
-                ))}
-              </div>
-              <PaginationBar
-                ariaLabel={t("catalog.paginationAria")}
-                compact
-                itemLabel={t("catalog.paginationItemLabel")}
-                onPageChange={setPage}
-                page={safePage}
-                pageSize={BOOKS_PAGE_SIZE}
-                total={catalogState.books.length}
-              />
-            </>
-          );
-        })() : null}
+                </>
+              );
+            })()
+          : null}
       </div>
     </section>
   );

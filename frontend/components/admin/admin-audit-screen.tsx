@@ -260,8 +260,10 @@ export function AdminAuditScreen() {
   );
   const safePage = Math.min(Math.max(1, pageNumber), totalPages);
   const visibleItems =
-    items?.slice((safePage - 1) * AUDIT_PAGE_SIZE, safePage * AUDIT_PAGE_SIZE) ??
-    [];
+    items?.slice(
+      (safePage - 1) * AUDIT_PAGE_SIZE,
+      safePage * AUDIT_PAGE_SIZE,
+    ) ?? [];
 
   return (
     <>

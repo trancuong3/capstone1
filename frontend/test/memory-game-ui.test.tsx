@@ -738,27 +738,35 @@ describe("MemoryGameScreen", () => {
     );
   });
 
-  it("paginates themes and recent history when more than 6 items exist", async () => {
-    const manyThemes = Array.from({ length: 8 }, (_, index) => ({
-      theme_key: `theme_${index + 1}`,
-      name_vi: `Chủ đề trí nhớ ${index + 1}`,
-      description_vi: `Mô tả chủ đề ${index + 1}.`,
-      badge_vi: "Thiên nhiên",
-      accent_hex: "#F7B731",
-      sprite_count: 6,
-      sample_items_vi: ["mèo mướp"],
-    }));
+  it("paginates recent history at 6 per page when more than 6 sessions exist", async () => {
+    const validThemeKeys = [
+      "sunny_garden",
+      "happy_classroom",
+      "mid_autumn_yard",
+      "seaside_morning",
+      "countryside_pond",
+      "friendly_market",
+    ] as const;
     const manyHistory = Array.from({ length: 8 }, (_, index) => ({
       id: `44000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       child_id: TEST_CHILD_ID,
-      theme_key: `theme_${index + 1}`,
+      child_grade: 2,
+      theme_key: validThemeKeys[index % validThemeKeys.length]!,
       theme_name_vi: `Lịch sử trí nhớ ${index + 1}`,
-      object_count: 5,
+      difficulty_level: 2,
+      timer_mode: "30S" as const,
       timer_seconds: 30,
+      recall_mode: "GUIDED_RECALL" as const,
+      status: "COMPLETED" as const,
+      hints_used: 0,
+      peek_count: 0,
       best_factual_score: 80,
       best_creative_score: 85,
       stars: 3,
+      attempts_count: 2,
+      object_count: 5,
       created_at: "2026-11-25T10:00:00Z",
+      updated_at: "2026-11-25T10:02:00Z",
     }));
 
     vi.stubGlobal(
@@ -768,7 +776,7 @@ describe("MemoryGameScreen", () => {
         if (path === `/profiles/children/${TEST_CHILD_ID}`)
           return Response.json(childFixture);
         if (path === "/games/memory/themes")
-          return Response.json({ ...sampleCatalog, themes: manyThemes });
+          return Response.json(sampleCatalog);
         if (path === "/games/memory/sessions")
           return Response.json(manyHistory);
         throw new Error(`Unexpected path ${path}`);
@@ -778,23 +786,15 @@ describe("MemoryGameScreen", () => {
     const user = userEvent.setup();
     renderScreen();
 
-    expect(await screen.findByText("Chủ đề trí nhớ 1")).toBeInTheDocument();
-    expect(screen.getByText("Chủ đề trí nhớ 6")).toBeInTheDocument();
-    expect(screen.queryByText("Chủ đề trí nhớ 7")).not.toBeInTheDocument();
-
-    expect(screen.getByText("Lịch sử trí nhớ 1")).toBeInTheDocument();
+    expect(await screen.findByText("Lịch sử trí nhớ 1")).toBeInTheDocument();
     expect(screen.getByText("Lịch sử trí nhớ 6")).toBeInTheDocument();
     expect(screen.queryByText("Lịch sử trí nhớ 7")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
 
-    const nextButtons = screen.getAllByRole("button", { name: /Sau/i });
-    expect(nextButtons).toHaveLength(2);
-
-    await user.click(nextButtons[0]!);
-    expect(await screen.findByText("Chủ đề trí nhớ 7")).toBeInTheDocument();
-    expect(screen.queryByText("Chủ đề trí nhớ 1")).not.toBeInTheDocument();
-
-    await user.click(nextButtons[1]!);
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
     expect(await screen.findByText("Lịch sử trí nhớ 7")).toBeInTheDocument();
+    expect(screen.getByText("Lịch sử trí nhớ 8")).toBeInTheDocument();
     expect(screen.queryByText("Lịch sử trí nhớ 1")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 2 / 2")).toBeInTheDocument();
   });
 });

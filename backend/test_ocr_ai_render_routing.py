@@ -118,7 +118,7 @@ class RenderBlueprintAndConfigTests(unittest.TestCase):
         with self.assertRaises(OcrConfigurationError) as proof_err:
             asyncio.run(orch.correct("Xin chào", _make_png_bytes(), [(0.1, 0.1, 0.2, 0.1), (0.4, 0.1, 0.2, 0.1)]))
         self.assertEqual(proof_err.exception.code, "NO_AI_PROVIDER_CONFIGURED")
-        with self.assertRaises(ChildSafetyError) as safety_err:
+        with self.assertRaises(OcrConfigurationError) as safety_err:
             asyncio.run(safety.analyze("Xin chào"))
         self.assertEqual(safety_err.exception.code, "NO_AI_PROVIDER_CONFIGURED")
 
@@ -458,7 +458,10 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
             model_id="deterministic",
             updated_at=datetime.now(timezone.utc),
         )
-        svc = BookCoverService(fake_db)  # type: ignore[arg-type]
+        svc = BookCoverService(
+            fake_db,  # type: ignore[arg-type]
+            ocr_check_fn=lambda *_args, **_kwargs: {"detected_text": "", "boxes": []},
+        )
         svc.authorize_book_write = AsyncMock(return_value=(fake_book, "admin"))  # type: ignore[method-assign]
         svc.style_bible_service.get_or_build_for_book = AsyncMock(  # type: ignore[method-assign]
             return_value=style_bible_dto
@@ -494,7 +497,12 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
         svc.commit_generated_cover_bytes = AsyncMock(return_value=(fake_asset, False))  # type: ignore[method-assign]
 
         router_mock = MagicMock()
-        router_mock.eligible_providers.return_value = [object()]
+        router_mock.eligible_providers.return_value = [
+            SimpleNamespace(
+                provider_id="cloudflare_flux",
+                model_id="@cf/black-forest-labs/flux-1-schnell",
+            )
+        ]
         router_mock.generate_image = AsyncMock(
             return_value=ImageGenerationResult(
                 image_bytes=_make_png_bytes(600, 800),
@@ -506,6 +514,7 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
                 latency_ms=42,
             )
         )
+        svc._ai_router = router_mock
         with (
             patch.dict(
                 os.environ,
@@ -517,6 +526,7 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
                 clear=False,
             ),
             patch("app.services.ai_capability_router.get_default_ai_router", return_value=router_mock),
+            patch("app.services.book_cover_service.get_default_ai_router", return_value=router_mock),
         ):
             res = await svc.generate_ai_cover(
                 actor_id, book_id, BookCoverGenerateRequest(prompt_hint="Nắng mai")
@@ -528,7 +538,11 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
         page_id = uuid4()
         rev_id = uuid4()
         fake_page = SimpleNamespace(Id=page_id, CurrentVerifiedRevisionId=rev_id)
-        ill_svc = BookIllustrationService(fake_db)  # type: ignore[arg-type]
+        ill_svc = BookIllustrationService(
+            fake_db,  # type: ignore[arg-type]
+            ai_router=router_mock,
+            ocr_check_fn=lambda *_args, **_kwargs: {"detected_text": "", "boxes": []},
+        )
         ill_svc.cover_service.authorize_book_write = AsyncMock(return_value=(fake_book, "admin"))  # type: ignore[method-assign]
         ill_svc.style_bible_service.get_or_build_for_book = AsyncMock(  # type: ignore[method-assign]
             return_value=SimpleNamespace(
@@ -553,6 +567,7 @@ class ImageRouterAndHealthAndCronTests(unittest.IsolatedAsyncioTestCase):
                 clear=False,
             ),
             patch("app.services.ai_capability_router.get_default_ai_router", return_value=router_mock),
+            patch("app.services.book_cover_service.get_default_ai_router", return_value=router_mock),
             patch("app.services.book_illustration_service.upload_object"),
         ):
             ill_res = await ill_svc.generate_page_illustration(

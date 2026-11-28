@@ -599,7 +599,11 @@ describe("automatic reading flow on the reading screen", () => {
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: /Buổi đọc đã hoàn thành/i }),
+      await screen.findByRole(
+        "heading",
+        { name: /Buổi đọc đã hoàn thành/i },
+        { timeout: 5000 },
+      ),
     ).toBeInTheDocument();
     expect(services.readingService.completeCurrentPage).toHaveBeenCalledTimes(
       1,

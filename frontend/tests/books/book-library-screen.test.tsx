@@ -207,10 +207,12 @@ describe("BookLibraryScreen with real API adapters", () => {
       screen.queryByRole("heading", { level: 2, name: "Cuốn sách số 10" }),
     ).not.toBeInTheDocument();
 
-    const nav = screen.getByRole("navigation", { name: "Phân trang thư viện sách" });
+    const nav = screen.getByRole("navigation", {
+      name: "Phân trang thư viện sách",
+    });
     expect(within(nav).getByText("Trang 1 / 2")).toBeInTheDocument();
 
-    await user.click(within(nav).getByRole("button", { name: /Sau/i }));
+    await user.click(within(nav).getByRole("button", { name: /Tiếp/i }));
     expect(
       await screen.findByRole("heading", { level: 2, name: "Cuốn sách số 10" }),
     ).toBeInTheDocument();

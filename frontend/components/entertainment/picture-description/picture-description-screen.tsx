@@ -718,6 +718,7 @@ export function PictureDescriptionScreen() {
       // collapsed by default for Grades 4-5 (expandable in 1 tap).
       setShowGradeHintChips(loaded.child_grade < 4);
       setSelectedAttemptId(newestAttempt?.attempt_id ?? null);
+      setAttemptsPage(1);
       setPracticeTab(
         initialTab === "RESULT" && newestAttempt ? "RESULT" : "PRACTICE",
       );
@@ -1204,6 +1205,7 @@ export function PictureDescriptionScreen() {
       lastSuccessfulSubmitRef.current = { key: submitKey, at: Date.now() };
       setSession(response.session);
       setSelectedAttemptId(response.latest_attempt.attempt_id);
+      setAttemptsPage(1);
       setActiveFollowUpQuestion(
         response.latest_attempt.feedback.next_prompt_question ?? null,
       );
@@ -1294,6 +1296,39 @@ export function PictureDescriptionScreen() {
         descriptionContainsTerm(descriptionText, item.word),
       ).length
     : 0;
+
+  const samplesTotal =
+    catalogState.status === "ready" ? catalogState.catalog.samples.length : 0;
+  const safeSamplesPage = Math.min(
+    Math.max(1, samplesPage),
+    Math.max(1, Math.ceil(samplesTotal / PICTURE_GRID_PAGE_SIZE)),
+  );
+  const bookPagesTotal =
+    catalogState.status === "ready"
+      ? catalogState.catalog.book_pages.length
+      : 0;
+  const safeBookPagesPage = Math.min(
+    Math.max(1, bookPagesPage),
+    Math.max(1, Math.ceil(bookPagesTotal / PICTURE_GRID_PAGE_SIZE)),
+  );
+  const sessionsTotal =
+    catalogState.status === "ready" ? catalogState.sessions.length : 0;
+  const safeSessionsPage = Math.min(
+    Math.max(1, sessionsPage),
+    Math.max(1, Math.ceil(sessionsTotal / PICTURE_GRID_PAGE_SIZE)),
+  );
+  const attemptsTotal = session ? session.attempts.length : 0;
+  const safeAttemptsPage = Math.min(
+    Math.max(1, attemptsPage),
+    Math.max(1, Math.ceil(attemptsTotal / ATTEMPTS_PAGE_SIZE)),
+  );
+  const attemptsStartIndex = (safeAttemptsPage - 1) * ATTEMPTS_PAGE_SIZE;
+  const visibleAttempts = session
+    ? session.attempts.slice(
+        attemptsStartIndex,
+        attemptsStartIndex + ATTEMPTS_PAGE_SIZE,
+      )
+    : [];
 
   return (
     <section
@@ -1481,8 +1516,8 @@ export function PictureDescriptionScreen() {
                     <div className="grid gap-5 md:grid-cols-3">
                       {catalogState.catalog.samples
                         .slice(
-                          (samplesPage - 1) * PICTURE_GRID_PAGE_SIZE,
-                          samplesPage * PICTURE_GRID_PAGE_SIZE,
+                          (safeSamplesPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                          safeSamplesPage * PICTURE_GRID_PAGE_SIZE,
                         )
                         .map((sample) => {
                           const existing = sampleSessionMap.get(
@@ -1584,7 +1619,7 @@ export function PictureDescriptionScreen() {
                       compact
                       itemLabel={t("pictureDescription.samplesPaginationItem")}
                       onPageChange={setSamplesPage}
-                      page={samplesPage}
+                      page={safeSamplesPage}
                       pageSize={PICTURE_GRID_PAGE_SIZE}
                       total={catalogState.catalog.samples.length}
                     />
@@ -1681,8 +1716,8 @@ export function PictureDescriptionScreen() {
                       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                         {catalogState.catalog.book_pages
                           .slice(
-                            (bookPagesPage - 1) * PICTURE_GRID_PAGE_SIZE,
-                            bookPagesPage * PICTURE_GRID_PAGE_SIZE,
+                            (safeBookPagesPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                            safeBookPagesPage * PICTURE_GRID_PAGE_SIZE,
                           )
                           .map((page) => {
                             const existing = bookPageSessionMap.get(
@@ -1783,7 +1818,7 @@ export function PictureDescriptionScreen() {
                           "pictureDescription.bookPagesPaginationItem",
                         )}
                         onPageChange={setBookPagesPage}
-                        page={bookPagesPage}
+                        page={safeBookPagesPage}
                         pageSize={PICTURE_GRID_PAGE_SIZE}
                         total={catalogState.catalog.book_pages.length}
                       />
@@ -1809,8 +1844,8 @@ export function PictureDescriptionScreen() {
               <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {catalogState.sessions
                   .slice(
-                    (sessionsPage - 1) * PICTURE_GRID_PAGE_SIZE,
-                    sessionsPage * PICTURE_GRID_PAGE_SIZE,
+                    (safeSessionsPage - 1) * PICTURE_GRID_PAGE_SIZE,
+                    safeSessionsPage * PICTURE_GRID_PAGE_SIZE,
                   )
                   .map((item) => (
                     <button
@@ -1870,7 +1905,7 @@ export function PictureDescriptionScreen() {
                 compact
                 itemLabel={t("pictureDescription.recentPaginationItem")}
                 onPageChange={setSessionsPage}
-                page={sessionsPage}
+                page={safeSessionsPage}
                 pageSize={PICTURE_GRID_PAGE_SIZE}
                 total={catalogState.sessions.length}
               />
@@ -2815,39 +2850,49 @@ export function PictureDescriptionScreen() {
                 role="tabpanel"
               >
                 {session.attempts.length > 1 ? (
-                  <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-border pb-3">
-                    <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
-                      {t("pictureDescription.attemptHistoryLabel")}
-                    </span>
-                    {session.attempts.map((attempt, index) => {
-                      const isSelected =
-                        attempt.attempt_id === activeAttempt.attempt_id;
-                      return (
-                        <button
-                          aria-pressed={isSelected}
-                          className={
-                            "rounded-full px-3 py-1 text-xs font-extrabold transition-colors " +
-                            (isSelected
-                              ? "bg-primary text-white shadow-2xs"
-                              : "bg-sky/40 text-ink hover:bg-sky")
-                          }
-                          key={attempt.attempt_id}
-                          onClick={() =>
-                            setSelectedAttemptId(attempt.attempt_id)
-                          }
-                          type="button"
-                        >
-                          {t("pictureDescription.attemptTab", {
-                            number: attempt.attempt_number,
-                            latest:
-                              index === 0
-                                ? t("pictureDescription.attemptLatestSuffix")
-                                : "",
-                            score: attempt.score_out_of_10,
-                          })}
-                        </button>
-                      );
-                    })}
+                  <div className="mb-4 flex flex-col gap-2 border-b border-border pb-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-muted">
+                        {t("pictureDescription.attemptHistoryLabel")}
+                      </span>
+                      {visibleAttempts.map((attempt, offsetIndex) => {
+                        const index = attemptsStartIndex + offsetIndex;
+                        const isSelected =
+                          attempt.attempt_id === activeAttempt.attempt_id;
+                        return (
+                          <button
+                            aria-pressed={isSelected}
+                            className={
+                              "rounded-full px-3 py-1 text-xs font-extrabold transition-colors " +
+                              (isSelected
+                                ? "bg-primary text-white shadow-2xs"
+                                : "bg-sky/40 text-ink hover:bg-sky")
+                            }
+                            key={attempt.attempt_id}
+                            onClick={() =>
+                              setSelectedAttemptId(attempt.attempt_id)
+                            }
+                            type="button"
+                          >
+                            {t("pictureDescription.attemptTab", {
+                              number: attempt.attempt_number,
+                              latest:
+                                index === 0
+                                  ? t("pictureDescription.attemptLatestSuffix")
+                                  : "",
+                              score: attempt.score_out_of_10,
+                            })}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <PaginationBar
+                      compact
+                      onPageChange={setAttemptsPage}
+                      page={safeAttemptsPage}
+                      pageSize={ATTEMPTS_PAGE_SIZE}
+                      total={session.attempts.length}
+                    />
                   </div>
                 ) : null}
 

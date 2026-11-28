@@ -22,8 +22,7 @@ let crossRequestCacheEnabled = false;
 let cacheEpoch = 0;
 
 const NON_CACHEABLE_PATH_PATTERNS = [
-  // Catalog availability, draft revisions and signed playback can change externally.
-  /^\/books\/catalog(?:\?|$)/,
+  // Draft revisions and signed playback can change externally.
   /^\/karaoke(?:\/|\?|$)/,
   /\/health(?:\?|$)/,
   /\/ocr(?:\/|\?|$)/,
@@ -93,8 +92,17 @@ function extractTokenScope(accessToken: string | null | undefined): string {
   return `tok:${accessToken.length}:${suffix}`;
 }
 
-function buildCacheKey(path: string, accessToken?: string): string {
-  return `${activeActorScope}|${extractTokenScope(accessToken)}|${path}`;
+function normalizeCacheLocale(locale: string | undefined): string {
+  const cleaned = (locale ?? "vi").replace(/\|/g, "").trim();
+  return cleaned || "vi";
+}
+
+function buildCacheKey(
+  path: string,
+  accessToken?: string,
+  locale: string = "vi",
+): string {
+  return `${activeActorScope}@${normalizeCacheLocale(locale)}|${extractTokenScope(accessToken)}|${path}`;
 }
 
 export function isCacheableApiGetPath(path: string): boolean {
@@ -143,18 +151,26 @@ export function clearApiReadCache(): void {
   invalidateApiReadCache();
 }
 
-export function invalidateApiReadCacheByPrefix(prefix: string): void {
+export function invalidateApiReadCacheByPrefix(
+  prefixOrPrefixes: string | readonly string[],
+): void {
+  const prefixes =
+    typeof prefixOrPrefixes === "string"
+      ? [prefixOrPrefixes]
+      : prefixOrPrefixes;
+  if (prefixes.length === 0) return;
+
   for (const key of readCache.keys()) {
     const separator = key.indexOf("|", key.indexOf("|") + 1);
     const path = separator >= 0 ? key.slice(separator + 1) : key;
-    if (path.startsWith(prefix)) {
+    if (prefixes.some((prefix) => path.startsWith(prefix))) {
       readCache.delete(key);
     }
   }
   for (const [key, entry] of inflightReads.entries()) {
     const separator = key.indexOf("|", key.indexOf("|") + 1);
     const path = separator >= 0 ? key.slice(separator + 1) : key;
-    if (path.startsWith(prefix)) {
+    if (prefixes.some((prefix) => path.startsWith(prefix))) {
       entry.invalidated = true;
       inflightReads.delete(key);
     }
@@ -165,12 +181,13 @@ export function getCachedApiRead<T>(
   path: string,
   accessToken: string,
   now: number = Date.now(),
+  locale: string = "vi",
 ): T | undefined {
   if (!crossRequestCacheEnabled || !isCacheableApiGetPath(path)) {
     return undefined;
   }
 
-  const key = buildCacheKey(path, accessToken);
+  const key = buildCacheKey(path, accessToken, locale);
   const entry = readCache.get(key);
   if (!entry) {
     return undefined;
@@ -192,12 +209,13 @@ export function setCachedApiRead<T>(
   value: T,
   ttlMs: number = DEFAULT_READ_CACHE_TTL_MS,
   now: number = Date.now(),
+  locale: string = "vi",
 ): void {
   if (!crossRequestCacheEnabled || ttlMs <= 0 || !isCacheableApiGetPath(path)) {
     return;
   }
 
-  const key = buildCacheKey(path, accessToken);
+  const key = buildCacheKey(path, accessToken, locale);
   if (readCache.has(key)) {
     readCache.delete(key);
   }
@@ -235,14 +253,17 @@ export async function runCoalescedApiGet<T>(
   options: {
     readonly cacheTtlMs?: number;
     readonly bypassCache?: boolean;
+    readonly locale?: string;
   } = {},
 ): Promise<T> {
   if (signal?.aborted) {
     throw createAbortError();
   }
 
+  const locale = normalizeCacheLocale(options.locale);
+
   if (!options.bypassCache) {
-    const cached = getCachedApiRead<T>(path, accessToken);
+    const cached = getCachedApiRead<T>(path, accessToken, Date.now(), locale);
     if (cached !== undefined) {
       return cached;
     }
@@ -250,7 +271,7 @@ export async function runCoalescedApiGet<T>(
 
   const capturedScope = activeActorScope;
   const capturedEpoch = cacheEpoch;
-  const key = buildCacheKey(path, accessToken);
+  const key = buildCacheKey(path, accessToken, locale);
   let entry = inflightReads.get(key);
   if (!entry) {
     const controller = new AbortController();
@@ -273,6 +294,8 @@ export async function runCoalescedApiGet<T>(
             accessToken,
             result,
             options.cacheTtlMs ?? DEFAULT_READ_CACHE_TTL_MS,
+            Date.now(),
+            locale,
           );
         }
         return result;

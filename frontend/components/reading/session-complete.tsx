@@ -393,54 +393,54 @@ export function SessionComplete({
             mispronouncedWords.length > 0 ||
             skippedWords.length > 0 ? (
               <div className="space-y-3.5">
-                {!hasWordAssessment && spokenWords.length > 0 ? (
-                  (() => {
-                    const totalUnassessedPages = Math.max(
-                      1,
-                      Math.ceil(spokenWords.length / WORDS_PAGE_SIZE),
-                    );
-                    const safeUnassessedPage = Math.min(
-                      Math.max(1, unassessedPage),
-                      totalUnassessedPages,
-                    );
-                    const unassessedStart =
-                      (safeUnassessedPage - 1) * WORDS_PAGE_SIZE;
-                    const visibleSpoken = spokenWords.slice(
-                      unassessedStart,
-                      unassessedStart + WORDS_PAGE_SIZE,
-                    );
-                    return (
-                      <div>
-                        <p className="mb-2 text-sm text-muted">
-                          {t("complete.unassessedOnlyLabel")}
-                        </p>
-                        <div
-                          className="viread-learning-content flex flex-wrap gap-2"
-                          dir="ltr"
-                          lang="vi"
-                        >
-                          {visibleSpoken.map((word, index) => (
-                            <span
-                              key={`${word}-${unassessedStart + index}`}
-                              className="rounded-full border border-border bg-white px-3 py-1 text-sm text-ink"
-                            >
-                              {word}
-                            </span>
-                          ))}
+                {!hasWordAssessment && spokenWords.length > 0
+                  ? (() => {
+                      const totalUnassessedPages = Math.max(
+                        1,
+                        Math.ceil(spokenWords.length / WORDS_PAGE_SIZE),
+                      );
+                      const safeUnassessedPage = Math.min(
+                        Math.max(1, unassessedPage),
+                        totalUnassessedPages,
+                      );
+                      const unassessedStart =
+                        (safeUnassessedPage - 1) * WORDS_PAGE_SIZE;
+                      const visibleSpoken = spokenWords.slice(
+                        unassessedStart,
+                        unassessedStart + WORDS_PAGE_SIZE,
+                      );
+                      return (
+                        <div>
+                          <p className="mb-2 text-sm text-muted">
+                            {t("complete.unassessedOnlyLabel")}
+                          </p>
+                          <div
+                            className="viread-learning-content flex flex-wrap gap-2"
+                            dir="ltr"
+                            lang="vi"
+                          >
+                            {visibleSpoken.map((word, index) => (
+                              <span
+                                key={`${word}-${unassessedStart + index}`}
+                                className="rounded-full border border-border bg-white px-3 py-1 text-sm text-ink"
+                              >
+                                {word}
+                              </span>
+                            ))}
+                          </div>
+                          <PaginationBar
+                            ariaLabel={t("complete.sttResultsTitle")}
+                            className="mt-2.5"
+                            compact
+                            onPageChange={setUnassessedPage}
+                            page={safeUnassessedPage}
+                            pageSize={WORDS_PAGE_SIZE}
+                            total={spokenWords.length}
+                          />
                         </div>
-                        <PaginationBar
-                          ariaLabel={t("complete.sttResultsTitle")}
-                          className="mt-2.5"
-                          compact
-                          onPageChange={setUnassessedPage}
-                          page={safeUnassessedPage}
-                          pageSize={WORDS_PAGE_SIZE}
-                          total={spokenWords.length}
-                        />
-                      </div>
-                    );
-                  })()
-                ) : null}
+                      );
+                    })()
+                  : null}
                 {correctWords.length > 0 &&
                   (() => {
                     const totalCorrectPages = Math.max(

@@ -154,12 +154,21 @@ describe("Audit Wave 4 regressions (AUD-010, AUD-012, AUD-014)", () => {
       expect(getProtectedRouteRedirect(route, "admin")).toBe("/admin/books");
     }
 
-    const reportLayoutPath = path.resolve(
+    const reportPagePath = path.resolve(
+      process.cwd(),
+      "app/(app)/sessions/[sessionId]/report/page.tsx",
+    );
+    const duplicateReportLayoutPath = path.resolve(
       process.cwd(),
       "app/sessions/[sessionId]/report/layout.tsx",
     );
-    expect(fs.existsSync(reportLayoutPath)).toBe(true);
-    expect(fs.readFileSync(reportLayoutPath, "utf8")).toContain(
+    const parentAppLayoutPath = path.resolve(
+      process.cwd(),
+      "app/(app)/layout.tsx",
+    );
+    expect(fs.existsSync(reportPagePath)).toBe(true);
+    expect(fs.existsSync(duplicateReportLayoutPath)).toBe(false);
+    expect(fs.readFileSync(parentAppLayoutPath, "utf8")).toContain(
       'requireAppRole("parent")',
     );
   });

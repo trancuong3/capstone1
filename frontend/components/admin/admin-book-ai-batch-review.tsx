@@ -255,10 +255,7 @@ export function AdminBookAiBatchReview({
     1,
     Math.ceil(results.length / BATCH_RESULTS_PAGE_SIZE),
   );
-  const safeResultsPage = Math.min(
-    Math.max(1, resultsPage),
-    resultsTotalPages,
-  );
+  const safeResultsPage = Math.min(Math.max(1, resultsPage), resultsTotalPages);
   const visibleResults = results.slice(
     (safeResultsPage - 1) * BATCH_RESULTS_PAGE_SIZE,
     safeResultsPage * BATCH_RESULTS_PAGE_SIZE,

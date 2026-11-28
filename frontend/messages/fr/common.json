@@ -130,5 +130,33 @@
     "tierOllama": "Ollama local",
     "tierFallback": "Guide de secours",
     "tierOffline": "Guide hors ligne"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Traitement en arrière-plan…",
+    "closeAria": "Fermer le centre de tâches IA",
+    "defaultBookLabel": "Livre",
+    "elapsedHours": "{hours} h",
+    "elapsedHoursMinutes": "{hours} h {minutes} min",
+    "elapsedMinutes": "{minutes} min",
+    "elapsedMinutesSeconds": "{minutes} min {seconds} s",
+    "elapsedRunning": "En cours depuis {elapsed}",
+    "elapsedSeconds": "{seconds} s",
+    "emptyDescription": "Lorsque vous téléversez des pages, lancez l'OCR ou générez des couvertures, la progression en direct s'affiche ici.",
+    "emptyTitle": "Aucune tâche IA pour le moment",
+    "openAria": "Ouvrir le centre de tâches IA",
+    "pageSeparator": " • Page {pageNumber}",
+    "pillFailed": "Tâches en échec ({count})",
+    "pillIdle": "Tâches IA",
+    "pillRunning": "IA en cours ({count})",
+    "pillWaitingReview": "À vérifier ({count})",
+    "processingAria": "Traitement de {title}",
+    "progressAria": "Progression de {title}",
+    "refreshAria": "Actualiser la liste des tâches",
+    "stagePrefix": "Étape : {stage}",
+    "subtitle": "Les tâches en arrière-plan continuent en toute sécurité même si vous changez de page.",
+    "title": "Centre de tâches IA",
+    "viewResultAction": "Voir le résultat",
+    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
+    "pillWaitingForWorker": "File OCR ({count})"
   }
 }

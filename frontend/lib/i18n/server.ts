@@ -11,8 +11,10 @@ import {
   type SupportedLocale,
   type TextDirection,
 } from "@/lib/i18n/locales";
-import type { MessagesDictionary } from "@/lib/i18n/types";
+import type { MessageTree, MessagesDictionary } from "@/lib/i18n/types";
+import { loadAdminLocaleMessages } from "@/messages/admin-loader";
 import { loadLocaleMessages } from "@/messages/loader";
+import { viMessages } from "@/messages/vi";
 
 export interface ServerLocaleOptions {
   readonly publishedOnly?: boolean;
@@ -60,8 +62,15 @@ export interface ServerI18nSnapshot {
   readonly messages: MessagesDictionary;
 }
 
+export interface ServerAdminI18nSnapshot extends ServerI18nSnapshot {
+  readonly adminMessages: MessageTree;
+  readonly viAdminMessages: MessageTree;
+  readonly fallbackMessages: MessagesDictionary;
+}
+
 /**
- * Loads ONLY the resolved SSR locale's message bundle for RootLayout hydration.
+ * Loads ONLY the resolved SSR locale's core message bundle (excluding `admin`)
+ * for RootLayout hydration.
  */
 export async function getServerI18n(
   options: ServerLocaleOptions = {},
@@ -75,5 +84,41 @@ export async function getServerI18n(
     dir: getLocaleDirection(locale),
     metadata,
     messages,
+  };
+}
+
+/**
+ * Loads the resolved SSR locale's core messages PLUS the route-scoped `admin`
+ * namespace (and `vi` admin fallback) exclusively for `/admin/**` layouts and
+ * metadata/loading boundaries.
+ */
+export async function getServerAdminI18n(
+  options: ServerLocaleOptions = {},
+): Promise<ServerAdminI18nSnapshot> {
+  const locale = await getServerLocale(options);
+  const [coreMessages, adminMessages, viAdminMessages] = await Promise.all([
+    loadLocaleMessages(locale),
+    loadAdminLocaleMessages(locale),
+    locale === DEFAULT_LOCALE
+      ? Promise.resolve<MessageTree | null>(null)
+      : loadAdminLocaleMessages(DEFAULT_LOCALE),
+  ]);
+  const resolvedViAdmin = viAdminMessages ?? adminMessages;
+  const metadata = getLocaleMetadata(locale);
+
+  return {
+    locale,
+    dir: getLocaleDirection(locale),
+    metadata,
+    messages: {
+      ...coreMessages,
+      admin: adminMessages,
+    },
+    adminMessages,
+    viAdminMessages: resolvedViAdmin,
+    fallbackMessages: {
+      ...viMessages,
+      admin: resolvedViAdmin,
+    },
   };
 }

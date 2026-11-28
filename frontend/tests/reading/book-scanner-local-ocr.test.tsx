@@ -326,7 +326,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
         return Response.json(childFixture);
       }
       if (path === "/reading/scan-page-ocr/jobs") {
-        return Response.json({ jobs: queuedList });
+        return Response.json({ worker_online: false, jobs: queuedList });
       }
       if (path === "/ocr/worker-status") {
         return Response.json({
@@ -347,7 +347,7 @@ describe("BookScannerScreen local OCR photo upload", () => {
     expect(listRegion).not.toHaveTextContent("trang-cho-7.jpg");
     expect(listRegion).toHaveTextContent("Trang 1 / 2");
 
-    await user.click(screen.getByRole("button", { name: /Sau/i }));
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
     expect(listRegion).toHaveTextContent("trang-cho-7.jpg");
     expect(listRegion).toHaveTextContent("trang-cho-8.jpg");
     expect(listRegion).not.toHaveTextContent("trang-cho-2.jpg");

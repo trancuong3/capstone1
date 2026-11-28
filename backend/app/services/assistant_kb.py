@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 import re
 import unicodedata
 from typing import Sequence
@@ -1928,6 +1929,32 @@ def get_page_context(
     return title, greeting, prompts, actions
 
 
+@lru_cache(maxsize=256)
+def _precompute_article_index(
+    article: KbArticle,
+) -> tuple[tuple[str, ...], frozenset[str], frozenset[str]]:
+    folded_keywords = tuple(
+        folded_kw
+        for kw in article.keywords
+        if (folded_kw := fold_vietnamese(kw))
+    )
+    article_text = fold_vietnamese(
+        " ".join(
+            (
+                article.title_vi,
+                article.title_en,
+                " ".join(article.keywords),
+                article.short_answer_vi,
+                article.short_answer_en,
+                article.detailed_answer_vi,
+                article.detailed_answer_en,
+            )
+        )
+    )
+    article_tokens = _tokenize_meaningful(article_text)
+    return folded_keywords, frozenset(article_tokens), frozenset(_bigrams(article_tokens))
+
+
 def retrieve_kb_matches(
     query: str,
     *,
@@ -1954,13 +1981,12 @@ def retrieve_kb_matches(
         if role_scope not in article.scopes:
             continue
 
+        folded_keywords, article_token_set, article_bigrams = _precompute_article_index(article)
+
         best_keyword_score = 0.0
         keyword_hits = 0
         exact_faq_hit = False
-        for kw in article.keywords:
-            folded_kw = fold_vietnamese(kw)
-            if not folded_kw:
-                continue
+        for folded_kw in folded_keywords:
             if folded_kw == folded_query:
                 best_keyword_score = 1.0
                 keyword_hits += 2
@@ -1969,23 +1995,6 @@ def retrieve_kb_matches(
                 weight = 0.88 if " " in folded_kw else 0.68
                 best_keyword_score = max(best_keyword_score, weight)
                 keyword_hits += 1
-
-        article_text = fold_vietnamese(
-            " ".join(
-                (
-                    article.title_vi,
-                    article.title_en,
-                    " ".join(article.keywords),
-                    article.short_answer_vi,
-                    article.short_answer_en,
-                    article.detailed_answer_vi,
-                    article.detailed_answer_en,
-                )
-            )
-        )
-        article_tokens = _tokenize_meaningful(article_text)
-        article_token_set = set(article_tokens)
-        article_bigrams = _bigrams(article_tokens)
 
         matched_tokens = query_token_set & article_token_set
         token_overlap = (

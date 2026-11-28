@@ -15,6 +15,7 @@ import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
 import type { TranslateFn } from "@/lib/i18n/types";
 import { viMessages } from "@/messages/vi";
+import viAdminMessages from "@/messages/vi/admin.json";
 
 export interface AdminParentFormValues {
   readonly display_name: string;
@@ -41,10 +42,15 @@ interface AdminParentFormModalProps {
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phonePattern = /^\+?[0-9][0-9\s().-]{5,24}$/;
 
+const viAdminFallbackMessages = {
+  ...viMessages,
+  admin: viAdminMessages,
+};
+
 const defaultTranslate: TranslateFn = (key, params, fallback) =>
   translateMessage(
-    viMessages,
-    viMessages,
+    viAdminFallbackMessages,
+    viAdminFallbackMessages,
     DEFAULT_LOCALE,
     key.includes(".") && !key.startsWith("admin.") ? `admin.${key}` : key,
     params,

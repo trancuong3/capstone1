@@ -224,7 +224,7 @@ export function GlobalTaskCenter({
   hideOnPaths = [],
   className,
 }: GlobalTaskCenterProps) {
-  const t = useTranslations("admin");
+  const t = useTranslations("common");
   const tOcr = useTranslations("ocr");
   const pathname = usePathname() ?? "/";
   const taskCenter = useOptionalAiTaskCenter();
@@ -291,10 +291,7 @@ export function GlobalTaskCenter({
 
   const rawTasksPage =
     tasksPageState.scopeKey === scopeKey ? tasksPageState.page : 1;
-  const totalTaskPages = Math.max(
-    1,
-    Math.ceil(tasks.length / TASKS_PAGE_SIZE),
-  );
+  const totalTaskPages = Math.max(1, Math.ceil(tasks.length / TASKS_PAGE_SIZE));
   const safeTasksPage = Math.min(Math.max(1, rawTasksPage), totalTaskPages);
   const visibleTasks = tasks.slice(
     (safeTasksPage - 1) * TASKS_PAGE_SIZE,
@@ -657,7 +654,7 @@ export function GlobalTaskCenter({
                             type="button"
                           >
                             <RotateCcw aria-hidden="true" className="size-4" />
-                            {t("common.retry")}
+                            {t("actions.retry")}
                           </button>
                         ) : null}
 
@@ -669,7 +666,7 @@ export function GlobalTaskCenter({
                             type="button"
                           >
                             <XCircle aria-hidden="true" className="size-4" />
-                            {t("common.cancel")}
+                            {t("actions.cancel")}
                           </button>
                         ) : null}
 
@@ -703,7 +700,11 @@ export function GlobalTaskCenter({
             {tasks.length > TASKS_PAGE_SIZE ? (
               <div className="border-t border-border bg-canvas/40 px-4 py-2.5 sm:px-5">
                 <PaginationBar
-                  ariaLabel={t("taskCenter.title", undefined, "Trung tâm tác vụ AI")}
+                  ariaLabel={t(
+                    "taskCenter.title",
+                    undefined,
+                    "Trung tâm tác vụ AI",
+                  )}
                   compact
                   onPageChange={(nextPage) =>
                     setTasksPageState({ scopeKey, page: nextPage })

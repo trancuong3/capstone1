@@ -2903,33 +2903,5 @@
       "userBooks": "User Books & Data Contributions"
     },
     "tabsAria": "أقسام إدارة جودة الكتب"
-  },
-  "taskCenter": {
-    "backgroundProcessing": "جارٍ المعالجة في الخلفية…",
-    "closeAria": "إغلاق مركز مهام الذكاء الاصطناعي",
-    "defaultBookLabel": "كتاب",
-    "elapsedHours": "{hours} س",
-    "elapsedHoursMinutes": "{hours} س {minutes} د",
-    "elapsedMinutes": "{minutes} د",
-    "elapsedMinutesSeconds": "{minutes} د {seconds} ث",
-    "elapsedRunning": "قيد التشغيل منذ {elapsed}",
-    "elapsedSeconds": "{seconds} ث",
-    "emptyDescription": "عند رفع صفحات الكتب أو استخراج OCR أو إنشاء الأغلفة، سيظهر التقدم المباشر هنا.",
-    "emptyTitle": "لا توجد مهام ذكاء اصطناعي بعد",
-    "openAria": "فتح مركز مهام الذكاء الاصطناعي",
-    "pageSeparator": " • صفحة {pageNumber}",
-    "pillFailed": "مهام فاشلة ({count})",
-    "pillIdle": "مهام AI",
-    "pillRunning": "AI قيد التشغيل ({count})",
-    "pillWaitingReview": "يتطلب التحقق ({count})",
-    "processingAria": "جارٍ معالجة {title}",
-    "progressAria": "تقدم {title}",
-    "refreshAria": "تحديث قائمة المهام",
-    "stagePrefix": "المرحلة: {stage}",
-    "subtitle": "تستمر المهام الخلفية في العمل بأمان حتى عند الانتقال إلى صفحة أخرى.",
-    "title": "مركز مهام الذكاء الاصطناعي",
-    "viewResultAction": "عرض النتيجة",
-    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
-    "pillWaitingForWorker": "قائمة انتظار OCR ({count})"
   }
 }

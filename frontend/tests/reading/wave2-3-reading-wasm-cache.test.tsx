@@ -633,7 +633,7 @@ describe("Wave 2+3 reading core, WASM STT, cache, and hooks regressions", () => 
       screen.queryByTestId("voice-wifi-ready-badge-local_north_truc_ly"),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("voice-offline-cache-notice")).toHaveTextContent(
-      /Giọng đọc trực tuyến hiện đang tạm nghỉ/i,
+      /chưa có âm thanh dựng trước/i,
     );
 
     // Verify technical provider toggle and raw file paths are never rendered

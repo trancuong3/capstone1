@@ -130,5 +130,33 @@
     "tierOllama": "Ollama cục bộ",
     "tierFallback": "Hướng dẫn dự phòng",
     "tierOffline": "Hướng dẫn ngoại tuyến"
+  },
+  "taskCenter": {
+    "backgroundProcessing": "Đang xử lý nền…",
+    "closeAria": "Đóng trung tâm tác vụ AI",
+    "defaultBookLabel": "Sách",
+    "elapsedHours": "{hours} giờ",
+    "elapsedHoursMinutes": "{hours} giờ {minutes} phút",
+    "elapsedMinutes": "{minutes} phút",
+    "elapsedMinutesSeconds": "{minutes} phút {seconds} giây",
+    "elapsedRunning": "Đã chạy {elapsed}",
+    "elapsedSeconds": "{seconds} giây",
+    "emptyDescription": "Khi bạn tải trang sách, tách nội dung OCR hoặc tạo bìa, tiến trình thực sẽ hiển thị tại đây.",
+    "emptyTitle": "Chưa có tác vụ AI nào",
+    "openAria": "Mở trung tâm tác vụ AI",
+    "pageSeparator": " • Trang {pageNumber}",
+    "pillFailed": "Tác vụ lỗi ({count})",
+    "pillIdle": "Tác vụ AI",
+    "pillRunning": "AI đang chạy ({count})",
+    "pillWaitingReview": "Cần xác minh ({count})",
+    "processingAria": "Đang xử lý {title}",
+    "progressAria": "Tiến độ {title}",
+    "refreshAria": "Làm mới danh sách tác vụ",
+    "stagePrefix": "Bước: {stage}",
+    "subtitle": "Tác vụ nền tiếp tục chạy an toàn kể cả khi bạn chuyển trang.",
+    "title": "Trung tâm tác vụ AI",
+    "viewResultAction": "Xem kết quả",
+    "workerOfflineBanner": "Chờ máy xử lý AI kết nối lại. Tác vụ đã lưu bền vững và sẽ tự tiếp tục.",
+    "pillWaitingForWorker": "Hàng chờ OCR ({count})"
   }
 }

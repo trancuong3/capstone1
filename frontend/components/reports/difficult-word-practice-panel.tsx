@@ -2359,7 +2359,10 @@ export function DifficultWordPracticePanel({
                 onPageChange={setHistoryPage}
                 page={Math.min(
                   Math.max(1, historyPage),
-                  Math.max(1, Math.ceil(historyItems.length / HISTORY_PAGE_SIZE)),
+                  Math.max(
+                    1,
+                    Math.ceil(historyItems.length / HISTORY_PAGE_SIZE),
+                  ),
                 )}
                 pageSize={HISTORY_PAGE_SIZE}
                 total={historyItems.length}

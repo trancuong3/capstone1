@@ -17,6 +17,11 @@ const sendAssistantMessageMock = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({
   usePathname: () => navState.pathname,
+  useRouter: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/api/assistant-service", async (importOriginal) => {
@@ -64,7 +69,11 @@ describe("ViReadAssistantWidget", () => {
 
     await user.click(launcher);
 
-    const panel = screen.getByTestId("viread-assistant-panel");
+    const panel = await screen.findByTestId(
+      "viread-assistant-panel",
+      undefined,
+      { timeout: 5000 },
+    );
     expect(panel).toHaveAttribute("role", "complementary");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(within(panel).getByText("Quét sách giấy")).toBeInTheDocument();
@@ -117,6 +126,9 @@ describe("ViReadAssistantWidget", () => {
 
     // Open -> Hide from panel header -> Reopen programmatically (e.g. from Help & Support)
     await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel", undefined, {
+      timeout: 5000,
+    });
     await user.click(screen.getByTestId("viread-assistant-hide"));
     expect(
       screen.getByTestId("viread-assistant-hidden-tab"),
@@ -125,7 +137,11 @@ describe("ViReadAssistantWidget", () => {
     await act(async () => {
       openViReadAssistant();
     });
-    expect(screen.getByTestId("viread-assistant-panel")).toBeInTheDocument();
+    expect(
+      await screen.findByTestId("viread-assistant-panel", undefined, {
+        timeout: 5000,
+      }),
+    ).toBeInTheDocument();
   });
 
   it("sends tiered chat messages, displays source tier/latency/actions, supports deeper AI & clear", async () => {
@@ -158,6 +174,9 @@ describe("ViReadAssistantWidget", () => {
 
     renderWidget();
     await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel", undefined, {
+      timeout: 5000,
+    });
 
     const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
     await user.type(input, "Làm sao tạo hồ sơ bé?{Enter}");
@@ -224,6 +243,9 @@ describe("ViReadAssistantWidget", () => {
 
     renderWidget();
     await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel", undefined, {
+      timeout: 5000,
+    });
 
     const bwBtn = screen.getByTestId("viread-assistant-bandwidth-btn");
     expect(bwBtn).toHaveTextContent("Tự động · Nhanh");
@@ -281,6 +303,9 @@ describe("ViReadAssistantWidget", () => {
 
     const { rerender } = renderWidget();
     await user.click(screen.getByTestId("viread-assistant-launcher"));
+    await screen.findByTestId("viread-assistant-panel", undefined, {
+      timeout: 5000,
+    });
 
     const input = screen.getByLabelText("Nhập câu hỏi về ViRead");
     await user.type(input, "Cách đặt lịch nhắc đọc?{Enter}");

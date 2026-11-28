@@ -883,12 +883,9 @@ export function AdminBookContentQualityScreen({
         return item.codes.includes("UNVERIFIED_PAGE");
       }
       return item.codes.some((code) =>
-        [
-          "MISSING_IMAGE",
-          "EMPTY_OCR",
-          "OCR_ERROR",
-          "IMAGE_ONLY_PAGE",
-        ].includes(code),
+        ["MISSING_IMAGE", "EMPTY_OCR", "OCR_ERROR", "IMAGE_ONLY_PAGE"].includes(
+          code,
+        ),
       );
     },
   );
@@ -2581,45 +2578,42 @@ export function AdminBookContentQualityScreen({
                   </div>
                   <ul className="mt-3 grid gap-2">
                     {visiblePageDiagnostics.map((item, idx) => (
-                        <li
-                          className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
-                          key={`${item.page_number}:${item.page_id ?? idx}`}
-                        >
-                          <div className="min-w-0 flex-1">
-                            <span className="font-extrabold text-ink">
-                              {t(
-                                "contentQuality.bookDetail.pageNumberHeading",
-                                {
-                                  pageNumber: formatNumber(item.page_number),
-                                },
-                              )}
-                            </span>
-                            <div className="mt-1 flex flex-wrap gap-1">
-                              {item.codes.map((code) => (
-                                <AdminBadge
-                                  key={code}
-                                  tone={code === "OK" ? "success" : "warning"}
-                                >
-                                  {t(
-                                    `contentQuality.diagnosticStatuses.${code}`,
-                                    undefined,
-                                    code,
-                                  )}
-                                </AdminBadge>
-                              ))}
-                            </div>
-                            <p className="mt-1 text-muted">{item.summary}</p>
+                      <li
+                        className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-border bg-surface-subtle/50 p-2.5 text-xs"
+                        key={`${item.page_number}:${item.page_id ?? idx}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="font-extrabold text-ink">
+                            {t("contentQuality.bookDetail.pageNumberHeading", {
+                              pageNumber: formatNumber(item.page_number),
+                            })}
+                          </span>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {item.codes.map((code) => (
+                              <AdminBadge
+                                key={code}
+                                tone={code === "OK" ? "success" : "warning"}
+                              >
+                                {t(
+                                  `contentQuality.diagnosticStatuses.${code}`,
+                                  undefined,
+                                  code,
+                                )}
+                              </AdminBadge>
+                            ))}
                           </div>
-                          {item.page_id ? (
-                            <Link
-                              className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary transition-colors hover:bg-surface-subtle"
-                              href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
-                            >
-                              {t("contentQuality.bookDetail.openOcrPage")}
-                            </Link>
-                          ) : null}
-                        </li>
-                      ))}
+                          <p className="mt-1 text-muted">{item.summary}</p>
+                        </div>
+                        {item.page_id ? (
+                          <Link
+                            className="inline-flex min-h-8 items-center rounded-control border border-border bg-white px-2.5 font-bold text-primary transition-colors hover:bg-surface-subtle"
+                            href={`/admin/books/${encodeURIComponent(selectedBook.book_id)}/pages/${encodeURIComponent(item.page_id)}`}
+                          >
+                            {t("contentQuality.bookDetail.openOcrPage")}
+                          </Link>
+                        ) : null}
+                      </li>
+                    ))}
                   </ul>
                   <PaginationBar
                     className="mt-3"

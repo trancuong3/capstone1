@@ -2903,33 +2903,5 @@
       "userBooks": "User Books & Data Contributions"
     },
     "tabsAria": "Secciones de gestión de calidad de libros"
-  },
-  "taskCenter": {
-    "backgroundProcessing": "Procesando en segundo plano…",
-    "closeAria": "Cerrar centro de tareas de IA",
-    "defaultBookLabel": "Libro",
-    "elapsedHours": "{hours} h",
-    "elapsedHoursMinutes": "{hours} h {minutes} min",
-    "elapsedMinutes": "{minutes} min",
-    "elapsedMinutesSeconds": "{minutes} min {seconds} s",
-    "elapsedRunning": "En ejecución {elapsed}",
-    "elapsedSeconds": "{seconds} s",
-    "emptyDescription": "Cuando subas páginas, extraigas OCR o generes portadas, el progreso en vivo aparecerá aquí.",
-    "emptyTitle": "Aún no hay tareas de IA",
-    "openAria": "Abrir centro de tareas de IA",
-    "pageSeparator": " • Página {pageNumber}",
-    "pillFailed": "Tareas fallidas ({count})",
-    "pillIdle": "Tareas IA",
-    "pillRunning": "IA en curso ({count})",
-    "pillWaitingReview": "Por verificar ({count})",
-    "processingAria": "Procesando {title}",
-    "progressAria": "Progreso de {title}",
-    "refreshAria": "Actualizar lista de tareas",
-    "stagePrefix": "Paso: {stage}",
-    "subtitle": "Las tareas en segundo plano siguen ejecutándose de forma segura aunque cambies de página.",
-    "title": "Centro de tareas de IA",
-    "viewResultAction": "Ver resultado",
-    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
-    "pillWaitingForWorker": "Cola de OCR ({count})"
   }
 }

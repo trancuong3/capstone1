@@ -697,7 +697,14 @@ export function SentenceShooterScreen({
       active = false;
       controller.abort();
     };
-  }, [childId, difficulty, initialBookId, reloadKey, shooterService, totalRounds]);
+  }, [
+    childId,
+    difficulty,
+    initialBookId,
+    reloadKey,
+    shooterService,
+    totalRounds,
+  ]);
 
   const effectiveSelectedBookId =
     !hasManuallySelectedBook &&
@@ -1922,86 +1929,91 @@ export function SentenceShooterScreen({
             title={t("sentenceShooter.emptyBooksTitle")}
           />
         ) : null}
-        {bookState.status === "ready" && bookState.books.length > 0 ? (() => {
-          const totalBooksPages = Math.max(
-            1,
-            Math.ceil(bookState.books.length / SHOOTER_BOOKS_PAGE_SIZE),
-          );
-          const safeBooksPage = Math.min(Math.max(1, booksPage), totalBooksPages);
-          const visibleBooks = bookState.books.slice(
-            (safeBooksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
-            safeBooksPage * SHOOTER_BOOKS_PAGE_SIZE,
-          );
-          return (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {visibleBooks.map((book) => {
-                  const selected = effectiveSelectedBookId === book.id;
-                  return (
-                    <button
-                      aria-pressed={selected}
-                      className={[
-                        "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
-                        selected
-                          ? "border-primary ring-2 ring-primary/20"
-                          : "border-border hover:border-primary/60",
-                      ].join(" ")}
-                      key={book.id}
-                      onClick={() => {
-                        setHasManuallySelectedBook(true);
-                        setSelectedBookId(book.id);
-                      }}
-                      type="button"
-                    >
-                      <BookCover book={toBookCover(book)} size="small" />
-                      <span className="min-w-0">
-                        <span
-                          className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
-                          dir="ltr"
-                          lang="vi"
+        {bookState.status === "ready" && bookState.books.length > 0
+          ? (() => {
+              const totalBooksPages = Math.max(
+                1,
+                Math.ceil(bookState.books.length / SHOOTER_BOOKS_PAGE_SIZE),
+              );
+              const safeBooksPage = Math.min(
+                Math.max(1, booksPage),
+                totalBooksPages,
+              );
+              const visibleBooks = bookState.books.slice(
+                (safeBooksPage - 1) * SHOOTER_BOOKS_PAGE_SIZE,
+                safeBooksPage * SHOOTER_BOOKS_PAGE_SIZE,
+              );
+              return (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {visibleBooks.map((book) => {
+                      const selected = effectiveSelectedBookId === book.id;
+                      return (
+                        <button
+                          aria-pressed={selected}
+                          className={[
+                            "flex min-h-28 items-center gap-4 rounded-control border bg-white p-4 text-start transition-colors focus-visible:outline-3 focus-visible:outline-offset-3 focus-visible:outline-primary",
+                            selected
+                              ? "border-primary ring-2 ring-primary/20"
+                              : "border-border hover:border-primary/60",
+                          ].join(" ")}
+                          key={book.id}
+                          onClick={() => {
+                            setHasManuallySelectedBook(true);
+                            setSelectedBookId(book.id);
+                          }}
+                          type="button"
                         >
-                          {book.title}
-                        </span>
-                        <span className="mt-1 block text-sm font-semibold text-muted">
-                          {book.author ? (
-                            <>
-                              {t("sentenceShooter.authorPrefix", {
-                                author: "",
-                              }).trimEnd()}{" "}
-                              <span
-                                className="viread-learning-content"
-                                dir="ltr"
-                                lang="vi"
-                              >
-                                {book.author}
-                              </span>
-                            </>
-                          ) : (
-                            t("sentenceShooter.defaultBookSource")
-                          )}
-                        </span>
-                        <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
-                          {t("sentenceShooter.readyRoundsBadge", {
-                            count: book.available_rounds,
-                          })}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-              <PaginationBar
-                ariaLabel={t("sentenceShooter.booksPaginationAria")}
-                compact
-                itemLabel={t("sentenceShooter.booksPaginationItem")}
-                onPageChange={setBooksPage}
-                page={safeBooksPage}
-                pageSize={SHOOTER_BOOKS_PAGE_SIZE}
-                total={bookState.books.length}
-              />
-            </>
-          );
-        })() : null}
+                          <BookCover book={toBookCover(book)} size="small" />
+                          <span className="min-w-0">
+                            <span
+                              className="viread-learning-content block line-clamp-2 break-words font-extrabold text-ink"
+                              dir="ltr"
+                              lang="vi"
+                            >
+                              {book.title}
+                            </span>
+                            <span className="mt-1 block text-sm font-semibold text-muted">
+                              {book.author ? (
+                                <>
+                                  {t("sentenceShooter.authorPrefix", {
+                                    author: "",
+                                  }).trimEnd()}{" "}
+                                  <span
+                                    className="viread-learning-content"
+                                    dir="ltr"
+                                    lang="vi"
+                                  >
+                                    {book.author}
+                                  </span>
+                                </>
+                              ) : (
+                                t("sentenceShooter.defaultBookSource")
+                              )}
+                            </span>
+                            <span className="mt-3 inline-block rounded-full bg-success-surface px-3 py-1 text-xs font-extrabold text-success-ink">
+                              {t("sentenceShooter.readyRoundsBadge", {
+                                count: book.available_rounds,
+                              })}
+                            </span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <PaginationBar
+                    ariaLabel={t("sentenceShooter.booksPaginationAria")}
+                    compact
+                    itemLabel={t("sentenceShooter.booksPaginationItem")}
+                    onPageChange={setBooksPage}
+                    page={safeBooksPage}
+                    pageSize={SHOOTER_BOOKS_PAGE_SIZE}
+                    total={bookState.books.length}
+                  />
+                </>
+              );
+            })()
+          : null}
       </div>
 
       <div className="flex flex-col-reverse gap-3 border-t border-border pt-5 sm:flex-row sm:justify-between">

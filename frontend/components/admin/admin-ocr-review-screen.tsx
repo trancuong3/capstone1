@@ -60,6 +60,7 @@ import { translateMessage } from "@/lib/i18n/formatter";
 import { DEFAULT_LOCALE } from "@/lib/i18n/locales";
 import type { TranslateFn } from "@/lib/i18n/types";
 import { viMessages } from "@/messages/vi";
+import viAdminMessages from "@/messages/vi/admin.json";
 import {
   AiCorrectionCancelledError,
   type AdminAiWorkflowDTO,
@@ -93,10 +94,15 @@ type AiTokenChange = {
   readonly proposed: string;
 };
 
+const viAdminFallbackMessages = {
+  ...viMessages,
+  admin: viAdminMessages,
+};
+
 const defaultTranslate: TranslateFn = (key, params, fallback) =>
   translateMessage(
-    viMessages,
-    viMessages,
+    viAdminFallbackMessages,
+    viAdminFallbackMessages,
     DEFAULT_LOCALE,
     key.includes(".") && !key.startsWith("admin.") ? `admin.${key}` : key,
     params,

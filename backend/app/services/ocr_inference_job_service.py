@@ -1593,7 +1593,7 @@ class OcrInferenceJobService:
             if (
                 (now - hb_at) <= ttl
                 and status_upper in {"IDLE", "BUSY"}
-                and self._worker_has_ready_engine(worker.Engines)
+                and self._worker_has_ready_engine(getattr(worker, "Engines", None))
             ):
                 await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
                 return True

@@ -2903,33 +2903,5 @@
       "userBooks": "User Books & Data Contributions"
     },
     "tabsAria": "图书质量管理分区"
-  },
-  "taskCenter": {
-    "backgroundProcessing": "正在后台处理…",
-    "closeAria": "关闭 AI 任务中心",
-    "defaultBookLabel": "图书",
-    "elapsedHours": "{hours} 小时",
-    "elapsedHoursMinutes": "{hours} 小时 {minutes} 分钟",
-    "elapsedMinutes": "{minutes} 分钟",
-    "elapsedMinutesSeconds": "{minutes} 分钟 {seconds} 秒",
-    "elapsedRunning": "已运行 {elapsed}",
-    "elapsedSeconds": "{seconds} 秒",
-    "emptyDescription": "当您上传书页、提取 OCR 或生成封面时，实时进度会显示在此处。",
-    "emptyTitle": "暂无 AI 任务",
-    "openAria": "打开 AI 任务中心",
-    "pageSeparator": " • 第 {pageNumber} 页",
-    "pillFailed": "失败任务 ({count})",
-    "pillIdle": "AI 任务",
-    "pillRunning": "AI 运行中 ({count})",
-    "pillWaitingReview": "待核验 ({count})",
-    "processingAria": "正在处理 {title}",
-    "progressAria": "{title} 进度",
-    "refreshAria": "刷新任务列表",
-    "stagePrefix": "阶段：{stage}",
-    "subtitle": "即使切换页面，后台任务仍会安全持续运行。",
-    "title": "AI 任务中心",
-    "viewResultAction": "查看结果",
-    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
-    "pillWaitingForWorker": "OCR 队列 ({count})"
   }
 }

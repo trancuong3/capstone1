@@ -113,12 +113,55 @@ describe("coalesced browser auth and bounded user-scoped read cache", () => {
     clearApiReadCache();
   });
 
+  it("caches /books/catalog short-lived per user & locale, invalidates on /books or /studio mutations, and stays isolated from /reading mutations", async () => {
+    setApiReadCacheEnabled(true);
+    setApiReadCacheActorScope("parent-a");
+    document.cookie = "viread_locale=vi; path=/";
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return new Response(JSON.stringify({ id: "2", title: "Saved" }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ id: "1", title: "Catalog Book" }), {
+        status: 200,
+      });
+    });
+
+    await requestApi("/books/catalog?include_private=true", itemSchema);
+    await requestApi("/books/catalog?include_private=true", itemSchema);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // /reading mutation must NOT wipe /books/catalog
+    await requestApi("/reading/sessions/s1/events", itemSchema, undefined, {
+      method: "POST",
+      body: {},
+    });
+    await requestApi("/books/catalog?include_private=true", itemSchema);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // Switching locale isolates cached GETs cleanly
+    document.cookie = "viread_locale=en; path=/";
+    await requestApi("/books/catalog?include_private=true", itemSchema);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+
+    // /books mutation invalidates /books/catalog across locales
+    document.cookie = "viread_locale=vi; path=/";
+    await requestApi("/books/my-books", itemSchema, undefined, {
+      method: "POST",
+      body: { title: "New" },
+    });
+    await requestApi("/books/catalog?include_private=true", itemSchema);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    clearApiReadCache();
+  });
+
   it.each([
-    "/books/catalog?include_private=true",
+    "/books/my-books?limit=10",
     "/karaoke/songs?child_id=child-a",
     "/karaoke/admin/songs/song-a",
     "/karaoke/admin/songs/song-a/draft/reference-preview",
-  ])("refreshes mutable catalog and playback reads for %s", async (path) => {
+  ])("refreshes mutable private and playback reads for %s", async (path) => {
     setApiReadCacheEnabled(true);
     fetchMock
       .mockResolvedValueOnce(

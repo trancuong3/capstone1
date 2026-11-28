@@ -2903,33 +2903,5 @@
       "userBooks": "User Books & Data Contributions"
     },
     "tabsAria": "Book quality management sections"
-  },
-  "taskCenter": {
-    "backgroundProcessing": "Processing in background…",
-    "closeAria": "Close AI Task Center",
-    "defaultBookLabel": "Book",
-    "elapsedHours": "{hours}h",
-    "elapsedHoursMinutes": "{hours}h {minutes}m",
-    "elapsedMinutes": "{minutes}m",
-    "elapsedMinutesSeconds": "{minutes}m {seconds}s",
-    "elapsedRunning": "Running for {elapsed}",
-    "elapsedSeconds": "{seconds}s",
-    "emptyDescription": "When you upload book pages, extract OCR, or generate covers, live progress will appear here.",
-    "emptyTitle": "No AI tasks yet",
-    "openAria": "Open AI Task Center",
-    "pageSeparator": " • Page {pageNumber}",
-    "pillFailed": "Failed tasks ({count})",
-    "pillIdle": "AI Tasks",
-    "pillRunning": "AI running ({count})",
-    "pillWaitingReview": "Needs review ({count})",
-    "processingAria": "Processing {title}",
-    "progressAria": "Progress for {title}",
-    "refreshAria": "Refresh task list",
-    "stagePrefix": "Stage: {stage}",
-    "subtitle": "Background tasks keep running safely even when you navigate away.",
-    "title": "AI Task Center",
-    "viewResultAction": "View result",
-    "workerOfflineBanner": "Waiting for AI service to reconnect. Tasks are safely saved and will resume automatically.",
-    "pillWaitingForWorker": "OCR queue ({count})"
   }
 }

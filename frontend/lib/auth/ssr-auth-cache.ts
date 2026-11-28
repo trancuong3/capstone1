@@ -10,8 +10,8 @@ import type { ParentRole } from "@/types/profile";
 export const VIREAD_ROLE_CACHE_COOKIE = "viread_role_cache";
 export const VIREAD_SSR_AUTH_HEADER = "x-viread-ssr-auth";
 
-export const ROLE_CACHE_TTL_MS = 30_000;
-export const ROLE_CACHE_MAX_AGE_SECONDS = 30;
+export const ROLE_CACHE_TTL_MS = 120_000;
+export const ROLE_CACHE_MAX_AGE_SECONDS = 120;
 const REQUEST_HANDOFF_TTL_MS = 10_000;
 
 export interface CookieNameValue {

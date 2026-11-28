@@ -315,6 +315,7 @@ describe("LocalSegmentSpeechRecognition 503 Offline -> Online browser fallback",
     for (let i = 0; i < 10; i += 1) internal.consumeSamples16k(voiced);
     for (let i = 0; i < 20; i += 1) internal.consumeSamples16k(silent);
     await new Promise((resolve) => setTimeout(resolve, 320));
+    rec.stop();
 
     expect(FakeNativeBrowserSpeechRecognition.instances).toHaveLength(0);
     expect(getVoiceEngineStatus().stt.tier).toBe("idle");

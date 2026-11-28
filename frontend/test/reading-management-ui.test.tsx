@@ -537,7 +537,9 @@ describe("ReadingManagementScreen backed by HTTP API adapter", () => {
 
     // VerifiedBookPicker paginated at 5/page with search resetting page to 1
     await user.click(
-      within(collectionsSection).getByText(/Thêm từ thư viện sách đã xác minh/i),
+      within(collectionsSection).getByText(
+        /Thêm từ thư viện sách đã xác minh/i,
+      ),
     );
     expect(
       within(collectionsSection).getByText("Sách thư viện số 1"),

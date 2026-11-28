@@ -70,6 +70,8 @@ def _make_app(orchestrator: VoiceOrchestrator) -> TestClient:
 
 class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
     def setUp(self) -> None:
+        self._env_patch = patch.dict(os.environ, {"ELEVENLABS_API_KEY": ""}, clear=False)
+        self._env_patch.start()
         reset_google_cooldowns()
         clear_voice_orchestrator_caches()
         self._orig_voice_factory = voice_routes.get_voice_orchestrator
@@ -78,6 +80,7 @@ class LocalFirstAndFallbackPolicyTests(unittest.TestCase):
     def tearDown(self) -> None:
         voice_routes.get_voice_orchestrator = self._orig_voice_factory
         studio_routes.get_voice_orchestrator = self._orig_studio_factory
+        self._env_patch.stop()
 
     def test_healthy_local_stt_and_tts_make_zero_google_calls(self) -> None:
         local = LocalVoiceProvider(base_url="http://127.0.0.1:8010")

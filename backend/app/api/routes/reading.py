@@ -672,10 +672,13 @@ async def delete_reading_report(
 
 #Kadepham
 from fastapi import UploadFile, File
+from sqlalchemy.orm import load_only
 from app.models.book import PageRevisionWord
 from app.schemas.reading import CameraPageMatchRead, ReadingPageRead, ReadingPageWordRead
-from app.services.storage_service import download_object
+from app.services.storage_service import download_object, download_object_async
 from app.services.vision_page_matcher import vision_page_matcher
+
+_ORIGINAL_DOWNLOAD_OBJECT = download_object
 
 MAX_CAMERA_FRAME_BYTES = 8 * 1024 * 1024
 MAX_CAMERA_FRAME_PIXELS = 40_000_000
@@ -749,10 +752,13 @@ async def _fetch_stored_page_bytes(
     """Read stored page image strictly from Supabase Storage using validated object keys."""
     if not _is_safe_storage_object_path(image_path):
         return None
+    cleaned_path = image_path.strip()
     try:
-        return await asyncio.to_thread(
-            download_object, image_path.strip(), bucket_name=bucket_name
-        )
+        if download_object is not _ORIGINAL_DOWNLOAD_OBJECT:
+            return await asyncio.to_thread(
+                download_object, cleaned_path, bucket_name=bucket_name
+            )
+        return await download_object_async(cleaned_path, bucket_name=bucket_name)
     except Exception:
         return None
 
@@ -868,7 +874,7 @@ async def _build_match_candidates(
         missing.append((p, bucket, cache_key))
 
     if missing:
-        sem = asyncio.Semaphore(6)
+        sem = asyncio.Semaphore(4)
 
         async def _load_one(
             page_orm: BookPage, bucket_name: str | None, key: tuple[str, str]
@@ -877,20 +883,17 @@ async def _build_match_candidates(
                 img_bytes = await _fetch_stored_page_bytes(
                     page_orm.ImagePath, bucket_name=bucket_name
                 )
-            if not img_bytes:
+                if not img_bytes:
+                    return None
+                features = await asyncio.to_thread(
+                    vision_page_matcher.compute_and_cache_features, key, img_bytes
+                )
+                del img_bytes
+            if features is None:
                 return None
-            features = await asyncio.to_thread(
-                vision_page_matcher.compute_and_cache_features, key, img_bytes
-            )
-            if features is not None:
-                return {
-                    "page_orm": page_orm,
-                    "features": features,
-                    "cache_key": key,
-                }
             return {
                 "page_orm": page_orm,
-                "image_bytes": img_bytes,
+                "features": features,
                 "cache_key": key,
             }
 
@@ -945,6 +948,18 @@ async def match_book_page_from_camera(
     max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_BOOK_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
+        .options(
+            load_only(
+                BookPage.Id,
+                BookPage.BookId,
+                BookPage.PageNumber,
+                BookPage.ImagePath,
+                BookPage.CurrentVerifiedRevisionId,
+                BookPage.Width,
+                BookPage.Height,
+            ),
+            load_only(Book.Id, Book.VisibilityScope),
+        )
         .join(Book, Book.Id == BookPage.BookId)
         .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(
@@ -1073,6 +1088,18 @@ async def match_page_global_from_camera(
     max_candidates = _bounded_match_limit(MAX_MATCH_PAGE_GLOBAL_CANDIDATES)
     pages_result = await db.execute(
         select(BookPage, Book)
+        .options(
+            load_only(
+                BookPage.Id,
+                BookPage.BookId,
+                BookPage.PageNumber,
+                BookPage.ImagePath,
+                BookPage.CurrentVerifiedRevisionId,
+                BookPage.Width,
+                BookPage.Height,
+            ),
+            load_only(Book.Id, Book.VisibilityScope),
+        )
         .join(Book, Book.Id == BookPage.BookId)
         .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
         .where(

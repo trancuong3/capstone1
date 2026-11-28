@@ -129,6 +129,29 @@ describe("Supabase proxy auth refresh", () => {
     );
   });
 
+  it("redirects unauthenticated root / requests directly to /login while preserving cleared role cache cookies", async () => {
+    getClaimsMock.mockImplementation(async () => {
+      return { data: null, error: null };
+    });
+
+    for (const userAgent of ["Mozilla/5.0", "Mozilla/5.0 ViReadAndroid/1.0"]) {
+      const response = await proxy(
+        new NextRequest("https://app.example.com/?utm=app", {
+          headers: {
+            "user-agent": userAgent,
+            cookie: "viread_role_cache=stale-role-cookie",
+          },
+        }),
+      );
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        "https://app.example.com/login",
+      );
+      expect(response.cookies.get("viread_role_cache")?.value).toBe("");
+      expect(response.cookies.get("viread_role_cache")?.maxAge).toBe(0);
+    }
+  });
+
   it("redirects authenticated /admin requests immediately to /admin/parents", async () => {
     getClaimsMock.mockResolvedValue({
       data: { claims: { sub: "admin-user-1" } },

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import logging
 from io import BytesIO
 from uuid import UUID, uuid4
@@ -98,6 +100,18 @@ def _cleanup_object(path: str) -> None:
     delete_object(path, bucket_name=SUPABASE_AVATAR_BUCKET)
 
 
+async def _release_read_tx(repository: object) -> None:
+    db = getattr(repository, "db", None)
+    rollback = getattr(db, "rollback", None)
+    if callable(rollback):
+        try:
+            result = rollback()
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            pass
+
+
 class AvatarService:
     """Coordinate ownership checks, Storage, and avatar-path persistence."""
 
@@ -120,12 +134,17 @@ class AvatarService:
                 detail="Access denied",
             )
 
-        normalized_image = normalize_avatar_image(data, content_type)
+        previous_path = getattr(profile, "AvatarPath", None)
+        await _release_read_tx(self.profile_repository)
+
+        normalized_image = await asyncio.to_thread(
+            normalize_avatar_image, data, content_type
+        )
         path = f"profiles/{parent_id}/avatar/{uuid4().hex}.webp"
         await self._persist_new_avatar(
             path,
             normalized_image,
-            getattr(profile, "AvatarPath", None),
+            previous_path,
             lambda avatar_path: self.profile_repository.update_avatar_path(
                 parent_id,
                 avatar_path,
@@ -165,7 +184,7 @@ class AvatarService:
             f"profiles/{parent_id}/avatar/",
         )
         if path_to_remove:
-            _cleanup_object(path_to_remove)
+            await asyncio.to_thread(_cleanup_object, path_to_remove)
 
     async def upload_child_avatar(
         self,
@@ -178,12 +197,17 @@ class AvatarService:
         if child is None:
             raise AvatarResourceNotFoundError()
 
-        normalized_image = normalize_avatar_image(data, content_type)
+        previous_path = getattr(child, "AvatarPath", None)
+        await _release_read_tx(self.child_repository)
+
+        normalized_image = await asyncio.to_thread(
+            normalize_avatar_image, data, content_type
+        )
         path = f"children/{child_id}/avatar/{uuid4().hex}.webp"
         await self._persist_new_avatar(
             path,
             normalized_image,
-            getattr(child, "AvatarPath", None),
+            previous_path,
             lambda avatar_path: self.child_repository.update_avatar_path(
                 child_id,
                 parent_id,
@@ -220,7 +244,7 @@ class AvatarService:
             f"children/{child_id}/avatar/",
         )
         if path_to_remove:
-            _cleanup_object(path_to_remove)
+            await asyncio.to_thread(_cleanup_object, path_to_remove)
 
     async def _persist_new_avatar(
         self,
@@ -231,7 +255,8 @@ class AvatarService:
         old_path_prefix: str,
     ) -> None:
         try:
-            upload_object(
+            await asyncio.to_thread(
+                upload_object,
                 path,
                 image,
                 "image/webp",
@@ -239,18 +264,18 @@ class AvatarService:
             )
         except StorageUploadFailure as error:
             if error.cleanup_may_be_needed:
-                _cleanup_object(path)
+                await asyncio.to_thread(_cleanup_object, path)
             raise
 
         try:
             updated_entity = await persist_path(path)
             if updated_entity is None:
-                _cleanup_object(path)
+                await asyncio.to_thread(_cleanup_object, path)
                 raise AvatarResourceNotFoundError()
         except AvatarResourceNotFoundError:
             raise
         except Exception as error:
-            _cleanup_object(path)
+            await asyncio.to_thread(_cleanup_object, path)
             logger.error(
                 "Avatar metadata persistence failed (exception_type=%s)",
                 type(error).__name__,
@@ -265,4 +290,4 @@ class AvatarService:
             old_path_prefix,
         )
         if old_path and old_path != path:
-            _cleanup_object(old_path)
+            await asyncio.to_thread(_cleanup_object, old_path)

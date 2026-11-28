@@ -478,30 +478,39 @@ describe("Reading history detail", () => {
     const user = userEvent.setup();
     currentDetail = {
       ...sessionDetailFixture,
-      comprehension: Array.from({ length: 8 }, (_, idx) => ({
-        question: {
-          id: `q-${idx + 1}`,
-          type: "FACTUAL" as const,
-          prompt: `Câu hỏi đọc hiểu số ${idx + 1}`,
-          page_revision_id: bookFixture.id,
-          source_span: null,
-          difficulty: "EASY",
-          answered: true,
-        },
-        answer: {
-          answer_id: `a-${idx + 1}`,
-          question_id: `q-${idx + 1}`,
-          submitted_answer: `Đáp án ${idx + 1}`,
-          is_correct: true,
-          score: 1,
-          feedback_code: null,
-        },
-      })),
+      comprehension: Array.from({ length: 8 }, (_, idx) => {
+        const suffix = String(idx + 1).padStart(2, "0");
+        const qId = `60000000-0000-4000-8000-0000000000${suffix}`;
+        return {
+          question: {
+            id: qId,
+            type: "FACTUAL" as const,
+            prompt: `Câu hỏi đọc hiểu số ${idx + 1}`,
+            page_revision_id: bookFixture.id,
+            source_span: null,
+            difficulty: "EASY",
+            answered: true,
+          },
+          answer: {
+            answer_id: `70000000-0000-4000-8000-0000000000${suffix}`,
+            question_id: qId,
+            submitted_answer: `Đáp án ${idx + 1}`,
+            is_correct: true,
+            score: 1,
+            feedback_code: null,
+          },
+        };
+      }),
       events: Array.from({ length: 10 }, (_, idx) => ({
         ...sessionDetailFixture.events[0],
-        id: `ev-${idx + 1}`,
+        id: `80000000-0000-4000-8000-0000000000${String(idx + 1).padStart(2, "0")}`,
         start_ms: (idx + 1) * 1000,
+        end_ms: (idx + 1) * 1000 + 500,
       })),
+      availability: {
+        ...sessionDetailFixture.availability,
+        comprehension: "available",
+      },
     };
 
     render(
@@ -512,9 +521,7 @@ describe("Reading history detail", () => {
 
     await screen.findByText("Câu hỏi đọc hiểu số 1");
     expect(screen.getByText("Câu hỏi đọc hiểu số 6")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Câu hỏi đọc hiểu số 7"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Câu hỏi đọc hiểu số 7")).not.toBeInTheDocument();
 
     const qNav = screen.getByRole("navigation", {
       name: "Phân trang câu hỏi đọc hiểu",
@@ -526,9 +533,7 @@ describe("Reading history detail", () => {
     );
     expect(screen.getByText("Câu hỏi đọc hiểu số 7")).toBeInTheDocument();
     expect(screen.getByText("Câu hỏi đọc hiểu số 8")).toBeInTheDocument();
-    expect(
-      screen.queryByText("Câu hỏi đọc hiểu số 1"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Câu hỏi đọc hiểu số 1")).not.toBeInTheDocument();
 
     const evNav = screen.getByRole("navigation", {
       name: "Phân trang sự kiện trong buổi đọc",

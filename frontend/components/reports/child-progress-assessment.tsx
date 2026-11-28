@@ -763,9 +763,12 @@ function AssessmentBody({
                     })}
                   </ul>
                   <PaginationBar
-                    ariaLabel={t("overview.assessmentCard.recommendedWordsTitle", {
-                      days: data.days,
-                    })}
+                    ariaLabel={t(
+                      "overview.assessmentCard.recommendedWordsTitle",
+                      {
+                        days: data.days,
+                      },
+                    )}
                     className="mt-2"
                     compact
                     onPageChange={setPracticeWordsPage}

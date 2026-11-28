@@ -231,48 +231,52 @@ export function ParentBookReportsScreen() {
                     {selectedDetail.admin_resolution_note ??
                       t("bookReports.adminResponsePending")}
                   </p>
-                  {selectedDetail.history.length ? (() => {
-                    const totalHistoryPages = Math.max(
-                      1,
-                      Math.ceil(
-                        selectedDetail.history.length / HISTORY_PAGE_SIZE,
-                      ),
-                    );
-                    const safeHistoryPage = Math.min(
-                      Math.max(1, historyPage),
-                      totalHistoryPages,
-                    );
-                    const historyOffset =
-                      (safeHistoryPage - 1) * HISTORY_PAGE_SIZE;
-                    const visibleHistory = selectedDetail.history.slice(
-                      historyOffset,
-                      historyOffset + HISTORY_PAGE_SIZE,
-                    );
-                    return (
-                      <>
-                        <ul className="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted">
-                          {visibleHistory.map((entry, idx) => (
-                            <li
-                              key={`${entry.created_at}:${historyOffset + idx}`}
-                            >
-                              <span className="font-semibold text-ink">
-                                {t(`reportDialog.statuses.${entry.to_status}`)}
-                              </span>
-                              {entry.note ? ` · ${entry.note}` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                        <PaginationBar
-                          className="mt-2"
-                          compact
-                          onPageChange={setHistoryPage}
-                          page={safeHistoryPage}
-                          pageSize={HISTORY_PAGE_SIZE}
-                          total={selectedDetail.history.length}
-                        />
-                      </>
-                    );
-                  })() : null}
+                  {selectedDetail.history.length
+                    ? (() => {
+                        const totalHistoryPages = Math.max(
+                          1,
+                          Math.ceil(
+                            selectedDetail.history.length / HISTORY_PAGE_SIZE,
+                          ),
+                        );
+                        const safeHistoryPage = Math.min(
+                          Math.max(1, historyPage),
+                          totalHistoryPages,
+                        );
+                        const historyOffset =
+                          (safeHistoryPage - 1) * HISTORY_PAGE_SIZE;
+                        const visibleHistory = selectedDetail.history.slice(
+                          historyOffset,
+                          historyOffset + HISTORY_PAGE_SIZE,
+                        );
+                        return (
+                          <>
+                            <ul className="mt-2 grid gap-1 border-t border-border pt-2 text-xs text-muted">
+                              {visibleHistory.map((entry, idx) => (
+                                <li
+                                  key={`${entry.created_at}:${historyOffset + idx}`}
+                                >
+                                  <span className="font-semibold text-ink">
+                                    {t(
+                                      `reportDialog.statuses.${entry.to_status}`,
+                                    )}
+                                  </span>
+                                  {entry.note ? ` · ${entry.note}` : ""}
+                                </li>
+                              ))}
+                            </ul>
+                            <PaginationBar
+                              className="mt-2"
+                              compact
+                              onPageChange={setHistoryPage}
+                              page={safeHistoryPage}
+                              pageSize={HISTORY_PAGE_SIZE}
+                              total={selectedDetail.history.length}
+                            />
+                          </>
+                        );
+                      })()
+                    : null}
                 </div>
               ) : null}
             </article>

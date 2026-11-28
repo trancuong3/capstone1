@@ -64,7 +64,7 @@ describe("admin components", () => {
       ),
     );
     const logout = screen.getByRole("button", { name: "Đăng xuất" });
-    expect(logout.className).toContain("min-h-12");
+    expect(logout.className).toContain("min-h-10");
     expect(logout.className).not.toContain("h-16");
 
     const outsideButton = render(<Button>Parent action</Button>);
