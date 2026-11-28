@@ -27,6 +27,7 @@ from app.api.routes import (
 from app.api.routes import admin_viread_training
 from app.api.routes import assistant
 from app.api.routes import book_assets
+from app.api.routes import family_pedagogy
 from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
@@ -44,6 +45,7 @@ api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["K
 api_router.include_router(adaptive_learning.router, prefix="/learning", tags=["Adaptive Learning"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
+api_router.include_router(family_pedagogy.router, prefix="/profiles", tags=["Profiles"])
 api_router.include_router(parent_private_book.router, prefix="/books", tags=["Parent Private Books"])
 api_router.include_router(book.router, prefix="/books", tags=["Books"])
 api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])

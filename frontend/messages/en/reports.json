@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Suggested practice words ({days} days)",
       "heardAsCount": "Child often reads as “{heardAs}” ({times} times)",
       "recordedCount": "Recorded {times} times",
-      "heardAsInline": "(read as “{heardAs}”)"
+      "heardAsInline": "(read as “{heardAs}”)",
+      "phonologyTitle": "Tones & sounds often practiced across reading sessions",
+      "phonologyDisclaimer": "Grouped from recent reading sessions for gentle warm-ups (not a medical diagnosis).",
+      "openMinimalPairSandbox": "60s minimal-pair drill",
+      "phonologySessionsBadge": "{sessions} sessions"
     },
     "firstPassSummary": {
       "regionAria": "First attempt and practice results",
@@ -670,7 +674,8 @@
     "focusAria": "Filter reading management sections",
     "focusPlans": "Plans",
     "focusGoals": "Goals",
-    "focusReminders": "Reminders"
+    "focusReminders": "Reminders",
+    "androidReminderBody": "It is time for {alias}'s ViRead reading session!"
   },
   "entertainmentSummary": {
     "loading": "Summarizing Play & Learn progress for {childName}…",
@@ -692,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Song lines to practice slowly at 0.85x",
     "openSongAction": "Open song",
     "homeTipsTitle": "Home support tips for parents"
+  },
+  "printCertificate": {
+    "brandTagline": "Family Reading Progress Snapshot",
+    "printA4Action": "Print A4 Report",
+    "downloadCertificateAction": "Save Certificate (.png)",
+    "certificateHeading": "READING MILESTONE CERTIFICATE",
+    "certificateSubtitle": "Celebrating steady Vietnamese reading practice with family",
+    "awardedTo": "Proudly awarded to",
+    "progressAchievement": "{alias} practiced reading steadily and grew Vietnamese vocabulary!",
+    "progressStatsLine": "Completed sessions: {sessions} · Words read: {words} · Avg accuracy: {accuracy}",
+    "sessionReaderFallback": "Dedicated Young Reader",
+    "sessionAchievement": "Completed a clear and confident reading session!",
+    "sessionStatsLine": "Pages read: {pages} · Total words: {words} · Best accuracy: {accuracy}",
+    "issuedOn": "Issued on: {date}",
+    "encouragementFooter": "Every page you read today plants a warm seed of curiosity with your family."
   }
 }

@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Vorgeschlagene Übungswörter ({days} Tage)",
       "heardAsCount": "Das Kind liest oft „{heardAs}“ ({times} Mal)",
       "recordedCount": "{times} Mal erfasst",
-      "heardAsInline": "(gelesen als „{heardAs}“)"
+      "heardAsInline": "(gelesen als „{heardAs}“)",
+      "phonologyTitle": "Töne & Laute mit häufigem Übungsbedarf",
+      "phonologyDisclaimer": "Aus letzten Lesesitzungen zusammengefasst für kurzes Aufwärmen (keine medizinische Diagnose).",
+      "openMinimalPairSandbox": "60s-Minimalpaare",
+      "phonologySessionsBadge": "{sessions} Sitzungen"
     },
     "firstPassSummary": {
       "regionAria": "Ergebnisse des ersten Versuchs und der Übung",
@@ -670,7 +674,8 @@
     "focusAria": "Bereiche der Leseverwaltung filtern",
     "focusPlans": "Pläne",
     "focusGoals": "Ziele",
-    "focusReminders": "Erinnerungen"
+    "focusReminders": "Erinnerungen",
+    "androidReminderBody": "Zeit für die Lesezeit mit {alias} auf ViRead!"
   },
   "entertainmentSummary": {
     "loading": "Fortschritte im Spiel- und Lernbereich für {childName} werden geladen…",
@@ -692,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Liedzeilen zum langsamen Üben mit 0,85x",
     "openSongAction": "Lied öffnen",
     "homeTipsTitle": "Tipps für zu Hause für Eltern"
+  },
+  "printCertificate": {
+    "brandTagline": "Familien-Lesefortschrittsbericht",
+    "printA4Action": "A4-Bericht drucken",
+    "downloadCertificateAction": "Urkunde speichern (.png)",
+    "certificateHeading": "LESEMEILENSTEIN-URKUNDE",
+    "certificateSubtitle": "Für ausdauerndes vietnamesisches Lesen mit der Familie",
+    "awardedTo": "Mit Stolz verliehen an",
+    "progressAchievement": "{alias} hat ausdauernd gelesen und seinen vietnamesischen Wortschatz erweitert!",
+    "progressStatsLine": "Sitzungen: {sessions} · Gelesene Wörter: {words} · Ø Genauigkeit: {accuracy}",
+    "sessionReaderFallback": "Fleißiges Lesekind",
+    "sessionAchievement": "Hat eine klare und selbstbewusste Lesesitzung abgeschlossen!",
+    "sessionStatsLine": "Seiten: {pages} · Wörter gesamt: {words} · Beste Genauigkeit: {accuracy}",
+    "issuedOn": "Ausgestellt am: {date}",
+    "encouragementFooter": "Jede heute gelesene Seite pflanzt einen warmen Wissensfunken in der Familie."
   }
 }

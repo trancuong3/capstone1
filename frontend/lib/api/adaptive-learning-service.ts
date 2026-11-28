@@ -6,6 +6,7 @@ import { translateRuntime } from "@/lib/i18n/runtime";
 import type {
   EntertainmentRecommendationsDTO,
   ParentEntertainmentAnalyticsDTO,
+  WarmupMicroStoryDTO,
 } from "@/types/adaptive-learning";
 
 const skillDomainSchema = z.enum([
@@ -129,6 +130,18 @@ function normalizeWindowDays(windowDays: number): number {
   return Math.min(90, Math.max(7, Math.floor(windowDays)));
 }
 
+const warmupMicroStorySchema = z.object({
+  child_id: z.string().min(1),
+  local_date: z.string(),
+  has_due_words: z.boolean(),
+  target_words: z.array(z.string()).default([]),
+  title_vi: z.string(),
+  sentences: z.array(z.string()).default([]),
+  full_text: z.string(),
+  source: z.enum(["AI", "RULE_BASED"]),
+  cached: z.boolean().default(false),
+});
+
 export interface AdaptiveLearningService {
   getRecommendations(
     childId: string,
@@ -139,6 +152,10 @@ export interface AdaptiveLearningService {
     windowDays?: number,
     teacherGender?: "female" | "male",
   ): Promise<ParentEntertainmentAnalyticsDTO>;
+  getWarmupStory(
+    childId: string,
+    options?: { readonly refresh?: boolean },
+  ): Promise<WarmupMicroStoryDTO>;
 }
 
 export function createAdaptiveLearningService(): AdaptiveLearningService {
@@ -169,6 +186,17 @@ export function createAdaptiveLearningService(): AdaptiveLearningService {
       return requestApi(
         `/learning/children/${encodeURIComponent(normalizedChildId)}/parent-analytics?window_days=${normalizedWindowDays}${genderParam}`,
         parentEntertainmentAnalyticsSchema,
+      );
+    },
+    async getWarmupStory(
+      childId: string,
+      options?: { readonly refresh?: boolean },
+    ) {
+      const normalizedChildId = assertNonEmptyChildId(childId);
+      const suffix = options?.refresh ? "?refresh=true" : "";
+      return requestApi(
+        `/learning/children/${encodeURIComponent(normalizedChildId)}/warmup-story${suffix}`,
+        warmupMicroStorySchema,
       );
     },
   };

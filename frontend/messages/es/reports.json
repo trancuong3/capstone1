@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "Palabras sugeridas para practicar ({days} días)",
       "heardAsCount": "El niño suele leerlo como “{heardAs}” ({times} veces)",
       "recordedCount": "Registrado {times} veces",
-      "heardAsInline": "(leído como “{heardAs}”)"
+      "heardAsInline": "(leído como “{heardAs}”)",
+      "phonologyTitle": "Tonos y sonidos que suelen requerir práctica",
+      "phonologyDisclaimer": "Agrupado de sesiones recientes para calentamiento breve (no es diagnóstico médico).",
+      "openMinimalPairSandbox": "Pares mínimos 60s",
+      "phonologySessionsBadge": "{sessions} sesiones"
     },
     "firstPassSummary": {
       "regionAria": "Resultados del primer intento y la práctica",
@@ -670,7 +674,8 @@
     "focusAria": "Filtrar secciones de gestión de lectura",
     "focusPlans": "Planes",
     "focusGoals": "Objetivos",
-    "focusReminders": "Recordatorios"
+    "focusReminders": "Recordatorios",
+    "androidReminderBody": "¡Es hora de leer con {alias} en ViRead!"
   },
   "entertainmentSummary": {
     "loading": "Resumiendo el progreso lúdico de {childName}…",
@@ -692,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "Versos para practicar despacio a 0,85x",
     "openSongAction": "Abrir canción",
     "homeTipsTitle": "Consejos para acompañar en casa"
+  },
+  "printCertificate": {
+    "brandTagline": "Informe familiar de progreso lector",
+    "printA4Action": "Imprimir informe A4",
+    "downloadCertificateAction": "Guardar certificado (.png)",
+    "certificateHeading": "CERTIFICADO DE LOGRO LECTOR",
+    "certificateSubtitle": "Celebrando la constancia en la lectura vietnamita en familia",
+    "awardedTo": "Otorgado con cariño a",
+    "progressAchievement": "¡{alias} practicó la lectura con constancia y amplió su vocabulario vietnamita!",
+    "progressStatsLine": "Sesiones: {sessions} · Palabras leídas: {words} · Precisión media: {accuracy}",
+    "sessionReaderFallback": "Pequeño lector dedicado",
+    "sessionAchievement": "¡Completó una sesión de lectura clara y segura!",
+    "sessionStatsLine": "Páginas leídas: {pages} · Palabras totales: {words} · Mejor precisión: {accuracy}",
+    "issuedOn": "Fecha de emisión: {date}",
+    "encouragementFooter": "Cada página leída hoy siembra una cálida semilla de saber en familia."
   }
 }

@@ -62,6 +62,7 @@ import {
 import {
   fetchVoiceEngineHealth,
   getFreshVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import {
@@ -1450,9 +1451,12 @@ export function DifficultWordPracticePanel({
         : null;
       let effectiveConfidence = browserBestConfRef.current;
       const freshHealth = getFreshVoiceEngineHealth();
+      const permanentlyUnconfigured =
+        isPermanentlyHostedLocalUnconfigured(freshHealth);
       const localSttDown =
-        freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready);
+        permanentlyUnconfigured ||
+        (freshHealth !== null &&
+          (!freshHealth.local.available || !freshHealth.local.stt_ready));
       if (
         localSttDown &&
         !effectiveTranscript &&
@@ -1474,8 +1478,10 @@ export function DifficultWordPracticePanel({
             effectiveTranscript = wasmText;
             recordSttEngineUsage({
               provider: "wasm",
-              fallbackUsed: true,
-              fallbackReason: "LOCAL_STT_UNAVAILABLE",
+              fallbackUsed: !permanentlyUnconfigured,
+              fallbackReason: permanentlyUnconfigured
+                ? null
+                : "LOCAL_STT_UNAVAILABLE",
             });
             if (
               normalizeVietnameseWord(wasmText) ===

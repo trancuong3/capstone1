@@ -538,7 +538,8 @@
       "who": "¿Quién o qué hay?",
       "action": "¿Qué está haciendo?",
       "where": "¿Dónde y de qué color?"
-    }
+    },
+    "studioIllustrationBadge": "Ilustración limpia"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "No se pudo reproducir en bucle. Pulsa Escuchar para intentarlo de nuevo.",

@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import math
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import httpx
@@ -147,21 +147,39 @@ class ReadingContentService:
 
         # Page completion and first-pass assessment use durable evidence.
         # Raw spoken-word counts stay unknown when only an assessment is saved.
+        page_rows = await self.repository.session_page_rows(session.Id)
+        reports = await self.repository.comparison_reports(session.Id)
+        events = await self.repository.events_for_session(session.Id)
+        from app.services.child_progress.metrics import SessionRow, session_minutes
+        from app.services.reading_assessment import aggregate_assessment
+
+        assessment = aggregate_assessment(session.Id, reports, events)
         duration_min = None
         if session.EndedAt and session.StartedAt:
-            start = session.StartedAt
-            end = session.EndedAt
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            if end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            duration_min = max(0, int((end - start).total_seconds() // 60))
-        page_rows = await self.repository.session_page_rows(session.Id)
-        from app.services.reading_assessment import aggregate_assessment
-        assessment = aggregate_assessment(
-            session.Id, await self.repository.comparison_reports(session.Id),
-            await self.repository.events_for_session(session.Id),
-        )
+            activity_ts = [
+                ts
+                for ts in (
+                    *(getattr(r, "CreatedAt", None) for r in reports),
+                    *(getattr(e, "CreatedAt", None) for e in events),
+                    *(getattr(p, "StartedAt", None) for p in page_rows),
+                    *(getattr(p, "CompletedAt", None) for p in page_rows),
+                )
+                if ts is not None
+            ]
+            practiced_words = int(assessment.get("practiced_words") or 0)
+            active_min = session_minutes(
+                SessionRow(
+                    id=session.Id,
+                    book_id=session.BookId,
+                    state=session.State,
+                    started_at=session.StartedAt,
+                    ended_at=session.EndedAt,
+                ),
+                activity_timestamps=activity_ts,
+                words_read=practiced_words,
+                pages_compared=len(reports),
+            )
+            duration_min = max(0, int(active_min))
         return ReadingCompletionSummaryDTO(
             duration_minutes=duration_min,
             pages_explored=(
@@ -768,15 +786,22 @@ class ReadingContentService:
 
     @staticmethod
     def _summary(session: ReadingSession) -> SessionSummaryRead:
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
         duration_ms = None
         if session.EndedAt is not None and session.StartedAt is not None:
-            start = session.StartedAt
-            end = session.EndedAt
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=timezone.utc)
-            if end.tzinfo is None:
-                end = end.replace(tzinfo=timezone.utc)
-            duration_ms = max(0, int((end - start).total_seconds() * 1000))
+            start = (
+                session.StartedAt.astimezone(timezone.utc)
+                if session.StartedAt.tzinfo is not None
+                else session.StartedAt.replace(tzinfo=timezone.utc)
+            )
+            end = (
+                session.EndedAt.astimezone(timezone.utc)
+                if session.EndedAt.tzinfo is not None
+                else session.EndedAt.replace(tzinfo=timezone.utc)
+            )
+            raw_ms = max(0, (end - start) // timedelta(milliseconds=1))
+            duration_ms = min(raw_ms, MAX_SESSION_MINUTES * 60 * 1000)
 
         if session.State in ("FINISHED", "COMPLETED"):
             wire_state = "FINISHED"
@@ -1436,6 +1461,8 @@ class ReadingContentService:
         ill_storage_path: str | None = None
         ill_owner_id = None
         illustration_text_free = False
+        extracted_page_kind: str | None = None
+        extracted_blocks_json: list[dict] | None = None
         try:
             from sqlalchemy import desc, select
             from app.models.smart_book_studio import BookPresentationAsset
@@ -1467,6 +1494,33 @@ class ReadingContentService:
             ill_storage_path = None
             ill_owner_id = None
             illustration_text_free = False
+
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import PageOcrExtraction
+
+            db_session = getattr(self.repository, "db", None)
+            if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
+                async with db_session.begin_nested():
+                    ocr_ext = await db_session.scalar(
+                        select(PageOcrExtraction)
+                        .where(PageOcrExtraction.BookPageId == page_id)
+                        .order_by(
+                            desc(PageOcrExtraction.UpdatedAt),
+                            desc(PageOcrExtraction.Id),
+                        )
+                        .limit(1)
+                    )
+                    if ocr_ext is not None:
+                        raw_pk = getattr(ocr_ext, "PageKind", None)
+                        if isinstance(raw_pk, str) and raw_pk.strip():
+                            extracted_page_kind = raw_pk.strip()
+                        raw_blocks = getattr(ocr_ext, "BlocksJson", None)
+                        if isinstance(raw_blocks, list):
+                            extracted_blocks_json = raw_blocks
+        except Exception:
+            extracted_page_kind = None
+            extracted_blocks_json = None
 
         rollback = getattr(self.repository.db, "rollback", None)
         if callable(rollback):
@@ -1573,6 +1627,16 @@ class ReadingContentService:
                 if isinstance(item, int) and not isinstance(item, bool) and item >= 0
             })
 
+        para_start_lines = safe_line_indices("paragraph_start_line_indices")
+        from app.services.duet_reading import build_duet_segments_for_page
+
+        duet_segments = build_duet_segments_for_page(
+            words,
+            page_kind=extracted_page_kind,
+            blocks_json=extracted_blocks_json,
+            paragraph_start_line_indices=para_start_lines,
+        )
+
         return ReadingPageDTO(
             page_id=page_id,
             page_revision_id=page_revision_id,
@@ -1593,8 +1657,10 @@ class ReadingContentService:
             ),
             illustration_url=illustration_url,
             illustration_text_free=illustration_text_free,
+            page_kind=extracted_page_kind,
+            duet_segments=duet_segments,
             text=text_content,
             words=words,
-            paragraph_start_line_indices=safe_line_indices("paragraph_start_line_indices"),
+            paragraph_start_line_indices=para_start_lines,
             indented_line_indices=safe_line_indices("indented_line_indices"),
         )

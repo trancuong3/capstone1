@@ -29,6 +29,8 @@ import {
   getVoiceEngineHealthForRouting,
   getVoiceEngineStatus,
   isHostedLocalVoiceUnconfigured,
+  isPermanentlyHostedLocalUnconfigured,
+  markHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
@@ -115,7 +117,7 @@ const MIN_SPEECH_RMS_HOLD = 0.0016;
 const INITIAL_NOISE_FLOOR = 0.0018;
 const MAX_NOISE_FLOOR = 0.0055;
 const MIN_NOISE_FLOOR = 0.0009;
-const SILENCE_FLUSH_MS = 420;
+const SILENCE_FLUSH_MS = 300;
 const CLAUSE_FLUSH_MIN_SPEECH_MS = 1_800;
 const CLAUSE_FLUSH_SILENCE_MS = 160;
 const MIN_SPEECH_MS = 90;
@@ -799,6 +801,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private lifecycleCleanup: (() => void) | null = null;
   private boundTrack: MediaStreamTrack | null = null;
   private boundTrackEndedHandler: (() => void) | null = null;
+  private standbyMode = false;
+  private audioGraphGeneration = 0;
   private audioGraphReady = false;
   private audioGraphReadyPromise: Promise<boolean> | null = null;
 
@@ -825,7 +829,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     if (this.audioGraphReady || this.usingBrowserFallback) {
       return Promise.resolve(true);
     }
-    if (!this.active || this.stopping || !this.audioGraphReadyPromise) {
+    if (
+      (!this.active && !this.standbyMode) ||
+      this.stopping ||
+      !this.audioGraphReadyPromise
+    ) {
       return Promise.resolve(false);
     }
     if (timeoutMs <= 0) {
@@ -848,6 +856,54 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     });
   }
 
+  /**
+   * Arms the AudioContext + AudioWorklet pipeline during the 3s countdown so
+   * `noiseFloor` and `preRoll` are already calibrated BEFORE `start()` is called
+   * at `0`, eliminating first-word startup latency without emitting speech events.
+   */
+  armStandby(audioTrack?: MediaStreamTrack): Promise<boolean> {
+    if (this.active || this.stopping) {
+      return this.whenAudioGraphReady(800);
+    }
+    if (isAndroidNativeSpeechAvailable()) {
+      return Promise.resolve(false);
+    }
+    if (this.standbyMode && this.audioGraphReadyPromise) {
+      return this.audioGraphReadyPromise;
+    }
+    this.standbyMode = true;
+    this.resetSegmentState();
+    this.abortController = new AbortController();
+    const freshHealth = getVoiceEngineHealthForRouting();
+    const localUnconfigured = isPermanentlyHostedLocalUnconfigured(freshHealth);
+    const localDown =
+      localUnconfigured ||
+      (freshHealth !== null &&
+        (!freshHealth.local.available || !freshHealth.local.stt_ready));
+    if (localDown && detectBrowserWasmSttSupport().supported) {
+      this.usingWasmStt = true;
+      this.wsDisabledForRun = true;
+      void getBrowserWasmSttClient()
+        .init(this.abortController.signal)
+        .catch(() => undefined);
+    }
+    this.audioGraphReadyPromise = this.openAudioGraph(audioTrack);
+    return this.audioGraphReadyPromise;
+  }
+
+  cancelStandby(): void {
+    if (!this.standbyMode) return;
+    this.standbyMode = false;
+    if (!this.active) {
+      this.stopping = false;
+      this.abortController?.abort();
+      this.closeSttWebSocket();
+      this.resetSegmentState();
+      this.teardownAudioGraph();
+      this.detachLifecycleListeners();
+    }
+  }
+
   /** True while the child is currently speaking or an STT segment upload is still in flight. */
   hasPendingUploads(): boolean {
     if (this.usingBrowserFallback) return false;
@@ -856,6 +912,8 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
 
   start(audioTrack?: MediaStreamTrack): void {
     if (this.active) return;
+    const wasStandby = this.standbyMode;
+    this.standbyMode = false;
     this.epoch += 1;
     this.active = true;
     this.stopping = false;
@@ -873,7 +931,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.segmentStartsWithOverlapCarry = false;
     this.clearBrowserRestartTimer();
     this.clearBrowserStopWatchdog();
-    this.abortController = new AbortController();
+    if (
+      !wasStandby ||
+      !this.abortController ||
+      this.abortController.signal.aborted
+    ) {
+      this.abortController = new AbortController();
+    }
     this.resultsHistory = [];
     this.uploadChain = Promise.resolve();
     this.consecutiveTechnicalFailures = 0;
@@ -884,9 +948,16 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     this.wsStartedPageId = null;
     this.wsStartedSessionId = null;
     this.wsPcmTail = new Float32Array(0);
-    this.audioGraphReady = false;
-    this.audioGraphReadyPromise = null;
-    this.resetSegmentState();
+    if (!wasStandby) {
+      this.audioGraphReady = false;
+      this.audioGraphReadyPromise = null;
+      this.resetSegmentState();
+    } else {
+      // Preserve calibrated `noiseFloor` and rolling `preRoll` collected during standby!
+      const preservedPreRoll = this.preRoll;
+      this.resetSegmentState();
+      this.preRoll = preservedPreRoll;
+    }
     this.attachLifecycleListeners();
 
     const policy = getVoicePolicyPreferences();
@@ -907,13 +978,12 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         });
       }
     } else {
-      const confirmedLocalDown =
-        freshHealth !== null &&
-        (!freshHealth.local.available || !freshHealth.local.stt_ready);
       const localUnconfigured =
-        freshHealth !== null &&
-        (freshHealth.local.configured === false ||
-          freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
+        isPermanentlyHostedLocalUnconfigured(freshHealth);
+      const confirmedLocalDown =
+        localUnconfigured ||
+        (freshHealth !== null &&
+          (!freshHealth.local.available || !freshHealth.local.stt_ready));
       const now = Date.now();
       const withinEmergencyCooldown =
         lastLocalSttOutageAt > 0 &&
@@ -937,7 +1007,9 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         !freshHealth.google.stt_cooldown;
       const confirmedLocalDownNoGoogle =
         confirmedLocalDown &&
-        (!freshHealth.google.stt_configured || freshHealth.google.stt_cooldown);
+        (!freshHealth ||
+          !freshHealth.google.stt_configured ||
+          freshHealth.google.stt_cooldown);
 
       // Priority when Local Worker is unavailable (strict Offline-First):
       // 1. Android Native STT (100% on-device streaming on Android APK WebView).
@@ -952,6 +1024,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
         if (confirmedLocalDown) {
           lastLocalSttOutageAt = now;
         }
+        if (wasStandby) this.teardownAudioGraph();
         this.audioGraphReady = true;
         this.audioGraphReadyPromise = Promise.resolve(true);
         return;
@@ -988,6 +1061,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           lastLocalSttOutageAt = now;
         }
         if (this.tryActivateBrowserFallback()) {
+          if (wasStandby) this.teardownAudioGraph();
           this.audioGraphReady = true;
           this.audioGraphReadyPromise = Promise.resolve(true);
           return;
@@ -1001,10 +1075,32 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       }
     }
 
+    if (
+      wasStandby &&
+      this.audioCtx &&
+      this.audioCtx.state !== "closed" &&
+      (!audioTrack || !this.boundTrack || this.boundTrack === audioTrack)
+    ) {
+      if (this.audioCtx.state === "suspended") {
+        void this.audioCtx.resume().catch(() => undefined);
+      }
+      if (!this.wsDisabledForRun && !this.usingWasmStt) {
+        void this.openSttWebSocket();
+      }
+      if (!this.audioGraphReadyPromise) {
+        this.audioGraphReady = true;
+        this.audioGraphReadyPromise = Promise.resolve(true);
+      }
+      return;
+    }
+    if (wasStandby) {
+      this.teardownAudioGraph();
+    }
     this.audioGraphReadyPromise = this.openAudioGraph(audioTrack);
   }
 
   stop(): void {
+    this.standbyMode = false;
     if (!this.active || this.stopping) return;
     const stopEpoch = this.epoch;
     this.stopping = true;
@@ -1081,7 +1177,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   abort(): void {
-    if (!this.active) return;
+    this.standbyMode = false;
+    if (!this.active) {
+      this.teardownAudioGraph();
+      return;
+    }
     this.epoch += 1;
     this.active = false;
     this.stopping = false;
@@ -1205,9 +1305,22 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       typeof errorOrForce === "boolean"
         ? errorOrForce
         : isImmediateLocalOutageError(errorOrForce);
+    if (
+      typeof errorOrForce === "object" &&
+      errorOrForce !== null &&
+      String(
+        (errorOrForce as { code?: unknown; providerCode?: unknown }).code ??
+          (errorOrForce as { providerCode?: unknown }).providerCode ??
+          "",
+      ).includes("LOCAL_VOICE_UNCONFIGURED")
+    ) {
+      markHostedLocalUnconfigured();
+    }
     const freshHealth = getVoiceEngineHealthForRouting();
+    const localUnconfigured = isPermanentlyHostedLocalUnconfigured(freshHealth);
     const confirmedLocalOutage =
       forceImmediate ||
+      localUnconfigured ||
       (freshHealth !== null &&
         (!freshHealth.local.available || !freshHealth.local.stt_ready));
     if (
@@ -1221,10 +1334,6 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       if (androidSttReady && this.tryActivateBrowserFallback()) {
         return true;
       }
-      const localUnconfigured =
-        freshHealth !== null &&
-        (freshHealth.local.configured === false ||
-          freshHealth.local.error_code === "LOCAL_VOICE_UNCONFIGURED");
       // Strict Offline-First STT fallback:
       // 1. Local Worker -> 2. On-Device Offline (Android Native APK / Browser WASM Web)
       // -> 3. Browser Web Speech API / Cloud ONLY as last resort.
@@ -1776,6 +1885,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
           void this.openSttWebSocket(true);
           return;
         }
+        if (msg.code === "LOCAL_VOICE_UNCONFIGURED") {
+          markHostedLocalUnconfigured();
+          this.wsDisabledForRun = true;
+          this.closeSttWebSocket();
+          this.recordTechnicalFailureAndMaybeFallback(true);
+          return;
+        }
         if (
           msg.code === "LOCAL_VOICE_UNCONFIGURED" ||
           msg.code === "LOCAL_STT_UNAVAILABLE" ||
@@ -2085,6 +2201,7 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   }
 
   private teardownAudioGraph(): void {
+    this.audioGraphGeneration += 1;
     this.audioGraphReady = false;
     this.audioGraphReadyPromise = null;
     if (this.boundTrack && this.boundTrackEndedHandler) {
@@ -2152,13 +2269,15 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
   private async openAudioGraph(
     audioTrack?: MediaStreamTrack,
   ): Promise<boolean> {
-    const capturedEpoch = this.epoch;
+    const graphGen = this.audioGraphGeneration;
     const isStale = () =>
-      capturedEpoch !== this.epoch || !this.active || this.stopping;
+      graphGen !== this.audioGraphGeneration ||
+      (!this.active && !this.standbyMode) ||
+      this.stopping;
     try {
       // Open streaming WS `/voice/stt-stream` in parallel with mic & AudioWorklet
       // startup so handshake finishes BEFORE the child speaks the first word!
-      if (!this.wsDisabledForRun && !this.usingWasmStt) {
+      if (!this.standbyMode && !this.wsDisabledForRun && !this.usingWasmStt) {
         void this.openSttWebSocket();
       }
       let stream: MediaStream;
@@ -2186,7 +2305,11 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       const primaryTrack = stream.getAudioTracks?.()?.[0] ?? audioTrack ?? null;
       if (primaryTrack) {
         const onTrackEnded = () => {
-          if (capturedEpoch === this.epoch && this.active && !this.stopping) {
+          if (
+            graphGen === this.audioGraphGeneration &&
+            (this.active || this.standbyMode) &&
+            !this.stopping
+          ) {
             this.abort();
           }
         };
@@ -2348,10 +2471,20 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       this.audioGraphReady = true;
       return true;
     } catch (err) {
-      if (capturedEpoch !== this.epoch || !this.active) return false;
+      if (
+        graphGen !== this.audioGraphGeneration ||
+        (!this.active && !this.standbyMode)
+      ) {
+        return false;
+      }
+      const wasStandbyOnly = !this.active && this.standbyMode;
       this.active = false;
+      this.standbyMode = false;
       this.teardownAudioGraph();
       this.detachLifecycleListeners();
+      if (wasStandbyOnly) {
+        return false;
+      }
       const isDenied =
         err instanceof Error &&
         (err.name === "NotAllowedError" ||
@@ -2385,6 +2518,23 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
     const holdThreshold = Math.max(MIN_SPEECH_RMS_HOLD, this.noiseFloor * 1.4);
     const isOnsetFrame = rms >= onsetThreshold || peak >= onsetThreshold * 3.0;
     const isVoicedFrame = rms >= holdThreshold || peak >= holdThreshold * 3.0;
+
+    if (!this.active && this.standbyMode) {
+      // Standby countdown calibration: track background noiseFloor and preRoll
+      // only — never trigger speech onset or uploads until countdown hits 0.
+      this.noiseFloor = Math.min(
+        MAX_NOISE_FLOOR,
+        Math.max(MIN_NOISE_FLOOR, this.noiseFloor * 0.95 + rms * 0.05),
+      );
+      const merged = new Float32Array(this.preRoll.length + chunk.length);
+      merged.set(this.preRoll, 0);
+      merged.set(chunk, this.preRoll.length);
+      this.preRoll =
+        merged.length > PRE_ROLL_SAMPLES
+          ? merged.slice(merged.length - PRE_ROLL_SAMPLES)
+          : merged;
+      return;
+    }
 
     if (!this.inSpeech) {
       if (isOnsetFrame) {
@@ -2598,6 +2748,13 @@ export class LocalSegmentSpeechRecognition implements SegmentSpeechRecognitionLi
       0,
       Math.round((this.voicedSamples / TARGET_SAMPLE_RATE) * 1000),
     );
+    if (usedWasm && voicedDurationMs < 550) {
+      parentSignal?.removeEventListener("abort", forwardAbort);
+      if (this.interimAbortController === interimCtrl) {
+        this.interimAbortController = null;
+      }
+      return;
+    }
     const activeSpeechMs =
       voicedDurationMs > 0
         ? voicedDurationMs

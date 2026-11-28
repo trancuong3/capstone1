@@ -15,6 +15,7 @@ import {
   parentPrivateBookDetailSchema,
   parentPrivateBookPageSchema,
   parentPrivateBookSummarySchema,
+  parentStoryweaverResponseSchema,
   parentSubmitPagesResponseSchema,
   type AdminFlow2CandidateDecisionResponseDTO,
   type AdminFlow2CandidatePageDTO,
@@ -33,6 +34,8 @@ import {
   type ParentPrivateBookDetailDTO,
   type ParentPrivateBookPageDTO,
   type ParentPrivateBookSummaryDTO,
+  type ParentStoryweaverInput,
+  type ParentStoryweaverResponseDTO,
   type ParentSubmitPagesResponseDTO,
   type SourceUsageType,
 } from "@/types/parent-private-book";
@@ -180,6 +183,10 @@ export interface ParentPrivateBookService {
     submissionId: string,
     input: AddPrivatePageInput,
   ): Promise<ParentAddPageResponseDTO>;
+  createStoryweaverBook?(
+    input: ParentStoryweaverInput,
+    signal?: AbortSignal,
+  ): Promise<ParentStoryweaverResponseDTO>;
   getOcrContribution?(bookId: string): Promise<ParentOcrContributionStateDTO>;
   updateOcrContribution?(
     bookId: string,
@@ -243,6 +250,24 @@ export function createParentPrivateBookService(): ParentPrivateBookService {
           source_note: input.source_note?.trim() || null,
         },
       }),
+    createStoryweaverBook: (input, signal) =>
+      requestApi(
+        "/books/my-books/storyweaver",
+        parentStoryweaverResponseSchema,
+        signal,
+        {
+          method: "POST",
+          body: {
+            child_id: input.child_id ?? null,
+            title: input.title?.trim() || null,
+            theme: input.theme.trim(),
+            page_count: input.page_count,
+            target_grade: input.target_grade ?? null,
+            style_mode: input.style_mode,
+            custom_words: input.custom_words ? [...input.custom_words] : [],
+          },
+        },
+      ),
     update: (bookId, input) => {
       const body: Record<string, unknown> = {};
       if (input.title !== undefined) body.title = input.title.trim();

@@ -21,7 +21,64 @@ def _stable_random(seed: str) -> random.Random:
 
 
 def _sentences(page: SourcePage) -> list[tuple[int, int]]:
-    """Return (start, end_exclusive) word ranges split on sentence punctuation."""
+    """Return (start, end_exclusive) word ranges split on punctuation, Studio V2 blocks, or poem lines."""
+
+    # 1. If Studio V2 canonical blocks provide valid token spans, respect block boundaries first.
+    block_spans: list[tuple[int, int]] = []
+    if page.blocks:
+        total = len(page.tokens)
+        for blk in page.blocks:
+            if not isinstance(blk, dict):
+                continue
+            if blk.get("decision", "KEEP") == "EXCLUDE" or blk.get("in_canonical", True) is False:
+                continue
+            btype = str(blk.get("block_type") or "")
+            if btype in {"PAGE_NUMBER", "RUNNING_HEADER", "PUBLISHER_META", "NOISE_OCR"}:
+                continue
+            src = blk.get("source_word_indices")
+            if isinstance(src, list) and src:
+                valid = sorted(
+                    i for i in src if isinstance(i, int) and not isinstance(i, bool) and 0 <= i < total
+                )
+                if valid and valid[-1] - valid[0] + 1 == len(valid):
+                    b_start, b_end = valid[0], valid[-1] + 1
+                    sub_start = b_start
+                    for idx in range(b_start, b_end):
+                        if page.tokens[idx].rstrip("\"'”’)»").endswith((".", "!", "?", "…")):
+                            block_spans.append((sub_start, idx + 1))
+                            sub_start = idx + 1
+                    if sub_start < b_end:
+                        block_spans.append((sub_start, b_end))
+        if block_spans:
+            return block_spans
+
+    # 2. For POEM pages (or newline-structured verses without sentence periods), align line breaks to tokens.
+    if (page.page_kind or "").upper() == "POEM" and "\n" in page.text:
+        line_spans: list[tuple[int, int]] = []
+        cursor = 0
+        total = len(page.tokens)
+        for raw_line in page.text.splitlines():
+            line_words = raw_line.split()
+            if not line_words or cursor >= total:
+                continue
+            end_cursor = min(total, cursor + len(line_words))
+            line_spans.append((cursor, end_cursor))
+            cursor = end_cursor
+        if line_spans:
+            # Pair short 3-4 word verse lines if needed so spans satisfy _MIN_SENTENCE_WORDS.._MAX_SENTENCE_WORDS
+            merged: list[tuple[int, int]] = []
+            idx = 0
+            while idx < len(line_spans):
+                s, e = line_spans[idx]
+                if (e - s) < _MIN_SENTENCE_WORDS and (idx + 1) < len(line_spans):
+                    _, e2 = line_spans[idx + 1]
+                    if (e2 - s) <= _MAX_SENTENCE_WORDS:
+                        merged.append((s, e2))
+                        idx += 2
+                        continue
+                merged.append((s, e))
+                idx += 1
+            return merged
 
     spans: list[tuple[int, int]] = []
     start = 0

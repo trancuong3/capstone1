@@ -3,13 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
     ChildProfile,
     ComprehensionAnswer,
     ComprehensionQuestion,
+    DifficultWordPracticeAttempt,
     Profile,
     ReadingEvent,
     ReadingSession,
@@ -17,6 +19,7 @@ from app.models import (
 from app.models.reading_comparison_report import ReadingComparisonReport
 from app.services.child_progress.metrics import (
     AnswerRow,
+    PracticeAttemptEvidenceRow,
     ReportRow,
     RetryEventRow,
     SessionRow,
@@ -26,6 +29,7 @@ MAX_SESSIONS = 2_000
 MAX_REPORTS = 1_500
 MAX_EVENTS = 5_000
 MAX_ANSWERS = 5_000
+MAX_PRACTICE_ATTEMPTS = 2_000
 
 
 class ChildProgressRepository:
@@ -117,6 +121,49 @@ class ChildProgressRepository:
             .limit(MAX_ANSWERS)
         )
         return [AnswerRow(*row) for row in result.all()]
+
+    async def practice_attempts(
+        self, child_id: UUID, since: datetime
+    ) -> list[PracticeAttemptEvidenceRow]:
+        try:
+            ready = await self.db.scalar(
+                select(text("to_regclass('public.difficult_word_practice_attempts')"))
+            )
+            if ready is None:
+                return []
+            async with self.db.begin_nested():
+                result = await self.db.execute(
+                    select(
+                        DifficultWordPracticeAttempt.Id,
+                        DifficultWordPracticeAttempt.SessionId,
+                        DifficultWordPracticeAttempt.NormalizedWord,
+                        DifficultWordPracticeAttempt.DisplayText,
+                        DifficultWordPracticeAttempt.AssessmentStatus,
+                        DifficultWordPracticeAttempt.SpokenTranscript,
+                        DifficultWordPracticeAttempt.CreatedAt,
+                    )
+                    .where(
+                        DifficultWordPracticeAttempt.ChildId == child_id,
+                        DifficultWordPracticeAttempt.CreatedAt >= since,
+                        DifficultWordPracticeAttempt.State == "COMPLETED",
+                    )
+                    .order_by(DifficultWordPracticeAttempt.CreatedAt.desc())
+                    .limit(MAX_PRACTICE_ATTEMPTS)
+                )
+                return [
+                    PracticeAttemptEvidenceRow(
+                        attempt_id=row[0],
+                        session_id=row[1],
+                        normalized_word=row[2] or "",
+                        display_text=row[3] or row[2] or "",
+                        assessment_status=row[4] or "",
+                        spoken_transcript=row[5],
+                        created_at=row[6],
+                    )
+                    for row in result.all()
+                ]
+        except SQLAlchemyError:
+            return []
 
     async def release(self) -> None:
         """End the read transaction so no DB slot is held during a slow AI call."""

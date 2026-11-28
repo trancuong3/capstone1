@@ -538,7 +538,8 @@
       "who": "Qui ou quel animal ?",
       "action": "Que fait-il ?",
       "where": "Où et quelle couleur ?"
-    }
+    },
+    "studioIllustrationBadge": "Illustration sans texte"
   },
   "karaokeRuntime": {
     "loopPlayFailed": "Lecture en boucle impossible. Appuyez sur Écouter pour réessayer.",

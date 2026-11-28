@@ -20,7 +20,7 @@ import {
 
 import { AppServicesContext } from "@/components/providers/app-services-provider";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
-import { Button } from "@/components/common/button";
+import { Button, ButtonLink } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
@@ -208,10 +208,13 @@ function WeeklyChart({
       <div aria-hidden="true" className="overflow-x-auto pb-0.5">
         <div className="flex h-16 min-w-full items-end gap-1.5 border-b border-border/80 pt-1 sm:gap-2">
           {weekly.map((week) => {
+            const hasActivity = week.minutes > 0 || week.sessions > 0;
             const barHeight =
               week.minutes > 0
                 ? Math.max(6, Math.round((week.minutes / maxMinutes) * 28))
-                : 3;
+                : hasActivity
+                  ? 6
+                  : 3;
             return (
               <div
                 className="flex h-full min-w-8 flex-1 flex-col justify-end text-center"
@@ -225,7 +228,7 @@ function WeeklyChart({
                 <div
                   className={cn(
                     "mx-auto mt-0.5 w-full max-w-8 rounded-t-[4px]",
-                    week.minutes > 0 ? "bg-primary/85" : "bg-border",
+                    hasActivity ? "bg-primary/85" : "bg-border",
                   )}
                   style={{ height: `${barHeight}px` }}
                   title={t("overview.assessmentCard.weekBarTitle", {
@@ -402,6 +405,9 @@ export function ChildProgressAssessmentCard({
       })
       .then((next) => {
         if (requestRef.current !== request || controller.signal.aborted) return;
+        if (refreshControllerRef.current === controller) {
+          refreshControllerRef.current = null;
+        }
         const aiSucceeded = next.assessment.source === "AI";
         setView({
           status: "ready",
@@ -412,6 +418,9 @@ export function ChildProgressAssessmentCard({
       })
       .catch((error: unknown) => {
         if (requestRef.current !== request || controller.signal.aborted) return;
+        if (refreshControllerRef.current === controller) {
+          refreshControllerRef.current = null;
+        }
         setView((current) =>
           current.status === "ready"
             ? {
@@ -565,7 +574,9 @@ function AssessmentBody({
   const actionsFor = (audience: "PARENT" | "CHILD") =>
     assessment.actions.filter((action) => action.audience === audience);
 
-  const hasWeekly = data.weekly.some((week) => week.minutes > 0);
+  const hasWeekly = data.weekly.some(
+    (week) => week.minutes > 0 || week.sessions > 0,
+  );
   const hasDetails =
     assessment.strengths.length > 0 ||
     assessment.weaknesses.length > 0 ||
@@ -713,7 +724,9 @@ function AssessmentBody({
               size="admin"
               variant="secondary"
             >
-              <RefreshCw aria-hidden="true" className="size-3.5" />
+              {view.ai === "writing" ? null : (
+                <RefreshCw aria-hidden="true" className="size-3.5" />
+              )}
               {view.ai === "writing"
                 ? t("overview.assessmentCard.aiWriting")
                 : t("overview.assessmentCard.aiRefresh")}
@@ -757,6 +770,75 @@ function AssessmentBody({
             </p>
           ) : null}
         </div>
+
+        {data.phonological_patterns && data.phonological_patterns.length > 0 ? (
+          <section
+            className="space-y-3 rounded-control border border-primary/25 bg-gradient-to-r from-cream/85 via-white to-sky/45 p-4"
+            data-testid="child-progress-phonology-patterns"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="space-y-0.5">
+                <h3 className="text-sm font-extrabold text-ink">
+                  {t("overview.assessmentCard.phonologyTitle")}
+                </h3>
+                <p className="text-xs text-muted">
+                  {t("overview.assessmentCard.phonologyDisclaimer")}
+                </p>
+              </div>
+              <ButtonLink
+                href={`/reports/difficult-words?childId=${encodeURIComponent(data.child_id)}&sandbox=1`}
+                size="compact"
+                variant="secondary"
+              >
+                {t("overview.assessmentCard.openMinimalPairSandbox")}
+              </ButtonLink>
+            </div>
+            <div className="grid gap-2.5 sm:grid-cols-2">
+              {data.phonological_patterns.map((pattern) => (
+                <div
+                  className="space-y-1.5 rounded-control border border-border bg-white p-3"
+                  key={pattern.pattern_key}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <strong
+                      className="viread-learning-content text-sm font-extrabold text-ink"
+                      dir="ltr"
+                      lang="vi"
+                    >
+                      {pattern.title_vi}
+                    </strong>
+                    <span className="rounded-full bg-sky px-2 py-0.5 text-[11px] font-bold text-primary-hover">
+                      {t("overview.assessmentCard.phonologySessionsBadge", {
+                        sessions: pattern.distinct_sessions,
+                      })}
+                    </span>
+                  </div>
+                  <p
+                    className="viread-learning-content text-xs leading-relaxed text-muted"
+                    dir="ltr"
+                    lang="vi"
+                  >
+                    {pattern.summary_vi}
+                  </p>
+                  {pattern.examples.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {pattern.examples.slice(0, 3).map((ex) => (
+                        <span
+                          className="viread-learning-content rounded-full border border-border bg-cream/70 px-2.5 py-0.5 text-xs font-bold text-ink"
+                          dir="ltr"
+                          key={`${ex.expected_word}-${ex.spoken_word}`}
+                          lang="vi"
+                        >
+                          {ex.expected_word} → {ex.spoken_word}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {hasDetails ? (
           <details className="group rounded-control bg-canvas/65 px-3 py-1.5">

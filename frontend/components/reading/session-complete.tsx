@@ -23,6 +23,7 @@ import Image from "next/image";
 import { BookChildHeader } from "@/components/books/book-child-header";
 import { Button, ButtonLink } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
+import { ReadingPassportPanel } from "@/components/dashboard/reading-passport-panel";
 import { SessionReadingReports } from "@/components/reports/session-reading-reports";
 import { ReadingAssessmentSummary } from "@/components/reports/reading-assessment-summary";
 import { StatusMessage } from "@/components/common/status-message";
@@ -39,6 +40,7 @@ interface SessionCompleteProps {
   bookId: string;
   startPageId?: string;
   endPageId?: string;
+  lastPageId?: string;
   child: ChildProfileDTO;
   sessionId: string;
   summary: ReadingCompletionSummaryUI;
@@ -52,6 +54,7 @@ export function SessionComplete({
   bookId,
   startPageId,
   endPageId,
+  lastPageId,
   child,
   sessionId,
   summary,
@@ -688,6 +691,56 @@ export function SessionComplete({
             )}
           </div>
         )}
+
+        <ReadingPassportPanel
+          allowParentRecording={false}
+          childAlias={child.alias}
+          childId={child.id}
+          collapsible
+          defaultExpanded={false}
+        />
+
+        {lastPageId || startPageId ? (
+          <div
+            className="mx-auto w-full max-w-[440px] rounded-card border border-primary/25 bg-sky/40 p-4 text-center"
+            data-testid="multimodal-bridge-panel"
+          >
+            <p className="text-xs font-extrabold uppercase tracking-wide text-primary-hover">
+              {t("multimodalBridge.title")}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              {t("multimodalBridge.subtitle")}
+            </p>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <ButtonLink
+                className="w-auto"
+                href={`/entertainment/picture-description?${new URLSearchParams(
+                  {
+                    childId: child.id,
+                    bookId,
+                    pageId: (lastPageId ?? startPageId)!,
+                  },
+                ).toString()}`}
+                size="compact"
+                variant="secondary"
+              >
+                {t("multimodalBridge.pictureCta")}
+              </ButtonLink>
+              <ButtonLink
+                className="w-auto"
+                href={`/entertainment/sentence-shooter?${new URLSearchParams({
+                  childId: child.id,
+                  bookId,
+                  pageId: (lastPageId ?? startPageId)!,
+                }).toString()}`}
+                size="compact"
+                variant="secondary"
+              >
+                {t("multimodalBridge.shooterCta")}
+              </ButtonLink>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-2 pt-0.5 sm:grid-cols-2 lg:grid-cols-3">
           <ButtonLink

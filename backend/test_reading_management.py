@@ -127,6 +127,21 @@ class ReadingManagementTests(unittest.TestCase):
             completed_metric([row], "SESSIONS", now, cycle_start, now), 1
         )
 
+    def test_completed_metric_caps_multi_day_idle_sessions_and_handles_naive_timestamps(self):
+        now = datetime(2026, 10, 22, 12, tzinfo=timezone.utc)
+        abandoned = session(
+            "COMPLETED",
+            datetime(2026, 10, 19, 8, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 22, 10, 0, tzinfo=timezone.utc),
+        )
+        normal_naive = session(
+            "FINISHED",
+            datetime(2026, 10, 20, 9, 0),
+            datetime(2026, 10, 20, 9, 25),
+        )
+        self.assertEqual(completed_metric([abandoned], "MINUTES", now), 90)
+        self.assertEqual(completed_metric([abandoned, normal_naive], "MINUTES", now), 115)
+
     def test_parent_cannot_list_goals_for_child_not_owned_by_them(self):
         service = ReadingManagementService(OwnershipRepository(owned=False))
         with self.assertRaises(ManagementNotFound):

@@ -199,20 +199,20 @@ VALID_VIETNAMESE_UNTONED_RHYMES: frozenset[str] = frozenset(
         "oay", "oeo", "uây", "iêu", "yêu", "ươu",
         # -m / -n / -ng / -nh rhymes
         "am", "ăm", "âm", "em", "êm", "im", "om", "ôm", "ơm", "um", "ưm",
-        "iêm", "yêm", "uôm", "ươm",
+        "iêm", "yêm", "uôm", "ươm", "oam", "oăm", "uâm", "uêm", "uym",
         "an", "ăn", "ân", "en", "ên", "in", "on", "ôn", "ơn", "un", "ưn",
-        "oan", "oăn", "oen", "uan", "uân", "uyên", "iên", "yên", "uôn", "ươn",
+        "oan", "oăn", "oen", "uan", "uân", "uyên", "uyn", "iên", "yên", "uôn", "ươn",
         "ang", "ăng", "âng", "eng", "ong", "ông", "ung", "ưng",
-        "oang", "oăng", "uang", "uâng", "iêng", "yêng", "uông", "ương",
+        "oang", "oăng", "oong", "oeng", "uang", "uâng", "iêng", "yêng", "uông", "ương",
         "anh", "ênh", "inh", "oanh", "uênh", "uynh",
         # Checked codas (-c / -ch / -p / -t)
-        "ac", "ăc", "âc", "ec", "oc", "ôc", "uc", "ưc",
-        "oac", "oăc", "uôc", "iêc", "ươc",
+        "ac", "ăc", "âc", "ec", "êc", "oc", "ôc", "uc", "ưc",
+        "oac", "oăc", "oec", "ooc", "uâc", "uêc", "uôc", "iêc", "yêc", "ươc",
         "ach", "êch", "ich", "oach", "uêch", "uych",
-        "ap", "ăp", "âp", "ep", "êp", "ip", "op", "ôp", "ơp", "up",
-        "oap", "uâp", "iêp", "yêp", "ươp",
+        "ap", "ăp", "âp", "ep", "êp", "ip", "op", "ôp", "ơp", "up", "ưp",
+        "oap", "oăp", "oep", "uâp", "uôp", "uyp", "iêp", "yêp", "ươp",
         "at", "ăt", "ât", "et", "êt", "it", "ot", "ôt", "ơt", "ut", "ưt",
-        "oat", "oăt", "oet", "uat", "uât", "uyt", "uyêt", "iêt", "yêt", "uôt", "ươt",
+        "oat", "oăt", "oet", "uat", "uât", "uêt", "uyt", "uyêt", "iêt", "yêt", "uôt", "ươt",
     }
 )
 

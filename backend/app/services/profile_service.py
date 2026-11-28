@@ -1,7 +1,7 @@
 """Business orchestration for the authenticated user's profile."""
 
 import asyncio
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 from uuid import UUID
@@ -282,22 +282,29 @@ class ProfileService:
         }
 
     @staticmethod
-    def _serialize_latest_session(session: Any, book_title: str) -> dict[str, Any]:
+    def _serialize_latest_session(
+        session: Any, book_title: str, *, now: datetime | None = None
+    ) -> dict[str, Any]:
+        from app.services.child_progress.metrics import MAX_SESSION_MINUTES
+
         started_at = session.StartedAt
         ended_at = session.EndedAt
-        duration_ms = None
-        if ended_at is not None and started_at is not None:
+        start_utc: datetime | None = None
+        if started_at is not None:
             start_utc = (
-                started_at
+                started_at.astimezone(timezone.utc)
                 if started_at.tzinfo is not None
                 else started_at.replace(tzinfo=timezone.utc)
             )
+        duration_ms = None
+        if ended_at is not None and start_utc is not None:
             end_utc = (
-                ended_at
+                ended_at.astimezone(timezone.utc)
                 if ended_at.tzinfo is not None
                 else ended_at.replace(tzinfo=timezone.utc)
             )
-            duration_ms = max(0, int((end_utc - start_utc).total_seconds() * 1000))
+            raw_ms = max(0, (end_utc - start_utc) // timedelta(milliseconds=1))
+            duration_ms = min(raw_ms, MAX_SESSION_MINUTES * 60 * 1000)
 
         raw_state = str(session.State or "")
         if raw_state in ("FINISHED", "COMPLETED"):
@@ -315,7 +322,20 @@ class ProfileService:
         else:
             wire_state = "PAGE_READY"
 
-        resumable = ended_at is None and wire_state not in ("FINISHED", "ABORTED")
+        reference_now = now if now is not None else datetime.now(timezone.utc)
+        if reference_now.tzinfo is None:
+            reference_now = reference_now.replace(tzinfo=timezone.utc)
+        else:
+            reference_now = reference_now.astimezone(timezone.utc)
+        is_recent = (
+            start_utc is None
+            or (reference_now - start_utc) <= timedelta(hours=12)
+        )
+        resumable = (
+            ended_at is None
+            and wire_state not in ("FINISHED", "ABORTED")
+            and is_recent
+        )
         return {
             "session_id": session.Id,
             "child_id": session.ChildId,

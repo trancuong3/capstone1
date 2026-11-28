@@ -12,6 +12,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { ChildSelector } from "@/components/reports/child-selector";
 import { DifficultWordBookCard } from "@/components/reports/difficult-word-book-card";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
+import { MinimalPairSandbox } from "@/components/reading/minimal-pair-sandbox";
 import { ReportPageHeader } from "@/components/reports/report-page-header";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -552,6 +553,16 @@ export function DifficultWordsScreen({
         />
       ) : (
         <>
+          <MinimalPairSandbox
+            childAlias={state.child.alias}
+            childId={state.child.id}
+            days={Math.min(90, Math.max(7, periodDays))}
+            initialOpen={
+              typeof window !== "undefined" &&
+              new URLSearchParams(window.location.search).get("sandbox") === "1"
+            }
+          />
+
           <div className="flex flex-col gap-3.5 rounded-card border border-border bg-white p-4 shadow-2xs sm:p-5">
             <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
               <div className="min-w-0">

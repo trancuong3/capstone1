@@ -50,11 +50,15 @@ import {
   SPEED_MIN,
   SPEED_STEP,
   getSpeechPreferences,
+  getSpeechPreferencesMeta,
 } from "@/lib/reading/speech-preferences";
+import { detectBrowserWasmTtsSupport } from "@/lib/reading/browser-wasm-tts";
+import { warmWasmTtsIfNeeded } from "@/lib/reading/voice-preloader";
 import {
   fetchVoiceEngineHealth,
   getBrowserOnlineStatus,
   getCachedVoiceEngineHealth,
+  isPermanentlyHostedLocalUnconfigured,
   subscribeBrowserOnlineStatus,
   subscribeVoiceEngineHealth,
 } from "@/lib/reading/voice-engine-status";
@@ -311,9 +315,35 @@ export function ReadingVoiceSettings({
           storedVoice &&
           !data.voices.some((voice) => voice.voice_id === storedVoice)
         ) {
+          const preservedGender = resolveVoiceGender(
+            storedVoice,
+            getSpeechPreferencesMeta().gender,
+          );
+          const preservedRegion = inferRegionFromVoiceId(
+            storedVoice,
+            getVoicePolicyPreferences().region,
+          );
+          const fallbackVoice =
+            data.voices.find(
+              (v) =>
+                resolveVoiceRegion(v) === preservedRegion &&
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            data.voices.find(
+              (v) =>
+                resolveVoiceGender(v.voice_id, v.gender) === preservedGender,
+            ) ??
+            null;
+          const fallbackVoiceId =
+            fallbackVoice && fallbackVoice.voice_id !== data.default_voice_id
+              ? fallbackVoice.voice_id
+              : null;
           setRemovedVoiceNotice(t("settings.savedVoiceResetNotice"));
-          update({ voiceId: null, gender: "female" });
-          syncPausedSessionLock(null);
+          update({
+            voiceId: fallbackVoiceId,
+            gender: fallbackVoiceId ? preservedGender : "female",
+          });
+          syncPausedSessionLock(fallbackVoiceId);
         }
         setLoadState({ status: "ready", data });
       })
@@ -379,6 +409,12 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
+    const targetGender = selectedOption
+      ? resolveVoiceGender(selectedOption.voice_id, selectedOption.gender)
+      : value.voiceId === null
+        ? "female"
+        : resolveVoiceGender(explicitVoiceId ?? storedVoiceId);
+    void warmWasmTtsIfNeeded(targetGender, voiceHealth ?? undefined);
   }
 
   function selectTeacherGender(nextGender: VoiceGender) {
@@ -427,6 +463,7 @@ export function ReadingVoiceSettings({
           ? (lockInput) => voiceStudio.updateSessionVoiceLock!(lockInput)
           : undefined,
     });
+    void warmWasmTtsIfNeeded(nextGender, voiceHealth ?? undefined);
   }
 
   function changeProviderPolicy(
@@ -1030,13 +1067,18 @@ export function ReadingVoiceSettings({
               </div>
             )}
             {loadState.status === "ready" &&
+            !detectBrowserWasmTtsSupport().supported &&
             !(
-              voiceHealth?.elevenlabs?.tts_configured ||
-              voiceHealth?.elevenlabs?.stt_configured
+              policy.providerMode === "local_with_google_fallback" &&
+              ((policy.allowGoogleTtsFallback &&
+                voiceHealth?.elevenlabs?.tts_configured) ||
+                (policy.allowGoogleSttFallback &&
+                  voiceHealth?.elevenlabs?.stt_configured))
             ) &&
-            (voiceHealth
-              ? !voiceHealth.local.available
-              : loadState.data.local_worker_ready === false)
+            (isPermanentlyHostedLocalUnconfigured(voiceHealth) ||
+              (voiceHealth
+                ? !voiceHealth.local.available
+                : loadState.data.local_worker_ready === false))
               ? (() => {
                   const cachedIds =
                     loadState.data.cached_voice_ids !== undefined

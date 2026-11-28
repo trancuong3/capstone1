@@ -320,10 +320,17 @@ def _resolve_local_voice_region_gender(voice_id: str) -> tuple[str, str]:
             gender = str(item.get("gender") or "female")
             return region, gender
     lower = voice_id.lower()
-    if "south" in lower or "nam" in lower:
-        region = "south"
-    elif "central" in lower or "trung" in lower:
+    if "central" in lower or "trung" in lower:
         region = "central"
+    elif (
+        "south" in lower
+        or "mien_nam" in lower
+        or "mien-nam" in lower
+        or "nam_bo" in lower
+        or "wavenet_b" in lower
+        or "wavenet_c" in lower
+    ):
+        region = "south"
     if any(
         marker in lower
         for marker in (
@@ -926,14 +933,18 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
-                    _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    _el_region, req_gender = _resolve_local_voice_region_gender(voice_id)
                     el_kwargs: dict[str, Any] = {
                         "text": text,
                         "requested_voice_id": el_voice_id,
                         "speed": speed,
                     }
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize, "expected_gender"):
-                        el_kwargs["expected_gender"] = el_expected_gender
+                        el_kwargs["expected_gender"] = req_gender
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize, "allow_default_fallback"
+                    ):
+                        el_kwargs["allow_default_fallback"] = False
                     try:
                         el_audio = await self.elevenlabs.synthesize(**el_kwargs)
                     except VoiceProviderError as el_err:
@@ -1290,6 +1301,7 @@ class VoiceOrchestrator:
                 if el_voice_id:
                     t_el = time.perf_counter()
                     _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
                     el_timed_kwargs: dict[str, Any] = {
                         "words": words,
                         "requested_voice_id": el_voice_id,
@@ -1299,6 +1311,10 @@ class VoiceOrchestrator:
                         el_timed_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_timed, "region"):
                         el_timed_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_timed, "allow_default_fallback"
+                    ):
+                        el_timed_kwargs["allow_default_fallback"] = False
                     try:
                         el_timed = await self.elevenlabs.synthesize_timed(**el_timed_kwargs)
                     except VoiceProviderError as el_err:
@@ -1570,6 +1586,7 @@ class VoiceOrchestrator:
                 if el_voice_id:
                     t_el = time.perf_counter()
                     _el_region, el_expected_gender = _resolve_local_voice_region_gender(voice_id)
+                    req_gender = el_expected_gender
                     el_phonics_kwargs: dict[str, Any] = {
                         "steps": steps,
                         "requested_voice_id": el_voice_id,
@@ -1579,6 +1596,10 @@ class VoiceOrchestrator:
                         el_phonics_kwargs["expected_gender"] = el_expected_gender
                     if self._fn_accepts_kwarg(self.elevenlabs.synthesize_phonics, "region"):
                         el_phonics_kwargs["region"] = self._voice_region(voice_id)
+                    if req_gender == "male" and self._fn_accepts_kwarg(
+                        self.elevenlabs.synthesize_phonics, "allow_default_fallback"
+                    ):
+                        el_phonics_kwargs["allow_default_fallback"] = False
                     try:
                         el_phonics = await self.elevenlabs.synthesize_phonics(**el_phonics_kwargs)
                     except VoiceProviderError as el_err:

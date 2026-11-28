@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "建议练习词汇（{days} 天）",
       "heardAsCount": "孩子常读成“{heardAs}”（{times} 次）",
       "recordedCount": "记录 {times} 次",
-      "heardAsInline": "（读成“{heardAs}”）"
+      "heardAsInline": "（读成“{heardAs}”）",
+      "phonologyTitle": "朗读中常需巩固的声调与音节对比",
+      "phonologyDisclaimer": "根据近期朗读记录汇总的轻松热身建议（非医学诊断）。",
+      "openMinimalPairSandbox": "60秒对立词练习",
+      "phonologySessionsBadge": "{sessions} 次朗读"
     },
     "firstPassSummary": {
       "regionAria": "首次尝试与练习结果",
@@ -670,7 +674,8 @@
     "focusAria": "筛选阅读管理板块",
     "focusPlans": "计划",
     "focusGoals": "目标",
-    "focusReminders": "提醒"
+    "focusReminders": "提醒",
+    "androidReminderBody": "到时间和 {alias} 一起在 ViRead 读书啦！"
   },
   "entertainmentSummary": {
     "loading": "正在汇总 {childName} 的趣味学习进度…",
@@ -692,5 +697,20 @@
     "karaokeWeakSegmentsTitle": "建议以 0.85 倍速慢练的歌词片段",
     "openSongAction": "打开歌曲",
     "homeTipsTitle": "家长居家陪伴小建议"
+  },
+  "printCertificate": {
+    "brandTagline": "家庭阅读成长报告",
+    "printA4Action": "打印 A4 报告",
+    "downloadCertificateAction": "下载里程碑证书 (.png)",
+    "certificateHeading": "阅读成长里程碑证书",
+    "certificateSubtitle": "表彰与家人坚持不懈的越南语朗读成长之旅",
+    "awardedTo": "欣然授予热爱阅读的小读者",
+    "progressAchievement": "{alias} 每周坚持朗读练习，不断丰富越南语词汇！",
+    "progressStatsLine": "完成练习：{sessions} 次 · 累计朗读：{words} 词 · 平均准确率：{accuracy}",
+    "sessionReaderFallback": "勤奋的小读者",
+    "sessionAchievement": "清晰自信地完成本次朗读练习！",
+    "sessionStatsLine": "已读页数：{pages} · 总词数：{words} · 最高准确率：{accuracy}",
+    "issuedOn": "颁发日期：{date}",
+    "encouragementFooter": "今天读过的每一页书，都是在家人陪伴下播下的温暖知识种子。"
   }
 }

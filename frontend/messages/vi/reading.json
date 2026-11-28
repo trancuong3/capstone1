@@ -174,6 +174,15 @@
       "no_device": "Không tìm thấy microphone trên thiết bị. Hãy kết nối microphone rồi thử lại.",
       "device_busy": "Microphone đang được ứng dụng khác sử dụng. Hãy đóng ứng dụng đó rồi thử lại.",
       "error": "Không thể kiểm tra microphone. Vui lòng kiểm tra kết nối an toàn và cài đặt trình duyệt rồi thử lại."
+    },
+    "warmupStory": {
+      "spacedEyebrow": "Ôn từ khó ngắt quãng (1–3–7 ngày)",
+      "starterEyebrow": "Khởi động nhẹ trước giờ đọc",
+      "title": "Truyện ngắn khởi động 2 câu",
+      "listenStory": "Nghe truyện mẫu",
+      "stopListen": "Dừng nghe",
+      "refreshStory": "Đổi truyện khởi động mới",
+      "focusWordsLabel": "Từ lồng ghép hôm nay"
     }
   },
   "ready": {
@@ -459,5 +468,31 @@
     "keepTrying": "Bé thử đọc chậm và rõ từng tiếng nhé.",
     "wordsRead": "{count, plural, =0 {Chưa đọc từ nào} other {Đã đọc # từ}}"
   },
-  "learningContentNotice": "Nội dung sách và luyện đọc tiếng Việt luôn hiển thị theo chiều trái sang phải để giữ đúng chính tả."
+  "learningContentNotice": "Nội dung sách và luyện đọc tiếng Việt luôn hiển thị theo chiều trái sang phải để giữ đúng chính tả.",
+  "pageKinds": {
+    "TEXT_ONLY": "Văn bản",
+    "TEXT_AND_IMAGE": "Truyện minh họa",
+    "IMAGE_PRIMARY": "Tranh chính",
+    "COMIC": "Truyện tranh / Hội thoại",
+    "POEM": "Thơ thiếu nhi",
+    "EXERCISE": "Bài luyện tập",
+    "MULTI_COLUMN": "Nhiều cột",
+    "TEXT_OVER_IMAGE": "Chữ trên tranh",
+    "LOW_QUALITY": "Cần rà soát"
+  },
+  "duet": {
+    "toggleLabel": "Đọc phân vai Ba Mẹ & Bé",
+    "toggleActive": "Đang bật Đọc phân vai",
+    "parentTurnBadge": "Lượt ba mẹ đọc dẫn",
+    "childTurnBadge": "Tới lượt bé đọc!",
+    "listenParentSample": "Nghe mẫu lượt này",
+    "completeParentTurn": "Ba mẹ đã đọc — Tới lượt bé",
+    "turnCounter": "Lượt {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "Khám phá tranh & câu của trang sách",
+    "subtitle": "Tiếp tục mở rộng vốn từ và câu văn từ chính trang sách bé vừa đọc.",
+    "pictureCta": "Tả tranh trang sách",
+    "shooterCta": "Xếp câu trang sách"
+  }
 }

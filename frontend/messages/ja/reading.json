@@ -174,6 +174,15 @@
       "no_device": "デバイスにマイクが見つかりません。マイクを接続して、もう一度お試しください。",
       "device_busy": "マイクが他のアプリで使用中です。そのアプリを閉じて、もう一度お試しください。",
       "error": "マイクを確認できません。安全な接続とブラウザ設定をご確認のうえ再試行してください。"
+    },
+    "warmupStory": {
+      "spacedEyebrow": "間隔反復ワード復習（1・3・7日）",
+      "starterEyebrow": "読書前のやさしいウォームアップ",
+      "title": "ウォームアップ・ショートストーリー",
+      "listenStory": "お話を聞く",
+      "stopListen": "停止",
+      "refreshStory": "新しいお話にする",
+      "focusWordsLabel": "今日ちりばめた言葉"
     }
   },
   "ready": {
@@ -459,5 +468,31 @@
     "keepTrying": "ゆっくり、一音ずつはっきりと読んでみましょう。",
     "wordsRead": "{count, plural, =0 {単語未読} other {#単語読み上げ済み}}"
   },
-  "learningContentNotice": "ViReadの読書コンテンツは、正しい綴りを維持するため左から右へ表示されます。"
+  "learningContentNotice": "ViReadの読書コンテンツは、正しい綴りを維持するため左から右へ表示されます。",
+  "pageKinds": {
+    "TEXT_ONLY": "本文",
+    "TEXT_AND_IMAGE": "挿絵付き物語",
+    "IMAGE_PRIMARY": "イラスト中心",
+    "COMIC": "マンガ・会話",
+    "POEM": "子どもの詩",
+    "EXERCISE": "練習ページ",
+    "MULTI_COLUMN": "段組みページ",
+    "TEXT_OVER_IMAGE": "絵の上のテキスト",
+    "LOW_QUALITY": "要確認"
+  },
+  "duet": {
+    "toggleLabel": "親子で交互読み",
+    "toggleActive": "交互読みオン",
+    "parentTurnBadge": "おうちの人のリード番",
+    "childTurnBadge": "お子さまが読む番です！",
+    "listenParentSample": "お手本を聞く",
+    "completeParentTurn": "読んだので子どもの番へ",
+    "turnCounter": "パート {current}/{total}"
+  },
+  "multimodalBridge": {
+    "title": "このページの挿絵と文であそぶ",
+    "subtitle": "今読んだページから語彙や文づくりを楽しく広げましょう。",
+    "pictureCta": "ページの絵を説明する",
+    "shooterCta": "ページの文を並べ替える"
+  }
 }

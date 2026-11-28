@@ -541,6 +541,7 @@ class ParentPrivateBookService:
         submissions: list[ParentBookPageSubmission],
         readable_for_children: bool,
         ocr_contribution: Any | None = None,
+        readability: Any | None = None,
     ) -> ParentPrivateBookSummaryRead:
         pending_count = sum(
             1 for s in submissions if s.WorkflowStatus in ("CHECKING", "PENDING_ADMIN", "NEEDS_RECHECK")
@@ -599,6 +600,7 @@ class ParentPrivateBookService:
             has_held_multipage_batch=has_held_multipage,
             privacy_notice=privacy_notice,
             ocr_contribution=ocr_contribution,
+            readability=readability,
             created_at=book.CreatedAt,
         )
 
@@ -787,6 +789,34 @@ class ParentPrivateBookService:
         if not ready_only:
             readable_ids = await self._readable_private_book_ids(book_ids, actor_id)
 
+        texts_by_book: dict[UUID, list[str]] = {}
+        committed_book_ids = [
+            b_id for b_id in book_ids if committed_map.get(b_id, 0) > 0
+        ]
+        if (
+            isinstance(getattr(self, "db", None), AsyncSession)
+            and committed_book_ids
+        ):
+            try:
+                text_rows = await self.db.execute(
+                    select(BookPage.BookId, PageRevision.VerifiedText)
+                    .join(PageRevision, PageRevision.Id == BookPage.CurrentVerifiedRevisionId)
+                    .where(
+                        BookPage.BookId.in_(committed_book_ids),
+                        BookPage.LifecycleStatus == "ACTIVE",
+                        PageRevision.VerificationStatus == "VERIFIED",
+                    )
+                    .order_by(BookPage.BookId, BookPage.PageNumber)
+                )
+                for b_id, v_text in text_rows.all():
+                    if v_text:
+                        texts_by_book.setdefault(b_id, []).append(str(v_text))
+            except Exception:
+                texts_by_book = {}
+
+        from app.schemas.parent_private_book import VietnameseReadabilityRead
+        from app.services.vietnamese_readability import analyse_vietnamese_readability
+
         results: list[ParentPrivateBookSummaryRead] = []
         for book in books:
             if ready_only:
@@ -795,6 +825,18 @@ class ParentPrivateBookService:
                 readable = book.Id in readable_ids
             else:
                 readable = await self.repo.is_private_book_readable(book.Id, actor_id)
+            book_texts = texts_by_book.get(book.Id, [])
+            book_readability = (
+                VietnameseReadabilityRead(
+                    **analyse_vietnamese_readability(
+                        "\n".join(book_texts),
+                        min_grade=int(book.MinGrade),
+                        max_grade=int(book.MaxGrade),
+                    ).to_dict()
+                )
+                if book_texts
+                else None
+            )
             results.append(
                 self._serialize_book_summary(
                     book,
@@ -802,6 +844,7 @@ class ParentPrivateBookService:
                     submissions=subs_by_book.get(book.Id, []),
                     readable_for_children=readable,
                     ocr_contribution=contrib_map.get(book.Id),
+                    readability=book_readability,
                 )
             )
         return results
@@ -883,24 +926,56 @@ class ParentPrivateBookService:
             (sub.Id, sub.SourceStoragePath, sub.OwnerParentId)
             for sub in submissions
         ]
-        pages_dto = [
-            ParentPrivatePageRead(
-                page_id=page.Id,
-                page_number=int(page.PageNumber),
-                current_verified_revision_id=page.CurrentVerifiedRevisionId,
-                verified_text=((rev.VerifiedText or "") if rev else ""),
-                verified_text_preview=((rev.VerifiedText or "")[:240] if rev else ""),
-                image_url="",
-                created_at=page.CreatedAt,
+        from app.schemas.parent_private_book import VietnameseReadabilityRead
+        from app.services.vietnamese_readability import analyse_vietnamese_readability
+
+        pages_dto = []
+        committed_texts: list[str] = []
+        for page, rev in pages_rows:
+            v_text = (rev.VerifiedText or "") if rev else ""
+            if v_text.strip():
+                committed_texts.append(v_text)
+            page_readability = (
+                VietnameseReadabilityRead(
+                    **analyse_vietnamese_readability(
+                        v_text,
+                        min_grade=int(book.MinGrade),
+                        max_grade=int(book.MaxGrade),
+                    ).to_dict()
+                )
+                if v_text.strip()
+                else None
             )
-            for page, rev in pages_rows
-        ]
+            pages_dto.append(
+                ParentPrivatePageRead(
+                    page_id=page.Id,
+                    page_number=int(page.PageNumber),
+                    current_verified_revision_id=page.CurrentVerifiedRevisionId,
+                    verified_text=v_text,
+                    verified_text_preview=v_text[:240],
+                    image_url="",
+                    readability=page_readability,
+                    created_at=page.CreatedAt,
+                )
+            )
+        book_readability = (
+            VietnameseReadabilityRead(
+                **analyse_vietnamese_readability(
+                    "\n".join(committed_texts),
+                    min_grade=int(book.MinGrade),
+                    max_grade=int(book.MaxGrade),
+                ).to_dict()
+            )
+            if committed_texts
+            else None
+        )
         summary = self._serialize_book_summary(
             book,
             committed_count=len(pages_rows),
             submissions=submissions,
             readable_for_children=readable,
             ocr_contribution=contrib_map.get(book.Id),
+            readability=book_readability,
         )
         submissions_dto = [
             self._serialize_submission(
