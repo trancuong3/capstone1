@@ -61,9 +61,8 @@ describe("ViReadAndroid/1.0 mobile WebView proxy and route-policy checks", () =>
   });
 
   it("handles / and /login in ViReadAndroid/1.0 WebView", async () => {
-    const guestPass = NextResponse.next();
     mocks.refreshSupabaseAuth.mockResolvedValueOnce({
-      response: guestPass,
+      response: NextResponse.next(),
       userId: null,
     });
 

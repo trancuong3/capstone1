@@ -571,8 +571,14 @@ async function shouldRetryColdStartResponse(
     return false;
   }
   const detail = await extractBackendDetail(response);
-  // Only treat unstructured/gateway 502/503/504 responses as cold starts; never
-  // retry structured application domain errors such as async OCR 504 or DB busy 503.
+  // Structured FastAPI JSON 503 responses (e.g. DB busy, voice offline) are
+  // application-level backpressure and must never be auto-retried; only
+  // unstructured/gateway 503 responses (detail === null) count as cold starts.
+  if (response.status === 503) {
+    return detail === null;
+  }
+  // Only treat unstructured/gateway 502/504 responses as cold starts; never
+  // retry structured application domain errors such as async OCR 504 responses.
   return detail === null || !isKnownBackendDetail(detail);
 }
 
@@ -705,8 +711,7 @@ function invalidateReadCacheForMutationPath(path: string): void {
   invalidateApiReadCache();
 }
 
-const COLD_START_RETRY_STATUSES = new Set([502, 504]);
-const COLD_START_GET_RETRY_STATUSES = new Set([502, 503, 504]);
+const COLD_START_RETRY_STATUSES = new Set([502, 503, 504]);
 
 /** Only public DTOs validated by the supplied schema can reach a component. */
 export interface RequestApiOptions {
@@ -824,7 +829,7 @@ export async function requestApi<T>(
 
       let response: Response | null = null;
       let attemptError: ServiceError | null = null;
-      let attemptCanColdStartRetry = false;
+      let allowColdStartAutoRetry = false;
 
       try {
         timeoutId = setTimeout(() => {
@@ -842,8 +847,8 @@ export async function requestApi<T>(
         });
       } catch (error) {
         if (fetchSignal?.aborted && !timedOut) throw error;
+        allowColdStartAutoRetry = true;
         attemptError = failure(0, "", true);
-        attemptCanColdStartRetry = true;
       } finally {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
         fetchSignal?.removeEventListener("abort", onParentAbort);
@@ -870,18 +875,15 @@ export async function requestApi<T>(
           const coldStartGateway =
             !COLD_START_RETRY_STATUSES.has(response.status) ||
             (await shouldRetryColdStartResponse(response));
+          allowColdStartAutoRetry =
+            COLD_START_RETRY_STATUSES.has(response.status) && coldStartGateway;
           attemptError = failure(
             response.status,
             requestId,
-            response.status >= 500 && coldStartGateway,
+            response.status >= 500 &&
+              (response.status === 503 || coldStartGateway),
             backendMessage,
           );
-          attemptCanColdStartRetry =
-            method === "GET" &&
-            (await shouldRetryColdStartResponse(
-              response,
-              COLD_START_GET_RETRY_STATUSES,
-            ));
         } else if (response.status === 204 || response.status === 205) {
           const parsed = schema.safeParse(undefined);
           if (!parsed.success) {
@@ -914,7 +916,7 @@ export async function requestApi<T>(
         method === "GET" &&
         attempt < maxRetries &&
         !fetchSignal?.aborted &&
-        attemptCanColdStartRetry &&
+        allowColdStartAutoRetry &&
         isColdStartRetryableGetError(lastError)
       ) {
         const remainingAfterAttempt = deadlineAt - Date.now();

@@ -159,12 +159,12 @@ class BackendOcrClient:
     ) -> dict[str, Any]:
         max_attempts = max(1, min(3, self._completion_retry_attempts))
         last_exc: Exception | None = None
+        request_kwargs: dict[str, Any] = {"json": json_body}
+        if timeout_seconds is not None:
+            request_kwargs["timeout"] = float(timeout_seconds)
         for attempt in range(1, max_attempts + 1):
             try:
-                req_kwargs: dict[str, Any] = {"json": json_body}
-                if timeout_seconds is not None:
-                    req_kwargs["timeout"] = float(timeout_seconds)
-                resp = self._client.request(method, path, **req_kwargs)
+                resp = self._client.request(method, path, **request_kwargs)
                 if return_on_409 is not None and resp.status_code == 409:
                     return dict(return_on_409)
                 if resp.status_code in retryable_statuses and attempt < max_attempts:

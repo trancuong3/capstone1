@@ -498,16 +498,20 @@ class MessageTests(unittest.TestCase):
 
     def test_copy_states_one_neutral_fact_and_nothing_else(self):
         message = self.build()
-        body = message.get_content()
+        plain_body = message.get_body(preferencelist=("plain",)).get_content()
+        html_body = message.get_body(preferencelist=("html",)).get_content()
         self.assertEqual(message["Subject"], "ViRead đã tạm dừng buổi đọc")
-        self.assertIn("một lúc không thấy người đọc trong khung hình", body)
-        self.assertIn("tạm dừng", body)
-        lowered = body.lower()
-        for forbidden in (
-            "nguy hiểm", "ở đâu", "mất tích", "bỏ đi", "transcript", "bản ghi",
-            "hình ảnh", "ảnh chụp", "ghi âm", "đã đọc", "trang ",
-        ):
-            self.assertNotIn(forbidden, lowered)
+        self.assertEqual(message["Content-Language"], "vi")
+        for body in (plain_body, html_body):
+            self.assertIn("một lúc không thấy người đọc trong khung hình", body)
+            self.assertIn("tạm dừng", body)
+            lowered = body.lower()
+            for forbidden in (
+                "nguy hiểm", "ở đâu", "mất tích", "bỏ đi", "transcript", "bản ghi",
+                "hình ảnh", "ảnh chụp", "ảnh", "ghi âm", "đã đọc", "trang ",
+                "danger", "missing", "photo",
+            ):
+                self.assertNotIn(forbidden, lowered)
         self.assertEqual(message["To"], "parent@example.test")
 
     def test_message_id_is_stable_per_alert(self):
@@ -521,7 +525,13 @@ class MessageTests(unittest.TestCase):
             self.assertEqual(len(files), 1)
             parsed = message_from_bytes(files[0].read_bytes(), policy=email_policy.default)
             self.assertEqual(parsed["Subject"], "ViRead đã tạm dừng buổi đọc")
-            self.assertIn("không thấy người đọc trong khung hình", parsed.get_content())
+            self.assertEqual(parsed["Content-Language"], "vi")
+            plain_part = parsed.get_body(preferencelist=("plain",))
+            html_part = parsed.get_body(preferencelist=("html",))
+            self.assertIsNotNone(plain_part)
+            self.assertIsNotNone(html_part)
+            self.assertIn("không thấy người đọc trong khung hình", plain_part.get_content())
+            self.assertIn("không thấy người đọc trong khung hình", html_part.get_content())
             with self.assertRaises(FileExistsError):
                 provider._write_to_sink(message, folder)
 

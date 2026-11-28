@@ -395,102 +395,88 @@ describe("Phone QA regressions: Android STT/TTS, Karaoke, AudioUnlock, Phonics U
   });
 
   it("retries non-JSON gateway 502 on GET without retrying structured 503/504 or POST mutations", async () => {
-    vi.useFakeTimers();
-    try {
-      // 1. GET retries non-JSON gateway 502 (Render cold-start) and recovers
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValueOnce(
-          new Response("Bad Gateway", {
-            status: 502,
-            headers: { "Content-Type": "text/html" },
-          }),
-        )
-        .mockResolvedValueOnce(Response.json({ ok: true }));
-      global.fetch = fetchMock as typeof fetch;
-
-      const getPromise = requestApi(
-        "/books/",
-        z.object({ ok: z.boolean() }),
-        undefined,
-        { maxRetries: 1, retryDelayMs: 500 },
-      );
-      await vi.advanceTimersByTimeAsync(600);
-      await expect(getPromise).resolves.toEqual({ ok: true });
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-
-      // 2. GET must NOT retry structured FastAPI JSON 503 or 504 application errors
-      const dbBusyFetchMock = vi
-        .fn()
-        .mockResolvedValueOnce(
-          Response.json(
-            { detail: "Database temporarily unavailable" },
-            { status: 503 },
-          ),
-        );
-      global.fetch = dbBusyFetchMock as typeof fetch;
-      await expect(
-        requestApi(
-          "/books/db-busy-503",
-          z.object({ ok: z.boolean() }),
-          undefined,
-          {
-            maxRetries: 1,
-            retryDelayMs: 500,
-          },
-        ),
-      ).rejects.toMatchObject({
-        status: 503,
-        message: expect.stringContaining("đang bận"),
-      });
-      expect(dbBusyFetchMock).toHaveBeenCalledTimes(1);
-
-      const syncTimeoutFetchMock = vi.fn().mockResolvedValueOnce(
-        Response.json(
-          {
-            detail:
-              "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
-          },
-          { status: 504 },
-        ),
-      );
-      global.fetch = syncTimeoutFetchMock as typeof fetch;
-      await expect(
-        requestApi(
-          "/reading/scan-page-ocr",
-          z.object({ ok: z.boolean() }),
-          undefined,
-          {
-            maxRetries: 1,
-            retryDelayMs: 500,
-          },
-        ),
-      ).rejects.toMatchObject({
-        status: 504,
-        message: expect.stringContaining("xếp hàng"),
-      });
-      expect(syncTimeoutFetchMock).toHaveBeenCalledTimes(1);
-
-      // 3. POST mutations must NEVER auto-retry even on non-JSON gateway 502
-      const postFetchMock = vi.fn().mockResolvedValue(
+    // 1. GET retries non-JSON gateway 502 (Render cold-start) and recovers
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
         new Response("Bad Gateway", {
           status: 502,
           headers: { "Content-Type": "text/html" },
         }),
+      )
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    global.fetch = fetchMock as typeof fetch;
+
+    await expect(
+      requestApi("/books/", z.object({ ok: z.boolean() }), undefined, {
+        bypassCache: true,
+        maxRetries: 1,
+        retryDelayMs: 0,
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    // 2. GET must NOT retry structured FastAPI JSON 503 or 504 application errors
+    const dbBusyFetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json(
+          { detail: "Database temporarily unavailable" },
+          { status: 503 },
+        ),
       );
-      global.fetch = postFetchMock as typeof fetch;
-      await expect(
-        requestApi("/books/", z.object({ ok: z.boolean() }), undefined, {
-          method: "POST",
-          body: { name: "test" },
-          maxRetries: 1,
-          retryDelayMs: 500,
-        }),
-      ).rejects.toMatchObject({ status: 502 });
-      expect(postFetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
+    global.fetch = dbBusyFetchMock as typeof fetch;
+    await expect(
+      requestApi(
+        "/books/db-busy-503",
+        z.object({ ok: z.boolean() }),
+        undefined,
+        { bypassCache: true, maxRetries: 1, retryDelayMs: 0 },
+      ),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: expect.stringContaining("đang bận"),
+    });
+    expect(dbBusyFetchMock).toHaveBeenCalledTimes(1);
+
+    const syncTimeoutFetchMock = vi.fn().mockResolvedValueOnce(
+      Response.json(
+        {
+          detail:
+            "Remote OCR worker did not finish before sync timeout; poll job status asynchronously.",
+        },
+        { status: 504 },
+      ),
+    );
+    global.fetch = syncTimeoutFetchMock as typeof fetch;
+    await expect(
+      requestApi(
+        "/reading/scan-page-ocr",
+        z.object({ ok: z.boolean() }),
+        undefined,
+        { bypassCache: true, maxRetries: 1, retryDelayMs: 0 },
+      ),
+    ).rejects.toMatchObject({
+      status: 504,
+      message: expect.stringContaining("xếp hàng"),
+    });
+    expect(syncTimeoutFetchMock).toHaveBeenCalledTimes(1);
+
+    // 3. POST mutations must NEVER auto-retry even on non-JSON gateway 502
+    const postFetchMock = vi.fn().mockResolvedValue(
+      new Response("Bad Gateway", {
+        status: 502,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+    global.fetch = postFetchMock as typeof fetch;
+    await expect(
+      requestApi("/books/", z.object({ ok: z.boolean() }), undefined, {
+        method: "POST",
+        body: { name: "test" },
+      }),
+    ).rejects.toMatchObject({ status: 502 });
+    expect(postFetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("expires degraded Android capabilities snapshot after 5000ms and re-queries bridge", async () => {

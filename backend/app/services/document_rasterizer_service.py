@@ -1296,8 +1296,6 @@ def iter_rasterized_spooled_document(
         header_bytes=spooled.header_bytes,
     )
     temp_pdf_path: Path | None = None
-    page_iter: Iterator[RasterizedDocumentPage] | None = None
-    bounded_iter: Iterator[RasterizedDocumentPage] | None = None
     try:
         if detected == "DOCX":
             _validate_docx_archive(spooled.spool_file)
