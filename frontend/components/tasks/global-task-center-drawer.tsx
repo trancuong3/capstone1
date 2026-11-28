@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
@@ -124,6 +125,8 @@ export function GlobalTaskCenterDrawer() {
     pendingActionJobIds,
     errorMessage,
     closePanel,
+    markAllAlertsSeen,
+    markTaskAlertSeen,
     refresh,
     retryTask,
     cancelTask,
@@ -165,7 +168,7 @@ export function GlobalTaskCenterDrawer() {
         "Không gian phụ huynh (riêng bạn)",
       );
 
-  return (
+  const drawerContent = (
     <div
       className="fixed inset-0 z-50 flex items-end justify-end bg-ink/35 backdrop-blur-[1px] sm:items-stretch"
       data-testid="global-task-center-backdrop"
@@ -413,7 +416,10 @@ export function GlobalTaskCenterDrawer() {
                       <Link
                         className="ms-auto inline-flex min-h-12 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-semibold text-white transition-colors hover:bg-primary-hover"
                         href={task.result_href}
-                        onClick={closePanel}
+                        onClick={() => {
+                          markTaskAlertSeen(task);
+                          closePanel();
+                        }}
                       >
                         {t(
                           "taskCenter.viewResultAction",
@@ -454,7 +460,10 @@ export function GlobalTaskCenterDrawer() {
             className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-control border border-border bg-white px-4 text-xs font-bold text-primary transition-colors hover:bg-sky/50 focus-visible:outline-3 focus-visible:outline-primary"
             data-testid="global-task-center-full-page-link"
             href={fullTasksPageHref}
-            onClick={closePanel}
+            onClick={() => {
+              markAllAlertsSeen();
+              closePanel();
+            }}
           >
             {t(
               "taskCenter.openFullPage",
@@ -467,4 +476,10 @@ export function GlobalTaskCenterDrawer() {
       </section>
     </div>
   );
+
+  // Portal to document.body so fixed inset-0 escapes sticky header backdrop-filter
+  // containing blocks on mobile viewports.
+  return typeof document !== "undefined"
+    ? createPortal(drawerContent, document.body)
+    : drawerContent;
 }

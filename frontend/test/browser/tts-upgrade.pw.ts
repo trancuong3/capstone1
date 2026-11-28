@@ -1,5 +1,10 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { ids, installApiFixture, readyVoiceStatus } from "./real-data-fixture";
+import {
+  ids,
+  installApiFixture,
+  PLAYWRIGHT_ORIGIN,
+  readyVoiceStatus,
+} from "./real-data-fixture";
 
 interface Probe {
   audios: HTMLAudioElement[];
@@ -61,7 +66,7 @@ async function installReading(
     word_sample?: boolean;
   }[] = [];
   const headers = {
-    "access-control-allow-origin": "http://127.0.0.1:3106",
+    "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
     "access-control-allow-headers":
       "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id",
     "access-control-allow-methods": "GET,POST,PUT,OPTIONS",
@@ -571,4 +576,237 @@ test("Phase 3: unavailable TTS produces a safe recoverable error with zero OS vo
   ).toBeEnabled();
   expect(fixture.unexpected).toEqual([]);
   expect(fixture.writes).toEqual([]);
+});
+
+test("Dashboard AI teacher selection auto-plays precomputed greeting, persists per child across reload, and syncs male persona into Reading", async ({
+  page,
+}, testInfo) => {
+  const api = await installApiFixture(page);
+  const ttsPayloads: Array<{
+    text?: string;
+    voice_id?: string;
+    speed?: number;
+    cache_scope?: string;
+  }> = [];
+  const sessionLockUpdates: Array<{ session_id?: string; voice_id?: string }> =
+    [];
+  const corsHeaders = {
+    "access-control-allow-origin": PLAYWRIGHT_ORIGIN,
+    "access-control-allow-headers":
+      "authorization,content-type,accept,x-voice-policy-mode,x-allow-google-stt-fallback,x-allow-google-tts-fallback,x-voice-region,x-voice-session-id,x-voice-page-id,x-voice-turn-id,x-voice-lock-update",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS",
+    "access-control-expose-headers":
+      "x-voice-provider,x-resolved-voice-id,x-voice-region,x-voice-model-version,x-voice-fallback,x-voice-gender",
+  };
+
+  await page.route("http://127.0.0.1:8000/voice/**", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: corsHeaders });
+    }
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/voice/status" && route.request().method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        headers: corsHeaders,
+        contentType: "application/json",
+        body: JSON.stringify({
+          default_mode: "local_only",
+          default_voice_id: "local_north_truc_ly",
+          local: { available: false, stt_ready: false, tts_ready: false },
+          google: {
+            stt_configured: false,
+            tts_configured: false,
+            stt_cooldown: false,
+            tts_cooldown: false,
+          },
+          elevenlabs: {
+            configured: true,
+            stt_configured: true,
+            tts_configured: true,
+            male_tts_configured: false,
+            stt_cooldown: false,
+            tts_cooldown: false,
+          },
+        }),
+      });
+    }
+    if (path === "/voice/voices" && route.request().method() === "GET") {
+      return route.fallback();
+    }
+    if (path === "/voice/session-lock" && route.request().method() === "PUT") {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        session_id?: string;
+        voice_id?: string;
+      };
+      sessionLockUpdates.push(body);
+      return route.fallback();
+    }
+    if (
+      path === "/voice/text-to-speech" &&
+      route.request().method() === "POST"
+    ) {
+      const body = (route.request().postDataJSON() ?? {}) as {
+        text?: string;
+        voice_id?: string;
+        speed?: number;
+        cache_scope?: string;
+      };
+      ttsPayloads.push(body);
+      // Enforce real production constraint: only COACHING-scoped greetings hit Supabase cache when local worker is offline!
+      if (body.cache_scope !== "COACHING") {
+        return route.fulfill({
+          status: 503,
+          headers: corsHeaders,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "LOCAL_TTS_UNAVAILABLE" } }),
+        });
+      }
+      return route.fulfill({
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          "x-voice-provider": "precomputed_cache",
+          "x-resolved-voice-id": body.voice_id ?? "local_north_truc_ly",
+          "x-voice-gender":
+            (body.voice_id ?? "").includes("thai_son") ||
+            (body.voice_id ?? "").includes("thien_minh") ||
+            (body.voice_id ?? "").includes("quang_son")
+              ? "male"
+              : "female",
+        },
+        contentType: "audio/wav",
+        body: Buffer.from(silentWav(4), "base64"),
+      });
+    }
+    return route.fallback();
+  });
+
+  await page.addInitScript(() => {
+    const probe: Probe = {
+      audios: [],
+      utterances: [],
+      microphoneRequests: 0,
+      cancels: 0,
+      pauses: 0,
+      resumes: 0,
+    };
+    window.__ttsProbe = probe;
+    const OriginalAudio = window.Audio;
+    Object.defineProperty(window, "Audio", {
+      configurable: true,
+      value: function (src?: string) {
+        const audio = new OriginalAudio(src);
+        probe.audios.push(audio);
+        return audio;
+      },
+    });
+  });
+
+  await page.goto("/dashboard");
+  const section = page.getByTestId("ai-teacher-voice-section");
+  await expect(section).toBeVisible();
+  await expect(page.getByTestId("teacher-policy-local-only")).toBeVisible();
+  await expect(page.getByTestId("teacher-policy-online-backup")).toBeVisible();
+
+  // 1. Selecting Thầy giáo AI immediately speaks the precomputed male greeting from COACHING cache
+  await page.getByTestId("teacher-card-male").click();
+  await expect.poll(() => ttsPayloads.length).toBe(1);
+  expect(ttsPayloads[0]).toMatchObject({
+    voice_id: "local_north_thien_minh",
+    cache_scope: "COACHING",
+    text: "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+  });
+  await expect
+    .poll(() => page.evaluate(() => window.__ttsProbe.audios[0]?.paused))
+    .toBe(false);
+
+  // 2. Switching region to Miền Nam keeps Male persona (Thầy Thái Sơn), stops prior audio, and plays new greeting
+  await page.getByTestId("teacher-region-south").click();
+  await expect.poll(() => ttsPayloads.length).toBe(2);
+  expect(ttsPayloads[1]).toMatchObject({
+    voice_id: "local_south_thai_son",
+    cache_scope: "COACHING",
+    text: "Chào con, hôm nay thầy trò mình cùng đọc sách bài Hai mươi mốt bông hoa nhé.",
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(() => ({
+        firstPaused: window.__ttsProbe.audios[0]?.paused === true,
+        secondPlaying: window.__ttsProbe.audios[1]?.paused === false,
+      })),
+    )
+    .toEqual({ firstPaused: true, secondPlaying: true });
+  await expect(section.locator('[role="alert"]')).toHaveCount(0);
+
+  await section.screenshot({
+    path: testInfo.outputPath("dashboard-ai-teacher-male-voice.png"),
+  });
+
+  // 3. Reloading /dashboard hydrates the persisted child voice_preferences (Thầy Thái Sơn · Miền Nam)
+  await page.reload();
+  await expect(page.getByTestId("teacher-card-male")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+  await expect(page.getByTestId("teacher-region-south")).toHaveAttribute(
+    "aria-checked",
+    "true",
+  );
+
+  // 4. Navigating to Difficult Words report keeps Thầy Thái Sơn hydrated across routes
+  await page.goto(`/reports/difficult-words?childId=${ids.child}`);
+  await expect(
+    page.getByRole("heading", { name: /Từ cần luyện của Bé API/ }),
+  ).toBeVisible();
+  const syncedPrefs = await page.evaluate(() =>
+    JSON.parse(
+      window.localStorage.getItem("viread.speech-preferences.v1") ?? "{}",
+    ),
+  );
+  expect(syncedPrefs.voiceId).toBe("local_south_thai_son");
+  await page.getByRole("button", { name: /Luyện 1 từ cần ôn/ }).click();
+  // DifficultWordPracticePanel automatically speaks the word cue with the synced Thầy Thái Sơn voice!
+  await expect
+    .poll(() =>
+      ttsPayloads.some(
+        (p) =>
+          p.voice_id === "local_south_thai_son" && p.cache_scope === "CATALOG",
+      ),
+    )
+    .toBe(true);
+
+  await page.getByRole("button", { name: "Giọng đọc", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByRole("heading", { name: /Giọng đọc mẫu · Thầy giáo AI/ }),
+  ).toBeVisible();
+  await expect(dialog.getByText("ElevenLabs Cloud: Sẵn sàng")).toBeVisible();
+  await expect(
+    dialog.getByRole("radio", { name: /Thầy Thái Sơn/ }),
+  ).toBeChecked();
+  const stopBtn = dialog.getByRole("button", {
+    name: "Dừng nghe",
+    exact: true,
+  });
+  if (await stopBtn.isVisible()) {
+    await stopBtn.click();
+  }
+  const prevAudios = await page.evaluate(() => window.__ttsProbe.audios.length);
+  await dialog.getByRole("button", { name: "Nghe thử", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (n) =>
+          window.__ttsProbe.audios.length > n &&
+          window.__ttsProbe.audios.at(-1)?.paused === false,
+        prevAudios,
+      ),
+    )
+    .toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("difficult-words-synced-teacher.png"),
+  });
+  expect(
+    api.unexpected.filter((item) => item !== "external:huggingface.co"),
+  ).toEqual([]);
 });

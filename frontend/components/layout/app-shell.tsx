@@ -67,6 +67,10 @@ import {
   sanitizeDashboardSummaryForCache,
   writeUserCache,
 } from "@/lib/cache/user-query-cache";
+import {
+  hydrateTeacherVoiceFromChildProfile,
+  resetTeacherVoiceForActorSwitch,
+} from "@/lib/reading/session-voice-lock";
 import { cn } from "@/lib/utils/cn";
 import type { ChildProfileDTO } from "@/types/child";
 import type { DashboardSummaryDTO, ParentProfileDTO } from "@/types/profile";
@@ -198,6 +202,12 @@ export function AppShell({ children }: AppShellProps) {
       null
     );
   }, [availableChildren, selectedChildId, validatedSelectedChild]);
+
+  useEffect(() => {
+    if (selectedChild) {
+      hydrateTeacherVoiceFromChildProfile(selectedChild);
+    }
+  }, [selectedChild]);
 
   const isChildSwitcherVisible = childSwitcherOpenForPath === pathname;
   const isMobileImmersive =
@@ -353,6 +363,7 @@ export function AppShell({ children }: AppShellProps) {
     const prevId = previousUserIdRef.current;
     if (prevId !== undefined && prevId !== user?.id) {
       resetApiReadCacheForActorSwitch();
+      resetTeacherVoiceForActorSwitch();
       clearUserCache(prevId);
       clearChildModeLockForUser(prevId);
       void clearAndroidScheduledReminders();
@@ -447,6 +458,7 @@ export function AppShell({ children }: AppShellProps) {
       void clearAndroidScheduledReminders();
       clearStoredScanJobIds();
       resetApiReadCacheForActorSwitch();
+      resetTeacherVoiceForActorSwitch();
       clearUserCache();
       broadcastActorSwitch();
       await authService.signOut();
@@ -594,6 +606,9 @@ export function AppShell({ children }: AppShellProps) {
                                   onClick={() => {
                                     appStore.selectChild(child.id);
                                     appStore.setValidatedSelectedChild(child);
+                                    hydrateTeacherVoiceFromChildProfile(child, {
+                                      force: true,
+                                    });
                                     setChildSwitcherOpenForPath(null);
                                   }}
                                   role="option"

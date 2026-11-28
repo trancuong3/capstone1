@@ -227,6 +227,34 @@ class ParentProfileApiTests(unittest.TestCase):
             )
         self.assertEqual(response.status_code, 403)
 
+    def test_suspended_profile_get_me_returns_403(self):
+        suspended_profile = SimpleNamespace(
+            Id=PARENT_ID,
+            DisplayName="Ba mẹ An",
+            Role="parent",
+            Active=0,
+            CreatedAt=CREATED_AT,
+            ContactPhone=None,
+            children=[],
+        )
+        repository = MagicMock()
+        repository.get_by_id = AsyncMock(return_value=suspended_profile)
+        repository.update_contact_phone = AsyncMock(return_value=suspended_profile)
+
+        with patch.object(profile_routes, "ProfileRepository", return_value=repository):
+            with make_client() as client:
+                get_resp = client.get("/profiles/me")
+                patch_resp = client.patch(
+                    "/profiles/me/contact-phone",
+                    json={"contact_phone": "+84912345678"},
+                )
+
+        self.assertEqual(get_resp.status_code, 403)
+        self.assertEqual(get_resp.json()["detail"]["code"], "ACCESS_DENIED")
+        self.assertEqual(patch_resp.status_code, 403)
+        self.assertEqual(patch_resp.json()["detail"]["code"], "ACCESS_DENIED")
+        repository.update_contact_phone.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

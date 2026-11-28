@@ -71,6 +71,8 @@ class SpacedDifficultWordRead(BaseModel):
     days_since_practice: int | None = None
     recommended_game: GameKey
     reason_vi: str
+    phonics_category: str = "general"
+    phonics_label_vi: str = "Từ cần ôn"
 
 
 class CrossGameRecommendationRead(BaseModel):

@@ -383,6 +383,17 @@ class SentenceShooterRepository:
 
         Gracefully returns [] if the table is unavailable in an unmigrated DB.
         """
+        if hasattr(self.db, "begin_nested"):
+            from app.services.active_weak_words import list_active_weak_words_for_child
+
+            unified = await list_active_weak_words_for_child(
+                self.db,
+                child_id,
+                limit=limit,
+            )
+            if unified:
+                return unified
+
         try:
             result = await self.db.execute(
                 select(

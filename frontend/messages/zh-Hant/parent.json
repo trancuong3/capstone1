@@ -249,7 +249,12 @@
     "selectedBadge": "目前選擇",
     "regionLabel": "地區口音",
     "voiceListLabel": "選擇具體聲音",
-    "voiceListAria": "依老師與地區篩選的聲音清單"
+    "voiceListAria": "依老師與地區篩選的聲音清單",
+    "policyLabel": "語音引擎模式",
+    "policyAria": "選擇語音引擎模式",
+    "policyLocalOnly": "僅限本機",
+    "policyOnlineBackup": "本機 + 線上備援",
+    "workerOfflineHint": "本機語音服務目前未執行。請開啟「本機 + 線上備援」，以便朗讀未預先快取的繪本句子與遊戲語音。"
   },
   "childModePin": {
     "lockedPill": "兒童鎖定已開啟",

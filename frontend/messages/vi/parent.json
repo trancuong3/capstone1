@@ -249,7 +249,12 @@
     "selectedBadge": "Đang chọn",
     "regionLabel": "Vùng miền",
     "voiceListLabel": "Chọn giọng cụ thể",
-    "voiceListAria": "Danh sách giọng đọc theo nhân vật và vùng miền"
+    "voiceListAria": "Danh sách giọng đọc theo nhân vật và vùng miền",
+    "policyLabel": "Chế độ nguồn giọng đọc",
+    "policyAria": "Chọn chế độ nguồn giọng đọc",
+    "policyLocalOnly": "Chỉ máy này",
+    "policyOnlineBackup": "Máy này + Dự phòng trực tuyến",
+    "workerOfflineHint": "Máy trạm giọng đọc trên máy đang tạm nghỉ. Hãy bật “Máy này + Dự phòng trực tuyến” để bé vẫn nghe được các câu sách mới và trò chơi chưa dựng sẵn."
   },
   "childModePin": {
     "lockedPill": "Đang khóa góc bé",

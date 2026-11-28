@@ -5,6 +5,11 @@ import base64
 import httpx
 
 from app.services.admin_ocr_chunking import OcrTextChunk
+from app.services.cloud_ai_defaults import (
+    extract_gemini_text,
+    gemini_thinking_config,
+    record_cloud_ai_outcome,
+)
 from app.services.ocr_ai.exceptions import OcrProviderError
 from app.services.ocr_ai.prompts import SYSTEM_PROMPT, chunk_prompt, response_json_schema
 from app.services.ocr_ai.runtime import (
@@ -62,6 +67,15 @@ class GeminiOcrProvider:
         image_bytes: bytes,
         image_mime_type: str,
     ) -> ChunkCorrectionResult:
+        generation_config: dict[str, object] = {
+            "temperature": 0,
+            "responseMimeType": "application/json",
+            "responseJsonSchema": response_json_schema(chunk.expected_word_count),
+        }
+        thinking_cfg = gemini_thinking_config(self.model)
+        if thinking_cfg is not None:
+            generation_config["thinkingConfig"] = thinking_cfg
+
         payload = {
             "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
             "contents": [
@@ -78,11 +92,7 @@ class GeminiOcrProvider:
                     ],
                 }
             ],
-            "generationConfig": {
-                "temperature": 0,
-                "responseMimeType": "application/json",
-                "responseJsonSchema": response_json_schema(chunk.expected_word_count),
-            },
+            "generationConfig": generation_config,
         }
         url = f"{_GEMINI_API_BASE}/models/{self.model}:generateContent"
         try:
@@ -93,7 +103,24 @@ class GeminiOcrProvider:
                 json=payload,
                 timeout=httpx.Timeout(self._timeout_seconds),
             )
+            if response.status_code == 400 and thinking_cfg is not None:
+                generation_config.pop("thinkingConfig", None)
+                response = await client.post(
+                    url,
+                    headers={"x-goog-api-key": self._api_key},
+                    json=payload,
+                    timeout=httpx.Timeout(self._timeout_seconds),
+                )
         except httpx.TimeoutException as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "ocr_ai",
+                    "gemini",
+                    self.model,
+                    ok=False,
+                    error_code="PROVIDER_TIMEOUT",
+                    http_status=504,
+                )
             raise OcrProviderError(
                 provider=self.name,
                 code="PROVIDER_TIMEOUT",
@@ -101,6 +128,15 @@ class GeminiOcrProvider:
                 disables_family=True,
             ) from exc
         except httpx.RequestError as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "ocr_ai",
+                    "gemini",
+                    self.model,
+                    ok=False,
+                    error_code="PROVIDER_NETWORK",
+                    http_status=503,
+                )
             raise OcrProviderError(
                 provider=self.name,
                 code="PROVIDER_NETWORK",
@@ -108,19 +144,55 @@ class GeminiOcrProvider:
                 disables_family=True,
             ) from exc
         if response.status_code != 200:
-            raise self._http_error(response.status_code, response=response)
+            err = self._http_error(response.status_code, response=response)
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "ocr_ai",
+                    "gemini",
+                    self.model,
+                    ok=False,
+                    error_code=err.code,
+                    http_status=response.status_code,
+                )
+            raise err
         try:
             data = response.json()
-            candidates = data.get("candidates") if isinstance(data, dict) else None
-            first = candidates[0] if isinstance(candidates, list) and candidates else None
-            content = first.get("content") if isinstance(first, dict) else None
-            parts = content.get("parts") if isinstance(content, dict) else None
-            text = parts[0].get("text") if isinstance(parts, list) and parts else None
+            text = extract_gemini_text(data)
         except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "ocr_ai",
+                    "gemini",
+                    self.model,
+                    ok=False,
+                    error_code="INVALID_RESPONSE",
+                    http_status=response.status_code,
+                )
             raise OcrProviderError(
                 provider=self.name, code="INVALID_RESPONSE", status_code=502
             ) from exc
-        return decode_and_validate_content(text, chunk=chunk, provider=self.name)
+        try:
+            result = decode_and_validate_content(text, chunk=chunk, provider=self.name)
+        except OcrProviderError as exc:
+            if self._transport is None:
+                record_cloud_ai_outcome(
+                    "ocr_ai",
+                    "gemini",
+                    self.model,
+                    ok=False,
+                    error_code=exc.code,
+                    http_status=response.status_code,
+                )
+            raise
+        if self._transport is None:
+            record_cloud_ai_outcome(
+                "ocr_ai",
+                "gemini",
+                self.model,
+                ok=True,
+                http_status=response.status_code,
+            )
+        return result
 
     def _http_error(
         self, status_code: int, *, response: httpx.Response | None = None

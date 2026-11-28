@@ -25,6 +25,8 @@ export interface SkillMasteryDTO {
 export interface SpacedDifficultWordDTO {
   normalized_word: string;
   display_text: string;
+  phonics_category?: string;
+  phonics_label_vi?: string;
   priority_score: number;
   practice_count: number;
   last_practiced_at: string | null;

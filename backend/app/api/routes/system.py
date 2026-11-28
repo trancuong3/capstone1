@@ -27,6 +27,7 @@ from app.repositories.difficult_words_repository import DifficultWordsRepository
 from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
 from app.services import remote_ocr_wakeup
 from app.services.admin_ocr_local import LocalCorrectionError, LocalOcrConfig, LocalOcrCorrector
+from app.services.cloud_ai_defaults import get_cloud_ai_health_snapshot
 from app.services.ocr_ai.config import OcrCorrectionConfig
 from app.services.ocr_ai.exceptions import OcrConfigurationError
 from app.services.ocr_inference_job_service import is_remote_ocr_mode
@@ -1586,17 +1587,58 @@ class AdminSystemService:
                         "action_hint": "Kiểm tra lại OCR_CLOUD_CORRECTION_ENABLED và biến khóa API đám mây.",
                         "last_error": "INVALID_CLOUD_OCR_CONFIG",
                     }
+                ai_snap = get_cloud_ai_health_snapshot()
                 if cfg.gemini_enabled or cfg.groq_enabled:
                     providers = (
                         "Gemini & Groq"
                         if (cfg.gemini_enabled and cfg.groq_enabled)
                         else ("Gemini" if cfg.gemini_enabled else "Groq")
                     )
+                    default_models = ai_snap.get("default_models") or {}
+                    model_parts: list[str] = []
+                    if cfg.gemini_enabled:
+                        gem_primary = str(
+                            default_models.get("gemini_primary") or cfg.gemini_primary_model
+                        )
+                        gem_fallback = str(
+                            default_models.get("gemini_fallback") or cfg.gemini_fallback_model
+                        )
+                        model_parts.append(f"Gemini: {gem_primary}/{gem_fallback}")
+                    if cfg.groq_enabled:
+                        groq_primary = str(
+                            default_models.get("groq_primary") or cfg.groq_model
+                        )
+                        model_parts.append(f"Groq: {groq_primary}")
+                    model_summary = ", ".join(model_parts)
+                    snap_error = ai_snap.get("last_error")
+                    if (
+                        ai_snap.get("status") == "DEGRADED"
+                        and snap_error
+                        and snap_error != "AI_NOT_CONFIGURED"
+                    ):
+                        err_code = str(snap_error)
+                        return {
+                            "status": "DEGRADED",
+                            "detail_status": "failed",
+                            "operational_state": "Degraded",
+                            "safe_message": (
+                                f"AI đám mây ({providers}; {model_summary}) đang gặp lỗi liên tiếp ({err_code})."
+                            ),
+                            "service_group": "ocr",
+                            "execution_mode": "cloud_ai",
+                            "criticality": "important",
+                            "action_hint": (
+                                "Kiểm tra khóa API (GEMINI_API_KEY / GROQ_API_KEY), hạn mức hoặc tên model AI trong biến môi trường."
+                            ),
+                            "last_error": err_code,
+                        }
                     return {
                         "status": "HEALTHY",
                         "detail_status": "cloud_ready",
                         "operational_state": "Healthy",
-                        "safe_message": f"Hỗ trợ hậu kiểm nhận diện chữ đang hoạt động qua dịch vụ đám mây ({providers}).",
+                        "safe_message": (
+                            f"Hỗ trợ hậu kiểm nhận diện chữ đang hoạt động qua dịch vụ đám mây ({providers}; {model_summary})."
+                        ),
                         "service_group": "ocr",
                         "execution_mode": "cloud_ai",
                         "criticality": "important",
@@ -2296,6 +2338,43 @@ class AdminSystemService:
                 action_hint=stt_info.get("action_hint"),  # type: ignore[arg-type]
             ),
         ]
+
+        # Surface runtime Cloud AI failures (e.g. Child Progress / Tutor Questions) even when
+        # OCR cloud correction is disabled (`local_ocr` stays cleanly `local_only`).
+        if local_ocr_info.get("detail_status") == "local_only":
+            cloud_ai_snap = get_cloud_ai_health_snapshot()
+            failing_cloud = [
+                (svc, meta)
+                for svc, meta in (cloud_ai_snap.get("services") or {}).items()
+                if int(meta.get("consecutive_failures") or 0) >= 2
+            ]
+            if failing_cloud:
+                err_code = str(
+                    cloud_ai_snap.get("last_error")
+                    or failing_cloud[0][1].get("last_error_code")
+                    or "CLOUD_AI_UNAVAILABLE"
+                )
+                failing_names = ", ".join(sorted(svc for svc, _ in failing_cloud))
+                items.append(
+                    AdminHealthItemRead(
+                        id="cloud_ai",
+                        label="Cloud AI (Gemini / Groq)",
+                        status="DEGRADED",
+                        detail_status="failed",
+                        operational_state="Degraded",
+                        checked_at=checked_at,
+                        safe_message=(
+                            f"Dịch vụ Cloud AI ({failing_names}) đang gặp lỗi liên tiếp ({err_code})."
+                        ),
+                        last_error=err_code,
+                        service_group="ocr",
+                        execution_mode="cloud_ai",
+                        criticality="important",
+                        action_hint=(
+                            "Kiểm tra khóa API (GEMINI_API_KEY / GROQ_API_KEY), hạn mức hoặc tên model AI trong biến môi trường."
+                        ),
+                    )
+                )
 
         if not tts_cache_enabled:
             cache_item = AdminHealthItemRead(

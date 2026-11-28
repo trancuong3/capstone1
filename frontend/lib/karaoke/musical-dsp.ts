@@ -1504,6 +1504,31 @@ export function createBrowserMusicalMonitor(
     source.connect(analyser);
 
     const sampleRate = context.sampleRate || DEFAULT_DSP_SAMPLE_RATE;
+    const baseLatSec =
+      typeof context.baseLatency === "number" &&
+      Number.isFinite(context.baseLatency)
+        ? Math.max(0, context.baseLatency)
+        : 0;
+    const outLatSec =
+      typeof (context as AudioContext & { outputLatency?: number })
+        .outputLatency === "number" &&
+      Number.isFinite(
+        (context as AudioContext & { outputLatency?: number }).outputLatency,
+      )
+        ? Math.max(
+            0,
+            (context as AudioContext & { outputLatency?: number })
+              .outputLatency!,
+          )
+        : 0;
+    const hardwareLatencyMs =
+      baseLatSec + outLatSec > 0
+        ? Math.max(
+            40,
+            Math.min(220, Math.round((baseLatSec + outLatSec) * 1000 + 45)),
+          )
+        : DEFAULT_MIC_LATENCY_MS;
+    const resolvedLatencyMs = options.micLatencyMs ?? hardwareLatencyMs;
     const analyzer =
       options.existingAnalyzer ??
       new MusicalDspAnalyzer({
@@ -1511,7 +1536,7 @@ export function createBrowserMusicalMonitor(
         frameSize: analyser.fftSize,
         lyricSpans: options.lyricSpans,
         headphoneMode: options.headphoneMode,
-        micLatencyMs: options.micLatencyMs ?? DEFAULT_MIC_LATENCY_MS,
+        micLatencyMs: resolvedLatencyMs,
       });
     if (options.existingAnalyzer && options.micLatencyMs !== undefined) {
       analyzer.setMicLatencyMs(options.micLatencyMs);

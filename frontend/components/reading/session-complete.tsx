@@ -66,7 +66,16 @@ export function SessionComplete({
   const t = useTranslations("reading");
   const tb = useTranslations("books");
   const speechPlayer = useSpeechPlayer();
+  const speechPlayerRef = useRef(speechPlayer);
   const offeredVoiceRef = useRef(false);
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+  useEffect(() => {
+    return () => {
+      speechPlayerRef.current.stop();
+    };
+  }, []);
   const [showWordList, setShowWordList] = useState(false);
   const [unassessedPage, setUnassessedPage] = useState(1);
   const [correctWordsPage, setCorrectWordsPage] = useState(1);
@@ -107,16 +116,17 @@ export function SessionComplete({
     if (!hasVoiceApi) return;
     offeredVoiceRef.current = true;
     const offerText = adaptTextToTeacherPersona(
-      "Buổi đọc xong rồi! Con có muốn luyện lại mấy từ khó vừa rồi cùng cô không? Con bấm nút Luyện ngay các từ khó nhé!",
+      "Hoan hô con đã đọc hết bài! Con có muốn đọc lại mấy từ vừa vấp không?",
       getEffectiveTeacherPersona().gender,
     );
-    void speechPlayer
-      .play(offerText, { coaching: true })
+    void speechPlayerRef.current
+      .play(offerText, {
+        coaching: true,
+        cacheScope: "COACHING",
+        bypassSessionLock: true,
+      })
       .catch(() => undefined);
-    return () => {
-      speechPlayer.stop();
-    };
-  }, [hasDifficultWords, speechPlayer]);
+  }, [hasDifficultWords]);
   const scoredWordCount =
     correctWords.length + mispronouncedWords.length + skippedWords.length;
   const hasWordAssessment =

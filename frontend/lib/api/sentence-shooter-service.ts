@@ -20,6 +20,8 @@ const bookSchema = z.object({
   min_grade: z.number().int().min(1).max(5),
   max_grade: z.number().int().min(1).max(5),
   available_rounds: z.number().int().min(1),
+  difficult_word_count: z.number().int().min(0).optional(),
+  matched_difficult_words: z.array(z.string()).optional(),
 });
 
 const difficultySchema = z.enum(["easy", "medium", "challenge"]);
