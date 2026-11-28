@@ -121,7 +121,9 @@ export function DifficultWordsScreen({
           previous.routeKey === routeSelectionKey &&
           previous.bookKey === bookKey &&
           previous.word
-            ? [...previous.visitedWords, previous.word]
+            ? previous.visitedWords.includes(previous.word)
+              ? previous.visitedWords
+              : [...previous.visitedWords, previous.word]
             : [],
       }));
     },
@@ -333,6 +335,14 @@ export function DifficultWordsScreen({
   const bookGroups = useMemo(
     () => groupDifficultWordsByBook(filteredWords),
     [filteredWords],
+  );
+  const totalBookGroupPages = Math.max(
+    1,
+    Math.ceil(bookGroups.length / BOOK_GROUPS_PAGE_SIZE),
+  );
+  const safeBookGroupPage = Math.min(
+    Math.max(1, bookGroupPage),
+    totalBookGroupPages,
   );
 
   const summaryStats = useMemo(() => {
@@ -714,7 +724,10 @@ export function DifficultWordsScreen({
               action={
                 <Button
                   className="sm:w-auto sm:px-6"
-                  onClick={() => setStatusFilter("ALL")}
+                  onClick={() => {
+                    setStatusFilter("ALL");
+                    setBookGroupPage(1);
+                  }}
                   variant="secondary"
                 >
                   {t("screen.viewAllWords", { count: state.words.length })}
@@ -731,8 +744,8 @@ export function DifficultWordsScreen({
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                 {bookGroups
                   .slice(
-                    (bookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,
-                    bookGroupPage * BOOK_GROUPS_PAGE_SIZE,
+                    (safeBookGroupPage - 1) * BOOK_GROUPS_PAGE_SIZE,
+                    safeBookGroupPage * BOOK_GROUPS_PAGE_SIZE,
                   )
                   .map((group) => (
                     <DifficultWordBookCard
@@ -759,7 +772,7 @@ export function DifficultWordsScreen({
                 ariaLabel={t("screen.paginationAria")}
                 itemLabel={t("screen.paginationItemLabel")}
                 onPageChange={setBookGroupPage}
-                page={bookGroupPage}
+                page={safeBookGroupPage}
                 pageSize={BOOK_GROUPS_PAGE_SIZE}
                 total={bookGroups.length}
               />

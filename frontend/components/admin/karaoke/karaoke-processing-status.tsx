@@ -115,7 +115,7 @@ function ProcessingStatusBody({
             {t(`karaoke.processing.statusLabels.${job.status}`)}
           </h2>
           <AdminStatusBadge
-            label={job.status}
+            label={t(`karaoke.processing.statusLabels.${job.status}`)}
             status={job.status}
             tone={badgeTone}
           />

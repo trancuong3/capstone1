@@ -33,15 +33,30 @@ function wavBuffer(): Buffer {
 
 async function installDifficultWordsE2EFixture(
   page: Page,
-  options?: { readonly micMode?: "synthetic" | "synthetic-burst" | "denied" },
+  options?: {
+    readonly micMode?: "synthetic" | "synthetic-burst" | "denied";
+    readonly speechMode?: "none" | "scripted";
+    readonly evaluateMode?: "always-correct" | "scripted";
+    readonly failEvaluateOnce?: boolean;
+  },
 ) {
   await installApiFixture(page);
 
   const fixtureState = {
     wordsStatus: 200,
     emptyWords: false,
+    failEvaluateRemaining: options?.failEvaluateOnce ? 1 : 0,
+    ttsRequests: [] as string[],
+    evaluateRequests: [] as Array<{
+      request_id: string;
+      normalized_word: string;
+      browser_transcript: string;
+      context_phrase: string;
+    }>,
   };
   const micMode = options?.micMode ?? "synthetic";
+  const speechMode = options?.speechMode ?? "none";
+  const evaluateMode = options?.evaluateMode ?? "always-correct";
 
   const now = "2026-11-18T02:00:00Z";
   const childBId = "22222222-2222-4222-8222-333333333333";
@@ -211,6 +226,12 @@ async function installDifficultWordsE2EFixture(
       return jsonRespond(route, children[1]);
     }
     if (pathname === "/voice/text-to-speech" && method === "POST") {
+      try {
+        const body = route.request().postDataJSON() as { text?: string } | null;
+        if (body?.text) fixtureState.ttsRequests.push(body.text);
+      } catch {
+        // ignore non-JSON body
+      }
       return route.fulfill({
         status: 200,
         headers: corsHeaders,
@@ -243,19 +264,49 @@ async function installDifficultWordsE2EFixture(
       method === "POST"
     ) {
       const formData = route.request().postData() ?? "";
-      const normMatch = formData.match(
-        /name="normalized_word"\r\n\r\n([^\r\n]+)/,
-      );
-      const norm = normMatch?.[1]?.trim() || "có";
+      const extractField = (name: string) =>
+        formData
+          .match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r\\n]+)`))?.[1]
+          ?.trim() ?? "";
+      const norm = extractField("normalized_word") || "có";
+      const requestId = extractField("request_id");
+      const browserTranscript = extractField("browser_transcript");
+      const contextPhrase = extractField("context_phrase");
+      fixtureState.evaluateRequests.push({
+        request_id: requestId,
+        normalized_word: norm,
+        browser_transcript: browserTranscript,
+        context_phrase: contextPhrase,
+      });
+
+      if (fixtureState.failEvaluateRemaining > 0) {
+        fixtureState.failEvaluateRemaining -= 1;
+        return jsonRespond(route, { detail: "Offline outage" }, 503);
+      }
+
       const wordEntry = wordListA.find((w) => w.normalized_word === norm);
       const count = (wordEntry?.practice_attempts_count ?? 0) + 1;
+      const isCorrect =
+        evaluateMode === "always-correct"
+          ? true
+          : browserTranscript
+              .toLocaleLowerCase("vi")
+              .includes(norm.toLocaleLowerCase("vi"));
+      const assessmentStatus = isCorrect ? "CORRECT" : "INCORRECT";
       if (wordEntry) {
         wordEntry.practice_attempts_count = count;
-        wordEntry.practice_correct_count = count;
-        wordEntry.consecutive_correct_count = 1;
-        wordEntry.practice_status = "COMPLETED";
+        if (isCorrect) {
+          wordEntry.practice_correct_count =
+            (wordEntry.practice_correct_count ?? 0) + 1;
+          wordEntry.consecutive_correct_count = 1;
+          wordEntry.practice_status = "COMPLETED";
+        } else {
+          wordEntry.practice_incorrect_count =
+            (wordEntry.practice_incorrect_count ?? 0) + 1;
+          wordEntry.practice_status = "NEEDS_MORE_PRACTICE";
+        }
         wordEntry.last_practiced_at = now;
-        wordEntry.last_practice_status = "CORRECT";
+        wordEntry.last_practice_status = assessmentStatus;
       }
       const attemptId = `77777777-7777-4777-8777-${String(attemptsA.length + 1).padStart(12, "0")}`;
       const attempt = {
@@ -265,31 +316,39 @@ async function installDifficultWordsE2EFixture(
         display_text: wordEntry?.display_text ?? norm,
         attempt_number: count,
         state: "COMPLETED",
-        assessment_status: "CORRECT",
+        assessment_status: assessmentStatus,
         recognition_source: "SERVER_STT",
-        spoken_transcript: wordEntry?.display_text ?? norm,
+        spoken_transcript: isCorrect
+          ? (wordEntry?.display_text ?? norm)
+          : browserTranscript || "cò",
         confidence: null,
         audio_duration_ms: 820,
         assessment_version: 1,
         evidence_word_ids: [ids.revision],
         persistence_backend: "READING_EVENT",
-        resolved_in_session: true,
+        resolved_in_session: isCorrect,
         started_at: now,
         completed_at: now,
-        feedback_message: "Chính xác rồi! Con giỏi lắm!",
+        feedback_message: isCorrect
+          ? "Chính xác rồi! Con giỏi lắm!"
+          : "Con nghe lại rồi đọc theo nhé!",
         word_progress: {
           normalized_word: norm,
-          practice_status: "COMPLETED",
+          practice_status: isCorrect ? "COMPLETED" : "NEEDS_MORE_PRACTICE",
           practice_attempts_count: count,
-          practice_correct_count: count,
-          practice_incorrect_count: 0,
+          practice_correct_count: wordEntry?.practice_correct_count ?? 0,
+          practice_incorrect_count: wordEntry?.practice_incorrect_count ?? 0,
           practice_uncertain_count: 0,
-          consecutive_correct_count: 1,
+          consecutive_correct_count: isCorrect ? 1 : 0,
           required_consecutive_correct: 1,
           last_practiced_at: now,
-          last_practice_status: "CORRECT",
+          last_practice_status: assessmentStatus,
         },
-        next_recommended_word: norm === "có" ? "ngập ngừng" : null,
+        next_recommended_word:
+          wordListA.find(
+            (w) =>
+              w.normalized_word !== norm && w.practice_status !== "COMPLETED",
+          )?.normalized_word ?? null,
         evidence_count_unchanged: true,
       };
       attemptsA.unshift(attempt);
@@ -393,7 +452,13 @@ async function installDifficultWordsE2EFixture(
 
   // Synthetic Web Audio / MediaRecorder or permission-denied fixture (never touches real hardware)
   await page.addInitScript(
-    (mode: "synthetic" | "synthetic-burst" | "denied") => {
+    ({
+      mode,
+      recMode,
+    }: {
+      mode: "synthetic" | "synthetic-burst" | "denied";
+      recMode: "none" | "scripted";
+    }) => {
       const bursts = new WeakMap<MediaStream, () => void>();
       if (mode === "synthetic-burst") {
         const NativeRecorder = window.MediaRecorder;
@@ -404,14 +469,76 @@ async function installDifficultWordsE2EFixture(
           }
         };
       }
-      Object.defineProperty(window, "SpeechRecognition", {
-        configurable: true,
-        value: undefined,
-      });
-      Object.defineProperty(window, "webkitSpeechRecognition", {
-        configurable: true,
-        value: undefined,
-      });
+      if (recMode === "scripted") {
+        const instances: Array<{
+          onresult: ((e: unknown) => void) | null;
+          onend: (() => void) | null;
+          onerror: ((e: unknown) => void) | null;
+          say: (t: string, conf?: number) => void;
+        }> = [];
+        class ScriptedSpeechRecognition {
+          continuous = true;
+          interimResults = true;
+          lang = "vi-VN";
+          maxAlternatives = 1;
+          onresult: ((e: unknown) => void) | null = null;
+          onend: (() => void) | null = null;
+          onerror: ((e: unknown) => void) | null = null;
+          results: Array<{
+            isFinal: boolean;
+            length: number;
+            0: { transcript: string; confidence: number };
+          }> = [];
+          constructor() {
+            instances.push(this);
+          }
+          start() {}
+          abort() {
+            this.onend?.();
+          }
+          stop() {
+            this.onend?.();
+          }
+          say(transcript: string, confidence = 0.95) {
+            this.results.push({
+              isFinal: true,
+              length: 1,
+              0: { transcript, confidence },
+            });
+            this.onresult?.({
+              resultIndex: this.results.length - 1,
+              results: [...this.results],
+            });
+          }
+        }
+        Object.defineProperty(window, "SpeechRecognition", {
+          configurable: true,
+          value: ScriptedSpeechRecognition,
+        });
+        Object.defineProperty(window, "webkitSpeechRecognition", {
+          configurable: true,
+          value: ScriptedSpeechRecognition,
+        });
+        Object.assign(window, {
+          __dwSpeech: {
+            count: () => instances.length,
+            say: (transcript: string, confidence = 0.95) => {
+              const active = instances[instances.length - 1];
+              if (!active) throw new Error("No active DW SpeechRecognition");
+              active.say(transcript, confidence);
+            },
+          },
+        });
+      } else {
+        Object.defineProperty(window, "SpeechRecognition", {
+          configurable: true,
+          value: undefined,
+        });
+        Object.defineProperty(window, "webkitSpeechRecognition", {
+          configurable: true,
+          value: undefined,
+        });
+      }
       Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
         configurable: true,
         value: async () => {
@@ -458,7 +585,7 @@ async function installDifficultWordsE2EFixture(
         },
       });
     },
-    micMode,
+    { mode: micMode, recMode: speechMode },
   );
 
   return { childBId, fixtureState };
@@ -666,4 +793,257 @@ test("Hands-free short-word sensitivity & zero-extra-tap auto-advance loop in re
   await page.reload();
   await expect(page.getByText(/Đã luyện đúng 2\/2 từ/)).toBeVisible();
   await expect(page.getByText(/2\/2 từ đã đọc đúng \(100%\)/)).toBeVisible();
+});
+
+test("AUTO-DW-01: hands-free ladder (wrong -> context phrase -> 'đánh vần giúp con' -> partial syllable -> full word -> auto-advance & reload persist)", async ({
+  page,
+}) => {
+  await installDifficultWordsE2EFixture(page, {
+    micMode: "synthetic",
+    speechMode: "scripted",
+    evaluateMode: "scripted",
+  });
+
+  await page.goto(`/reports/difficult-words?childId=${ids.child}`);
+  await page.getByRole("button", { name: "Luyện cùng bé" }).click();
+  await expect(
+    page.getByRole("heading", { name: "có", exact: true }),
+  ).toBeVisible();
+
+  // Attempt 1: wrong pronunciation "cò" -> switches to context phrase "có một bông" on attempt 2
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("cò");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(page.getByText("có một bông", { exact: true })).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Attempt 2: ask "đánh vần giúp con" -> runs phonics steps & reopens mic
+  const countBeforeAttempt2 = await page.evaluate(() =>
+    (
+      window as unknown as { __dwSpeech: { count: () => number } }
+    ).__dwSpeech.count(),
+  );
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("đánh vần giúp con");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(page.getByText(/Cô đánh vần từng bước tiếng/i)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Attempt 3: partial syllable ("cờ o") -> SPELLING_STEP_ONLY (must stay on "có")
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __dwSpeech: { count: () => number } }
+          ).__dwSpeech.count(),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(countBeforeAttempt2);
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  const countBeforeAttempt3 = await page.evaluate(() =>
+    (
+      window as unknown as { __dwSpeech: { count: () => number } }
+    ).__dwSpeech.count(),
+  );
+  await page.waitForTimeout(1700);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("cờ o");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(
+    page.getByText(/Con đánh vần đúng nhịp rồi! Giờ con đọc trọn tiếng/i),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // Attempt 4: full word "có" -> CORRECT -> auto-advances to word #2 ("ngập ngừng") with autoStart=true
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __dwSpeech: { count: () => number } }
+          ).__dwSpeech.count(),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(countBeforeAttempt3);
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  const countBeforeAttempt4 = await page.evaluate(() =>
+    (
+      window as unknown as { __dwSpeech: { count: () => number } }
+    ).__dwSpeech.count(),
+  );
+  await page.waitForTimeout(1700);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("có");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+
+  await expect(
+    page.getByRole("heading", { name: "ngập ngừng", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          (
+            window as unknown as { __dwSpeech: { count: () => number } }
+          ).__dwSpeech.count(),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBeGreaterThan(countBeforeAttempt4);
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(1700);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("ngập ngừng");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(page.getByText(/Hoàn thành từ này/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  await page.getByRole("button", { name: "Quay về danh sách" }).click();
+  await expect(page.getByText(/2\/2 từ đã đọc đúng \(100%\)/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/2\/2 từ đã đọc đúng \(100%\)/)).toBeVisible();
+});
+
+test("AUTO-DW-02: max attempts advances, voice 'từ tiếp theo'/'dừng luyện', offline evaluate idempotent request_id, and 100% celebration", async ({
+  page,
+}) => {
+  const { fixtureState } = await installDifficultWordsE2EFixture(page, {
+    micMode: "synthetic",
+    speechMode: "scripted",
+    evaluateMode: "scripted",
+    failEvaluateOnce: true,
+  });
+
+  await page.goto(`/reports/difficult-words?childId=${ids.child}`);
+  await page.getByRole("button", { name: "Luyện cùng bé" }).click();
+  await expect(
+    page.getByRole("heading", { name: "có", exact: true }),
+  ).toBeVisible();
+
+  // 1) Offline/503 on first evaluate -> retry "Lưu lại kết quả" reuses identical request_id!
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("cò");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(
+    page.getByRole("button", { name: "Lưu lại kết quả" }),
+  ).toBeVisible({ timeout: 10_000 });
+  await page.getByRole("button", { name: "Lưu lại kết quả" }).click();
+  expect(fixtureState.evaluateRequests.length).toBeGreaterThanOrEqual(2);
+  expect(fixtureState.evaluateRequests[1].request_id).toBe(
+    fixtureState.evaluateRequests[0].request_id,
+  );
+
+  // 2) Voice "dừng luyện" pauses cleanly; resume & say "từ tiếp theo" -> advances to "ngập ngừng"
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("dừng luyện");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(
+    page.getByRole("button", { name: "Tiếp tục luyện" }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Tiếp tục luyện" }).click();
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("từ tiếp theo");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(
+    page.getByRole("heading", { name: "ngập ngừng", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // 3) Complete "ngập ngừng" -> also go back and complete "có" -> 100% completion celebration
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("ngập ngừng");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(page.getByText(/Hoàn thành từ này/)).toBeVisible({
+    timeout: 10_000,
+  });
+
+  // Advance to remaining incomplete word "có" via CTA -> complete "có" -> triggers 100% celebration!
+  await page.getByRole("button", { name: /Sang từ tiếp theo \(có\)/ }).click();
+  await expect(
+    page.getByRole("heading", { name: "có", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Dừng ghi âm" })).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.waitForTimeout(300);
+  await page.evaluate(() => {
+    (
+      window as unknown as { __dwSpeech: { say: (t: string) => void } }
+    ).__dwSpeech.say("có");
+  });
+  await page.getByRole("button", { name: "Dừng ghi âm" }).click();
+  await expect(page.getByText(/Hoàn thành từ này/)).toBeVisible({
+    timeout: 10_000,
+  });
+  await expect
+    .poll(
+      () =>
+        fixtureState.ttsRequests.some((t) =>
+          /hoàn thành hết tất cả các từ cần luyện/i.test(t),
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
 });

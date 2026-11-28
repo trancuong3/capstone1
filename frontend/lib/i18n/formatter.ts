@@ -309,9 +309,9 @@ function formatWithDateTimeIntl(
   const { fallback, ...intlOptions } = options ?? {};
   // ECMA-402 throws TypeError if dateStyle/timeStyle is combined with component
   // defaults (year, month, day, hour, minute), which would fall back to toISOString().
-  const usesStyleOptions =
+  const usesStylePresets =
     intlOptions.dateStyle !== undefined || intlOptions.timeStyle !== undefined;
-  const mergedOptions: Intl.DateTimeFormatOptions = usesStyleOptions
+  const mergedOptions: Intl.DateTimeFormatOptions = usesStylePresets
     ? { ...intlOptions }
     : { ...defaults, ...intlOptions };
 

@@ -110,6 +110,17 @@ class OcrCorrectionConfig:
         if (os.getenv("LOCAL_OCR_BASE_URL") or "").strip():
             return True
         return True
+    @staticmethod
+    def _resolve_cloud_enabled(
+        *,
+        local_enabled: bool,
+        gemini_api_key: str | None,
+        groq_api_key: str | None,
+    ) -> bool:
+        raw_cloud = os.getenv("OCR_CLOUD_CORRECTION_ENABLED")
+        if raw_cloud is not None and raw_cloud.strip() != "":
+            return _read_bool("OCR_CLOUD_CORRECTION_ENABLED", False)
+        return (not local_enabled) and bool(gemini_api_key or groq_api_key)
 
     @staticmethod
     def private_book_allow_cloud_ai() -> bool:
@@ -119,7 +130,11 @@ class OcrCorrectionConfig:
             return _read_bool("PRIVATE_BOOK_ALLOW_CLOUD_AI", False)
         if not OcrCorrectionConfig.local_ollama_enabled():
             try:
-                return _read_bool("OCR_CLOUD_CORRECTION_ENABLED", False)
+                return OcrCorrectionConfig._resolve_cloud_enabled(
+                    local_enabled=False,
+                    gemini_api_key=_optional_secret("GEMINI_API_KEY"),
+                    groq_api_key=_optional_secret("GROQ_API_KEY"),
+                )
             except OcrConfigurationError:
                 return False
         return False
@@ -134,6 +149,8 @@ class OcrCorrectionConfig:
     @classmethod
     def from_environment(cls) -> "OcrCorrectionConfig":
         local_enabled = cls.local_ollama_enabled()
+        gemini_api_key = _optional_secret("GEMINI_API_KEY")
+        groq_api_key = _optional_secret("GROQ_API_KEY")
         try:
             local = LocalOcrConfig.from_environment()
         except LocalCorrectionError as exc:
@@ -142,9 +159,13 @@ class OcrCorrectionConfig:
             else:
                 raise OcrConfigurationError("INVALID_LOCAL_OCR_CONFIGURATION") from exc
         return cls(
-            cloud_enabled=_read_bool("OCR_CLOUD_CORRECTION_ENABLED", False),
-            gemini_api_key=_optional_secret("GEMINI_API_KEY"),
-            groq_api_key=_optional_secret("GROQ_API_KEY"),
+            cloud_enabled=cls._resolve_cloud_enabled(
+                local_enabled=local_enabled,
+                gemini_api_key=gemini_api_key,
+                groq_api_key=groq_api_key,
+            ),
+            gemini_api_key=gemini_api_key,
+            groq_api_key=groq_api_key,
             gemini_primary_model=_read_model(
                 "GEMINI_OCR_PRIMARY_MODEL", "gemini-2.5-flash-lite"
             ),

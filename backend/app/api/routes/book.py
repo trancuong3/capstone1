@@ -170,7 +170,8 @@ async def get_book_pages(
     db: AsyncSession = Depends(get_db),
 ):
     """Return pages for an eligible catalog book; mint signed URLs only for verified active users."""
-    from app.services.storage_service import create_signed_image_urls
+    from app.services import storage_service as _storage_service
+    from app.services.storage_service import create_cached_signed_image_urls
 
     verified_actor_id = await _verify_optional_active_actor(request, db)
     pages = await BookService(db).list_pages(
@@ -206,10 +207,16 @@ async def get_book_pages(
                 raw_paths_to_sign.append(raw_image_path)
         if raw_paths_to_sign:
             try:
-                signed_urls = await asyncio.to_thread(
-                    create_signed_image_urls,
-                    raw_paths_to_sign,
-                )
+                try:
+                    signed_urls = await asyncio.to_thread(
+                        create_cached_signed_image_urls,
+                        raw_paths_to_sign,
+                    )
+                except TypeError:
+                    signed_urls = await asyncio.to_thread(
+                        _storage_service.create_signed_image_urls,
+                        raw_paths_to_sign,
+                    )
                 signed_by_path = dict(zip(raw_paths_to_sign, signed_urls))
             except Exception:
                 signed_by_path = {}

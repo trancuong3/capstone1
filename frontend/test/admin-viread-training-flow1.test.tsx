@@ -164,7 +164,7 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
     expect(table.getByText(/WER \(%\)/)).toBeInTheDocument();
     expect(table.getByText("Exact Match (%)")).toBeInTheDocument();
     expect(table.getByText("F1-Score (%)")).toBeInTheDocument();
-    expect(table.getByText("Tốc độ GPU (ms/dòng)")).toBeInTheDocument();
+    expect(table.getByText("Tốc độ xử lý (ms/dòng)")).toBeInTheDocument();
 
     // Diacritics errors
     expect(screen.getByText(/Lỗi dấu tiếng Việt/i)).toBeInTheDocument();
@@ -180,14 +180,14 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+        screen.getByRole("tab", { name: /Cập nhật mô hình/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
+    await user.click(screen.getByRole("tab", { name: /Cập nhật mô hình/i }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Thay thế trực tiếp Model VietOCR V2 Fine-Tuned/i),
+        screen.getByText(/Thay thế trực tiếp mô hình nhận diện chữ/i),
       ).toBeInTheDocument();
     });
 
@@ -268,14 +268,14 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+        screen.getByRole("tab", { name: /Cập nhật mô hình/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
+    await user.click(screen.getByRole("tab", { name: /Cập nhật mô hình/i }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Thay thế trực tiếp Model VietOCR V2 Fine-Tuned/i),
+        screen.getByText(/Thay thế trực tiếp mô hình nhận diện chữ/i),
       ).toBeInTheDocument();
     });
 
@@ -294,7 +294,7 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
     await waitFor(() => {
       expect(
         screen.getByText(
-          /Tệp trọng số bắt buộc phải có đuôi \.pth hoặc \.pt\./i,
+          /Tệp trọng số mô hình không đúng định dạng quy định\./i,
         ),
       ).toBeInTheDocument();
     });
@@ -306,14 +306,14 @@ describe("AdminVireadTrainingScreen - Flow 1 Model Replacement & Reliability Pro
 
     await waitFor(() => {
       expect(
-        screen.getByRole("tab", { name: /Thay model Flow 1/i }),
+        screen.getByRole("tab", { name: /Cập nhật mô hình/i }),
       ).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("tab", { name: /Thay model Flow 1/i }));
+    await user.click(screen.getByRole("tab", { name: /Cập nhật mô hình/i }));
 
     await waitFor(() => {
       expect(
-        screen.getByText(/Thay thế trực tiếp Model VietOCR V2 Fine-Tuned/i),
+        screen.getByText(/Thay thế trực tiếp mô hình nhận diện chữ/i),
       ).toBeInTheDocument();
     });
 

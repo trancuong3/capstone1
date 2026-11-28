@@ -155,12 +155,16 @@ class BackendOcrClient:
         retryable_statuses: frozenset[int],
         retryable_exceptions: tuple[type[Exception], ...],
         return_on_409: dict[str, Any] | None = None,
+        timeout_seconds: float | None = None,
     ) -> dict[str, Any]:
         max_attempts = max(1, min(3, self._completion_retry_attempts))
         last_exc: Exception | None = None
+        request_kwargs: dict[str, Any] = {"json": json_body}
+        if timeout_seconds is not None:
+            request_kwargs["timeout"] = float(timeout_seconds)
         for attempt in range(1, max_attempts + 1):
             try:
-                resp = self._client.request(method, path, json=json_body)
+                resp = self._client.request(method, path, **request_kwargs)
                 if return_on_409 is not None and resp.status_code == 409:
                     return dict(return_on_409)
                 if resp.status_code in retryable_statuses and attempt < max_attempts:
@@ -180,13 +184,19 @@ class BackendOcrClient:
         assert last_exc is not None
         raise last_exc
 
-    def send_worker_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def send_worker_heartbeat(
+        self,
+        payload: dict[str, Any],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         return self._request_with_retry(
             "POST",
             "/internal/ocr-jobs/worker-heartbeat",
             json_body=payload,
             retryable_statuses=frozenset({429, 500, 502, 503, 504}),
             retryable_exceptions=(httpx.RequestError,),
+            timeout_seconds=timeout_seconds,
         )
 
     def get_active_model(self) -> dict[str, Any]:
@@ -901,8 +911,9 @@ def run_worker_forever(
         runtime.wake_event.set()
         server.should_exit = True
 
-    signal.signal(signal.SIGINT, _handle_stop)
-    signal.signal(signal.SIGTERM, _handle_stop)
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, _handle_stop)
+        signal.signal(signal.SIGTERM, _handle_stop)
 
     if not runtime.is_draining():
         if use_scale_to_zero:
@@ -939,6 +950,31 @@ def run_worker_forever(
 
     warmup_recovery_attempts = 0
     try:
+        if client is not None and not stop_event.is_set():
+            try:
+                startup_hb = runtime.heartbeat_payload()
+                if runtime.is_ready():
+                    startup_hb["status"] = "IDLE"
+                client.send_worker_heartbeat(startup_hb, timeout_seconds=5.0)
+                last_hb = time.monotonic()
+            except Exception as exc:
+                logger.warning("Startup worker heartbeat failed: %s", type(exc).__name__)
+            if runtime.is_ready() and not stop_event.is_set():
+                try:
+                    drained_on_start = drain_queue_synchronously(
+                        client,
+                        runtime,
+                        lease_seconds=lease_seconds,
+                        heartbeat_seconds=heartbeat_seconds,
+                        straggler_wait_seconds=0.0,
+                        stop_event=stop_event,
+                    )
+                    last_hb = time.monotonic()
+                    if drained_on_start > 0:
+                        last_activity_at = time.monotonic()
+                except Exception as exc:
+                    logger.warning("Startup queue drain failed: %s", type(exc).__name__)
+
         while not stop_event.is_set():
             now = time.monotonic()
 
@@ -1090,14 +1126,15 @@ def run_worker_forever(
                 last_activity_at = time.monotonic()
     finally:
         server.should_exit = True
-        if client is not None and not use_quiet_standby:
+        if client is not None:
             try:
                 off = runtime.heartbeat_payload()
                 off["status"] = "OFFLINE"
-                client.send_worker_heartbeat(off)
+                off["active_job_id"] = None
+                off["active_job_count"] = 0
+                client.send_worker_heartbeat(off, timeout_seconds=2.0)
             except Exception:
                 pass
-        if client is not None:
             client.close()
 
 

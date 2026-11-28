@@ -97,7 +97,7 @@ describe("Report components with typed data and real API adapters", () => {
       </AppServicesProvider>,
     );
     expect(await screen.findByText("Chưa đánh giá")).toBeInTheDocument();
-    expect(screen.getAllByText(TEST_REVISION_ID).length).toBeGreaterThan(0);
+    expect(screen.queryByText(TEST_REVISION_ID)).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "Sự kiện trong buổi đọc" }),
     ).toBeInTheDocument();
@@ -132,7 +132,7 @@ describe("Report components with typed data and real API adapters", () => {
     await user.click(screen.getByRole("button", { name: "Luyện từ" }));
     expect(
       await screen.findByText(
-        "Hệ thống lưu lịch sử luyện từ chưa được khởi tạo bảng dữ liệu trên máy chủ.",
+        "Tính năng lưu lịch sử luyện từ hiện chưa sẵn sàng. Ba mẹ và bé vui lòng thử lại sau nhé.",
       ),
     ).toBeInTheDocument();
     expect(apiFetchFixture).toHaveBeenCalledTimes(1);

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import binascii
 import ipaddress
+import json
 import logging
 import math
 import os
@@ -1331,6 +1332,7 @@ class LocalVoiceProvider:
         filename: str,
         content_type: str,
         language_code: str | None = "vi",
+        keyterms: list[str] | None = None,
         source: str | None = None,
         session_id: str | None = None,
         turn_id: str | None = None,
@@ -1338,6 +1340,18 @@ class LocalVoiceProvider:
         form_data: dict[str, Any] = {
             "language": (language_code or "vi").strip() or "vi",
         }
+        if keyterms:
+            clean_keyterms: list[str] = []
+            seen_terms: set[str] = set()
+            for raw_term in keyterms[:30]:
+                if not isinstance(raw_term, str):
+                    continue
+                term = unicodedata.normalize("NFC", raw_term).strip()[:80]
+                if term and term.lower() not in seen_terms:
+                    seen_terms.add(term.lower())
+                    clean_keyterms.append(term)
+            if clean_keyterms:
+                form_data["keyterms"] = json.dumps(clean_keyterms, ensure_ascii=False)
         if source:
             form_data["source"] = source.strip()[:40]
         if session_id:
@@ -1401,16 +1415,28 @@ class LocalVoiceProvider:
             if (
                 txt
                 and isinstance(start, (int, float))
+                and not isinstance(start, bool)
                 and isinstance(end, (int, float))
+                and not isinstance(end, bool)
+                and math.isfinite(float(start))
+                and math.isfinite(float(end))
                 and start >= 0
                 and end >= start
             ):
+                raw_logprob = item.get("logprob")
+                safe_logprob = (
+                    float(raw_logprob)
+                    if isinstance(raw_logprob, (int, float))
+                    and not isinstance(raw_logprob, bool)
+                    and math.isfinite(float(raw_logprob))
+                    else None
+                )
                 safe_words.append(
                     {
                         "text": txt,
                         "start": float(start),
                         "end": float(end),
-                        "logprob": None,
+                        "logprob": safe_logprob,
                     }
                 )
 

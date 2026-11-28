@@ -41,15 +41,15 @@
     "books": "Bücherregal",
     "metadataQuality": "Buchqualität",
     "auditLogs": "Prüfprotokolle",
-    "training": "OCR-Training",
+    "training": "Texterkennungsmodelle",
     "health": "Betrieb",
     "moreTitle": "Weitere Verwaltung",
     "mobileQualityShort": "Qualität",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Text-KI",
     "mobileMoreDescriptions": {
       "auditLogs": "Admin-Prüfprotokolle verfolgen",
-      "training": "VietOCR V2-Modell trainieren und betreiben",
-      "health": "Systemstatus, OCR-Worker und Stimme"
+      "training": "Texterkennungsmodelle trainieren und verwalten",
+      "health": "Systemstatus, Texterkennung und Sprache"
     }
   },
   "accountMenu": {

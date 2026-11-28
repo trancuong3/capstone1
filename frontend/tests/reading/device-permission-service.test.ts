@@ -212,7 +212,7 @@ describe("DevicePermissionService", () => {
     const result =
       await createDevicePermissionService().requestAccess("microphone");
     expect(result.status).toBe("error");
-    expect(result.message).toContain("HTTPS hoặc localhost");
+    expect(result.message).toContain("kết nối an toàn");
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 

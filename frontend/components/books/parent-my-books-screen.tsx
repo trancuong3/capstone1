@@ -31,12 +31,14 @@ import { ReadabilityBadge } from "@/components/books/readability-badge";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Modal } from "@/components/common/modal";
+import { OcrServiceStatusBanner } from "@/components/common/ocr-service-status-banner";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { TextField } from "@/components/common/text-field";
 import { useAuthRuntime } from "@/hooks/use-auth-runtime";
 import { useTranslations } from "@/hooks/use-i18n";
+import { useOcrWorkerStatus } from "@/hooks/use-ocr-worker-status";
 import { useParentPrivateBookService } from "@/hooks/use-parent-private-book-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -203,6 +205,10 @@ function ParentMyBooksContent({
   const loadBooks = useCallback(() => {
     setReloadKey((prev) => prev + 1);
   }, []);
+
+  const ocrWorker = useOcrWorkerStatus({
+    onRecovered: loadBooks,
+  });
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
@@ -537,6 +543,17 @@ function ParentMyBooksContent({
           {t("myBooks.privacyBannerBody")}
         </p>
       </div>
+
+      <OcrServiceStatusBanner
+        compact
+        isChecking={ocrWorker.isChecking}
+        justRecovered={ocrWorker.justRecovered}
+        onDismissRecovered={ocrWorker.dismissRecoveredNotice}
+        onRecheck={() => void ocrWorker.recheckNow()}
+        queuedCount={ocrWorker.queueDepth}
+        status={ocrWorker.status}
+        variant="parent"
+      />
 
       {actionError ? (
         <StatusMessage title={t("myBooks.actionErrorTitle")} tone="error">
@@ -916,6 +933,20 @@ function ParentMyBooksContent({
                       <p className="rounded-control border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-950">
                         {t("myBooks.multiPageHoldingNotice")}
                       </p>
+                    ) : null}
+
+                    {ocrWorker.isUnavailable &&
+                    book.pending_submission_count > 0 ? (
+                      <div
+                        className="flex items-center gap-2 rounded-control border border-amber-300 bg-amber-50/90 px-2.5 py-2 text-xs font-semibold text-amber-950"
+                        data-testid={`book-waiting-ocr-${book.id}`}
+                      >
+                        <Clock3
+                          aria-hidden="true"
+                          className="size-3.5 shrink-0 text-amber-700"
+                        />
+                        <span>{t("myBooks.waitingOcrReopenBadge")}</span>
+                      </div>
                     ) : null}
 
                     <div className="flex flex-col gap-2 rounded-control bg-canvas/85 px-3 py-2.5 text-xs">

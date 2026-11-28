@@ -16,6 +16,7 @@ describe("/api/cron/parent-emails route handler", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     process.env = { ...originalEnv };
   });
 
@@ -260,5 +261,101 @@ describe("/api/cron/parent-emails route handler", () => {
     );
     expect(resNetwork.status).toBe(200);
     expect(fetchNetwork).toHaveBeenCalledTimes(2);
+  });
+
+  it("recovers from multi-attempt Render cold-start 502s within the 55s budget", async () => {
+    vi.useFakeTimers();
+    process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
+    process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("cold-1", { status: 502 }))
+      .mockResolvedValueOnce(new Response("cold-2", { status: 502 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ engagement_sent: 4 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer a-very-strong-cron-secret-value",
+        },
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(3_000);
+    const res = await pending;
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const body = await res.json();
+    expect(body.summary.engagement_sent).toBe(4);
+  });
+
+  it("retries immediately after a slow cold-start timeout without extra sleep and returns 504 if the 55s budget exhausts", async () => {
+    vi.useFakeTimers();
+    process.env.CRON_SECRET = "a-very-strong-cron-secret-value";
+    process.env.NEXT_PUBLIC_API_URL = "https://capstone1-ssd8.onrender.com";
+
+    // Slow first attempt (40s) followed by immediate recovery
+    const slowRecoverFetch = vi
+      .fn()
+      .mockImplementationOnce(
+        (_url: string, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ reminders_sent: 1 }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", slowRecoverFetch);
+
+    const slowRecoverPending = GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer a-very-strong-cron-secret-value",
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(40_000);
+    const slowRecoverRes = await slowRecoverPending;
+    expect(slowRecoverRes.status).toBe(200);
+    expect(slowRecoverFetch).toHaveBeenCalledTimes(2);
+
+    // Exhausting entire 55s budget returns 504 UPSTREAM_UNREACHABLE
+    const alwaysHangFetch = vi.fn().mockImplementation(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", alwaysHangFetch);
+
+    const exhaustPending = GET(
+      new NextRequest("https://viread.vercel.app/api/cron/parent-emails", {
+        headers: {
+          authorization: "Bearer a-very-strong-cron-secret-value",
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(56_000);
+    const exhaustRes = await exhaustPending;
+    expect(exhaustRes.status).toBe(504);
+    expect(await exhaustRes.json()).toEqual({
+      ok: false,
+      error: "UPSTREAM_UNREACHABLE",
+    });
   });
 });

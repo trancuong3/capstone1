@@ -20,6 +20,8 @@ import { cookies, headers } from "next/headers";
 import { getAppIdentity } from "@/lib/auth/server-authorization";
 import {
   computeSupabaseAuthCookieFingerprint,
+  ROLE_CACHE_MAX_AGE_SECONDS,
+  ROLE_CACHE_TTL_MS,
   signSsrAuthHeader,
   signSsrRoleCacheCookie,
   stripUntrustedSsrAuthHeaders,
@@ -65,16 +67,26 @@ describe("SSR auth cache and proxy handoff", () => {
       now: 1_000,
     });
 
-    expect(verifySsrRoleCacheCookie(signed, "user-1", cookieHash, 5_000)).toBe(
-      "parent",
-    );
+    expect(
+      verifySsrRoleCacheCookie(
+        signed,
+        "user-1",
+        cookieHash,
+        1_000 + ROLE_CACHE_TTL_MS - 1,
+      ),
+    ).toBe("parent");
     // Tampered payload/signature rejected
     expect(
       verifySsrRoleCacheCookie(`${signed}x`, "user-1", cookieHash, 5_000),
     ).toBeNull();
     // Expired TTL rejected
     expect(
-      verifySsrRoleCacheCookie(signed, "user-1", cookieHash, 40_000),
+      verifySsrRoleCacheCookie(
+        signed,
+        "user-1",
+        cookieHash,
+        1_000 + ROLE_CACHE_TTL_MS,
+      ),
     ).toBeNull();
     // Different user rejected
     expect(
@@ -124,6 +136,7 @@ describe("SSR auth cache and proxy handoff", () => {
     const cachedCookie = result.response.cookies.get(VIREAD_ROLE_CACHE_COOKIE);
     expect(cachedCookie?.value).toBeTruthy();
     expect(cachedCookie?.httpOnly).toBe(true);
+    expect(cachedCookie?.maxAge).toBe(ROLE_CACHE_MAX_AGE_SECONDS);
 
     const forwardedSignedHeader = result.response.headers.get(
       `x-middleware-request-${VIREAD_SSR_AUTH_HEADER}`,

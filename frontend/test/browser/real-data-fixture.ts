@@ -1452,8 +1452,10 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
       const targetChildId = decodeURIComponent(warmupStoryMatch[1]);
       return respond(route, {
         child_id: targetChildId,
-        grade: child.grade,
+        local_date: "2026-10-08",
+        has_due_words: true,
         target_words: ["mèo", "nắng"],
+        title_vi: "Nắng sớm bên hiên",
         sentences: [
           "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà.",
           "Bé mỉm cười đọc sách cùng chú mèo ngoan.",
@@ -1461,8 +1463,7 @@ export async function installApiFixture(page: Page): Promise<BrowserApiState> {
         full_text:
           "Chú mèo nhỏ sưởi nắng sớm bên hiên nhà. Bé mỉm cười đọc sách cùng chú mèo ngoan.",
         source: "RULE_BASED",
-        has_due_words: true,
-        generated_at: timestamp,
+        cached: false,
       });
     }
     if (

@@ -1,4 +1,7 @@
 {
+  "hub": {
+    "navAria": "Reading journey navigation"
+  },
   "overview": {
     "title": "Progress Report",
     "subtitle": "Track your child's reading time, accuracy, and reading streaks.",
@@ -27,9 +30,9 @@
     "periodListErrorDesc": "The current report is still displayed. You can try reloading the period list.",
     "noPeriodReportTitle": "No report for the selected period",
     "noSavedReportTitle": "No saved reports",
-    "noReportDescription": "No report for this selection. Please choose another child or period; the system does not use placeholder data.",
+    "noReportDescription": "No report found for this selection. Parents can choose another child profile or reporting period.",
     "pendingReportTitle": "Data pending",
-    "pendingReportDesc": "Report data is not yet ready. The system does not display estimated figures.",
+    "pendingReportDesc": "Report data is not yet available. Please try again later.",
     "periodBannerRange": "Period: {start} → {end}",
     "periodGeneratedAt": "Updated at {dateTime} (Vietnam time); does not auto-recalculate after each session.",
     "unsupportedFormatTitle": "Report format not supported",
@@ -61,10 +64,10 @@
     "viewAllWords": "View all ({count})",
     "noDifficultWordsInPeriod": "No difficult words recorded for this period.",
     "difficultWordsWindowNote": "Note: The Difficult words section defaults to the last 90 days and does not change based on the report period above.",
-    "legacyMetricsTitle": "Legacy metrics",
-    "legacyMetricsSubtitle": "Preserved saved field names; not converted to session counts or exact percentages.",
-    "legacyTotalBooks": "Total books saved (total_books)",
-    "legacyAvgFluency": "Saved avg_fluency value (unit undefined)",
+    "legacyMetricsTitle": "Previously stored metrics",
+    "legacyMetricsSubtitle": "Summary metrics from an earlier storage format.",
+    "legacyTotalBooks": "Total saved books",
+    "legacyAvgFluency": "Average fluency score",
     "periodSelectLabel": "Saved report period",
     "periodLatestOption": "Latest",
     "periodSelectedRange": "{start} → {end} (selected)",
@@ -166,7 +169,11 @@
       "uncertainLabel": "Couldn't hear clearly",
       "uncertainNote": "Recorded separately, not counted as a confirmed pronunciation error."
     },
-    "entertainmentSummaryHeading": "Play & Learn Progress & Language Skills (V4.0)"
+    "entertainmentSummaryHeading": "Play & Learn Progress & Language Skills (V4.0)",
+    "focusAria": "Filter report sections",
+    "focusAssessment": "AI Assessment",
+    "focusSignals": "Charts & metrics",
+    "focusEntertainment": "Play & Learn"
   },
   "sessions": {
     "title": "Reading history",
@@ -178,7 +185,7 @@
     "noChildDesc": "Create a profile to start saving the child's reading sessions.",
     "createChildAction": "Create child profile",
     "pendingDataTitle": "Data pending",
-    "pendingHistoryDesc": "Reading history data is not yet available. The system does not display sample data.",
+    "pendingHistoryDesc": "Reading history data is not yet available. Please try again later.",
     "retry": "Retry",
     "manageChildren": "Manage child profiles",
     "notFoundTitle": "History not found",
@@ -221,7 +228,7 @@
     "durationMinutesSeconds": "{minutes} minutes {seconds} seconds",
     "detail": {
       "loadingAria": "Loading reading session details",
-      "pendingDesc": "Data for this item is not available in the current format. No sample data available.",
+      "pendingDesc": "Data for this item is not yet available. Please try again later.",
       "notFoundTitle": "Reading session not found",
       "notFoundDesc": "The reading session does not exist or does not belong to the current account.",
       "backToHistory": "Back to history",
@@ -287,7 +294,7 @@
       "originalOmission": "Skip",
       "originalMispronunciation": "Incorrect pronunciation",
       "recognizedPrefix": "ViRead recognized: “{text}”",
-      "pageRevisionMeta": "Page {pageId} · version ",
+      "pageRevisionMeta": "Book page",
       "firstPassSectionAria": "First pass events",
       "firstPassSectionTitle": "First pass events",
       "timestampAt": "At ",
@@ -350,7 +357,7 @@
       "prevShort": "Previous",
       "nextShort": "Next",
       "loadingPageAria": "Loading book page content",
-      "verifiedPageTitle": "Verified page content",
+      "verifiedPageTitle": "Book page content",
       "selfCorrectedCount": "Self-corrected: {count} words",
       "pageMissingContentNote": "Could not load the exact book page version read by your child. Saved transcripts and statistics remain unchanged.",
       "legendAria": "Color legend",
@@ -423,7 +430,7 @@
     "errorTitle": "Something went wrong",
     "savedTitle": "Saved",
     "loadChildFailed": "Could not load child profile. Please try again.",
-    "loadManagementFailed": "Could not load reading management data. Check the backend and Reading Management migrations, then try again.",
+    "loadManagementFailed": "Unable to load reading management data. Please try again later.",
     "mutationUnconfirmed": "Action could not be completed. Data was not confirmed as saved; please try again.",
     "overviewAria": "Reading habits overview",
     "summaryRunningGoals": "Active goals",
@@ -531,7 +538,7 @@
     "goalsTimezoneRule": "Progress only counts completed sessions with valid start and end times. Goals do not auto-complete just by reaching 100%.",
     "remindersSectionAria": "Reading reminders",
     "remindersTitle": "Reading reminders",
-    "remindersSubtitle": "Schedules are saved in your selected timezone. When email alerts are on, reminders are sent to the parent's verified address.",
+    "remindersSubtitle": "Schedules are saved in the selected timezone. When email is enabled, the system sends reminders to the parent's verified address.",
     "addReminder": "Add reminder",
     "dueRemindersTitle": "Time to read ({count})",
     "reminderAtPrefix": "Reminder at ",
@@ -582,7 +589,7 @@
       "startLabel": "Start",
       "createGoal": "Create goal",
       "localTimeLabel": "Local time",
-      "ianaTimezoneLabel": "IANA timezone",
+      "ianaTimezoneLabel": "Detailed timezone",
       "repeatDaysLabel": "Repeat on",
       "emailReminderLabel": "Reading reminder email",
       "sendEmailCheck": "Email parent when it's time to read",
@@ -661,6 +668,10 @@
       "wantToRead": "Want to read",
       "savedToRead": "Saved to reading list"
     },
+    "focusAria": "Filter reading management sections",
+    "focusPlans": "Plans",
+    "focusGoals": "Goals",
+    "focusReminders": "Reminders",
     "androidReminderBody": "It is time for {alias}'s ViRead reading session!"
   },
   "entertainmentSummary": {

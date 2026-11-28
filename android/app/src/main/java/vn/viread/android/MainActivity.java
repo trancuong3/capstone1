@@ -883,10 +883,16 @@ public final class MainActivity extends Activity {
             if (errorTitleView != null) errorTitleView.setText(title);
             if (errorMessageView != null) errorMessageView.setText(message);
             if (errorDetailView != null) {
-                String suffix = (codeLabel != null && !codeLabel.trim().isEmpty())
-                        ? " · " + codeLabel.trim()
-                        : "";
-                errorDetailView.setText("Máy chủ: " + navigation.getOrigin() + suffix);
+                if (BuildConfig.DEBUG) {
+                    String suffix = (codeLabel != null && !codeLabel.trim().isEmpty())
+                            ? " · " + codeLabel.trim()
+                            : "";
+                    errorDetailView.setText("Máy chủ: " + navigation.getOrigin() + suffix);
+                    errorDetailView.setVisibility(View.VISIBLE);
+                } else {
+                    errorDetailView.setText("");
+                    errorDetailView.setVisibility(View.GONE);
+                }
             }
             if (errorOverlay != null) errorOverlay.setVisibility(View.VISIBLE);
         });

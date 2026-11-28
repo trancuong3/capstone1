@@ -537,7 +537,7 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     act(() => lastRec().say("con chọn B"));
     expect(submitAnswer).toHaveBeenCalledTimes(2);
 
-    act(() =>
+    await act(async () => {
       resolveManual({
         answer_id: "ans-right",
         question_id: q1.question.id,
@@ -545,13 +545,10 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
         is_correct: true,
         score: 1,
         feedback_code: "CORRECT",
-      }),
-    );
+      });
+    });
 
-    // Advance to Q2 via click on "Câu tiếp theo"
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Câu tiếp theo/ }),
-    );
+    // Auto-praises and advances to Q2 cleanly
     await screen.findByText("Trời hôm đó thế nào?");
     await waitFor(() => expect(QuizRecognition.instances).toHaveLength(3));
 
@@ -770,5 +767,175 @@ describe("hands-free voice comprehension quiz flow (G24)", () => {
     expect(capturedSignal?.aborted).toBe(true);
     act(() => resolveQuestionPlay());
     await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
+  });
+
+  it("AUTO-QUIZ-02: speaks 10s silence reminder #1 and 12s reminder #2 (max 2), and scrolls beingRead option on mobile", async () => {
+    vi.useFakeTimers();
+    const scrollIntoViewMock = vi.fn();
+    const origScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      const q1 = makeQuizQuestion(1, 1, "Ai nấu cơm cho bé?", [
+        "Bác gấu",
+        "Chú thỏ",
+        "Mẹ của bé",
+      ]);
+      speechPlayerMock.play.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 20);
+          }),
+      );
+      servicesHook.mockReturnValue({
+        comprehensionService: {
+          getQuestion: vi.fn().mockResolvedValueOnce(q1),
+          submitAnswer: vi.fn(),
+        },
+      } as unknown as ReadingServices);
+
+      render(
+        <ComprehensionQuestion
+          child={childFixture}
+          onComplete={vi.fn()}
+          sessionId={TEST_SESSION_ID}
+        />,
+      );
+
+      for (let step = 0; step < 8; step += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(25);
+        });
+      }
+      expect(QuizRecognition.instances).toHaveLength(1);
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+
+      speechPlayerMock.play.mockClear();
+
+      // 10s silence -> reminder #1
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_050);
+      });
+      expect(speechPlayerMock.play).toHaveBeenCalledTimes(1);
+
+      // 12s more silence -> reminder #2
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(12_050);
+      });
+      expect(speechPlayerMock.play).toHaveBeenCalledTimes(2);
+
+      // Another 20s silence -> NO 3rd reminder (capped at 2)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(speechPlayerMock.play).toHaveBeenCalledTimes(2);
+    } finally {
+      Element.prototype.scrollIntoView = origScrollIntoView;
+    }
+  });
+
+  it("AUTO-QUIZ-03: walks 3-step anti-stuck ladder (hint -> eliminate -> explain & auto-advance), supports 'bỏ qua câu này', and recovers from API 500 without duplicate submits", async () => {
+    let now = 1_000;
+    vi.spyOn(performance, "now").mockImplementation(() => now);
+
+    const q1 = makeQuizQuestion(1, 2, "Bạn nào thích ăn cá?", [
+      "Con mèo",
+      "Con vịt",
+      "Con gà",
+    ]);
+    const q2 = makeQuizQuestion(2, 2, "Bé đi đâu buổi sáng?", [
+      "Đi ngủ",
+      "Đi học",
+      "Đi bơi",
+    ]);
+    const getQuestion = vi
+      .fn()
+      // Initial load returns 500 -> recovers cleanly via Thử lại
+      .mockRejectedValueOnce(new Error("HTTP 500"))
+      .mockResolvedValueOnce(q1)
+      .mockResolvedValueOnce(q2);
+    const submitAnswer = vi
+      .fn()
+      // Q1 wrong #1 -> story_hint
+      .mockResolvedValueOnce({
+        answer_id: "w1",
+        question_id: q1.question.id,
+        submitted_answer: "Con vịt",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Con mèo thích ăn cá rán.",
+      })
+      // Q1 wrong #2 -> eliminates wrong choices
+      .mockResolvedValueOnce({
+        answer_id: "w2",
+        question_id: q1.question.id,
+        submitted_answer: "Con gà",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Con mèo thích ăn cá rán.",
+      })
+      // Q1 wrong #3 -> explains answer and auto-advances to Q2
+      .mockResolvedValueOnce({
+        answer_id: "w3",
+        question_id: q1.question.id,
+        submitted_answer: "Con vịt",
+        is_correct: false,
+        score: 0,
+        feedback_code: "TRY_AGAIN",
+        story_hint: "Con mèo thích ăn cá rán.",
+      });
+
+    servicesHook.mockReturnValue({
+      comprehensionService: { getQuestion, submitAnswer },
+    } as unknown as ReadingServices);
+
+    const onComplete = vi.fn();
+    render(
+      <ComprehensionQuestion
+        child={childFixture}
+        onComplete={onComplete}
+        sessionId={TEST_SESSION_ID}
+      />,
+    );
+
+    // API 500 on getQuestion -> shows retry button -> recovers cleanly
+    const retryBtn = await screen.findByRole("button", { name: /Thử lại/ });
+    fireEvent.click(retryBtn);
+
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(1));
+
+    // Wrong #1 -> story_hint
+    now += 2_000;
+    act(() => lastRec().say("Con vịt"));
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(1));
+    expect(screen.getByText(/Con mèo thích ăn cá rán/)).toBeInTheDocument();
+
+    // Wrong #2 -> eliminates wrong choices ("Con vịt" and "Con gà" marked data-eliminated-choice)
+    now += 2_000;
+    act(() => lastRec().say("Con gà"));
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: /Con vịt/ })).toHaveAttribute(
+      "data-eliminated-choice",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: /Con gà/ })).toHaveAttribute(
+      "data-eliminated-choice",
+      "true",
+    );
+
+    // Wrong #3 -> step 3 explains & auto-advances to Q2
+    now += 2_000;
+    act(() => lastRec().say("đáp án B"));
+    await waitFor(() => expect(submitAnswer).toHaveBeenCalledTimes(3));
+    await screen.findByText("Bé đi đâu buổi sáng?");
+    await waitFor(() => expect(QuizRecognition.instances).toHaveLength(4));
+
+    // On Q2: child says "bỏ qua câu này" -> advances & completes quiz without calling submitAnswer
+    now += 2_000;
+    act(() => lastRec().say("bỏ qua câu này"));
+    await waitFor(() => expect(onComplete).toHaveBeenCalledOnce());
+    expect(submitAnswer).toHaveBeenCalledTimes(3);
   });
 });

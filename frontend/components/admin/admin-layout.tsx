@@ -239,7 +239,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
               />
               <LanguageSelector
                 align="end"
-                className="max-[380px]:max-w-[7.25rem] lg:w-full lg:[&>button]:border lg:[&>button]:border-border"
+                className="max-[380px]:max-w-[7.25rem] [&>button]:min-h-10 [&>button]:py-1.5 lg:w-full lg:[&>button]:border lg:[&>button]:border-border"
                 presentation={isDesktopSidebar ? "sheet" : "auto"}
                 variant={isDesktopSidebar ? "menu" : "compact"}
               />
@@ -248,7 +248,7 @@ export function AdminLayout({ children }: { children: ReactNode }) {
                 disabled={isSigningOut}
                 isLoading={isSigningOut}
                 onClick={() => void handleSignOut()}
-                size="compact"
+                size="admin"
                 type="button"
                 variant="outline"
               >

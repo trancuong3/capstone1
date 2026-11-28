@@ -362,6 +362,12 @@ export function createDifficultWordService(): DifficultWordService {
           JSON.stringify(input.evidence_word_ids),
         );
       }
+      if (input.provider_mode) {
+        form.append("provider_mode", input.provider_mode);
+      }
+      if (input.allow_google_stt != null) {
+        form.append("allow_google_stt", String(input.allow_google_stt));
+      }
       return requestApi(
         `/system/difficult-words/${encodeURIComponent(childId)}/practice/evaluate`,
         practiceAttemptSchema,

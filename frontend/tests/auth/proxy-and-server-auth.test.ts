@@ -150,6 +150,24 @@ describe("deep-link redirect preservation in proxy and server authorization", ()
     );
   });
 
+  it("proxy redirects unauthenticated root / directly to /login preserving auth response cookies", async () => {
+    const authResponse = NextResponse.next();
+    refreshSupabaseAuthMock.mockResolvedValue({
+      response: authResponse,
+      userId: null,
+    });
+
+    const req = new NextRequest("http://localhost:3000/?foo=bar");
+    const resp = await proxy(req);
+
+    expect(resp.status).toBe(307);
+    expect(resp.headers.get("location")).toBe("http://localhost:3000/login");
+    expect(preserveSupabaseAuthResponseMock).toHaveBeenCalledWith(
+      authResponse,
+      expect.any(NextResponse),
+    );
+  });
+
   it("proxy keeps authenticated admin on /admin/login when ?state= is present", async () => {
     const passThrough = NextResponse.next();
     refreshSupabaseAuthMock.mockResolvedValue({

@@ -165,21 +165,21 @@ export function mapProviderToEngineSnapshot(input: {
   const isStt = input.kind === "stt";
 
   let tier: VoiceEngineTier = "local_offline";
-  let engineLabel = isStt ? "Offline (Sherpa-ONNX)" : "Offline (VieNeu-TTS)";
-  let shortLabel = "Offline";
+  let engineLabel = isStt ? "Nhận diện ViRead" : "Giọng đọc ViRead";
+  let shortLabel = "ViRead";
 
   if (normalized === "wasm" || normalized === "browser_wasm") {
     tier = "browser_wasm";
-    engineLabel = "Offline (WASM trên máy)";
-    shortLabel = "Offline (WASM)";
+    engineLabel = "Trên thiết bị";
+    shortLabel = "Thiết bị";
   } else if (normalized === "precomputed_cache") {
     tier = "local_offline";
-    engineLabel = "Offline (Precomputed Cache)";
-    shortLabel = "Offline (Cache)";
+    engineLabel = "Giọng đọc chuẩn bị sẵn";
+    shortLabel = "Chuẩn bị sẵn";
   } else if (normalized === "catalog_cache" || normalized === "precomputed") {
     tier = "catalog_cache";
-    engineLabel = "VieNeu (Cache chuẩn)";
-    shortLabel = "Cache chuẩn";
+    engineLabel = "Giọng đọc chuẩn";
+    shortLabel = "Chuẩn";
   } else if (
     normalized === "android_native" ||
     normalized === "android" ||
@@ -197,8 +197,8 @@ export function mapProviderToEngineSnapshot(input: {
     shortLabel = "ElevenLabs";
   } else if (normalized === "google" || normalized.startsWith("google")) {
     tier = "google_cloud";
-    engineLabel = "Google Cloud API";
-    shortLabel = "Online (Google API)";
+    engineLabel = "Trực tuyến";
+    shortLabel = "Trực tuyến";
   } else if (
     normalized === "browser" ||
     normalized === "webspeech" ||
@@ -206,7 +206,7 @@ export function mapProviderToEngineSnapshot(input: {
   ) {
     tier = "browser_default";
     engineLabel = "Trình duyệt mặc định";
-    shortLabel = "Online (Google/Trình duyệt)";
+    shortLabel = "Trình duyệt";
   }
 
   return {

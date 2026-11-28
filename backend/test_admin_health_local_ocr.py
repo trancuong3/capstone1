@@ -47,7 +47,7 @@ class LocalOcrHealthTests(unittest.IsolatedAsyncioTestCase):
         local_probe.assert_awaited_once()
         local_item = next(item for item in result.services if item.id == "local_ocr")
         self.assertEqual(local_item.status, "HEALTHY")
-        self.assertEqual(local_item.label, "AI OCR cục bộ")
+        self.assertEqual(local_item.label, "Nhận diện chữ")
 
     async def test_health_is_inconclusive_if_ocr_probe_times_out(self):
         repository = AsyncMock()

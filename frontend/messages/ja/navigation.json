@@ -41,15 +41,15 @@
     "books": "ブックライブラリ",
     "metadataQuality": "本の品質",
     "auditLogs": "監査ログ",
-    "training": "OCRトレーニング",
+    "training": "文字認識モデル",
     "health": "運用",
     "moreTitle": "その他の管理",
     "mobileQualityShort": "品質",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "文字認識",
     "mobileMoreDescriptions": {
       "auditLogs": "管理用監査ログの追跡",
-      "training": "VietOCR V2モデルの学習と運用",
-      "health": "システム、OCRワーカー、音声の状態"
+      "training": "文字認識モデルの学習と運用",
+      "health": "システム状態・文字認識・音声"
     }
   },
   "accountMenu": {

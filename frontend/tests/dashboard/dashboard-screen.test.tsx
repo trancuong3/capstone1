@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -374,5 +374,166 @@ describe("DashboardScreen with real API adapters", () => {
         name: `${secondChild.alias}, lớp ${secondChild.grade}`,
       }),
     ).toBeInTheDocument();
+  });
+
+  it("paginates 10 children at 4 per page, syncs to a pre-selected child's page, and lets parent browse other pages", async () => {
+    const manyChildren = Array.from({ length: 10 }, (_, index) => ({
+      ...childFixture,
+      id: `41ee0744-5a14-4d2c-bcbc-${String(index + 1).padStart(12, "0")}`,
+      alias: `Bé số ${index + 1}`,
+      grade: (index % 5) + 1,
+    }));
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/profiles/dashboard-summary") {
+        return Response.json({
+          profile,
+          children: manyChildren,
+          latest_sessions_by_child: {},
+        });
+      }
+      throw new Error(`Unexpected route: ${path}`);
+    });
+
+    const user = userEvent.setup();
+    renderDashboard();
+
+    // Page 1 shows children 1..4 only (never stretching the sidebar with all 10)
+    expect(
+      await screen.findByRole("button", { name: "Bé số 1, lớp 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Bé số 4, lớp 4" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Bé số 5, lớp 5" }),
+    ).not.toBeInTheDocument();
+
+    const pagination = screen.getByRole("navigation", {
+      name: /Hồ sơ bé/i,
+    });
+    expect(pagination).toHaveTextContent("Trang 1 / 3");
+    expect(pagination).toHaveTextContent("1–4 / 10");
+
+    // Navigate to page 2 -> shows children 5..8, select child #6
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(
+      screen.getByRole("button", { name: "Bé số 5, lớp 5" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Bé số 1, lớp 1" }),
+    ).not.toBeInTheDocument();
+    expect(pagination).toHaveTextContent("Trang 2 / 3");
+
+    const child6Btn = screen.getByRole("button", { name: "Bé số 6, lớp 1" });
+    await user.click(child6Btn);
+    expect(child6Btn).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByText("Mở tủ sách và chọn một cuốn cho Bé số 6."),
+    ).toBeInTheDocument();
+
+    // Navigate to page 3 -> shows children 9..10 and does not snap back to page 2
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(pagination).toHaveTextContent("Trang 3 / 3");
+    expect(
+      screen.getByRole("button", { name: "Bé số 9, lớp 4" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Bé số 10, lớp 5" }),
+    ).toBeInTheDocument();
+  });
+
+  it("opens on the page containing a pre-selected child and clamps safely if children shrink", async () => {
+    const manyChildren = Array.from({ length: 10 }, (_, index) => ({
+      ...childFixture,
+      id: `52ee0744-5a14-4d2c-bcbc-${String(index + 1).padStart(12, "0")}`,
+      alias: `Bé mẫu ${index + 1}`,
+      grade: (index % 5) + 1,
+    }));
+    const preselected = manyChildren[8]!; // child #9 -> page 3
+
+    const cachedSummary: DashboardSummaryDTO = {
+      profile,
+      children: manyChildren,
+      latest_sessions_by_child: {},
+      source: "dashboard-summary",
+    };
+    writeUserCache(profile.id, "dashboard-summary", cachedSummary);
+
+    let releaseRefresh: () => void = () => undefined;
+    const refreshGate = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/profiles/dashboard-summary") {
+        await refreshGate;
+        // Shrink list to first 2 children on network refresh (preselected removed? keep 3 children including none on page 3)
+        return Response.json({
+          profile,
+          children: manyChildren.slice(0, 3),
+          latest_sessions_by_child: {},
+        });
+      }
+      throw new Error(`Unexpected route: ${path}`);
+    });
+
+    function SeedChild9() {
+      const { selectChild } = useAppStore();
+      useEffect(() => selectChild(preselected.id), [selectChild]);
+      return null;
+    }
+
+    const user = userEvent.setup();
+    render(
+      <AuthRuntimeContext.Provider
+        value={{
+          initializationFailure: null,
+          isPasswordRecovery: false,
+          lastEvent: "SIGNED_IN",
+          mode: "supabase",
+          status: "ready",
+          session: {
+            expires_at: null,
+            user: {
+              id: profile.id,
+              email: "parent@example.com",
+              display_name: "Ba mẹ kiểm thử",
+            },
+          },
+        }}
+      >
+        <AppStoreProvider>
+          <SeedChild9 />
+          <AppServicesProvider>
+            <DashboardScreen />
+          </AppServicesProvider>
+        </AppStoreProvider>
+      </AuthRuntimeContext.Provider>,
+    );
+
+    // Opens directly on page 3 where child #9 lives
+    expect(
+      await screen.findByRole("button", { name: "Bé mẫu 9, lớp 4" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    const pagination = screen.getByRole("navigation", { name: /Hồ sơ bé/i });
+    expect(pagination).toHaveTextContent("Trang 3 / 3");
+
+    // Parent can browse back to page 2 without snapping back to page 3
+    await user.click(within(pagination).getByRole("button", { name: /Trước/ }));
+    expect(pagination).toHaveTextContent("Trang 2 / 3");
+    expect(
+      screen.getByRole("button", { name: "Bé mẫu 5, lớp 5" }),
+    ).toBeInTheDocument();
+
+    // When refreshed list shrinks to 3 children, page clamps safely to page 1 and pagination hides
+    await act(async () => releaseRefresh());
+    expect(
+      await screen.findByRole("button", { name: "Bé mẫu 1, lớp 1" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: /Hồ sơ bé/i }),
+    ).not.toBeInTheDocument();
   });
 });

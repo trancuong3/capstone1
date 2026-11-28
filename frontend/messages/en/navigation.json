@@ -41,15 +41,15 @@
     "books": "Book Library",
     "metadataQuality": "Book Quality",
     "auditLogs": "Audit Logs",
-    "training": "OCR Training",
+    "training": "Text recognition models",
     "health": "Operations",
     "moreTitle": "More Admin",
     "mobileQualityShort": "Quality",
-    "mobileOcrShort": "OCR",
+    "mobileOcrShort": "Text AI",
     "mobileMoreDescriptions": {
       "auditLogs": "Track admin audit logs",
-      "training": "Train and operate VietOCR V2 model",
-      "health": "System status, OCR worker, and voice"
+      "training": "Train and manage text recognition models",
+      "health": "System health, text recognition, and voice"
     }
   },
   "accountMenu": {

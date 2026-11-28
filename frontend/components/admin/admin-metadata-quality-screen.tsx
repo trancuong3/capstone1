@@ -553,11 +553,12 @@ export function AdminMetadataQualityScreen({
                               </div>
                             </td>
                             <td className="px-3.5 py-3">
-                              <div className="flex flex-wrap justify-end gap-2">
+                              <div className="flex flex-nowrap items-center justify-end gap-2">
                                 {book.issues.some(
                                   (issue) => issue !== "POSSIBLE_DUPLICATE",
                                 ) ? (
                                   <ButtonLink
+                                    className="whitespace-nowrap"
                                     href={
                                       "/admin/books/" +
                                       encodeURIComponent(book.id) +
@@ -574,6 +575,7 @@ export function AdminMetadataQualityScreen({
                                 ) : null}
                                 {book.issues.includes("POSSIBLE_DUPLICATE") ? (
                                   <ButtonLink
+                                    className="whitespace-nowrap"
                                     href={
                                       "/admin/books/" +
                                       encodeURIComponent(book.id)

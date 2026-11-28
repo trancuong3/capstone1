@@ -42,6 +42,8 @@ interface BookPageViewerProps extends PageWordEvidence {
   illustrationUrl?: string | null;
   illustrationTextFree?: boolean;
   initialReadingMode?: ReadingDisplayMode;
+  retryMode?: boolean;
+  retryFocusKey?: string | null;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
 }
@@ -514,23 +516,37 @@ function PageSurface(
         ? "text"
         : legacyMode;
 
+  const [layoutRevision, setLayoutRevision] = useState(0);
+  const prevRenderModeRef = useRef(renderMode);
+  useEffect(() => {
+    if (prevRenderModeRef.current !== renderMode) {
+      prevRenderModeRef.current = renderMode;
+      setLayoutRevision((rev) => rev + 1);
+    }
+  }, [renderMode]);
+
   const activeId = previewSnapshot
     ? previewSnapshot.currentWordId
     : currentWordId;
 
   const getActiveNode = useCallback(() => {
     if (!activeId) return null;
-    if (overlay) {
+    if (renderMode === "image-overlay") {
       return overlayNodesRef.current.get(activeId) ?? null;
     }
     return textNodesRef.current.get(activeId) ?? null;
-  }, [activeId, overlay]);
+  }, [activeId, renderMode]);
 
   const { isDetached, resumeAutoFollow } = useReadingAutoScroll({
     containerRef: rootRef,
     getActiveElement: getActiveNode,
     activeWordId: activeId,
     pageKey: `${page.page_id}:${page.page_revision_id}`,
+    centerMode: Boolean(props.retryMode),
+    forceFocusKey:
+      props.retryMode && props.retryFocusKey
+        ? `${props.retryFocusKey}:rev=${layoutRevision}`
+        : null,
     isPreview: Boolean(previewSnapshot),
   });
 
@@ -699,6 +715,7 @@ function PageSurface(
                     page: formatNumber(page.page_number),
                   })}
                   className="mx-auto h-auto max-h-[28dvh] w-auto max-w-full rounded-control object-contain sm:max-h-[38dvh]"
+                  onLoad={() => setLayoutRevision((rev) => rev + 1)}
                   onError={() => {
                     if (illustrationNeedsAuth && safeIllustrationUrl) {
                       setIllustrationAuthState({
@@ -803,6 +820,7 @@ function PageSurface(
                     height={Math.max(1, page.height)}
                     unoptimized
                     className="mx-auto h-auto max-h-[42dvh] w-auto max-w-full object-contain"
+                    onLoad={() => setLayoutRevision((rev) => rev + 1)}
                     onError={handleImageLoadError}
                   />
                 </div>

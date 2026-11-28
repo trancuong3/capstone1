@@ -2,12 +2,9 @@
 
 import { z } from "zod";
 
-import {
-  getBrowserAccessToken,
-  invalidateBrowserTokenCache,
-} from "@/lib/api/browser-auth";
+import { requestApi } from "@/lib/api/api-client";
+import { ServiceError } from "@/lib/api/service-error";
 import { translateRuntime } from "@/lib/i18n/runtime";
-import { getApiBaseUrl } from "@/lib/supabase/config";
 import type {
   SupportFeedbackRequest,
   SupportFeedbackResponse,
@@ -51,60 +48,22 @@ export interface SupportService {
 export function createSupportService(): SupportService {
   return {
     async submitFeedback(request) {
-      let accessToken: string;
       try {
-        accessToken = await getBrowserAccessToken({
-          onUnauthorized: () =>
-            new SupportFeedbackError(safeMessageForStatus(401), 401),
-        });
-      } catch (error) {
-        if (error instanceof SupportFeedbackError) {
-          throw error;
-        }
-        throw new SupportFeedbackError(safeMessageForStatus(401), 401);
-      }
-
-      let response: Response;
-      try {
-        response = await fetch(getApiBaseUrl() + "/support/feedback", {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            Authorization: "Bearer " + accessToken,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(request),
-          cache: "no-store",
-          credentials: "omit",
-          redirect: "error",
-        });
-      } catch {
-        throw new SupportFeedbackError(safeMessageForStatus(0), 0);
-      }
-
-      if (!response.ok) {
-        if (response.status === 401) {
-          invalidateBrowserTokenCache();
-        }
-        throw new SupportFeedbackError(
-          safeMessageForStatus(response.status),
-          response.status,
+        return await requestApi(
+          "/support/feedback",
+          supportFeedbackResponseSchema,
+          undefined,
+          { method: "POST", body: request },
         );
-      }
-
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch {
+      } catch (error) {
+        if (error instanceof ServiceError) {
+          throw new SupportFeedbackError(
+            safeMessageForStatus(error.status),
+            error.status,
+          );
+        }
         throw new SupportFeedbackError(safeMessageForStatus(0), 0);
       }
-
-      const parsed = supportFeedbackResponseSchema.safeParse(payload);
-      if (!parsed.success) {
-        throw new SupportFeedbackError(safeMessageForStatus(0), 0);
-      }
-
-      return parsed.data;
     },
   };
 }

@@ -626,7 +626,33 @@ describe("real Admin adapters", () => {
     ];
     expect(wakeUrl).toContain("/system/admin/health/ocr-worker/wakeup");
     expect(wakeInit.method).toBe("POST");
-    expect(wakeInit.signal).toBe(controller.signal);
+    expect(wakeInit.signal).toBeInstanceOf(AbortSignal);
+    expect(wakeInit.signal?.aborted).toBe(false);
+
+    const wakeAbortController = new AbortController();
+    let wakeForwardedSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce((_url: string, init?: RequestInit) => {
+      wakeForwardedSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        const rejectAbort = () =>
+          reject(new DOMException("The operation was aborted.", "AbortError"));
+        if (wakeForwardedSignal?.aborted) {
+          rejectAbort();
+          return;
+        }
+        wakeForwardedSignal?.addEventListener("abort", rejectAbort, {
+          once: true,
+        });
+      });
+    });
+    const pendingWake = service.wakeOcrWorker(wakeAbortController.signal);
+    await vi.waitFor(() =>
+      expect(wakeForwardedSignal).toBeInstanceOf(AbortSignal),
+    );
+    expect(wakeForwardedSignal?.aborted).toBe(false);
+    wakeAbortController.abort();
+    expect(wakeForwardedSignal?.aborted).toBe(true);
+    await expect(pendingWake).rejects.toMatchObject({ name: "AbortError" });
 
     fetchMock.mockResolvedValueOnce(
       Response.json({ status: "ok", woken: "yes", detail: 123 }),
@@ -689,11 +715,11 @@ describe("real Admin adapters", () => {
     );
     await expect(createAdminBookService().list()).rejects.toMatchObject({
       status: 503,
-      message: "Backend chưa cấu hình SUPABASE_STORAGE_BUCKET trong file .env.",
+      message: "Hệ thống lưu trữ hình ảnh chưa sẵn sàng. Vui lòng thử lại sau.",
     });
   });
 
-  it("shows the safe Storage bucket reason and includes its request ID", async () => {
+  it("shows the safe Storage bucket reason and preserves its request ID property", async () => {
     fetchMock.mockResolvedValue(
       Response.json(
         {
@@ -709,8 +735,7 @@ describe("real Admin adapters", () => {
     await expect(createAdminBookService().list()).rejects.toMatchObject({
       status: 503,
       request_id: "request-test-123",
-      message:
-        "Không tìm thấy bucket trong Supabase project đang cấu hình. Hãy kiểm tra đúng tên bucket và SUPABASE_URL. Mã yêu cầu: request-test-123.",
+      message: "Không tìm thấy thư mục lưu trữ hình ảnh. Vui lòng thử lại sau.",
     });
   });
 
@@ -848,7 +873,7 @@ describe("real Admin adapters", () => {
     expect(progress[1]).toEqual({
       status: "FAILED",
       error_message:
-        "Backend thiếu SUPABASE_SECRET_KEY hoặc SUPABASE_SERVICE_ROLE_KEY. Hãy cấu hình khóa chỉ ở môi trường Backend.",
+        "Dịch vụ lưu trữ hình ảnh đang bảo trì cấu hình. Vui lòng thử lại sau.",
     });
   });
 

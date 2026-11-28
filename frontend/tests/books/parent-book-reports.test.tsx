@@ -174,4 +174,48 @@ describe("Parent book content reports dialog & inbox", () => {
       /Admin đã kiểm tra và gỡ nội dung không phù hợp/i,
     );
   });
+
+  it("paginates parent book reports at 10 per page and requests the next page offset", async () => {
+    const listMineMock = vi.mocked(mockReportService.listMine);
+    listMineMock.mockReset();
+    listMineMock.mockImplementation(async ({ limit = 10, offset = 0 } = {}) => {
+      const all = Array.from({ length: 12 }, (_, index) => ({
+        id: `77000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        book_id: BOOK_ID,
+        book_title: `Sách báo cáo ${index + 1}`,
+        reporter_name: "Phụ huynh A",
+        page_id: PAGE_ID,
+        page_number: index + 1,
+        page_revision_id: null,
+        issue_type: "SPELLING_ERROR" as const,
+        description: `Lỗi chính tả báo cáo ${index + 1}`,
+        reported_text: null,
+        suggested_correction: null,
+        status: "OPEN" as const,
+        scan_run_id: null,
+        created_at: CREATED_AT,
+        updated_at: CREATED_AT,
+      }));
+      return {
+        items: all.slice(offset, offset + limit),
+        total: all.length,
+        limit,
+        offset,
+      };
+    });
+
+    const user = userEvent.setup();
+    render(<ParentBookReportsScreen />);
+
+    expect(await screen.findByText("Sách báo cáo 1")).toBeInTheDocument();
+    expect(screen.getByText("Sách báo cáo 10")).toBeInTheDocument();
+    expect(screen.queryByText("Sách báo cáo 11")).not.toBeInTheDocument();
+    expect(screen.getByText("Trang 1 / 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Tiếp/i }));
+    expect(await screen.findByText("Sách báo cáo 11")).toBeInTheDocument();
+    expect(screen.getByText("Sách báo cáo 12")).toBeInTheDocument();
+    expect(screen.queryByText("Sách báo cáo 1")).not.toBeInTheDocument();
+    expect(listMineMock).toHaveBeenLastCalledWith({ limit: 10, offset: 10 });
+  });
 });

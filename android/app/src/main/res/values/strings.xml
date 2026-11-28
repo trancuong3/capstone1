@@ -9,18 +9,18 @@
     <!-- Stage 3 (20-45s): Render.com cold start in progress -->
     <string name="loading_hint_stage3">Máy chủ đang khởi động, vui lòng đợi…</string>
     <!-- Legacy / fallback; kept for backward compatibility with any reference -->
-    <string name="loading_cold_start_hint">Máy chủ đang khởi động (cold-start), ba mẹ vui lòng đợi thêm giây lát…</string>
+    <string name="loading_cold_start_hint">Hệ thống đang khởi động, ba mẹ vui lòng đợi thêm giây lát…</string>
 
     <string name="error_title_network">Chưa kết nối được máy chủ ViRead</string>
     <string name="error_title_server">Máy chủ ViRead đang khởi động hoặc bận</string>
     <!-- Used specifically for LOAD_TIMEOUT_MS expiry -->
     <string name="error_title_timeout">Không thể kết nối ViRead</string>
-    <string name="error_title_tls">Chứng chỉ bảo mật không hợp lệ</string>
+    <string name="error_title_tls">Kết nối chưa an toàn</string>
 
     <string name="offline_message">Không thể kết nối tới máy chủ ViRead. Ba mẹ hãy kiểm tra mạng Wi‑Fi / 4G hoặc địa chỉ máy chủ rồi bấm Thử lại nhé.</string>
     <string name="timeout_message">Máy chủ ViRead phản hồi chậm. Ba mẹ hãy kiểm tra kết nối mạng rồi bấm Thử lại. Nếu vừa mở lần đầu, máy chủ có thể cần 30–60 giây để khởi động.</string>
-    <string name="server_5xx_message">Máy chủ ViRead đang bận hoặc đang khởi động lại (%1$d). Ba mẹ hãy đợi vài giây rồi bấm Thử lại nhé.</string>
-    <string name="tls_error_message">Chứng chỉ bảo mật HTTPS của máy chủ không hợp lệ nên ViRead đã chặn kết nối để bảo vệ tài khoản gia đình.</string>
+    <string name="server_5xx_message">Hệ thống ViRead đang bận hoặc đang khởi động lại (mã %1$d). Ba mẹ hãy đợi vài giây rồi bấm Thử lại nhé.</string>
+    <string name="tls_error_message">Kết nối HTTPS tới ViRead hiện chưa đảm bảo an toàn nên ứng dụng đã tạm dừng để bảo vệ tài khoản gia đình.</string>
     <string name="no_network_toast">Thiết bị hiện chưa có kết nối Internet hoặc Wi‑Fi.</string>
     <string name="network_ready_toast">Đã phát hiện kết nối mạng. Đang thử tải lại ViRead…</string>
 

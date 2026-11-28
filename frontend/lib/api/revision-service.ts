@@ -9,6 +9,7 @@ import {
   AdminOcrJobQueuedSignal,
   adminOcrJobSchema,
   adminProcessingSchema,
+  notifyTasksChanged,
   pollAdminOcrJob,
 } from "@/lib/api/admin-page-service";
 import { requestApi } from "@/lib/api/api-client";
@@ -104,10 +105,12 @@ export function createRevisionService(options?: {
           undefined,
           { method: "POST" },
         );
+        notifyTasksChanged();
         const finalJob = await pollAdminOcrJob(job, {
           pollIntervalMs,
           maxAttempts: maxPollAttempts,
         });
+        notifyTasksChanged();
         if (
           finalJob.status === "DEAD_LETTER" ||
           finalJob.status === "CANCELLED"
@@ -156,6 +159,7 @@ export function createRevisionService(options?: {
           undefined,
           { method: "POST" },
         );
+        notifyTasksChanged();
       }
       if (onStatus) {
         try {

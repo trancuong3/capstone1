@@ -529,12 +529,37 @@ _MAX_IMAGE_RESPONSE_BYTES = 10 * 1024 * 1024  # 10 MiB hard cap on generated ima
 def build_default_provider_registry(
     env: Mapping[str, str] | None = None,
 ) -> tuple[ProviderSpec, ...]:
-    """Build the capability matrix grounded in empirical 2025/2026 zero-cost probe findings."""
+    """Build the capability matrix grounded in empirical 2026 zero-cost probe findings."""
+    from app.services.ocr_ai.config import OcrCorrectionConfig
+    from app.services.ocr_ai.exceptions import OcrConfigurationError
+
     source_env: Mapping[str, str] = os.environ if env is None else env
-    cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
-    ai_image_enabled = _env_bool(source_env, "SMART_AI_IMAGE_GEN_ENABLED", True)
     gemini_key_present = _has_secret(source_env, "GEMINI_API_KEY")
     groq_key_present = _has_secret(source_env, "GROQ_API_KEY")
+    if env is None:
+        ollama_local_enabled = OcrCorrectionConfig.local_ollama_enabled()
+        try:
+            cloud_ocr_enabled = OcrCorrectionConfig.from_environment().cloud_enabled
+        except OcrConfigurationError:
+            cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
+    else:
+        raw_local = source_env.get("LOCAL_OCR_ENABLED")
+        if raw_local is not None and raw_local.strip():
+            ollama_local_enabled = _env_bool(source_env, "LOCAL_OCR_ENABLED", True)
+        else:
+            ollama_local_enabled = not (
+                _env_bool(source_env, "RENDER", False)
+                or _env_bool(source_env, "VIREAD_WEB_DISABLE_HEAVY_WORKERS", False)
+                or (source_env.get("VIREAD_OCR_MODE") or "").strip().lower() == "remote_worker"
+            )
+        raw_cloud = source_env.get("OCR_CLOUD_CORRECTION_ENABLED")
+        if raw_cloud is not None and raw_cloud.strip():
+            cloud_ocr_enabled = _env_bool(source_env, "OCR_CLOUD_CORRECTION_ENABLED", False)
+        else:
+            cloud_ocr_enabled = (not ollama_local_enabled) and (
+                gemini_key_present or groq_key_present
+            )
+    ai_image_enabled = _env_bool(source_env, "SMART_AI_IMAGE_GEN_ENABLED", True)
     cloudflare_ready = (
         ai_image_enabled
         and _has_secret(source_env, "CLOUDFLARE_ACCOUNT_ID")
@@ -617,7 +642,7 @@ def build_default_provider_registry(
             capabilities=ALL_TEXT_VISION_CAPABILITIES,
             quota_group=None,
             is_local=True,
-            enabled=True,
+            enabled=ollama_local_enabled,
             max_attempt_timeout_seconds=45.0,
             priority_order=40,
             notes="100% local loopback privacy fallback for text/vision/JSON.",

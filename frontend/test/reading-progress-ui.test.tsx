@@ -161,9 +161,7 @@ describe("Saved reading progress UI", () => {
     expect(
       within(table).getByRole("row", { name: "Lặp từ 0" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Giá trị avg_fluency đã lưu (chưa xác định đơn vị)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Điểm trôi chảy trung bình")).toBeInTheDocument();
     expect(
       screen.queryByText("Báo cáo này chưa ghi nhận từ cần luyện."),
     ).not.toBeInTheDocument();
@@ -344,5 +342,108 @@ describe("Saved reading progress UI", () => {
         String(url).endsWith(`/system/progress/${TEST_CHILD_ID}`),
       ),
     ).toBe(false);
+  });
+
+  it("paginates large difficult words lists (6 per page) instead of expanding all at once", async () => {
+    const user = userEvent.setup();
+    const manyWords = Array.from({ length: 15 }, (_, idx) => ({
+      normalized_word: `tu-${idx + 1}`,
+      display_text: `Từ khó ${idx + 1}`,
+      difficulty_score: 15 - idx,
+      omission_count: 1,
+      repetition_count: 0,
+      long_pause_count: 0,
+      read_example_count: 0,
+      session_count: 2,
+      last_seen_at: "2026-10-01T01:00:00Z",
+      evidence_word_ids: [
+        `50000000-0000-4000-8000-0000000000${String(idx + 1).padStart(2, "0")}`,
+      ],
+    }));
+    current = {
+      ...report,
+      difficult_words: manyWords,
+    };
+
+    renderReport();
+    await screen.findByText("Từ khó 1");
+
+    expect(screen.getByText("Từ khó 6")).toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 7")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Xem tất cả/ }),
+    ).not.toBeInTheDocument();
+
+    const pagination = screen.getByRole("navigation", {
+      name: "Từ cần luyện nổi bật",
+    });
+    expect(within(pagination).getByText("Trang 1 / 3")).toBeInTheDocument();
+
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByText("Từ khó 7")).toBeInTheDocument();
+    expect(screen.getByText("Từ khó 12")).toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Từ khó 13")).not.toBeInTheDocument();
+
+    await user.click(within(pagination).getByRole("button", { name: /Tiếp/ }));
+    expect(screen.getByText("Từ khó 13")).toBeInTheDocument();
+    expect(screen.getByText("Từ khó 15")).toBeInTheDocument();
+    expect(within(pagination).getByText("Trang 3 / 3")).toBeInTheDocument();
+  });
+
+  it("parallelizes child list, saved periods, and exact-window report when requestedChildId and period are provided", async () => {
+    let resolveChildren!: (res: Response) => void;
+    let resolvePeriods!: (res: Response) => void;
+    let resolveReport!: (res: Response) => void;
+
+    fetchMock.mockImplementation((url: string) => {
+      if (url.endsWith("/profiles/children")) {
+        return new Promise<Response>((resolve) => {
+          resolveChildren = resolve;
+        });
+      }
+      if (url.includes("/periods")) {
+        return new Promise<Response>((resolve) => {
+          resolvePeriods = resolve;
+        });
+      }
+      if (url.includes(`/system/progress/${TEST_CHILD_ID}`)) {
+        return new Promise<Response>((resolve) => {
+          resolveReport = resolve;
+        });
+      }
+      return Promise.resolve(respond(url));
+    });
+
+    renderReport({
+      requestedChildId: TEST_CHILD_ID,
+      requestedPeriodStart: report.period_start,
+      requestedPeriodEnd: report.period_end,
+    });
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map(([url]) => String(url));
+      expect(urls.some((u) => u.endsWith("/profiles/children"))).toBe(true);
+      expect(
+        urls.some((u) =>
+          u.includes(`/system/progress/${TEST_CHILD_ID}/periods`),
+        ),
+      ).toBe(true);
+      expect(
+        urls.some((u) =>
+          u.includes(
+            `/system/progress/${TEST_CHILD_ID}?period_start=${report.period_start}`,
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    await act(async () => {
+      resolveChildren(Response.json([child, second]));
+      resolvePeriods(Response.json({ items: [option], next_cursor: null }));
+      resolveReport(Response.json(report));
+    });
+
+    await screen.findByText("4 buổi");
   });
 });

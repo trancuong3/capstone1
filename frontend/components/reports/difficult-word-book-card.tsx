@@ -5,14 +5,13 @@ import { useCallback, useState } from "react";
 
 import { BookCover } from "@/components/books/book-cover";
 import { Button } from "@/components/common/button";
+import { PaginationBar } from "@/components/common/pagination-bar";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import type {
   DifficultWordBookGroup,
   DifficultWordDTO,
   DifficultWordPracticeStatus,
 } from "@/types/reports";
-
-const MAX_COLLAPSED_WORDS = 10;
 
 interface DifficultWordBookCardProps {
   readonly group: DifficultWordBookGroup;
@@ -54,6 +53,9 @@ const CHIP_STYLES: Record<
   },
 };
 
+const WORD_CHIPS_PAGE_SIZE = 12;
+const DETAIL_WORDS_PAGE_SIZE = 6;
+
 export function DifficultWordBookCard({
   group,
   onStartBookPractice,
@@ -63,8 +65,29 @@ export function DifficultWordBookCard({
   const t = useTranslations("difficultWords");
   const tr = useTranslations("reading");
   const [coverError, setCoverError] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [chipsPage, setChipsPage] = useState(1);
+  const [detailsPage, setDetailsPage] = useState(1);
   const handleCoverError = useCallback(() => setCoverError(true), []);
+
+  const totalChipPages = Math.max(
+    1,
+    Math.ceil(group.words.length / WORD_CHIPS_PAGE_SIZE),
+  );
+  const safeChipsPage = Math.min(Math.max(1, chipsPage), totalChipPages);
+  const visibleChipWords = group.words.slice(
+    (safeChipsPage - 1) * WORD_CHIPS_PAGE_SIZE,
+    safeChipsPage * WORD_CHIPS_PAGE_SIZE,
+  );
+
+  const totalDetailPages = Math.max(
+    1,
+    Math.ceil(group.words.length / DETAIL_WORDS_PAGE_SIZE),
+  );
+  const safeDetailsPage = Math.min(Math.max(1, detailsPage), totalDetailPages);
+  const visibleDetailWords = group.words.slice(
+    (safeDetailsPage - 1) * DETAIL_WORDS_PAGE_SIZE,
+    safeDetailsPage * DETAIL_WORDS_PAGE_SIZE,
+  );
 
   const firstPendingWord =
     group.words.find((item) => item.practice_status !== "COMPLETED") ??
@@ -92,13 +115,6 @@ export function DifficultWordBookCard({
           })
         : t("bookCard.gradeSingle", { grade: group.minGrade })
       : null;
-
-  const hasOverflowWords = group.words.length > MAX_COLLAPSED_WORDS;
-  const visibleWords =
-    hasOverflowWords && !expanded
-      ? group.words.slice(0, MAX_COLLAPSED_WORDS)
-      : group.words;
-  const hiddenCount = Math.max(0, group.words.length - MAX_COLLAPSED_WORDS);
 
   return (
     <article
@@ -199,59 +215,54 @@ export function DifficultWordBookCard({
           </div>
         </div>
 
-        <div
-          className="flex flex-wrap gap-2"
-          role="list"
-          aria-label={t("bookCard.wordsAria", { title: group.bookTitle })}
-        >
-          {visibleWords.map((word) => {
-            const status: DifficultWordPracticeStatus =
-              word.practice_status ?? "NOT_PRACTICED";
-            const style = CHIP_STYLES[status];
-            const statusLabel = t(style.labelKey);
-            return (
-              <button
-                aria-label={t("bookCard.wordButtonAria", {
-                  word: word.display_text,
-                  status: statusLabel,
-                })}
-                className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 py-1.5 text-base font-extrabold shadow-2xs transition-all hover:-translate-y-0.5 hover:shadow-xs focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
-                key={word.normalized_word}
-                onClick={() => onSelectWord(word)}
-                type="button"
-              >
-                {status === "COMPLETED" ? (
-                  <Check
-                    aria-hidden="true"
-                    className="size-4 text-success-ink"
-                  />
-                ) : (
-                  <span
-                    aria-hidden="true"
-                    className={`size-2 rounded-full ${style.dotClass}`}
-                  />
-                )}
-                <span className="viread-learning-content" dir="ltr" lang="vi">
-                  {word.display_text}
-                </span>
-              </button>
-            );
-          })}
-
-          {hasOverflowWords ? (
-            <button
-              aria-expanded={expanded}
-              className="inline-flex min-h-11 items-center rounded-full border border-dashed border-primary/40 bg-canvas px-3.5 py-1.5 text-xs font-extrabold text-primary transition-colors hover:bg-sky/60 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
-              onClick={() => setExpanded((prev) => !prev)}
-              type="button"
-            >
-              {expanded
-                ? t("bookCard.showFewerWords")
-                : t("bookCard.showMoreWords", {
-                    count: formatNumber(hiddenCount),
+        <div className="flex flex-col gap-2.5">
+          <div
+            className="flex flex-wrap gap-2"
+            role="list"
+            aria-label={t("bookCard.wordsAria", { title: group.bookTitle })}
+          >
+            {visibleChipWords.map((word) => {
+              const status: DifficultWordPracticeStatus =
+                word.practice_status ?? "NOT_PRACTICED";
+              const style = CHIP_STYLES[status];
+              const statusLabel = t(style.labelKey);
+              return (
+                <button
+                  aria-label={t("bookCard.wordButtonAria", {
+                    word: word.display_text,
+                    status: statusLabel,
                   })}
-            </button>
-          ) : null}
+                  className={`inline-flex min-h-12 items-center gap-2 rounded-full border px-4 py-2 text-base font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-offset-2 ${style.className}`}
+                  key={word.normalized_word}
+                  onClick={() => onSelectWord(word)}
+                  type="button"
+                >
+                  {status === "COMPLETED" ? (
+                    <Check
+                      aria-hidden="true"
+                      className="size-4 text-emerald-700"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden="true"
+                      className={`size-2 rounded-full ${style.dotClass}`}
+                    />
+                  )}
+                  <span className="viread-learning-content" dir="ltr" lang="vi">
+                    {word.display_text}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <PaginationBar
+            ariaLabel={t("bookCard.wordsAria", { title: group.bookTitle })}
+            compact
+            onPageChange={setChipsPage}
+            page={safeChipsPage}
+            pageSize={WORD_CHIPS_PAGE_SIZE}
+            total={group.words.length}
+          />
         </div>
 
         <details className="group rounded-control border border-border bg-surface-subtle/80 px-4 py-2.5 text-sm">
@@ -263,7 +274,7 @@ export function DifficultWordBookCard({
             />
           </summary>
           <ul className="mt-2.5 divide-y divide-border/70 border-t border-border pt-2 text-xs text-muted">
-            {group.words.map((word) => {
+            {visibleDetailWords.map((word) => {
               const source = word.sources?.[0];
               const mispronounced = word.mispronunciation_count ?? 0;
               return (
@@ -335,6 +346,15 @@ export function DifficultWordBookCard({
               );
             })}
           </ul>
+          <PaginationBar
+            ariaLabel={t("bookCard.parentDetails")}
+            className="mt-2.5"
+            compact
+            onPageChange={setDetailsPage}
+            page={safeDetailsPage}
+            pageSize={DETAIL_WORDS_PAGE_SIZE}
+            total={group.words.length}
+          />
         </details>
       </div>
 

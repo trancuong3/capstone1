@@ -469,6 +469,8 @@ class ChildSafetyOrchestrator:
         normalized_spans = normalized_spans[left:right]
         if not normalized.strip():
             raise ChildSafetyError("EMPTY_SAFETY_INPUT", [])
+        if not self.providers:
+            raise ChildSafetyError("NO_AI_PROVIDER_CONFIGURED", [])
         ollama_target_chars, ollama_overlap_chars = _ollama_chunk_budget(
             self.config.local.num_ctx
         )

@@ -371,21 +371,10 @@ export function KaraokeEditorScreen({
           </StatusMessage>
         )}
       {conflict && (
-        <details className="rounded-xl border border-border bg-white p-4">
-          <summary className="cursor-pointer text-sm font-bold text-ink">
-            {t("karaoke.editor.backupSummary")}
-          </summary>
-          <label className="mt-3 grid gap-2 text-sm">
-            {t("karaoke.editor.backupHint")}
-            <textarea
-              aria-label={t("karaoke.editor.backupAria")}
-              readOnly
-              value={JSON.stringify({ ...metadata, lyrics }, null, 2)}
-              rows={10}
-              className="w-full rounded-control border border-border p-3 font-mono text-xs"
-            />
-          </label>
-        </details>
+        <StatusMessage tone="warning">
+          Nội dung bài hát vừa được cập nhật ở phiên làm việc khác. Vui lòng tải
+          lại bản mới nhất trước khi lưu.
+        </StatusMessage>
       )}
       {notice && <StatusMessage tone="success">{notice}</StatusMessage>}
       {busy && (
@@ -407,9 +396,8 @@ export function KaraokeEditorScreen({
             {t("karaoke.editor.reloadFromServer")}
           </Button>
           {detail && (
-            <p className="text-sm text-muted tabular-nums">
+            <p className="text-sm text-muted">
               {t("karaoke.editor.revisionMeta", {
-                revision: formatNumber(detail.revision),
                 state: dirty
                   ? t("karaoke.editor.stateDirty")
                   : t("karaoke.editor.stateSynced"),

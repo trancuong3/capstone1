@@ -13,6 +13,8 @@ export type VoiceIntentType =
   | "STOP"
   | "RESUME"
   | "TRY_MORE"
+  | "NEXT_PAGE"
+  | "SKIP"
   | "NONE";
 
 export interface VoiceIntent {
@@ -61,7 +63,8 @@ const COMMANDS: readonly {
   {
     type: "REPLAY",
     patterns: [
-      /^(?:cô |thầy )?(?:đọc|nghe) lại(?: lần nữa| một lần nữa| giúp con| cho con)?$/u,
+      /^(?:cô |thầy )?(?:đọc|nghe) lại(?: mẫu| lần nữa| một lần nữa| giúp con| cho con)?$/u,
+      /^(?:cho )?(?:con |bé |em )?nghe(?: lại)? mẫu(?: từ này| chữ này)?$/u,
       /^(?:cho )?(?:con |bé |em )?nghe lại(?: từ này| chữ này)?$/u,
     ],
   },
@@ -81,11 +84,27 @@ const COMMANDS: readonly {
     ],
   },
   {
+    type: "NEXT_PAGE",
+    patterns: [
+      /^(?:cô |thầy )?(?:cho (?:con|bé|em) )?(?:sang|qua|chuyển|lật)(?: sang)? trang(?: tiếp theo| mới| sau)?$/u,
+      /^(?:cô |thầy )?(?:mở |xem )?trang tiếp theo$/u,
+      /^(?:con|bé|em) (?:muốn )?(?:sang|qua|chuyển|lật) trang(?: tiếp theo)?$/u,
+    ],
+  },
+  {
+    type: "SKIP",
+    patterns: [
+      /^(?:cô |thầy )?(?:cho (?:con|bé|em) )?bỏ qua(?: từ này| chữ này| câu này)?$/u,
+      /^(?:cô |thầy )?(?:cho (?:con|bé|em) )?(?:sang |qua |chuyển )?(?:từ|câu) tiếp theo$/u,
+      /^(?:qua|đổi) (?:từ|câu)(?: này| khác)?$/u,
+    ],
+  },
+  {
     type: "STOP",
     patterns: [
-      /^(?:con |bé |em )?(?:dừng|tạm dừng|ngừng)(?: lại| đọc| nghe)?$/u,
-      /^(?:con |bé |em )?(?:nghỉ|tạm nghỉ)(?: hôm nay)?$/u,
-      /^(?:con |bé |em )?(?:không|thôi) đọc nữa$/u,
+      /^(?:con |bé |em )?(?:dừng|tạm dừng|ngừng)(?: lại| đọc| nghe| luyện)?$/u,
+      /^(?:con |bé |em )?(?:nghỉ|tạm nghỉ)(?: luyện| hôm nay)?$/u,
+      /^(?:con |bé |em )?(?:không|thôi) (?:đọc|luyện) nữa$/u,
     ],
   },
   {
