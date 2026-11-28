@@ -9,6 +9,8 @@ import {
   AdminServicesProvider,
   type AdminServices,
 } from "@/components/providers/admin-services-provider";
+import { AiTaskCenterProvider } from "@/components/tasks/ai-task-center-provider";
+import { GlobalTaskCenter } from "@/components/tasks/global-task-center";
 import {
   AdminOcrJobQueuedSignal,
   cancelAdminOcrJob,
@@ -17,12 +19,18 @@ import {
   retryAdminOcrJob,
   type AdminOcrJobDTO,
 } from "@/lib/api/admin-page-service";
+import {
+  clearGlobalTasksMemoryCache,
+  type GlobalTasksService,
+} from "@/lib/api/global-tasks-service";
 import { createRevisionService } from "@/lib/api/revision-service";
+import { resetTaskAlertAckMemoryCache } from "@/lib/tasks/task-alert-acknowledgment";
 import {
   apiFetchFixture,
   installApiFetchFixture,
 } from "@/test/fixtures/api-test-fixture";
 import type { AdminBookDTO, AdminPageListItemUI } from "@/types/admin";
+import type { GlobalTaskListResponse } from "@/types/global-tasks";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -519,5 +527,153 @@ describe("Admin offline OCR API & UI hardening", () => {
       screen.queryByText(/Ảnh mới đang chờ duyệt/i),
     ).not.toBeInTheDocument();
     expect(booksGet.mock.calls.length).toBe(booksGetCountBefore);
+  });
+
+  it("clears the sidebar GlobalTaskCenter FAILED warning immediately when Admin retries a DEAD_LETTER OCR job directly on AdminBookDetailScreen", async () => {
+    const user = userEvent.setup();
+    clearGlobalTasksMemoryCache();
+    resetTaskAlertAckMemoryCache();
+    window.localStorage.clear();
+
+    apiFetchFixture.mockImplementation(async (input) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/health") {
+        return Response.json({
+          status: "ok",
+          ocr: { mode: "remote_worker", ready: true },
+        });
+      }
+      return Response.json({}, { status: 404 });
+    });
+
+    let currentJobs: AdminOcrJobDTO[] = [
+      {
+        id: JOB_DEAD_1,
+        job_kind: "ADMIN_PAGE_UPLOAD",
+        status: "DEAD_LETTER",
+        book_id: BOOK_ID,
+        file_name: "trang-loi.png",
+        error_message: "Ảnh quá mờ, không đọc được chữ.",
+        worker_online: true,
+      },
+    ];
+
+    const failedTaskFeed: GlobalTaskListResponse = {
+      actor_id: "admin-direct",
+      actor_role: "admin",
+      portal: "admin",
+      active_count: 0,
+      waiting_review_count: 0,
+      failed_count: 1,
+      completed_count: 0,
+      worker_online: true,
+      recommended_poll_ms: null,
+      tasks: [
+        {
+          id: JOB_DEAD_1,
+          source: "ocr_inference_job",
+          job_type: "ADMIN_PAGE_UPLOAD",
+          title_vi: "Nhận diện chữ OCR",
+          book_id: BOOK_ID,
+          book_page_id: null,
+          book_title: bookFixture.title,
+          page_number: null,
+          source_revision_id: null,
+          actor_id: "admin-direct",
+          actor_role: "admin",
+          portal: "admin",
+          status: "FAILED",
+          status_label_vi: "Xử lý thất bại",
+          stage: "OCR",
+          stage_label_vi: "Gặp lỗi",
+          priority: 50,
+          attempt_count: 3,
+          max_attempts: 3,
+          progress_completed: null,
+          progress_total: null,
+          progress_unit: null,
+          progress_pct: 0,
+          is_indeterminate: false,
+          can_retry: false,
+          can_cancel: false,
+          result_href: `/admin/books/${BOOK_ID}`,
+          result_ref: {},
+          checkpoints: {},
+          error_code: "OCR_FAILED",
+          error_message_vi: "Ảnh quá mờ, không đọc được chữ.",
+          created_at: "2026-11-28T08:00:00Z",
+          updated_at: "2026-11-28T08:00:00Z",
+          started_at: "2026-11-28T08:00:00Z",
+          completed_at: "2026-11-28T08:00:00Z",
+        },
+      ],
+    };
+
+    const taskService: GlobalTasksService = {
+      listTasks: vi.fn(async () => failedTaskFeed),
+      createTask: vi.fn(),
+      retryTask: vi.fn(),
+      cancelTask: vi.fn(),
+      getCapabilities: vi.fn(),
+    };
+
+    const retryOcrJob = vi.fn(async (jobId: string) => {
+      currentJobs = [];
+      return {
+        id: jobId,
+        job_kind: "ADMIN_PAGE_UPLOAD",
+        status: "QUEUED" as const,
+      };
+    });
+
+    const services = {
+      books: {
+        list: vi.fn(async () => []),
+        get: vi.fn(async () => bookFixture),
+        create: vi.fn(),
+        update: vi.fn(),
+        retire: vi.fn(),
+      },
+      pages: {
+        list: vi.fn(async () => [existingPageFixture]),
+        listOcrJobs: vi.fn(async () => currentJobs),
+        cancelOcrJob: vi.fn(),
+        retryOcrJob,
+        getImage: vi.fn(),
+        replaceImageAndReprocess: vi.fn(),
+        upload: vi.fn(),
+        reload: vi.fn(),
+        updateStatus: vi.fn(),
+        retire: vi.fn(),
+      },
+    } as unknown as AdminServices;
+
+    render(
+      <AiTaskCenterProvider
+        actorId="admin-direct"
+        actorRole="admin"
+        service={taskService}
+      >
+        <GlobalTaskCenter variant="sidebar" />
+        <AdminServicesContext.Provider value={services}>
+          <AdminBookDetailScreen bookId={BOOK_ID} />
+        </AdminServicesContext.Provider>
+      </AiTaskCenterProvider>,
+    );
+
+    const trigger = await screen.findByTestId("global-task-center-trigger");
+    await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ lỗi (1)"));
+
+    // Admin retries the failed OCR job directly on the book detail page (without opening the drawer).
+    await user.click(
+      await screen.findByTestId(`retry-dead-letter-job-${JOB_DEAD_1}`),
+    );
+    expect(retryOcrJob).toHaveBeenCalledWith(JOB_DEAD_1);
+
+    // Sidebar AI task bar immediately clears the stale FAILED warning!
+    await waitFor(() => expect(trigger).toHaveTextContent("Tác vụ AI"));
+    expect(
+      screen.queryByTestId("global-task-center-sidebar-count"),
+    ).not.toBeInTheDocument();
   });
 });

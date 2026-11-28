@@ -46,14 +46,17 @@ def deliver(body, timestamp, signature):
         return 503, {"code": "SMTP_NOT_CONFIGURED"}
     try:
         message = BytesParser(policy=policy.default).parsebytes(body)
-        from_addrs = getaddresses(message.get_all("From", []))
-        recipients = getaddresses(message.get_all("To", []))
+        from_headers = message.get_all("From", [])
+        to_headers = message.get_all("To", [])
+        from_addrs = getaddresses(from_headers)
+        recipients = getaddresses(to_headers)
         recipient_addr = recipients[0][1] if len(recipients) == 1 else ""
         rec_local, rec_sep, rec_domain = recipient_addr.partition("@")
         # One verified parent per delivery. Backend owns verification, limits and dedupe.
         if (
-            len(message.get_all("From", [])) != 1
-            or len(message.get_all("To", [])) != 1
+            len(from_headers) != 1
+            or len(to_headers) != 1
+            or any(getattr(hdr, "defects", None) for hdr in (*from_headers, *to_headers))
             or len(from_addrs) != 1
             or from_addrs[0][1].lower() != sender.lower()
             or len(recipients) != 1

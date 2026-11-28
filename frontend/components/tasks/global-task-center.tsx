@@ -101,8 +101,12 @@ export function GlobalTaskCenter({
     return isOpen ? <LazyGlobalTaskCenterDrawer /> : null;
   }
 
-  const { actorRole, waitingReviewCount, failedCount, togglePanel } =
-    taskCenter;
+  const {
+    actorRole,
+    unreadWaitingReviewCount,
+    unreadFailedCount,
+    togglePanel,
+  } = taskCenter;
 
   const pillText = allActiveWaitingForWorker
     ? t(
@@ -116,27 +120,27 @@ export function GlobalTaskCenter({
           { count: activeCount, percent: leadProgress.displayPercent },
           "AI đang chạy ({count}) · {percent}%",
         )
-      : waitingReviewCount > 0
+      : unreadFailedCount > 0
         ? t(
-            "taskCenter.pillWaitingReview",
-            { count: waitingReviewCount },
-            "Cần xác minh ({count})",
+            "taskCenter.pillFailed",
+            { count: unreadFailedCount },
+            "Tác vụ lỗi ({count})",
           )
-        : failedCount > 0
+        : unreadWaitingReviewCount > 0
           ? t(
-              "taskCenter.pillFailed",
-              { count: failedCount },
-              "Tác vụ lỗi ({count})",
+              "taskCenter.pillWaitingReview",
+              { count: unreadWaitingReviewCount },
+              "Cần xác minh ({count})",
             )
           : t("taskCenter.pillIdle", undefined, "Tác vụ AI");
 
   const highlightCount =
     activeCount > 0
       ? activeCount
-      : waitingReviewCount > 0
-        ? waitingReviewCount
-        : failedCount > 0
-          ? failedCount
+      : unreadFailedCount > 0
+        ? unreadFailedCount
+        : unreadWaitingReviewCount > 0
+          ? unreadWaitingReviewCount
           : 0;
 
   const isCompactTopbar = variant === "header-pill" || variant === "topbar";
@@ -160,9 +164,9 @@ export function GlobalTaskCenter({
           ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100/70"
           : activeCount > 0
             ? "border-primary/40 bg-sky text-primary-hover hover:bg-sky/80"
-            : failedCount > 0
+            : unreadFailedCount > 0
               ? "border-red-200 bg-red-50 text-danger hover:bg-red-100/70"
-              : waitingReviewCount > 0
+              : unreadWaitingReviewCount > 0
                 ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70"
                 : "border-border bg-white text-ink hover:bg-canvas",
         className,
@@ -184,7 +188,7 @@ export function GlobalTaskCenter({
             aria-hidden="true"
             className="size-4 shrink-0 animate-spin"
           />
-        ) : failedCount > 0 ? (
+        ) : unreadFailedCount > 0 ? (
           <AlertCircle aria-hidden="true" className="size-4 shrink-0" />
         ) : (
           <Sparkles
@@ -217,7 +221,7 @@ export function GlobalTaskCenter({
               ? "bg-amber-600 text-white"
               : activeCount > 0
                 ? "bg-primary text-white"
-                : failedCount > 0
+                : unreadFailedCount > 0
                   ? "bg-danger text-white"
                   : "bg-amber-600 text-white",
           )}

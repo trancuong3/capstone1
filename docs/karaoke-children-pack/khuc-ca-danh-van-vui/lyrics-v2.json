@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "lines": [
+    {
+      "id": "1754e633-b5b8-5907-97f2-0b83bc471baf",
+      "text": "Lá non lung linh đón nắng vàng",
+      "start_ms": 2500,
+      "end_ms": 6872,
+      "syllables": [
+        {
+          "id": "a090ba24-0954-54b1-bc61-ca221ff5873e",
+          "text": "Lá",
+          "start_ms": 2500,
+          "end_ms": 3062
+        },
+        {
+          "id": "e88765e8-c129-5568-9a84-4e957d702590",
+          "text": "non",
+          "start_ms": 3062,
+          "end_ms": 3624
+        },
+        {
+          "id": "beb45373-6ac8-523e-837b-f4618ea43a16",
+          "text": "lung",
+          "start_ms": 3624,
+          "end_ms": 4186
+        },
+        {
+          "id": "84a632f4-df1e-52ea-bcac-c098d854ad43",
+          "text": "linh",
+          "start_ms": 4186,
+          "end_ms": 4748
+        },
+        {
+          "id": "b8e8c47a-06cb-5d22-9ca8-fb369db50ee0",
+          "text": "đón",
+          "start_ms": 4748,
+          "end_ms": 5310
+        },
+        {
+          "id": "a43a85dc-f057-56e6-b717-3ed9ebc2e9a1",
+          "text": "nắng",
+          "start_ms": 5310,
+          "end_ms": 5872
+        },
+        {
+          "id": "4ef81324-c480-55b5-b085-219d7b193d45",
+          "text": "vàng",
+          "start_ms": 5872,
+          "end_ms": 6872
+        }
+      ]
+    },
+    {
+      "id": "fec7fb40-3571-5174-b1f3-0608bfc15b9c",
+      "text": "Sương sớm xôn xao gió nhẹ sang",
+      "start_ms": 7497,
+      "end_ms": 11869,
+      "syllables": [
+        {
+          "id": "e93f0669-4009-599e-b3e4-6d945dead3a1",
+          "text": "Sương",
+          "start_ms": 7497,
+          "end_ms": 8059
+        },
+        {
+          "id": "b2c81222-e20b-5a09-a049-4d52f6cc69ee",
+          "text": "sớm",
+          "start_ms": 8059,
+          "end_ms": 8621
+        },
+        {
+          "id": "79b5705a-ea4d-51d8-a3b2-d17c0c6b1266",
+          "text": "xôn",
+          "start_ms": 8621,
+          "end_ms": 9183
+        },
+        {
+          "id": "dba21f2e-ff77-5f77-9b1b-f36849213e67",
+          "text": "xao",
+          "start_ms": 9183,
+          "end_ms": 9745
+        },
+        {
+          "id": "966e25d5-d9b3-5b4e-b3f7-614cbd8d7fc7",
+          "text": "gió",
+          "start_ms": 9745,
+          "end_ms": 10307
+        },
+        {
+          "id": "e6903d02-d9e0-5df7-a0c8-0a18d6ce0df9",
+          "text": "nhẹ",
+          "start_ms": 10307,
+          "end_ms": 10869
+        },
+        {
+          "id": "5042e208-8038-51fd-bf6f-140380d2fdd3",
+          "text": "sang",
+          "start_ms": 10869,
+          "end_ms": 11869
+        }
+      ]
+    },
+    {
+      "id": "a6ff7eee-1d49-54be-9d71-b0440cb2b81d",
+      "text": "Chim sẻ chuyền cành trên trúc biếc",
+      "start_ms": 12494,
+      "end_ms": 16866,
+      "syllables": [
+        {
+          "id": "dedb47f9-6008-5f0b-a5cd-ae343d816998",
+          "text": "Chim",
+          "start_ms": 12494,
+          "end_ms": 13056
+        },
+        {
+          "id": "bbe399f2-e31e-5730-90ad-dfcdc5de4449",
+          "text": "sẻ",
+          "start_ms": 13056,
+          "end_ms": 13618
+        },
+        {
+          "id": "0a1f070e-55e9-5753-b715-8839af1d873f",
+          "text": "chuyền",
+          "start_ms": 13618,
+          "end_ms": 14180
+        },
+        {
+          "id": "2af735a0-4a73-531d-a24e-0ba21e7ae3e7",
+          "text": "cành",
+          "start_ms": 14180,
+          "end_ms": 14742
+        },
+        {
+          "id": "0f98bd19-6fe0-5fd4-a424-4cef9440f843",
+          "text": "trên",
+          "start_ms": 14742,
+          "end_ms": 15304
+        },
+        {
+          "id": "c488814f-e779-58be-98ad-91c5ebb7ea91",
+          "text": "trúc",
+          "start_ms": 15304,
+          "end_ms": 15866
+        },
+        {
+          "id": "49e73106-f35a-5f97-944e-0f3b9f870745",
+          "text": "biếc",
+          "start_ms": 15866,
+          "end_ms": 16866
+        }
+      ]
+    },
+    {
+      "id": "3fb82d51-ad1b-537a-b6c2-4f6843cc0a85",
+      "text": "Bé đọc tròn vành chữ rõ ràng",
+      "start_ms": 17491,
+      "end_ms": 21863,
+      "syllables": [
+        {
+          "id": "743bd106-dfa5-556a-a1a3-55e91dd441f7",
+          "text": "Bé",
+          "start_ms": 17491,
+          "end_ms": 18053
+        },
+        {
+          "id": "680c63e6-3a26-5bc6-a3f9-64e0511a3a95",
+          "text": "đọc",
+          "start_ms": 18053,
+          "end_ms": 18615
+        },
+        {
+          "id": "0b0eea22-7902-5023-91b8-2b8c0a8dc3c8",
+          "text": "tròn",
+          "start_ms": 18615,
+          "end_ms": 19177
+        },
+        {
+          "id": "cbecb95f-1dcd-5fc9-bc99-78a751db6fed",
+          "text": "vành",
+          "start_ms": 19177,
+          "end_ms": 19739
+        },
+        {
+          "id": "50ca12a9-e9ed-5194-9491-eb5dd011c7d7",
+          "text": "chữ",
+          "start_ms": 19739,
+          "end_ms": 20301
+        },
+        {
+          "id": "05ac63b9-dcb4-54c0-a227-b4220828493c",
+          "text": "rõ",
+          "start_ms": 20301,
+          "end_ms": 20863
+        },
+        {
+          "id": "0b7f1926-84fc-57aa-856d-0b54f18ed53b",
+          "text": "ràng",
+          "start_ms": 20863,
+          "end_ms": 21863
+        }
+      ]
+    },
+    {
+      "id": "7bdb431a-af53-578d-8b81-ed3dfaa34acb",
+      "text": "Nắng lên lấp lánh sân trường nhỏ",
+      "start_ms": 22488,
+      "end_ms": 26860,
+      "syllables": [
+        {
+          "id": "0f2958b6-1fab-5db3-809a-19a3462706f2",
+          "text": "Nắng",
+          "start_ms": 22488,
+          "end_ms": 23050
+        },
+        {
+          "id": "fa641c9e-7cac-53d8-9f0e-f57261ab8ee2",
+          "text": "lên",
+          "start_ms": 23050,
+          "end_ms": 23612
+        },
+        {
+          "id": "a0a29a00-f4a3-594f-8652-b8bd57200676",
+          "text": "lấp",
+          "start_ms": 23612,
+          "end_ms": 24174
+        },
+        {
+          "id": "037cd6a6-58f4-5c54-8f4f-d1242eaf5957",
+          "text": "lánh",
+          "start_ms": 24174,
+          "end_ms": 24736
+        },
+        {
+          "id": "2642e8e3-6625-528f-86f4-0ea04c842c60",
+          "text": "sân",
+          "start_ms": 24736,
+          "end_ms": 25298
+        },
+        {
+          "id": "b768f26c-c435-57e3-8795-847ae4036b4d",
+          "text": "trường",
+          "start_ms": 25298,
+          "end_ms": 25860
+        },
+        {
+          "id": "50ffc99d-0c2a-592d-b580-a2906ff7a59b",
+          "text": "nhỏ",
+          "start_ms": 25860,
+          "end_ms": 26860
+        }
+      ]
+    },
+    {
+      "id": "1cdcc8af-da8b-580a-983c-fb5787ca909f",
+      "text": "Bạn hiền chăm chỉ nở nụ cười",
+      "start_ms": 27485,
+      "end_ms": 31857,
+      "syllables": [
+        {
+          "id": "450750f2-b82e-5925-8033-07b182dc34a4",
+          "text": "Bạn",
+          "start_ms": 27485,
+          "end_ms": 28047
+        },
+        {
+          "id": "e6fab4ad-959d-5207-8b2a-daa1a938db6b",
+          "text": "hiền",
+          "start_ms": 28047,
+          "end_ms": 28609
+        },
+        {
+          "id": "dee1e63a-d521-5a3c-a536-c02c2ebb00ab",
+          "text": "chăm",
+          "start_ms": 28609,
+          "end_ms": 29171
+        },
+        {
+          "id": "bd1a0419-e087-51a6-8219-4a945c0fb4d5",
+          "text": "chỉ",
+          "start_ms": 29171,
+          "end_ms": 29733
+        },
+        {
+          "id": "00160e06-c6ae-56b3-b661-9996cc305cde",
+          "text": "nở",
+          "start_ms": 29733,
+          "end_ms": 30295
+        },
+        {
+          "id": "fef6e137-97d0-5248-9efe-fb7d4ad62c13",
+          "text": "nụ",
+          "start_ms": 30295,
+          "end_ms": 30857
+        },
+        {
+          "id": "161b664e-5d1a-5356-b0c2-3dd3ae3999be",
+          "text": "cười",
+          "start_ms": 30857,
+          "end_ms": 31857
+        }
+      ]
+    }
+  ]
+}

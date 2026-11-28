@@ -173,8 +173,22 @@ class KaraokePracticeService:
         )
 
         evidence_rows: list[LearningSkillEvidence] = []
+        raw_matched_words = (
+            payload.report_payload.get("matched_difficult_words")
+            if isinstance(payload.report_payload, dict)
+            else None
+        )
+        matched_words: list[str] = (
+            [
+                str(w).strip()[:80]
+                for w in raw_matched_words
+                if isinstance(w, str) and str(w).strip()
+            ][:8]
+            if isinstance(raw_matched_words, list)
+            else []
+        )
+        difficulty = max(1, min(5, int(getattr(child, "Grade", 1) or 1)))
         if payload.scoring_mode != "INSUFFICIENT_EVIDENCE":
-            difficulty = max(1, min(5, int(getattr(child, "Grade", 1) or 1)))
             evidence_type = (
                 "OBSERVED"
                 if payload.scoring_mode in ("FULL_MUSICAL", "RHYTHM_AND_LYRICS")
@@ -209,7 +223,7 @@ class KaraokePracticeService:
                         ScoreNormalized=round(float(score_val) / 100.0, 4),
                         Confidence=confidence,
                         DifficultyLevel=difficulty,
-                        PracticeWords=[],
+                        PracticeWords=matched_words if skill_key == "lyric_delivery" else [],
                         MetadataJson={
                             "song_id": str(payload.song_id),
                             "practice_mode": payload.practice_mode,
@@ -225,6 +239,29 @@ class KaraokePracticeService:
             saved = await self.repository.create_practice_session(
                 session_row, evidence_rows
             )
+            if (
+                matched_words
+                and payload.scoring_mode != "INSUFFICIENT_EVIDENCE"
+                and payload.practice_mode != "RHYTHM_TAP"
+                and payload.lyrics_score is not None
+                and payload.lyrics_score >= 55
+            ):
+                from app.services.active_weak_words import (
+                    record_entertainment_vocal_word_practice,
+                )
+
+                await record_entertainment_vocal_word_practice(
+                    getattr(self.repository, "db", None),
+                    child_id=payload.child_id,
+                    parent_id=parent_id,
+                    words=matched_words,
+                    source_module="KARAOKE",
+                    source_record_id=str(session_id),
+                    transcript_text=", ".join(matched_words),
+                    confidence=0.80,
+                    difficulty_level=difficulty,
+                    recognition_source="BROWSER_SPEECH",
+                )
             return _session_to_read(saved, persisted=True)
         except KaraokePracticeTableUnavailable:
             return _session_to_read(

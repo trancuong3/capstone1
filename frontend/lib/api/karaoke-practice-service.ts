@@ -106,6 +106,7 @@ export interface SavePracticeSessionPayload {
   segmentStartMs?: number | null;
   segmentEndMs?: number | null;
   evaluation: MusicalEvaluationResult;
+  matchedDifficultWords?: string[];
 }
 
 /**
@@ -148,6 +149,14 @@ export function createKaraokePracticeService() {
           active_vocal_coverage: ev.activeVocalCoverage,
           mean_cents_error: ev.meanCentsError,
           mean_signed_timing_offset_ms: ev.meanSignedTimingOffsetMs,
+          ...(payload.matchedDifficultWords?.length
+            ? {
+                matched_difficult_words: payload.matchedDifficultWords.slice(
+                  0,
+                  8,
+                ),
+              }
+            : {}),
           segments: ev.segments.slice(0, 60).map((seg) => ({
             line_index: seg.lineIndex,
             line_id: seg.lineId,

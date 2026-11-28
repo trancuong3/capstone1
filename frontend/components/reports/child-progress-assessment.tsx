@@ -30,6 +30,7 @@ import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import type { ChildProgressAssessment } from "@/lib/api/child-progress-service";
 import { ServiceError } from "@/lib/api/service-error";
+import { getSpeechPreferencesMeta } from "@/lib/reading/speech-preferences";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 
@@ -296,6 +297,7 @@ export function ChildProgressAssessmentCard({
 }) {
   const t = useTranslations("reports");
   const tCommon = useTranslations("common");
+  const teacherPersona = useTeacherPersona();
   const service = useContext(AppServicesContext)?.childProgressService;
   const [days, setDays] = useState<(typeof PERIODS)[number]>(30);
   const [view, setView] = useState<View>({ status: "loading" });
@@ -317,9 +319,17 @@ export function ChildProgressAssessmentCard({
     const request = ++requestRef.current;
     const controller = new AbortController();
     const isCurrent = () => requestRef.current === request;
+    const explicitGender =
+      teacherPersona.gender === "male"
+        ? ("male" as const)
+        : getSpeechPreferencesMeta().updatedAt > 0
+          ? ("female" as const)
+          : undefined;
 
-    service
-      .get(childId, days, controller.signal)
+    (explicitGender
+      ? service.get(childId, days, controller.signal, explicitGender)
+      : service.get(childId, days, controller.signal)
+    )
       .then((data) => {
         if (!isCurrent()) return;
         const needsAi =
@@ -332,7 +342,10 @@ export function ChildProgressAssessmentCard({
         });
         if (!needsAi) return;
         service
-          .generate(childId, days, { signal: controller.signal })
+          .generate(childId, days, {
+            signal: controller.signal,
+            ...(explicitGender ? { teacherGender: explicitGender } : {}),
+          })
           .then((next) => {
             if (!isCurrent()) return;
             const aiSucceeded = next.assessment.source === "AI";
@@ -366,7 +379,7 @@ export function ChildProgressAssessmentCard({
       refreshControllerRef.current?.abort();
       refreshControllerRef.current = null;
     };
-  }, [service, childId, days, reloadKey]);
+  }, [service, childId, days, reloadKey, teacherPersona.gender]);
 
   const refreshAi = useCallback(() => {
     if (!service || view.status !== "ready") return;
@@ -374,9 +387,19 @@ export function ChildProgressAssessmentCard({
     const controller = new AbortController();
     refreshControllerRef.current = controller;
     const request = ++requestRef.current;
+    const explicitGender =
+      teacherPersona.gender === "male"
+        ? ("male" as const)
+        : getSpeechPreferencesMeta().updatedAt > 0
+          ? ("female" as const)
+          : undefined;
     setView({ ...view, ai: "writing", aiReason: null });
     service
-      .generate(childId, days, { refresh: true, signal: controller.signal })
+      .generate(childId, days, {
+        refresh: true,
+        signal: controller.signal,
+        ...(explicitGender ? { teacherGender: explicitGender } : {}),
+      })
       .then((next) => {
         if (requestRef.current !== request || controller.signal.aborted) return;
         const aiSucceeded = next.assessment.source === "AI";
@@ -399,7 +422,7 @@ export function ChildProgressAssessmentCard({
             : current,
         );
       });
-  }, [service, view, childId, days]);
+  }, [service, view, childId, days, teacherPersona.gender]);
 
   // Without the service (tests, demos) the saved-report screen stays unchanged.
   if (!service) return null;

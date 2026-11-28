@@ -85,6 +85,7 @@ export interface SceneSpecDTO {
   readonly guided_questions_vi: readonly string[];
   readonly creative_prompt_vi: string;
   readonly matched_focus_words: readonly string[];
+  readonly creative_focus_words?: readonly string[];
 }
 
 export interface MemoryThemeDTO {

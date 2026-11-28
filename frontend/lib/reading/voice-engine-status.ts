@@ -44,6 +44,7 @@ export interface VoiceEngineHealthSnapshot {
     readonly configured: boolean;
     readonly stt_configured: boolean;
     readonly tts_configured: boolean;
+    readonly male_tts_configured?: boolean;
     readonly stt_cooldown?: boolean;
     readonly tts_cooldown?: boolean;
     readonly error_code?: string | null;
@@ -426,6 +427,9 @@ async function performFetchVoiceEngineHealth(): Promise<VoiceEngineHealthSnapsho
               configured: Boolean(elevenlabsRaw.configured),
               stt_configured: Boolean(elevenlabsRaw.stt_configured),
               tts_configured: Boolean(elevenlabsRaw.tts_configured),
+              ...(typeof elevenlabsRaw.male_tts_configured === "boolean"
+                ? { male_tts_configured: elevenlabsRaw.male_tts_configured }
+                : {}),
               ...(typeof elevenlabsRaw.stt_cooldown === "boolean"
                 ? { stt_cooldown: elevenlabsRaw.stt_cooldown }
                 : {}),

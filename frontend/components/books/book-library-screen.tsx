@@ -1,7 +1,7 @@
 "use client";
 
 import { BookMarked, BookOpenText, RefreshCw, SearchX } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { BookCard } from "@/components/books/book-card";
 import { BookChildHeader } from "@/components/books/book-child-header";
@@ -37,7 +37,11 @@ export function BookLibraryScreen() {
   const authRuntime = useAuthRuntime();
   const currentUserId = authRuntime.session?.user?.id ?? "";
   const bookService = useBookService();
-  const { state: childState, retry: retryChild } = useValidatedSelectedChild();
+  const {
+    state: childState,
+    selectedChildId: appSelectedChildId,
+    retry: retryChild,
+  } = useValidatedSelectedChild();
   const readingManagementService = useReadingManagementService();
   const [catalogState, setCatalogState] = useState<CatalogState>({
     status: "loading",
@@ -71,6 +75,18 @@ export function BookLibraryScreen() {
       ? gradeSelection.grade
       : child.grade
     : null;
+  const filteredBooks = useMemo(() => {
+    if (catalogState.status !== "ready") {
+      return [];
+    }
+    if (selectedGrade === null) {
+      return catalogState.books;
+    }
+    return catalogState.books.filter(
+      (book) =>
+        book.min_grade <= selectedGrade && selectedGrade <= book.max_grade,
+    );
+  }, [catalogState, selectedGrade]);
   const visibleSavedCollections =
     savedCollectionOwner === selectedChildId ? savedCollections : [];
 
@@ -162,7 +178,7 @@ export function BookLibraryScreen() {
   }
 
   useEffect(() => {
-    if (childState.status !== "ready") {
+    if (!appSelectedChildId) {
       return;
     }
 
@@ -179,12 +195,11 @@ export function BookLibraryScreen() {
 
       try {
         const books = await bookService.list({
-          grade: selectedGrade ?? undefined,
           search: effectiveSearch,
           include_private: true,
         });
         if (!isActive) return;
-        const hasFilters = selectedGrade !== null || effectiveSearch.length > 0;
+        const hasFilters = effectiveSearch.length > 0;
         let hasCatalog = books.length > 0;
         if (!hasCatalog && hasFilters) {
           hasCatalog =
@@ -213,13 +228,11 @@ export function BookLibraryScreen() {
       isActive = false;
     };
   }, [
+    appSelectedChildId,
     bookService,
-    childState.status,
     currentUserId,
     effectiveSearch,
     requestKey,
-    selectedChildId,
-    selectedGrade,
   ]);
 
   if (childState.status === "loading" || childState.status === "redirecting") {
@@ -320,6 +333,7 @@ export function BookLibraryScreen() {
                   key={grade ?? "all"}
                   onClick={() => {
                     if (child) {
+                      setPage(1);
                       setGradeSelection({ childId: child.id, grade });
                     }
                   }}
@@ -369,7 +383,7 @@ export function BookLibraryScreen() {
         ) : null}
 
         {catalogState.status === "ready" &&
-        catalogState.books.length === 0 &&
+        filteredBooks.length === 0 &&
         !catalogState.hasCatalog ? (
           <EmptyState
             description={t("catalog.updatingDescription")}
@@ -384,7 +398,7 @@ export function BookLibraryScreen() {
         ) : null}
 
         {catalogState.status === "ready" &&
-        catalogState.books.length === 0 &&
+        filteredBooks.length === 0 &&
         catalogState.hasCatalog ? (
           <EmptyState
             action={
@@ -392,6 +406,7 @@ export function BookLibraryScreen() {
                 className="max-w-72"
                 onClick={() => {
                   setSearch("");
+                  setPage(1);
                   setGradeSelection({
                     childId: selectedChildId,
                     grade: null,
@@ -410,14 +425,14 @@ export function BookLibraryScreen() {
           />
         ) : null}
 
-        {catalogState.status === "ready" && catalogState.books.length > 0
+        {catalogState.status === "ready" && filteredBooks.length > 0
           ? (() => {
               const totalBooksPages = Math.max(
                 1,
-                Math.ceil(catalogState.books.length / BOOKS_PAGE_SIZE),
+                Math.ceil(filteredBooks.length / BOOKS_PAGE_SIZE),
               );
               const safePage = Math.min(Math.max(1, page), totalBooksPages);
-              const visibleBooks = catalogState.books.slice(
+              const visibleBooks = filteredBooks.slice(
                 (safePage - 1) * BOOKS_PAGE_SIZE,
                 safePage * BOOKS_PAGE_SIZE,
               );
@@ -447,7 +462,7 @@ export function BookLibraryScreen() {
                     onPageChange={setPage}
                     page={safePage}
                     pageSize={BOOKS_PAGE_SIZE}
-                    total={catalogState.books.length}
+                    total={filteredBooks.length}
                   />
                 </>
               );

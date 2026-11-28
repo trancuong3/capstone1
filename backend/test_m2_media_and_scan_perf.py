@@ -38,6 +38,7 @@ from app.repositories.local_ocr_scan_repository import (
 )
 from app.services.book_cover_service import BookCoverService
 from app.services.book_service import AdminCatalogService, BookService, CatalogService
+from app.services.local_ocr_scan_service import LocalOcrScanService
 from app.services.reading_content_service import ReadingContentService
 from app.services.storage_service import clear_signed_url_cache
 
@@ -575,6 +576,30 @@ class M2BoundedScanCameraMatchAndEligibilityTests(unittest.IsolatedAsyncioTestCa
         await repo.eligible_verified_pages(book_id=b_id)
         stmt_book = db.execute.await_args.args[0]
         self.assertEqual(stmt_book._limit_clause.value, MAX_BOOK_OCR_SCAN_CANDIDATES)
+
+    async def test_local_ocr_scan_service_forwards_ocr_tokens_when_book_id_none(self) -> None:
+        repo = MagicMock()
+        repo.eligible_verified_pages = AsyncMock(return_value=[])
+        svc = LocalOcrScanService(repo)
+        res = await svc._build_scan_response(
+            ocr_result={
+                "text": "Con mèo trèo cây cau!",
+                "words": [
+                    {"word_index": 0, "line_index": 0, "text": "Con", "bbox": [0.1, 0.1, 0.1, 0.05]},
+                ],
+                "metadata": {"engine": "mock"},
+            },
+            scan_job_id=uuid4(),
+            request_id="req-m2-ocr-tokens",
+            idempotency_key=None,
+            book_id=None,
+            elapsed_ms=15,
+        )
+        self.assertFalse(res.matched)
+        repo.eligible_verified_pages.assert_awaited_once_with(
+            book_id=None,
+            ocr_tokens=["con", "mèo", "trèo", "cây", "cau"],
+        )
 
     async def test_reading_camera_match_async_download_and_drops_unextractable_bytes(self) -> None:
         with patch(

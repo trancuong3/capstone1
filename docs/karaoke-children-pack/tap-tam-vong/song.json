@@ -1,0 +1,16 @@
+{
+  "slug": "tap-tam-vong",
+  "song_id": "d3c0d237-f989-5fb2-9311-e1d699622b04",
+  "version_id": "87b1ca5e-6820-51ba-a010-83f20ae195f8",
+  "title": "Tập tầm vông",
+  "author": "Đồng dao dân gian Việt Nam",
+  "min_grade": 1,
+  "max_grade": 2,
+  "bpm": 104.0,
+  "phonics_focus": "Âm đầu t / kh & vần ông",
+  "source_note": "Đồng dao dân gian truyền thống Việt Nam thuộc phạm vi công cộng (Public Domain); hòa âm thiếu nhi bởi ViRead (CC0 1.0).",
+  "usage_note": "Phát trực tuyến và luyện nhịp điệu thiếu nhi trong ứng dụng ViRead.",
+  "duration_ms": 40918,
+  "audio_size_bytes": 655121,
+  "audio_sha256": "6f157c8b5a16b0658719bf16f34992599996a77bd98c35dcd02930a322e13f5a"
+}

@@ -249,6 +249,11 @@
     "selectedBadge": "Seleccionado",
     "regionLabel": "Región",
     "voiceListLabel": "Voz específica",
-    "voiceListAria": "Voces disponibles por docente y región"
+    "voiceListAria": "Voces disponibles por docente y región",
+    "policyLabel": "Modo del motor de voz",
+    "policyAria": "Elegir modo del motor de voz",
+    "policyLocalOnly": "Solo este dispositivo",
+    "policyOnlineBackup": "Este dispositivo + Respaldo en línea",
+    "workerOfflineHint": "El motor de voz local está inactivo. Activa «Este dispositivo + Respaldo en línea» para escuchar frases de libros y juegos sin caché previa."
   }
 }

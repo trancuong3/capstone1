@@ -150,6 +150,54 @@ class ParentEmailRelayTests(unittest.TestCase):
             self.assertEqual(code, 422)
             self.assertEqual(res, {"code": "MESSAGE_ENVELOPE_INVALID"})
 
+    def test_rejects_header_smuggling_with_address_defects_and_accepts_utf8_display_name(self):
+        smuggled_raw_messages = [
+            (
+                f"From: <{TEST_SENDER}><evil@example.com>\r\n"
+                "To: parent@example.com\r\n"
+                "Subject: Smuggled From\r\n\r\nBody"
+            ).encode("utf-8"),
+            (
+                f"From: {TEST_SENDER}\r\n"
+                "To: <parent@example.com><evil@example.com>\r\n"
+                "Subject: Smuggled To adjacent\r\n\r\nBody"
+            ).encode("utf-8"),
+            (
+                f"From: {TEST_SENDER}\r\n"
+                "To: <parent@example.com> <evil@example.com>\r\n"
+                "Subject: Smuggled To space\r\n\r\nBody"
+            ).encode("utf-8"),
+            (
+                f"From: {TEST_SENDER}\r\n"
+                "To: parent@example.com; evil@example.com\r\n"
+                "Subject: Smuggled To semicolon\r\n\r\nBody"
+            ).encode("utf-8"),
+            (
+                f"From: {TEST_SENDER}\r\n"
+                "To: <parent@example.com> extra\r\n"
+                "Subject: Smuggled To trailing\r\n\r\nBody"
+            ).encode("utf-8"),
+        ]
+        for body in smuggled_raw_messages:
+            ts, sig = _sign(body)
+            code, res = relay.deliver(body, ts, sig)
+            self.assertEqual(code, 422)
+            self.assertEqual(res, {"code": "MESSAGE_ENVELOPE_INVALID"})
+
+        utf8_body = _build_mime(to_addr='"Mẹ Bé An" <parent@example.com>')
+        ts, sig = _sign(utf8_body)
+        smtp_client = MagicMock()
+        smtp_cm = MagicMock()
+        smtp_cm.__enter__.return_value = smtp_client
+        smtp_cm.__exit__.return_value = False
+        with patch.object(relay.smtplib, "SMTP_SSL", return_value=smtp_cm):
+            code, res = relay.deliver(utf8_body, ts, sig)
+        self.assertEqual(code, 200)
+        self.assertEqual(res, {"status": "SENT"})
+        smtp_client.sendmail.assert_called_once_with(
+            TEST_SENDER, ["parent@example.com"], utf8_body
+        )
+
     def test_maps_malformed_rfc_header_to_422_message_invalid(self):
         raw = b"From: " + TEST_SENDER.encode() + b"\r\nTo: invalid\r\n\r\n"
         ts, sig = _sign(raw)
