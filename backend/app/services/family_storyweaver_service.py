@@ -36,11 +36,6 @@ from app.schemas.parent_private_book import (
 from app.services.book_quality_analyzer import analyse_verified_text
 from app.services.book_style_bible import analyze_book_style_deterministic
 from app.services.ocr_ai.config import OcrCorrectionConfig
-from app.services.ocr_inference_job_service import (
-    align_edited_text_to_words,
-    normalize_word,
-)
-from app.services.parent_private_book_pipeline import compute_candidate_hash
 from app.services.parent_private_book_service import (
     MODERATION_ACTIVE,
     VISIBILITY_PARENT_PRIVATE,
@@ -399,6 +394,12 @@ class FamilyStoryweaverService:
                 CreatedAt=now,
             )
             await repo.create_private_book(book)
+
+            from app.services.ocr_inference_job_service import (
+                align_edited_text_to_words,
+                normalize_word,
+            )
+            from app.services.parent_private_book_pipeline import compute_candidate_hash
 
             committed_revisions: list[tuple[UUID, UUID, int, str, list[dict[str, Any]]]] = []
             for page_id, page_num, page_text, permanent_path in page_specs:

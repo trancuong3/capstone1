@@ -41,7 +41,6 @@ from app.schemas.parent_private_book import (
     ParentSubmissionEditRequest,
     ParentSubmitPagesResponse,
 )
-from app.services.family_storyweaver_service import FamilyStoryweaverService
 from app.services.parent_flow2_contribution_service import ParentFlow2ContributionService
 from app.services.parent_private_book_service import ParentPrivateBookService
 from app.services.rate_limiter import rate_limit
@@ -137,6 +136,8 @@ async def create_storyweaver_private_book(
     db: AsyncSession = Depends(get_db),
 ):
     _apply_no_store(response)
+    from app.services.family_storyweaver_service import FamilyStoryweaverService
+
     base_url = str(request.base_url) if hasattr(request, "base_url") else None
     return await FamilyStoryweaverService(db).create_storyweaver_book(
         actor_id, payload, base_url=base_url

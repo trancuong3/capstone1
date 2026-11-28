@@ -1410,7 +1410,18 @@ class ReadingContentService:
                         if isinstance(raw_ill_path, str) and raw_ill_path.strip():
                             ill_storage_path = raw_ill_path.strip()
                         illustration_text_free = True
+        except Exception:
+            ill_id = None
+            ill_storage_path = None
+            illustration_text_free = False
 
+        try:
+            from sqlalchemy import desc, select
+            from app.models.smart_book_studio import PageOcrExtraction
+
+            db_session = getattr(self.repository, "db", None)
+            if db_session is not None and callable(getattr(db_session, "begin_nested", None)):
+                async with db_session.begin_nested():
                     ocr_ext = await db_session.scalar(
                         select(PageOcrExtraction)
                         .where(PageOcrExtraction.BookPageId == page_id)
@@ -1421,13 +1432,15 @@ class ReadingContentService:
                         .limit(1)
                     )
                     if ocr_ext is not None:
-                        extracted_page_kind = str(ocr_ext.PageKind) if ocr_ext.PageKind else None
-                        if isinstance(ocr_ext.BlocksJson, list):
-                            extracted_blocks_json = ocr_ext.BlocksJson
+                        raw_pk = getattr(ocr_ext, "PageKind", None)
+                        if isinstance(raw_pk, str) and raw_pk.strip():
+                            extracted_page_kind = raw_pk.strip()
+                        raw_blocks = getattr(ocr_ext, "BlocksJson", None)
+                        if isinstance(raw_blocks, list):
+                            extracted_blocks_json = raw_blocks
         except Exception:
-            ill_id = None
-            ill_storage_path = None
-            illustration_text_free = False
+            extracted_page_kind = None
+            extracted_blocks_json = None
 
         rollback = getattr(self.repository.db, "rollback", None)
         if callable(rollback):
