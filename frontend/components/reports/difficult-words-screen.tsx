@@ -1,8 +1,16 @@
 "use client";
 
 import { ArrowLeft, Mic, RefreshCw, Sparkles, Volume2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
@@ -70,6 +78,9 @@ export function DifficultWordsScreen({
   const { formatNumber } = useI18n();
   const t = useTranslations("difficultWords");
   const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? null;
   const userId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
   const { childService, difficultWordService } = useReportServices();
@@ -164,9 +175,10 @@ export function DifficultWordsScreen({
           PERSISTENT_USER_CACHE_MAX_STALE_MS,
         )?.data;
         const cachedChild = cachedChildren?.length
-          ? requestedChildId
-            ? cachedChildren.find((item) => item.id === requestedChildId)
-            : cachedChildren[0]
+          ? ((preferredChildId
+              ? cachedChildren.find((item) => item.id === preferredChildId)
+              : undefined) ??
+            (requestedChildId ? undefined : cachedChildren[0]))
           : undefined;
         if (cachedChildren && cachedChild) {
           const cachedWords =
@@ -199,12 +211,14 @@ export function DifficultWordsScreen({
             setState({ status: "no-children" });
           return;
         }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
         const child = matchedChild
           ? matchedChild
-          : await childService.get(requestedChildId!);
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         const words = await difficultWordService.list(
           child.id,
           createCalendarWindow(currentDateInReportTimezone(), periodDays),
@@ -256,6 +270,7 @@ export function DifficultWordsScreen({
     childService,
     difficultWordService,
     periodDays,
+    preferredChildId,
     requestKey,
     requestedChildId,
     userId,

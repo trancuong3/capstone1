@@ -19,6 +19,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { AiProgressBar } from "@/components/common/ai-progress-bar";
@@ -33,13 +34,13 @@ import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
-  type WasmSttProgressEvent,
 } from "@/lib/reading/browser-wasm-stt";
 import {
   isInjectedTestSpeechRecognition,
@@ -72,7 +73,10 @@ import {
 import {
   awaitSttReadyBeforeListening,
   awaitVoiceEnginesReadyBeforeListening,
+  getVoicePreloadState,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
+  subscribeVoicePreloadState,
   warmWasmTtsIfNeeded,
 } from "@/lib/reading/voice-preloader";
 import {
@@ -808,66 +812,37 @@ function ReadingSessionScreen({
   const [comparisonError, setComparisonError] = useState<string | null>(null);
   const [hasPageTranscripts, setHasPageTranscripts] = useState(false);
   const [isRetryingReports, setIsRetryingReports] = useState(false);
-  const [wasmDownloadState, setWasmDownloadState] = useState<{
-    percent: number | null;
-    file?: string;
-  } | null>(null);
-
-  useEffect(() => {
-    const wasmClient = getBrowserWasmSttClient();
-    const unsubscribe = wasmClient.subscribeProgress(
-      (event: WasmSttProgressEvent) => {
-        const normalizedStage = event.stage.toLowerCase();
-        if (
-          normalizedStage === "ready" ||
-          normalizedStage === "completed" ||
-          normalizedStage === "done" ||
-          wasmClient.isReady()
-        ) {
-          setWasmDownloadState(null);
-          return;
-        }
-        const computedPercent =
-          typeof event.index === "number" &&
-          typeof event.total === "number" &&
-          event.total > 0
-            ? Math.max(
-                5,
-                Math.min(
-                  95,
-                  Math.round(((event.index + 1) / event.total) * 85),
-                ),
-              )
-            : null;
-        setWasmDownloadState({
-          percent: computedPercent,
-          file: event.file,
-        });
-      },
-    );
-    return unsubscribe;
-  }, []);
-
-  const isWasmDownloading = wasmDownloadState !== null;
-  useEffect(() => {
-    if (!isWasmDownloading) return;
-    const wasmClient = getBrowserWasmSttClient();
-    const startedAt = Date.now();
-    const timer = window.setInterval(() => {
-      if (wasmClient.isReady() || Date.now() - startedAt > 95_000) {
-        setWasmDownloadState(null);
-      }
-    }, 350);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [isWasmDownloading]);
+  const voicePreloadState = useSyncExternalStore(
+    subscribeVoicePreloadState,
+    getVoicePreloadState,
+    getVoicePreloadState,
+  );
+  const isWasmDownloading = voicePreloadState.wasmDownloadActive;
 
   const isTtsSynthesizing = speechPlayer.state === "loading";
-  const isReadingAiWait =
+  const rawReadingAiWait =
     (isBusy && !speechPlayer.isPlaying) ||
     isRetryingReports ||
     isTtsSynthesizing;
+  const [aiWaitLongRunning, setAiWaitLongRunning] = useState(false);
+  useEffect(() => {
+    if (!rawReadingAiWait) {
+      const resetTimer = window.setTimeout(() => {
+        setAiWaitLongRunning(false);
+      }, 0);
+      return () => {
+        window.clearTimeout(resetTimer);
+      };
+    }
+    const showTimer = window.setTimeout(() => {
+      setAiWaitLongRunning(true);
+    }, 550);
+    return () => {
+      window.clearTimeout(showTimer);
+    };
+  }, [rawReadingAiWait]);
+  const isReadingAiWait =
+    rawReadingAiWait && (isRetryingReports || aiWaitLongRunning);
   const sessionLoadProgress = useAiProgress({
     active: loadState.status === "loading" || !page,
     stages: [
@@ -879,10 +854,10 @@ function ReadingSessionScreen({
   });
   const wasmModelProgress = useAiProgress({
     active: isWasmDownloading,
-    realPercent: wasmDownloadState?.percent ?? null,
+    realPercent: voicePreloadState.wasmDownloadPercent ?? null,
     progressMode:
-      wasmDownloadState?.percent !== null &&
-      wasmDownloadState?.percent !== undefined
+      voicePreloadState.wasmDownloadPercent !== null &&
+      voicePreloadState.wasmDownloadPercent !== undefined
         ? "measured"
         : "staged",
     stages: [
@@ -1153,7 +1128,67 @@ function ReadingSessionScreen({
   const phonicsSpelledWordIdsRef = useRef(new Set<string>());
   const passageContainsSpellRef = useRef(false);
 
+  const isCompanionSpeaking =
+    speechPlayer.isPlaying &&
+    !isPlayingPageSample &&
+    !isPlayingPhonicsLesson &&
+    !isReadingWord &&
+    !isPlayingTutorAudio;
+
+  useEffect(() => {
+    if (
+      !activePhonicsLesson ||
+      isPlayingPhonicsLesson ||
+      isReadingWord ||
+      isAnalyzingPhonicsAi ||
+      isMicRecording
+    ) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setActivePhonicsLesson(null);
+      setActivePhonicsStepIndex(null);
+      setPhonicsStatusHint(null);
+    }, 4_000);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [
+    activePhonicsLesson,
+    isAnalyzingPhonicsAi,
+    isMicRecording,
+    isPlayingPhonicsLesson,
+    isReadingWord,
+  ]);
+
+  useEffect(() => {
+    if (!companionBubble || isCompanionSpeaking) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCompanionBubble(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [companionBubble, isCompanionSpeaking]);
+
+  useEffect(() => {
+    if (!latestTranscript || isMicRecording) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLatestTranscript(null);
+    }, 4_500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [isMicRecording, latestTranscript]);
+
   const finishStartedRef = useRef(false);
+  const lastFailedTtsActionRef = useRef<
+    "page_sample" | "word" | "phonics" | "tutor" | null
+  >(null);
   const retryReportSaveStartedRef = useRef(false);
   const mountedRef = useRef(false);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
@@ -1298,6 +1333,9 @@ function ReadingSessionScreen({
     if (uiStateRef.current === "tts-error") {
       setUiState("reading");
     }
+    setActivePhonicsLesson(null);
+    setActivePhonicsStepIndex(null);
+    setPhonicsStatusHint(null);
     setPreviewSnapshot(null);
     setCurrentWordId(word.word_id);
 
@@ -1317,6 +1355,7 @@ function ReadingSessionScreen({
         () => speakGuarded(word.text, { wordSample: true }),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (err) {
       const isAbortError =
         typeof err === "object" &&
@@ -1324,6 +1363,7 @@ function ReadingSessionScreen({
         "name" in err &&
         (err as { name?: unknown }).name === "AbortError";
       if (!isAbortError) {
+        lastFailedTtsActionRef.current = "word";
         console.warn("Lỗi phát âm 1 từ:", err);
       }
     } finally {
@@ -1734,22 +1774,36 @@ function ReadingSessionScreen({
       }, 1000);
       return () => clearTimeout(timer);
     }
+    let cancelled = false;
     const finishDelayMs = getSessionStandbyRecognizer(sessionId) ? 0 : 400;
     const finishTimer = setTimeout(() => {
       if (assistantAudioPendingRef.current) {
-        setCountdown(null);
+        if (mountedRef.current) setCountdown(null);
         return;
       }
-      if (mountedRef.current) {
+      if (!mountedRef.current) return;
+      if (getSessionStandbyRecognizer(sessionId)) {
         setCountdown(null);
-        void startListeningRef.current().then((ok) => {
-          if (mountedRef.current && ok) {
-            setIsMicRecording(true);
-          }
-        });
       }
+      void Promise.race([
+        startListeningRef.current(),
+        new Promise<boolean>((resolve) =>
+          window.setTimeout(() => resolve(true), 450),
+        ),
+      ]).then((ok) => {
+        if (cancelled || !mountedRef.current) return;
+        setCountdown(null);
+        if (ok === true && isListeningActiveRef.current) {
+          setIsMicRecording(true);
+        } else if (ok === false) {
+          setIsMicRecording(false);
+        }
+      });
     }, finishDelayMs);
-    return () => clearTimeout(finishTimer);
+    return () => {
+      cancelled = true;
+      clearTimeout(finishTimer);
+    };
   }, [countdown, sessionId]);
 
   useEffect(() => {
@@ -4607,6 +4661,34 @@ function ReadingSessionScreen({
         words: transcript.words?.length ? transcript.words : null,
       };
     } catch (error) {
+      if (
+        !controller.signal.aborted &&
+        detectBrowserWasmSttSupport().supported
+      ) {
+        try {
+          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+            recording,
+            {
+              signal: controller.signal,
+              timeoutMs: 12_000,
+              voicedDurationMs: speechRecorder.getQuality?.()?.speechDurationMs,
+            },
+          );
+          const wasmText = wasmRes.text.normalize("NFC").trim();
+          if (wasmText && mountedRef.current && !controller.signal.aborted) {
+            recordSttEngineUsage({
+              provider: "wasm",
+              fallbackUsed: !isPermanentlyHostedLocalUnconfigured(),
+              fallbackReason: isPermanentlyHostedLocalUnconfigured()
+                ? null
+                : "LOCAL_STT_UNAVAILABLE",
+            });
+            return { text: wasmText, words: null };
+          }
+        } catch {
+          // Fall through cleanly to STT diagnostic handling below.
+        }
+      }
       if (!controller.signal.aborted) {
         if (isServiceError(error)) {
           if (isSttFallbackEligibleError(error)) {
@@ -5185,6 +5267,9 @@ function ReadingSessionScreen({
     if (uiStateRef.current === "tts-error") {
       setUiState("reading");
     }
+    setActivePhonicsLesson(null);
+    setActivePhonicsStepIndex(null);
+    setPhonicsStatusHint(null);
     setPreviewSnapshot(null);
     setIsBusy(true);
     setIsReadingWord(false);
@@ -5209,6 +5294,7 @@ function ReadingSessionScreen({
               text: fullText,
               onPlay: () => {
                 if (!isCurrentSample()) return;
+                lastFailedTtsActionRef.current = null;
                 setCurrentWordId(words[0].word_id);
               },
               onWordChange: (index) => {
@@ -5231,6 +5317,7 @@ function ReadingSessionScreen({
           ),
         true,
       );
+      lastFailedTtsActionRef.current = null;
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
         if (mountedRef.current) {
@@ -5242,6 +5329,7 @@ function ReadingSessionScreen({
       // Do NOT auto-resume the microphone when TTS sample playback failed.
       preventAssistantAudioResume();
       if (mountedRef.current) {
+        lastFailedTtsActionRef.current = "page_sample";
         setUiState("tts-error");
         setCurrentWordId(
           alignmentEngineRef.current?.getSnapshot().currentWordId ??
@@ -5307,6 +5395,9 @@ function ReadingSessionScreen({
       try {
         const ok = await startListening();
         if (mountedRef.current && ok) {
+          setActivePhonicsLesson(null);
+          setActivePhonicsStepIndex(null);
+          setPhonicsStatusHint(null);
           setIsMicRecording(true);
         }
       } finally {
@@ -6089,6 +6180,7 @@ function ReadingSessionScreen({
         playbackGeneration === tutorPlaybackGenerationRef.current &&
         !(error instanceof Error && error.name === "AbortError")
       ) {
+        lastFailedTtsActionRef.current = "tutor";
         setUiState("tts-error");
       }
     } finally {
@@ -6097,6 +6189,23 @@ function ReadingSessionScreen({
   }
 
   async function retryTutor() {
+    if (!tutorOpen && lastFailedTtsActionRef.current === "page_sample") {
+      lastFailedTtsActionRef.current = null;
+      await handleReadSample();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "phonics") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleSpellCurrentWord();
+      return;
+    }
+    if (!tutorOpen && lastFailedTtsActionRef.current === "word") {
+      lastFailedTtsActionRef.current = null;
+      setUiState("reading");
+      handleReadCurrentWord();
+      return;
+    }
     if (!page || !currentWordId || isBusy) return;
     const word = page.words.find(
       (item) => item.word_id === currentWordId,
@@ -7009,7 +7118,10 @@ function ReadingSessionScreen({
       };
 
       let transcription;
-      if (localSttConfirmedDown && detectBrowserWasmSttSupport().supported) {
+      if (
+        (localSttConfirmedDown || shouldPreferWarmWasmBatchStt()) &&
+        detectBrowserWasmSttSupport().supported
+      ) {
         try {
           transcription = await tryWasmRetryTranscribe();
         } catch (wasmErr) {
@@ -7040,13 +7152,17 @@ function ReadingSessionScreen({
           if (serverErrText.includes("LOCAL_VOICE_UNCONFIGURED")) {
             markHostedLocalUnconfigured();
           }
+          const isWasmEligibleNetworkOrServerErr =
+            serverErr instanceof TypeError ||
+            (serverErr instanceof Error && serverErr.name === "TimeoutError") ||
+            (isServiceError(serverErr) &&
+              (serverErr.status >= 500 ||
+                serverErr.status === 0 ||
+                serverErr.status === 408 ||
+                serverErr.status === 429));
           if (
             detectBrowserWasmSttSupport().supported &&
-            isServiceError(serverErr) &&
-            (serverErr.status >= 500 ||
-              serverErr.status === 0 ||
-              serverErr.status === 408 ||
-              serverErr.status === 429)
+            isWasmEligibleNetworkOrServerErr
           ) {
             try {
               transcription = await tryWasmRetryTranscribe();
@@ -8620,19 +8736,11 @@ function ReadingSessionScreen({
   }
 
   const canUseDuetMode = !retryMode && duetTurns.length >= 2;
-  const hasTopBarContent = Boolean(
-    pageProgress ||
-    canUseDuetMode ||
-    (pageNavigationError && pickerIndex === null) ||
-    speechPlayer.fallbackNotice ||
-    isWasmDownloading ||
-    isReadingAiWait,
-  );
 
-  const readingTopBar = hasTopBarContent ? (
+  const readingTopBar = (
     <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
       {pageProgress ? (
-        <div className="flex flex-wrap items-center gap-1 sm:gap-2.5">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
           <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-1.5">
             <Button
               aria-label={t("session.previousPage")}
@@ -8696,6 +8804,23 @@ function ReadingSessionScreen({
             ) : null}
           </div>
 
+          {canUseDuetMode ? (
+            <button
+              aria-pressed={duetModeEnabled}
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+                duetModeEnabled
+                  ? "border-primary bg-primary text-white shadow-2xs"
+                  : "border-border bg-white text-ink hover:bg-sky"
+              }`}
+              data-testid="duet-mode-toggle"
+              onClick={() => setDuetModeEnabled((prev) => !prev)}
+              type="button"
+            >
+              <Users aria-hidden="true" className="size-3.5 shrink-0" />
+              {duetModeEnabled ? t("duet.toggleActive") : t("duet.toggleLabel")}
+            </button>
+          ) : null}
+
           <button
             type="button"
             aria-label={t("session.pageOptionsAria")}
@@ -8737,14 +8862,14 @@ function ReadingSessionScreen({
               })}
             </p>
           </div>
+          <VoiceEngineBadge className="shrink-0" compact />
         </div>
-      ) : null}
-      {canUseDuetMode ? (
-        <div className="flex flex-col gap-1.5 pt-0.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          {canUseDuetMode ? (
             <button
               aria-pressed={duetModeEnabled}
-              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
+              className={`inline-flex min-h-9 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-extrabold transition-colors focus-visible:outline-3 focus-visible:outline-primary ${
                 duetModeEnabled
                   ? "border-primary bg-primary text-white shadow-2xs"
                   : "border-border bg-white text-ink hover:bg-sky"
@@ -8756,77 +8881,80 @@ function ReadingSessionScreen({
               <Users aria-hidden="true" className="size-3.5 shrink-0" />
               {duetModeEnabled ? t("duet.toggleActive") : t("duet.toggleLabel")}
             </button>
-          </div>
-          {duetModeEnabled && activeDuetTurn ? (
-            <div
-              className={`flex flex-wrap items-center justify-between gap-2.5 rounded-card border px-3.5 py-2.5 ${
-                activeDuetTurn.role === "PARENT"
-                  ? "border-amber-300 bg-amber-50/90"
-                  : "border-emerald-300 bg-emerald-50/90"
-              }`}
-              data-duet-role={activeDuetTurn.role}
-              data-testid="duet-turn-banner"
+          ) : (
+            <span />
+          )}
+          <VoiceEngineBadge className="ms-auto shrink-0" compact />
+        </div>
+      )}
+      {canUseDuetMode && duetModeEnabled && activeDuetTurn ? (
+        <div
+          className={`flex flex-wrap items-center justify-between gap-2.5 rounded-card border px-3.5 py-2.5 ${
+            activeDuetTurn.role === "PARENT"
+              ? "border-amber-300 bg-amber-50/90"
+              : "border-emerald-300 bg-emerald-50/90"
+          }`}
+          data-duet-role={activeDuetTurn.role}
+          data-testid="duet-turn-banner"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
+                  activeDuetTurn.role === "PARENT"
+                    ? "bg-amber-200/80 text-amber-950"
+                    : "bg-emerald-200/80 text-emerald-950"
+                }`}
+              >
+                {activeDuetTurn.role === "PARENT"
+                  ? t("duet.parentTurnBadge")
+                  : t("duet.childTurnBadge")}
+              </span>
+              <span className="text-xs font-semibold text-muted">
+                {t("duet.turnCounter", {
+                  current: formatNumber(activeDuetTurn.turnIndex + 1),
+                  total: formatNumber(duetTurns.length),
+                })}
+              </span>
+            </div>
+            <p
+              className="viread-learning-content mt-1 line-clamp-2 text-sm font-bold text-ink"
+              dir="ltr"
+              lang="vi"
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold ${
-                      activeDuetTurn.role === "PARENT"
-                        ? "bg-amber-200/80 text-amber-950"
-                        : "bg-emerald-200/80 text-emerald-950"
-                    }`}
-                  >
-                    {activeDuetTurn.role === "PARENT"
-                      ? t("duet.parentTurnBadge")
-                      : t("duet.childTurnBadge")}
-                  </span>
-                  <span className="text-xs font-semibold text-muted">
-                    {t("duet.turnCounter", {
-                      current: formatNumber(activeDuetTurn.turnIndex + 1),
-                      total: formatNumber(duetTurns.length),
-                    })}
-                  </span>
-                </div>
-                <p
-                  className="viread-learning-content mt-1 line-clamp-2 text-sm font-bold text-ink"
-                  dir="ltr"
-                  lang="vi"
-                >
-                  {activeDuetTurn.text}
-                </p>
-              </div>
-              {activeDuetTurn.role === "PARENT" ? (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    className="w-auto"
-                    fullWidth={false}
-                    onClick={() => {
-                      speechPlayer.stop();
-                      void speechPlayer
-                        .play(activeDuetTurn.text, {
-                          utteranceKind: "page_sample",
-                        })
-                        .catch(() => undefined);
-                    }}
-                    size="compact"
-                    type="button"
-                    variant="secondary"
-                  >
-                    <Volume2 aria-hidden="true" className="size-3.5" />
-                    {t("duet.listenParentSample")}
-                  </Button>
-                  <Button
-                    className="w-auto"
-                    data-testid="duet-complete-parent-turn"
-                    fullWidth={false}
-                    onClick={handleCompleteParentDuetTurn}
-                    size="compact"
-                    type="button"
-                  >
-                    {t("duet.completeParentTurn")}
-                  </Button>
-                </div>
-              ) : null}
+              {activeDuetTurn.text}
+            </p>
+          </div>
+          {activeDuetTurn.role === "PARENT" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                className="w-auto"
+                fullWidth={false}
+                onClick={() => {
+                  speechPlayer.stop();
+                  void speechPlayer
+                    .play(activeDuetTurn.text, {
+                      utteranceKind: "page_sample",
+                    })
+                    .catch(() => undefined);
+                }}
+                size="compact"
+                type="button"
+                variant="secondary"
+              >
+                <Volume2 aria-hidden="true" className="size-3.5" />
+                {t("duet.listenParentSample")}
+              </Button>
+              <Button
+                className="w-auto"
+                data-testid="duet-complete-parent-turn"
+                fullWidth={false}
+                onClick={handleCompleteParentDuetTurn}
+                size="compact"
+                type="button"
+              >
+                {t("duet.completeParentTurn")}
+              </Button>
             </div>
           ) : null}
         </div>
@@ -8852,7 +8980,7 @@ function ReadingSessionScreen({
       {isWasmDownloading ? (
         <AiProgressBar
           active
-          detail={wasmDownloadState?.file}
+          detail={voicePreloadState.wasmDownloadFile ?? undefined}
           label={
             wasmModelProgress.stageLabel ??
             tCommon("aiProgress.downloadingSpeechModel")
@@ -8887,7 +9015,7 @@ function ReadingSessionScreen({
         </p>
       ) : null}
     </div>
-  ) : null;
+  );
 
   return (
     <ReadingDynamicFallbackContext.Provider value={dynamicFallbackContextValue}>
@@ -9089,13 +9217,8 @@ function ReadingSessionScreen({
           hesitationWordIds={hesitationWordIds}
           assistedWordIds={assistedWordIds}
           companionBubble={companionBubble}
-          isCompanionSpeaking={
-            speechPlayer.isPlaying &&
-            !isPlayingPageSample &&
-            !isPlayingPhonicsLesson &&
-            !isReadingWord &&
-            !isPlayingTutorAudio
-          }
+          isCompanionSpeaking={isCompanionSpeaking}
+          onDismissCompanion={() => setCompanionBubble(null)}
           comparisonResult={comparisonResult}
           sentenceReinforcementPanel={
             activeSentenceReinforcement ? (

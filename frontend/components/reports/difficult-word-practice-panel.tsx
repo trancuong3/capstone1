@@ -68,6 +68,7 @@ import {
 import {
   awaitSttReadyBeforeListening,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
 } from "@/lib/reading/voice-preloader";
 import {
   buildPhonicsLesson,
@@ -1456,7 +1457,8 @@ export function DifficultWordPracticePanel({
       const localSttDown =
         permanentlyUnconfigured ||
         (freshHealth !== null &&
-          (!freshHealth.local.available || !freshHealth.local.stt_ready));
+          (!freshHealth.local.available || !freshHealth.local.stt_ready)) ||
+        shouldPreferWarmWasmBatchStt();
       if (
         localSttDown &&
         !effectiveTranscript &&
@@ -2111,6 +2113,7 @@ export function DifficultWordPracticePanel({
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
           <ReadingVoiceSettings
+            childId={child.id}
             disabled={flowState === "LISTENING"}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}

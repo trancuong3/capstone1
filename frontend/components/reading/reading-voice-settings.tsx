@@ -588,7 +588,16 @@ export function ReadingVoiceSettings({
 
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
-  const selectedVoiceId = preferences.voiceId ?? defaultVoiceId;
+  const pairDefaultVoiceId = getDefaultLocalVoiceIdForRegionAndGender(
+    policy.region,
+    teacherPersona.gender,
+  );
+  const selectedVoiceId =
+    preferences.voiceId ??
+    (loadState.status === "ready" &&
+    loadState.data.voices.some((v) => v.voice_id === pairDefaultVoiceId)
+      ? pairDefaultVoiceId
+      : defaultVoiceId);
   const isYouthful = (voice: VoiceOption) =>
     ["young", "young_adult", "youthful"].includes(
       voice.age?.toLowerCase() ?? "",
@@ -1119,7 +1128,7 @@ export function ReadingVoiceSettings({
             >
               {t("settings.parentModeTitle")}
             </h3>
-            <VoiceEngineBadge />
+            <VoiceEngineBadge testIdPrefix="voice-modal-engine" />
             {voiceHealth ? (
               <div
                 data-testid="voice-health-status-pills"

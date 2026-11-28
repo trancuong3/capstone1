@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpenCheck, Heart, Sparkles, Volume2 } from "lucide-react";
+import { BookOpenCheck, Heart, Sparkles, Volume2, X } from "lucide-react";
 
 import { useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
@@ -24,6 +24,7 @@ interface ReadingCompanionBubbleProps {
   readonly state: CompanionBubbleState;
   readonly isSpeaking?: boolean;
   readonly gender?: VoiceGender;
+  readonly onDismiss?: () => void;
 }
 
 const MOOD_STYLES: Readonly<
@@ -121,6 +122,7 @@ export function ReadingCompanionBubble({
   state,
   isSpeaking = false,
   gender,
+  onDismiss,
 }: ReadingCompanionBubbleProps) {
   const t = useTranslations("reading");
   const activePersona = useTeacherPersona();
@@ -183,6 +185,17 @@ export function ReadingCompanionBubble({
           {displayMessage}
         </p>
       </div>
+      {onDismiss ? (
+        <button
+          aria-label={t("phonics.closeAria")}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-border/70 bg-white/85 text-muted hover:bg-white hover:text-ink focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          data-testid="dismiss-companion-bubble"
+          onClick={onDismiss}
+          type="button"
+        >
+          <X aria-hidden="true" className="size-4" />
+        </button>
+      ) : null}
     </div>
   );
 }

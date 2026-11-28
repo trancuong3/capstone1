@@ -97,6 +97,7 @@ interface ReadingLayoutProps {
   assistedWordIds?: ReadonlySet<string>;
   companionBubble?: CompanionBubbleState | null;
   isCompanionSpeaking?: boolean;
+  onDismissCompanion?: () => void;
   readingMode?: ReadingDisplayMode | null;
   onReadingModeChange?: (mode: ReadingDisplayMode) => void;
   /** Optional compact page-range / navigation strip rendered inside the top band. */
@@ -163,6 +164,7 @@ export function ReadingLayout({
   assistedWordIds,
   companionBubble = null,
   isCompanionSpeaking = false,
+  onDismissCompanion,
   readingMode,
   onReadingModeChange,
   previewSnapshot,
@@ -181,6 +183,11 @@ export function ReadingLayout({
   const resolvedInitialReadingMode: ReadingDisplayMode | undefined =
     activeReadingMode ??
     (pageHasVerifiedIllustration ? "ILLUSTRATED" : undefined);
+  const showIdleTranscript =
+    Boolean(latestTranscript) &&
+    !phonicsPanel &&
+    !sentenceReinforcementPanel &&
+    !companionBubble;
   const hasStatusBanner =
     retryMode ||
     countdown !== null ||
@@ -188,12 +195,18 @@ export function ReadingLayout({
     isReadingWord ||
     (isMicRecording &&
       (isCurrentWordMispronounced || Boolean(latestTranscript))) ||
-    Boolean(latestTranscript);
+    showIdleTranscript;
+  const showCompanionBubble =
+    !retryMode &&
+    Boolean(companionBubble) &&
+    !phonicsPanel &&
+    !sentenceReinforcementPanel &&
+    !(isMicRecording && isCurrentWordMispronounced);
   const hasFeedbackPanel =
     hasStatusBanner ||
     Boolean(sentenceReinforcementPanel) ||
     Boolean(phonicsPanel) ||
-    Boolean(!retryMode && companionBubble);
+    showCompanionBubble;
 
   return (
     <section className="relative mx-auto flex min-h-0 w-full max-w-[1200px] flex-1 flex-col gap-1.5 px-3 pt-1.5 sm:gap-3 sm:px-6 sm:pt-3">
@@ -324,14 +337,16 @@ export function ReadingLayout({
             data-reading-feedback="true"
             className={cn(
               "mx-auto mb-1 w-full max-w-[1104px] space-y-1 overflow-y-auto overscroll-contain sm:mb-2 sm:space-y-2",
-              phonicsPanel || retryMode || sentenceReinforcementPanel
-                ? "max-h-[44dvh] sm:max-h-[38dvh]"
-                : "max-h-[15dvh] sm:max-h-[24dvh]",
+              retryMode
+                ? "max-h-[24dvh] sm:max-h-[30dvh]"
+                : phonicsPanel || sentenceReinforcementPanel
+                  ? "max-h-[32dvh] sm:max-h-[34dvh]"
+                  : "max-h-[14dvh] sm:max-h-[20dvh]",
             )}
           >
             {retryMode ? (
               <div
-                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-3 rounded-card border border-border bg-white px-4 py-2.5"
+                className="mx-auto flex w-full max-w-[1008px] flex-wrap items-center gap-2 rounded-card border border-border bg-white px-3 py-1.5 sm:gap-3 sm:px-4 sm:py-2"
                 aria-live="polite"
               >
                 <div className="min-w-0 flex-1">
@@ -375,7 +390,7 @@ export function ReadingLayout({
                   </p>
 
                   <p
-                    className="viread-learning-content mt-1.5 w-fit max-w-full break-words rounded-control bg-warning-surface px-3 py-1 text-xl font-extrabold text-ink"
+                    className="viread-learning-content mt-1 w-fit max-w-full break-words rounded-control bg-warning-surface px-2.5 py-0.5 text-lg font-extrabold text-ink sm:px-3 sm:py-1 sm:text-xl"
                     dir="ltr"
                     lang="vi"
                   >
@@ -387,7 +402,7 @@ export function ReadingLayout({
 
                   {retryContextPhrase ? (
                     <p
-                      className="viread-learning-content mt-1.5 break-words text-base font-bold text-ink sm:text-lg"
+                      className="viread-learning-content mt-1 break-words text-sm font-bold text-ink sm:mt-1.5 sm:text-lg"
                       dir="ltr"
                       lang="vi"
                     >
@@ -559,7 +574,10 @@ export function ReadingLayout({
                   </span>
                 </p>
               ) : null
-            ) : !phonicsPanel && latestTranscript ? (
+            ) : !phonicsPanel &&
+              !companionBubble &&
+              !sentenceReinforcementPanel &&
+              latestTranscript ? (
               <div className="mx-auto flex w-full max-w-[1008px] items-center gap-3 rounded-card border border-purple/50 bg-purple/40 px-4 py-1.5">
                 <span className="shrink-0 text-sm font-semibold text-purple-ink">
                   {t("layout.latestRecording")}
@@ -586,9 +604,10 @@ export function ReadingLayout({
               </div>
             ) : null}
 
-            {!retryMode && companionBubble ? (
+            {showCompanionBubble && companionBubble ? (
               <ReadingCompanionBubble
                 isSpeaking={isCompanionSpeaking}
+                onDismiss={onDismissCompanion}
                 state={companionBubble}
               />
             ) : null}

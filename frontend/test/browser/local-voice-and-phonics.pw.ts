@@ -318,9 +318,11 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
   const dialog = page.getByRole("dialog", { name: "Giọng đọc mẫu" });
   await expect(dialog).toBeVisible();
 
-  const localOnlyBtn = dialog.getByRole("button", { name: /Chỉ máy này/ });
+  const localOnlyBtn = dialog.getByRole("button", {
+    name: /Ưu tiên trên thiết bị|Chỉ máy này/,
+  });
   const onlineBackupBtn = dialog.getByRole("button", {
-    name: /Máy này \+ Google dự phòng/,
+    name: /Tự động linh hoạt|Máy này \+ Google dự phòng/,
   });
   await expect(localOnlyBtn).toHaveAttribute("aria-pressed", "true");
   await expect(onlineBackupBtn).toHaveAttribute("aria-pressed", "false");
@@ -340,10 +342,14 @@ test("ReadingScreen: Bắc · Trung · Nam selector, local-first Google fallback
 
   await onlineBackupBtn.click();
   await expect(
-    dialog.getByLabel(/Dự phòng Google cho Nhận diện giọng nói \(STT\)/),
+    dialog.getByLabel(
+      /Hỗ trợ nhận diện giọng đọc trực tuyến|Dự phòng Google cho Nhận diện giọng nói \(STT\)/,
+    ),
   ).toBeChecked();
   await expect(
-    dialog.getByLabel(/Dự phòng Google cho Đọc mẫu \(TTS\)/),
+    dialog.getByLabel(
+      /Hỗ trợ giọng đọc mẫu trực tuyến|Dự phòng Google cho Đọc mẫu \(TTS\)/,
+    ),
   ).toBeChecked();
 
   await localOnlyBtn.click();

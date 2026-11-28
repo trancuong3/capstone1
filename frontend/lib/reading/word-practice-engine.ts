@@ -24,6 +24,7 @@ import {
   markHostedLocalUnconfigured,
   recordSttEngineUsage,
 } from "@/lib/reading/voice-engine-status";
+import { shouldPreferWarmWasmBatchStt } from "@/lib/reading/voice-preloader";
 import {
   hasHighConfidenceKeytermResult,
   hasUsableBrowserConfidence,
@@ -318,7 +319,8 @@ export async function evaluateRecordedShortWord({
   const localSttUnavailable =
     permanentlyUnconfigured ||
     (freshHealth !== null &&
-      (!freshHealth.local.available || !freshHealth.local.stt_ready));
+      (!freshHealth.local.available || !freshHealth.local.stt_ready)) ||
+    shouldPreferWarmWasmBatchStt();
   const canUseWasm = detectBrowserWasmSttSupport().supported;
   let triedWasmFirst = false;
 

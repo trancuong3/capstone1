@@ -1,8 +1,9 @@
 "use client";
 
 import { History, RefreshCw, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
@@ -69,6 +70,9 @@ export function SessionHistoryScreen({
   const { formatDate, formatNumber, locale } = useI18n();
   const t = useTranslations("reports");
   const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? null;
   const userId =
     authRuntime.session?.user?.id ?? authRuntime.initialUserId ?? null;
   const { childService, sessionService } = useReportServices();
@@ -99,9 +103,10 @@ export function SessionHistoryScreen({
           PERSISTENT_USER_CACHE_MAX_STALE_MS,
         )?.data;
         const cachedChild = cachedChildren?.length
-          ? requestedChildId
-            ? cachedChildren.find((item) => item.id === requestedChildId)
-            : cachedChildren[0]
+          ? ((preferredChildId
+              ? cachedChildren.find((item) => item.id === preferredChildId)
+              : undefined) ??
+            (requestedChildId ? undefined : cachedChildren[0]))
           : undefined;
 
         if (cachedChildren && cachedChild) {
@@ -135,12 +140,14 @@ export function SessionHistoryScreen({
           if (active) setState({ status: "no-children" });
           return;
         }
-        const matchedChild = requestedChildId
-          ? children.find((item) => item.id === requestedChildId)
+        const matchedChild = preferredChildId
+          ? children.find((item) => item.id === preferredChildId)
           : children[0];
         const child = matchedChild
           ? matchedChild
-          : await childService.get(requestedChildId!);
+          : requestedChildId
+            ? await childService.get(requestedChildId)
+            : children[0];
         const history = await sessionService.list(child.id, {
           cursor: currentPage > 1 ? `page-${currentPage}` : undefined,
           limit: 10,
@@ -217,6 +224,7 @@ export function SessionHistoryScreen({
   }, [
     childService,
     currentPage,
+    preferredChildId,
     requestKey,
     requestedChildId,
     sessionService,

@@ -18,6 +18,7 @@ import { StatusMessage } from "@/components/common/status-message";
 import { useAppStore } from "@/components/providers/app-store-provider";
 import { MinimalPairSandbox } from "@/components/reading/minimal-pair-sandbox";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { WarmupMicroStoryCard } from "@/components/reading/warmup-micro-story-card";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useBookService } from "@/hooks/use-book-service";
@@ -686,21 +687,27 @@ export function ReadingPreparationScreen({
                   : "Giọng đọc & nhận diện giọng nói sẽ sẵn sàng ngay khi bé đọc."}
             </span>
           </div>
-          <ReadingVoiceSettings
-            disabled={isStarting}
-            fallbackNotice={speechPlayer.fallbackNotice}
-            isPreviewing={speechPlayer.isPlaying}
-            onPreview={(sample) =>
-              speechPlayer.play(sample, {
-                coaching: true,
-                cacheScope: "COACHING",
-                isPrivateBook: false,
-                bypassSessionLock: true,
-                utteranceKind: "voice_preview",
-              })
-            }
-            onStopPreview={speechPlayer.stop}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <VoiceEngineBadge compact />
+            <ReadingVoiceSettings
+              childId={
+                state.status === "ready" ? state.data.child.id : selectedChildId
+              }
+              disabled={isStarting}
+              fallbackNotice={speechPlayer.fallbackNotice}
+              isPreviewing={speechPlayer.isPlaying}
+              onPreview={(sample) =>
+                speechPlayer.play(sample, {
+                  coaching: true,
+                  cacheScope: "COACHING",
+                  isPrivateBook: false,
+                  bypassSessionLock: true,
+                  utteranceKind: "voice_preview",
+                })
+              }
+              onStopPreview={speechPlayer.stop}
+            />
+          </div>
         </div>
       </section>
 

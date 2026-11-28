@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   BellRing,
   BookHeart,
@@ -9,6 +16,7 @@ import {
   Target,
 } from "lucide-react";
 
+import { AppStoreContext } from "@/components/providers/app-store-provider";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { SegmentedFilterBar } from "@/components/common/segmented-filter-bar";
@@ -66,12 +74,15 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
   const t = useTranslations("reports");
   const tCommon = useTranslations("common");
   const authRuntime = useAuthRuntime();
+  const appStore = useContext(AppStoreContext);
+  const preferredChildId =
+    requestedChildId ?? appStore?.selectedChildId ?? null;
   const childService = useChildService();
   const bookService = useBookService();
   const service = useReadingManagementService();
 
   const [children, setChildren] = useState<ChildProfileDTO[]>([]);
-  const [childId, setChildId] = useState(requestedChildId ?? "");
+  const [childId, setChildId] = useState(preferredChildId ?? "");
   const [goals, setGoals] = useState<ReadingGoalDTO[]>([]);
   const [plans, setPlans] = useState<ReadingPlanDTO[]>([]);
   const [collections, setCollections] = useState<ChildBookCollectionDTO[]>([]);
@@ -176,8 +187,8 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
       .then((items) => {
         if (!active) return;
         setChildren(items);
-        const requested = requestedChildId
-          ? items.find((child) => child.id === requestedChildId)
+        const requested = preferredChildId
+          ? items.find((child) => child.id === preferredChildId)
           : undefined;
         setChildId((current) =>
           current && items.some((child) => child.id === current)
@@ -194,7 +205,7 @@ export function ReadingManagementScreen({ requestedChildId }: Props) {
     return () => {
       active = false;
     };
-  }, [childService, requestedChildId, t]);
+  }, [childService, preferredChildId, t]);
 
   useEffect(() => {
     if (!childId) {

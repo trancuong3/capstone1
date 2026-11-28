@@ -126,7 +126,7 @@ export function PhonicsLessonCard({
       )}
       data-testid="phonics-lesson-card"
     >
-      <div className="space-y-2">
+      <div className={cn("space-y-2", compact && "space-y-1.5")}>
         <div className="flex items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-xs font-bold text-primary">
@@ -220,7 +220,10 @@ export function PhonicsLessonCard({
       {/* Synchronized character-slice highlight of the focus syllable / phrase */}
       <div
         aria-live="polite"
-        className="viread-learning-content mt-3 flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white px-4 py-3 text-center"
+        className={cn(
+          "viread-learning-content mt-3 flex flex-wrap items-baseline justify-center gap-1 rounded-xl border border-border bg-white px-4 py-3 text-center",
+          compact && "mt-2 px-3 py-1.5",
+        )}
         data-testid="phonics-focus-display"
         dir="ltr"
         lang="vi"
@@ -241,6 +244,7 @@ export function PhonicsLessonCard({
         <span
           className={cn(
             "inline-flex items-baseline rounded-lg px-1.5 py-0.5 text-3xl font-extrabold tracking-wide transition-all sm:text-4xl",
+            compact && "text-2xl sm:text-3xl",
             (highlightKind === "whole_syllable" ||
               highlightKind === "tone_and_syllable" ||
               highlightKind === "context") &&
@@ -293,7 +297,10 @@ export function PhonicsLessonCard({
       {/* Ordered phonics steps */}
       <ol
         aria-label={t("phonics.stepsAria")}
-        className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4"
+        className={cn(
+          "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4",
+          compact && "mt-2 gap-1.5",
+        )}
       >
         {lesson.steps.map((step, idx) => {
           const isCurrent = activeStepIndex === idx;
@@ -303,6 +310,7 @@ export function PhonicsLessonCard({
               aria-current={isCurrent ? "step" : undefined}
               className={cn(
                 "flex items-center gap-2 rounded-xl border-2 px-3 py-2 text-sm font-bold transition-all",
+                compact && "px-2.5 py-1.5 text-xs sm:text-sm",
                 isCurrent
                   ? "scale-[1.02] border-primary bg-primary text-white shadow-sm"
                   : isDone
@@ -339,7 +347,10 @@ export function PhonicsLessonCard({
       {statusHint ? (
         <p
           aria-live="polite"
-          className="mt-2.5 text-center text-sm font-semibold text-primary"
+          className={cn(
+            "mt-2.5 text-center text-sm font-semibold text-primary",
+            compact && "mt-1.5 text-xs",
+          )}
         >
           {statusHint}
         </p>

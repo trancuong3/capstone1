@@ -16,6 +16,7 @@ import { Button } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useReadingServices } from "@/hooks/use-reading-services";
@@ -1429,7 +1430,9 @@ export function ComprehensionQuestion({
                   {loadState.value.progress_label}
                 </p>
                 <div className="flex flex-wrap items-center gap-2">
+                  <VoiceEngineBadge compact />
                   <ReadingVoiceSettings
+                    childId={child.id}
                     disabled={voicePhase === "listening"}
                     fallbackNotice={speechPlayer.fallbackNotice}
                     isPreviewing={speechPlayer.isPlaying}

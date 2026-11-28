@@ -1490,6 +1490,7 @@ export function SentenceShooterScreen({
             </div>
             <div className="flex shrink-0 items-center gap-2">
               <ReadingVoiceSettings
+                childId={child?.id ?? null}
                 fallbackNotice={speechPlayer.fallbackNotice}
                 isPreviewing={speechPlayer.isPlaying}
                 onPreview={(sample) => {
@@ -2084,6 +2085,7 @@ export function SentenceShooterScreen({
           </p>
         </div>
         <ReadingVoiceSettings
+          childId={child?.id ?? null}
           fallbackNotice={speechPlayer.fallbackNotice}
           isPreviewing={speechPlayer.isPlaying}
           onPreview={(sample) => {

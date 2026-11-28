@@ -243,7 +243,7 @@ export function EntertainmentScreen({
     const cleaned = word.trim();
     if (!cleaned || !calmSound) return;
     void speechPlayer
-      .play(cleaned, { wordSample: true, speedScale: 0.92 })
+      .play(cleaned, { wordSample: true })
       .catch(() => undefined);
   }
 

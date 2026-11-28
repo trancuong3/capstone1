@@ -28,6 +28,7 @@ import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -64,6 +65,7 @@ import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import {
   awaitSttReadyBeforeListening,
   preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
 } from "@/lib/reading/voice-preloader";
 import { cn } from "@/lib/utils/cn";
 import type {
@@ -543,7 +545,7 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
         .play(
           adapted,
           options?.wordSample
-            ? { wordSample: true, speedScale: 0.92, bypassSessionLock: true }
+            ? { wordSample: true, bypassSessionLock: true }
             : {
                 coaching: true,
                 utteranceKind: "game_prompt",
@@ -606,13 +608,36 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
               .filter(Boolean)
               .slice(0, 18)
           : urlFocusWords;
-        const sttRes = await speechService.transcribe(audioBlob, {
-          languageCode: "vi",
-          keyterms,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        const transcript = sttRes.text?.trim() ?? "";
+        const preferWarmWasm = shouldPreferWarmWasmBatchStt();
+        const wasmSupported = detectBrowserWasmSttSupport().supported;
+        let transcript = "";
+        if (preferWarmWasm && wasmSupported) {
+          const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+            audioBlob,
+            { timeoutMs: 12_000 },
+          );
+          if (controller.signal.aborted) return;
+          transcript = wasmRes.text.normalize("NFC").trim();
+        } else {
+          try {
+            const sttRes = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            transcript = sttRes.text?.trim() ?? "";
+          } catch (serverErr) {
+            if (controller.signal.aborted) return;
+            if (!wasmSupported) throw serverErr;
+            const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+              audioBlob,
+              { timeoutMs: 12_000 },
+            );
+            if (controller.signal.aborted) return;
+            transcript = wasmRes.text.normalize("NFC").trim();
+          }
+        }
         if (!transcript) return;
         setVoiceNotice(null);
         if (target === "RECALL") {
@@ -1395,7 +1420,9 @@ export function MemoryGameScreen({ service }: MemoryGameScreenProps = {}) {
           <p className="text-body text-muted">{t("memoryGame.lead")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <VoiceEngineBadge compact />
           <ReadingVoiceSettings
+            childId={childId}
             disabled={isListeningVoice}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying}

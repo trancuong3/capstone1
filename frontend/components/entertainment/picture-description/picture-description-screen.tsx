@@ -45,6 +45,7 @@ import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
+import { VoiceEngineBadge } from "@/components/reading/voice-engine-badge";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
@@ -81,7 +82,10 @@ import {
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
-import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
+import {
+  preloadReadingVoiceEngines,
+  shouldPreferWarmWasmBatchStt,
+} from "@/lib/reading/voice-preloader";
 import {
   getFreshVoiceEngineHealth,
   isPermanentlyHostedLocalUnconfigured,
@@ -1411,7 +1415,10 @@ export function PictureDescriptionScreen({
           getFreshVoiceEngineHealth(),
         );
         const wasmSupported = detectBrowserWasmSttSupport().supported;
-        if (localUnconfigured && wasmSupported) {
+        if (
+          (localUnconfigured || shouldPreferWarmWasmBatchStt()) &&
+          wasmSupported
+        ) {
           try {
             const wasmResult = await getBrowserWasmSttClient().transcribeBlob(
               audioBlob,
@@ -1731,7 +1738,9 @@ export function PictureDescriptionScreen({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <VoiceEngineBadge compact />
             <ReadingVoiceSettings
+              childId={selectedChildForHeader.id}
               disabled={isRecordingVoice}
               fallbackNotice={speechPlayer.fallbackNotice}
               isPreviewing={speechPlayer.isPlaying}
