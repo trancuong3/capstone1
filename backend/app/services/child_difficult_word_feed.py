@@ -161,6 +161,8 @@ class ChildDifficultWordFeed:
         self,
         fn: Callable[[], Coroutine[Any, Any, list[Any]]],
     ) -> list[Any]:
+        if not callable(getattr(self.db, "execute", None)):
+            return []
         begin_nested = getattr(self.db, "begin_nested", None)
         use_nested = False
         cm = None
