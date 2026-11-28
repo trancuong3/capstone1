@@ -235,7 +235,17 @@ class EmailLocalizationTests(unittest.TestCase):
             for msg in (rem_default, rem_vi, rem_fallback):
                 self.assertEqual(msg["Subject"], "Đến giờ đọc sách cùng bé")
                 self.assertEqual(msg["Content-Language"], "vi")
-                self.assertEqual(msg.get_content(), expected_rem_body)
+                plain_part = msg.get_body(preferencelist=("plain",))
+                html_part = msg.get_body(preferencelist=("html",))
+                self.assertIsNotNone(plain_part)
+                self.assertIsNotNone(html_part)
+                self.assertEqual(plain_part.get_content(), expected_rem_body)
+                html_content = html_part.get_content()
+                self.assertIn("Bé An", html_content)
+                self.assertIn("2026-11-04", html_content)
+                self.assertIn("19:30", html_content)
+                self.assertIn("Asia/Ho_Chi_Minh", html_content)
+                self.assertIn("https://viread.test/app", html_content)
 
             pres_vi = build_presence_message(
                 recipient="parent@example.test",
@@ -251,14 +261,25 @@ class EmailLocalizationTests(unittest.TestCase):
             self.assertEqual(pres_vi["Subject"], LEGACY_PRESENCE_SUBJECT)
             self.assertEqual(pres_vi["Content-Language"], "vi")
             self.assertEqual(
-                pres_vi.get_content(),
+                pres_vi.get_body(preferencelist=("plain",)).get_content(),
                 "Chào ba mẹ,\n\n"
                 "ViRead đã tạm dừng buổi đọc của Bé An vì một lúc không thấy người đọc trong khung hình.\n\n"
                 "Khi sẵn sàng, ba mẹ có thể mở ViRead để tiếp tục: https://viread.test/app\n\n"
                 'Bạn nhận email này vì đã bật "Nhắc qua email khi không thấy người đọc". '
                 "Ba mẹ có thể tắt bất kỳ lúc nào trong phần cài đặt đọc sách.\n",
             )
-            self.assertIn("tạm dừng buổi đọc vì một lúc", pres_no_alias.get_content())
+            self.assertIn(
+                "ViRead đã tạm dừng buổi đọc của Bé An",
+                pres_vi.get_body(preferencelist=("html",)).get_content(),
+            )
+            self.assertIn(
+                "tạm dừng buổi đọc vì một lúc",
+                pres_no_alias.get_body(preferencelist=("plain",)).get_content(),
+            )
+            self.assertIn(
+                "tạm dừng buổi đọc vì một lúc",
+                pres_no_alias.get_body(preferencelist=("html",)).get_content(),
+            )
 
     def test_selected_locales_preserve_timezone_and_set_content_language(self):
         occ_id = UUID("11111111-1111-4111-8111-111111111111")
@@ -267,7 +288,8 @@ class EmailLocalizationTests(unittest.TestCase):
             patch("app.providers.reading_reminder_email_provider.SMTP_FROM_EMAIL", "sender@example.test"),
             patch("app.providers.reading_presence_email_provider.SMTP_FROM_EMAIL", "sender@example.test"),
         ):
-            for code in ("vi", "en", "ja", "ar", "de"):
+            for code in SUPPORTED_LOCALES:
+                expected_dir = "rtl" if code in RTL_LOCALES else "ltr"
                 rem = build_reading_reminder_message(
                     recipient="parent@example.test",
                     child_alias="Minh",
@@ -278,9 +300,14 @@ class EmailLocalizationTests(unittest.TestCase):
                     locale=code,
                 )
                 self.assertEqual(rem["Content-Language"], code)
-                self.assertIn("2026-11-25", rem.get_content())
-                self.assertIn("20:15", rem.get_content())
-                self.assertIn("America/Los_Angeles", rem.get_content())
+                rem_plain = rem.get_body(preferencelist=("plain",)).get_content()
+                rem_html = rem.get_body(preferencelist=("html",)).get_content()
+                for body in (rem_plain, rem_html):
+                    self.assertIn("2026-11-25", body, code)
+                    self.assertIn("20:15", body, code)
+                    self.assertIn("America/Los_Angeles", body, code)
+                self.assertIn(f'<html lang="{code}" dir="{expected_dir}">', rem_html, code)
+                self.assertIn(f'dir="{expected_dir}" bgcolor="#fffaf0"', rem_html, code)
 
                 pres = build_presence_message(
                     recipient="parent@example.test",
@@ -289,9 +316,18 @@ class EmailLocalizationTests(unittest.TestCase):
                     locale=code,
                 )
                 self.assertEqual(pres["Content-Language"], code)
-                self.assertIn("Minh", pres.get_content())
-                for forbidden in ("danger", "missing", "transcript", "photo", "nguy hiểm", "mất tích"):
-                    self.assertNotIn(forbidden, pres.get_content().lower())
+                pres_plain = pres.get_body(preferencelist=("plain",)).get_content()
+                pres_html = pres.get_body(preferencelist=("html",)).get_content()
+                self.assertIn(f'<html lang="{code}" dir="{expected_dir}">', pres_html, code)
+                self.assertIn(f'dir="{expected_dir}" bgcolor="#fffaf0"', pres_html, code)
+                for body in (pres_plain, pres_html):
+                    self.assertIn("Minh", body, code)
+                    lowered = body.lower()
+                    for forbidden in (
+                        "danger", "missing", "transcript", "photo",
+                        "nguy hiểm", "mất tích", "ảnh", "trang ",
+                    ):
+                        self.assertNotIn(forbidden, lowered, f"{code}: {forbidden}")
 
     def test_support_provider_sets_content_language_safely(self):
         names = (

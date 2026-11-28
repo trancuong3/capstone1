@@ -360,12 +360,15 @@ class PresenceHttpEndToEndTests(PresenceDbCase):
         files = self.mails()
         self.assertEqual(len(files), 1)
         message = message_from_bytes(files[0].read_bytes(), policy=policy.default)
-        body = message.get_content()
+        plain_body = message.get_body(preferencelist=("plain",)).get_content()
+        html_body = message.get_body(preferencelist=("html",)).get_content()
         self.assertEqual(message["To"], "parent@example.test")
         self.assertEqual(message["Subject"], "ViRead đã tạm dừng buổi đọc")
-        self.assertIn("một lúc không thấy người đọc trong khung hình", body)
-        for forbidden in ("transcript", "nguy hiểm", "ở đâu", "ảnh", "ghi âm"):
-            self.assertNotIn(forbidden, body.lower())
+        self.assertEqual(message["Content-Language"], "vi")
+        for body in (plain_body, html_body):
+            self.assertIn("một lúc không thấy người đọc trong khung hình", body)
+            for forbidden in ("transcript", "nguy hiểm", "ở đâu", "ảnh", "ghi âm"):
+                self.assertNotIn(forbidden, body.lower())
         stored = (await self.client.post(f"/reading-presence/alerts/{alert_id}/cancel", json={"reason": "RETURNED"})).json()
         self.assertEqual(stored["status"], "SENT")  # too late to cancel: already sent once
 
