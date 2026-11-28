@@ -60,10 +60,10 @@ import {
 } from "@/lib/reading/native-speech-bridge";
 import {
   buildPhonicsLesson,
-  READING_MASTERY_LABELS,
   type PhonicsLessonPlan,
   type SupportedPhonicsLessonPlan,
 } from "@/lib/reading/phonics-lesson";
+import { cn } from "@/lib/utils/cn";
 import {
   getActiveSessionVoiceLock,
   getEffectiveTeacherPersona,
