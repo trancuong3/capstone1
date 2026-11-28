@@ -4757,6 +4757,7 @@ export class TtsPlayback {
                   if (canUseAllowedDeviceFallbackTts(operation, error)) {
                     const servedCachedWords =
                       !isHostedNoLiveServerTts(error) &&
+                      !isLocalOutageNoCloud &&
                       (await tryPlayPhonicsViaCachedWordSynthesize());
                     if (servedCachedWords) {
                       return;
