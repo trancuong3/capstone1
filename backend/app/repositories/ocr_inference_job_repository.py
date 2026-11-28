@@ -73,8 +73,12 @@ class OcrInferenceJobRepository:
         ]
         if submission_id is not None:
             filters.append(OcrInferenceJob.SubmissionId == submission_id)
+            if owner_user_id is not None:
+                filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         elif page_id is not None:
             filters.append(OcrInferenceJob.PageId == page_id)
+            if owner_user_id is not None:
+                filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         elif owner_user_id is not None:
             filters.append(OcrInferenceJob.OwnerUserId == owner_user_id)
         else:

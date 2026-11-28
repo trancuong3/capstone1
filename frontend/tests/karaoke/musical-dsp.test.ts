@@ -223,6 +223,121 @@ describe("Web Audio YIN pitch detector & octave-invariant helpers", () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
+
+  it("rejects high-ZCR unvoiced sibilant/breath noise while keeping high child vocals voiced", () => {
+    const analyzer = new MusicalDspAnalyzer({
+      sampleRate: SR,
+      frameSize: FRAME_SIZE,
+      lyricSpans: [{ startMs: 0, endMs: 1200 }],
+      headphoneMode: true,
+    });
+
+    // High-frequency unvoiced sibilant/breath hiss (~6.5 kHz + broadband noise)
+    const sibilant = new Float32Array(FRAME_SIZE);
+    const noise = synthesizeWhiteNoise(0.18, 999);
+    for (let i = 0; i < FRAME_SIZE; i++) {
+      sibilant[i] =
+        0.16 * Math.sin((2 * Math.PI * 6500 * i) / SR) + noise[i] * 0.5;
+    }
+
+    const noiseFrame = analyzer.processFrame(sibilant, 100);
+    expect(noiseFrame.zeroCrossingRate).toBeGreaterThanOrEqual(0.25);
+    expect(noiseFrame.voiced).toBe(false);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("noise");
+
+    // Genuine high-pitched child vocal (987.77 Hz / B5) stays voiced & singing
+    const highChildVocal = synthesizeVocalFrame(987.77, 0.22);
+    const vocalFrame = analyzer.processFrame(highChildVocal, 200);
+    expect(vocalFrame.voiced).toBe(true);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("singing");
+  });
+
+  it("keeps bright high-pitched child vocals voiced on 16 kHz mobile mics while rejecting 16 kHz white noise", () => {
+    const mobileSr = 16_000;
+    const analyzer = new MusicalDspAnalyzer({
+      sampleRate: mobileSr,
+      frameSize: FRAME_SIZE,
+      lyricSpans: [{ startMs: 0, endMs: 1200 }],
+      headphoneMode: true,
+    });
+
+    // Bright child soprano (B5 = 987.77 Hz with strong 2nd & 3rd harmonics inside vocal band)
+    const brightMobileVocal = new Float32Array(FRAME_SIZE);
+    for (let i = 0; i < FRAME_SIZE; i++) {
+      const t = i / mobileSr;
+      brightMobileVocal[i] =
+        0.22 *
+        (0.42 * Math.sin(2 * Math.PI * 987.77 * t) +
+          0.34 * Math.sin(2 * Math.PI * 1975.54 * t + 0.3) +
+          0.24 * Math.sin(2 * Math.PI * 2963.31 * t + 0.7));
+    }
+    const vocalFrame = analyzer.processFrame(brightMobileVocal, 100);
+    expect(vocalFrame.voiced).toBe(true);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("singing");
+
+    // Broadband white noise on 16 kHz mobile mic MUST still be rejected as noise
+    const mobileNoise = synthesizeWhiteNoise(0.14, 777, FRAME_SIZE);
+    const noiseFrame = analyzer.processFrame(mobileNoise, 200);
+    expect(noiseFrame.voiced).toBe(false);
+    expect(analyzer.getLiveTelemetry()?.signalState).toBe("noise");
+  });
+
+  it("tears down AudioContext automatically on document visibilitychange to hidden", () => {
+    const close = vi.fn(async () => {});
+    const disconnect = vi.fn();
+
+    class MockAudioContext {
+      state = "running";
+      sampleRate = SR;
+      resume = vi.fn(async () => {});
+      close = close;
+      createMediaStreamSource = () => ({ connect: vi.fn(), disconnect });
+      createAnalyser = () => ({
+        fftSize: FRAME_SIZE,
+        smoothingTimeConstant: 0,
+        disconnect,
+        getFloatTimeDomainData: (buf: Float32Array) => buf.fill(0),
+      });
+    }
+    vi.stubGlobal("AudioContext", MockAudioContext);
+
+    const stream = {
+      getAudioTracks: () => [
+        { readyState: "live", enabled: true, muted: false },
+      ],
+    } as unknown as MediaStream;
+
+    const monitor = createBrowserMusicalMonitor({
+      stream,
+      getCurrentMs: () => 100,
+    });
+    expect(monitor).not.toBeNull();
+
+    const originalDescriptor = Object.getOwnPropertyDescriptor(
+      Document.prototype,
+      "visibilityState",
+    );
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    try {
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(close).toHaveBeenCalledOnce();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      if (originalDescriptor) {
+        Object.defineProperty(
+          Document.prototype,
+          "visibilityState",
+          originalDescriptor,
+        );
+      } else {
+        delete (document as unknown as Record<string, unknown>).visibilityState;
+      }
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("Practice modes, beat grid derivation & non-conflated scoring modes", () => {

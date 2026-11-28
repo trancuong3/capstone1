@@ -202,6 +202,24 @@ class StorageHealthTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-key", repr(result))
         self.assertNotIn("secret HTTP failure", repr(result))
 
+    async def test_storage_head_405_falls_back_to_lightweight_get_and_caches_healthy(self):
+        client = AsyncMock()
+        client.__aenter__.return_value = client
+        client.head.return_value = MagicMock(status_code=405)
+        client.get.return_value = MagicMock(status_code=200)
+        with (
+            patch.object(runtime_diagnostics, "SUPABASE_URL", "https://example.supabase.co"),
+            patch.object(runtime_diagnostics, "SUPABASE_STORAGE_BUCKET", "bucket"),
+            patch.object(runtime_diagnostics, "SUPABASE_ADMIN_KEY", "private-key"),
+            patch.object(runtime_diagnostics.httpx, "AsyncClient", return_value=client),
+        ):
+            result = await runtime_diagnostics.probe_storage_health()
+            cached = await runtime_diagnostics.probe_storage_health()
+        self.assertEqual(result["status"], "HEALTHY")
+        self.assertEqual(cached["status"], "HEALTHY")
+        self.assertEqual(client.head.await_count, 1)
+        self.assertEqual(client.get.await_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

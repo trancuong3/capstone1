@@ -839,6 +839,7 @@ describe("Child Autopilot UX V4.1", () => {
     );
     expect(speechPlayMock).toHaveBeenCalledWith(
       "Bé thấy con vật nào đang nằm ngủ trong vườn?",
+      expect.objectContaining({ utteranceKind: "game_coaching" }),
     );
     expect(recorderStartMock).not.toHaveBeenCalled();
 
@@ -878,6 +879,7 @@ describe("Child Autopilot UX V4.1", () => {
     ).toHaveTextContent("con mèo");
     expect(speechPlayMock).toHaveBeenCalledWith(
       expect.stringContaining("Bé tả câu rất rõ ràng và tự nhiên!"),
+      expect.objectContaining({ utteranceKind: "game_coaching" }),
     );
   });
 
@@ -990,6 +992,7 @@ describe("Child Autopilot UX V4.1", () => {
     });
     expect(speechPlayMock).toHaveBeenCalledWith(
       "Bé nhìn kỹ màu sắc và vị trí các đồ vật trong tranh nhé!",
+      expect.objectContaining({ utteranceKind: "game_prompt" }),
     );
 
     // Timer hits 0 -> enters RECALL -> speaks prompt -> 280ms cooldown -> arms SpeechRecognition
@@ -1037,6 +1040,7 @@ describe("Child Autopilot UX V4.1", () => {
     );
     expect(speechPlayMock).toHaveBeenCalledWith(
       expect.stringContaining("Bé quan sát rất tinh mắt!"),
+      expect.objectContaining({ utteranceKind: "game_prompt" }),
     );
 
     await act(async () => {

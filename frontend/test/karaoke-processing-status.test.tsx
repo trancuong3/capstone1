@@ -5,7 +5,7 @@ import { SongMetadataForm } from "@/components/admin/karaoke/song-metadata-form"
 import { processingJob } from "@/test/karaoke-processing-fixtures";
 import { lineId, songDetail } from "@/test/karaoke-fixtures";
 describe("karaoke processing status presentation", () => {
-  it("shows a real stage, safe navigation message, no fake percentage and no worker-dead claim", () => {
+  it("shows a real stage, safe navigation message, progress percentage and no worker-dead claim", () => {
     render(
       <KaraokeProcessingStatus
         job={processingJob({ status: "RUNNING", stage: "ALIGNING_LYRICS" })}
@@ -17,8 +17,14 @@ describe("karaoke processing status presentation", () => {
       screen.getByText("Đang căn lời theo giọng hát."),
     ).toBeInTheDocument();
     expect(screen.getByText(/có thể rời trang/)).toBeInTheDocument();
-    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
-    expect(screen.queryByText(/%|worker đã chết/)).not.toBeInTheDocument();
+    const progressBar = screen.getByRole("progressbar");
+    expect(progressBar).toHaveAttribute("aria-valuemin", "0");
+    expect(progressBar).toHaveAttribute("aria-valuemax", "100");
+    expect(progressBar).toHaveAttribute("aria-valuenow", "75");
+    expect(
+      screen.getByTestId("karaoke-processing-progress-pct"),
+    ).toHaveTextContent("75%");
+    expect(screen.queryByText(/worker đã chết/)).not.toBeInTheDocument();
   });
   it("only warns about queue delay at the capabilities threshold, without automatic actions", () => {
     const job = processingJob();

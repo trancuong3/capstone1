@@ -26,7 +26,11 @@
       "sessions": "مراجعة جلسات القراءة المكتملة",
       "entertainment": "ألعاب اللغة، سرد القصص، والكاريوكي",
       "difficultWords": "التدرب على الكلمات التي يخطئ طفلك في قراءتها غالباً"
-    }
+    },
+    "devicePermissions": "فحص الميكروفون والكاميرا",
+    "aiTasksNotifications": "مهام الذكاء الاصطناعي والإشعارات",
+    "userGuide": "دليل الاستخدام التفصيلي",
+    "helpFeedback": "المساعدة وإرسال الملاحظات"
   },
   "admin": {
     "navLabel": "تنقل الإدارة",
@@ -58,7 +62,19 @@
     "accountSection": "الحساب",
     "helpSection": "المساعدة",
     "sessionSection": "جلسة تسجيل الدخول",
-    "defaultAccountLabel": "حسابي في ViRead"
+    "defaultAccountLabel": "حسابي في ViRead",
+    "activitiesSection": "الأنشطة والأدوات",
+    "accountDeviceSection": "الحساب والأجهزة",
+    "guideSupportSection": "الدليل والدعم",
+    "quickChildTitle": "ملف الطفل النشط",
+    "languageLabel": "لغة الواجهة",
+    "taskStatusRunning": "{count} مهام قيد التشغيل في الخلفية",
+    "taskStatusReview": "{count} مهام بانتظار المراجعة",
+    "taskStatusFailed": "{count} مهام تحتاج انتباهك",
+    "taskStatusNewDone": "{count} مهام اكتملت حديثاً",
+    "taskStatusIdle": "لا توجد مهام جديدة",
+    "unreadBadgeAria": "إشعارات مهام ذكاء اصطناعي غير مقروءة",
+    "runningBadgeAria": "مهام ذكاء اصطناعي تعمل في الخلفية"
   },
   "childSwitcher": {
     "selectedAria": "الطفل المختار: {alias}، اضغط للتبديل",
@@ -73,5 +89,38 @@
     "ariaLabel": "معلومات ViRead",
     "logoDashboardAria": "ViRead - الانتقال إلى لوحة التحكم",
     "logoHomeAria": "ViRead - الانتقال إلى الصفحة الرئيسية"
+  },
+  "guide": {
+    "title": "دليل استخدام ViRead",
+    "subtitle": "5 خطوات بسيطة للقراءة مع طفلك كل يوم.",
+    "closeAction": "حسناً",
+    "openHelpCenter": "فتح مركز المساعدة",
+    "steps": {
+      "1": {
+        "title": "1. إنشاء ملف للطفل",
+        "body": "أضف اسم الطفل والصف الدراسي (1–5) لاقتراح الكتب المناسبة.",
+        "action": "ملفات الأطفال"
+      },
+      "2": {
+        "title": "2. اختر كتاباً أو ارفع كتبك الخاصة",
+        "body": "اختر قصة من المكتبة أو ارفع صوراً أو PDF أو DOCX في كتبي.",
+        "action": "كتبي"
+      },
+      "3": {
+        "title": "3. افحص الميكروفون واقرأ مع طفلك",
+        "body": "جرّب الميكروفون مسبقاً ليستمع ViRead بوضوح ويساعد على التهجئة.",
+        "action": "فحص الأجهزة"
+      },
+      "4": {
+        "title": "4. راجع الكلمات الصعبة وتابع التقدم",
+        "body": "درّب الطفل على الكلمات الصعبة لكل كتاب وتابع التقدم الأسبوعي.",
+        "action": "كلمات للتدريب"
+      },
+      "5": {
+        "title": "5. جدول القراءة وتابع مهام الذكاء الاصطناعي",
+        "body": "اضبط الأهداف والتذكيرات في إدارة القراءة وتابع مهام المعالجة.",
+        "action": "إدارة القراءة"
+      }
+    }
   }
 }

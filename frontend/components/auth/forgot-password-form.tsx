@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
@@ -24,7 +24,7 @@ export function ForgotPasswordForm({
   hasInitialError,
   onSubmitted,
 }: ForgotPasswordFormProps) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const authService = useAuthService();
   const authRuntime = useAuthRuntime();
   const isHydrated = useHydrated();
@@ -46,10 +46,30 @@ export function ForgotPasswordForm({
     formState: { errors, isSubmitting },
     handleSubmit,
     register,
+    trigger,
   } = useForm<PasswordRecoveryRequest>({
     defaultValues: { email: "" },
     resolver: zodResolver(forgotPasswordSchema),
   });
+  const prevLocaleRef = useRef(locale);
+  const errorsRef = useRef(errors);
+
+  useEffect(() => {
+    errorsRef.current = errors;
+  }, [errors]);
+
+  useEffect(() => {
+    if (prevLocaleRef.current === locale) {
+      return;
+    }
+    prevLocaleRef.current = locale;
+    const activeFields = Object.keys(errorsRef.current) as Array<
+      keyof PasswordRecoveryRequest
+    >;
+    if (activeFields.length > 0) {
+      void trigger(activeFields);
+    }
+  }, [locale, trigger]);
 
   const onSubmit = handleSubmit(async (values) => {
     setHasError(false);

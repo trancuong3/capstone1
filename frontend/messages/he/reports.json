@@ -388,7 +388,20 @@
         "repeated": "חזרה על מילים",
         "hesitation": "מהסס"
       }
-    }
+    },
+    "summarySessions": "מפגשי קריאה",
+    "summaryDuration": "משך כולל",
+    "summaryCompleted": "הושלמו",
+    "summaryDurationZero": "0 דקות",
+    "filterAria": "סינון מפגשים לפי סטטוס",
+    "filterAll": "הכול",
+    "filterCompleted": "הושלמו",
+    "filterIncomplete": "בתהליך",
+    "searchPlaceholder": "סינון לפי שם ספר בעמוד זה…",
+    "searchAria": "חיפוש מפגשים לפי שם ספר",
+    "filterEmptyTitle": "אין מפגשים תואמים",
+    "filterEmptyDesc": "נסו לשנות סינון או לנקות חיפוש.",
+    "clearFilterAction": "הצגת כל המפגשים"
   },
   "readingManagement": {
     "title": "ניהול קריאה ותזכורות",

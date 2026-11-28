@@ -12,12 +12,15 @@ import re
 import unicodedata
 from collections import defaultdict
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import numpy as np
 from fastapi import HTTPException
 from PIL import Image, UnidentifiedImageError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 import yaml
 
@@ -297,28 +300,120 @@ def _verified_snapshot_db_rows(dataset_id: UUID, source_rows: list[dict[str, Any
     } for item in source_rows]
 
 
-def _edit_distance(left: list[str], right: list[str]) -> int:
+@lru_cache(maxsize=4096)
+def _normalize_metric_text(value: str) -> str:
+    return normalize_typographic_for_vietocr(unicodedata.normalize("NFC", value))
+
+
+@lru_cache(maxsize=4096)
+def _cached_edit_distance(left: str | tuple[str, ...], right: str | tuple[str, ...]) -> int:
+    if left == right:
+        return 0
+    len_l = len(left)
+    len_r = len(right)
+    min_len = len_l if len_l < len_r else len_r
+    start = 0
+    while start < min_len and left[start] == right[start]:
+        start += 1
+    end_l = len_l
+    end_r = len_r
+    while end_l > start and end_r > start and left[end_l - 1] == right[end_r - 1]:
+        end_l -= 1
+        end_r -= 1
+    left = left[start:end_l]
+    right = right[start:end_r]
+    if not left:
+        return len(right)
+    if not right:
+        return len(left)
     if len(left) < len(right):
         left, right = right, left
-    previous = list(range(len(right) + 1))
-    for i, item in enumerate(left, 1):
-        current = [i]
-        for j, other in enumerate(right, 1):
-            current.append(min(current[-1] + 1, previous[j] + 1, previous[j - 1] + (item != other)))
-        previous = current
-    return previous[-1]
+    # Myers' bit-parallel exact Levenshtein distance (O(len(left)) integer ops).
+    m = len(right)
+    peq: dict[str, int] = {}
+    for idx, token in enumerate(right):
+        peq[token] = peq.get(token, 0) | (1 << idx)
+    mask = (1 << m) - 1
+    pv = mask
+    mv = 0
+    score = m
+    high_bit = 1 << (m - 1)
+    for token in left:
+        eq = peq.get(token, 0)
+        xv = eq | mv
+        xh = ((((eq & pv) + pv) ^ pv) | eq) & mask
+        ph = (mv | (~(xh | pv) & mask)) & mask
+        mh = pv & xh
+        if ph & high_bit:
+            score += 1
+        elif mh & high_bit:
+            score -= 1
+        ph = ((ph << 1) | 1) & mask
+        mh = (mh << 1) & mask
+        pv = (mh | (~(xv | ph) & mask)) & mask
+        mv = ph & xv
+    return score
+
+
+def _edit_distance(left: list[str] | str, right: list[str] | str) -> int:
+    key_l = left if isinstance(left, str) else tuple(left)
+    key_r = right if isinstance(right, str) else tuple(right)
+    return _cached_edit_distance(key_l, key_r)
 
 
 def _metric_counts(lines: list[dict[str, str]], field: str, metric: str) -> tuple[int, int]:
     errors = units = 0
+    is_cer = metric == "cer"
     for line in lines:
-        ref_norm = normalize_typographic_for_vietocr(unicodedata.normalize("NFC", line["reference"]))
-        hyp_norm = normalize_typographic_for_vietocr(unicodedata.normalize("NFC", line[field]))
-        reference = list(ref_norm) if metric == "cer" else ref_norm.split()
-        hypothesis = list(hyp_norm) if metric == "cer" else hyp_norm.split()
-        errors += _edit_distance(reference, hypothesis)
-        units += len(reference)
+        ref_norm = _normalize_metric_text(line["reference"])
+        hyp_norm = _normalize_metric_text(line[field])
+        if is_cer:
+            errors += _cached_edit_distance(ref_norm, hyp_norm)
+            units += len(ref_norm)
+        else:
+            ref_words = tuple(ref_norm.split())
+            errors += _cached_edit_distance(ref_words, tuple(hyp_norm.split()))
+            units += len(ref_words)
     return errors, units
+
+
+def _group_paired_counts(lines: list[dict[str, str]], baseline: str, metric: str) -> tuple[int, int, int]:
+    base_errors = cand_errors = units = 0
+    is_cer = metric == "cer"
+    for line in lines:
+        ref_norm = _normalize_metric_text(line["reference"])
+        base_norm = _normalize_metric_text(line[baseline])
+        cand_norm = _normalize_metric_text(line["candidate"])
+        if is_cer:
+            base_errors += _cached_edit_distance(ref_norm, base_norm)
+            cand_errors += _cached_edit_distance(ref_norm, cand_norm)
+            units += len(ref_norm)
+        else:
+            ref_words = tuple(ref_norm.split())
+            base_errors += _cached_edit_distance(ref_words, tuple(base_norm.split()))
+            cand_errors += _cached_edit_distance(ref_words, tuple(cand_norm.split()))
+            units += len(ref_words)
+    return base_errors, cand_errors, units
+
+
+@lru_cache(maxsize=16)
+def _bootstrap_cluster_counts(n_groups: int, replicates: int, seed: int) -> np.ndarray:
+    """Precompute exact cluster draw counts matching Random(seed).randrange(n_groups)."""
+    rng = random.Random(seed)
+    getrandbits = rng.getrandbits
+    k = n_groups.bit_length()
+    draws: list[int] = []
+    append = draws.append
+    for _ in range(replicates * n_groups):
+        r = getrandbits(k)
+        while r >= n_groups:
+            r = getrandbits(k)
+        append(r)
+    idx = np.asarray(draws, dtype=np.int32).reshape(replicates, n_groups)
+    counts = np.zeros((replicates, n_groups), dtype=np.int64)
+    np.add.at(counts, (np.arange(replicates)[:, None], idx), 1)
+    counts.setflags(write=False)
+    return counts
 
 
 def _paired_metric(lines: list[dict[str, str]], metric: str, *, baseline: str = "original",
@@ -326,31 +421,44 @@ def _paired_metric(lines: list[dict[str, str]], metric: str, *, baseline: str = 
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for line in lines:
         groups[line["group_id"]].append(line)
-    original_errors, units = _metric_counts(lines, baseline, metric)
-    candidate_errors, _ = _metric_counts(lines, "candidate", metric)
+    names = sorted(groups)
+    group_stats: list[tuple[int, int, int]] = []
+    original_errors = 0
+    candidate_errors = 0
+    units = 0
+    for name in names:
+        base_err, cand_err, group_units = _group_paired_counts(groups[name], baseline, metric)
+        group_stats.append((base_err, cand_err, group_units))
+        original_errors += base_err
+        candidate_errors += cand_err
+        units += group_units
     if units <= 0:
         raise ValueError("benchmark reference units are empty")
-    names = sorted(groups)
-    rng = random.Random(seed)
-    deltas = []
-    for _ in range(replicates):
-        selected = [name for _ in names for name in (names[rng.randrange(len(names))],)]
-        sampled = [line for name in selected for line in groups[name]]
-        base_n, base_units = _metric_counts(sampled, baseline, metric)
-        candidate_n, _ = _metric_counts(sampled, "candidate", metric)
-        deltas.append(candidate_n / base_units - base_n / base_units)
-    deltas.sort()
+    n_groups = len(group_stats)
+    counts = _bootstrap_cluster_counts(n_groups, replicates, seed)
+    totals = counts @ np.asarray(group_stats, dtype=np.int64)
+    base_units = totals[:, 2]
+    valid = base_units > 0
+    if np.any(valid):
+        valid_units = base_units[valid]
+        deltas_arr = totals[valid, 1] / valid_units - totals[valid, 0] / valid_units
+        deltas_arr.sort()
+        n_deltas = int(deltas_arr.shape[0])
+        ci_low = float(deltas_arr[math.floor(0.025 * (n_deltas - 1))])
+        ci_high = float(deltas_arr[math.ceil(0.975 * (n_deltas - 1))])
+    else:
+        fallback_delta = candidate_errors / units - original_errors / units
+        ci_low = fallback_delta
+        ci_high = fallback_delta
+    delta = candidate_errors / units - original_errors / units
     return {"metric": metric, f"{baseline}_error_count": original_errors,
             "candidate_error_count": candidate_errors, "reference_unit_count": units,
             f"{baseline}_rate": original_errors / units, "candidate_rate": candidate_errors / units,
-            f"delta_candidate_minus_{baseline}": candidate_errors / units - original_errors / units,
-            f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}": [
-                deltas[math.floor(0.025 * (len(deltas) - 1))],
-                deltas[math.ceil(0.975 * (len(deltas) - 1))]],
-            "bootstrap_replicates": replicates, "cluster_count": len(names), "seed": seed,
-            **({"delta_candidate_minus_original": candidate_errors / units - original_errors / units,
-               "paired_cluster_bootstrap_95ci": [deltas[math.floor(0.025 * (len(deltas) - 1))],
-                                                  deltas[math.ceil(0.975 * (len(deltas) - 1))]]}
+            f"delta_candidate_minus_{baseline}": delta,
+            f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}": [ci_low, ci_high],
+            "bootstrap_replicates": replicates, "cluster_count": n_groups, "seed": seed,
+            **({"delta_candidate_minus_original": delta,
+               "paired_cluster_bootstrap_95ci": [ci_low, ci_high]}
                if baseline == "original" else {})}
 
 
@@ -362,48 +470,72 @@ def _gate(metrics: dict[str, Any], *, manifest_sha: str, evaluation_type: str = 
         return {"status": "INSUFFICIENT_EVIDENCE", "promotion_allowed": False,
                 "reason": "pilot_is_advisory_and_never_promotable",
                 "sample_count": sample_count, "group_count": group_count,
-                "locked_test_manifest_sha256": manifest_sha}
+                "locked_test_manifest_sha256": manifest_sha,
+                "failing_checks": []}
     if sample_count < MIN_LOCKED_PAIRS or group_count < MIN_LOCKED_GROUPS:
         return {"status": "INSUFFICIENT_EVIDENCE", "promotion_allowed": False,
-                "reason": "minimum_locked_test_size_not_met"}
+                "reason": "minimum_locked_test_size_not_met",
+                "failing_checks": []}
     baselines = ["original"]
     for baseline in ("parent", "active"):
         if f"{baseline}_cer" in metrics or f"{baseline}_wer" in metrics:
             baselines.append(baseline)
     if require_model_baselines and not {"parent", "active"}.issubset(baselines):
         return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
-                "reason": "parent_and_active_baselines_required"}
+                "reason": "parent_and_active_baselines_required",
+                "failing_checks": []}
     if any((f"{baseline}_cer" in metrics) != (f"{baseline}_wer" in metrics)
            for baseline in ("parent", "active")):
         return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
-                "reason": "incomplete_model_baseline_metrics"}
+                "reason": "incomplete_model_baseline_metrics",
+                "failing_checks": []}
     comparisons = [(baseline, metrics["cer"] if baseline == "original" else metrics[f"{baseline}_cer"],
                     metrics["wer"] if baseline == "original" else metrics[f"{baseline}_wer"])
                    for baseline in baselines]
+    failing_checks: list[dict[str, Any]] = []
+    non_regression_exceeded = False
+    favors_original = False
     for baseline, cer, wer in comparisons:
-        for result in (cer, wer):
+        for metric_name, result in (("cer", cer), ("wer", wer)):
             rate_key = f"{baseline}_rate"
             if not math.isfinite(float(result["candidate_rate"])) or not math.isfinite(float(result[rate_key])):
-                return {"status": "EVALUATION_FAILED", "promotion_allowed": False, "reason": "non_finite_metric"}
+                return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
+                        "reason": "non_finite_metric", "failing_checks": []}
             interval = result.get(f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}")
+            delta_key = f"delta_candidate_minus_{baseline}"
             if (not isinstance(interval, list) or len(interval) != 2
                     or any(not math.isfinite(float(value)) or not -1 <= float(value) <= 1 for value in interval)
-                    or not math.isfinite(float(result[f"delta_candidate_minus_{baseline}"]))):
+                    or not math.isfinite(float(result[delta_key]))):
                 return {"status": "EVALUATION_FAILED", "promotion_allowed": False,
-                        "reason": "invalid_paired_confidence_interval"}
-            if float(result[f"delta_candidate_minus_{baseline}"]) > 0.005:
-                return {"status": "ORIGINAL_WIN", "promotion_allowed": False, "reason": "non_regression_limit_exceeded"}
-    if all(float(result[f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"][1]) < 0
-           for baseline, cer, wer in comparisons for result in (cer, wer)):
+                        "reason": "invalid_paired_confidence_interval", "failing_checks": []}
+            delta_val = float(result[delta_key])
+            ci_low, ci_high = float(interval[0]), float(interval[1])
+            if delta_val > 0.005:
+                non_regression_exceeded = True
+            if ci_low > 0:
+                favors_original = True
+            if delta_val > 0.005 or ci_high >= 0:
+                failing_checks.append({
+                    "baseline": baseline,
+                    "metric": metric_name,
+                    "delta": delta_val,
+                    "ci95": [ci_low, ci_high],
+                })
+    if non_regression_exceeded:
+        return {"status": "ORIGINAL_WIN", "promotion_allowed": False,
+                "reason": "non_regression_limit_exceeded",
+                "failing_checks": failing_checks}
+    if not failing_checks:
         return {"status": "V2_WIN", "promotion_allowed": True, "requires_human_approval": True,
                 "reason": "paired_cluster_confidence_intervals_favor_candidate_against_all_baselines",
                 "locked_test_manifest_sha256": manifest_sha}
-    if any(float(result[f"paired_cluster_bootstrap_95ci_candidate_minus_{baseline}"][0]) > 0
-           for baseline, cer, wer in comparisons for result in (cer, wer)):
+    if favors_original:
         return {"status": "ORIGINAL_WIN", "promotion_allowed": False,
-                "reason": "paired_cluster_confidence_interval_favors_original"}
+                "reason": "paired_cluster_confidence_interval_favors_original",
+                "failing_checks": failing_checks}
     return {"status": "NO_SIGNIFICANT_DIFFERENCE", "promotion_allowed": False,
-            "reason": "paired_cluster_confidence_intervals_include_zero"}
+            "reason": "paired_cluster_confidence_intervals_include_zero",
+            "failing_checks": failing_checks}
 
 
 class VireadOcrTrainingService:
@@ -465,9 +597,13 @@ class VireadOcrTrainingService:
         self,
         reference: str,
         aggregate: Any | None = None,
+        *,
+        router: TrainingArtifactStoreRouter | None = None,
     ) -> tuple[str, int]:
         if is_gdrive_ref(reference):
-            router = await self._artifact_router()
+            if router is None:
+                router = await self._artifact_router()
+                await self._release_read_txn()
 
             def _stream_hash() -> tuple[str, int]:
                 chunk_digest = hashlib.sha256()
@@ -483,6 +619,14 @@ class VireadOcrTrainingService:
                 return await asyncio.to_thread(_stream_hash)
             except TrainingStorageError as exc:
                 raise _storage_http_error(exc) from exc
+            except (ValueError, KeyError) as exc:
+                raise _storage_http_error(
+                    TrainingStorageError(
+                        f"Unexpected Drive bridge error while streaming checkpoint shard: {exc}",
+                        code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                        http_status=502,
+                    )
+                ) from exc
         return await asyncio.to_thread(hash_storage_object, reference, aggregate)
 
     async def _release_read_txn(self) -> None:
@@ -560,6 +704,13 @@ class VireadOcrTrainingService:
             LEFT JOIN public.viread_ocr_training_runs AS training_run ON training_run.id=job.run_id
             ORDER BY job.created_at DESC LIMIT 30
         """)
+        from app.services.ai_task_progress import compute_training_job_progress
+
+        for job_row in jobs:
+            job_row["progress_pct"] = compute_training_job_progress(
+                status=job_row.get("status"),
+                progress=job_row.get("progress"),
+            )
         benchmarks = await self.repo.all("""
             SELECT id AS benchmark_id, run_id, gate_status, sample_count, group_count,
                    candidate_checkpoint_sha256, locked_test_manifest_sha256, evaluation_type, created_at
@@ -2468,6 +2619,10 @@ class VireadOcrTrainingService:
         chunks = await self.repo.all("SELECT chunk_index, chunk_sha256, storage_path, byte_count FROM public.viread_ocr_checkpoint_chunks WHERE run_id=:run_id ORDER BY chunk_index", {"run_id": run_id})
         if not chunks or [int(chunk["chunk_index"]) for chunk in chunks] != list(range(len(chunks))):
             raise HTTPException(status_code=422, detail="Checkpoint shards are incomplete or out of order")
+        chunks_on_drive = any(is_gdrive_ref(chunk["storage_path"]) for chunk in chunks)
+        drive_router: TrainingArtifactStoreRouter | None = None
+        if chunks_on_drive:
+            drive_router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
         # Release the read transaction before touching Storage. On Render Free,
         # the checkpoint can exceed 150 MiB and remote I/O must not hold a DB
         # connection or the training-job row lock while heartbeats update it.
@@ -2475,13 +2630,16 @@ class VireadOcrTrainingService:
         digest = hashlib.sha256()
         total = 0
         for chunk in chunks:
-            chunk_digest, chunk_bytes = await self._hash_artifact_stream(chunk["storage_path"], digest)
+            chunk_digest, chunk_bytes = await self._hash_artifact_stream(
+                chunk["storage_path"],
+                digest,
+                router=drive_router,
+            )
             if chunk_bytes != int(chunk["byte_count"]) or chunk_digest != chunk["chunk_sha256"]:
                 raise HTTPException(status_code=422, detail="Stored checkpoint shard failed integrity verification")
             total += chunk_bytes
         if digest.hexdigest() != payload.checkpoint_sha256 or total != payload.checkpoint_bytes:
             raise HTTPException(status_code=422, detail="Reassembled candidate checkpoint does not match the registered hash or size")
-        chunks_on_drive = any(is_gdrive_ref(chunk["storage_path"]) for chunk in chunks)
         manifest_provider = (
             StorageProvider.GOOGLE_DRIVE.value if chunks_on_drive else StorageProvider.SUPABASE_LEGACY.value
         )
@@ -2498,10 +2656,10 @@ class VireadOcrTrainingService:
         manifest_bytes = _canonical(manifest)
         manifest_drive_id: str | None = None
         if chunks_on_drive:
-            router = await self._artifact_router(write_provider=StorageProvider.GOOGLE_DRIVE)
+            assert drive_router is not None
             try:
                 stored_manifest = await asyncio.to_thread(
-                    router.put,
+                    drive_router.put,
                     f"checkpoints/{run_id}/checkpoint.manifest.json",
                     manifest_bytes,
                     content_type="application/json",
@@ -2510,6 +2668,14 @@ class VireadOcrTrainingService:
                 )
             except TrainingStorageError as exc:
                 raise _storage_http_error(exc) from exc
+            except (ValueError, KeyError) as exc:
+                raise _storage_http_error(
+                    TrainingStorageError(
+                        f"Unexpected Drive bridge error while storing checkpoint manifest: {exc}",
+                        code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                        http_status=502,
+                    )
+                ) from exc
             manifest_path = stored_manifest.reference
             manifest_drive_id = stored_manifest.drive_file_id
         else:
@@ -2902,9 +3068,13 @@ class VireadOcrTrainingService:
                     logger.warning("Could not delete orphan shard %s: %s", obj_path, del_err)
             raise
 
-        from app.services.ocr_inference_job_service import is_remote_ocr_mode
+        from app.services.ocr_inference_job_service import (
+            clear_active_model_manifest_cache,
+            is_remote_ocr_mode,
+        )
 
         evict_cached_viread_checkpoint = None
+        clear_active_model_manifest_cache()
         if not is_remote_ocr_mode():
             from app.services.ocr_engine import (
                 evict_cached_viread_checkpoint as _evict_cached,
@@ -2917,6 +3087,8 @@ class VireadOcrTrainingService:
                 "storage_path": manifest_path,
                 "profile": "FLOW1_EXTERNAL_TRDG",
             })
+        else:
+            self._trigger_remote_ocr_wakeup_best_effort(reason="flow1_model_activated")
         invalidate_overview_manifest_cache()
 
         cleanup_status = {
@@ -2963,16 +3135,149 @@ class VireadOcrTrainingService:
         }
 
 
-    async def benchmark(self, actor_id: UUID, payload: BenchmarkCreate) -> dict[str, Any]:
+    @staticmethod
+    def _trigger_remote_ocr_wakeup_best_effort(*, reason: str) -> None:
+        """Fire a non-blocking remote OCR worker wakeup so a newly active model is loaded immediately."""
+        try:
+            from app.services.ocr_inference_job_service import (
+                trigger_remote_ocr_model_reload_wakeup,
+            )
+
+            trigger_remote_ocr_model_reload_wakeup(
+                reason=reason,
+                bypass_coalesce=True,
+            )
+        except Exception as exc:
+            logger.warning("Best-effort remote OCR wakeup skipped (%s): %s", reason, type(exc).__name__)
+
+    @staticmethod
+    def _build_idempotent_benchmark_response(
+        prior_benchmark: dict[str, Any],
+        *,
+        run_id: UUID,
+        report_hash: str,
+        evaluation_type: str,
+    ) -> dict[str, Any]:
+        if str(prior_benchmark["run_id"]) != str(run_id) or prior_benchmark["report_sha256"] != report_hash:
+            raise HTTPException(status_code=409, detail="This sealed evaluation cohort has already been consumed")
+        stored_metrics = prior_benchmark.get("metrics") or {}
+        return {
+            "benchmark_id": prior_benchmark["id"],
+            "run_id": run_id,
+            "gate_status": prior_benchmark["gate_status"],
+            "promotion_allowed": (
+                prior_benchmark["gate_status"] == "V2_WIN" and evaluation_type == "PRODUCTION"
+            ),
+            "sample_count": prior_benchmark["sample_count"],
+            "group_count": prior_benchmark["group_count"],
+            "report_sha256": report_hash,
+            "report_storage_path": stored_metrics.get("report_storage_path"),
+            "storage_provider": stored_metrics.get("storage_provider", StorageProvider.SUPABASE_LEGACY.value),
+            "evaluation_type": evaluation_type,
+            "metrics": {key: value for key, value in stored_metrics.items()
+                        if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
+            "quality_gate": stored_metrics.get("quality_gate"),
+            "idempotent": True,
+        }
+
+    async def _lock_colab_job_for_benchmark(
+        self,
+        actor_id: UUID,
+        job_id: UUID,
+        worker_id: str,
+        payload: BenchmarkCreate,
+    ) -> None:
+        job = await self.repo.one("""
+            SELECT id, target, status, worker_id, run_id, created_by,
+                   locked_test_version_id, locked_test_manifest_sha256,
+                   (lease_expires_at IS NOT NULL AND lease_expires_at > now()) AS lease_active
+            FROM public.viread_ocr_training_jobs WHERE id=:id FOR UPDATE
+        """, {"id": job_id})
+        if (
+            not job
+            or job["target"] != "COLAB"
+            or job["status"] != "COLAB_RUNNING"
+            or job["worker_id"] != worker_id
+            or not job.get("lease_active", True)
+            or str(job["created_by"]) != str(actor_id)
+        ):
+            await self.repo.rollback()
+            raise HTTPException(status_code=409, detail="Training job lease is no longer owned by this worker")
+        if (
+            str(payload.run_id) != str(job["run_id"])
+            or str(payload.locked_test_version_id) != str(job["locked_test_version_id"])
+            or payload.locked_test_manifest_sha256 != job["locked_test_manifest_sha256"]
+        ):
+            await self.repo.rollback()
+            raise HTTPException(status_code=422, detail="Benchmark dataset or run differs from the immutable job selection")
+
+    async def _update_colab_job_benchmark_state(
+        self,
+        job_id: UUID,
+        worker_id: str,
+        *,
+        gate_status: str,
+        evaluation_type: str,
+    ) -> None:
+        await self.repo.execute("""
+            UPDATE public.viread_ocr_training_jobs
+            SET progress=CAST(:progress AS jsonb),
+                metadata=metadata || CAST(:metadata AS jsonb),
+                updated_at=now()
+            WHERE id=:id AND target='COLAB' AND status='COLAB_RUNNING' AND worker_id=:worker_id
+        """, {
+            "id": job_id,
+            "worker_id": worker_id,
+            "progress": json.dumps({"stage": "benchmarked", "gate_status": gate_status}),
+            "metadata": json.dumps({
+                "evaluation_status": "COMPLETED",
+                "evaluation_gate_status": gate_status,
+                "evaluation_type": evaluation_type,
+            }),
+        })
+
+    async def _fetch_prior_benchmark(
+        self,
+        *,
+        cohort_id: Any | None,
+        locked_test_version_id: UUID,
+    ) -> dict[str, Any] | None:
+        if cohort_id is not None:
+            return await self.repo.one("""
+                SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
+                FROM public.viread_ocr_benchmarks WHERE evaluation_cohort_id=:cohort_id LIMIT 1
+            """, {"cohort_id": cohort_id})
+        return await self.repo.one("""
+            SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
+            FROM public.viread_ocr_benchmarks WHERE locked_test_version_id=:dataset_id LIMIT 1
+        """, {"dataset_id": locked_test_version_id})
+
+    async def benchmark(
+        self,
+        actor_id: UUID,
+        payload: BenchmarkCreate,
+        *,
+        job_id: UUID | None = None,
+        worker_id: str | None = None,
+    ) -> dict[str, Any]:
+        if (job_id is None) != (worker_id is None):
+            raise ValueError("job_id and worker_id must be provided together")
+
+        # Phase 1: short read-only validation transaction (NO FOR UPDATE locks).
         await self._admin(actor_id)
         run = await self.repo.one("""
             SELECT id, status, profile, parent_checkpoint_sha256, checkpoint_sha256
             FROM public.viread_ocr_training_runs WHERE id=:id
         """, {"id": payload.run_id})
-        locked = await self.repo.one("SELECT id, source_flow, version_sha256, is_locked_test, sample_count FROM public.viread_ocr_dataset_versions WHERE id=:id FOR UPDATE", {"id": payload.locked_test_version_id})
+        locked = await self.repo.one(
+            "SELECT id, source_flow, version_sha256, is_locked_test, sample_count FROM public.viread_ocr_dataset_versions WHERE id=:id",
+            {"id": payload.locked_test_version_id},
+        )
         if not run or run["status"] not in {"CANDIDATE", "BENCHMARKED"} or not run["checkpoint_sha256"]:
+            await self._release_read_txn()
             raise HTTPException(status_code=409, detail="Benchmark requires a completed candidate run")
         if not locked or locked["source_flow"] != "LOCKED_TEST" or not locked["is_locked_test"] or locked["version_sha256"] != payload.locked_test_manifest_sha256:
+            await self._release_read_txn()
             raise HTTPException(status_code=422, detail="Locked Test version/hash is invalid")
         integrity = await self.repo.one("""
             SELECT count(sample.id)::integer AS sample_count,
@@ -2991,37 +3296,30 @@ class VireadOcrTrainingService:
                 or int(integrity["unique_annotation_count"] or 0) != int(locked["sample_count"])
                 or int(integrity["unique_image_count"] or 0) != int(locked["sample_count"])
                 or int(integrity["verified_count"] or 0) != int(locked["sample_count"])):
+            await self._release_read_txn()
             raise HTTPException(status_code=409, detail="Locked Test snapshot has missing, duplicate, or unverified human-annotation rows")
         cohort = await self.repo.one("""
             SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
-            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id FOR UPDATE
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id
         """, {"dataset_id": payload.locked_test_version_id})
         if cohort and cohort["manifest_sha256"] != locked["version_sha256"]:
+            await self._release_read_txn()
             raise HTTPException(status_code=409, detail="Evaluation cohort manifest hash changed")
         evaluation_type = cohort["evaluation_type"] if cohort else "PRODUCTION"
         minimum_samples, minimum_groups = ((MIN_PILOT_PAIRS, MIN_PILOT_GROUPS)
                                            if evaluation_type == "PILOT"
                                            else (MIN_LOCKED_PAIRS, MIN_LOCKED_GROUPS))
         if int(integrity["sample_count"]) < minimum_samples or int(integrity["group_count"] or 0) < minimum_groups:
+            await self._release_read_txn()
             raise HTTPException(status_code=409, detail="Locked Test cohort does not meet its independent sample and document-group minimums")
         if cohort and (int(cohort["sample_count"]) != int(integrity["sample_count"])
                        or int(cohort["group_count"]) != int(integrity["group_count"])):
+            await self._release_read_txn()
             raise HTTPException(status_code=409, detail="Evaluation cohort counts do not match its sealed dataset")
-        prior_benchmark = None
-        if cohort:
-            prior_cohort_benchmark = await self.repo.one("""
-                SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
-                FROM public.viread_ocr_benchmarks WHERE evaluation_cohort_id=:cohort_id LIMIT 1
-            """, {"cohort_id": cohort["id"]})
-            if prior_cohort_benchmark:
-                prior_benchmark = prior_cohort_benchmark
-        else:
-            prior_locked_benchmark = await self.repo.one("""
-                SELECT id, run_id, report_sha256, gate_status, sample_count, group_count, metrics
-                FROM public.viread_ocr_benchmarks WHERE locked_test_version_id=:dataset_id LIMIT 1
-            """, {"dataset_id": payload.locked_test_version_id})
-            if prior_locked_benchmark:
-                prior_benchmark = prior_locked_benchmark
+        prior_benchmark = await self._fetch_prior_benchmark(
+            cohort_id=cohort["id"] if cohort else None,
+            locked_test_version_id=payload.locked_test_version_id,
+        )
         expected = await self.repo.all("""
             SELECT sample.source_annotation_id AS sample_id,
                    COALESCE(page.bookid::text, sample.source_group_id) AS group_id,
@@ -3034,24 +3332,29 @@ class VireadOcrTrainingService:
         by_id = {item["sample_id"]: item for item in expected}
         outputs = [item.model_dump() for item in payload.outputs]
         if len(outputs) != len(by_id) or {item["sample_id"] for item in outputs} != set(by_id):
+            await self._release_read_txn()
             raise HTTPException(status_code=422, detail="Benchmark outputs must cover every Locked Test sample exactly once")
         active = await self.repo.one("SELECT checkpoint_sha256 FROM public.viread_ocr_active_model WHERE singleton=TRUE")
         active_sha = active["checkpoint_sha256"] if active else None
         require_baselines = evaluation_type == "PRODUCTION"
         if require_baselines:
             if active_sha != run["parent_checkpoint_sha256"]:
+                await self._release_read_txn()
                 raise HTTPException(status_code=409, detail="Candidate parent is no longer active; preserve the candidate and evaluate a new lineage")
             if (payload.parent_checkpoint_sha256 != run["parent_checkpoint_sha256"]
                     or payload.active_checkpoint_sha256 != active_sha
                     or any(item.get("parent") is None or item.get("active") is None for item in outputs)):
+                await self._release_read_txn()
                 raise HTTPException(status_code=422, detail="Production benchmark must include parent and active model predictions with matching lineage hashes")
         if cohort and evaluation_type == "PILOT" and (payload.parent_checkpoint_sha256 or payload.active_checkpoint_sha256):
             if payload.parent_checkpoint_sha256 != run["parent_checkpoint_sha256"]:
+                await self._release_read_txn()
                 raise HTTPException(status_code=422, detail="Pilot parent checkpoint hash does not match the candidate lineage")
         paired = []
         for output in outputs:
             reference = by_id[output["sample_id"]]
             if output["group_id"] != reference["group_id"]:
+                await self._release_read_txn()
                 raise HTTPException(status_code=422, detail="Benchmark group ID does not match the sealed dataset")
             row = {"sample_id": output["sample_id"], "group_id": output["group_id"],
                    "reference": unicodedata.normalize("NFC", reference["reference"]),
@@ -3064,27 +3367,39 @@ class VireadOcrTrainingService:
             paired.append(row)
         report_hash = hashlib.sha256(_canonical(paired)).hexdigest()
         if prior_benchmark:
-            if prior_benchmark["run_id"] != payload.run_id or prior_benchmark["report_sha256"] != report_hash:
-                raise HTTPException(status_code=409, detail="This sealed evaluation cohort has already been consumed")
-            stored_metrics = prior_benchmark.get("metrics") or {}
-            return {
-                "benchmark_id": prior_benchmark["id"],
-                "run_id": payload.run_id,
-                "gate_status": prior_benchmark["gate_status"],
-                "promotion_allowed": (
-                    prior_benchmark["gate_status"] == "V2_WIN" and evaluation_type == "PRODUCTION"
-                ),
-                "sample_count": prior_benchmark["sample_count"],
-                "group_count": prior_benchmark["group_count"],
-                "report_sha256": report_hash,
-                "report_storage_path": stored_metrics.get("report_storage_path"),
-                "storage_provider": stored_metrics.get("storage_provider", StorageProvider.SUPABASE_LEGACY.value),
-                "evaluation_type": evaluation_type,
-                "metrics": {key: value for key, value in stored_metrics.items()
-                            if key in {"cer", "wer"} or key.endswith(("_cer", "_wer"))},
-                "quality_gate": stored_metrics.get("quality_gate"),
-                "idempotent": True,
-            }
+            try:
+                replay = self._build_idempotent_benchmark_response(
+                    prior_benchmark,
+                    run_id=payload.run_id,
+                    report_hash=report_hash,
+                    evaluation_type=evaluation_type,
+                )
+            except HTTPException:
+                await self._release_read_txn()
+                raise
+            if job_id is not None and worker_id is not None:
+                await self._lock_colab_job_for_benchmark(actor_id, job_id, worker_id, payload)
+                await self._update_colab_job_benchmark_state(
+                    job_id,
+                    worker_id,
+                    gate_status=replay["gate_status"],
+                    evaluation_type=evaluation_type,
+                )
+                await self.repo.commit()
+            else:
+                await self._release_read_txn()
+            return replay
+
+        router = await self._artifact_router()
+        use_drive_report = (
+            _is_flow2_profile(run.get("profile"))
+            and router.write_provider == StorageProvider.GOOGLE_DRIVE
+        )
+        # Release the read transaction before CPU bootstrap and Google Drive upload
+        # so Supavisor/Postgres never sees an idle-in-transaction session or held row locks.
+        await self._release_read_txn()
+
+        # Phase 2: CPU paired cluster bootstrap + quality gate + Drive report upload (NO DB txn).
         cer_metric, wer_metric = await asyncio.gather(
             asyncio.to_thread(_paired_metric, paired, "cer"),
             asyncio.to_thread(_paired_metric, paired, "wer", seed=20261113),
@@ -3121,17 +3436,11 @@ class VireadOcrTrainingService:
         report_provider = StorageProvider.SUPABASE_LEGACY.value
         report_storage_path: str | None = None
         report_drive_file_id: str | None = None
-        router = await self._artifact_router()
-        use_drive_report = (
-            _is_flow2_profile(run.get("profile"))
-            and router.write_provider == StorageProvider.GOOGLE_DRIVE
-        )
         if use_drive_report:
             db_metrics_payload = {
                 key: value for key, value in full_report_payload.items()
                 if key != "outputs"
             }
-            await ensure_database_capacity(self.db, len(_canonical(db_metrics_payload)) + 4096)
             try:
                 stored_report = await asyncio.to_thread(
                     router.put,
@@ -3143,6 +3452,14 @@ class VireadOcrTrainingService:
                 )
             except TrainingStorageError as exc:
                 raise _storage_http_error(exc) from exc
+            except (ValueError, KeyError) as exc:
+                raise _storage_http_error(
+                    TrainingStorageError(
+                        f"Unexpected Drive bridge error while storing benchmark report: {exc}",
+                        code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                        http_status=502,
+                    )
+                ) from exc
             report_provider = stored_report.provider.value
             report_storage_path = stored_report.reference
             report_drive_file_id = stored_report.drive_file_id
@@ -3151,7 +3468,69 @@ class VireadOcrTrainingService:
             db_metrics_payload["storage_provider"] = report_provider
         else:
             db_metrics_payload = {**metrics, "quality_gate": gate}
-            await ensure_database_capacity(self.db, len(_canonical(db_metrics_payload)) + 4096)
+
+        # Phase 3: short atomic write transaction acquiring FOR UPDATE locks only for persistence.
+        await ensure_database_capacity(self.db, len(_canonical(db_metrics_payload)) + 4096)
+        if job_id is not None and worker_id is not None:
+            await self._lock_colab_job_for_benchmark(actor_id, job_id, worker_id, payload)
+        locked_for_write = await self.repo.one(
+            "SELECT id, source_flow, version_sha256, is_locked_test, sample_count FROM public.viread_ocr_dataset_versions WHERE id=:id FOR UPDATE",
+            {"id": payload.locked_test_version_id},
+        )
+        if (
+            not locked_for_write
+            or locked_for_write["source_flow"] != "LOCKED_TEST"
+            or not locked_for_write["is_locked_test"]
+            or locked_for_write["version_sha256"] != locked["version_sha256"]
+        ):
+            await self.repo.rollback()
+            raise HTTPException(status_code=422, detail="Locked Test version/hash is invalid")
+        cohort_for_write = await self.repo.one("""
+            SELECT id, evaluation_type, manifest_sha256, sample_count, group_count
+            FROM public.viread_ocr_evaluation_cohorts WHERE dataset_version_id=:dataset_id FOR UPDATE
+        """, {"dataset_id": payload.locked_test_version_id})
+        if cohort_for_write and cohort_for_write["manifest_sha256"] != locked["version_sha256"]:
+            await self.repo.rollback()
+            raise HTTPException(status_code=409, detail="Evaluation cohort manifest hash changed")
+        effective_cohort_id = cohort_for_write["id"] if cohort_for_write else (cohort["id"] if cohort else None)
+        prior_for_write = await self._fetch_prior_benchmark(
+            cohort_id=effective_cohort_id,
+            locked_test_version_id=payload.locked_test_version_id,
+        )
+        if prior_for_write:
+            try:
+                replay = self._build_idempotent_benchmark_response(
+                    prior_for_write,
+                    run_id=payload.run_id,
+                    report_hash=report_hash,
+                    evaluation_type=evaluation_type,
+                )
+            except HTTPException:
+                await self.repo.rollback()
+                raise
+            if job_id is not None and worker_id is not None:
+                await self._update_colab_job_benchmark_state(
+                    job_id,
+                    worker_id,
+                    gate_status=replay["gate_status"],
+                    evaluation_type=evaluation_type,
+                )
+                await self.repo.commit()
+            else:
+                await self.repo.rollback()
+            return replay
+        if require_baselines:
+            latest_active = await self.repo.one(
+                "SELECT checkpoint_sha256 FROM public.viread_ocr_active_model WHERE singleton=TRUE"
+            )
+            latest_active_sha = latest_active["checkpoint_sha256"] if latest_active else None
+            if latest_active_sha != run["parent_checkpoint_sha256"]:
+                await self.repo.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Candidate parent is no longer active; preserve the candidate and evaluate a new lineage",
+                )
+
         try:
             await self.repo.execute("""
                 INSERT INTO public.viread_ocr_benchmarks
@@ -3167,7 +3546,7 @@ class VireadOcrTrainingService:
                   "test_sha": locked["version_sha256"], "report_sha": report_hash, "gate": gate["status"],
                   "samples": len(paired), "groups": len({item["group_id"] for item in paired}),
                   "metrics": json.dumps(db_metrics_payload, ensure_ascii=False), "actor_id": actor_id,
-                  "cohort_id": cohort["id"] if cohort else None, "evaluation_type": evaluation_type,
+                  "cohort_id": effective_cohort_id, "evaluation_type": evaluation_type,
                   "parent_sha": payload.parent_checkpoint_sha256 or run["parent_checkpoint_sha256"],
                   "active_sha": payload.active_checkpoint_sha256 or active_sha})
             if report_storage_path:
@@ -3184,7 +3563,51 @@ class VireadOcrTrainingService:
                     "id": benchmark_id,
                 })
             await self.repo.execute("UPDATE public.viread_ocr_training_runs SET status='BENCHMARKED', updated_at=now() WHERE id=:id", {"id": payload.run_id})
+            if job_id is not None and worker_id is not None:
+                await self._update_colab_job_benchmark_state(
+                    job_id,
+                    worker_id,
+                    gate_status=gate["status"],
+                    evaluation_type=evaluation_type,
+                )
             await self.repo.commit()
+        except IntegrityError as exc:
+            await self.repo.rollback()
+            raced = await self._fetch_prior_benchmark(
+                cohort_id=effective_cohort_id,
+                locked_test_version_id=payload.locked_test_version_id,
+            )
+            if raced is not None:
+                try:
+                    replay = self._build_idempotent_benchmark_response(
+                        raced,
+                        run_id=payload.run_id,
+                        report_hash=report_hash,
+                        evaluation_type=evaluation_type,
+                    )
+                except HTTPException:
+                    await self._release_read_txn()
+                    raise
+                if job_id is not None and worker_id is not None:
+                    await self._lock_colab_job_for_benchmark(actor_id, job_id, worker_id, payload)
+                    await self._update_colab_job_benchmark_state(
+                        job_id,
+                        worker_id,
+                        gate_status=replay["gate_status"],
+                        evaluation_type=evaluation_type,
+                    )
+                    await self.repo.commit()
+                else:
+                    await self._release_read_txn()
+                return replay
+            await self._release_read_txn()
+            err_msg = str(exc).lower()
+            if "viread_ocr_benchmarks_evaluation_cohort_uidx" in err_msg or "unique" in err_msg:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This sealed evaluation cohort has already been consumed",
+                ) from exc
+            raise
         except Exception:
             await self.repo.rollback()
             raise
@@ -3336,12 +3759,72 @@ class VireadOcrTrainingService:
 
     async def decide(self, actor_id: UUID, payload: ModelDecisionRequest) -> dict[str, Any]:
         await self._admin(actor_id)
-        active = await self.repo.one("SELECT checkpoint_sha256, storage_path, profile, decision_id FROM public.viread_ocr_active_model WHERE singleton=TRUE FOR UPDATE")
-        if not active:
-            raise HTTPException(status_code=503, detail="Active model registry is not initialized")
+        verified_drive_path: str | None = None
         if payload.action == "APPROVE":
             if payload.run_id is None or payload.benchmark_id is None:
                 raise HTTPException(status_code=422, detail="Approval requires both a candidate run and its Locked Test benchmark")
+            # Phase 1 (short read txn, NO FOR UPDATE): validate candidate and verify Drive
+            # artifact existence outside any row locks.
+            pre_active = await self.repo.one(
+                "SELECT checkpoint_sha256, storage_path, profile, decision_id FROM public.viread_ocr_active_model WHERE singleton=TRUE"
+            )
+            if not pre_active:
+                await self._release_read_txn()
+                raise HTTPException(status_code=503, detail="Active model registry is not initialized")
+            pre_run = await self.repo.one("""
+                SELECT id, profile, status, checkpoint_sha256, checkpoint_storage_path,
+                       parent_checkpoint_sha256
+                FROM public.viread_ocr_training_runs WHERE id=:id
+            """, {"id": payload.run_id})
+            pre_benchmark = await self.repo.one("""
+                SELECT id, run_id, candidate_checkpoint_sha256, gate_status, evaluation_type,
+                       parent_checkpoint_sha256, active_checkpoint_sha256
+                FROM public.viread_ocr_benchmarks WHERE id=:id
+            """, {"id": payload.benchmark_id})
+            if (not pre_run or not pre_benchmark or pre_run["status"] != "BENCHMARKED"
+                    or str(pre_benchmark["run_id"]) != str(pre_run["id"])
+                    or pre_benchmark["candidate_checkpoint_sha256"] != pre_run["checkpoint_sha256"]
+                    or pre_benchmark["gate_status"] != "V2_WIN"
+                    or pre_benchmark["evaluation_type"] != "PRODUCTION"):
+                await self._release_read_txn()
+                raise HTTPException(status_code=409, detail="Candidate has no passing Production quality gate")
+            if (pre_active["checkpoint_sha256"] != pre_run["parent_checkpoint_sha256"]
+                    or pre_benchmark["parent_checkpoint_sha256"] != pre_run["parent_checkpoint_sha256"]
+                    or pre_benchmark["active_checkpoint_sha256"] != pre_active["checkpoint_sha256"]):
+                await self._release_read_txn()
+                raise HTTPException(status_code=409, detail="Candidate parent/active lineage changed after evaluation")
+            if pre_active["checkpoint_sha256"] == pre_run["checkpoint_sha256"]:
+                await self._release_read_txn()
+                raise HTTPException(status_code=409, detail="Candidate is already the active model")
+            candidate_path = pre_run["checkpoint_storage_path"]
+            if candidate_path and is_gdrive_ref(candidate_path):
+                router = await self._artifact_router()
+                await self._release_read_txn()
+                try:
+                    artifact_ok = await asyncio.to_thread(router.exists, candidate_path)
+                except TrainingStorageError as exc:
+                    raise _storage_http_error(exc) from exc
+                except (ValueError, KeyError) as exc:
+                    raise _storage_http_error(
+                        TrainingStorageError(
+                            f"Unexpected Drive bridge error while verifying candidate artifact: {exc}",
+                            code="DRIVE_BRIDGE_RESPONSE_INVALID",
+                            http_status=502,
+                        )
+                    ) from exc
+                if not artifact_ok:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Candidate checkpoint manifest is missing or trashed on Google Drive; refusing activation",
+                    )
+                verified_drive_path = candidate_path
+
+        # Phase 2 (short atomic write txn with FOR UPDATE locks; zero Drive I/O).
+        active = await self.repo.one("SELECT checkpoint_sha256, storage_path, profile, decision_id FROM public.viread_ocr_active_model WHERE singleton=TRUE FOR UPDATE")
+        if not active:
+            await self.repo.rollback()
+            raise HTTPException(status_code=503, detail="Active model registry is not initialized")
+        if payload.action == "APPROVE":
             run = await self.repo.one("""
                 SELECT id, profile, status, checkpoint_sha256, checkpoint_storage_path,
                        parent_checkpoint_sha256
@@ -3353,37 +3836,35 @@ class VireadOcrTrainingService:
                 FROM public.viread_ocr_benchmarks WHERE id=:id
             """, {"id": payload.benchmark_id})
             if (not run or not benchmark or run["status"] != "BENCHMARKED"
-                    or benchmark["run_id"] != run["id"]
+                    or str(benchmark["run_id"]) != str(run["id"])
                     or benchmark["candidate_checkpoint_sha256"] != run["checkpoint_sha256"]
                     or benchmark["gate_status"] != "V2_WIN"
                     or benchmark["evaluation_type"] != "PRODUCTION"):
+                await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Candidate has no passing Production quality gate")
             if (active["checkpoint_sha256"] != run["parent_checkpoint_sha256"]
                     or benchmark["parent_checkpoint_sha256"] != run["parent_checkpoint_sha256"]
                     or benchmark["active_checkpoint_sha256"] != active["checkpoint_sha256"]):
+                await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Candidate parent/active lineage changed after evaluation")
             if active["checkpoint_sha256"] == run["checkpoint_sha256"]:
+                await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Candidate is already the active model")
             next_sha, next_path, next_profile = run["checkpoint_sha256"], run["checkpoint_storage_path"], run["profile"]
-            if next_path and is_gdrive_ref(next_path):
-                router = await self._artifact_router()
-                try:
-                    artifact_ok = await asyncio.to_thread(router.exists, next_path)
-                except TrainingStorageError as exc:
-                    await self.repo.rollback()
-                    raise _storage_http_error(exc) from exc
-                if not artifact_ok:
-                    await self.repo.rollback()
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Candidate checkpoint manifest is missing or trashed on Google Drive; refusing activation",
-                    )
+            if next_path and is_gdrive_ref(next_path) and next_path != verified_drive_path:
+                await self.repo.rollback()
+                raise HTTPException(
+                    status_code=409,
+                    detail="Candidate checkpoint storage path changed during activation; retry approval",
+                )
             action_benchmark = payload.benchmark_id
         else:
             if active["profile"] == "ORIGINAL" or active["decision_id"] is None:
+                await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Original is already active; there is nothing to roll back")
             prior = await self.repo.one("SELECT action, candidate_checkpoint_sha256, previous_checkpoint_sha256, candidate_storage_path, previous_storage_path, candidate_profile, previous_profile FROM public.viread_ocr_model_decisions WHERE id=:id", {"id": active["decision_id"]})
             if not prior or prior["action"] != "APPROVE":
+                await self.repo.rollback()
                 raise HTTPException(status_code=409, detail="Rollback is only available from the latest approved V2 model")
             next_sha, next_path, next_profile = prior["previous_checkpoint_sha256"], prior["previous_storage_path"], prior["previous_profile"]
             action_benchmark = None
@@ -3430,20 +3911,29 @@ class VireadOcrTrainingService:
                 WHERE singleton=TRUE
             """, {"provider": next_provider, "drive_id": next_drive_id})
             await self.repo.commit()
-            invalidate_overview_manifest_cache()
-            from app.services.ocr_inference_job_service import is_remote_ocr_mode
-
-            if not is_remote_ocr_mode():
-                from app.services.ocr_engine import set_active_viread_model_cache
-
-                set_active_viread_model_cache({
-                    "checkpoint_sha256": next_sha,
-                    "storage_path": next_path,
-                    "profile": next_profile,
-                })
         except Exception:
             await self.repo.rollback()
             raise
+
+        invalidate_overview_manifest_cache()
+        from app.services.ocr_inference_job_service import (
+            clear_active_model_manifest_cache,
+            is_remote_ocr_mode,
+        )
+
+        clear_active_model_manifest_cache()
+        if not is_remote_ocr_mode():
+            from app.services.ocr_engine import set_active_viread_model_cache
+
+            set_active_viread_model_cache({
+                "checkpoint_sha256": next_sha,
+                "storage_path": next_path,
+                "profile": next_profile,
+            })
+        else:
+            self._trigger_remote_ocr_wakeup_best_effort(
+                reason=f"model_{payload.action.lower()}"
+            )
         return {"decision_id": decision_id, "action": payload.action,
                 "active_model": {"checkpoint_sha256": next_sha, "storage_path": next_path,
                                  "storage_provider": next_provider, "drive_file_id": next_drive_id,

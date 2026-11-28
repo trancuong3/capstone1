@@ -10,24 +10,28 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
   Wifi,
   WifiOff,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { Card } from "@/components/common/card";
 import { StatusMessage } from "@/components/common/status-message";
 import { useOptionalAiTaskCenter } from "@/components/tasks/ai-task-center-provider";
+import { TaskProgressView } from "@/components/tasks/global-task-center";
+import { useTranslations } from "@/hooks/use-i18n";
 import {
   createGlobalTasksService,
   emitStudioTasksChanged,
   STUDIO_TASKS_CHANGED_EVENT,
   type GlobalTasksService,
 } from "@/lib/api/global-tasks-service";
+import type { TranslateFn } from "@/lib/i18n/types";
 import { cn } from "@/lib/utils/cn";
 import {
   ACTIVE_GLOBAL_TASK_STATUSES,
@@ -35,15 +39,14 @@ import {
   type GlobalTaskItem,
   type GlobalTaskListResponse,
   type GlobalTaskStatus,
+  type StudioTasksChangedDetail,
 } from "@/types/global-tasks";
 
 export type StudioTaskStatusFilter =
   "ALL" | "ACTIVE" | "WAITING_FOR_REVIEW" | "FAILED" | "SUCCEEDED" | "OTHER";
 
-export type StudioTaskRoleFilter = "ALL" | GlobalTaskActorRole;
-
 export interface StudioTasksPageScreenProps {
-  readonly viewMode?: "parent" | "admin";
+  readonly viewMode?: GlobalTaskActorRole;
   readonly service?: GlobalTasksService;
 }
 
@@ -84,33 +87,50 @@ function matchesStatusFilter(
   return status === "CANCELLED" || status === "STALE";
 }
 
-function formatElapsedVietnamese(
+function formatElapsed(
   startedIso: string | null,
   createdIso: string,
   nowMs: number,
+  t: TranslateFn,
 ): string {
   const parsed = Date.parse(startedIso ?? createdIso);
   if (!Number.isFinite(parsed)) return "";
   const elapsedSec = Math.max(0, Math.floor((nowMs - parsed) / 1000));
   if (elapsedSec < 60) {
-    return `${elapsedSec} giây`;
+    return t(
+      "taskCenter.elapsedSeconds",
+      { seconds: elapsedSec },
+      "{seconds} giây",
+    );
   }
   const minutes = Math.floor(elapsedSec / 60);
   const seconds = elapsedSec % 60;
   if (minutes < 60) {
-    return seconds > 0 ? `${minutes} phút ${seconds} giây` : `${minutes} phút`;
+    return seconds > 0
+      ? t(
+          "taskCenter.elapsedMinutesSeconds",
+          { minutes, seconds },
+          "{minutes} phút {seconds} giây",
+        )
+      : t("taskCenter.elapsedMinutes", { minutes }, "{minutes} phút");
   }
   const hours = Math.floor(minutes / 60);
   const remMinutes = minutes % 60;
-  return remMinutes > 0 ? `${hours} giờ ${remMinutes} phút` : `${hours} giờ`;
+  return remMinutes > 0
+    ? t(
+        "taskCenter.elapsedHoursMinutes",
+        { hours, minutes: remMinutes },
+        "{hours} giờ {minutes} phút",
+      )
+    : t("taskCenter.elapsedHours", { hours }, "{hours} giờ");
 }
 
 function buildBookHref(
   task: GlobalTaskItem,
-  viewMode: "parent" | "admin",
+  viewMode: GlobalTaskActorRole,
 ): string | null {
   if (!task.book_id) return null;
-  if (viewMode === "admin" || task.actor_role === "admin") {
+  if (viewMode === "admin") {
     return `/admin/books/${encodeURIComponent(task.book_id)}`;
   }
   return `/my-books?bookId=${encodeURIComponent(task.book_id)}`;
@@ -118,22 +138,41 @@ function buildBookHref(
 
 function buildPageHref(
   task: GlobalTaskItem,
-  viewMode: "parent" | "admin",
+  viewMode: GlobalTaskActorRole,
 ): string | null {
   if (!task.book_id || !task.book_page_id) return null;
-  if (viewMode === "admin" || task.actor_role === "admin") {
+  if (viewMode === "admin") {
     return `/admin/books/${encodeURIComponent(task.book_id)}/pages/${encodeURIComponent(task.book_page_id)}`;
   }
   return `/my-books?bookId=${encodeURIComponent(task.book_id)}#page-${encodeURIComponent(task.book_page_id)}`;
+}
+
+function filterTasksForPortal(
+  items: readonly GlobalTaskItem[],
+  viewMode: GlobalTaskActorRole,
+  expectedActorId?: string | null,
+): readonly GlobalTaskItem[] {
+  return items.filter((task) => {
+    if (task.actor_role !== viewMode) return false;
+    if (task.portal && task.portal !== viewMode) return false;
+    if (expectedActorId && task.actor_id && task.actor_id !== expectedActorId) {
+      return false;
+    }
+    return true;
+  });
 }
 
 export function StudioTasksPageScreen({
   viewMode = "parent",
   service: injectedService,
 }: StudioTasksPageScreenProps) {
+  const t = useTranslations("common");
   const taskCenter = useOptionalAiTaskCenter();
   const useProviderData = Boolean(
-    !injectedService && taskCenter && taskCenter.scopeKey,
+    !injectedService &&
+    taskCenter &&
+    taskCenter.scopeKey &&
+    taskCenter.actorRole === viewMode,
   );
   const fallbackService = useMemo(
     () => injectedService ?? createGlobalTasksService(),
@@ -150,7 +189,6 @@ export function StudioTasksPageScreen({
   );
   const [statusFilter, setStatusFilter] =
     useState<StudioTaskStatusFilter>("ALL");
-  const [roleFilter, setRoleFilter] = useState<StudioTaskRoleFilter>("ALL");
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [clockMs, setClockMs] = useState<number>(() => Date.now());
 
@@ -159,8 +197,19 @@ export function StudioTasksPageScreen({
       setLocalLoading(true);
       setLocalError(null);
       try {
-        const data = await fallbackService.listTasks({ limit: 80, signal });
+        const data = await fallbackService.listTasks({
+          portal: viewMode,
+          limit: 80,
+          signal,
+        });
         if (signal?.aborted) return;
+        if (
+          data.actor_role !== viewMode ||
+          (data.portal && data.portal !== viewMode)
+        ) {
+          setLocalFeed(null);
+          return;
+        }
         setLocalFeed(data);
       } catch (err) {
         if (signal?.aborted) return;
@@ -168,7 +217,11 @@ export function StudioTasksPageScreen({
         setLocalError(
           err instanceof Error && err.message
             ? err.message
-            : "Chưa tải được danh sách tác vụ AI.",
+            : t(
+                "taskCenter.loadError",
+                undefined,
+                "Chưa tải được danh sách tác vụ AI.",
+              ),
         );
       } finally {
         if (!signal?.aborted) {
@@ -176,15 +229,27 @@ export function StudioTasksPageScreen({
         }
       }
     },
-    [fallbackService],
+    [fallbackService, t, viewMode],
   );
 
+  const providerScopeKey = taskCenter?.scopeKey ?? null;
+  const taskCenterRefreshRef = useRef<(() => Promise<void>) | null>(null);
+
   useEffect(() => {
-    if (useProviderData && taskCenter) {
-      const timer = globalThis.setTimeout(() => {
-        void taskCenter.refresh();
-      }, 0);
-      return () => globalThis.clearTimeout(timer);
+    taskCenterRefreshRef.current = taskCenter?.refresh ?? null;
+  }, [taskCenter?.refresh]);
+
+  useEffect(() => {
+    if (!useProviderData || !providerScopeKey) return;
+    const timer = globalThis.setTimeout(() => {
+      void taskCenterRefreshRef.current?.();
+    }, 0);
+    return () => globalThis.clearTimeout(timer);
+  }, [providerScopeKey, useProviderData]);
+
+  useEffect(() => {
+    if (useProviderData) {
+      return;
     }
 
     let active = true;
@@ -195,9 +260,18 @@ export function StudioTasksPageScreen({
       const controller = new AbortController();
       activeController = controller;
       void fallbackService
-        .listTasks({ limit: 80, signal: controller.signal })
+        .listTasks({ portal: viewMode, limit: 80, signal: controller.signal })
         .then((data) => {
           if (!active || controller.signal.aborted) return;
+          if (
+            data.actor_role !== viewMode ||
+            (data.portal && data.portal !== viewMode)
+          ) {
+            setLocalFeed(null);
+            setLocalError(null);
+            setLocalLoading(false);
+            return;
+          }
           setLocalFeed(data);
           setLocalError(null);
           setLocalLoading(false);
@@ -208,7 +282,11 @@ export function StudioTasksPageScreen({
           setLocalError(
             err instanceof Error && err.message
               ? err.message
-              : "Chưa tải được danh sách tác vụ AI.",
+              : t(
+                  "taskCenter.loadError",
+                  undefined,
+                  "Chưa tải được danh sách tác vụ AI.",
+                ),
           );
           setLocalLoading(false);
         });
@@ -216,11 +294,17 @@ export function StudioTasksPageScreen({
 
     fetchFeed();
 
-    const handleSync = () => {
+    const handleSync = (event?: Event) => {
       if (
         typeof document !== "undefined" &&
         document.visibilityState === "hidden"
       ) {
+        return;
+      }
+      const detail = (
+        event as CustomEvent<StudioTasksChangedDetail | undefined> | undefined
+      )?.detail;
+      if (detail?.portal && detail.portal !== viewMode) {
         return;
       }
       fetchFeed();
@@ -237,25 +321,46 @@ export function StudioTasksPageScreen({
         window.removeEventListener("viread:android-resume", handleSync);
       }
     };
-  }, [fallbackService, taskCenter, useProviderData]);
+  }, [fallbackService, t, useProviderData, viewMode]);
 
-  const tasks: readonly GlobalTaskItem[] = useMemo(
+  const tasks: readonly GlobalTaskItem[] = useMemo(() => {
+    const raw = useProviderData
+      ? (taskCenter?.tasks ?? [])
+      : (localFeed?.tasks ?? []);
+    const expectedActorId = useProviderData
+      ? taskCenter?.actorId
+      : localFeed?.actor_id;
+    return filterTasksForPortal(raw, viewMode, expectedActorId);
+  }, [
+    localFeed?.actor_id,
+    localFeed?.tasks,
+    taskCenter?.actorId,
+    taskCenter?.tasks,
+    useProviderData,
+    viewMode,
+  ]);
+
+  const activeCount = useMemo(
     () =>
-      useProviderData ? (taskCenter?.tasks ?? []) : (localFeed?.tasks ?? []),
-    [localFeed?.tasks, taskCenter?.tasks, useProviderData],
+      tasks.filter((task) => ACTIVE_GLOBAL_TASK_STATUSES.has(task.status))
+        .length,
+    [tasks],
   );
-  const activeCount = useProviderData
-    ? (taskCenter?.activeCount ?? 0)
-    : (localFeed?.active_count ?? 0);
-  const waitingReviewCount = useProviderData
-    ? (taskCenter?.waitingReviewCount ?? 0)
-    : (localFeed?.waiting_review_count ?? 0);
-  const failedCount = useProviderData
-    ? (taskCenter?.failedCount ?? 0)
-    : (localFeed?.failed_count ?? 0);
-  const completedCount = useProviderData
-    ? (taskCenter?.completedCount ?? 0)
-    : (localFeed?.completed_count ?? 0);
+  const waitingReviewCount = useMemo(
+    () => tasks.filter((task) => task.status === "WAITING_FOR_REVIEW").length,
+    [tasks],
+  );
+  const failedCount = useMemo(
+    () =>
+      tasks.filter(
+        (task) => task.status === "FAILED" || task.status === "PARTIAL_SUCCESS",
+      ).length,
+    [tasks],
+  );
+  const completedCount = useMemo(
+    () => tasks.filter((task) => task.status === "SUCCEEDED").length,
+    [tasks],
+  );
   const workerOnline = useProviderData
     ? (taskCenter?.workerOnline ?? null)
     : (localFeed?.worker_online ?? null);
@@ -291,20 +396,32 @@ export function StudioTasksPageScreen({
       setActionNotice(null);
       if (useProviderData && taskCenter) {
         await taskCenter.retryTask(jobId);
-        setActionNotice("Đã xếp lịch thử lại tác vụ từ điểm lưu gần nhất.");
+        setActionNotice(
+          t(
+            "taskCenter.retryNotice",
+            undefined,
+            "Đã xếp lịch thử lại tác vụ từ điểm lưu gần nhất.",
+          ),
+        );
         return;
       }
       setLocalBusyIds((prev) => new Set(prev).add(jobId));
       try {
-        const res = await fallbackService.retryTask(jobId);
+        const res = await fallbackService.retryTask(jobId, {
+          portal: viewMode,
+        });
         setActionNotice(res.message_vi);
-        emitStudioTasksChanged();
+        emitStudioTasksChanged({ portal: viewMode });
         await loadLocalFeed();
       } catch (err) {
         setLocalError(
           err instanceof Error && err.message
             ? err.message
-            : "Không thể thử lại tác vụ lúc này.",
+            : t(
+                "taskCenter.retryError",
+                undefined,
+                "Không thể thử lại tác vụ lúc này.",
+              ),
         );
       } finally {
         setLocalBusyIds((prev) => {
@@ -314,7 +431,7 @@ export function StudioTasksPageScreen({
         });
       }
     },
-    [fallbackService, loadLocalFeed, taskCenter, useProviderData],
+    [fallbackService, loadLocalFeed, t, taskCenter, useProviderData, viewMode],
   );
 
   const handleCancel = useCallback(
@@ -322,20 +439,32 @@ export function StudioTasksPageScreen({
       setActionNotice(null);
       if (useProviderData && taskCenter) {
         await taskCenter.cancelTask(jobId);
-        setActionNotice("Đã gửi yêu cầu hủy tác vụ an toàn.");
+        setActionNotice(
+          t(
+            "taskCenter.cancelNotice",
+            undefined,
+            "Đã gửi yêu cầu hủy tác vụ an toàn.",
+          ),
+        );
         return;
       }
       setLocalBusyIds((prev) => new Set(prev).add(jobId));
       try {
-        const res = await fallbackService.cancelTask(jobId);
+        const res = await fallbackService.cancelTask(jobId, {
+          portal: viewMode,
+        });
         setActionNotice(res.message_vi);
-        emitStudioTasksChanged();
+        emitStudioTasksChanged({ portal: viewMode });
         await loadLocalFeed();
       } catch (err) {
         setLocalError(
           err instanceof Error && err.message
             ? err.message
-            : "Không thể hủy tác vụ lúc này.",
+            : t(
+                "taskCenter.cancelError",
+                undefined,
+                "Không thể hủy tác vụ lúc này.",
+              ),
         );
       } finally {
         setLocalBusyIds((prev) => {
@@ -345,17 +474,13 @@ export function StudioTasksPageScreen({
         });
       }
     },
-    [fallbackService, loadLocalFeed, taskCenter, useProviderData],
+    [fallbackService, loadLocalFeed, t, taskCenter, useProviderData, viewMode],
   );
 
   const filteredTasks = useMemo(
     () =>
-      tasks.filter(
-        (task) =>
-          matchesStatusFilter(task.status, statusFilter) &&
-          (roleFilter === "ALL" || task.actor_role === roleFilter),
-      ),
-    [roleFilter, statusFilter, tasks],
+      tasks.filter((task) => matchesStatusFilter(task.status, statusFilter)),
+    [statusFilter, tasks],
   );
 
   const statusFilterOptions: ReadonlyArray<{
@@ -363,64 +488,111 @@ export function StudioTasksPageScreen({
     readonly label: string;
     readonly count: number;
   }> = [
-    { value: "ALL", label: "Tất cả", count: tasks.length },
-    { value: "ACTIVE", label: "Đang chạy", count: activeCount },
+    {
+      value: "ALL",
+      label: t("taskCenter.filters.all", undefined, "Tất cả"),
+      count: tasks.length,
+    },
+    {
+      value: "ACTIVE",
+      label: t("taskCenter.filters.active", undefined, "Đang chạy"),
+      count: activeCount,
+    },
     {
       value: "WAITING_FOR_REVIEW",
-      label: "Cần xác minh",
+      label: t("taskCenter.filters.waitingReview", undefined, "Cần xác minh"),
       count: waitingReviewCount,
     },
-    { value: "FAILED", label: "Thất bại", count: failedCount },
-    { value: "SUCCEEDED", label: "Hoàn tất", count: completedCount },
+    {
+      value: "FAILED",
+      label: t("taskCenter.filters.failed", undefined, "Thất bại"),
+      count: failedCount,
+    },
+    {
+      value: "SUCCEEDED",
+      label: t("taskCenter.filters.succeeded", undefined, "Hoàn tất"),
+      count: completedCount,
+    },
     {
       value: "OTHER",
-      label: "Đã hủy / Cũ",
+      label: t("taskCenter.filters.other", undefined, "Đã hủy / Cũ"),
       count: tasks.filter(
-        (t) => t.status === "CANCELLED" || t.status === "STALE",
+        (item) => item.status === "CANCELLED" || item.status === "STALE",
       ).length,
     },
   ];
 
-  const roleFilterOptions: ReadonlyArray<{
-    readonly value: StudioTaskRoleFilter;
-    readonly label: string;
-  }> = [
-    { value: "ALL", label: "Tất cả vai trò" },
-    { value: "admin", label: "Quản trị" },
-    { value: "parent", label: "Phụ huynh" },
-  ];
+  const isAdminView = viewMode === "admin";
+  const pageHeading = isAdminView
+    ? t("taskCenter.adminTitle", undefined, "Tác vụ AI quản trị")
+    : t("taskCenter.parentTitle", undefined, "Tác vụ AI của tôi");
+  const pageSubtitle = isAdminView
+    ? t(
+        "taskCenter.adminSubtitle",
+        undefined,
+        "Chỉ hiển thị các tác vụ AI của riêng tài khoản quản trị này. Tiến trình chạy nền an toàn khi bạn chuyển trang.",
+      )
+    : t(
+        "taskCenter.parentSubtitle",
+        undefined,
+        "Chỉ hiển thị các tác vụ AI thuộc tài khoản phụ huynh của bạn. Tiến trình chạy nền an toàn khi bạn chuyển trang.",
+      );
+  const scopeBadgeLabel = isAdminView
+    ? t(
+        "taskCenter.scopeBadgeAdmin",
+        undefined,
+        "Không gian quản trị (riêng bạn)",
+      )
+    : t(
+        "taskCenter.scopeBadgeParent",
+        undefined,
+        "Không gian phụ huynh (riêng bạn)",
+      );
 
   return (
     <section
       aria-labelledby="studio-tasks-heading"
       className="mx-auto flex w-full max-w-[1160px] flex-col gap-5 px-4 py-6 sm:px-6"
+      data-portal={viewMode}
       data-testid="studio-tasks-page"
     >
       <header className="flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 space-y-1">
-          <p className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
-            <Sparkles aria-hidden="true" className="size-3.5" />
-            Smart Book Studio V2
-          </p>
+        <div className="min-w-0 space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="inline-flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
+              <Sparkles aria-hidden="true" className="size-3.5" />
+              ViRead Studio
+            </p>
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-sky/75 px-2.5 py-0.5 text-[11px] font-bold text-primary-hover"
+              data-testid="studio-tasks-scope-badge"
+            >
+              <ShieldCheck aria-hidden="true" className="size-3 shrink-0" />
+              {scopeBadgeLabel}
+            </span>
+          </div>
           <h1
             className="text-2xl font-black text-ink sm:text-3xl"
             id="studio-tasks-heading"
           >
-            Trung tâm tác vụ AI
+            {pageHeading}
           </h1>
-          <p className="text-sm text-muted">
-            Theo dõi bền vững mọi tác vụ OCR, tách nội dung, ảnh bìa và tranh
-            minh họa — an toàn khi tải lại trang hoặc chuyển ứng dụng.
-          </p>
+          <p className="text-sm text-muted">{pageSubtitle}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Link
             className="inline-flex min-h-11 items-center gap-1.5 rounded-control border border-border bg-white px-3.5 text-xs font-bold text-ink transition-colors hover:bg-canvas focus-visible:outline-3 focus-visible:outline-primary"
-            href={viewMode === "admin" ? "/admin/books" : "/my-books"}
+            href={isAdminView ? "/admin/books" : "/my-books"}
           >
             <BookOpen aria-hidden="true" className="size-4" />
-            {viewMode === "admin" ? "Về kho sách quản trị" : "Về sách của tôi"}
+            {isAdminView
+              ? t(
+                  "taskCenter.backToAdminBooks",
+                  undefined,
+                  "Về kho sách quản trị",
+                )
+              : t("taskCenter.backToParentBooks", undefined, "Về sách của tôi")}
           </Link>
           <Button
             className="min-h-11 w-auto px-4 text-xs"
@@ -432,7 +604,7 @@ export function StudioTasksPageScreen({
             variant="secondary"
           >
             <RefreshCw aria-hidden="true" className="size-4" />
-            Làm mới
+            {t("taskCenter.refreshBtn", undefined, "Làm mới")}
           </Button>
         </div>
       </header>
@@ -440,25 +612,33 @@ export function StudioTasksPageScreen({
       {/* Summary metrics */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card className="bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Đang chạy</p>
+          <p className="text-xs font-semibold text-muted">
+            {t("taskCenter.metrics.active", undefined, "Đang chạy")}
+          </p>
           <p className="mt-1 text-2xl font-black tabular-nums text-primary">
             {activeCount}
           </p>
         </Card>
         <Card className="bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Cần xác minh</p>
+          <p className="text-xs font-semibold text-muted">
+            {t("taskCenter.metrics.waitingReview", undefined, "Cần xác minh")}
+          </p>
           <p className="mt-1 text-2xl font-black tabular-nums text-amber-700">
             {waitingReviewCount}
           </p>
         </Card>
         <Card className="bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Thất bại</p>
+          <p className="text-xs font-semibold text-muted">
+            {t("taskCenter.metrics.failed", undefined, "Thất bại")}
+          </p>
           <p className="mt-1 text-2xl font-black tabular-nums text-danger">
             {failedCount}
           </p>
         </Card>
         <Card className="bg-white p-4">
-          <p className="text-xs font-semibold text-muted">Hoàn tất</p>
+          <p className="text-xs font-semibold text-muted">
+            {t("taskCenter.metrics.completed", undefined, "Hoàn tất")}
+          </p>
           <p className="mt-1 text-2xl font-black tabular-nums text-emerald-700">
             {completedCount}
           </p>
@@ -482,8 +662,16 @@ export function StudioTasksPageScreen({
           )}
           <span>
             {workerOnline
-              ? "Máy xử lý AI / OCR đang trực tuyến và sẵn sàng nhận tác vụ."
-              : "Máy xử lý AI đang tạm ngoại tuyến — tác vụ đã lưu bền vững và sẽ tự động tiếp tục khi kết nối lại."}
+              ? t(
+                  "taskCenter.workerOnlineBanner",
+                  undefined,
+                  "Máy xử lý AI / OCR đang trực tuyến và sẵn sàng nhận tác vụ.",
+                )
+              : t(
+                  "taskCenter.workerOfflineBanner",
+                  undefined,
+                  "Máy chủ OCR đang tạm tắt — Các tác vụ của bạn đã lưu trong hàng chờ và sẽ tự tiếp tục khi máy chủ bật lại.",
+                )}
           </span>
         </div>
       ) : null}
@@ -496,10 +684,14 @@ export function StudioTasksPageScreen({
         <StatusMessage tone="error">{errorMessage}</StatusMessage>
       ) : null}
 
-      {/* Filter Bar */}
+      {/* Status-only Filter Bar (strictly isolated per portal — NO cross-role filter!) */}
       <Card className="flex flex-col gap-3 bg-white p-4">
         <div
-          aria-label="Lọc tác vụ theo trạng thái"
+          aria-label={t(
+            "taskCenter.filterAria",
+            undefined,
+            "Lọc tác vụ theo trạng thái",
+          )}
           className="flex flex-wrap gap-2"
           role="group"
         >
@@ -533,33 +725,6 @@ export function StudioTasksPageScreen({
             );
           })}
         </div>
-
-        <div
-          aria-label="Lọc tác vụ theo vai trò"
-          className="flex flex-wrap items-center gap-2 border-t border-border pt-3"
-          role="group"
-        >
-          <span className="text-xs font-semibold text-muted">Vai trò:</span>
-          {roleFilterOptions.map((option) => {
-            const selected = roleFilter === option.value;
-            return (
-              <button
-                aria-pressed={selected}
-                className={cn(
-                  "inline-flex min-h-11 items-center rounded-control border px-3 text-xs font-semibold transition-colors focus-visible:outline-3 focus-visible:outline-primary",
-                  selected
-                    ? "border-primary bg-sky text-primary-hover"
-                    : "border-border bg-white text-ink hover:bg-canvas",
-                )}
-                key={option.value}
-                onClick={() => setRoleFilter(option.value)}
-                type="button"
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
       </Card>
 
       {/* Task Cards */}
@@ -571,13 +736,41 @@ export function StudioTasksPageScreen({
           />
           <p className="mt-3 text-base font-bold text-ink">
             {tasks.length === 0
-              ? "Chưa có tác vụ AI nào"
-              : "Không có tác vụ nào khớp bộ lọc hiện tại"}
+              ? isAdminView
+                ? t(
+                    "taskCenter.emptyAdminTitle",
+                    undefined,
+                    "Chưa có tác vụ AI quản trị nào",
+                  )
+                : t(
+                    "taskCenter.emptyParentTitle",
+                    undefined,
+                    "Chưa có tác vụ AI nào của bạn",
+                  )
+              : t(
+                  "taskCenter.emptyFilteredTitle",
+                  undefined,
+                  "Không có tác vụ nào khớp bộ lọc hiện tại",
+                )}
           </p>
           <p className="mt-1 text-sm text-muted">
             {tasks.length === 0
-              ? "Khi bạn tải trang sách, chạy OCR, tạo bìa hoặc tách tranh minh họa, tiến trình thực sẽ hiển thị tại đây."
-              : "Hãy chọn bộ lọc khác hoặc bấm Làm mới để cập nhật danh sách mới nhất."}
+              ? isAdminView
+                ? t(
+                    "taskCenter.emptyAdminDesc",
+                    undefined,
+                    "Khi bạn tải trang sách kho chung, chạy OCR, soát lỗi hoặc tạo bìa quản trị, tiến trình % thực sẽ hiển thị riêng tại đây.",
+                  )
+                : t(
+                    "taskCenter.emptyParentDesc",
+                    undefined,
+                    "Khi bạn tải trang sách riêng, quét OCR hoặc tạo bìa cho gia đình, tiến trình % thực sẽ hiển thị riêng tại đây.",
+                  )
+              : t(
+                  "taskCenter.emptyFilteredDesc",
+                  undefined,
+                  "Hãy chọn bộ lọc khác hoặc bấm Làm mới để cập nhật danh sách mới nhất.",
+                )}
           </p>
         </Card>
       ) : (
@@ -585,19 +778,14 @@ export function StudioTasksPageScreen({
           {filteredTasks.map((task) => {
             const isBusy = pendingActionIds.has(task.id);
             const isActive = ACTIVE_GLOBAL_TASK_STATUSES.has(task.status);
-            const elapsedText = formatElapsedVietnamese(
+            const elapsedText = formatElapsed(
               task.started_at,
               task.created_at,
               clockMs,
+              t,
             );
             const bookHref = buildBookHref(task, viewMode);
             const pageHref = buildPageHref(task, viewMode);
-            const hasMeasuredProgress =
-              !task.is_indeterminate &&
-              task.progress_completed !== null &&
-              task.progress_total !== null &&
-              task.progress_total > 0 &&
-              task.progress_pct !== null;
 
             return (
               <article
@@ -607,18 +795,20 @@ export function StudioTasksPageScreen({
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-base font-extrabold text-ink">
-                        {task.title_vi}
-                      </h2>
-                      <span className="rounded-full bg-canvas px-2 py-0.5 text-[11px] font-bold uppercase text-muted">
-                        {task.actor_role === "admin" ? "Quản trị" : "Phụ huynh"}
-                      </span>
-                    </div>
+                    <h2 className="text-base font-extrabold text-ink">
+                      {task.title_vi}
+                    </h2>
                     {task.book_title || task.page_number ? (
                       <p className="text-xs font-medium text-muted">
-                        {task.book_title ?? "Sách"}
-                        {task.page_number ? ` • Trang ${task.page_number}` : ""}
+                        {task.book_title ??
+                          t("taskCenter.defaultBookLabel", undefined, "Sách")}
+                        {task.page_number
+                          ? t(
+                              "taskCenter.pageSeparator",
+                              { pageNumber: task.page_number },
+                              " • Trang {pageNumber}",
+                            )
+                          : ""}
                       </p>
                     ) : null}
                   </div>
@@ -645,75 +835,39 @@ export function StudioTasksPageScreen({
                         className="size-3.5 text-danger"
                       />
                     ) : null}
-                    Bước:{" "}
-                    <strong className="text-ink">{task.stage_label_vi}</strong>
+                    {t(
+                      "taskCenter.stagePrefix",
+                      { stage: task.stage_label_vi },
+                      "Bước: {stage}",
+                    )}
                   </span>
                   {elapsedText ? (
                     <span className="inline-flex items-center gap-1 tabular-nums">
                       <Clock aria-hidden="true" className="size-3.5" />
-                      {isActive ? `Đã chạy ${elapsedText}` : elapsedText}
+                      {isActive
+                        ? t(
+                            "taskCenter.elapsedRunning",
+                            { elapsed: elapsedText },
+                            "Đã chạy {elapsed}",
+                          )
+                        : elapsedText}
                     </span>
                   ) : null}
                   {task.attempt_count > 0 ? (
                     <span className="tabular-nums">
-                      Lần thử {task.attempt_count}/{task.max_attempts}
+                      {t(
+                        "taskCenter.attemptLabel",
+                        {
+                          attempt: task.attempt_count,
+                          maxAttempts: task.max_attempts,
+                        },
+                        "Lần thử {attempt}/{maxAttempts}",
+                      )}
                     </span>
                   ) : null}
                 </div>
 
-                {hasMeasuredProgress ? (
-                  <div className="mt-3 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs font-semibold text-muted">
-                      <span>
-                        {task.progress_completed}/{task.progress_total}
-                        {task.progress_unit ? ` ${task.progress_unit}` : ""}
-                      </span>
-                      <span className="tabular-nums">
-                        {Math.round(
-                          Math.max(0, Math.min(100, task.progress_pct!)),
-                        )}
-                        %
-                      </span>
-                    </div>
-                    <div
-                      aria-label={`Tiến độ ${task.title_vi}`}
-                      aria-valuemax={task.progress_total!}
-                      aria-valuemin={0}
-                      aria-valuenow={task.progress_completed!}
-                      className="h-2 w-full overflow-hidden rounded-full bg-canvas"
-                      role="progressbar"
-                    >
-                      <div
-                        className={cn(
-                          "h-full rounded-full transition-[width] duration-300",
-                          task.status === "FAILED"
-                            ? "bg-danger"
-                            : task.status === "SUCCEEDED"
-                              ? "bg-emerald-600"
-                              : "bg-primary",
-                        )}
-                        style={{
-                          width: `${Math.max(0, Math.min(100, task.progress_pct!))}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : isActive ? (
-                  <div className="mt-3 space-y-1.5">
-                    <div className="flex items-center justify-between text-xs text-muted">
-                      <span>{task.stage_label_vi}</span>
-                      <span>Đang xử lý nền…</span>
-                    </div>
-                    <div
-                      aria-label={`Đang xử lý ${task.title_vi}`}
-                      className="h-2 w-full overflow-hidden rounded-full bg-canvas"
-                      data-indeterminate="true"
-                      role="progressbar"
-                    >
-                      <div className="h-full w-2/5 animate-pulse rounded-full bg-primary/75" />
-                    </div>
-                  </div>
-                ) : null}
+                <TaskProgressView t={t} task={task} />
 
                 {task.error_message_vi ? (
                   <p className="mt-2.5 rounded-control bg-red-50 px-3 py-2 text-xs font-medium text-danger">
@@ -730,7 +884,7 @@ export function StudioTasksPageScreen({
                       type="button"
                     >
                       <RotateCcw aria-hidden="true" className="size-4" />
-                      Thử lại
+                      {t("actions.retry", undefined, "Thử lại")}
                     </button>
                   ) : null}
 
@@ -742,7 +896,7 @@ export function StudioTasksPageScreen({
                       type="button"
                     >
                       <XCircle aria-hidden="true" className="size-4" />
-                      Hủy
+                      {t("actions.cancel", undefined, "Hủy")}
                     </button>
                   ) : null}
 
@@ -752,7 +906,7 @@ export function StudioTasksPageScreen({
                       href={bookHref}
                     >
                       <BookOpen aria-hidden="true" className="size-3.5" />
-                      Mở sách
+                      {t("taskCenter.openBookAction", undefined, "Mở sách")}
                     </Link>
                   ) : null}
 
@@ -762,7 +916,7 @@ export function StudioTasksPageScreen({
                       href={pageHref}
                     >
                       <FileText aria-hidden="true" className="size-3.5" />
-                      Mở trang
+                      {t("taskCenter.openPageAction", undefined, "Mở trang")}
                     </Link>
                   ) : null}
 
@@ -774,7 +928,11 @@ export function StudioTasksPageScreen({
                       className="ms-auto inline-flex min-h-11 items-center gap-1.5 rounded-control bg-primary px-3.5 text-xs font-bold text-white transition-colors hover:bg-primary-hover"
                       href={task.result_href}
                     >
-                      Xem kết quả
+                      {t(
+                        "taskCenter.viewResultAction",
+                        undefined,
+                        "Xem kết quả",
+                      )}
                       <ExternalLink aria-hidden="true" className="size-3.5" />
                     </Link>
                   ) : null}

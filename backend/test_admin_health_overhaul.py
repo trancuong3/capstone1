@@ -314,7 +314,7 @@ class CorePerformanceAndConcurrencyTests(unittest.IsolatedAsyncioTestCase):
         ):
             report = await AdminSystemService(repo, voice).health()
 
-        db_probe_mock.assert_awaited_once_with(timeout=4.0)
+        db_probe_mock.assert_awaited_once_with(timeout=6.0)
         session_maker.assert_called_once()
         cache_session.connection.assert_awaited_once_with(
             execution_options={"isolation_level": "AUTOCOMMIT"}
@@ -1125,6 +1125,377 @@ class AdminCatalogCoverHydrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(by_id[book_b_id].cover_source_type, "AI_GENERATED")
         self.assertIsNone(by_id[book_c_id].cover_url)
         self.assertIsNone(by_id[book_c_id].cover_source_type)
+
+
+class OpsHealthCoreVoiceOcrFixesTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        clear_rate_limits()
+        remote_ocr_wakeup.clear_remote_ocr_wakeup_cache_for_tests()
+        from app.services.tts_audio_cache_service import clear_tts_cache_runtime_metrics
+
+        clear_tts_cache_runtime_metrics()
+
+    def tearDown(self) -> None:
+        clear_rate_limits()
+        remote_ocr_wakeup.clear_remote_ocr_wakeup_cache_for_tests()
+        from app.services.tts_audio_cache_service import clear_tts_cache_runtime_metrics
+
+        clear_tts_cache_runtime_metrics()
+
+    async def test_get_admin_health_route_rolls_back_active_db_tx_before_health_probes(self) -> None:
+        from app.api.routes.system import get_admin_health
+
+        db = MagicMock(spec=AsyncSession)
+        db.in_transaction.return_value = True
+        db.rollback = AsyncMock()
+        events: list[str] = []
+
+        async def _fake_rollback():
+            events.append("rollback")
+
+        db.rollback.side_effect = _fake_rollback
+
+        fake_report = AdminHealthRead(
+            overall_status="HEALTHY",
+            checked_at=datetime.now(timezone.utc),
+            services=[],
+        )
+
+        async def _fake_health(*_a, **_kw):
+            events.append("health")
+            return fake_report
+
+        req = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(background_workers={})))
+        with (
+            patch.object(AdminSystemService, "require_admin", new=AsyncMock()) as req_admin,
+            patch.object(AdminSystemService, "health", new=AsyncMock(side_effect=_fake_health)),
+        ):
+            res = await get_admin_health(request=req, actor_id=ADMIN_ACTOR, db=db)
+
+        req_admin.assert_awaited_once_with(ADMIN_ACTOR)
+        db.rollback.assert_awaited_once()
+        self.assertEqual(events, ["rollback", "health"])
+        self.assertEqual(res.overall_status, "HEALTHY")
+
+    async def test_hosted_tts_elevenlabs_ready_and_empty_cache_fallback_do_not_report_local_unconfigured(
+        self,
+    ) -> None:
+        el_orch = MagicMock()
+        el_orch.get_status = AsyncMock(
+            return_value={
+                "local": {
+                    "configured": False,
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNCONFIGURED",
+                },
+                "elevenlabs": {
+                    "configured": True,
+                    "tts_cooldown": False,
+                    "stt_cooldown": False,
+                },
+                "google": {
+                    "stt_configured": False,
+                    "tts_configured": False,
+                    "stt_cooldown": False,
+                    "tts_cooldown": False,
+                },
+            }
+        )
+        repo = MagicMock()
+        repo.db = None
+        repo.probe_database = AsyncMock(return_value=True)
+        with (
+            patch.dict(
+                os.environ,
+                {"RENDER": "true", "APP_ENVIRONMENT": "production", "VIREAD_OCR_MODE": "local_inprocess"},
+                clear=False,
+            ),
+            patch("app.api.routes.system.probe_storage_health", new=AsyncMock(return_value=_healthy_storage())),
+            patch("app.api.routes.system.collect_ocr_health", return_value=[]),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value=_default_audio_cache(0)),
+            ),
+        ):
+            el_report = await AdminSystemService(repo, el_orch).health()
+
+        by_id_el = {item.id: item for item in el_report.services}
+        self.assertEqual(by_id_el["tts"].status, "HEALTHY")
+        self.assertEqual(by_id_el["tts"].detail_status, "cloud_ready")
+        self.assertEqual(by_id_el["tts"].execution_mode, "cloud_ai")
+
+        # Empty TTS audio cache on hosted mode with no cloud keys -> HEALTHY standby cache + Web Speech fallback
+        empty_orch = MagicMock()
+        empty_orch.get_status = AsyncMock(
+            return_value={
+                "local": {
+                    "configured": False,
+                    "available": False,
+                    "stt_ready": False,
+                    "tts_ready": False,
+                    "error_code": "LOCAL_VOICE_UNCONFIGURED",
+                },
+                "elevenlabs": {
+                    "configured": False,
+                    "tts_cooldown": False,
+                    "stt_cooldown": False,
+                },
+                "google": {
+                    "stt_configured": False,
+                    "tts_configured": False,
+                    "stt_cooldown": False,
+                    "tts_cooldown": False,
+                },
+            }
+        )
+        with (
+            patch.dict(
+                os.environ,
+                {"RENDER": "true", "APP_ENVIRONMENT": "production", "VIREAD_OCR_MODE": "local_inprocess"},
+                clear=False,
+            ),
+            patch("app.api.routes.system.probe_storage_health", new=AsyncMock(return_value=_healthy_storage())),
+            patch("app.api.routes.system.collect_ocr_health", return_value=[]),
+            patch("app.api.routes.system.is_tts_cache_enabled", return_value=True),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value=_default_audio_cache(0)),
+            ),
+        ):
+            cached_empty_report = await AdminSystemService(repo, empty_orch).health()
+
+        by_id_empty = {item.id: item for item in cached_empty_report.services}
+        self.assertEqual(by_id_empty["tts"].status, "HEALTHY")
+        self.assertEqual(by_id_empty["tts"].detail_status, "cached")
+        self.assertNotEqual(by_id_empty["tts"].last_error, "LOCAL_VOICE_UNCONFIGURED")
+
+    async def test_remote_ocr_probe_timeout_and_hosted_idle_never_report_fake_unconfigured_while_online_worker_is_healthy(
+        self,
+    ) -> None:
+        repo = MagicMock()
+        repo.db = None
+        repo.probe_database = AsyncMock(return_value=True)
+        voice = MagicMock()
+        voice.probe_tts = AsyncMock(return_value=("HEALTHY", "ok"))
+        voice.probe_stt = AsyncMock(return_value=("HEALTHY", "ok"))
+
+        # 1. Timeout during collect_remote_ocr_health -> Unknown / OCR_HEALTH_PROBE_TIMEOUT, NOT REMOTE_OCR_WORKER_UNCONFIGURED
+        with (
+            patch.dict(os.environ, {"RENDER": "true", "APP_ENVIRONMENT": "production"}, clear=False),
+            patch("app.api.routes.system.is_remote_ocr_mode", return_value=True),
+            patch(
+                "app.api.routes.system.collect_remote_ocr_health",
+                new=AsyncMock(side_effect=asyncio.TimeoutError()),
+            ),
+            patch("app.api.routes.system.is_remote_worker_wakeup_configured", return_value=False),
+            patch("app.api.routes.system.probe_storage_health", new=AsyncMock(return_value=_healthy_storage())),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value=_default_audio_cache(0)),
+            ),
+        ):
+            timeout_report = await AdminSystemService(repo, voice).health(workers={})
+
+        by_timeout = {item.id: item for item in timeout_report.services}
+        self.assertEqual(by_timeout["ocr_worker"].status, "DEGRADED")
+        self.assertEqual(by_timeout["ocr_worker"].detail_status, "unknown")
+        self.assertEqual(by_timeout["ocr_worker"].operational_state, "Unknown")
+        self.assertEqual(by_timeout["ocr_worker"].last_error, "OCR_HEALTH_PROBE_TIMEOUT")
+        self.assertNotEqual(by_timeout["ocr_worker"].last_error, "REMOTE_OCR_WORKER_UNCONFIGURED")
+
+        # 2. Hosted empty queue with no remote URL -> Standby (no false REMOTE_OCR_WORKER_UNCONFIGURED)
+        hosted_idle = {
+            "mode": "remote_worker",
+            "ready": False,
+            "wakeup_configured": False,
+            "probe_degraded": False,
+            "engines": {},
+            "workers": [],
+            "queue": {"pending_total": 0, "active_total": 0},
+        }
+        with (
+            patch.dict(os.environ, {"RENDER": "true", "APP_ENVIRONMENT": "production"}, clear=False),
+            patch("app.api.routes.system.is_remote_ocr_mode", return_value=True),
+            patch(
+                "app.api.routes.system.collect_remote_ocr_health",
+                new=AsyncMock(return_value=hosted_idle),
+            ),
+            patch("app.api.routes.system.probe_storage_health", new=AsyncMock(return_value=_healthy_storage())),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value=_default_audio_cache(0)),
+            ),
+        ):
+            idle_report = await AdminSystemService(repo, voice).health(workers={})
+
+        by_idle = {item.id: item for item in idle_report.services}
+        self.assertEqual(by_idle["ocr_worker"].detail_status, "standby")
+        self.assertEqual(by_idle["ocr_worker"].operational_state, "Standby")
+        self.assertIsNone(by_idle["ocr_worker"].last_error)
+
+        # 3. Online laptop worker win-ocr-c -> all 5 OCR entries HEALTHY
+        win_worker_online = {
+            "mode": "remote_worker",
+            "ready": True,
+            "wakeup_configured": False,
+            "probe_degraded": False,
+            "engines": {
+                "paddleocr": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+                "vietocr": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+                "tesseract_vie": {"status": "HEALTHY", "detail_status": "inference_verified", "installed": True, "loaded": True, "inference_verified": True},
+            },
+            "workers": [
+                {"worker_id": "win-ocr-c", "online": True, "ready": True, "standby_mode": "quiet_standby", "engines": {}}
+            ],
+            "queue": {"pending_total": 0, "active_total": 0},
+        }
+        with (
+            patch.dict(os.environ, {"RENDER": "true", "APP_ENVIRONMENT": "production"}, clear=False),
+            patch("app.api.routes.system.is_remote_ocr_mode", return_value=True),
+            patch(
+                "app.api.routes.system.collect_remote_ocr_health",
+                new=AsyncMock(return_value=win_worker_online),
+            ),
+            patch("app.api.routes.system.probe_storage_health", new=AsyncMock(return_value=_healthy_storage())),
+            patch(
+                "app.api.routes.system.TtsAudioCacheService.get_summary",
+                new=AsyncMock(return_value=_default_audio_cache(0)),
+            ),
+        ):
+            online_report = await AdminSystemService(repo, voice).health(workers={})
+
+        by_online = {item.id: item for item in online_report.services}
+        for ocr_id in ("ocr_worker", "paddleocr", "vietocr", "tesseract", "tesseract_vie"):
+            self.assertEqual(by_online[ocr_id].status, "HEALTHY", ocr_id)
+
+    async def test_queue_metrics_parent_email_and_ocr_training_ignore_colab_wait_or_active_lease(
+        self,
+    ) -> None:
+        from sqlalchemy import create_engine, text
+        from sqlalchemy.orm import sessionmaker
+
+        sync_engine = create_engine("sqlite:///:memory:")
+        try:
+            with sync_engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE parentemaildeliveries (
+                            status TEXT NOT NULL,
+                            nextattemptat TEXT,
+                            createdat TEXT NOT NULL,
+                            sentat TEXT
+                        )
+                        """
+                    )
+                )
+                conn.execute(
+                    text(
+                        """
+                        CREATE TABLE viread_ocr_training_jobs (
+                            status TEXT NOT NULL,
+                            target TEXT,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            lease_expires_at TEXT
+                        )
+                        """
+                    )
+                )
+                now = datetime.now(timezone.utc)
+                old_ts = (now - timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+                recent_ts = (now - timedelta(minutes=2)).strftime("%Y-%m-%d %H:%M:%S")
+                future_ts = (now + timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO parentemaildeliveries (status, nextattemptat, createdat, sentat)
+                        VALUES
+                            ('SENT', NULL, :old_ts, :recent_ts),
+                            ('RETRY', :old_ts, :old_ts, NULL)
+                        """
+                    ),
+                    {"old_ts": old_ts, "recent_ts": recent_ts},
+                )
+                conn.execute(
+                    text(
+                        """
+                        INSERT INTO viread_ocr_training_jobs (status, target, created_at, updated_at, lease_expires_at)
+                        VALUES
+                            ('WAITING_FOR_COLAB_WORKER', 'COLAB', :old_ts, :old_ts, NULL),
+                            ('COLAB_RUNNING', 'COLAB', :old_ts, :recent_ts, :future_ts),
+                            ('CANDIDATE', 'COLAB', :old_ts, :recent_ts, NULL)
+                        """
+                    ),
+                    {"old_ts": old_ts, "recent_ts": recent_ts, "future_ts": future_ts},
+                )
+
+            class _Bridge:
+                def __init__(self, s):
+                    self.s = s
+                    self.sync_session = s
+                    self.bind = s.bind
+
+                async def execute(self, stmt, params=None):
+                    return self.s.execute(stmt, params) if params is not None else self.s.execute(stmt)
+
+            with sessionmaker(bind=sync_engine)() as sess:
+                metrics = await runtime_diagnostics.collect_worker_queue_metrics(_Bridge(sess))  # type: ignore[arg-type]
+
+            email_m = metrics["parent_email_dispatcher"]
+            self.assertEqual(email_m["queue_depth"], 1)
+            self.assertIsNotNone(email_m["last_success_at"])
+            self.assertIsNotNone(email_m["oldest_pending_job_age_seconds"])
+
+            train_m = metrics["viread_ocr_training"]
+            self.assertEqual(train_m["queue_depth"], 2)
+            self.assertIsNotNone(train_m["last_success_at"])
+            self.assertIsNone(train_m["oldest_pending_job_age_seconds"])
+        finally:
+            sync_engine.dispose()
+
+    async def test_tts_cache_summary_ram_ttl_cache_hits_once_and_invalidates(self) -> None:
+        from app.repositories.tts_audio_cache_repository import TtsAudioCacheRepository
+        from app.services.tts_audio_cache_service import (
+            TtsAudioCacheService,
+            invalidate_tts_cache_summary_cache,
+        )
+
+        mock_repo = MagicMock(spec=TtsAudioCacheRepository)
+        mock_repo.get_summary = AsyncMock(
+            side_effect=[
+                {
+                    "entry_count": 3,
+                    "storage_used_bytes": 100,
+                    "daily_egress_bytes": 10,
+                    "hit_count": 2,
+                    "miss_count": 1,
+                },
+                {
+                    "entry_count": 4,
+                    "storage_used_bytes": 150,
+                    "daily_egress_bytes": 12,
+                    "hit_count": 3,
+                    "miss_count": 1,
+                },
+            ]
+        )
+        fake_db = MagicMock(spec=AsyncSession)
+        fake_db.bind = object()
+        svc = TtsAudioCacheService(fake_db)
+        svc.repo = mock_repo
+        first = await svc.get_summary()
+        second = await svc.get_summary()
+        self.assertEqual(first["entry_count"], 3)
+        self.assertEqual(second["entry_count"], 3)
+        self.assertEqual(mock_repo.get_summary.await_count, 1)
+
+        invalidate_tts_cache_summary_cache()
+        third = await svc.get_summary()
+        self.assertEqual(third["entry_count"], 4)
+        self.assertEqual(mock_repo.get_summary.await_count, 2)
 
 
 if __name__ == "__main__":

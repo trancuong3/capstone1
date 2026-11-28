@@ -131,6 +131,37 @@ const mediaUrl = z
       !url.password
     );
   }, "Địa chỉ media không hợp lệ.");
+export const melodyNoteSchema = z.object({
+  start_ms: milliseconds,
+  end_ms: milliseconds,
+  midi: z.number().min(24).max(108),
+  hz: z.number().positive().max(4000),
+  confidence: z.number().min(0).max(1).default(0.8),
+  voiced: z.boolean().default(true),
+  syllable_id: z.string().nullable().optional(),
+  line_id: z.string().nullable().optional(),
+  text: z.string().nullable().optional(),
+});
+
+export const melodyContourPointSchema = z.object({
+  time_ms: milliseconds,
+  hz: z.number().positive().max(4000),
+  midi: z.number().min(24).max(108),
+  confidence: z.number().min(0).max(1).default(0.8),
+});
+
+export const melodyProfileSchema = z.object({
+  melody_version: z.number().int().min(1).default(1),
+  hop_ms: z.number().int().min(10).max(200).default(40),
+  duration_ms: milliseconds,
+  min_midi: z.number().min(24).max(108),
+  max_midi: z.number().min(24).max(108),
+  median_midi: z.number().min(24).max(108),
+  bpm: z.number().min(30).max(240).nullable().optional(),
+  notes: z.array(melodyNoteSchema).max(1500).default([]),
+  pitch_contour: z.array(melodyContourPointSchema).max(3000).default([]),
+});
+
 export const karaokePreviewSchema = z.object({
   song_id: z.guid(),
   version_id: z.guid(),
@@ -142,6 +173,7 @@ export const karaokePreviewSchema = z.object({
   audio_url_expires_at: date,
   cover_url: mediaUrl.nullable(),
   lyrics: lyricsSchema,
+  melody_profile: melodyProfileSchema.nullable().optional(),
 });
 export const songCardSchema = karaokePreviewSchema
   .pick({
@@ -196,6 +228,11 @@ export type KaraokeLine = KaraokeLyrics["lines"][number];
 export type KaraokeSyllable = z.infer<typeof syllableSchema>;
 export type AdminKaraokeDetail = z.infer<typeof adminKaraokeDetailSchema>;
 export type AdminKaraokeList = z.infer<typeof adminKaraokeListSchema>;
+export type KaraokeMelodyNote = z.infer<typeof melodyNoteSchema>;
+export type KaraokeMelodyContourPoint = z.infer<
+  typeof melodyContourPointSchema
+>;
+export type KaraokeMelodyProfile = z.infer<typeof melodyProfileSchema>;
 export type KaraokePreview = z.infer<typeof karaokePreviewSchema>;
 export type SongCard = z.infer<typeof songCardSchema>;
 export type KaraokeSongCard = SongCard;

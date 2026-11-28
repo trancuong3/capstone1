@@ -12,7 +12,8 @@ from starlette.concurrency import run_in_threadpool
 from app.models.karaoke import utcnow
 from app.repositories.karaoke_repository import KaraokeRepository
 from app.schemas.karaoke import (
-    AdminDetail, AdminList, AdminSongSummary, DraftPreview, Lyrics, Playback, SongCard, SongList,
+    AdminDetail, AdminList, AdminSongSummary, DraftPreview, Lyrics, MelodyExtractResponse,
+    MelodyProfileRead, Playback, SongCard, SongList,
     ValidationIssue, ValidationRead, VersionRead, MAX_AUDIO_BYTES, MAX_COVER_BYTES,
 )
 from app.services.karaoke_media_service import inspect_audio, normalize_cover, read_upload
@@ -452,7 +453,27 @@ class KaraokeService:
             result = await self._detail(state)
         return result
 
-    async def _media_dto(self, song_id, version):
+    async def _resolve_melody_profile(self, version):
+        raw = getattr(version, "melody_profile", None)
+        if not isinstance(raw, dict) and hasattr(self.repository, "db"):
+            from app.repositories.karaoke_practice_repository import KaraokePracticeRepository
+
+            practice_repo = KaraokePracticeRepository(self.repository.db)
+            stored = await practice_repo.get_musical_profile(version.id)
+            if stored is not None and isinstance(stored.ProfileJson, dict):
+                candidate = stored.ProfileJson.get("melody_profile")
+                if isinstance(candidate, dict):
+                    raw = candidate
+            if not isinstance(raw, dict):
+                raw = await practice_repo.get_version_melody_profile(version.id)
+        if not isinstance(raw, dict):
+            return None
+        try:
+            return MelodyProfileRead.model_validate(raw)
+        except ValidationError:
+            return None
+
+    async def _media_dto(self, song_id, version, *, melody_profile=None):
         await self._media_available(song_id, version)
         # Expiry is conservative: start the clock before asking Storage to sign.
         expires = utcnow() + timedelta(seconds=URL_TTL)
@@ -462,17 +483,22 @@ class KaraokeService:
         return dict(song_id=song_id, version_id=version.id, title=version.title,
                     author=version.author, duration_ms=version.duration_ms,
                     audio_url=audio_url, audio_url_expires_at=expires,
-                    cover_url=cover_url, lyrics=version.lyrics)
+                    cover_url=cover_url, lyrics=version.lyrics,
+                    melody_profile=melody_profile)
 
     async def preview(self, actor_id, song_id):
-        state = await self._admin_snapshot(actor_id, song_id)
-        if state.draft is None:
-            raise HTTPException(409, "Karaoke draft is missing")
-        if not state.draft.audio_path:
-            raise HTTPException(422, "Karaoke audio is required")
+        async with self.repository.read():
+            await self._actor(actor_id, "admin")
+            state = await self._state(song_id)
+            if state.draft is None:
+                raise HTTPException(409, "Karaoke draft is missing")
+            if not state.draft.audio_path:
+                raise HTTPException(422, "Karaoke audio is required")
+            melody = await self._resolve_melody_profile(state.draft)
+            snapshot = state.snapshot()
         # Timing editor must hear audio before all lyric timings are completed.
-        return DraftPreview(revision=state.song.revision,
-                            **await self._media_dto(song_id, state.draft))
+        return DraftPreview(revision=snapshot.song.revision,
+                            **await self._media_dto(song_id, snapshot.draft, melody_profile=melody))
 
     async def _load_child_difficult_words(self, actor_id, child_id, *, limit: int = 12) -> list[str]:
         custom_fn = getattr(self.repository, "difficult_words", None)
@@ -554,7 +580,118 @@ class KaraokeService:
                 raise HTTPException(404, "Karaoke song not found")
             if expected_version_id is not None and version.id != expected_version_id:
                 raise HTTPException(409, "Karaoke published version changed")
+            melody = await self._resolve_melody_profile(version)
             snapshot = state.snapshot()
         if content_issues(snapshot.published):
             raise HTTPException(503, "Karaoke content is unavailable")
-        return Playback(**await self._media_dto(song_id, snapshot.published))
+        return Playback(**await self._media_dto(song_id, snapshot.published, melody_profile=melody))
+
+    async def extract_melody(self, actor_id, song_id):
+        """Admin backfill/re-extract reference `melody_profile` from reference or song audio."""
+        from app.services.karaoke_melody_extractor import (
+            build_musical_profile_payload,
+            extract_melody_profile,
+        )
+
+        async with self.repository.read():
+            await self._actor(actor_id, "admin")
+            state = await self._state(song_id)
+            target_version = state.published or state.draft
+            if target_version is None:
+                raise HTTPException(404, "Karaoke song version not found")
+            version_id = target_version.id
+            ref_path = getattr(target_version, "reference_audio_path", None)
+            ref_size = getattr(target_version, "reference_audio_size_bytes", None)
+            audio_path = getattr(target_version, "audio_path", None)
+            audio_size = getattr(target_version, "audio_size_bytes", None)
+            duration_ms = getattr(target_version, "duration_ms", None)
+            lyrics_json = deepcopy(target_version.lyrics)
+            origin_job_id = getattr(target_version, "origin_job_id", None)
+            if not ref_path and origin_job_id and hasattr(self.repository, "db"):
+                from sqlalchemy import select
+                from app.models.karaoke_processing import KaraokeProcessingJob
+
+                origin = await self.repository.db.scalar(
+                    select(KaraokeProcessingJob).where(
+                        KaraokeProcessingJob.id == origin_job_id,
+                        KaraokeProcessingJob.song_id == song_id,
+                    )
+                )
+                if (
+                    origin is not None
+                    and origin.mode == "VOCAL_TRACK"
+                    and origin.status == "APPLIED"
+                    and origin.input_audio_path
+                ):
+                    ref_path = origin.input_audio_path
+                    ref_size = origin.input_audio_size_bytes
+
+        if ref_path:
+            source_kind = "reference_audio"
+            download_path, download_size = ref_path, ref_size
+        elif audio_path:
+            source_kind = "audio"
+            download_path, download_size = audio_path, audio_size
+        else:
+            raise HTTPException(422, "Karaoke audio is required for melody extraction")
+
+        audio_bytes = await run_in_threadpool(
+            self.storage.download, download_path, song_id, download_size
+        )
+        raw_profile = await run_in_threadpool(
+            extract_melody_profile,
+            audio_bytes,
+            lyrics=lyrics_json if isinstance(lyrics_json, dict) else None,
+            duration_ms=duration_ms,
+        )
+        validated = None
+        if raw_profile is not None:
+            try:
+                validated = MelodyProfileRead.model_validate(raw_profile)
+            except ValidationError:
+                raw_profile = None
+                validated = None
+
+        persisted = False
+        storage_ready = True
+        if raw_profile is not None:
+            if hasattr(self.repository, "db"):
+                from app.repositories.karaoke_practice_repository import KaraokePracticeRepository
+
+                async with self.repository.write():
+                    await self._actor(actor_id, "admin")
+                    practice_repo = KaraokePracticeRepository(self.repository.db)
+                    storage_ready = await practice_repo.is_storage_ready()
+                    payload_json = build_musical_profile_payload(
+                        raw_profile, lyrics_json if isinstance(lyrics_json, dict) else None
+                    )
+                    if storage_ready:
+                        persisted = await practice_repo.upsert_musical_profile(
+                            version_id,
+                            bpm=payload_json.get("bpm"),
+                            audio_type="DUAL_TRACK" if source_kind == "reference_audio" else "VOCAL_FULL",
+                            has_pitch_contour=bool(payload_json.get("pitch_contour")),
+                            has_beat_grid=bool(payload_json.get("beat_grid_ms")),
+                            source_method="AUDIO_DSP",
+                            profile_json=payload_json,
+                        )
+                    col_saved = await practice_repo.save_version_melody_profile(version_id, raw_profile)
+                    persisted = persisted or col_saved
+            else:
+                # In-memory test double path
+                async with self.repository.write():
+                    await self._actor(actor_id, "admin")
+                    state = await self._state(song_id, lock=True)
+                    target = state.published or state.draft
+                    if target is not None:
+                        setattr(target, "melody_profile", raw_profile)
+                        persisted = True
+
+        return MelodyExtractResponse(
+            song_id=song_id,
+            version_id=version_id,
+            source_audio=source_kind,
+            melody_profile=validated,
+            persisted=persisted,
+            storage_ready=storage_ready,
+        )

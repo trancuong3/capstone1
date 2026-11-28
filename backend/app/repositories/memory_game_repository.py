@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -25,6 +25,7 @@ class ChildProjection:
     Id: UUID
     ParentId: UUID
     Grade: int
+    Settings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +127,12 @@ class MemoryGameRepository:
         parent_id: UUID,
     ) -> ChildProjection | None:
         result = await self.db.execute(
-            select(ChildProfile.Id, ChildProfile.ParentId, ChildProfile.Grade).where(
+            select(
+                ChildProfile.Id,
+                ChildProfile.ParentId,
+                ChildProfile.Grade,
+                ChildProfile.Settings,
+            ).where(
                 ChildProfile.Id == child_id,
                 ChildProfile.ParentId == parent_id,
             )
@@ -134,7 +140,13 @@ class MemoryGameRepository:
         row = result.one_or_none()
         if row is None:
             return None
-        return ChildProjection(Id=row.Id, ParentId=row.ParentId, Grade=int(row.Grade))
+        raw_settings = getattr(row, "Settings", None)
+        return ChildProjection(
+            Id=row.Id,
+            ParentId=row.ParentId,
+            Grade=int(row.Grade),
+            Settings=dict(raw_settings) if isinstance(raw_settings, dict) else {},
+        )
 
     async def recent_difficult_words(
         self,

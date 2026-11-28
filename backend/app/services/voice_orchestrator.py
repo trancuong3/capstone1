@@ -90,12 +90,19 @@ _SESSION_LOCK_TTL_SECONDS = 4 * 3600.0
 _session_voice_locks: "OrderedDict[tuple[str, str], tuple[float, str, str]]" = OrderedDict()
 _tts_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
 
+_ELEVENLABS_QUOTA_COOLDOWN_SECONDS = 300.0
+_elevenlabs_tts_cooldown_until: float = 0.0
+_elevenlabs_stt_cooldown_until: float = 0.0
+
 
 def clear_voice_orchestrator_caches() -> None:
+    global _elevenlabs_tts_cooldown_until, _elevenlabs_stt_cooldown_until
     _turn_results.clear()
     _turn_inflight.clear()
     _session_voice_locks.clear()
     _tts_inflight.clear()
+    _elevenlabs_tts_cooldown_until = 0.0
+    _elevenlabs_stt_cooldown_until = 0.0
 
 
 def _prune_session_voice_locks(now: float) -> None:
@@ -257,13 +264,50 @@ class VoiceOrchestrator:
                 "stt_cooldown": self.google.is_stt_in_cooldown(),
                 "tts_cooldown": self.google.is_tts_in_cooldown(),
             },
-            "elevenlabs": {
-                "configured": self.elevenlabs.is_configured(),
-                "stt_configured": self.elevenlabs.is_configured(),
-                "tts_configured": self.elevenlabs.is_configured(),
-                "model_id": self.elevenlabs.get_configured_model_id(),
-                "voice_id": self.elevenlabs.get_configured_voice_id(),
-            },
+            "elevenlabs": self._elevenlabs_status(),
+        }
+
+    def _is_elevenlabs_tts_in_cooldown(self) -> bool:
+        fn = getattr(self.elevenlabs, "is_tts_in_cooldown", None)
+        if callable(fn) and fn():
+            return True
+        return time.monotonic() < _elevenlabs_tts_cooldown_until
+
+    def _is_elevenlabs_stt_in_cooldown(self) -> bool:
+        fn = getattr(self.elevenlabs, "is_stt_in_cooldown", None)
+        if callable(fn) and fn():
+            return True
+        return time.monotonic() < _elevenlabs_stt_cooldown_until
+
+    @staticmethod
+    def _mark_elevenlabs_cooldown(
+        capability: Literal["tts", "stt"], err: VoiceProviderError
+    ) -> None:
+        global _elevenlabs_tts_cooldown_until, _elevenlabs_stt_cooldown_until
+        code_upper = str(getattr(err, "code", "") or "").upper()
+        status_code = getattr(err, "status_code", None)
+        if (
+            "QUOTA" in code_upper
+            or "RATE_LIMIT" in code_upper
+            or status_code == 429
+        ):
+            until = time.monotonic() + _ELEVENLABS_QUOTA_COOLDOWN_SECONDS
+            if capability == "tts":
+                _elevenlabs_tts_cooldown_until = until
+            else:
+                _elevenlabs_stt_cooldown_until = until
+
+    def _elevenlabs_status(self) -> dict[str, Any]:
+        is_conf_fn = getattr(self.elevenlabs, "is_configured", None)
+        el_configured = bool(callable(is_conf_fn) and is_conf_fn())
+        return {
+            "configured": el_configured,
+            "stt_configured": el_configured,
+            "tts_configured": el_configured,
+            "stt_cooldown": self._is_elevenlabs_stt_in_cooldown(),
+            "tts_cooldown": self._is_elevenlabs_tts_in_cooldown(),
+            "model_id": self.elevenlabs.get_configured_model_id(),
+            "voice_id": self.elevenlabs.get_configured_voice_id(),
         }
 
     async def list_voices(
@@ -425,7 +469,7 @@ class VoiceOrchestrator:
         self, policy: VoicePolicyContext, requested_voice_id: str
     ) -> str | None:
         """Allow ElevenLabs TTS ONLY when parent opted into cloud fallback AND gender matches."""
-        if not self.elevenlabs.is_configured():
+        if not self.elevenlabs.is_configured() or self._is_elevenlabs_tts_in_cooldown():
             return None
         if (
             policy.provider_mode != "local_with_google_fallback"
@@ -438,6 +482,7 @@ class VoiceOrchestrator:
     def _can_use_elevenlabs_stt(self, policy: VoicePolicyContext) -> bool:
         return (
             self.elevenlabs.is_configured()
+            and not self._is_elevenlabs_stt_in_cooldown()
             and policy.provider_mode == "local_with_google_fallback"
             and policy.allow_google_stt
         )
@@ -706,11 +751,15 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
-                    el_audio = await self.elevenlabs.synthesize(
-                        text=text,
-                        requested_voice_id=el_voice_id,
-                        speed=speed,
-                    )
+                    try:
+                        el_audio = await self.elevenlabs.synthesize(
+                            text=text,
+                            requested_voice_id=el_voice_id,
+                            speed=speed,
+                        )
+                    except VoiceProviderError as el_err:
+                        self._mark_elevenlabs_cooldown("tts", el_err)
+                        raise
                     el_resolved_voice = (
                         el_audio.resolved_voice_id
                         or self.elevenlabs.get_configured_voice_id()
@@ -1064,11 +1113,15 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
-                    el_timed = await self.elevenlabs.synthesize_timed(
-                        words=words,
-                        requested_voice_id=el_voice_id,
-                        speed=speed,
-                    )
+                    try:
+                        el_timed = await self.elevenlabs.synthesize_timed(
+                            words=words,
+                            requested_voice_id=el_voice_id,
+                            speed=speed,
+                        )
+                    except VoiceProviderError as el_err:
+                        self._mark_elevenlabs_cooldown("tts", el_err)
+                        raise
                     if (
                         cache_svc is not None
                         and cache_target is not None
@@ -1345,11 +1398,15 @@ class VoiceOrchestrator:
                 el_voice_id = self._resolve_elevenlabs_tts_voice(ctx, voice_id)
                 if el_voice_id:
                     t_el = time.perf_counter()
-                    el_phonics = await self.elevenlabs.synthesize_phonics(
-                        steps=steps,
-                        requested_voice_id=el_voice_id,
-                        speed=speed,
-                    )
+                    try:
+                        el_phonics = await self.elevenlabs.synthesize_phonics(
+                            steps=steps,
+                            requested_voice_id=el_voice_id,
+                            speed=speed,
+                        )
+                    except VoiceProviderError as el_err:
+                        self._mark_elevenlabs_cooldown("tts", el_err)
+                        raise
                     if (
                         cache_svc is not None
                         and cache_target is not None
@@ -1515,13 +1572,17 @@ class VoiceOrchestrator:
         except LocalVoiceTechnicalError as local_err:
             if self._can_use_elevenlabs_stt(ctx):
                 t_el = time.perf_counter()
-                el_res = await self.elevenlabs.transcribe(
-                    audio=audio,
-                    filename=filename,
-                    content_type=content_type,
-                    language_code=language_code or "vi",
-                    keyterms=keyterms,
-                )
+                try:
+                    el_res = await self.elevenlabs.transcribe(
+                        audio=audio,
+                        filename=filename,
+                        content_type=content_type,
+                        language_code=language_code or "vi",
+                        keyterms=keyterms,
+                    )
+                except VoiceProviderError as el_err:
+                    self._mark_elevenlabs_cooldown("stt", el_err)
+                    raise
                 logger.info(
                     "stt_ok provider=elevenlabs fallback=1 reason=%s ms=%.1f session=%s page=%s turn=%s request_id=%s",
                     local_err.code,

@@ -1228,6 +1228,7 @@ class RobustnessAndRegressionTests(unittest.IsolatedAsyncioTestCase):
         await repo.recover_stale_sending(
             SUNDAY_MORNING_UTC, stale_after=timedelta(minutes=10)
         )
+        await repo.expire_stale_retries(SUNDAY_MORNING_UTC)
         await repo.claim_or_retry_delivery(
             parent_id=PARENT_ID,
             child_id=None,
@@ -1441,6 +1442,367 @@ class RobustnessAndRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(acc_uncertain)
         self.assertEqual(dict(words_uncertain), {})
+
+    async def test_expire_stale_retries_skips_resumed_inactivity_keeps_active_multichild_and_expires_ttl(self):
+        from app.repositories.parent_email_notification_repository import (
+            ParentEmailNotificationRepository,
+        )
+
+        parent_resumed = uuid4()
+        parent_still_inactive = uuid4()
+        child_resumed = uuid4()
+        child_read_today = uuid4()
+        child_still_idle = uuid4()
+
+        # naive UTC timestamps verify _ensure_utc normalization safety
+        now_utc = SUNDAY_NIGHT_UTC  # 22:30 VN (quiet hours)
+        created_recent = now_utc - timedelta(hours=14)
+        created_expired = now_utc - timedelta(hours=25)
+        created_digest_expired = now_utc - timedelta(hours=37)
+
+        row_resumed = SimpleNamespace(
+            Id=uuid4(),
+            ParentId=parent_resumed,
+            Category="INACTIVITY_ALERT",
+            Status="RETRY",
+            Attempts=1,
+            NextAttemptAt=now_utc - timedelta(hours=10),
+            ErrorCode="EMAIL_PROVIDER_UNAVAILABLE",
+            CreatedAt=created_recent.replace(tzinfo=None),
+        )
+        row_multichild = SimpleNamespace(
+            Id=uuid4(),
+            ParentId=parent_still_inactive,
+            Category="INACTIVITY_ALERT",
+            Status="RETRY",
+            Attempts=1,
+            NextAttemptAt=now_utc - timedelta(hours=10),
+            ErrorCode="EMAIL_PROVIDER_UNAVAILABLE",
+            CreatedAt=created_recent,
+        )
+        row_ttl_expired = SimpleNamespace(
+            Id=uuid4(),
+            ParentId=parent_still_inactive,
+            Category="WEEKLY_DIGEST",
+            Status="RETRY",
+            Attempts=1,
+            NextAttemptAt=now_utc - timedelta(hours=2),
+            ErrorCode="EMAIL_PROVIDER_UNAVAILABLE",
+            CreatedAt=created_digest_expired,
+        )
+        row_inactivity_ttl_expired = SimpleNamespace(
+            Id=uuid4(),
+            ParentId=parent_still_inactive,
+            Category="INACTIVITY_ALERT",
+            Status="RETRY",
+            Attempts=1,
+            NextAttemptAt=now_utc - timedelta(hours=2),
+            ErrorCode="EMAIL_PROVIDER_UNAVAILABLE",
+            CreatedAt=created_expired,
+        )
+        row_max_attempts = SimpleNamespace(
+            Id=uuid4(),
+            ParentId=parent_resumed,
+            Category="MILESTONE",
+            Status="RETRY",
+            Attempts=3,
+            NextAttemptAt=now_utc - timedelta(minutes=5),
+            ErrorCode=None,
+            CreatedAt=created_recent,
+        )
+
+        class RetryStubSession:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.committed = False
+                self.compiled_sql: list[str] = []
+
+            async def execute(self, stmt, *_args, **_kwargs):
+                from sqlalchemy.dialects import postgresql
+
+                self.compiled_sql.append(str(stmt.compile(dialect=postgresql.dialect())))
+                self.calls += 1
+                if self.calls == 1:
+                    return SimpleNamespace(
+                        scalars=lambda: SimpleNamespace(
+                            all=lambda: [
+                                row_resumed,
+                                row_multichild,
+                                row_ttl_expired,
+                                row_inactivity_ttl_expired,
+                                row_max_attempts,
+                            ]
+                        )
+                    )
+                if self.calls == 2:
+                    return SimpleNamespace(
+                        all=lambda: [
+                            (parent_resumed, 1),
+                            (parent_still_inactive, 1),
+                        ]
+                    )
+                if self.calls == 3:
+                    return SimpleNamespace(
+                        scalars=lambda: SimpleNamespace(
+                            all=lambda: [
+                                make_prefs(
+                                    ParentId=parent_resumed,
+                                    InactivityAlertEnabled=True,
+                                    InactivityDays=5,
+                                    Timezone="Asia/Ho_Chi_Minh",
+                                ),
+                                make_prefs(
+                                    ParentId=parent_still_inactive,
+                                    InactivityAlertEnabled=True,
+                                    InactivityDays=5,
+                                    Timezone="Asia/Ho_Chi_Minh",
+                                ),
+                            ]
+                        )
+                    )
+                if self.calls == 4:
+                    return SimpleNamespace(
+                        all=lambda: [
+                            (child_resumed, parent_resumed, now_utc - timedelta(days=10)),
+                            (child_read_today, parent_still_inactive, now_utc - timedelta(days=10)),
+                            (child_still_idle, parent_still_inactive, now_utc - timedelta(days=10)),
+                        ]
+                    )
+                return SimpleNamespace(
+                    all=lambda: [
+                        (child_resumed, (now_utc - timedelta(hours=3)).replace(tzinfo=None)),
+                        (child_read_today, now_utc - timedelta(hours=2)),
+                        (child_still_idle, now_utc - timedelta(days=7)),
+                    ]
+                )
+
+            async def commit(self) -> None:
+                self.committed = True
+
+        stub_session = RetryStubSession()
+        repo = ParentEmailNotificationRepository(stub_session)  # type: ignore[arg-type]
+        updated = await repo.expire_stale_retries(now_utc, max_attempts=3)
+
+        self.assertEqual(updated, 4)
+        self.assertTrue(stub_session.committed)
+        self.assertEqual(row_resumed.Status, "SKIPPED")
+        self.assertEqual(row_resumed.ErrorCode, "CHILD_ACTIVITY_RESUMED")
+        self.assertIsNone(row_resumed.NextAttemptAt)
+
+        # Multi-child parent still has child_still_idle inactive for 7 days >= 5
+        self.assertEqual(row_multichild.Status, "RETRY")
+        self.assertIsNotNone(row_multichild.NextAttemptAt)
+
+        # TTL expired rows are skipped
+        self.assertEqual(row_ttl_expired.Status, "SKIPPED")
+        self.assertEqual(row_ttl_expired.ErrorCode, "RETRY_EXPIRED")
+        self.assertEqual(row_inactivity_ttl_expired.Status, "SKIPPED")
+        self.assertEqual(row_inactivity_ttl_expired.ErrorCode, "RETRY_EXPIRED")
+
+        # Attempts >= max_attempts becomes terminal FAILED
+        self.assertEqual(row_max_attempts.Status, "FAILED")
+        self.assertEqual(row_max_attempts.ErrorCode, "DELIVERY_RETRY_LIMIT")
+        self.assertEqual(len(stub_session.compiled_sql), 5)
+
+    async def test_batch_dispatch_snapshots_orm_objects_and_runs_retry_expiry_during_quiet_hours(self):
+        from app.repositories.parent_email_notification_repository import (
+            ParentDeliverySummary,
+        )
+
+        parent_a = PARENT_ID
+        parent_b = UUID("44444444-4444-4444-8444-444444444444")
+        child_a = CHILD_A_ID
+        child_b = CHILD_B_ID
+
+        class ExpiringDb:
+            def __init__(self) -> None:
+                self.expired = False
+                self.rollback_calls = 0
+
+            async def rollback(self) -> None:
+                self.expired = True
+                self.rollback_calls += 1
+
+        class ExpiringRow:
+            def __init__(self, db_ref: ExpiringDb, **attrs: object) -> None:
+                object.__setattr__(self, "_db_ref", db_ref)
+                object.__setattr__(self, "_attrs", attrs)
+
+            def __getattr__(self, name: str):
+                db_ref = object.__getattribute__(self, "_db_ref")
+                if db_ref.expired:
+                    raise RuntimeError(f"MissingGreenlet: expired access to {name}")
+                attrs = object.__getattribute__(self, "_attrs")
+                if name in attrs:
+                    return attrs[name]
+                raise AttributeError(name)
+
+        class BatchExpiringRepo(FakeNotificationRepo):
+            def __init__(self) -> None:
+                super().__init__()
+                self.db = ExpiringDb()
+                self.expire_stale_retries_calls = 0
+
+            async def expire_stale_retries(self, _now: datetime, *, max_attempts: int = 3) -> int:
+                self.expire_stale_retries_calls += 1
+                self.db.expired = False
+                return 1
+
+            async def list_active_parents_with_children(
+                self,
+                *,
+                limit: int = 200,
+                after_created_at: datetime | None = None,
+                after_id: UUID | None = None,
+            ):
+                self.db.expired = False
+                return [
+                    ActiveParentBundle(
+                        parent_id=parent_a,
+                        display_name="Mẹ Lan",
+                        children=(
+                            ExpiringRow(  # type: ignore[arg-type]
+                                self.db,
+                                Id=child_a,
+                                ParentId=parent_a,
+                                Alias="Bé An",
+                                CreatedAt=SUNDAY_MORNING_UTC - timedelta(days=20),
+                            ),
+                        ),
+                        preferences=ExpiringRow(  # type: ignore[arg-type]
+                            self.db,
+                            ParentId=parent_a,
+                            WeeklyDigestEnabled=True,
+                            InactivityAlertEnabled=True,
+                            InactivityDays=5,
+                            MilestoneEnabled=True,
+                            DigestWeekday=6,
+                            Timezone="Asia/Ho_Chi_Minh",
+                            QuietHoursStart=21,
+                            QuietHoursEnd=7,
+                            MaxEmailsPerWeek=4,
+                            UpdatedAt=SUNDAY_MORNING_UTC,
+                        ),
+                        created_at=SUNDAY_MORNING_UTC - timedelta(days=20),
+                    ),
+                    ActiveParentBundle(
+                        parent_id=parent_b,
+                        display_name="Bố Minh",
+                        children=(
+                            ExpiringRow(  # type: ignore[arg-type]
+                                self.db,
+                                Id=child_b,
+                                ParentId=parent_b,
+                                Alias="Bé Bo",
+                                CreatedAt=SUNDAY_MORNING_UTC - timedelta(days=20),
+                            ),
+                        ),
+                        preferences=ExpiringRow(  # type: ignore[arg-type]
+                            self.db,
+                            ParentId=parent_b,
+                            WeeklyDigestEnabled=True,
+                            InactivityAlertEnabled=True,
+                            InactivityDays=5,
+                            MilestoneEnabled=True,
+                            DigestWeekday=6,
+                            Timezone="Asia/Ho_Chi_Minh",
+                            QuietHoursStart=21,
+                            QuietHoursEnd=7,
+                            MaxEmailsPerWeek=4,
+                            UpdatedAt=SUNDAY_MORNING_UTC,
+                        ),
+                        created_at=SUNDAY_MORNING_UTC - timedelta(days=19),
+                    ),
+                ]
+
+            async def get_parent_delivery_summaries_batch(
+                self, parent_ids: list[UUID], _now: datetime
+            ) -> dict[UUID, ParentDeliverySummary]:
+                return {
+                    pid: ParentDeliverySummary(automated_sent_last_7d=0)
+                    for pid in parent_ids
+                }
+
+            async def list_retry_deliveries_batch(self, _parent_ids: list[UUID]):
+                return {}
+
+            async def get_children_activity_snapshots_batch(
+                self, children, _now: datetime, *, digest_child_ids=None
+            ):
+                out = {}
+                for c in children:
+                    cid = c.Id
+                    sess = ExpiringRow(
+                        self.db,
+                        Id=uuid4(),
+                        ChildId=cid,
+                        State="COMPLETED",
+                        StartedAt=SUNDAY_MORNING_UTC - timedelta(hours=3),
+                        EndedAt=SUNDAY_MORNING_UTC - timedelta(hours=2, minutes=45),
+                    )
+                    goal = ExpiringRow(
+                        self.db,
+                        Id=uuid4(),
+                        ChildId=cid,
+                        Metric="MINUTES",
+                        Period="DAILY",
+                        TargetValue=15,
+                        Timezone="Asia/Ho_Chi_Minh",
+                        StartsOn=SUNDAY_MORNING_UTC.date() - timedelta(days=7),
+                        EndsOn=None,
+                        Status="ACTIVE",
+                    )
+                    out[cid] = ChildActivitySnapshot(
+                        child=c,
+                        sessions_last_7d=(sess,),  # type: ignore[arg-type]
+                        sessions_prev_7d_count=1,
+                        sessions_last_35d=(sess,),  # type: ignore[arg-type]
+                        total_completed_sessions=1,
+                        last_session_at=sess.StartedAt,
+                        avg_fluency_last_7d=88.0,
+                        top_difficult_words_last_7d=(),
+                        active_goals=(goal,),  # type: ignore[arg-type]
+                        first_completed_session_at=sess.EndedAt,
+                    )
+                return out
+
+            async def claim_or_retry_delivery(self, **kwargs):
+                row = await super().claim_or_retry_delivery(**kwargs)
+                if row is None:
+                    return None
+                self.db.expired = False
+                return ExpiringRow(
+                    self.db,
+                    Id=row.Id,
+                    Attempts=row.Attempts,
+                    Status=row.Status,
+                )
+
+        repo = BatchExpiringRepo()
+        service = ParentEmailNotificationService(repo)  # type: ignore[arg-type]
+        sent = []
+        with patch(
+            "app.services.parent_email_notification_service.parent_email_delivery_is_configured",
+            return_value=True,
+        ), patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"):
+            # Quiet hours still runs expire_stale_retries cleanly
+            quiet_delivered = await service.dispatch_engagement_emails(
+                SUNDAY_NIGHT_UTC,
+                recipient_resolver=verified_parent,
+                message_sender=lambda m: sent.append(m) or "resend",
+            )
+            self.assertEqual(quiet_delivered, 0)
+            self.assertEqual(repo.expire_stale_retries_calls, 1)
+
+            # Active window sends both parents without triggering MissingGreenlet across rollbacks
+            active_delivered = await service.dispatch_engagement_emails(
+                SUNDAY_MORNING_UTC,
+                recipient_resolver=verified_parent,
+                message_sender=lambda m: sent.append(m) or "resend",
+            )
+        self.assertEqual(active_delivered, 4)
+        self.assertEqual(len(sent), 4)
+        self.assertGreaterEqual(repo.db.rollback_calls, 4)
 
 
 if __name__ == "__main__":

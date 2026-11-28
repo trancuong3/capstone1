@@ -36,6 +36,7 @@ from app.api.routes import reading_presence as reading_presence_route  # noqa: E
 from app.jobs import (  # noqa: E402
     admin_ai_workflow_worker,
     book_quality_worker,
+    parent_email_dispatcher_worker,
     reading_presence_alert_worker,
     reading_reminder_worker,
     viread_ocr_outbox_worker,
@@ -48,6 +49,7 @@ from app.services.worker_telemetry import (  # noqa: E402
     clear_worker_telemetry,
     get_worker_telemetry,
     persist_worker_heartbeat,
+    persist_worker_heartbeats_batch,
     read_persisted_worker_heartbeats,
 )
 
@@ -287,6 +289,70 @@ class WorkerHeartbeatPersistenceTests(unittest.IsolatedAsyncioTestCase):
         finally:
             engine.dispose()
 
+    async def test_batch_heartbeat_upsert_persists_all_workers_in_single_sql_rtt_and_deduplicates(
+        self,
+    ) -> None:
+        engine, session_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        try:
+            async with session_factory() as db:
+                original_execute = db.execute
+                execute_calls = 0
+
+                async def _counting_execute(stmt, params=None):
+                    nonlocal execute_calls
+                    execute_calls += 1
+                    return await original_execute(stmt, params)
+
+                db.execute = _counting_execute  # type: ignore[method-assign]
+                await persist_worker_heartbeats_batch(
+                    db,
+                    [
+                        {
+                            "worker_id": "viread_ocr_outbox",
+                            "execution_mode": "cron_scheduled",
+                            "ok": False,
+                            "items_processed": 0,
+                            "error_code": "INITIAL_ERR",
+                            "source": "cron",
+                        },
+                        # Duplicate key in same batch must deduplicate (keeping latest)
+                        {
+                            "worker_id": "viread_ocr_outbox",
+                            "execution_mode": "cron_scheduled",
+                            "ok": True,
+                            "items_processed": 2,
+                            "source": "cron",
+                        },
+                        {
+                            "worker_id": "parent_email_dispatcher",
+                            "execution_mode": "cron_scheduled",
+                            "ok": True,
+                            "items_processed": 4,
+                            "source": "cron",
+                        },
+                        {
+                            "worker_id": "reading_reminder",
+                            "execution_mode": "cron_scheduled",
+                            "ok": True,
+                            "items_processed": 1,
+                            "source": "cron",
+                        },
+                    ],
+                )
+                self.assertEqual(execute_calls, 1, "Batch upsert must execute strictly 1 SQL statement")
+
+            async with session_factory() as db:
+                hb = await read_persisted_worker_heartbeats(db)
+            self.assertEqual(
+                set(hb.keys()),
+                {"viread_ocr_outbox", "parent_email_dispatcher", "reading_reminder"},
+            )
+            self.assertIsNone(hb["viread_ocr_outbox"]["last_error_code"])
+            self.assertEqual(hb["viread_ocr_outbox"]["last_items_processed"], 2)
+            self.assertEqual(hb["parent_email_dispatcher"]["last_items_processed"], 4)
+        finally:
+            engine.dispose()
+
 
 class CronIsolationAndHeartbeatSweepTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -384,22 +450,23 @@ class CronIsolationAndHeartbeatSweepTests(unittest.IsolatedAsyncioTestCase):
             engine.dispose()
 
     async def test_reading_reminder_process_due_records_error_telemetry_on_failure(self) -> None:
-        @asynccontextmanager
-        async def _lock_ok(_key: int):
-            yield True
-
         broken_repo = MagicMock()
         broken_repo.create_due_occurrences_for_worker = AsyncMock(
             side_effect=ConnectionError("db lost")
         )
         fake_session = AsyncMock()
-        fake_cm = MagicMock()
-        fake_cm.__aenter__ = AsyncMock(return_value=fake_session)
-        fake_cm.__aexit__ = AsyncMock(return_value=False)
+        session_entries = 0
+
+        @asynccontextmanager
+        async def _single_session():
+            nonlocal session_entries
+            session_entries += 1
+            yield fake_session
 
         with (
-            patch.object(reading_reminder_worker, "_advisory_lock_guard", side_effect=_lock_ok),
-            patch.object(reading_reminder_worker, "AsyncSessionLocal", return_value=fake_cm),
+            patch.object(
+                reading_reminder_worker, "AsyncSessionLocal", side_effect=_single_session
+            ),
             patch.object(
                 reading_reminder_worker,
                 "ReadingManagementRepository",
@@ -409,10 +476,437 @@ class CronIsolationAndHeartbeatSweepTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ConnectionError):
                 await reading_reminder_worker.process_due_reminders_once()
 
+        self.assertEqual(session_entries, 1)
         self.assertEqual(
             get_worker_telemetry("reading_reminder")["last_error"],
             "ConnectionError",
         )
+
+    async def test_cron_runs_fast_db_sweeps_before_outbound_email_and_persists_all_8_workers(
+        self,
+    ) -> None:
+        engine, session_factory = _make_sqlite_session_factory(
+            HEARTBEATS_DDL_SQLITE,
+            BOOK_QUALITY_SCAN_RUNS_DDL_SQLITE,
+            ADMIN_AI_WORKFLOWS_DDL_SQLITE,
+        )
+        try:
+            call_order: list[str] = []
+
+            async def _fake_reap():
+                call_order.append("ocr_leases")
+                return {"requeued": 0, "dead_lettered": 0}
+
+            fake_ocr_svc = MagicMock()
+            fake_ocr_svc.reap_expired_leases = AsyncMock(side_effect=_fake_reap)
+            fake_ocr_svc.prune_stale_worker_heartbeats = AsyncMock(return_value=0)
+
+            async def _fake_reconcile(**_kw):
+                call_order.append("parent_book_submission")
+                return {"reclaimed_count": 0, "failed_count": 0}
+
+            async def _fake_outbox():
+                call_order.append("viread_ocr_outbox")
+                return False
+
+            async def _fake_training():
+                call_order.append("viread_ocr_training")
+                return {"ok": True, "colab_activity": False}
+
+            async def _fake_local_cleanup(*, max_age_hours=24):
+                call_order.append("local_scan_cleanup")
+                return 0
+
+            async def _fake_reminders(*, now=None):
+                call_order.append("reading_reminder")
+                return 3
+
+            async def _fake_alerts(*, now=None):
+                call_order.append("reading_presence")
+                return 1
+
+            async def _fake_engagement(*, now=None):
+                call_order.append("parent_email_dispatcher")
+                return 2
+
+            async def _fake_keepwarm():
+                call_order.append("hf_space_keepwarm")
+                return False
+
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "APP_ENVIRONMENT": "production",
+                        "VIREAD_WEB_DISABLE_HEAVY_WORKERS": "true",
+                    },
+                    clear=False,
+                ),
+                patch.object(cron_svc, "AsyncSessionLocal", side_effect=session_factory),
+                patch.object(cron_svc, "OcrInferenceJobService", return_value=fake_ocr_svc),
+                patch.object(
+                    cron_svc,
+                    "reconcile_orphaned_parent_submissions",
+                    new=AsyncMock(side_effect=_fake_reconcile),
+                ),
+                patch.object(
+                    cron_svc.viread_ocr_outbox_worker,
+                    "run_once",
+                    new=AsyncMock(side_effect=_fake_outbox),
+                ),
+                patch.object(
+                    cron_svc.viread_ocr_training_auto_worker,
+                    "run_maintenance_once",
+                    new=AsyncMock(side_effect=_fake_training),
+                ),
+                patch.object(
+                    cron_svc,
+                    "_cleanup_expired_local_scans",
+                    new=AsyncMock(side_effect=_fake_local_cleanup),
+                ),
+                patch.object(
+                    cron_svc,
+                    "maybe_keep_warm_hf_space_from_cron",
+                    new=AsyncMock(side_effect=_fake_keepwarm),
+                ),
+            ):
+                result = await cron_svc.run_scheduled_cron_dispatch(
+                    run_remote_sweeps=True,
+                    reminders_runner=_fake_reminders,
+                    alerts_runner=_fake_alerts,
+                    engagement_runner=_fake_engagement,
+                    temp_cleanup_runner=AsyncMock(return_value=0),
+                    parent_post_ocr_runner=AsyncMock(return_value=False),
+                )
+
+            self.assertEqual(result["sweep_errors"], [])
+            self.assertEqual(result["engagement_emails_delivered"], 2)
+            # Verify fast DB sweeps ran BEFORE outbound HTTP/email runners
+            self.assertLess(
+                call_order.index("viread_ocr_training"),
+                call_order.index("reading_reminder"),
+            )
+            self.assertLess(
+                call_order.index("viread_ocr_outbox"),
+                call_order.index("reading_reminder"),
+            )
+            self.assertLess(
+                call_order.index("reading_reminder"),
+                call_order.index("parent_email_dispatcher"),
+            )
+            self.assertLess(
+                call_order.index("parent_email_dispatcher"),
+                call_order.index("hf_space_keepwarm"),
+            )
+
+            async with session_factory() as db:
+                hb = await read_persisted_worker_heartbeats(db)
+
+            expected_8 = (
+                "parent_book_submission",
+                "admin_ai_workflow",
+                "book_quality",
+                "viread_ocr_outbox",
+                "viread_ocr_training",
+                "reading_reminder",
+                "reading_presence",
+                "parent_email_dispatcher",
+            )
+            for key in expected_8:
+                self.assertIn(key, hb, f"Missing persisted heartbeat for {key}")
+                self.assertIsNone(hb[key]["last_error_code"], f"Unexpected error for {key}")
+            self.assertEqual(hb["parent_email_dispatcher"]["last_items_processed"], 2)
+            self.assertIsNotNone(
+                get_worker_telemetry("parent_email_dispatcher")["last_success_at"]
+            )
+        finally:
+            engine.dispose()
+
+    async def test_parent_book_submission_heartbeat_not_marked_ok_when_budget_exhausted_before_running(
+        self,
+    ) -> None:
+        engine, session_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        try:
+            async def _slow_ocr_reap(**_kw):
+                await asyncio.sleep(0.05)
+                return (0, 0, 0)
+
+            with (
+                patch.object(cron_svc, "AsyncSessionLocal", side_effect=session_factory),
+                patch.object(
+                    cron_svc, "_sweep_ocr_leases_and_heartbeats", side_effect=_slow_ocr_reap
+                ),
+                patch.object(cron_svc, "_remaining_budget", side_effect=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            ):
+                await cron_svc.run_scheduled_cron_dispatch(
+                    run_remote_sweeps=True,
+                    reminders_runner=AsyncMock(return_value=0),
+                    alerts_runner=AsyncMock(return_value=0),
+                    engagement_runner=AsyncMock(return_value=0),
+                )
+
+            async with session_factory() as db:
+                hb = await read_persisted_worker_heartbeats(db)
+            self.assertNotIn("parent_book_submission", hb)
+        finally:
+            engine.dispose()
+
+    async def test_parent_email_dispatcher_dispatch_all_once_persists_all_3_email_heartbeats(
+        self,
+    ) -> None:
+        engine, session_factory = _make_sqlite_session_factory(HEARTBEATS_DDL_SQLITE)
+        try:
+            with (
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "AsyncSessionLocal",
+                    side_effect=session_factory,
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "_worker_ready",
+                    return_value=(True, "resend"),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "active_email_provider",
+                    return_value="resend",
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_alerts_once",
+                    new=AsyncMock(return_value=1),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_due_reminders_once",
+                    new=AsyncMock(return_value=3),
+                ),
+                patch.object(
+                    parent_email_dispatcher_worker,
+                    "process_engagement_emails_once",
+                    new=AsyncMock(return_value=2),
+                ),
+            ):
+                summary = await parent_email_dispatcher_worker.dispatch_all_once(scope="all")
+
+            self.assertEqual(summary["presence_sent"], 1)
+            self.assertEqual(summary["reminders_sent"], 3)
+            self.assertEqual(summary["engagement_sent"], 2)
+            async with session_factory() as db:
+                hb = await read_persisted_worker_heartbeats(db)
+            for key, expected_items in (
+                ("reading_presence", 1),
+                ("reading_reminder", 3),
+                ("parent_email_dispatcher", 6),
+            ):
+                self.assertIn(key, hb)
+                self.assertIsNone(hb[key]["last_error_code"])
+                self.assertEqual(hb[key]["last_items_processed"], expected_items)
+        finally:
+            engine.dispose()
+
+    async def test_engagement_dispatch_uses_batch_prefetch_and_respects_max_emails_cap(
+        self,
+    ) -> None:
+        from app.providers import parent_email_transport as transport
+        from app.repositories.parent_email_notification_repository import (
+            ActiveParentBundle,
+            ChildActivitySnapshot,
+            ParentDeliverySummary,
+        )
+        from app.services.parent_email_notification_service import (
+            ParentEmailNotificationService,
+        )
+
+        # Monday 2026-11-30 09:00 Asia/Ho_Chi_Minh == 02:00 UTC (non-digest day; default digest is Sunday)
+        now = datetime(2026, 11, 30, 2, 0, tzinfo=timezone.utc)
+        bundles = []
+        snapshots = {}
+        for idx in range(4):
+            pid = uuid4()
+            cid = uuid4()
+            child = SimpleNamespace(
+                Id=cid,
+                ParentId=pid,
+                Alias=f"Bé {idx}",
+                CreatedAt=now - timedelta(days=10),
+            )
+            bundles.append(
+                ActiveParentBundle(
+                    parent_id=pid,
+                    display_name=f"Parent {idx}",
+                    children=(child,),
+                    preferences=None,
+                    created_at=now - timedelta(days=20 - idx),
+                )
+            )
+            snapshots[cid] = ChildActivitySnapshot(
+                child=child,
+                sessions_last_7d=(),
+                sessions_prev_7d_count=0,
+                sessions_last_35d=(),
+                total_completed_sessions=0,
+                last_session_at=None,
+                avg_fluency_last_7d=None,
+                top_difficult_words_last_7d=(),
+                active_goals=(),
+                first_completed_session_at=None,
+            )
+
+        class _BatchRepo:
+            def __init__(self) -> None:
+                self.batch_summary_calls = 0
+                self.batch_retry_calls = 0
+                self.batch_snapshot_calls = 0
+                self.single_snapshot_calls = 0
+                self.captured_digest_child_ids: list[set[UUID]] = []
+                self.claimed: set[str] = set()
+
+            async def is_storage_ready(self) -> bool:
+                return True
+
+            async def recover_stale_sending(self, *_a, **_kw) -> int:
+                return 0
+
+            async def list_active_parents_with_children(self, **_kw):
+                return bundles
+
+            async def get_parent_delivery_summaries_batch(self, parent_ids, _now):
+                self.batch_summary_calls += 1
+                return {pid: ParentDeliverySummary(automated_sent_last_7d=0) for pid in parent_ids}
+
+            async def list_retry_deliveries_batch(self, _parent_ids):
+                self.batch_retry_calls += 1
+                return {}
+
+            async def get_children_activity_snapshots_batch(
+                self, children, _now, *, digest_child_ids=None
+            ):
+                self.batch_snapshot_calls += 1
+                self.captured_digest_child_ids.append(set(digest_child_ids or set()))
+                return {c.Id: snapshots[c.Id] for c in children}
+
+            async def get_child_activity_snapshot(self, child, _now):
+                self.single_snapshot_calls += 1
+                return snapshots[child.Id]
+
+            async def get_delivery_by_dedupe_key(self, _key):
+                return None
+
+            async def claim_or_retry_delivery(self, **kw):
+                key = kw["dedupe_key"]
+                if key in self.claimed:
+                    return None
+                self.claimed.add(key)
+                return SimpleNamespace(Id=uuid4(), Attempts=1)
+
+            async def finish_delivery(self, *_a, **_kw) -> None:
+                return None
+
+        repo = _BatchRepo()
+        svc = ParentEmailNotificationService(repo)  # type: ignore[arg-type]
+        sent = []
+
+        async def _resolve(_pid):
+            return "parent@example.test"
+
+        with (
+            patch.object(transport.settings, "RESEND_API_KEY", "re_test_key"),
+            patch.object(transport.settings, "EMAIL_FROM_ADDRESS", "no-reply@viread.app"),
+        ):
+            delivered = await svc.dispatch_engagement_emails(
+                now,
+                recipient_resolver=_resolve,
+                message_sender=lambda m: sent.append(m) or "resend",
+                max_emails=2,
+                max_seconds=10.0,
+            )
+
+        self.assertEqual(delivered, 2, "Must respect max_emails=2 cap per cron tick")
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(repo.batch_summary_calls, 1)
+        self.assertEqual(repo.batch_retry_calls, 1)
+        self.assertEqual(repo.batch_snapshot_calls, 1)
+        self.assertEqual(repo.single_snapshot_calls, 0, "Must use batch snapshot query instead of N+1")
+        self.assertEqual(
+            repo.captured_digest_child_ids,
+            [set()],
+            "On non-digest day with no digest retries, digest_child_ids must be empty",
+        )
+
+    async def test_cron_route_handlers_unwrap_optional_header_and_query_on_direct_call(
+        self,
+    ) -> None:
+        from fastapi import HTTPException
+        from app.api.routes import internal_cron, parent_notifications
+
+        with patch.dict(
+            os.environ,
+            {"VIREAD_CRON_DISPATCH_TOKEN": "a" * 40},
+            clear=False,
+        ):
+            with self.assertRaises(HTTPException) as ctx_internal:
+                internal_cron.require_cron_dispatch_token()
+            self.assertEqual(ctx_internal.exception.status_code, 401)
+
+        with patch.object(
+            parent_notifications.settings, "PARENT_EMAIL_CRON_SECRET", "s" * 24
+        ):
+            with self.assertRaises(HTTPException) as ctx_parent:
+                await parent_notifications.trigger_cron_dispatch()
+            self.assertEqual(ctx_parent.exception.status_code, 401)
+
+    async def test_parent_email_repository_batch_queries_compile_cleanly_for_postgres(
+        self,
+    ) -> None:
+        from sqlalchemy.dialects import postgresql
+        from app.repositories.parent_email_notification_repository import (
+            ParentEmailNotificationRepository,
+        )
+
+        compiled_sqls: list[str] = []
+
+        class _CompilingSession:
+            async def execute(self, stmt, *_a, **_kw):
+                compiled_sqls.append(
+                    str(stmt.compile(dialect=postgresql.dialect()))
+                )
+                return SimpleNamespace(
+                    all=lambda: [],
+                    scalars=lambda: SimpleNamespace(all=lambda: []),
+                )
+
+        repo = ParentEmailNotificationRepository(_CompilingSession())  # type: ignore[arg-type]
+        now = datetime(2026, 11, 27, 15, 0, tzinfo=timezone.utc)
+        pid = uuid4()
+        cid = uuid4()
+        child = SimpleNamespace(Id=cid, ParentId=pid, Alias="Bé An", CreatedAt=now)
+
+        summaries = await repo.get_parent_delivery_summaries_batch([pid], now)
+        self.assertEqual(summaries[pid].automated_sent_last_7d, 0)
+
+        retries = await repo.list_retry_deliveries_batch([pid])
+        self.assertEqual(retries, {})
+
+        # Non-digest batch: strictly 3 queries (sessions, aggregates, goals)
+        before_non_digest = len(compiled_sqls)
+        snaps_non_digest = await repo.get_children_activity_snapshots_batch(
+            [child], now, digest_child_ids=set()
+        )
+        self.assertIn(cid, snaps_non_digest)
+        self.assertEqual(len(compiled_sqls) - before_non_digest, 3)
+
+        # Digest batch: 6 queries (adds fluency, comparison reports, difficult words)
+        before_digest = len(compiled_sqls)
+        snaps_digest = await repo.get_children_activity_snapshots_batch(
+            [child], now, digest_child_ids={cid}
+        )
+        self.assertIn(cid, snaps_digest)
+        self.assertEqual(len(compiled_sqls) - before_digest, 6)
+        joined = "\n".join(compiled_sqls)
+        self.assertIn("FROM readingcomparisonreports JOIN readingsessions", joined)
+        self.assertIn("FROM pagerevisionwords JOIN readingevents", joined)
 
 
 class BookQualityAndAdminWorkflowEventTests(unittest.IsolatedAsyncioTestCase):

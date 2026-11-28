@@ -11,8 +11,8 @@ from app.api.deps import get_current_parent_id, get_db
 from app.diagnostic_logging import log_diagnostic
 from app.repositories.karaoke_repository import ConcurrentKaraokeUpdate, KaraokeRepository
 from app.schemas.karaoke import (
-    AdminDetail, AdminList, DraftPreview, DraftRequest, DraftWrite, Playback,
-    RevisionRequest, SongCreate, SongList, ValidationRead, VisibilityRequest,
+    AdminDetail, AdminList, DraftPreview, DraftRequest, DraftWrite, MelodyExtractResponse,
+    Playback, RevisionRequest, SongCreate, SongList, ValidationRead, VisibilityRequest,
 )
 from app.services.karaoke_service import KaraokeService
 
@@ -149,6 +149,15 @@ async def publish_song(song_id: UUID, payload: DraftRequest,
 async def set_visibility(song_id: UUID, payload: VisibilityRequest,
                          actor_id: UUID = Depends(get_current_parent_id), service=Depends(get_karaoke_service)):
     return await service.visibility(actor_id, song_id, payload)
+
+
+@router.post("/admin/songs/{song_id}/extract-melody", response_model=MelodyExtractResponse)
+async def extract_song_melody(
+    song_id: UUID,
+    actor_id: UUID = Depends(get_current_parent_id),
+    service=Depends(get_karaoke_service),
+):
+    return await service.extract_melody(actor_id, song_id)
 
 
 @router.get("/songs", response_model=SongList)

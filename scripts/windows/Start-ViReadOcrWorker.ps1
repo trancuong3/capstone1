@@ -10,6 +10,9 @@ param(
     [string]$OcrWorkerToken = "",
     [ValidateSet("BelowNormal", "Idle", "Normal")]
     [string]$Priority = "BelowNormal",
+    [string]$QuietStandby = "",
+    [int]$QuietStandbyKeepaliveSeconds = 30,
+    [int]$MaxIdlePollSeconds = 20,
     [switch]$AllowDegradedStart
 )
 
@@ -73,6 +76,21 @@ function Resolve-BackendSetting([string]$explicitVal, [string]$envKey) {
 $effectiveBackendUrl = Resolve-BackendSetting $BackendUrl "VIREAD_OCR_BACKEND_URL"
 $effectiveToken = Resolve-BackendSetting $OcrWorkerToken "VIREAD_OCR_WORKER_TOKEN"
 $boundedThreads = [Math]::Max(1, [Math]::Min(4, $CpuThreads))
+$resolvedQuietStandby = Resolve-BackendSetting $QuietStandby "VIREAD_OCR_QUIET_STANDBY"
+if (-not $resolvedQuietStandby) {
+    $resolvedQuietStandby = if ($effectiveBackendUrl -match "^https://") { "true" } else { "false" }
+}
+$resolvedKeepaliveEnv = Resolve-BackendSetting "" "VIREAD_OCR_QUIET_STANDBY_KEEPALIVE_SECONDS"
+$effectiveKeepaliveSeconds = if ($PSBoundParameters.ContainsKey("QuietStandbyKeepaliveSeconds")) {
+    [Math]::Max(0, $QuietStandbyKeepaliveSeconds)
+} elseif ($resolvedKeepaliveEnv) {
+    [Math]::Max(0, [int]$resolvedKeepaliveEnv)
+} elseif ($resolvedQuietStandby -match "^(1|true|yes|on)$") {
+    [Math]::Max(0, $QuietStandbyKeepaliveSeconds)
+} else {
+    0
+}
+$effectiveMaxIdlePollSeconds = [Math]::Max(5, [Math]::Min(60, $MaxIdlePollSeconds))
 
 # Idempotent check
 try {
@@ -106,6 +124,9 @@ $envKeys = @(
     "VIREAD_OCR_WORKER_PORT",
     "VIREAD_OCR_BACKEND_URL",
     "VIREAD_OCR_WORKER_TOKEN",
+    "VIREAD_OCR_QUIET_STANDBY",
+    "VIREAD_OCR_QUIET_STANDBY_KEEPALIVE_SECONDS",
+    "VIREAD_OCR_MAX_IDLE_POLL_SECONDS",
     "PYTHONPATH",
     "DATABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
@@ -127,6 +148,9 @@ try {
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_WORKER_PORT", "$Port", "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_BACKEND_URL", $effectiveBackendUrl, "Process")
     [Environment]::SetEnvironmentVariable("VIREAD_OCR_WORKER_TOKEN", $effectiveToken, "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_OCR_QUIET_STANDBY", $resolvedQuietStandby, "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_OCR_QUIET_STANDBY_KEEPALIVE_SECONDS", "$effectiveKeepaliveSeconds", "Process")
+    [Environment]::SetEnvironmentVariable("VIREAD_OCR_MAX_IDLE_POLL_SECONDS", "$effectiveMaxIdlePollSeconds", "Process")
     [Environment]::SetEnvironmentVariable("PYTHONPATH", "$repoRoot;$repoRoot\backend", "Process")
 
     # Enforce zero DB / Supabase secrets on OCR worker process.
@@ -191,6 +215,9 @@ $listenStart = if ($listenProc) { $listenProc.StartTime.ToUniversalTime().ToStri
     cpuThreads        = $boundedThreads
     backendConfigured = [bool]$effectiveBackendUrl
     tokenConfigured   = [bool]$effectiveToken
+    quietStandby      = $resolvedQuietStandby
+    keepaliveSeconds  = $effectiveKeepaliveSeconds
+    maxIdlePollSeconds = $effectiveMaxIdlePollSeconds
     ocrRuntimeDir     = $OcrRuntimeDir
     startedAt         = (Get-Date).ToUniversalTime().ToString("o")
 } | ConvertTo-Json | Set-Content -Encoding UTF8 $stateFile

@@ -388,7 +388,20 @@
         "repeated": "繰り返し",
         "hesitation": "ためらい"
       }
-    }
+    },
+    "summarySessions": "読書回数",
+    "summaryDuration": "合計時間",
+    "summaryCompleted": "完了",
+    "summaryDurationZero": "0分",
+    "filterAria": "状態で読書履歴を絞り込み",
+    "filterAll": "すべて",
+    "filterCompleted": "完了",
+    "filterIncomplete": "途中",
+    "searchPlaceholder": "このページの書名で絞り込み…",
+    "searchAria": "書名で履歴を検索",
+    "filterEmptyTitle": "一致する履歴がありません",
+    "filterEmptyDesc": "状態フィルターを変更するか検索をクリアしてください。",
+    "clearFilterAction": "すべての履歴を表示"
   },
   "readingManagement": {
     "title": "読書管理とリマインダー",

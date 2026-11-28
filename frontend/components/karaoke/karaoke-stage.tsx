@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Button, ButtonLink } from "@/components/common/button";
 import { KaraokeScoreCard } from "@/components/karaoke/karaoke-score-card";
+import { PitchHighwayCanvas } from "@/components/karaoke/pitch-highway-canvas";
 import { StatusMessage } from "@/components/common/status-message";
 import { SyllableLyrics } from "@/components/karaoke/syllable-lyrics";
 import { useEntertainmentPreferences } from "@/hooks/use-entertainment-preferences";
@@ -38,6 +39,11 @@ import {
   activeLyricIndex,
   formatKaraokeTime,
 } from "@/lib/karaoke/lyrics-timeline";
+import {
+  DEFAULT_MIC_LATENCY_MS,
+  MIC_LATENCY_MAX_MS,
+  MIC_LATENCY_MIN_MS,
+} from "@/lib/karaoke/musical-dsp";
 import {
   evaluateMusicalPerformance,
   type KaraokePracticeMode,
@@ -54,9 +60,28 @@ import {
   SEGMENT_PRACTICE_DEFAULT_RATE,
   type RhythmTapFeedback,
 } from "@/lib/karaoke/musical-practice";
+import { resolveTargetNotes } from "@/lib/karaoke/pro-karaoke-scoring";
 import type { KaraokeLine, KaraokePreview } from "@/types/karaoke";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import styles from "./karaoke-stage.module.css";
+
+const MIC_LATENCY_STORAGE_KEY = "viread.karaoke-mic-latency.v1";
+
+function readStoredMicLatencyMs(): number {
+  if (typeof window === "undefined") return DEFAULT_MIC_LATENCY_MS;
+  try {
+    const raw = window.localStorage.getItem(MIC_LATENCY_STORAGE_KEY);
+    if (!raw) return DEFAULT_MIC_LATENCY_MS;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return DEFAULT_MIC_LATENCY_MS;
+    return Math.max(
+      MIC_LATENCY_MIN_MS,
+      Math.min(MIC_LATENCY_MAX_MS, Math.round(parsed)),
+    );
+  } catch {
+    return DEFAULT_MIC_LATENCY_MS;
+  }
+}
 
 export interface KaraokePracticeHistorySummary {
   bestFullSongScore: number | null;
@@ -408,15 +433,66 @@ export function KaraokeStage({
     useState<RhythmTapFeedback | null>(null);
   const [rhythmTapResult, setRhythmTapResult] =
     useState<MusicalEvaluationResult | null>(null);
+  const [micLatencyMs, setMicLatencyMsState] = useState<number>(() =>
+    readStoredMicLatencyMs(),
+  );
+  const setMicLatencyMs = useCallback((value: number) => {
+    const clamped = Math.max(
+      MIC_LATENCY_MIN_MS,
+      Math.min(MIC_LATENCY_MAX_MS, Math.round(value)),
+    );
+    setMicLatencyMsState(clamped);
+    try {
+      window.localStorage.setItem(MIC_LATENCY_STORAGE_KEY, String(clamped));
+    } catch {
+      /* Ignore blocked storage. */
+    }
+  }, []);
 
   const profileLoadedRef = useRef(false);
   const lastSavedScoreRef = useRef<MusicalEvaluationResult | null>(null);
   const lastPlaybackMs = useRef<number | null>(null);
   const playheadBarRef = useRef<HTMLDivElement | null>(null);
 
-  const resolvedProfile = useMemo(
-    () => resolveMusicalProfile(lyrics, remoteProfile),
-    [lyrics, remoteProfile],
+  const effectiveMelodyProfile =
+    source.melody_profile ?? remoteProfile?.melodyProfile ?? null;
+
+  const resolvedProfile = useMemo(() => {
+    const base = resolveMusicalProfile(lyrics, remoteProfile);
+    if (
+      effectiveMelodyProfile &&
+      !base.hasPitchContour &&
+      effectiveMelodyProfile.pitch_contour?.length
+    ) {
+      return {
+        ...base,
+        bpm: effectiveMelodyProfile.bpm ?? base.bpm,
+        hasPitchContour: true,
+        sourceMethod: "AUDIO_DSP" as const,
+        pitchContour: effectiveMelodyProfile.pitch_contour.map((pt) => ({
+          timeMs: pt.time_ms,
+          hz: pt.hz,
+          midi: pt.midi,
+        })),
+        melodyProfile: effectiveMelodyProfile,
+      };
+    }
+    return {
+      ...base,
+      melodyProfile: effectiveMelodyProfile,
+    };
+  }, [lyrics, remoteProfile, effectiveMelodyProfile]);
+
+  const targetNotes = useMemo(
+    () => resolveTargetNotes(effectiveMelodyProfile, resolvedProfile, lyrics),
+    [effectiveMelodyProfile, resolvedProfile, lyrics],
+  );
+  const phraseStartsMs = useMemo(
+    () =>
+      lyrics.lines
+        .map((line) => line.start_ms)
+        .filter((t): t is number => t !== null && Number.isFinite(t)),
+    [lyrics.lines],
   );
   const tapTrackerRef = useRef<RhythmTapTracker>(
     new RhythmTapTracker(resolvedProfile.beatGridMs),
@@ -444,6 +520,10 @@ export function KaraokeStage({
     headphoneMode: headphones,
     practiceMode,
     musicalProfile: resolvedProfile,
+    melodyProfile: effectiveMelodyProfile,
+    keyShift: player.keyShift,
+    playbackRate: player.rate,
+    micLatencyMs,
     segmentRange,
   });
   const {
@@ -1321,9 +1401,20 @@ export function KaraokeStage({
               </Button>
             </div>
           )}
-          {finalScore ? (
+          {finalScore ||
+          (scoredMode &&
+            practiceMode !== "RHYTHM_TAP" &&
+            scoring.proScore !== null) ? (
             <KaraokeScoreCard
               score={finalScore}
+              proScore={scoring.proScore}
+              targetNotes={targetNotes}
+              dspFrames={scoring.dspFrames}
+              durationMs={source.duration_ms}
+              replayAudioUrl={scoring.replayAudioUrl}
+              onApplySuggestedKeyShift={(nextShift) => {
+                player.setKeyShift(nextShift);
+              }}
               onPractice={(id) =>
                 practice(lines.find((line) => line.id === id))
               }
@@ -1345,7 +1436,7 @@ export function KaraokeStage({
           <h2 className="text-heading font-extrabold">
             {t("karaoke.stage.finishedHeading", { alias: childAlias })}
           </h2>
-          {!finalScore && !showMusicalPanel && (
+          {!finalScore && !showMusicalPanel && !scoring.proScore && (
             <p role="status" className="text-muted">
               {scoring.status === "finishing"
                 ? t("karaoke.stage.finishingLastLine")
@@ -1371,6 +1462,21 @@ export function KaraokeStage({
         </div>
       ) : (
         <>
+          <PitchHighwayCanvas
+            targetNotes={targetNotes}
+            keyShift={player.keyShift}
+            getCurrentMs={player.getCurrentMs}
+            subscribeClock={player.subscribeClock}
+            getPitchRing={scoring.getPitchRing}
+            getLatestPitchSample={scoring.getLatestPitchSample}
+            playing={player.playing}
+            listening={scoring.listening}
+            scoredMode={scoredMode && practiceMode !== "RHYTHM_TAP"}
+            sttAvailable={scoring.sttAvailable}
+            beatGridMs={resolvedProfile.beatGridMs}
+            phraseStartsMs={phraseStartsMs}
+            reducedMotion={reducedMotion}
+          />
           <div
             className={`${styles.lyrics} rounded-card bg-white/80 px-4`}
             aria-label={t("karaoke.lyrics.regionAria")}
@@ -1731,19 +1837,57 @@ export function KaraokeStage({
           }}
           className="min-h-12 w-full accent-primary"
         />
-        <label className="flex flex-wrap items-center justify-center gap-3 font-bold">
-          {t("karaoke.stage.tempoLabel")}
-          <select
-            aria-label={t("karaoke.stage.tempoLabel")}
-            className="min-h-14 rounded-control border border-border bg-white px-4"
-            value={player.rate}
-            onChange={(event) => player.setRate(Number(event.target.value))}
+        <div className="flex flex-wrap items-center justify-center gap-4">
+          <label className="flex flex-wrap items-center justify-center gap-3 font-bold">
+            {t("karaoke.stage.tempoLabel")}
+            <select
+              aria-label={t("karaoke.stage.tempoLabel")}
+              className="min-h-14 rounded-control border border-border bg-white px-4"
+              value={player.rate}
+              onChange={(event) => player.setRate(Number(event.target.value))}
+            >
+              <option value={0.75}>{t("karaoke.stage.tempoSlow")}</option>
+              <option value={0.85}>{t("karaoke.stage.tempoSegment")}</option>
+              <option value={1}>{t("karaoke.stage.tempoNormal")}</option>
+            </select>
+          </label>
+          <div
+            role="group"
+            aria-label="Chỉnh tông mục tiêu"
+            data-testid="karaoke-key-shift-controls"
+            className="flex items-center gap-1.5 rounded-control border border-border bg-white px-2.5 py-1.5"
           >
-            <option value={0.75}>{t("karaoke.stage.tempoSlow")}</option>
-            <option value={0.85}>{t("karaoke.stage.tempoSegment")}</option>
-            <option value={1}>{t("karaoke.stage.tempoNormal")}</option>
-          </select>
-        </label>
+            <span className="text-xs font-extrabold text-muted">Tông:</span>
+            <button
+              type="button"
+              aria-label="Hạ tông 1 bán âm"
+              disabled={player.keyShift <= -3}
+              onClick={() => player.setKeyShift(player.keyShift - 1)}
+              className="grid min-h-12 min-w-12 place-items-center rounded-control border border-border bg-sky/50 text-lg font-black text-primary hover:bg-sky disabled:opacity-40"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              aria-label="Đặt lại tông chuẩn 0 bán âm"
+              onClick={() => player.setKeyShift(0)}
+              className="min-h-12 min-w-16 rounded-control px-2 text-sm font-extrabold text-ink tabular-nums hover:bg-cream"
+            >
+              {player.keyShift > 0
+                ? `+${player.keyShift}`
+                : `${player.keyShift}`}
+            </button>
+            <button
+              type="button"
+              aria-label="Tăng tông 1 bán âm"
+              disabled={player.keyShift >= 3}
+              onClick={() => player.setKeyShift(player.keyShift + 1)}
+              className="grid min-h-12 min-w-12 place-items-center rounded-control border border-border bg-sky/50 text-lg font-black text-primary hover:bg-sky disabled:opacity-40"
+            >
+              +
+            </button>
+          </div>
+        </div>
       </div>
       <details className="min-w-0 rounded-control border border-border bg-white/70 p-4">
         <summary className="min-h-11 cursor-pointer content-center font-bold text-primary">
@@ -1780,6 +1924,27 @@ export function KaraokeStage({
               step={0.05}
               value={player.volume}
               onChange={(event) => player.setVolume(Number(event.target.value))}
+              className="min-h-12 w-full accent-primary"
+            />
+          </label>
+          <label className="grid gap-1.5 font-bold">
+            <span className="flex items-center justify-between gap-2 text-sm">
+              <span>Hiệu chỉnh độ trễ micro (tai nghe Bluetooth / loa)</span>
+              <span
+                data-testid="karaoke-mic-latency-value"
+                className="tabular-nums text-primary"
+              >
+                {micLatencyMs > 0 ? `+${micLatencyMs}` : micLatencyMs} ms
+              </span>
+            </span>
+            <input
+              aria-label="Hiệu chỉnh độ trễ micro"
+              type="range"
+              min={MIC_LATENCY_MIN_MS}
+              max={MIC_LATENCY_MAX_MS}
+              step={10}
+              value={micLatencyMs}
+              onChange={(event) => setMicLatencyMs(Number(event.target.value))}
               className="min-h-12 w-full accent-primary"
             />
           </label>

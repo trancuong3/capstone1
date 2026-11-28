@@ -31,6 +31,7 @@ from ocr_worker.worker import (  # noqa: E402
     compute_adaptive_poll_delay,
     is_quiet_standby_enabled,
     process_claimed_job,
+    resolve_quiet_standby_keepalive_seconds,
 )
 
 
@@ -457,6 +458,20 @@ class TestOcrWorkerServiceAndClient(unittest.TestCase):
         self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=5.0), 2.0)
         self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=30.0), 5.0)
         self.assertEqual(compute_adaptive_poll_delay(base_poll_seconds=2.0, idle_seconds=70.0), 10.0)
+        self.assertEqual(
+            compute_adaptive_poll_delay(
+                base_poll_seconds=2.0,
+                idle_seconds=130.0,
+                max_idle_poll_seconds=20.0,
+            ),
+            20.0,
+        )
+        with patch.dict(os.environ, {"VIREAD_OCR_QUIET_STANDBY_KEEPALIVE_SECONDS": ""}, clear=False):
+            self.assertEqual(resolve_quiet_standby_keepalive_seconds(), 0.0)
+        self.assertEqual(resolve_quiet_standby_keepalive_seconds(30.0), 30.0)
+        self.assertEqual(resolve_quiet_standby_keepalive_seconds(3.0), 10.0)
+        self.assertEqual(resolve_quiet_standby_keepalive_seconds(999.0), 180.0)
+        self.assertEqual(resolve_quiet_standby_keepalive_seconds(0.0), 0.0)
 
         from scripts.build_hf_space_bundle import build_hf_space_bundle
 

@@ -3235,16 +3235,6 @@ test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=
 
   await page.addInitScript(() => {
     const tracks = new Set<MediaStreamTrack>();
-    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
-      configurable: true,
-      value: async () => {
-        const ctx = new AudioContext();
-        const dest = ctx.createMediaStreamDestination();
-        const stream = dest.stream;
-        stream.getTracks().forEach((track) => tracks.add(track));
-        return stream;
-      },
-    });
     class Recognizer {
       static active?: Recognizer;
       onstart: (() => void) | null = null;
@@ -3267,6 +3257,22 @@ test("Flow 11: Karaoke V4.1 (Ôn từ khó + 1-tap Hát ngay ?autoplay=1&scored=
         if (Recognizer.active === this) Recognizer.active = undefined;
       }
     }
+    Object.defineProperty(navigator.mediaDevices, "getUserMedia", {
+      configurable: true,
+      value: async () => {
+        if (Recognizer.active) {
+          throw new DOMException(
+            "Microphone exclusively held by SpeechRecognition",
+            "NotReadableError",
+          );
+        }
+        const ctx = new AudioContext();
+        const dest = ctx.createMediaStreamDestination();
+        const stream = dest.stream;
+        stream.getTracks().forEach((track) => tracks.add(track));
+        return stream;
+      },
+    });
     const control = {
       audio: null as HTMLAudioElement | null,
       sing(startSeconds: number, endSeconds: number, text: string) {

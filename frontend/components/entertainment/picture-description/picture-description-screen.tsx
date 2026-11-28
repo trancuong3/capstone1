@@ -38,11 +38,13 @@ import {
 } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
@@ -53,6 +55,7 @@ import { useTranslations } from "@/hooks/use-i18n";
 import { usePictureDescriptionService } from "@/hooks/use-picture-description-service";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
 import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
 import {
@@ -63,6 +66,7 @@ import {
   BrowserTranscriptCollector,
   type BrowserRecognitionEventLike,
 } from "@/lib/reading/browser-transcript-collector";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import {
   TTS_MIC_COOLDOWN_MS,
@@ -371,12 +375,18 @@ export function PictureDescriptionScreen({
   autoPlay,
 }: PictureDescriptionScreenProps = {}) {
   const t = useTranslations("entertainment");
+  const tCommon = useTranslations("common");
   const defaultGameError = t("pictureDescription.defaultError");
   const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
   const { state: childState, retry: retryChild } = useValidatedSelectedChild();
   const pictureService = usePictureDescriptionService();
   const speechService = useMemo<SpeechService>(() => createSpeechService(), []);
   const speechPlayer = useSpeechPlayer();
+  const teacherPersona = useTeacherPersona();
+  const adaptTeacherText = useCallback(
+    (value: string) => adaptTextToTeacherPersona(value, teacherPersona.gender),
+    [teacherPersona.gender],
+  );
   const recorder = useSpeechRecorder();
   const {
     reducedMotion,
@@ -424,6 +434,33 @@ export function PictureDescriptionScreen({
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const analyzeProgress = useAiProgress({
+    active: isAnalyzing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.safetyChecking") },
+      { atPct: 30, label: tCommon("aiProgress.analyzing") },
+      { atPct: 70, label: tCommon("aiProgress.generatingQuestion") },
+      { atPct: 90, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 12_000,
+  });
+  const transcribeProgress = useAiProgress({
+    active: isTranscribing,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.transcribing") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_500,
+  });
+  const evaluateProgress = useAiProgress({
+    active: isEvaluating,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 50, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 10_000,
+  });
   const [isRecordingVoice, setIsRecordingVoice] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [evaluateError, setEvaluateError] = useState<string | null>(null);
@@ -741,6 +778,16 @@ export function PictureDescriptionScreen({
         return;
       }
 
+      // Preserve exact vocabulary/sample story content; adapt teacher coaching prompts/feedback.
+      const isStoryOrVocabSample =
+        key.startsWith("target-word:") ||
+        key.startsWith("vocab:") ||
+        key.startsWith("sample:") ||
+        key.startsWith("upgraded:");
+      const spokenText = isStoryOrVocabSample
+        ? cleaned
+        : adaptTextToTeacherPersona(cleaned, teacherPersona.gender);
+
       // G10 Anti-Self-Capture: Immediately abort any active mic / SpeechRecognition before TTS starts.
       abortActiveVoiceCapture({ preserveDraft: true });
       stopSpeechPlayback();
@@ -748,7 +795,9 @@ export function PictureDescriptionScreen({
       setPlayingSpeechKey(key);
 
       try {
-        await speechPlayer.play(cleaned);
+        await speechPlayer.play(spokenText, {
+          utteranceKind: isStoryOrVocabSample ? "game_sample" : "game_coaching",
+        });
       } catch {
         // Ignore playback interruption / fallback errors.
       } finally {
@@ -763,6 +812,7 @@ export function PictureDescriptionScreen({
       playingSpeechKey,
       speechPlayer,
       stopSpeechPlayback,
+      teacherPersona.gender,
     ],
   );
 
@@ -912,6 +962,7 @@ export function PictureDescriptionScreen({
           source_type: "SAMPLE",
           sample_key: sample.sample_key,
           refresh_ai_guide: options?.refreshAiGuide,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -952,6 +1003,7 @@ export function PictureDescriptionScreen({
           child_id: childId,
           source_type: "BOOK_PAGE",
           book_page_id: page.page_id,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -1017,6 +1069,7 @@ export function PictureDescriptionScreen({
           child_id: childId,
           source_type: "CUSTOM_UPLOAD",
           image_file: uploadFile,
+          teacher_gender: teacherPersona.gender,
         },
         controller.signal,
       );
@@ -1365,6 +1418,7 @@ export function PictureDescriptionScreen({
             transcript_text: trimmed,
             input_mode: overrideMode ?? inputMode,
             teaching_mode: teachingMode,
+            teacher_gender: teacherPersona.gender,
             ...(sessionTargetWords.length > 0
               ? { target_words: sessionTargetWords }
               : {}),
@@ -1402,6 +1456,7 @@ export function PictureDescriptionScreen({
       session,
       stopSpeechPlayback,
       t,
+      teacherPersona.gender,
       teachingMode,
     ],
   );
@@ -1810,6 +1865,18 @@ export function PictureDescriptionScreen({
               grade: selectedChild.grade,
             })}
           </p>
+          <div className="w-full max-w-md">
+            <AiProgressBar
+              active
+              elapsedSeconds={analyzeProgress.elapsedSeconds}
+              label={
+                analyzeProgress.stageLabel ?? tCommon("aiProgress.analyzing")
+              }
+              percent={analyzeProgress.percent}
+              size="md"
+              testId="picture-analyzing-progress"
+            />
+          </div>
         </div>
       ) : null}
 
@@ -2586,12 +2653,16 @@ export function PictureDescriptionScreen({
               <>
                 {/* Teaching Mode Selector Pills (6 Pedagogical Modes V4.0) */}
                 <section
-                  aria-label={t("pictureDescription.teachingModeSectionAria")}
+                  aria-label={adaptTeacherText(
+                    t("pictureDescription.teachingModeSectionAria"),
+                  )}
                   className="rounded-card border border-border bg-white p-4 shadow-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs font-extrabold uppercase tracking-wide text-primary">
-                      {t("pictureDescription.teachingModeHeading")}
+                      {adaptTeacherText(
+                        t("pictureDescription.teachingModeHeading"),
+                      )}
                     </p>
                     <Button
                       disabled={!calmSound}
@@ -2722,14 +2793,18 @@ export function PictureDescriptionScreen({
                 {/* Active PEER/CROWD Follow-Up Prompt when Child Replies to AI Teacher */}
                 {activeFollowUpQuestion ? (
                   <section
-                    aria-label={t("pictureDescription.followUpSectionAria")}
+                    aria-label={adaptTeacherText(
+                      t("pictureDescription.followUpSectionAria"),
+                    )}
                     className="rounded-card border border-amber-300/70 bg-amber-50/70 p-4"
                     data-testid="practice-followup-banner"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-amber-900">
                         <Sparkles aria-hidden="true" className="size-4" />
-                        {t("pictureDescription.practiceFollowUpTitle")}
+                        {adaptTeacherText(
+                          t("pictureDescription.practiceFollowUpTitle"),
+                        )}
                       </p>
                       <Button
                         disabled={!calmSound}
@@ -2754,7 +2829,7 @@ export function PictureDescriptionScreen({
                       dir="ltr"
                       lang="vi"
                     >
-                      {activeFollowUpQuestion}
+                      {adaptTeacherText(activeFollowUpQuestion)}
                     </p>
                   </section>
                 ) : null}
@@ -2767,9 +2842,11 @@ export function PictureDescriptionScreen({
                   >
                     <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
                       <Lightbulb aria-hidden="true" className="size-4" />
-                      {t("pictureDescription.previousCoachingTitle", {
-                        attempt: latestAttempt.attempt_number,
-                      })}
+                      {adaptTeacherText(
+                        t("pictureDescription.previousCoachingTitle", {
+                          attempt: latestAttempt.attempt_number,
+                        }),
+                      )}
                     </p>
                     <p
                       className="viread-learning-content mt-1 text-sm font-semibold text-ink"
@@ -3014,6 +3091,21 @@ export function PictureDescriptionScreen({
                     </div>
                   ) : null}
 
+                  {isTranscribing ? (
+                    <div className="mt-3">
+                      <AiProgressBar
+                        active
+                        label={
+                          transcribeProgress.stageLabel ??
+                          tCommon("aiProgress.transcribing")
+                        }
+                        percent={transcribeProgress.percent}
+                        size="compact"
+                        testId="picture-transcribing-progress"
+                      />
+                    </div>
+                  ) : null}
+
                   <label
                     className="mt-3 block"
                     htmlFor="picture-description-input"
@@ -3049,16 +3141,33 @@ export function PictureDescriptionScreen({
                   {isEvaluating ? (
                     <div
                       aria-live="polite"
-                      className="mt-3 flex items-center gap-2.5 rounded-control border border-primary/25 bg-sky/25 px-3.5 py-2.5 text-sm font-bold text-primary"
+                      className="mt-3 space-y-2 rounded-control border border-primary/25 bg-sky/25 px-3.5 py-2.5 text-sm font-bold text-primary"
                     >
-                      <RefreshCw
-                        aria-hidden="true"
-                        className={cn(
-                          "size-4 shrink-0",
-                          !reducedMotion && "animate-spin",
-                        )}
+                      <div className="flex items-center gap-2.5">
+                        <RefreshCw
+                          aria-hidden="true"
+                          className={cn(
+                            "size-4 shrink-0",
+                            !reducedMotion && "animate-spin",
+                          )}
+                        />
+                        <span>
+                          {adaptTeacherText(
+                            t("pictureDescription.evaluatingBanner"),
+                          )}
+                        </span>
+                      </div>
+                      <AiProgressBar
+                        active
+                        elapsedSeconds={evaluateProgress.elapsedSeconds}
+                        label={
+                          evaluateProgress.stageLabel ??
+                          tCommon("aiProgress.evaluatingAnswer")
+                        }
+                        percent={evaluateProgress.percent}
+                        size="sm"
+                        testId="picture-evaluating-progress"
                       />
-                      <span>{t("pictureDescription.evaluatingBanner")}</span>
                     </div>
                   ) : null}
 
@@ -3066,7 +3175,7 @@ export function PictureDescriptionScreen({
                     <div className="mt-3">
                       <StatusMessage tone="error">
                         <div className="flex flex-wrap items-center justify-between gap-2.5">
-                          <span>{evaluateError}</span>
+                          <span>{adaptTeacherText(evaluateError)}</span>
                           <Button
                             disabled={isEvaluating || !descriptionText.trim()}
                             onClick={() => void handleEvaluate()}
@@ -3092,7 +3201,7 @@ export function PictureDescriptionScreen({
                             : "text-muted")
                         }
                       >
-                        {draftReadiness.label}
+                        {adaptTeacherText(draftReadiness.label)}
                       </p>
                       <p className="text-xs text-muted">
                         {t("pictureDescription.charCounter", {
@@ -3111,9 +3220,11 @@ export function PictureDescriptionScreen({
                       type="button"
                     >
                       <Send aria-hidden="true" className="size-4" />
-                      {isEvaluating
-                        ? t("pictureDescription.evaluatingButton")
-                        : t("pictureDescription.submitButton")}
+                      {adaptTeacherText(
+                        isEvaluating
+                          ? t("pictureDescription.evaluatingButton")
+                          : t("pictureDescription.submitButton"),
+                      )}
                     </Button>
                   </div>
                 </section>
@@ -3487,7 +3598,9 @@ export function PictureDescriptionScreen({
                     <StatusMessage tone="info">
                       <div className="flex flex-wrap items-center justify-between gap-2.5">
                         <span>
-                          {t("pictureDescription.fallbackEvalNotice")}
+                          {adaptTeacherText(
+                            t("pictureDescription.fallbackEvalNotice"),
+                          )}
                         </span>
                         <Button
                           disabled={isEvaluating}
@@ -3511,18 +3624,36 @@ export function PictureDescriptionScreen({
                                 : "")
                             }
                           />
-                          {isEvaluating
-                            ? t("pictureDescription.reEvaluatingAi")
-                            : t("pictureDescription.reEvaluateWithAi")}
+                          {adaptTeacherText(
+                            isEvaluating
+                              ? t("pictureDescription.reEvaluatingAi")
+                              : t("pictureDescription.reEvaluateWithAi"),
+                          )}
                         </Button>
                       </div>
+                      {isEvaluating ? (
+                        <div className="mt-2">
+                          <AiProgressBar
+                            active
+                            label={
+                              evaluateProgress.stageLabel ??
+                              tCommon("aiProgress.evaluatingAnswer")
+                            }
+                            percent={evaluateProgress.percent}
+                            size="compact"
+                            testId="picture-re-evaluating-progress"
+                          />
+                        </div>
+                      ) : null}
                     </StatusMessage>
                   </div>
                 ) : null}
 
                 {evaluateError ? (
                   <div className="mt-3">
-                    <StatusMessage tone="error">{evaluateError}</StatusMessage>
+                    <StatusMessage tone="error">
+                      {adaptTeacherText(evaluateError)}
+                    </StatusMessage>
                   </div>
                 ) : null}
 
@@ -3546,7 +3677,7 @@ export function PictureDescriptionScreen({
                   dir="ltr"
                   lang="vi"
                 >
-                  {activeAttempt.feedback.praise_message}
+                  {adaptTeacherText(activeAttempt.feedback.praise_message)}
                 </p>
 
                 {(() => {
@@ -3755,7 +3886,9 @@ export function PictureDescriptionScreen({
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wide text-primary">
                           <Sparkles aria-hidden="true" className="size-4" />
-                          {t("pictureDescription.resultFollowUpTitle")}
+                          {adaptTeacherText(
+                            t("pictureDescription.resultFollowUpTitle"),
+                          )}
                         </p>
                         {activeAttempt.feedback.scaffolding_step ? (
                           <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-extrabold text-ink shadow-2xs">

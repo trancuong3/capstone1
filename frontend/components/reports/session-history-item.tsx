@@ -1,6 +1,12 @@
 "use client";
 
-import { ChevronRight, Clock3 } from "lucide-react";
+import {
+  BookOpen,
+  CheckCircle2,
+  ChevronRight,
+  Clock3,
+  PauseCircle,
+} from "lucide-react";
 import Link from "next/link";
 
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
@@ -49,52 +55,77 @@ export function SessionHistoryItem({
   })();
   const href = `/sessions/${item.session.id}?childId=${encodeURIComponent(item.child.id)}&page=${page}`;
 
+  const isCompleted = item.session.state === "FINISHED";
+  const isPausedOrStopped =
+    item.session.state === "PAUSED" || item.session.state === "ABORTED";
+
+  const statusAccentClass = isCompleted
+    ? "bg-success-surface text-success-ink"
+    : isPausedOrStopped
+      ? "bg-surface-subtle text-muted"
+      : "bg-warning-surface text-warning";
+
+  const StatusIcon = isCompleted
+    ? CheckCircle2
+    : isPausedOrStopped
+      ? PauseCircle
+      : BookOpen;
+
   return (
     <article className="history-entry group relative transition-colors hover:bg-cream/80 focus-within:bg-cream/80">
       <div className="flex items-center justify-between gap-3 sm:gap-5">
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3
-              className="viread-learning-content break-words text-base font-extrabold leading-snug text-ink sm:text-lg"
-              dir="ltr"
-              lang="vi"
-            >
-              {item.book.title}
-            </h3>
-            <span
-              className={`inline-flex shrink-0 items-center rounded-control px-2.5 py-0.5 text-xs font-bold ${stateStyle.badgeClassName}`}
-              data-session-state={item.session.state}
-              data-state-tone={stateStyle.tone}
-            >
-              {stateLabel}
-            </span>
-          </div>
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <span
+            aria-hidden="true"
+            className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${statusAccentClass}`}
+          >
+            <StatusIcon className="size-4.5" strokeWidth={2.1} />
+          </span>
 
-          <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-muted sm:text-sm">
-            {showChildAlias ? (
-              <div>
-                <dt className="sr-only">{t("sessions.item.childSr")}</dt>
-                <dd>{item.child.alias}</dd>
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3
+                className="viread-learning-content break-words text-base font-extrabold leading-snug text-ink sm:text-lg"
+                dir="ltr"
+                lang="vi"
+              >
+                {item.book.title}
+              </h3>
+              <span
+                className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-bold ${stateStyle.badgeClassName}`}
+                data-session-state={item.session.state}
+                data-state-tone={stateStyle.tone}
+              >
+                {stateLabel}
+              </span>
+            </div>
+
+            <dl className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs font-semibold text-muted sm:text-sm">
+              {showChildAlias ? (
+                <div>
+                  <dt className="sr-only">{t("sessions.item.childSr")}</dt>
+                  <dd>{item.child.alias}</dd>
+                </div>
+              ) : null}
+              <div className="flex items-center gap-1.5">
+                <dt className="sr-only">{t("sessions.item.startedSr")}</dt>
+                <dd>
+                  <time
+                    className="tabular-nums"
+                    dateTime={item.session.started_at}
+                    title={startedLabel}
+                  >
+                    {timeLabel}
+                  </time>
+                </dd>
               </div>
-            ) : null}
-            <div className="flex items-center gap-1.5">
-              <dt className="sr-only">{t("sessions.item.startedSr")}</dt>
-              <dd>
-                <time
-                  className="tabular-nums"
-                  dateTime={item.session.started_at}
-                  title={startedLabel}
-                >
-                  {timeLabel}
-                </time>
-              </dd>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <Clock3 aria-hidden="true" className="size-3.5 shrink-0" />
-              <dt className="sr-only">{t("sessions.item.durationSr")}</dt>
-              <dd className="tabular-nums">{durationLabel}</dd>
-            </div>
-          </dl>
+              <div className="flex items-center gap-1.5">
+                <Clock3 aria-hidden="true" className="size-3.5 shrink-0" />
+                <dt className="sr-only">{t("sessions.item.durationSr")}</dt>
+                <dd className="tabular-nums">{durationLabel}</dd>
+              </div>
+            </dl>
+          </div>
         </div>
 
         <Link

@@ -686,6 +686,67 @@ describe("MemoryGameScreen", () => {
       },
     );
 
+    const ttsRequests: Array<Record<string, unknown>> = [];
+    const audioPlaySpy = vi.fn();
+    const baseResponder = createFetchResponder();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        if (path === "/voice/text-to-speech") {
+          ttsRequests.push(
+            JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+          );
+          return new Response(new Uint8Array([0xff, 0xfb, 0x90, 0x00]), {
+            status: 200,
+            headers: {
+              "Content-Type": "audio/mpeg",
+              "X-ViRead-TTS-Provider": "local-piper",
+              "X-ViRead-Voice-Id": "vi-vn-female-north",
+            },
+          });
+        }
+        return baseResponder(url, init);
+      }),
+    );
+
+    const createObjectUrlSpy = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:memory-tts-test");
+    const revokeObjectUrlSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => undefined);
+
+    class FakeAudio {
+      src: string;
+      volume = 1;
+      muted = false;
+      currentTime = 0;
+      duration = 1.2;
+      defaultPlaybackRate = 1;
+      playbackRate = 1;
+      preservesPitch = true;
+      private listeners = new Map<string, Set<() => void>>();
+      constructor(src = "") {
+        this.src = src;
+      }
+      addEventListener(event: string, cb: () => void) {
+        if (!this.listeners.has(event)) this.listeners.set(event, new Set());
+        this.listeners.get(event)!.add(cb);
+      }
+      removeEventListener(event: string, cb: () => void) {
+        this.listeners.get(event)?.delete(cb);
+      }
+      pause = vi.fn();
+      load = vi.fn();
+      play = vi.fn(async () => {
+        audioPlaySpy();
+        this.listeners.get("playing")?.forEach((cb) => cb());
+        this.listeners.get("ended")?.forEach((cb) => cb());
+      });
+    }
+    vi.stubGlobal("Audio", FakeAudio);
+
     const user = userEvent.setup();
     renderScreen();
 
@@ -703,10 +764,16 @@ describe("MemoryGameScreen", () => {
     expect(cancelTtsSpy).toHaveBeenCalled();
     expect(startSpy).toHaveBeenCalledTimes(1);
 
-    // 2. Click "Nghe hướng dẫn" -> MUST immediately abort active mic BEFORE speaking TTS!
+    // 2. Click "Nghe hướng dẫn" -> MUST immediately abort active mic BEFORE speaking via unified TtsPlayback (never raw window.speechSynthesis.speak)!
     await user.click(screen.getByRole("button", { name: /Nghe hướng dẫn/i }));
     expect(abortSpy).toHaveBeenCalledTimes(1);
-    expect(speakTtsSpy).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(ttsRequests).toHaveLength(1);
+      expect(audioPlaySpy).toHaveBeenCalledTimes(1);
+    });
+    expect(speakTtsSpy).not.toHaveBeenCalled();
+    createObjectUrlSpy.mockRestore();
+    revokeObjectUrlSpy.mockRestore();
   });
 
   it("supports 3-second gentle Supported Peek during Recall and hides again automatically", async () => {

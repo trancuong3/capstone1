@@ -508,4 +508,72 @@ describe("admin components", () => {
     await user.keyboard("{Escape}");
     expect(onFinalClose).toHaveBeenCalledWith("abc");
   });
+
+  it("forwards the title tooltip prop on AdminBadge for truncated audit action labels", () => {
+    const actionName = "admin.book.metadata.quality.update";
+    render(
+      <AdminBadge
+        className="max-w-full overflow-hidden font-mono"
+        dot
+        title={actionName}
+        tone="warning"
+      >
+        <span className="min-w-0 truncate">{actionName}</span>
+      </AdminBadge>,
+    );
+
+    const innerText = screen.getByText(actionName);
+    expect(innerText).toHaveClass("min-w-0", "truncate");
+    const badge = innerText.parentElement;
+    expect(badge).not.toBeNull();
+    expect(badge).toHaveAttribute("title", actionName);
+    expect(badge).toHaveClass("overflow-hidden");
+  });
+
+  it("renders AdminSelect with a single custom chevron and keeps the native select overlaid invisibly", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <AdminSelect
+        label="Trạng thái lọc"
+        options={[
+          { value: "", label: "Tất cả" },
+          { value: "ACTIVE", label: "Hoạt động" },
+        ]}
+        style={{ minWidth: "160px" }}
+        defaultValue=""
+      />,
+    );
+
+    const select = screen.getByLabelText("Trạng thái lọc");
+    expect(select).toHaveClass("opacity-0", "appearance-none");
+
+    const control = container.querySelector(
+      '[data-admin-select-control="true"]',
+    );
+    expect(control).not.toBeNull();
+    expect((control as HTMLElement).style.minWidth).toBe("160px");
+
+    const valueDisplay = container.querySelector(
+      '[data-admin-select-value="true"]',
+    );
+    expect(valueDisplay).toHaveTextContent("Tất cả");
+
+    await user.selectOptions(select, "ACTIVE");
+    expect(valueDisplay).toHaveTextContent("Hoạt động");
+
+    const childrenSelect = render(
+      <AdminSelect label="Chế độ con" value="NEEDS_REVIEW">
+        <option value="">Tất cả chế độ</option>
+        <option value="NEEDS_REVIEW">Cần kiểm tra</option>
+      </AdminSelect>,
+    );
+    expect(
+      childrenSelect.container.querySelector(
+        '[data-admin-select-value="true"]',
+      ),
+    ).toHaveTextContent("Cần kiểm tra");
+
+    const icons = container.querySelectorAll('svg[aria-hidden="true"]');
+    expect(icons).toHaveLength(1);
+  });
 });

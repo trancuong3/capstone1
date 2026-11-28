@@ -313,6 +313,7 @@ export interface SubmitMemoryAttemptInput {
   readonly stage: MemoryAttemptStage;
   readonly input_mode: MemoryInputMode;
   readonly response_text: string;
+  readonly teacher_gender?: "female" | "male";
 }
 
 export interface MemoryGameService {

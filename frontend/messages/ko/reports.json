@@ -388,7 +388,20 @@
         "repeated": "단어 반복",
         "hesitation": "머뭇거림"
       }
-    }
+    },
+    "summarySessions": "읽기 횟수",
+    "summaryDuration": "총 소요 시간",
+    "summaryCompleted": "완료",
+    "summaryDurationZero": "0분",
+    "filterAria": "상태별 읽기 기록 필터",
+    "filterAll": "전체",
+    "filterCompleted": "완료",
+    "filterIncomplete": "진행 중",
+    "searchPlaceholder": "현재 페이지 책 제목 검색…",
+    "searchAria": "책 제목으로 기록 검색",
+    "filterEmptyTitle": "조건에 맞는 기록이 없습니다",
+    "filterEmptyDesc": "상태 필터를 바꾸거나 검색어를 지워 보세요.",
+    "clearFilterAction": "전체 기록 보기"
   },
   "readingManagement": {
     "title": "독서 관리 및 알림",

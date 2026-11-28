@@ -3,7 +3,9 @@
 import { HeartHandshake, Info, Music2, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { ButtonLink } from "@/components/common/button";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useTranslations } from "@/hooks/use-i18n";
 import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import type {
@@ -41,6 +43,7 @@ export function EntertainmentLearningSummary({
   initialData = null,
 }: Props) {
   const t = useTranslations("reports");
+  const tCommon = useTranslations("common");
   const [fetchedData, setFetchedData] =
     useState<ParentEntertainmentAnalyticsDTO | null>(null);
   const [fetchStatus, setFetchStatus] = useState<"loading" | "ready" | "empty">(
@@ -81,11 +84,30 @@ export function EntertainmentLearningSummary({
 
   const data = initialData ?? fetchedData;
   const status = initialData ? "ready" : fetchStatus;
+  const analyticsProgress = useAiProgress({
+    active: status === "loading",
+    expectedDurationMs: 5_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.analyzing") },
+      { atPct: 50, label: tCommon("aiProgress.loadingRecommendations") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   if (status === "loading") {
     return (
-      <div className="rounded-card border border-border bg-white p-5 text-sm text-muted">
-        {t("entertainmentSummary.loading", { childName })}
+      <div className="space-y-2.5 rounded-card border border-border bg-white p-5 text-sm text-muted">
+        <p>{t("entertainmentSummary.loading", { childName })}</p>
+        <AiProgressBar
+          active
+          label={
+            analyticsProgress.stageLabel ??
+            tCommon("aiProgress.loadingRecommendations")
+          }
+          percent={analyticsProgress.percent}
+          size="compact"
+          testId="entertainment-learning-summary-progress"
+        />
       </div>
     );
   }

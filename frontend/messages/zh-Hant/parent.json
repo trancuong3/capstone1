@@ -233,5 +233,22 @@
         "a3": "開啟「進度」區段查看報告，或開啟「歷史記錄」區段查看已儲存的閱讀課程。"
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "全系統語音同步",
+    "title": "選擇 AI 女老師 / 男老師",
+    "subtitle": "所選聲音將同步套用於閱讀 · 拼讀 · 錯詞重讀 · 閱讀理解 · 趣味遊戲。",
+    "savedForChild": "已為 {alias} 儲存",
+    "previewButton": "試聽聲音",
+    "stopPreviewButton": "停止試聽",
+    "personaGroupAria": "選擇 AI 女老師或 AI 男老師",
+    "femaleTitle": "AI 女老師",
+    "femaleDesc": "溫柔親切的女聲",
+    "maleTitle": "AI 男老師",
+    "maleDesc": "沉穩生動的男聲",
+    "selectedBadge": "目前選擇",
+    "regionLabel": "地區口音",
+    "voiceListLabel": "選擇具體聲音",
+    "voiceListAria": "依老師與地區篩選的聲音清單"
   }
 }

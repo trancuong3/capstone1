@@ -85,7 +85,8 @@ async def get_history(
     actor_id: UUID = Depends(require_parent_id),
     db: AsyncSession = Depends(get_db),
 ) -> list[ParentEmailDeliveryRead]:
-    return await build_service(db).list_history(actor_id, limit=limit)
+    effective_limit = limit if isinstance(limit, int) else 10
+    return await build_service(db).list_history(actor_id, limit=effective_limit)
 
 
 @router.post("/test-email", response_model=ParentEmailTestResponse)
@@ -109,6 +110,9 @@ async def trigger_cron_dispatch(
     authorization: str | None = Header(default=None, alias="Authorization"),
 ) -> ParentEmailCronDispatchResponse:
     """Server-to-server scheduled dispatch endpoint for Vercel Cron / GitHub Actions."""
-    _verify_cron_secret(x_cron_secret, authorization)
-    summary = await dispatch_all_once(scope=scope)
+    effective_scope = scope if isinstance(scope, str) else "all"
+    effective_secret = x_cron_secret if isinstance(x_cron_secret, str) else None
+    effective_auth = authorization if isinstance(authorization, str) else None
+    _verify_cron_secret(effective_secret, effective_auth)
+    summary = await dispatch_all_once(scope=effective_scope)
     return ParentEmailCronDispatchResponse(**summary)

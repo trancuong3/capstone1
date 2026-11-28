@@ -208,6 +208,29 @@ describe("BookCover V2 (Unified Cover & Metadata Fallback)", () => {
     expect(screen.getByText("Nguyễn Nhật Ánh")).toBeInTheDocument();
     expect(screen.getByText("Lớp 1–3")).toBeInTheDocument();
     expect(screen.queryByTestId("book-cover-ai-badge")).not.toBeInTheDocument();
+
+    const hero = render(
+      <BookCover
+        author="Nguyễn Nhật Ánh"
+        book={sampleBook}
+        className="reader-cover-art"
+        grade="Lớp 1–3"
+        hero
+      />,
+    );
+    for (const part of [
+      "spine",
+      "body",
+      "header",
+      "grade",
+      "monogram",
+      "title-block",
+      "footer",
+    ]) {
+      expect(
+        hero.container.querySelector(`[data-cover-part="${part}"]`),
+      ).not.toBeNull();
+    }
   });
 
   it("loads authenticated /studio/assets/.../media cover with Bearer token and revokes blob on unmount", async () => {

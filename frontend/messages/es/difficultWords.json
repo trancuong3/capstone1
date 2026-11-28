@@ -52,7 +52,12 @@
     "emptyFilterDescription": "No hay palabras que coincidan con el estado de práctica seleccionado.",
     "viewAllWords": "Ver todas las palabras ({count})",
     "paginationAria": "Paginación de grupos de libros de práctica de palabras",
-    "paginationItemLabel": "libros"
+    "paginationItemLabel": "libros",
+    "statTotal": "Total",
+    "statCompleted": "Bien leídas",
+    "statRemaining": "Por repasar",
+    "quickMastered": "Dominadas",
+    "quickNeedsMoreFull": "Reforzar"
   },
   "bookCard": {
     "gradeSingle": "Grado {grade}",
@@ -69,7 +74,12 @@
     "badgeNotPracticed": "No releído",
     "badgeNeedsMore": "Necesita práctica",
     "badgeInProgress": "Practicando",
-    "badgeCompleted": "Leído correctamente"
+    "badgeCompleted": "Leído correctamente",
+    "showMoreWords": "+{count} más",
+    "showFewerWords": "Ver menos",
+    "tagMispronounced": "Err. {count}",
+    "tagOmitted": "Omit. {count}",
+    "tagRepeated": "Rep. {count}"
   },
   "item": {
     "notPracticed": "No practicado",

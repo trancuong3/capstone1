@@ -388,7 +388,20 @@
         "repeated": "Wiederholung",
         "hesitation": "Zögerlich"
       }
-    }
+    },
+    "summarySessions": "Sitzungen",
+    "summaryDuration": "Gesamtdauer",
+    "summaryCompleted": "Abgeschlossen",
+    "summaryDurationZero": "0 Min.",
+    "filterAria": "Lesesitzungen nach Status filtern",
+    "filterAll": "Alle",
+    "filterCompleted": "Abgeschlossen",
+    "filterIncomplete": "Offen",
+    "searchPlaceholder": "Auf dieser Seite nach Buchtitel suchen…",
+    "searchAria": "Sitzungen nach Buchtitel durchsuchen",
+    "filterEmptyTitle": "Keine passenden Sitzungen",
+    "filterEmptyDesc": "Status ändern oder Suchfeld leeren.",
+    "clearFilterAction": "Alle Sitzungen anzeigen"
   },
   "readingManagement": {
     "title": "Leseverwaltung & Erinnerungen",

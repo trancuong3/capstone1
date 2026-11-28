@@ -33,9 +33,11 @@ import {
   AdminStatusBadge,
   type AdminBadgeTone,
 } from "@/components/admin/admin-ui";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { StatusMessage } from "@/components/common/status-message";
 import { useAdminServices } from "@/hooks/use-admin-services";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { isServiceError } from "@/lib/api/service-error";
 import type { TranslateFn } from "@/lib/i18n/types";
@@ -791,6 +793,7 @@ function GroupSectionHeader({
 export function AdminHealthScreen() {
   const { health } = useAdminServices();
   const t = useTranslations("admin");
+  const tCommon = useTranslations("common");
   const { formatDateTime, formatNumber, formatPercent } = useI18n();
 
   const [snapshot, setSnapshot] = useState<HealthSnapshotUI | null>(null);
@@ -811,6 +814,16 @@ export function AdminHealthScreen() {
 
   const [isWakingOcr, setIsWakingOcr] = useState(false);
   const [wakeNotice, setWakeNotice] = useState<ActionNotice | null>(null);
+  const wakeOcrProgress = useAiProgress({
+    active: isWakingOcr,
+    expectedDurationMs: 45_000,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.wakingWorker") },
+      { atPct: 28, label: tCommon("aiProgress.connecting") },
+      { atPct: 62, label: tCommon("aiProgress.analyzing") },
+      { atPct: 86, label: tCommon("aiProgress.finalizing") },
+    ],
+  });
 
   const [clientCaps, setClientCaps] =
     useState<ClientDeviceCapabilitiesSnapshot | null>(null);
@@ -822,6 +835,10 @@ export function AdminHealthScreen() {
   const [isClearingTts, setIsClearingTts] = useState(false);
 
   const mountedRef = useRef(true);
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
   const healthRequestSeqRef = useRef(0);
   const healthAbortRef = useRef<AbortController | null>(null);
   const isRefreshingRef = useRef(false);
@@ -840,76 +857,90 @@ export function AdminHealthScreen() {
     }
   }, []);
 
-  const fetchHealthAsync = useCallback(async () => {
-    clearWakeRecheckTimer();
-    const seq = ++healthRequestSeqRef.current;
-    healthAbortRef.current?.abort();
-    const controller = new AbortController();
-    healthAbortRef.current = controller;
-    isRefreshingRef.current = true;
-
-    let timedOut = false;
-    const timeoutId = globalThis.setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, HEALTH_FETCH_TIMEOUT_MS);
-
-    try {
-      const nextSnapshot = await health.get(controller.signal);
-      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+  const fetchHealthAsync = useCallback(
+    async (options?: { forceFresh?: boolean }) => {
+      const forceFresh = Boolean(options?.forceFresh);
+      if (!forceFresh && isRefreshingRef.current) {
         return;
       }
-      setSnapshot(nextSnapshot);
-      setFetchError(null);
+      clearWakeRecheckTimer();
+      const seq = ++healthRequestSeqRef.current;
+      if (forceFresh) {
+        healthAbortRef.current?.abort();
+      }
+      const controller = new AbortController();
+      healthAbortRef.current = controller;
+      isRefreshingRef.current = true;
+
+      let timedOut = false;
+      const timeoutId = globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, HEALTH_FETCH_TIMEOUT_MS);
+
+      try {
+        const nextSnapshot = forceFresh
+          ? await health.get(controller.signal, { forceFresh: true })
+          : await health.get(controller.signal);
+        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+          return;
+        }
+        setSnapshot(nextSnapshot);
+        setFetchError(null);
+        setErrorDismissed(false);
+      } catch (err) {
+        if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
+          return;
+        }
+        if (!timedOut && controller.signal.aborted) {
+          return;
+        }
+        if (timedOut) {
+          setFetchError({
+            status: null,
+            requestId: null,
+            message: tRef.current(
+              "health.refreshTimeoutError",
+              undefined,
+              "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
+            ),
+            isTimeout: true,
+          });
+        } else if (isServiceError(err)) {
+          setFetchError({
+            status: err.status > 0 ? err.status : null,
+            requestId: err.request_id || null,
+            message: err.message || null,
+            isTimeout: false,
+          });
+        } else {
+          setFetchError({
+            status: null,
+            requestId: null,
+            message: null,
+            isTimeout: false,
+          });
+        }
+      } finally {
+        globalThis.clearTimeout(timeoutId);
+        if (mountedRef.current && seq === healthRequestSeqRef.current) {
+          isRefreshingRef.current = false;
+          setIsInitialLoading(false);
+          setIsRefreshing(false);
+        }
+      }
+    },
+    [clearWakeRecheckTimer, health],
+  );
+
+  const executeHealthFetch = useCallback(
+    async (options?: { forceFresh?: boolean }) => {
+      setIsRefreshing(true);
       setErrorDismissed(false);
-    } catch (err) {
-      if (!mountedRef.current || seq !== healthRequestSeqRef.current) {
-        return;
-      }
-      if (!timedOut && controller.signal.aborted) {
-        return;
-      }
-      if (timedOut) {
-        setFetchError({
-          status: null,
-          requestId: null,
-          message: t(
-            "health.refreshTimeoutError",
-            undefined,
-            "Yêu cầu kiểm tra vượt quá thời gian chờ 15 giây.",
-          ),
-          isTimeout: true,
-        });
-      } else if (isServiceError(err)) {
-        setFetchError({
-          status: err.status > 0 ? err.status : null,
-          requestId: err.request_id || null,
-          message: err.message || null,
-          isTimeout: false,
-        });
-      } else {
-        setFetchError({
-          status: null,
-          requestId: null,
-          message: null,
-          isTimeout: false,
-        });
-      }
-    } finally {
-      globalThis.clearTimeout(timeoutId);
-      if (mountedRef.current && seq === healthRequestSeqRef.current) {
-        isRefreshingRef.current = false;
-        setIsInitialLoading(false);
-        setIsRefreshing(false);
-      }
-    }
-  }, [clearWakeRecheckTimer, health, t]);
-
-  const executeHealthFetch = useCallback(async () => {
-    setIsRefreshing(true);
-    setErrorDismissed(false);
-    await fetchHealthAsync();
-  }, [fetchHealthAsync]);
+      await fetchHealthAsync(options);
+    },
+    [fetchHealthAsync],
+  );
 
   const probeClientAsync = useCallback(async () => {
     const seq = ++clientProbeSeqRef.current;
@@ -1069,7 +1100,7 @@ export function AdminHealthScreen() {
   }, [autoRefreshSec, executeHealthFetch, isTabHidden]);
 
   const handleManualRecheck = useCallback(() => {
-    void executeHealthFetch();
+    void executeHealthFetch({ forceFresh: true });
   }, [executeHealthFetch]);
 
   const handleWakeOcrWorker = useCallback(async () => {
@@ -1084,7 +1115,7 @@ export function AdminHealthScreen() {
       const response = await health.wakeOcrWorker(controller.signal);
       if (!mountedRef.current) return;
       if (response.woken) {
-        const suffix = t(
+        const suffix = tRef.current(
           "health.wakeOcrRechecking",
           undefined,
           "Tự động kiểm tra lại sau vài giây…",
@@ -1097,7 +1128,7 @@ export function AdminHealthScreen() {
         wakeRecheckTimerRef.current = globalThis.setTimeout(() => {
           wakeRecheckTimerRef.current = null;
           if (mountedRef.current) {
-            void executeHealthFetch();
+            void executeHealthFetch({ forceFresh: true });
           }
         }, WAKE_RECHECK_DELAY_MS);
       } else {
@@ -1958,6 +1989,19 @@ export function AdminHealthScreen() {
                                   )}
                             </Button>
                           </div>
+                        ) : null}
+                        {isWakingOcr ? (
+                          <AiProgressBar
+                            active
+                            elapsedSeconds={wakeOcrProgress.elapsedSeconds}
+                            label={
+                              wakeOcrProgress.stageLabel ??
+                              tCommon("aiProgress.wakingWorker")
+                            }
+                            percent={wakeOcrProgress.percent}
+                            size="sm"
+                            testId="ocr-wakeup-progress"
+                          />
                         ) : null}
                         {wakeNotice ? (
                           <StatusMessage

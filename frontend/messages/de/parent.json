@@ -233,5 +233,22 @@
         "a3": "Öffnen Sie den Bereich Fortschritt, um Berichte anzuzeigen, oder den Bereich Verlauf, um gespeicherte Lesesitzungen zu sehen."
       }
     }
+  },
+  "teacherVoice": {
+    "eyebrow": "Systemweite Stimmsynchronisierung",
+    "title": "KI-Lehrerin oder KI-Lehrer wählen",
+    "subtitle": "Die gewählte Stimme begleitet Lesen · Buchstabieren · Schwierige Wörter · Verständnis · Spiele.",
+    "savedForChild": "Gespeichert für {alias}",
+    "previewButton": "Stimme anhören",
+    "stopPreviewButton": "Vorschau stoppen",
+    "personaGroupAria": "KI-Lehrerin oder KI-Lehrer auswählen",
+    "femaleTitle": "KI-Lehrerin",
+    "femaleDesc": "Sanfte, warme Frauenstimme",
+    "maleTitle": "KI-Lehrer",
+    "maleDesc": "Warme, ausdrucksstarke Männerstimme",
+    "selectedBadge": "Aktiv",
+    "regionLabel": "Region",
+    "voiceListLabel": "Stimme auswählen",
+    "voiceListAria": "Verfügbare Stimmen nach Lehrkraft und Region"
   }
 }

@@ -20,11 +20,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { BookChildHeader } from "@/components/books/book-child-header";
+import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button, ButtonLink } from "@/components/common/button";
 import { EmptyState } from "@/components/common/empty-state";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { MemorySceneCanvas } from "@/components/entertainment/memory-game/memory-scene-canvas";
+import { useAiProgress } from "@/hooks/use-ai-progress";
 import {
   getEntertainmentPreferences,
   subscribeEntertainmentPreferences,
@@ -32,6 +34,7 @@ import {
 } from "@/hooks/use-entertainment-preferences";
 import { useTranslations } from "@/hooks/use-i18n";
 import { useSpeechPlayer } from "@/hooks/use-speech-player";
+import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import {
   createMemoryGameService,
@@ -44,6 +47,7 @@ import {
   formatCountdownSeconds,
   resolveAutoPlayFlag,
 } from "@/lib/entertainment/autopilot";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { cn } from "@/lib/utils/cn";
 import type {
   MatchedFactDTO,
@@ -184,6 +188,7 @@ export function MemoryGameScreen({
   autoPlay,
 }: MemoryGameScreenProps = {}) {
   const t = useTranslations("games");
+  const tCommon = useTranslations("common");
   const defaultErrorMessage = t("memoryGame.defaultError");
   const autoPlayRequested = resolveAutoPlayFlag(autoPlay);
   const memoryService = useMemo(
@@ -194,6 +199,7 @@ export function MemoryGameScreen({
   const child = childState.status === "ready" ? childState.child : null;
   const childId = child?.id ?? null;
   const speechPlayer = useSpeechPlayer();
+  const teacherPersona = useTeacherPersona();
   const {
     reducedMotion,
     calmSound,
@@ -264,6 +270,32 @@ export function MemoryGameScreen({
   const [focusedObjectId, setFocusedObjectId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isSubmittingRef = useRef(false);
+  const startProgress = useAiProgress({
+    active: isStarting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.preparing") },
+      { atPct: 48, label: tCommon("aiProgress.analyzing") },
+      { atPct: 84, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 6_000,
+  });
+  const hintProgress = useAiProgress({
+    active: isLoadingHint,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.generatingHint") },
+      { atPct: 74, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 4_000,
+  });
+  const submitProgress = useAiProgress({
+    active: isSubmitting,
+    stages: [
+      { atPct: 0, label: tCommon("aiProgress.evaluatingAnswer") },
+      { atPct: 55, label: tCommon("aiProgress.analyzing") },
+      { atPct: 85, label: tCommon("aiProgress.finalizing") },
+    ],
+    expectedDurationMs: 8_000,
+  });
 
   // Anti-TTS-Self-Capture Voice Lifecycle (matching G10)
   const [isListeningVoice, setIsListeningVoice] = useState(false);
@@ -275,10 +307,11 @@ export function MemoryGameScreen({
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const recallInputRef = useRef<HTMLTextAreaElement | null>(null);
   const isSpeakingPromptRef = useRef(false);
+  const speakGenRef = useRef(0);
+  const speechPlayerRef = useRef(speechPlayer);
   const ttsCooldownUntilRef = useRef<number>(0);
   const ttsRunTokenRef = useRef(0);
   const micArmTimeoutRef = useRef<number | null>(null);
-  const finishSpeakTimerRef = useRef<number | null>(null);
   const recallSilenceTimerRef = useRef<number | null>(null);
   const autopilotPhaseTimerRef = useRef<number | null>(null);
   const peekIntervalRef = useRef<number | null>(null);
@@ -338,6 +371,10 @@ export function MemoryGameScreen({
     }
   }, []);
 
+  useEffect(() => {
+    speechPlayerRef.current = speechPlayer;
+  }, [speechPlayer]);
+
   const stopMicCapture = useCallback(() => {
     if (micArmTimeoutRef.current !== null) {
       window.clearTimeout(micArmTimeoutRef.current);
@@ -365,20 +402,12 @@ export function MemoryGameScreen({
     setVoiceTarget(null);
   }, [clearRecallSilenceTimer]);
 
-  const speechPlayerRef = useRef(speechPlayer);
-  useEffect(() => {
-    speechPlayerRef.current = speechPlayer;
-  });
-
   const stopAllTts = useCallback(() => {
     ttsRunTokenRef.current += 1;
-    if (finishSpeakTimerRef.current !== null) {
-      window.clearTimeout(finishSpeakTimerRef.current);
-      finishSpeakTimerRef.current = null;
-    }
-    const wasSpeaking =
-      isSpeakingPromptRef.current || speechPlayerRef.current.isPlaying;
-    speechPlayerRef.current.stop();
+    speakGenRef.current += 1;
+    const player = speechPlayerRef.current;
+    const wasSpeaking = isSpeakingPromptRef.current || player.isPlaying;
+    player.stop();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
@@ -404,23 +433,20 @@ export function MemoryGameScreen({
   const speakVietnamesePrompt = useCallback(
     (text: string, options?: { onFinished?: () => void }) => {
       if (!calmSoundRef.current) return false;
-      const cleaned = text.trim();
-      if (!cleaned) return false;
+      const adapted = adaptTextToTeacherPersona(text, teacherPersona.gender);
+      if (!adapted.trim()) return false;
       // Anti-self-capture invariant: ALWAYS abort active mic BEFORE speaking TTS!
       stopMicCapture();
       stopAllTts();
       const runToken = ttsRunTokenRef.current;
+      const generation = speakGenRef.current;
       isSpeakingPromptRef.current = true;
       setIsSpeakingPrompt(true);
 
       let settled = false;
       const finishSpeak = () => {
-        if (settled) return;
+        if (settled || speakGenRef.current !== generation) return;
         settled = true;
-        if (finishSpeakTimerRef.current !== null) {
-          window.clearTimeout(finishSpeakTimerRef.current);
-          finishSpeakTimerRef.current = null;
-        }
         isSpeakingPromptRef.current = false;
         setIsSpeakingPrompt(false);
         ttsCooldownUntilRef.current = Date.now() + TTS_MIC_COOLDOWN_MS;
@@ -429,41 +455,13 @@ export function MemoryGameScreen({
         }
       };
 
-      if (
-        typeof window !== "undefined" &&
-        "speechSynthesis" in window &&
-        typeof window.SpeechSynthesisUtterance === "function"
-      ) {
-        try {
-          const utterance = new window.SpeechSynthesisUtterance(cleaned);
-          utterance.lang = "vi-VN";
-          utterance.rate = 0.95;
-          utterance.onend = finishSpeak;
-          utterance.onerror = finishSpeak;
-          window.speechSynthesis.speak(utterance);
-          finishSpeakTimerRef.current = window.setTimeout(() => {
-            if (
-              typeof window !== "undefined" &&
-              "speechSynthesis" in window &&
-              !window.speechSynthesis.speaking &&
-              !window.speechSynthesis.pending
-            ) {
-              finishSpeak();
-            }
-          }, 50);
-          return true;
-        } catch {
-          // Fall back to app speech player below.
-        }
-      }
-
       void speechPlayerRef.current
-        .play(cleaned)
+        .play(adapted, { utteranceKind: "game_prompt" })
         .catch(() => undefined)
         .finally(finishSpeak);
       return true;
     },
-    [stopAllTts, stopMicCapture],
+    [stopAllTts, stopMicCapture, teacherPersona.gender],
   );
 
   const startVoiceCapture = useCallback(
@@ -835,6 +833,7 @@ export function MemoryGameScreen({
           stage: "RECALL",
           input_mode: recallInputModeRef.current,
           response_text: trimmed,
+          teacher_gender: teacherPersona.gender,
         });
         setSession(result.session);
         setRecallEvaluation(result.attempt.evaluation);
@@ -857,6 +856,7 @@ export function MemoryGameScreen({
       stopAllTts,
       stopMicCapture,
       t,
+      teacherPersona.gender,
     ],
   );
 
@@ -878,6 +878,7 @@ export function MemoryGameScreen({
         stage: "CREATIVE",
         input_mode: creativeInputMode,
         response_text: trimmed,
+        teacher_gender: teacherPersona.gender,
       });
       setSession(result.session);
       setCreativeEvaluation(result.attempt.evaluation);
@@ -1606,7 +1607,7 @@ export function MemoryGameScreen({
             </div>
           </div>
 
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-3">
             <Button
               className="max-w-md text-lg"
               data-testid="start-memory-game-btn"
@@ -1616,6 +1617,19 @@ export function MemoryGameScreen({
               <Sparkles aria-hidden="true" className="size-5" />
               {t("memoryGame.startObserveButton")}
             </Button>
+            {isStarting ? (
+              <div className="w-full max-w-md">
+                <AiProgressBar
+                  active
+                  label={
+                    startProgress.stageLabel ?? tCommon("aiProgress.preparing")
+                  }
+                  percent={startProgress.percent}
+                  size="sm"
+                  testId="memory-game-starting-progress"
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Recent sessions */}
@@ -1833,6 +1847,20 @@ export function MemoryGameScreen({
                 </strong>{" "}
                 {t("memoryGame.curtainPromptSuffix")}
               </p>
+              {isLoadingHint ? (
+                <div className="mx-auto w-full max-w-sm">
+                  <AiProgressBar
+                    active
+                    label={
+                      hintProgress.stageLabel ??
+                      tCommon("aiProgress.generatingHint")
+                    }
+                    percent={hintProgress.percent}
+                    size="compact"
+                    testId="memory-game-hint-progress"
+                  />
+                </div>
+              ) : null}
               <div className="flex flex-wrap justify-center gap-2 pt-1">
                 <Button
                   data-testid="request-hint-btn"
@@ -2078,6 +2106,18 @@ export function MemoryGameScreen({
                 {t("memoryGame.submitRecallButton")}
               </Button>
             </div>
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  submitProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={submitProgress.percent}
+                size="compact"
+                testId="memory-game-recall-evaluating-progress"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -2107,7 +2147,10 @@ export function MemoryGameScreen({
                 dir="ltr"
                 lang="vi"
               >
-                {recallEvaluation.praise_message_vi}
+                {adaptTextToTeacherPersona(
+                  recallEvaluation.praise_message_vi,
+                  teacherPersona.gender,
+                )}
               </p>
             </div>
 
@@ -2443,6 +2486,18 @@ export function MemoryGameScreen({
                 {t("memoryGame.submitCreativeButton")}
               </Button>
             </div>
+            {isSubmitting ? (
+              <AiProgressBar
+                active
+                label={
+                  submitProgress.stageLabel ??
+                  tCommon("aiProgress.evaluatingAnswer")
+                }
+                percent={submitProgress.percent}
+                size="compact"
+                testId="memory-game-creative-evaluating-progress"
+              />
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -2465,8 +2520,12 @@ export function MemoryGameScreen({
               dir="ltr"
               lang="vi"
             >
-              {creativeEvaluation?.praise_message_vi ??
-                recallEvaluation?.praise_message_vi}
+              {adaptTextToTeacherPersona(
+                creativeEvaluation?.praise_message_vi ??
+                  recallEvaluation?.praise_message_vi ??
+                  "",
+                teacherPersona.gender,
+              )}
             </p>
           </div>
 
@@ -2488,7 +2547,10 @@ export function MemoryGameScreen({
               <p className="text-sm text-ink">
                 {recallEvaluation?.praise_message_vi ? (
                   <span className="viread-learning-content" dir="ltr" lang="vi">
-                    {recallEvaluation.praise_message_vi}
+                    {adaptTextToTeacherPersona(
+                      recallEvaluation.praise_message_vi,
+                      teacherPersona.gender,
+                    )}
                   </span>
                 ) : (
                   t("memoryGame.factualDefaultPraise")
@@ -2512,10 +2574,16 @@ export function MemoryGameScreen({
               <p className="text-sm text-ink">
                 {creativeEvaluation?.story_praise_vi ? (
                   <span className="viread-learning-content" dir="ltr" lang="vi">
-                    {creativeEvaluation.story_praise_vi}
+                    {adaptTextToTeacherPersona(
+                      creativeEvaluation.story_praise_vi,
+                      teacherPersona.gender,
+                    )}
                   </span>
                 ) : (
-                  t("memoryGame.creativeDefaultPraise")
+                  adaptTextToTeacherPersona(
+                    t("memoryGame.creativeDefaultPraise"),
+                    teacherPersona.gender,
+                  )
                 )}
               </p>
             </div>
@@ -2525,7 +2593,10 @@ export function MemoryGameScreen({
           creativeEvaluation.creative_highlights.length > 0 ? (
             <div className="rounded-card border border-border bg-white p-5">
               <h3 className="mb-2 text-lg font-extrabold text-purple-ink">
-                {t("memoryGame.creativeHighlightsHeading")}
+                {adaptTextToTeacherPersona(
+                  t("memoryGame.creativeHighlightsHeading"),
+                  teacherPersona.gender,
+                )}
               </h3>
               <ul className="list-disc space-y-1.5 ps-5 text-body text-ink">
                 {creativeEvaluation.creative_highlights.map((item) => (

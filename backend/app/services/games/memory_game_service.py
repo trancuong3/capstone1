@@ -338,6 +338,22 @@ class MemoryGameService:
                 detail="EMPTY_RESPONSE",
             )
 
+        resolved_teacher_gender = (
+            payload.teacher_gender
+            if payload.teacher_gender in ("female", "male")
+            else None
+        )
+        if resolved_teacher_gender is None and hasattr(self.repo, "child_owned_by"):
+            try:
+                owned_child = await self.repo.child_owned_by(session.ChildId, parent_id)
+                settings = getattr(owned_child, "Settings", None)
+                if isinstance(settings, dict):
+                    vp = settings.get("voice_preferences")
+                    if isinstance(vp, dict) and vp.get("gender") in ("female", "male"):
+                        resolved_teacher_gender = vp["gender"]
+            except Exception:
+                resolved_teacher_gender = None
+
         scene_spec = SceneSpec.model_validate(session.SceneSpec)
         evaluation = await self.evaluator.evaluate(
             scene_spec=scene_spec,
@@ -348,6 +364,7 @@ class MemoryGameService:
             prior_best_factual_score=session.BestFactualScore,
             prior_best_creative_score=session.BestCreativeScore,
             enable_ai_enrichment=enable_ai_enrichment,
+            teacher_gender=resolved_teacher_gender,
         )
 
         saved = await self.repo.record_attempt(

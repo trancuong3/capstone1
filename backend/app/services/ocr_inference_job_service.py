@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 import difflib
 import hashlib
 import json
@@ -293,6 +294,64 @@ def clear_active_model_manifest_cache() -> None:
     """Clear cached active VietOCR manifest + signed shard URLs."""
     global _ACTIVE_MODEL_MANIFEST_CACHE
     _ACTIVE_MODEL_MANIFEST_CACHE = None
+
+
+async def _run_model_reload_wakeup(reason: str, bypass_coalesce: bool) -> bool:
+    await asyncio.sleep(0)
+    try:
+        from app.services.remote_ocr_wakeup import send_remote_ocr_wakeup
+
+        return await send_remote_ocr_wakeup(
+            reason=reason,
+            job_id=None,
+            bypass_coalesce=bypass_coalesce,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "Best-effort remote OCR model-reload wakeup failed (%s): %s",
+            reason,
+            type(exc).__name__,
+        )
+        return False
+
+
+def trigger_remote_ocr_model_reload_wakeup(
+    *,
+    reason: str = "active_model_promoted",
+    bypass_coalesce: bool = True,
+) -> asyncio.Task[Any] | None:
+    """Best-effort non-blocking remote OCR wakeup after active VietOCR promotion/rollback.
+
+    Clears the active-model manifest RAM cache (and cached remote health snapshot) and,
+    when a remote OCR worker URL is configured, schedules a non-blocking `POST /wakeup`
+    so Quiet-Standby / Scale-to-Zero workers immediately resync the newly active model.
+    Never blocks or raises on caller paths.
+    """
+    clear_active_model_manifest_cache()
+    try:
+        from app.services import remote_ocr_wakeup
+
+        remote_ocr_wakeup._HEALTH_CACHE = None
+        if not remote_ocr_wakeup.is_remote_worker_wakeup_configured():
+            return None
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(
+            _run_model_reload_wakeup(reason=reason, bypass_coalesce=bypass_coalesce),
+            name="remote_ocr_model_reload_wakeup",
+        )
+        remote_ocr_wakeup._WAKEUP_TASKS.add(task)
+        task.add_done_callback(remote_ocr_wakeup._WAKEUP_TASKS.discard)
+        return task
+    except RuntimeError:
+        return None
+    except Exception as exc:
+        logger.warning(
+            "Could not schedule remote OCR model-reload wakeup: %s",
+            type(exc).__name__,
+        )
+        return None
 
 
 def _session_in_transaction(db: Any) -> bool:
@@ -1772,7 +1831,10 @@ class OcrInferenceJobService:
         job_image_path = job.ImagePath
         job_image_bucket = job.ImageBucket
         job_worker = job.WorkerId or worker_id
-        job_expected_profile = (job.ProcessingMeta or {}).get("expected_model_profile")
+        job_proc_meta = job.ProcessingMeta or {}
+        job_expected_profile = job_proc_meta.get("expected_model_profile")
+        job_active_profile = job_proc_meta.get("active_model_profile")
+        job_active_sha = job_proc_meta.get("active_model_sha256")
 
         # Commit DB transaction BEFORE calling Supabase Storage signed URL API so row locks
         # and ConcurrencyLimitedAsyncSession permits are never held across network I/O.
@@ -1814,6 +1876,8 @@ class OcrInferenceJobService:
             "source_fallback_path": fallback_path,
             "refresh_url_path": f"/internal/ocr-jobs/{job_id}/refresh-source-url",
             "expected_model_profile": job_expected_profile,
+            "active_model_profile": job_active_profile,
+            "active_model_sha256": job_active_sha,
         }
 
     async def _require_active_claim(
@@ -2411,14 +2475,29 @@ class OcrInferenceJobService:
             "next_retry_at": job.NextRetryAt.isoformat() if job.NextRetryAt else None,
         }
 
+    async def _build_drive_artifact_router(self) -> Any:
+        from app.services.viread_drive_connection_service import VireadDriveConnectionService
+
+        try:
+            return await VireadDriveConnectionService(self.db).build_artifact_router()
+        except TypeError as exc:
+            # Legacy unit tests may pass a synchronous MagicMock() as `db` and patch
+            # `get_runtime_artifact_router()`. Never swallow real DB or Drive errors.
+            if "can't be used in 'await' expression" not in str(exc):
+                raise
+            from app.services.training_storage.router import get_runtime_artifact_router
+
+            return get_runtime_artifact_router()
+
     async def get_active_model_manifest(self) -> dict[str, Any]:
         global _ACTIVE_MODEL_MANIFEST_CACHE
         import copy as _copy
         import time as _time
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
 
         was_in_tx = _session_in_transaction(self.db)
         pointer = await self.repo.get_active_model_pointer()
-        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
 
         profile = str((pointer or {}).get("profile") or "ORIGINAL")
         checkpoint_sha = str(
@@ -2437,6 +2516,7 @@ class OcrInferenceJobService:
             "shards": [],
         }
         if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return base
 
         cache_key = (profile, checkpoint_sha, str(storage_path))
@@ -2446,16 +2526,50 @@ class OcrInferenceJobService:
             and _ACTIVE_MODEL_MANIFEST_CACHE[1] == cache_key
             and now_mono < _ACTIVE_MODEL_MANIFEST_CACHE[0]
         ):
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
             return _copy.deepcopy(_ACTIVE_MODEL_MANIFEST_CACHE[2])
 
-        try:
-            manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
-            manifest = json.loads(manifest_bytes.decode("utf-8"))
-        except Exception as exc:
-            logger.warning("Failed reading active VietOCR manifest: %s", type(exc).__name__)
-            return base
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                # Release DB read transaction BEFORE any Google Drive network I/O.
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
 
-        from app.services.training_storage.references import is_gdrive_ref
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("Active VietOCR manifest must be a JSON object")
+        except TrainingStorageError as exc:
+            logger.warning(
+                "Failed reading active VietOCR manifest from Drive (%s): %s",
+                exc.code,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Active VietOCR manifest unavailable from storage ({exc.code}).",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Failed reading active VietOCR manifest (%s): %s",
+                "gdrive" if is_gdrive_ref(storage_ref) else "storage",
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Active VietOCR manifest unavailable from storage.",
+            ) from exc
 
         local_dir = (os.getenv("VIREAD_LOCAL_STORAGE_DIR") or "").strip()
         can_sign_storage = not local_dir and APP_ENVIRONMENT != "test"
@@ -2513,37 +2627,233 @@ class OcrInferenceJobService:
             return get_runtime_artifact_router().get(ref)
         return storage_service.download_object(ref)
 
-    async def get_active_model_artifact_bytes(
-        self, *, kind: str, shard_index: int | None = None
-    ) -> tuple[bytes, str]:
-        was_in_tx = _session_in_transaction(self.db)
-        pointer = await self.repo.get_active_model_pointer()
-        await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
-        storage_path = (pointer or {}).get("storage_path")
-        if not storage_path:
-            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
-        manifest_bytes = await asyncio.to_thread(self._download_model_ref, str(storage_path))
-        manifest = json.loads(manifest_bytes.decode("utf-8"))
-
+    @staticmethod
+    def _resolve_manifest_artifact_target(
+        manifest: dict[str, Any],
+        *,
+        kind: str,
+        shard_index: int | None = None,
+    ) -> tuple[str, str, int | None, str]:
         if kind == "config":
             config_info = manifest.get("config") or {}
             ref = config_info.get("storage_path")
             expected_sha = str(config_info.get("sha256") or "").lower()
+            expected_bytes = config_info.get("bytes")
             if not ref:
                 raise HTTPException(status_code=404, detail="Active VietOCR config not present.")
-        elif kind == "shard":
+            return (
+                str(ref),
+                expected_sha,
+                int(expected_bytes) if isinstance(expected_bytes, int) and expected_bytes >= 0 else None,
+                "application/x-yaml",
+            )
+        if kind == "shard":
             chunks = manifest.get("chunks") or []
             if shard_index is None or shard_index < 0 or shard_index >= len(chunks):
                 raise HTTPException(status_code=404, detail="Shard index out of range.")
             chunk = chunks[shard_index]
+            if not isinstance(chunk, dict):
+                raise HTTPException(status_code=404, detail="Shard entry is invalid.")
             ref = chunk.get("path") or chunk.get("storage_path")
             expected_sha = str(chunk.get("sha256") or "").lower()
+            expected_bytes = chunk.get("bytes")
             if not ref:
                 raise HTTPException(status_code=404, detail="Shard storage path missing.")
-        else:
-            raise HTTPException(status_code=400, detail="Unsupported artifact kind.")
+            return (
+                str(ref),
+                expected_sha,
+                int(expected_bytes) if isinstance(expected_bytes, int) and expected_bytes >= 0 else None,
+                "application/octet-stream",
+            )
+        raise HTTPException(status_code=400, detail="Unsupported artifact kind.")
 
-        payload = await asyncio.to_thread(self._download_model_ref, str(ref))
+    async def open_active_model_artifact_stream(
+        self,
+        *,
+        kind: str,
+        shard_index: int | None = None,
+    ) -> tuple[Iterator[bytes], str, dict[str, str]]:
+        """Stream active VietOCR checkpoint shards/config without buffering ~40 MiB Drive files in RAM."""
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
+
+        was_in_tx = _session_in_transaction(self.db)
+        pointer = await self.repo.get_active_model_pointer()
+        storage_path = (pointer or {}).get("storage_path")
+        if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
+
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                # Release DB read transaction BEFORE any Drive metadata/download/streaming I/O.
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+            if not isinstance(manifest, dict):
+                raise ValueError("Active VietOCR manifest must be a JSON object")
+        except TrainingStorageError as exc:
+            raise HTTPException(
+                status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Active VietOCR manifest unavailable ({exc.code}).",
+            ) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Active VietOCR manifest unavailable from storage.",
+            ) from exc
+
+        ref, expected_sha, expected_bytes, media_type = self._resolve_manifest_artifact_target(
+            manifest,
+            kind=kind,
+            shard_index=shard_index,
+        )
+
+        if is_gdrive_ref(ref):
+            if artifact_router is None:
+                tx_before_lazy = _session_in_transaction(self.db)
+                try:
+                    artifact_router = await self._build_drive_artifact_router()
+                finally:
+                    await _release_clean_self_opened_transaction(self.db, was_in_tx=tx_before_lazy)
+            try:
+                if hasattr(artifact_router, "open_stream_with_metadata"):
+                    meta, chunk_iterator = await asyncio.to_thread(
+                        artifact_router.open_stream_with_metadata,
+                        ref,
+                        expected_sha256=expected_sha or None,
+                    )
+                else:
+                    meta = await asyncio.to_thread(artifact_router.get_metadata, ref)
+                    if getattr(meta, "trashed", False):
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Requested active VietOCR artifact is unavailable.",
+                        )
+                    chunk_iterator = artifact_router.open_stream(
+                        ref,
+                        expected_sha256=expected_sha or None,
+                        preloaded_meta=meta,
+                    )
+            except TrainingStorageError as exc:
+                raise HTTPException(
+                    status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=exc.code,
+                ) from exc
+            if getattr(meta, "trashed", False):
+                raise HTTPException(
+                    status_code=404,
+                    detail="Requested active VietOCR artifact is unavailable.",
+                )
+
+            headers: dict[str, str] = {
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            }
+            resolved_sha = expected_sha or str(getattr(meta, "sha256", "") or "").lower()
+            if resolved_sha:
+                headers["X-Content-Sha256"] = resolved_sha
+            resolved_size = getattr(meta, "size_bytes", None)
+            if resolved_size is None:
+                resolved_size = expected_bytes
+            if resolved_size is not None:
+                headers["Content-Length"] = str(int(resolved_size))
+            return chunk_iterator, media_type, headers
+
+        # Supabase / legacy non-Drive path: preserve checksum verification and chunked response.
+        payload = await asyncio.to_thread(self._download_model_ref, ref)
+        actual_sha = hashlib.sha256(payload).hexdigest()
+        if expected_sha and actual_sha != expected_sha:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Artifact SHA-256 verification failed on backend.",
+            )
+
+        def _chunk_iter() -> Iterator[bytes]:
+            chunk_size = 65536
+            view = memoryview(payload)
+            for offset in range(0, len(view), chunk_size):
+                yield bytes(view[offset : offset + chunk_size])
+
+        headers = {
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-Content-Sha256": actual_sha,
+            "Content-Length": str(len(payload)),
+        }
+        return _chunk_iter(), media_type, headers
+
+    async def get_active_model_artifact_bytes(
+        self, *, kind: str, shard_index: int | None = None
+    ) -> tuple[bytes, str]:
+        from app.services.training_storage.base import TrainingStorageError
+        from app.services.training_storage.references import is_gdrive_ref
+
+        was_in_tx = _session_in_transaction(self.db)
+        pointer = await self.repo.get_active_model_pointer()
+        storage_path = (pointer or {}).get("storage_path")
+        if not storage_path:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+            raise HTTPException(status_code=404, detail="No custom active VietOCR artifact.")
+
+        storage_ref = str(storage_path)
+        artifact_router: Any | None = None
+        if is_gdrive_ref(storage_ref):
+            try:
+                artifact_router = await self._build_drive_artifact_router()
+            finally:
+                await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+        else:
+            await _release_clean_self_opened_transaction(self.db, was_in_tx=was_in_tx)
+
+        try:
+            if artifact_router is not None:
+                manifest_bytes = await asyncio.to_thread(artifact_router.get, storage_ref)
+            else:
+                manifest_bytes = await asyncio.to_thread(self._download_model_ref, storage_ref)
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except TrainingStorageError as exc:
+            raise HTTPException(
+                status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=exc.code,
+            ) from exc
+
+        ref, expected_sha, _expected_bytes, _media_type = self._resolve_manifest_artifact_target(
+            manifest,
+            kind=kind,
+            shard_index=shard_index,
+        )
+
+        if is_gdrive_ref(ref):
+            if artifact_router is None:
+                tx_before_lazy = _session_in_transaction(self.db)
+                try:
+                    artifact_router = await self._build_drive_artifact_router()
+                finally:
+                    await _release_clean_self_opened_transaction(self.db, was_in_tx=tx_before_lazy)
+            try:
+                payload = await asyncio.to_thread(artifact_router.get, ref)
+            except TrainingStorageError as exc:
+                raise HTTPException(
+                    status_code=exc.http_status or status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail=exc.code,
+                ) from exc
+        else:
+            payload = await asyncio.to_thread(self._download_model_ref, ref)
+
         actual_sha = hashlib.sha256(payload).hexdigest()
         if expected_sha and actual_sha != expected_sha:
             raise HTTPException(
@@ -2552,9 +2862,14 @@ class OcrInferenceJobService:
             )
         return payload, actual_sha
 
-    async def get_job_status_payload(self, job_id: UUID) -> dict[str, Any]:
+    async def get_job_status_payload(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if str(job.Status or "").upper() == "QUEUED":
             from app.services.remote_ocr_wakeup import (
@@ -2569,8 +2884,16 @@ class OcrInferenceJobService:
         worker_online = await self.has_online_worker()
         return self.serialize_job(job, worker_online=worker_online)
 
-    async def list_book_jobs_payload(self, book_id: UUID, *, limit: int = 200) -> list[dict[str, Any]]:
+    async def list_book_jobs_payload(
+        self,
+        book_id: UUID,
+        *,
+        limit: int = 200,
+        admin_only: bool = False,
+    ) -> list[dict[str, Any]]:
         rows = await self.repo.list_for_book(book_id, limit=limit)
+        if admin_only:
+            rows = [row for row in rows if row.JobKind in ADMIN_JOB_KINDS]
         queued_row = next(
             (row for row in rows if str(row.Status or "").upper() == "QUEUED"),
             None,
@@ -2588,9 +2911,16 @@ class OcrInferenceJobService:
         worker_online = await self.has_online_worker()
         return [self.serialize_job(row, worker_online=worker_online) for row in rows]
 
-    async def retry_job(self, job_id: UUID) -> dict[str, Any]:
+    async def retry_job(
+        self,
+        job_id: UUID,
+        *,
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status in ACTIVE_JOB_STATUSES:
             serialized_active = self.serialize_job(job)
@@ -2646,9 +2976,17 @@ class OcrInferenceJobService:
         except Exception:
             pass
 
-    async def cancel_job(self, job_id: UUID, *, reason: str = "ADMIN_CANCELLED") -> dict[str, Any]:
+    async def cancel_job(
+        self,
+        job_id: UUID,
+        *,
+        reason: str = "ADMIN_CANCELLED",
+        admin_only: bool = False,
+    ) -> dict[str, Any]:
         job = await self.repo.get(job_id, lock=True)
-        if job is None:
+        if job is None or (admin_only and job.JobKind not in ADMIN_JOB_KINDS):
+            if job is not None:
+                await self.db.rollback()
             raise HTTPException(status_code=404, detail="OCR inference job not found.")
         if job.Status not in ("SUCCEEDED", "CANCELLED"):
             now = datetime.now(timezone.utc)
@@ -2670,11 +3008,24 @@ class OcrInferenceJobService:
         *,
         worker_online: bool | None = None,
     ) -> dict[str, Any]:
+        from app.services.ai_task_progress import (
+            compute_ocr_job_progress,
+            extract_ocr_worker_phase,
+        )
+
+        worker_phase = extract_ocr_worker_phase(getattr(job, "ProcessingMeta", None))
+        progress_pct, _progress_mode = compute_ocr_job_progress(
+            status=job.Status,
+            worker_phase=worker_phase,
+            worker_online=worker_online,
+        )
         payload: dict[str, Any] = {
             "id": str(job.Id),
             "job_kind": job.JobKind,
             "status": job.Status,
-            "priority": int(job.Priority),
+            "worker_phase": worker_phase,
+            "progress_pct": progress_pct,
+            "priority": int(job.Priority or 50),
             "book_id": str(job.BookId) if job.BookId else None,
             "page_id": str(job.PageId) if job.PageId else None,
             "revision_id": str(job.RevisionId) if job.RevisionId else None,

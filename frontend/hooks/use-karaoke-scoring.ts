@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { translateRuntime } from "@/lib/i18n/runtime";
-import type { KaraokeLyrics } from "@/types/karaoke";
+import type { KaraokeLyrics, KaraokeMelodyProfile } from "@/types/karaoke";
 import {
   browserSingingProvider,
   type SingingRecognizer as Recognition,
@@ -21,10 +21,16 @@ import {
 } from "@/lib/karaoke/microphone-signal";
 import {
   createBrowserMusicalMonitor,
+  createLocalVocalRecorder,
+  DEFAULT_MIC_LATENCY_MS,
   type BrowserMusicalMonitor,
+  type DspFrame,
   type DspSessionSummary,
   type LiveDspTelemetry,
+  type LivePitchSample,
+  type LocalVocalRecorder,
   type LyricTimeSpan,
+  type MusicalDspAnalyzer,
 } from "@/lib/karaoke/musical-dsp";
 import {
   evaluateMusicalPerformance,
@@ -32,12 +38,20 @@ import {
   type MusicalEvaluationResult,
   type MusicalProfileData,
 } from "@/lib/karaoke/musical-scoring";
+import {
+  evaluateProKaraokePerformance,
+  type ProKaraokeScore,
+} from "@/lib/karaoke/pro-karaoke-scoring";
 import { extractLyricSpans } from "@/lib/karaoke/musical-practice";
 
 export interface KaraokeScoringOptions {
   headphoneMode?: boolean;
   practiceMode?: KaraokePracticeMode;
   musicalProfile?: MusicalProfileData | null;
+  melodyProfile?: KaraokeMelodyProfile | null;
+  keyShift?: number;
+  playbackRate?: number;
+  micLatencyMs?: number;
   segmentRange?: LyricTimeSpan | null;
 }
 
@@ -59,6 +73,11 @@ type Snapshot = {
   songScore: LiveSingingScore | null;
   musicalScore: MusicalEvaluationResult | null;
   songMusicalScore: MusicalEvaluationResult | null;
+  proScore: ProKaraokeScore | null;
+  songProScore: ProKaraokeScore | null;
+  replayAudioUrl: string | null;
+  dspFrames: readonly DspFrame[];
+  sttAvailable: boolean;
   liveTelemetry: LiveDspTelemetry | null;
   error: string | null;
   previewWords: ReadonlyMap<string, LiveWordState>;
@@ -99,6 +118,8 @@ function errorName(error: unknown) {
 }
 
 const emptyPreview: ReadonlyMap<string, LiveWordState> = new Map();
+const emptyFrames: readonly DspFrame[] = [];
+const emptyPitchRing: readonly LivePitchSample[] = [];
 const idle: Snapshot = {
   status: "idle",
   score: null,
@@ -106,13 +127,22 @@ const idle: Snapshot = {
   songScore: null,
   musicalScore: null,
   songMusicalScore: null,
+  proScore: null,
+  songProScore: null,
+  replayAudioUrl: null,
+  dspFrames: emptyFrames,
+  sttAvailable: false,
   liveTelemetry: null,
   error: null,
   previewWords: emptyPreview,
   liveTranscript: "",
   signal: "unavailable",
 };
-const supported = () => browserSingingProvider.supported();
+const hasMediaMic = () =>
+  typeof navigator !== "undefined" &&
+  typeof navigator.mediaDevices?.getUserMedia === "function" &&
+  typeof AudioContext !== "undefined";
+const supported = () => browserSingingProvider.supported() || hasMediaMic();
 const serverSupported = () => false;
 const subscribeSupport = () => () => {};
 const startWaitMs = 15_000;
@@ -126,6 +156,7 @@ class KaraokeMicSession {
   private snapshot = idle;
   private listeners = new Set<() => void>();
   private recognition: Recognition | null = null;
+  private dspOnlyActive = false;
   private trackInput = false;
   private stream: MediaStream | null = null;
   private sliceClock: ReturnType<typeof setInterval> | undefined;
@@ -148,6 +179,10 @@ class KaraokeMicSession {
   private signalContext: AudioContext | null = null;
   private signalClassifier = new SingingSignalClassifier();
   private musicalMonitor: BrowserMusicalMonitor | null = null;
+  private sessionAnalyzer: MusicalDspAnalyzer | null = null;
+  private companionStream: MediaStream | null = null;
+  private companionStreamPending = false;
+  private vocalRecorder: LocalVocalRecorder | null = null;
   private lastDspSummary: DspSessionSummary | null = null;
   private options: KaraokeScoringOptions = {};
 
@@ -159,12 +194,40 @@ class KaraokeMicSession {
     };
   };
 
+  getPitchRing = (): readonly LivePitchSample[] =>
+    this.musicalMonitor?.getPitchRing() ??
+    this.sessionAnalyzer?.getPitchRing() ??
+    emptyPitchRing;
+
+  getLatestPitchSample = (): LivePitchSample | null =>
+    this.musicalMonitor?.getLatestPitchSample() ??
+    this.sessionAnalyzer?.getLatestPitchSample() ??
+    null;
+
   setOptions = (options: KaraokeScoringOptions) => {
     this.options = options;
+    if (options.micLatencyMs !== undefined) {
+      this.musicalMonitor?.setMicLatencyMs(options.micLatencyMs);
+    }
   };
 
   private notify() {
     for (const listener of this.listeners) listener();
+  }
+
+  private disposeVocalRecorder() {
+    if (this.vocalRecorder) {
+      this.vocalRecorder.dispose();
+      this.vocalRecorder = null;
+    }
+    if (this.snapshot.replayAudioUrl) {
+      try {
+        URL.revokeObjectURL(this.snapshot.replayAudioUrl);
+      } catch {
+        /* Safe revoke. */
+      }
+      this.snapshot = { ...this.snapshot, replayAudioUrl: null };
+    }
   }
 
   private update(
@@ -172,6 +235,7 @@ class KaraokeMicSession {
     error: string | null = null,
     score: LiveSingingScore | null = null,
     musicalScore: MusicalEvaluationResult | null = this.snapshot.musicalScore,
+    proScore: ProKaraokeScore | null = this.snapshot.proScore,
   ) {
     this.snapshot = {
       status,
@@ -183,6 +247,13 @@ class KaraokeMicSession {
       songMusicalScore: this.savedSong
         ? this.savedSong.snapshot.musicalScore
         : musicalScore,
+      proScore,
+      songProScore: this.savedSong
+        ? this.savedSong.snapshot.proScore
+        : proScore,
+      replayAudioUrl: this.snapshot.replayAudioUrl,
+      dspFrames: this.lastDspSummary?.frames ?? this.snapshot.dspFrames,
+      sttAvailable: this.provider.supported(),
       liveTelemetry: this.snapshot.liveTelemetry,
       previewWords: this.snapshot.previewWords ?? emptyPreview,
       liveTranscript: this.snapshot.liveTranscript ?? "",
@@ -218,8 +289,113 @@ class KaraokeMicSession {
     }
   }
 
+  private stopVocalRecorderForReplay() {
+    const recorder = this.vocalRecorder;
+    if (!recorder) return;
+    void recorder.stop().then((url) => {
+      if (url && this.vocalRecorder === recorder) {
+        this.snapshot = { ...this.snapshot, replayAudioUrl: url };
+        this.notify();
+      }
+    });
+  }
+
+  private startVocalMonitorOnStream(stream: MediaStream) {
+    if (!this.musicalMonitor && this.activeLyrics) {
+      this.musicalMonitor = createBrowserMusicalMonitor({
+        stream,
+        getCurrentMs: this.getTime,
+        lyricSpans: extractLyricSpans(
+          this.activeLyrics,
+          this.options.segmentRange,
+        ),
+        headphoneMode: Boolean(this.options.headphoneMode),
+        micLatencyMs: this.options.micLatencyMs ?? DEFAULT_MIC_LATENCY_MS,
+        existingAnalyzer: this.sessionAnalyzer ?? undefined,
+        pollIntervalMs: 32,
+        telemetryThrottleMs: 100,
+        onTelemetry: (telemetry) => {
+          if (this.snapshot.status !== "listening") return;
+          this.snapshot = {
+            ...this.snapshot,
+            liveTelemetry: telemetry,
+          };
+          this.notify();
+        },
+      });
+      if (this.musicalMonitor) {
+        this.sessionAnalyzer = this.musicalMonitor.getAnalyzer();
+      }
+    }
+    if (!this.vocalRecorder && !this.savedSong) {
+      this.vocalRecorder = createLocalVocalRecorder(stream);
+      this.vocalRecorder?.start();
+    }
+  }
+
+  /**
+   * On standard browsers (Chrome/Edge/Safari/WebView) where `SpeechRecognition.start(track)`
+   * is unsupported (`trackInput === false`), acquire a companion `MediaStream` best-effort
+   * once SpeechRecognition starts so real-time Vocal DSP, Pitch Highway, VU meter, and
+   * 3-pillar Pitch+Rhythm scoring always run alongside Lyrics STT.
+   */
+  private ensureCompanionVocalMonitor(recognition: Recognition) {
+    if (
+      this.musicalMonitor ||
+      this.companionStream ||
+      this.companionStreamPending ||
+      !hasMediaMic()
+    ) {
+      return;
+    }
+    const devices = navigator.mediaDevices;
+    if (!devices?.getUserMedia) return;
+    this.companionStreamPending = true;
+    const useRawHeadphoneAudio = Boolean(this.options.headphoneMode);
+    void devices
+      .getUserMedia({
+        audio: useRawHeadphoneAudio
+          ? {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            }
+          : {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+      })
+      .then((stream) => {
+        this.companionStreamPending = false;
+        if (
+          this.recognition !== recognition ||
+          this.snapshot.status !== "listening"
+        ) {
+          for (const track of stream.getTracks()) track.stop();
+          return;
+        }
+        this.companionStream = stream;
+        this.startVocalMonitorOnStream(stream);
+      })
+      .catch(() => {
+        // Non-fatal: some mobile WebViews lock mic exclusively to SpeechRecognition.
+        // Lyrics scoring continues smoothly without failing the session.
+        this.companionStreamPending = false;
+      });
+  }
+
   private closeStream() {
     this.stopMusicalMonitor(true);
+    this.dspOnlyActive = false;
+    this.companionStreamPending = false;
+    if (this.companionStream) {
+      for (const track of this.companionStream.getTracks()) {
+        track.onended = null;
+        track.stop();
+      }
+      this.companionStream = null;
+    }
     if (this.signalContext && this.signalContext.state !== "closed") {
       void this.signalContext.close().catch(() => {});
     }
@@ -283,15 +459,17 @@ class KaraokeMicSession {
 
   reset = () => {
     this.release(true);
+    this.disposeVocalRecorder();
     this.acknowledge(false);
     this.attempt = null;
     this.activeLyrics = null;
     this.practiceLyrics = null;
     this.savedSong = null;
+    this.sessionAnalyzer = null;
     this.lastDspSummary = null;
     this.snapshot = idle;
     this.emptyRestarts = 0;
-    this.update("idle", null, null, null);
+    this.update("idle", null, null, null, null);
   };
 
   arm = (
@@ -327,6 +505,7 @@ class KaraokeMicSession {
     this.getTime = clock;
     this.practiceLyrics = lineId ? { ...lyrics, lines } : null;
     this.activeLyrics = this.practiceLyrics ?? lyrics;
+    this.sessionAnalyzer = null;
     this.lastDspSummary = null;
     this.attempt = new LiveSingingAttempt(this.activeLyrics);
     this.snapshot = { ...idle, liveScore: this.attempt.result(!!lineId) };
@@ -457,8 +636,71 @@ class KaraokeMicSession {
     }, 100);
   }
 
+  private openDspOnly(probe: boolean) {
+    const devices = navigator.mediaDevices;
+    if (!devices?.getUserMedia) {
+      this.fail(
+        translateRuntime("entertainment.karaokeRuntime.micScoringUnsupported"),
+      );
+      return;
+    }
+    this.dspOnlyActive = true;
+    const useRawHeadphoneAudio = Boolean(this.options.headphoneMode);
+    void devices
+      .getUserMedia({
+        audio: useRawHeadphoneAudio
+          ? {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            }
+          : {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+      })
+      .then((stream) => {
+        if (!this.dspOnlyActive || this.snapshot.status === "finishing") {
+          for (const track of stream.getTracks()) track.stop();
+          return;
+        }
+        if (probe) {
+          for (const track of stream.getTracks()) track.stop();
+          this.dspOnlyActive = false;
+          this.update("armed");
+          this.acknowledge(true);
+          return;
+        }
+        this.stream = stream;
+        const track = stream
+          .getAudioTracks()
+          .find((item) => item.readyState === "live");
+        if (!track) {
+          this.fail(microphoneError("NotFoundError"));
+          return;
+        }
+        track.onended = () => {
+          if (this.stream === stream && this.dspOnlyActive) {
+            this.fail(microphoneError("audio-capture"));
+          }
+        };
+        this.startVocalMonitorOnStream(stream);
+        this.update("listening");
+      })
+      .catch((error: unknown) => {
+        if (this.dspOnlyActive) {
+          this.fail(microphoneError(errorName(error)));
+        }
+      });
+  }
+
   private open(probe: boolean) {
     if (!this.provider.supported()) {
+      if (hasMediaMic()) {
+        this.openDspOnly(probe);
+        return;
+      }
       this.fail(
         translateRuntime("entertainment.karaokeRuntime.micScoringUnsupported"),
       );
@@ -507,29 +749,12 @@ class KaraokeMicSession {
               this.signalClassifier,
               this.ensureSignalContext(),
             );
-            if (!this.musicalMonitor && this.activeLyrics) {
-              this.musicalMonitor = createBrowserMusicalMonitor({
-                stream: this.stream,
-                getCurrentMs: this.getTime,
-                lyricSpans: extractLyricSpans(
-                  this.activeLyrics,
-                  this.options.segmentRange,
-                ),
-                headphoneMode: Boolean(this.options.headphoneMode),
-                pollIntervalMs: 40,
-                telemetryThrottleMs: 100,
-                onTelemetry: (telemetry) => {
-                  if (this.snapshot.status !== "listening") return;
-                  this.snapshot = {
-                    ...this.snapshot,
-                    liveTelemetry: telemetry,
-                  };
-                  this.notify();
-                },
-              });
-            }
+            this.startVocalMonitorOnStream(this.stream);
           }
           this.update("listening");
+          if (!this.trackInput) {
+            this.ensureCompanionVocalMonitor(recognition);
+          }
           if (this.trackInput) this.scheduleSlice(recognition, windows);
         }
       };
@@ -601,7 +826,11 @@ class KaraokeMicSession {
   }
 
   resume = () => {
-    if (this.recognition || !["armed", "paused"].includes(this.snapshot.status))
+    if (
+      this.recognition ||
+      this.dspOnlyActive ||
+      !["armed", "paused"].includes(this.snapshot.status)
+    )
       return;
     this.open(false);
   };
@@ -610,7 +839,10 @@ class KaraokeMicSession {
     const { status } = this.snapshot;
     if (
       status !== "listening" &&
-      !(this.recognition && (status === "armed" || status === "paused"))
+      !(
+        (this.recognition || this.dspOnlyActive) &&
+        (status === "armed" || status === "paused")
+      )
     )
       return;
     this.release(true);
@@ -619,7 +851,7 @@ class KaraokeMicSession {
 
   seekBoundary = (repeatPractice = false) => {
     if (
-      !this.recognition ||
+      (!this.recognition && !this.dspOnlyActive) ||
       this.snapshot.status === "arming" ||
       this.snapshot.status === "finishing"
     )
@@ -627,6 +859,7 @@ class KaraokeMicSession {
     this.pause();
     if (repeatPractice && this.practiceLyrics) {
       this.attempt = new LiveSingingAttempt(this.practiceLyrics);
+      this.sessionAnalyzer = null;
       this.lastDspSummary = null;
       this.snapshot = {
         ...this.snapshot,
@@ -655,6 +888,8 @@ class KaraokeMicSession {
   };
 
   private complete(error = this.snapshot.error) {
+    const sttWasActive = this.provider.supported() && !this.dspOnlyActive;
+    this.stopVocalRecorderForReplay();
     this.release(true);
     this.attempt?.flushPlayedOmissions(this.getTime());
     const result = this.attempt?.result(!!this.savedSong || !!error) ?? null;
@@ -672,21 +907,37 @@ class KaraokeMicSession {
         })
       : null;
 
+    const proResult = this.activeLyrics
+      ? evaluateProKaraokePerformance({
+          lyrics: this.activeLyrics,
+          dspSummary: this.lastDspSummary,
+          liveLyricsScore: result,
+          sttActive: sttWasActive,
+          melodyProfile: this.options.melodyProfile ?? null,
+          musicalProfile: this.options.musicalProfile ?? null,
+          keyShift: this.options.keyShift ?? 0,
+          playbackRate: this.options.playbackRate ?? 1,
+          segmentRange: this.options.segmentRange ?? null,
+        })
+      : null;
+
     this.attempt = null;
     const hasLyricsResult = result !== null && result.kind !== "insufficient";
     const hasMusicalResult =
       musicalResult !== null &&
       musicalResult.scoringMode !== "INSUFFICIENT_EVIDENCE";
+    const hasProResult = proResult !== null && proResult.kind === "scored";
 
-    if (hasLyricsResult || hasMusicalResult) {
+    if (hasLyricsResult || hasMusicalResult || hasProResult) {
       this.update(
         "scored",
         error,
         hasLyricsResult ? result : null,
         musicalResult,
+        proResult,
       );
     } else {
-      this.update("insufficient", error, null, musicalResult);
+      this.update("insufficient", error, null, musicalResult, proResult);
     }
   }
 
@@ -714,6 +965,7 @@ class KaraokeMicSession {
     }, finalWaitMs);
     try {
       if (!this.drainingSlice) this.recognition.stop();
+      this.stopVocalRecorderForReplay();
       this.closeStream();
     } catch {
       this.complete();
@@ -730,6 +982,10 @@ export function useKaraokeScoring(
   const headphoneMode = options?.headphoneMode;
   const practiceMode = options?.practiceMode;
   const musicalProfile = options?.musicalProfile;
+  const melodyProfile = options?.melodyProfile;
+  const keyShift = options?.keyShift;
+  const playbackRate = options?.playbackRate;
+  const micLatencyMs = options?.micLatencyMs;
   const segmentStartMs = options?.segmentRange?.startMs;
   const segmentEndMs = options?.segmentRange?.endMs;
   useEffect(() => {
@@ -737,6 +993,10 @@ export function useKaraokeScoring(
       headphoneMode,
       practiceMode,
       musicalProfile,
+      melodyProfile,
+      keyShift,
+      playbackRate,
+      micLatencyMs,
       segmentRange:
         segmentStartMs !== undefined && segmentEndMs !== undefined
           ? { startMs: segmentStartMs, endMs: segmentEndMs }
@@ -747,6 +1007,10 @@ export function useKaraokeScoring(
     headphoneMode,
     practiceMode,
     musicalProfile,
+    melodyProfile,
+    keyShift,
+    playbackRate,
+    micLatencyMs,
     segmentStartMs,
     segmentEndMs,
   ]);
@@ -785,6 +1049,8 @@ export function useKaraokeScoring(
     supported: available,
     listening: state.status === "listening",
     arm,
+    getPitchRing: session.getPitchRing,
+    getLatestPitchSample: session.getLatestPitchSample,
     observePlayback: session.observePlayback,
     endPractice: session.endPractice,
     seekBoundary: session.seekBoundary,

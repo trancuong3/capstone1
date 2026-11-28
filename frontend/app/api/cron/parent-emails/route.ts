@@ -96,6 +96,7 @@ async function handleCronDispatch(request: NextRequest) {
       ) {
         break;
       }
+      await upstream.body?.cancel().catch(() => undefined);
     } catch {
       upstream = null;
       if (attempt === 1) {

@@ -18,9 +18,11 @@ class GatePolicy:
 def evaluate_gate(metrics: dict[str, Any], *, paired_manifest_hash: str, expected_locked_manifest_hash: str,
                   policy: GatePolicy = GatePolicy()) -> dict[str, Any]:
     if paired_manifest_hash != expected_locked_manifest_hash:
-        return {"status": "EVALUATION_FAILED", "reason": "locked_test_manifest_hash_mismatch", "promotion_allowed": False}
+        return {"status": "EVALUATION_FAILED", "reason": "locked_test_manifest_hash_mismatch",
+                "promotion_allowed": False, "failing_checks": []}
     if not isinstance(metrics, dict) or not isinstance(metrics.get("sample_count"), int) or not isinstance(metrics.get("group_count"), int):
-        return {"status": "EVALUATION_FAILED", "reason": "malformed_metrics", "promotion_allowed": False}
+        return {"status": "EVALUATION_FAILED", "reason": "malformed_metrics",
+                "promotion_allowed": False, "failing_checks": []}
     try:
         count, groups = int(metrics["sample_count"]), int(metrics["group_count"])
         cer, wer = metrics["cer"], metrics["wer"]
@@ -46,7 +48,7 @@ def evaluate_gate(metrics: dict[str, Any], *, paired_manifest_hash: str, expecte
                 intervals[baseline].append([float(interval[0]), float(interval[1])])
         if count < policy.min_pairs or groups < policy.min_groups:
             return {"status": "INSUFFICIENT_EVIDENCE", "reason": "minimum_locked_test_size_not_met", "promotion_allowed": False,
-                    "sample_count": count, "group_count": groups}
+                    "sample_count": count, "group_count": groups, "failing_checks": []}
         deltas = {
             baseline: [float(item[f"delta_candidate_minus_{baseline}"]) for item in results]
             for baseline, results in comparisons.items()
@@ -60,11 +62,37 @@ def evaluate_gate(metrics: dict[str, Any], *, paired_manifest_hash: str, expecte
             for baseline, values in intervals.items()
         }
     except (KeyError, TypeError, ValueError, OverflowError):
-        return {"status": "EVALUATION_FAILED", "reason": "malformed_metrics", "promotion_allowed": False}
+        return {"status": "EVALUATION_FAILED", "reason": "malformed_metrics",
+                "promotion_allowed": False, "failing_checks": []}
+    metric_names = ("cer", "wer")
     if any(not math.isfinite(delta) for baseline_deltas in deltas.values() for delta in baseline_deltas):
-        return {"status": "EVALUATION_FAILED", "reason": "non_finite_metric", "promotion_allowed": False}
+        failing_checks: list[dict[str, Any]] = [
+            {
+                "baseline": baseline,
+                "metric": metric_name,
+                "delta": deltas[baseline][idx],
+                "ci95": list(intervals[baseline][idx]),
+            }
+            for baseline in comparisons
+            for idx, metric_name in enumerate(metric_names)
+            if not math.isfinite(deltas[baseline][idx])
+        ]
+        return {"status": "EVALUATION_FAILED", "reason": "non_finite_metric",
+                "promotion_allowed": False, "failing_checks": failing_checks}
     if any(delta > policy.max_absolute_regression for baseline_deltas in deltas.values() for delta in baseline_deltas):
-        return {"status": "ORIGINAL_WIN", "reason": "non_regression_limit_exceeded", "promotion_allowed": False}
+        failing_checks = [
+            {
+                "baseline": baseline,
+                "metric": metric_name,
+                "delta": deltas[baseline][idx],
+                "ci95": list(intervals[baseline][idx]),
+            }
+            for baseline in comparisons
+            for idx, metric_name in enumerate(metric_names)
+            if deltas[baseline][idx] > policy.max_absolute_regression
+        ]
+        return {"status": "ORIGINAL_WIN", "reason": "non_regression_limit_exceeded",
+                "promotion_allowed": False, "failing_checks": failing_checks}
     v2_win = all(bound < 0 for baseline_bounds in upper.values() for bound in baseline_bounds) if policy.require_both_cer_and_wer_win else all(any(bound < 0 for bound in baseline_bounds) for baseline_bounds in upper.values())
     original_win = any(bound > 0 for baseline_bounds in lower.values() for bound in baseline_bounds)
     if v2_win:
@@ -76,6 +104,47 @@ def evaluate_gate(metrics: dict[str, Any], *, paired_manifest_hash: str, expecte
     else:
         status = "NO_SIGNIFICANT_DIFFERENCE"
         reason = "paired_cluster_confidence_intervals_include_zero"
-    return {"status": status, "reason": reason, "promotion_allowed": status == "V2_WIN",
-            "sample_count": count, "group_count": groups,
-            "requires_human_approval": status == "V2_WIN"}
+    response: dict[str, Any] = {
+        "status": status, "reason": reason, "promotion_allowed": status == "V2_WIN",
+        "sample_count": count, "group_count": groups,
+        "requires_human_approval": status == "V2_WIN",
+    }
+    if status != "V2_WIN":
+        if status == "ORIGINAL_WIN":
+            failing_checks = [
+                {
+                    "baseline": baseline,
+                    "metric": metric_name,
+                    "delta": deltas[baseline][idx],
+                    "ci95": list(intervals[baseline][idx]),
+                }
+                for baseline in comparisons
+                for idx, metric_name in enumerate(metric_names)
+                if lower[baseline][idx] > 0 or upper[baseline][idx] >= 0
+            ]
+        elif policy.require_both_cer_and_wer_win:
+            failing_checks = [
+                {
+                    "baseline": baseline,
+                    "metric": metric_name,
+                    "delta": deltas[baseline][idx],
+                    "ci95": list(intervals[baseline][idx]),
+                }
+                for baseline in comparisons
+                for idx, metric_name in enumerate(metric_names)
+                if upper[baseline][idx] >= 0
+            ]
+        else:
+            failing_checks = [
+                {
+                    "baseline": baseline,
+                    "metric": metric_name,
+                    "delta": deltas[baseline][idx],
+                    "ci95": list(intervals[baseline][idx]),
+                }
+                for baseline in comparisons
+                if all(bound >= 0 for bound in upper[baseline])
+                for idx, metric_name in enumerate(metric_names)
+            ]
+        response["failing_checks"] = failing_checks
+    return response
