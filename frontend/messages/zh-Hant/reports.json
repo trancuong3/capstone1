@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "建議練習詞彙（{days} 天）",
       "heardAsCount": "孩子常讀成「{heardAs}」（{times} 次）",
       "recordedCount": "記錄 {times} 次",
-      "heardAsInline": "（讀成「{heardAs}」）"
+      "heardAsInline": "（讀成「{heardAs}」）",
+      "phonologyTitle": "朗讀中常需鞏固的聲調與音節對比",
+      "phonologyDisclaimer": "根據近期朗讀記錄彙整的輕鬆熱身建議（非醫學診斷）。",
+      "openMinimalPairSandbox": "60秒對立詞練習",
+      "phonologySessionsBadge": "{sessions} 次朗讀"
     },
     "firstPassSummary": {
       "regionAria": "首次與練習結果",
@@ -670,7 +674,8 @@
     "focusAria": "篩選閱讀管理板塊",
     "focusPlans": "計畫",
     "focusGoals": "目標",
-    "focusReminders": "提醒"
+    "focusReminders": "提醒",
+    "androidReminderBody": "到時間和 {alias} 一起在 ViRead 讀書囉！"
   },
   "entertainmentSummary": {
     "loading": "正在彙總 {childName} 的趣味學習進度…",

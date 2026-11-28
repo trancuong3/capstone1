@@ -10,10 +10,7 @@ import { purgeOfflineOutboxForAccount } from "@/lib/offline/offline-session-outb
 import { deleteOfflinePacksForAccount } from "@/lib/offline/reading-pack-store";
 
 export type OfflineWipeReason =
-  | "logout"
-  | "auth_clear"
-  | "inactive_profile"
-  | "account_switch";
+  "logout" | "auth_clear" | "inactive_profile" | "account_switch";
 
 export interface WipeOfflineAccountOptions {
   readonly parentAccountId?: string | null;

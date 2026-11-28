@@ -28,7 +28,9 @@ import {
   type VocabularyNotebookService,
 } from "@/lib/api/vocabulary-notebook-service";
 import { createVoiceStudioService } from "@/lib/api/voice-studio-service";
+import { getEffectiveTeacherPersona } from "@/lib/reading/session-voice-lock";
 import { TtsPlayback } from "@/lib/reading/tts-playback";
+import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
 import { useWordGlossaryTranslations } from "@/messages/features/word_glossary";
 
 export interface VocabularyNotebookDrawerProps {
@@ -150,9 +152,13 @@ export function VocabularyNotebookDrawer({
     }
     stopAudio();
     setPlayingItemId(item.id);
+    const spokenText = adaptTextToTeacherPersona(
+      item.spoken_tts_text,
+      getEffectiveTeacherPersona().gender,
+    );
     try {
       if (speechPlayer) {
-        await speechPlayer.play(item.spoken_tts_text, {
+        await speechPlayer.play(spokenText, {
           coaching: true,
           bypassSessionLock: true,
         });
@@ -163,7 +169,7 @@ export function VocabularyNotebookDrawer({
             createVoiceStudioService(),
           );
         }
-        await lazyPlayerRef.current.play(item.spoken_tts_text, {
+        await lazyPlayerRef.current.play(spokenText, {
           coaching: true,
           bypassSessionLock: true,
         });

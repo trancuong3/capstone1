@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "추가 연습이 필요한 단어 ({days}일)",
       "heardAsCount": "아이가 자주 “{heardAs}”라고 읽음 ({times}회)",
       "recordedCount": "{times}회 기록됨",
-      "heardAsInline": "(“{heardAs}”로 읽음)"
+      "heardAsInline": "(“{heardAs}”로 읽음)",
+      "phonologyTitle": "읽기 연습 중 자주 헷갈리는 성조 및 발음 패턴",
+      "phonologyDisclaimer": "최근 독서 기록을 바탕으로 가벼운 워밍업을 제안합니다 (의학적 진단 아님).",
+      "openMinimalPairSandbox": "60초 단어쌍 연습",
+      "phonologySessionsBadge": "{sessions}회 세션"
     },
     "firstPassSummary": {
       "regionAria": "첫 시도 및 연습 결과",
@@ -670,7 +674,8 @@
     "focusAria": "독서 관리 섹션 필터",
     "focusPlans": "계획",
     "focusGoals": "목표",
-    "focusReminders": "알림"
+    "focusReminders": "알림",
+    "androidReminderBody": "ViRead에서 {alias} 어린이와 함께 책 읽을 시간이에요!"
   },
   "entertainmentSummary": {
     "loading": "{childName}의 놀이 학습 진행 상황을 요약하는 중…",

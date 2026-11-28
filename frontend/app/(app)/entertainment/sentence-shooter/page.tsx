@@ -29,6 +29,7 @@ interface SentenceShooterPageProps {
     book_id?: string | string[];
     reading_session_id?: string | string[];
     source?: string | string[];
+    mode?: string | string[];
   }>;
 }
 
@@ -47,10 +48,13 @@ export default async function SentenceShooterPage({
     z.uuid().safeParse(candidateSessionId).success
       ? candidateSessionId
       : undefined;
+  const initialMode =
+    firstValue(query.mode) === "magic-quest" ? "magic-quest" : undefined;
 
   return (
     <SentenceShooterScreen
       initialBookId={firstValue(query.book_id)}
+      initialMode={initialMode}
       readingSessionId={readingSessionId}
     />
   );

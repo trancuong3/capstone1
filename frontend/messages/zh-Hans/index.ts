@@ -16,6 +16,7 @@ import reports from "./reports.json";
 import settings from "./settings.json";
 import speech from "./speech.json";
 import validation from "./validation.json";
+import { coReadingEn } from "../features/co_reading_messages";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 const messages: MessagesDictionary = {

@@ -2400,6 +2400,19 @@ class DifficultWordsService:
         attempt.UpdatedAt = now
 
         saved = await self.repository.save_practice_attempt(attempt)
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=getattr(saved, "Id", None),
+            normalized_word=saved.NormalizedWord,
+            assessment_status=saved.AssessmentStatus,
+            confidence=saved.Confidence,
+        )
         word_attempts = await self.repository.list_practice_attempts(
             child_id, actor_id, normalized_word=saved.NormalizedWord
         )
@@ -2514,6 +2527,19 @@ class DifficultWordsService:
         attempt.UpdatedAt = now
 
         saved = await self.repository.save_practice_attempt(attempt)
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=getattr(saved, "Id", None),
+            normalized_word=saved.NormalizedWord,
+            assessment_status=saved.AssessmentStatus,
+            confidence=saved.Confidence,
+        )
         word_attempts = await self.repository.list_practice_attempts(
             child_id, actor_id, normalized_word=saved.NormalizedWord
         )
@@ -2834,6 +2860,24 @@ class DifficultWordsService:
         word_progress = compute_word_practice_progress(norm, word_attempts)
         self._update_cached_word_status(
             child_id, actor_id, norm, word_progress.practice_status
+        )
+        from app.services.reading_skill_evidence import (
+            emit_difficult_word_skill_evidence,
+        )
+
+        evidence_rec_id = (
+            getattr(saved_table_row, "Id", None)
+            or getattr(saved_event_row, "Id", None)
+            or str(request_id)
+        )
+        await emit_difficult_word_skill_evidence(
+            self.repository,
+            child_id=child_id,
+            parent_id=actor_id,
+            record_id=evidence_rec_id,
+            normalized_word=norm,
+            assessment_status=resolved_status,
+            confidence=calibrated_confidence,
         )
         next_word = (
             await self._next_recommended_word(child_id, actor_id, norm)

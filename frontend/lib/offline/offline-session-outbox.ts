@@ -19,17 +19,10 @@ const OUTBOX_STORE = "events";
 const IDB_TIMEOUT_MS = 4_000;
 
 export type OfflineOutboxEventKind =
-  | "SESSION_START"
-  | "PAGE_READ"
-  | "WORD_ATTEMPT"
-  | "SESSION_FINISH";
+  "SESSION_START" | "PAGE_READ" | "WORD_ATTEMPT" | "SESSION_FINISH";
 
 export type OfflineOutboxSyncState =
-  | "idle"
-  | "pending"
-  | "syncing"
-  | "synced"
-  | "error";
+  "idle" | "pending" | "syncing" | "synced" | "error";
 
 export interface OfflineOutboxEventPayload {
   readonly client_event_id: string;
@@ -163,7 +156,9 @@ function emitOutboxChange(): void {
   }
 }
 
-export function subscribeOfflineSessionOutbox(listener: () => void): () => void {
+export function subscribeOfflineSessionOutbox(
+  listener: () => void,
+): () => void {
   outboxListeners.add(listener);
   return () => {
     outboxListeners.delete(listener);
@@ -580,12 +575,12 @@ export async function drainOfflineSessionOutbox(options: {
       for (let offset = 0; offset < pending.length; offset += chunkSize) {
         const slice = pending.slice(offset, offset + chunkSize);
         const firstId = slice[0]?.payload.client_event_id ?? "0";
-        const lastId =
-          slice[slice.length - 1]?.payload.client_event_id ?? "0";
-        const idempotencyKey = `outbox:${childId.slice(0, 18)}:${firstId}:${lastId}:${slice.length}`.slice(
-          0,
-          160,
-        );
+        const lastId = slice[slice.length - 1]?.payload.client_event_id ?? "0";
+        const idempotencyKey =
+          `outbox:${childId.slice(0, 18)}:${firstId}:${lastId}:${slice.length}`.slice(
+            0,
+            160,
+          );
 
         const response = await transport(
           childId,
@@ -617,8 +612,7 @@ export async function drainOfflineSessionOutbox(options: {
       emitOutboxChange();
       return lastResponse;
     } catch (error) {
-      const msg =
-        error instanceof Error ? error.message : "OUTBOX_SYNC_FAILED";
+      const msg = error instanceof Error ? error.message : "OUTBOX_SYNC_FAILED";
       partitionSyncMeta.set(partitionKey, {
         syncing: false,
         lastSyncedAt: prevMeta?.lastSyncedAt ?? null,

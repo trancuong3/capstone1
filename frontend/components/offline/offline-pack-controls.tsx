@@ -10,13 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/common/button";
 import { AppStoreContext } from "@/components/providers/app-store-provider";
@@ -84,8 +78,7 @@ export interface OfflinePackWeeklyPlanProps {
 }
 
 export type OfflinePackControlsProps =
-  | OfflinePackSingleProps
-  | OfflinePackWeeklyPlanProps;
+  OfflinePackSingleProps | OfflinePackWeeklyPlanProps;
 
 export function OfflineOutboxStatusPill({
   parentAccountId,
@@ -182,19 +175,21 @@ export function OfflinePackControls(props: OfflinePackControlsProps) {
   const appStore = useContext(AppStoreContext);
 
   const effectiveParentId =
-    (props.parentAccountId ??
+    (
+      props.parentAccountId ??
       authRuntime.session?.user?.id ??
       authRuntime.initialUserId ??
-      "")
-      .trim() || null;
+      ""
+    ).trim() || null;
 
   const explicitChild = props.mode !== "weekly-plan" ? props.child : null;
   const effectiveChildId =
-    (props.childProfileId ??
+    (
+      props.childProfileId ??
       explicitChild?.id ??
       appStore?.selectedChildId ??
-      "")
-      .trim() || null;
+      ""
+    ).trim() || null;
   const effectiveChildObj =
     explicitChild ?? appStore?.validatedSelectedChild ?? null;
 
@@ -401,7 +396,10 @@ export function OfflinePackControls(props: OfflinePackControlsProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-          <span data-testid="offline-weekly-size-estimate" className="font-semibold text-ink">
+          <span
+            data-testid="offline-weekly-size-estimate"
+            className="font-semibold text-ink"
+          >
             {t("offlinePack.controls.sizeEstimate", {
               sizeMb: formatMegabytes(totalEstBytes),
             })}
@@ -437,7 +435,9 @@ export function OfflinePackControls(props: OfflinePackControlsProps) {
             size="compact"
             fullWidth={false}
             disabled={
-              busyAction !== "idle" || weeklyBookIds.length === 0 || isOfflineNow
+              busyAction !== "idle" ||
+              weeklyBookIds.length === 0 ||
+              isOfflineNow
             }
             isLoading={busyAction === "downloading"}
             onClick={() => void handleDownloadWeekly()}
@@ -477,7 +477,8 @@ export function OfflinePackControls(props: OfflinePackControlsProps) {
     return null;
   }
 
-  const currentPack = packs.find((item) => item.bookId === props.bookId) ?? null;
+  const currentPack =
+    packs.find((item) => item.bookId === props.bookId) ?? null;
   const estBytes = currentPack
     ? currentPack.storedBytes
     : estimateOfflineBookPackBytes(props.estimatedPageCount ?? 4);
@@ -555,7 +556,10 @@ export function OfflinePackControls(props: OfflinePackControlsProps) {
     return (
       <div
         data-testid={`offline-card-controls-${props.bookId}`}
-        className={cn("flex w-full flex-wrap items-center gap-1.5", props.className)}
+        className={cn(
+          "flex w-full flex-wrap items-center gap-1.5",
+          props.className,
+        )}
       >
         {currentPack ? (
           <>

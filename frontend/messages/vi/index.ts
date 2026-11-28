@@ -18,9 +18,13 @@ import speech from "./speech.json";
 import validation from "./validation.json";
 import { fiveMinTrainVi } from "@/messages/features/five_min_train";
 import { offlinePackVi } from "@/messages/features/offline_pack";
-import { microStoryVi } from "../features/micro_story";
+import { coReadingVi } from "../features/co_reading_messages";
+import { microStoryVi } from "../features/micro_story_messages";
+import { phonemeGardenVi } from "../features/phoneme_garden_messages";
+import { prosodyCoachVi } from "../features/prosody_coach_messages";
+import { regionalDialectVi } from "../features/regional_dialect_messages";
 import { scanInstantVi } from "../features/scan_instant";
-import { wordGlossaryVi } from "../features/word_glossary";
+import { wordGlossaryVi } from "../features/word_glossary_messages";
 import type { MessagesDictionary } from "@/lib/i18n/types";
 
 export const viMessages: MessagesDictionary = {
@@ -47,6 +51,10 @@ export const viMessages: MessagesDictionary = {
   fiveMinTrain: fiveMinTrainVi,
   microStory: microStoryVi,
   offlinePack: offlinePackVi,
+  prosodyCoach: prosodyCoachVi,
+  regionalDialect: regionalDialectVi,
+  coReading: coReadingVi,
+  phonemeGarden: phonemeGardenVi,
 };
 
 export default viMessages;

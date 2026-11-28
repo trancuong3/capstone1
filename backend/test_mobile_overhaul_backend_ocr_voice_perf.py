@@ -888,7 +888,7 @@ class TestDashboardSummarySignedUrlCacheAndLightStartup(unittest.TestCase):
         child2_id = uuid4()
         session1_id = uuid4()
         book1_id = uuid4()
-        now = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
 
         c1 = SimpleNamespace(
             Id=child1_id,
@@ -1096,7 +1096,7 @@ class TestDashboardSummarySignedUrlCacheAndLightStartup(unittest.TestCase):
         child2_id = uuid4()
         sess1_id = uuid4()
         book1_id = uuid4()
-        now = datetime(2026, 11, 25, 10, 0, tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
 
         prof = SimpleNamespace(
             Id=parent_id,

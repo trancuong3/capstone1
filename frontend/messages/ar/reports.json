@@ -149,7 +149,11 @@
       "recommendedWordsTitle": "كلمات مقترحة للممارسة الإضافية ({days} يوم)",
       "heardAsCount": "يقرأ الطفل غالباً \"{heardAs}\" ({times} مرة)",
       "recordedCount": "سُجلت {times} مرة",
-      "heardAsInline": "(يقرأ \"{heardAs}\")"
+      "heardAsInline": "(يقرأ \"{heardAs}\")",
+      "phonologyTitle": "النغمات والأصوات التي يتدرب عليها الطفل كثيرا",
+      "phonologyDisclaimer": "ملخص من جلسات القراءة الأخيرة للإحماء اللطيف (وليس تشخيصا طبيا).",
+      "openMinimalPairSandbox": "تمرين أزواج 60 ثانية",
+      "phonologySessionsBadge": "{sessions} جلسات"
     },
     "firstPassSummary": {
       "regionAria": "نتائج المحاولة الأولى والممارسة",
@@ -670,7 +674,8 @@
     "focusAria": "تصفية أقسام إدارة القراءة",
     "focusPlans": "الخطط",
     "focusGoals": "الأهداف",
-    "focusReminders": "التذكيرات"
+    "focusReminders": "التذكيرات",
+    "androidReminderBody": "حان وقت قراءة الكتب مع {alias} على ViRead!"
   },
   "entertainmentSummary": {
     "loading": "جارٍ تلخيص تقدّم {childName} في اللعب والتعلّم…",

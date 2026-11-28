@@ -120,6 +120,7 @@ export interface TextToSpeechOptions {
   readonly pageRevisionId?: string | null;
   readonly cacheScope?: TtsCacheScope | null;
   readonly isPrivateBook?: boolean;
+  readonly ephemeral?: boolean;
   readonly bypassSessionLock?: boolean;
   readonly timeoutMs?: number;
 }
@@ -382,7 +383,7 @@ function shouldResyncServerVoiceLockOn409(input: {
   return (
     input.error instanceof ServiceError &&
     input.error.status === 409 &&
-    input.error.providerCode === "SESSION_VOICE_LOCKED"
+    input.error.provider_code === "SESSION_VOICE_LOCKED"
   );
 }
 
@@ -405,9 +406,11 @@ export function createSpeechService(): SpeechService {
       const sessionId = isSyntheticClientVoiceSessionId(rawSessionId)
         ? null
         : rawSessionId;
+      const isEphemeral = Boolean(options.ephemeral);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "CATALOG");
       const canUseBrowserCache =
+        !isEphemeral &&
         typeof indexedDB !== "undefined" &&
         shouldPersistTtsCacheEntry({
           scope: cacheScope,
@@ -490,12 +493,18 @@ export function createSpeechService(): SpeechService {
             ...(mode !== "local_only" ? { provider_mode: mode } : {}),
             ...(allowGoogleTts ? { allow_google_tts: true } : {}),
             ...(sessionId ? { session_id: sessionId } : {}),
-            ...(options.bookId ? { book_id: options.bookId } : {}),
-            ...(options.pageId ? { page_id: options.pageId } : {}),
-            ...(options.pageRevisionId
+            ...(!isEphemeral && options.bookId
+              ? { book_id: options.bookId }
+              : {}),
+            ...(!isEphemeral && options.pageId
+              ? { page_id: options.pageId }
+              : {}),
+            ...(!isEphemeral && options.pageRevisionId
               ? { page_revision_id: options.pageRevisionId }
               : {}),
-            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
+            ...(!isEphemeral && options.cacheScope
+              ? { cache_scope: options.cacheScope }
+              : {}),
           });
           const sendShortTts = (sendLockUpdate: boolean) =>
             speechRequest(
@@ -644,9 +653,11 @@ export function createSpeechService(): SpeechService {
       const sessionId = isSyntheticClientVoiceSessionId(rawSessionId)
         ? null
         : rawSessionId;
+      const isEphemeral = Boolean(options.ephemeral);
       const cacheScope: TtsCacheScope =
         options.cacheScope ?? (options.isPrivateBook ? "PRIVATE" : "COACHING");
       const canUseBrowserCache =
+        !isEphemeral &&
         typeof indexedDB !== "undefined" &&
         shouldPersistTtsCacheEntry({
           scope: cacheScope,
@@ -741,12 +752,18 @@ export function createSpeechService(): SpeechService {
             ...(mode !== "local_only" ? { provider_mode: mode } : {}),
             ...(allowGoogleTts ? { allow_google_tts: true } : {}),
             ...(sessionId ? { session_id: sessionId } : {}),
-            ...(options.bookId ? { book_id: options.bookId } : {}),
-            ...(options.pageId ? { page_id: options.pageId } : {}),
-            ...(options.pageRevisionId
+            ...(!isEphemeral && options.bookId
+              ? { book_id: options.bookId }
+              : {}),
+            ...(!isEphemeral && options.pageId
+              ? { page_id: options.pageId }
+              : {}),
+            ...(!isEphemeral && options.pageRevisionId
               ? { page_revision_id: options.pageRevisionId }
               : {}),
-            ...(options.cacheScope ? { cache_scope: options.cacheScope } : {}),
+            ...(!isEphemeral && options.cacheScope
+              ? { cache_scope: options.cacheScope }
+              : {}),
           });
           const sendPhonicsTts = (sendLockUpdate: boolean) =>
             speechRequest(

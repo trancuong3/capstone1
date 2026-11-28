@@ -1480,6 +1480,7 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
     def test_put_dedup_stream_selftest_resume_and_connect_with_owner_pinning(self):
         import asyncio
         import tempfile
+        from types import SimpleNamespace
         from app.services.training_storage.google_drive_desktop_store import (
             DRIVE_DESKTOP_SYNC_SCOPE,
             GoogleDriveDesktopStore,
@@ -1491,6 +1492,11 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
         )
 
         invalidate_sync_google_drive_store_cache()
+        fake_disk_usage = SimpleNamespace(
+            total=20 * 1024 * 1024 * 1024,
+            used=5 * 1024 * 1024 * 1024,
+            free=15 * 1024 * 1024 * 1024,
+        )
         with tempfile.TemporaryDirectory() as tmpdir:
             my_drive = Path(tmpdir) / "My Drive"
             my_drive.mkdir()
@@ -1501,7 +1507,10 @@ class TestGoogleDriveDesktopStore(unittest.TestCase):
                 "VIREAD_GDRIVE_OAUTH_CLIENT_SECRET": "",
                 "VIREAD_GDRIVE_DESKTOP_ALLOWED_ROOTS": str(tmpdir),
             }
-            with patch.dict(os.environ, env, clear=False):
+            with patch.dict(os.environ, env, clear=False), patch(
+                "app.services.training_storage.google_drive_desktop_store.shutil.disk_usage",
+                return_value=fake_disk_usage,
+            ):
                 # Wrong owner email rejected with 403
                 svc_bad = VireadDriveConnectionService(MagicMock())
                 svc_bad.repo = MagicMock()

@@ -101,6 +101,7 @@ interface ReadingVoiceSettingsProps {
   /** Speaks a short sample with the currently chosen voice and speed. */
   onPreview: (sample: string) => void | Promise<void>;
   onStopPreview: () => void;
+  onOpen?: () => void;
 }
 
 function voiceTitle(voice: VoiceOption): string {
@@ -171,6 +172,7 @@ export function ReadingVoiceSettings({
   fallbackNotice = null,
   onPreview,
   onStopPreview,
+  onOpen,
 }: ReadingVoiceSettingsProps) {
   const { formatNumber } = useI18n();
   const t = useTranslations("speech");
@@ -340,13 +342,7 @@ export function ReadingVoiceSettings({
         if (mountedRef.current && !controller.signal.aborted)
           setLoadState({ status: "error" });
       });
-  }, [
-    voiceStudio,
-    selectedChildId,
-    childService,
-    t,
-    buildVoiceContextKey,
-  ]);
+  }, [voiceStudio, selectedChildId, childService, t, buildVoiceContextKey]);
 
   function change(
     value: Parameters<typeof setSpeechPreferences>[0],
@@ -523,19 +519,21 @@ export function ReadingVoiceSettings({
     ) {
       return;
     }
+    const previousVoiceId = preferences.voiceId ?? getEffectiveVoiceId();
     setVoicePolicyPreferences({ region: nextTab });
     if (loadState.status === "ready") {
       const regionVoices = loadState.data.voices.filter(
         (v) => resolveVoiceRegion(v) === nextTab,
       );
       if (regionVoices.length > 0) {
-        const currentId =
-          preferences.voiceId ?? loadState.data.default_voice_id;
         const currentGender = resolveVoiceGender(
-          currentId,
+          previousVoiceId,
           teacherPersona.gender,
         );
-        if (!regionVoices.some((v) => v.voice_id === currentId)) {
+        if (
+          preferences.voiceId === null ||
+          !regionVoices.some((v) => v.voice_id === previousVoiceId)
+        ) {
           // ALWAYS preserve the active gender when changing region tabs!
           const sameGenderVoices = regionVoices.filter(
             (v) => resolveVoiceGender(v.voice_id, v.gender) === currentGender,
@@ -555,6 +553,7 @@ export function ReadingVoiceSettings({
   }
 
   function open() {
+    onOpen?.();
     setIsOpen(true);
     loadVoiceHealth();
     const currentKey = buildVoiceContextKey();
@@ -580,8 +579,13 @@ export function ReadingVoiceSettings({
 
   const defaultVoiceId =
     loadState.status === "ready" ? loadState.data.default_voice_id : null;
+  const effectiveVoiceId = getEffectiveVoiceId();
   const selectedVoiceId =
-    preferences.voiceId ?? defaultVoiceId ?? getEffectiveVoiceId();
+    preferences.voiceId ??
+    (loadState.status === "ready" &&
+    loadState.data.voices.some((v) => v.voice_id === effectiveVoiceId)
+      ? effectiveVoiceId
+      : (defaultVoiceId ?? effectiveVoiceId));
   const hasRealReadingSessionLock = Boolean(
     activeSessionLock &&
     !isSyntheticClientVoiceSessionId(activeSessionLock.sessionId),

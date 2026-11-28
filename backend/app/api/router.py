@@ -27,6 +27,9 @@ from app.api.routes import (
 from app.api.routes import admin_viread_training
 from app.api.routes import assistant
 from app.api.routes import book_assets
+from app.api.routes import co_reading
+from app.api.routes import family_pedagogy
+from app.api.routes import fluency_prosody
 from app.api.routes import global_tasks
 from app.api.routes import internal_cron
 from app.api.routes import internal_ocr
@@ -37,6 +40,8 @@ from app.api.routes import karaoke_simple_import
 from app.api.routes import ocr_extraction
 from app.api.routes import offline_reading_pack
 from app.api.routes import personalized_micro_story
+from app.api.routes import phoneme_garden
+from app.api.routes import regional_phonetics
 from app.api.routes import vocabulary_notebook
 
 api_router = APIRouter()
@@ -47,6 +52,7 @@ api_router.include_router(karaoke_processing.router, prefix="/karaoke", tags=["K
 api_router.include_router(adaptive_learning.router, prefix="/learning", tags=["Adaptive Learning"])
 
 api_router.include_router(profile.router, prefix="/profiles", tags=["Profiles"])
+api_router.include_router(family_pedagogy.router, prefix="/profiles", tags=["Profiles"])
 api_router.include_router(parent_private_book.router, prefix="/books", tags=["Parent Private Books"])
 api_router.include_router(book.router, prefix="/books", tags=["Books"])
 api_router.include_router(admin_ocr.router, prefix="/books", tags=["Admin OCR"])
@@ -113,4 +119,24 @@ api_router.include_router(
     offline_reading_pack.router,
     prefix="/offline",
     tags=["Offline Reading Pack"],
+)
+api_router.include_router(
+    fluency_prosody.router,
+    prefix="/fluency",
+    tags=["Fluency Prosody Coach"],
+)
+api_router.include_router(
+    regional_phonetics.router,
+    prefix="/dialect",
+    tags=["Regional Phonetics"],
+)
+api_router.include_router(
+    co_reading.router,
+    prefix="/co-reading",
+    tags=["Co-Reading & Parent Narration"],
+)
+api_router.include_router(
+    phoneme_garden.router,
+    prefix="/phoneme-garden",
+    tags=["Phoneme Garden"],
 )

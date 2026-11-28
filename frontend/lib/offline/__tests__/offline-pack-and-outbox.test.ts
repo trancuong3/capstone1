@@ -21,10 +21,12 @@ import {
 import {
   OFFLINE_CACHE_STORAGE_PREFIX,
   deleteOfflineBookPack,
+  downloadAndSaveOfflineBookPack,
   downloadWeeklyReadingPlanPacks,
   getOfflineBookPack,
   getOfflinePageMediaBlob,
   listOfflineBookPacks,
+  offlineReadingPackManifestSchema,
   resetOfflinePackStoreForTests,
   saveOfflineBookPack,
   saveOfflineSessionDescriptor,
@@ -39,6 +41,26 @@ vi.mock("next/navigation", () => ({
     push: vi.fn(),
     replace: vi.fn(),
     refresh: vi.fn(),
+  }),
+}));
+
+vi.mock("@/lib/supabase/client", () => ({
+  createBrowserSupabaseClient: () => ({
+    auth: {
+      initialize: async () => ({ error: null }),
+      getSession: async () => ({
+        data: { session: { access_token: "offline-pack-test-token" } },
+        error: null,
+      }),
+    },
+  }),
+}));
+
+vi.mock("@/lib/supabase/config", () => ({
+  getApiBaseUrl: () => "http://127.0.0.1:8000",
+  getSupabasePublicConfig: () => ({
+    url: "https://example.supabase.co",
+    publishableKey: "sb_publishable_test",
   }),
 }));
 
@@ -193,6 +215,7 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     resetOfflinePackStoreForTests();
     resetOfflineOutboxForTests();
     if (originalOnLine) {
@@ -280,7 +303,8 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
           visibilityScope: "CATALOG",
         });
       },
-      fetchBinary: async () => new Blob([new Uint8Array([9, 8, 7])], { type: "image/webp" }),
+      fetchBinary: async () =>
+        new Blob([new Uint8Array([9, 8, 7])], { type: "image/webp" }),
     });
 
     // Weekly plan download is strictly bounded to at most 3 books
@@ -324,10 +348,11 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
     const deleted = await deleteOfflineBookPack(PARENT_A, CHILD_A1, "book-2");
     expect(deleted).toBe(true);
     expect(await getOfflineBookPack(PARENT_A, CHILD_A1, "book-2")).toBeNull();
-    expect((await listOfflineBookPacks(PARENT_A, CHILD_A1)).map((p) => p.bookId).sort()).toEqual([
-      "book-1",
-      "book-3",
-    ]);
+    expect(
+      (await listOfflineBookPacks(PARENT_A, CHILD_A1))
+        .map((p) => p.bookId)
+        .sort(),
+    ).toEqual(["book-1", "book-3"]);
   });
 
   it("queues offline attempts per partition and auto-drains with Idempotency-Key on reconnect", async () => {
@@ -560,9 +585,9 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
     expect(
       screen.getByRole("button", { name: /Tải gói đọc tuần này/i }),
     ).toBeInTheDocument();
-    expect(screen.getAllByTestId("offline-wasm-stt-status").length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByTestId("offline-wasm-stt-status").length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByTestId("offline-outbox-status-pill")[0],
     ).toHaveTextContent(/Chờ mạng để đồng bộ/i);
@@ -572,9 +597,9 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
     );
 
     await waitFor(() => {
-      expect(screen.getAllByTestId("offline-pack-delete-btn").length).toBeGreaterThan(
-        0,
-      );
+      expect(
+        screen.getAllByTestId("offline-pack-delete-btn").length,
+      ).toBeGreaterThan(0);
     });
 
     // Drain outbox -> pill updates to "Đã đồng bộ xong"
@@ -618,5 +643,57 @@ describe("Feature #8 Offline Reading Pack Store, Outbox & Logout Hygiene", () =>
     expect(swSource).not.toContain("eval(");
     expect(swSource).toContain("/books/my-books");
     expect(swSource).toContain("VIREAD_PURGE_ACCOUNT_CACHE");
+  });
+
+  it("validates CATALOG and PARENT_PRIVATE manifests via offlineReadingPackManifestSchema and defaultFetchManifest", async () => {
+    const catalogBookId = "88888888-1111-4111-8111-222222222222";
+    const catalogManifest = makeManifest({
+      parentId: PARENT_A,
+      childId: CHILD_A1,
+      bookId: catalogBookId,
+      visibilityScope: "CATALOG",
+    });
+    const privateManifest = makeManifest({
+      parentId: PARENT_A,
+      childId: CHILD_A1,
+      bookId: "88888888-2222-4222-8222-333333333333",
+      visibilityScope: "PARENT_PRIVATE",
+    });
+
+    expect(
+      offlineReadingPackManifestSchema.parse(catalogManifest).visibility_scope,
+    ).toBe("CATALOG");
+    expect(
+      offlineReadingPackManifestSchema.parse(privateManifest).visibility_scope,
+    ).toBe("PARENT_PRIVATE");
+    expect(
+      offlineReadingPackManifestSchema.safeParse({
+        ...catalogManifest,
+        visibility_scope: "PUBLIC",
+      }).success,
+    ).toBe(false);
+
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (
+        url.pathname ===
+        `/offline/children/${CHILD_A1}/books/${catalogBookId}/pack-manifest`
+      ) {
+        return Response.json(catalogManifest);
+      }
+      throw new Error(`Unexpected fetch URL: ${url.toString()}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const savedSummary = await downloadAndSaveOfflineBookPack({
+      parentAccountId: PARENT_A,
+      childProfileId: CHILD_A1,
+      bookId: catalogBookId,
+      fetchBinary: async () => null,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(savedSummary.bookId).toBe(catalogBookId);
+    expect(savedSummary.visibilityScope).toBe("CATALOG");
   });
 });

@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Users,
   Volume2,
 } from "lucide-react";
 import dynamic, { type DynamicOptionsLoadingProps } from "next/dynamic";
@@ -25,12 +26,18 @@ import { Button, ButtonLink } from "@/components/common/button";
 import { Skeleton } from "@/components/common/skeleton";
 import { StatusMessage } from "@/components/common/status-message";
 import { resolvePostFinishUiState } from "@/lib/reading/post-finish-questions";
+import { CoReadingRolePlayModal } from "@/components/reading/co-reading-roleplay-modal";
+import { ProsodyBreathingCuesBar } from "@/components/reading/prosody-breathing-cues-bar";
 import { ReadingLayout } from "@/components/reading/reading-layout";
 import { ReadingReady } from "@/components/reading/reading-ready";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
 import { useAiProgress } from "@/hooks/use-ai-progress";
 import { useI18n, useTranslations } from "@/hooks/use-i18n";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
+import {
+  coReadingEn,
+  coReadingVi,
+} from "@/messages/features/co_reading_messages";
 import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
@@ -668,7 +675,8 @@ function ReadingSessionScreen({
   reconnectMode,
   sessionId,
 }: ReadingScreenProps) {
-  const { formatNumber } = useI18n();
+  const { formatNumber, locale } = useI18n();
+  const coReadingCopy = locale === "vi" ? coReadingVi : coReadingEn;
   const t = useTranslations("reading");
   const tCommon = useTranslations("common");
   const authRuntime = useAuthRuntime();
@@ -709,6 +717,7 @@ function ReadingSessionScreen({
     );
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [pageOptionsOpen, setPageOptionsOpen] = useState(false);
+  const [coReadingOpen, setCoReadingOpen] = useState(false);
   const pickerShouldReturnToReading = useRef(false);
   const [pickerIndex, setPickerIndex] = useState<number | null>(null);
   const retryOnRemountRef = useRef({
@@ -1959,7 +1968,8 @@ function ReadingSessionScreen({
         setCanonicalState(session.state);
         offlineSessionCtxRef.current = null;
         setIsOfflinePackMode(false);
-        const currentParentAccountId = offlineIdentityRef.current.parentAccountId;
+        const currentParentAccountId =
+          offlineIdentityRef.current.parentAccountId;
         if (currentParentAccountId) {
           void saveOfflineSessionDescriptor({
             parentAccountId: currentParentAccountId,
@@ -5095,6 +5105,9 @@ function ReadingSessionScreen({
   }
 
   function handleVoicePreview(sample: string): Promise<void> {
+    if (retryModeRef.current) {
+      cancelRetryRecognition();
+    }
     isVoicePreviewPlayingRef.current = true;
     return playAssistantAudio(
       async () => {
@@ -5195,11 +5208,12 @@ function ReadingSessionScreen({
   }
 
   function stopAssistantAudio(): void {
-    if (
-      retryModeRef.current &&
-      assistantAudioPlayingRef.current &&
-      !isVoicePreviewPlayingRef.current
-    ) {
+    if (isVoicePreviewPlayingRef.current) {
+      retryResumeAfterAssistantAudioRef.current = null;
+      if (retryModeRef.current) {
+        retryAttemptIdRef.current += 1;
+      }
+    } else if (retryModeRef.current && assistantAudioPlayingRef.current) {
       retryResumeAfterAssistantAudioRef.current =
         retryCandidatesRef.current[retryPositionRef.current] ?? null;
     }
@@ -5724,7 +5738,8 @@ function ReadingSessionScreen({
             pageId: page.page_id,
             pageRevisionId: page.page_revision_id,
             eventKind: "PAGE_READ",
-            transcript: transcriptsListRef.current.join(" ").trim() || undefined,
+            transcript:
+              transcriptsListRef.current.join(" ").trim() || undefined,
           }).catch(() => undefined);
         }
       } else {
@@ -6076,7 +6091,6 @@ function ReadingSessionScreen({
       countdown !== null;
     setTutorOpen(true);
     setIsBusy(true);
-    void speechPlayer.prefetch?.(word, { wordSample: true });
     const playbackGeneration = tutorPlaybackGenerationRef.current;
     try {
       await playAssistantAudio(
@@ -6161,7 +6175,6 @@ function ReadingSessionScreen({
       speechRecorder.isRecording ||
       countdown !== null;
     setIsBusy(true);
-    void speechPlayer.prefetch?.(word, { wordSample: true });
     const playbackGeneration = ++tutorPlaybackGenerationRef.current;
     try {
       let nextAction = tutorAction;
@@ -7991,7 +8004,14 @@ function ReadingSessionScreen({
       );
     } catch (error) {
       if (!isCurrent()) return;
-      if (error instanceof Error && error.name === "AbortError") return;
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "name" in error &&
+        (error as { name?: unknown }).name === "AbortError"
+      ) {
+        return;
+      }
       console.error("[RETRY TTS PLAYBACK]", error);
       if (isCurrent()) {
         setIsReadingWord(false);
@@ -8350,7 +8370,8 @@ function ReadingSessionScreen({
           (typeof navigator !== "undefined" && navigator.onLine === false)
         ) {
           const offlineCtx = offlineSessionCtxRef.current;
-          const pid = offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
+          const pid =
+            offlineCtx?.parentAccountId ?? activeParentAccountId ?? "";
           const cid = offlineCtx?.childProfileId ?? activeChildProfileId ?? "";
           const bid =
             offlineCtx?.loadedPack.book.id ??
@@ -8872,6 +8893,8 @@ function ReadingSessionScreen({
             child={child}
             sessionId={sessionId}
             summary={sessionSummary ?? completion}
+            referenceText={page.text || page.words.map((w) => w.text).join(" ")}
+            autoAnalyzeProsody={!isOfflinePackMode}
             reportError={comparisonError}
             onRetryReports={
               hasPageTranscripts
@@ -8885,7 +8908,16 @@ function ReadingSessionScreen({
     );
   }
 
+  const prosodyCueSourceText = (
+    page.text || page.words.map((w) => w.text).join(" ")
+  ).trim();
+  const showProsodyCuesBar = prosodyCueSourceText.length > 0 && !retryMode;
+  const showCoReadingTrigger =
+    !isOfflinePackMode && prosodyCueSourceText.length > 0 && !retryMode;
+
   const hasTopBarContent = Boolean(
+    showProsodyCuesBar ||
+    showCoReadingTrigger ||
     isOfflinePackMode ||
     pageProgress ||
     (pageNavigationError && pickerIndex === null) ||
@@ -8896,13 +8928,44 @@ function ReadingSessionScreen({
 
   const readingTopBar = hasTopBarContent ? (
     <div className="relative flex flex-col gap-1 border-b border-border/80 pb-1.5">
+      {showProsodyCuesBar || showCoReadingTrigger ? (
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          {showProsodyCuesBar ? (
+            <div className="min-w-0 flex-1">
+              <ProsodyBreathingCuesBar
+                compact
+                fetchRemoteOnExpand={!isOfflinePackMode}
+                text={prosodyCueSourceText}
+              />
+            </div>
+          ) : null}
+          {showCoReadingTrigger ? (
+            <button
+              type="button"
+              data-testid="reading-open-co-reading-btn"
+              onClick={() => {
+                stopAssistantAudio();
+                setCoReadingOpen(true);
+              }}
+              className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50/85 px-3 py-1.5 text-xs font-bold text-sky-900 transition-colors hover:bg-sky-100 focus-visible:outline-3 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            >
+              <Users
+                aria-hidden="true"
+                className="size-3.5 shrink-0 text-sky-700"
+              />
+              <span>{coReadingCopy.panelTitle}</span>
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {isOfflinePackMode ? (
         <div
           data-testid="reading-offline-pack-banner"
           className="flex flex-wrap items-center justify-between gap-2 rounded-control border border-amber-200 bg-amber-50/90 px-3 py-1.5 text-xs text-amber-950"
         >
           <span className="font-bold">
-            Gói đọc ngoại tuyến ({child.alias}) — lượt đọc sẽ tự đồng bộ khi có mạng.
+            Gói đọc ngoại tuyến ({child.alias}) — lượt đọc sẽ tự đồng bộ khi có
+            mạng.
           </span>
           <OfflineOutboxStatusPill
             parentAccountId={
@@ -9523,6 +9586,17 @@ function ReadingSessionScreen({
             onRetry={() => void retryTutor()}
             ttsFailed={uiState === "tts-error"}
             word={currentWord}
+          />
+        ) : null}
+
+        {coReadingOpen ? (
+          <CoReadingRolePlayModal
+            bookId={book.id}
+            childId={child.id}
+            onClose={() => setCoReadingOpen(false)}
+            pageId={page.page_id}
+            pageText={prosodyCueSourceText}
+            teacherVoiceId={getEffectiveVoiceId()}
           />
         ) : null}
 

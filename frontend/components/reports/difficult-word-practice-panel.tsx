@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   CheckCircle2,
+  Ear,
   Mic,
   Pause,
   Play,
@@ -19,6 +20,8 @@ import { AiProgressBar } from "@/components/common/ai-progress-bar";
 import { Button } from "@/components/common/button";
 import { PaginationBar } from "@/components/common/pagination-bar";
 import { StatusMessage } from "@/components/common/status-message";
+import { TaiThinhEarTrainerModal } from "@/components/entertainment/tai-thinh-ear-trainer-modal";
+import { RegionalPhoneticProfileCard } from "@/components/profiles/regional-phonetic-profile-card";
 import { CreateMicroStoryModal } from "@/components/reports/create-micro-story-modal";
 import { PhonicsLessonCard } from "@/components/reading/phonics-lesson-card";
 import { ReadingVoiceSettings } from "@/components/reading/reading-voice-settings";
@@ -36,6 +39,7 @@ import { normalizeLocale, type SupportedLocale } from "@/lib/i18n/locales";
 import { readLocaleCookie } from "@/lib/i18n/persistence";
 import { getCachedLocaleMessages } from "@/messages/loader";
 import { useMicroStoryTranslations } from "@/messages/features/micro_story";
+import { useRegionalDialectTranslations } from "@/messages/features/regional_dialect";
 import { viMessages } from "@/messages/vi";
 import { prepareShortWordAudio } from "@/lib/reading/short-word-audio";
 import { isServiceError } from "@/lib/api/service-error";
@@ -344,7 +348,9 @@ export function DifficultWordPracticePanel({
   const t = useTranslations("difficultWords");
   const tCommon = useTranslations("common");
   const tMicroStory = useMicroStoryTranslations();
+  const tDialect = useRegionalDialectTranslations();
   const [showMicroStoryModal, setShowMicroStoryModal] = useState(false);
+  const [showEarTrainerModal, setShowEarTrainerModal] = useState(false);
   const { difficultWordService } = useReportServices();
   const teacherPersona = useTeacherPersona();
   const speechService = useMemo(() => createSpeechService(), []);
@@ -2376,9 +2382,22 @@ export function DifficultWordPracticePanel({
         <div className="flex flex-wrap items-center gap-2">
           <VoiceEngineBadge compact />
           <ReadingVoiceSettings
+            childId={child.id}
             disabled={flowState === "LISTENING"}
             fallbackNotice={speechPlayer.fallbackNotice}
             isPreviewing={speechPlayer.isPlaying && !speechPlayer.isPaused}
+            onOpen={() => {
+              flowGenerationRef.current += 1;
+              cleanupRef.current();
+              setIsPlayingPhonics(false);
+              setFlowState((prev) =>
+                prev === "LISTENING" ||
+                prev === "INSTRUCTING" ||
+                prev === "EVALUATING"
+                  ? "IDLE"
+                  : prev,
+              );
+            }}
             onPreview={(sample) => {
               flowGenerationRef.current += 1;
               clearTimers();
@@ -2782,6 +2801,22 @@ export function DifficultWordPracticePanel({
           {tMicroStory("ctaButton")}
         </Button>
 
+        <Button
+          className="min-h-14 rounded-2xl sm:w-auto"
+          data-testid="practice-open-tai-thinh-cta"
+          disabled={isBusyActive}
+          onClick={() => {
+            flowGenerationRef.current += 1;
+            cleanupRef.current();
+            setFlowState("IDLE");
+            setShowEarTrainerModal(true);
+          }}
+          variant="secondary"
+        >
+          <Ear aria-hidden="true" className="size-4 text-primary" />
+          {tDialect("practiceDialectBtn")}
+        </Button>
+
         {recordedBlob ? (
           <Button
             className="min-h-14 rounded-2xl sm:w-auto"
@@ -2886,10 +2921,36 @@ export function DifficultWordPracticePanel({
         </div>
       </details>
 
+      <details
+        className="rounded-2xl border border-amber-200/80 bg-amber-50/40 px-4 py-3 text-sm"
+        data-testid="practice-regional-profile-details"
+      >
+        <summary className="cursor-pointer font-bold text-[#213C42]">
+          {tDialect("practiceProfileToggle")}
+        </summary>
+        <div className="mt-3">
+          <RegionalPhoneticProfileCard
+            childAlias={child.alias}
+            childId={child.id}
+            compact
+            onOpenEarTrainer={() => setShowEarTrainerModal(true)}
+          />
+        </div>
+      </details>
+
       <CreateMicroStoryModal
         child={child}
         isOpen={showMicroStoryModal}
         onClose={() => setShowMicroStoryModal(false)}
+      />
+
+      <TaiThinhEarTrainerModal
+        childAlias={child.alias}
+        childId={child.id}
+        isOpen={showEarTrainerModal}
+        onClose={() => setShowEarTrainerModal(false)}
+        speechPlayer={speechPlayer}
+        speechService={speechService}
       />
     </section>
   );

@@ -484,6 +484,60 @@ class Feat6VocabularyNotebookTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r_list_empty.status_code, 200)
             self.assertEqual(r_list_empty.json()["total"], 0)
 
+            # 9. Entertainment Hub (limit=20) & Picture Description (limit=12) query params on brand-new child
+            for q_limit in (20, 12):
+                r_new_child = client.get(
+                    f"/vocabulary/children/{ids['child_a_g4']}/notebook?limit={q_limit}"
+                )
+                self.assertEqual(r_new_child.status_code, 200)
+                self.assertEqual(
+                    r_new_child.json(),
+                    {
+                        "child_id": str(ids["child_a_g4"]),
+                        "total": 0,
+                        "storytelling_words": [],
+                        "items": [],
+                    },
+                )
+
+    async def test_list_notebook_gracefully_returns_empty_on_unmigrated_table_while_keeping_ownership_check(
+        self,
+    ) -> None:
+        from sqlalchemy.exc import ProgrammingError
+
+        state, ids = _seed_two_households()
+
+        class _UnmigratedVocabSession(_VocabFakeAsyncSession):
+            def __init__(self, st: StudioDbState) -> None:
+                super().__init__(st)
+                self.rolled_back = False
+
+            async def execute(self, statement: Any):
+                if "child_favorite_words" in str(statement):
+                    orig = Exception('relation "child_favorite_words" does not exist')
+                    setattr(orig, "sqlstate", "42P01")
+                    raise ProgrammingError(str(statement), params=None, orig=orig)
+                return await super().execute(statement)
+
+            async def rollback(self) -> None:
+                self.rolled_back = True
+                await super().rollback()
+
+        db = _UnmigratedVocabSession(state)
+        svc = KidGlossaryService(db, ai_router=AiCapabilityRouter(providers=[], env={}), env={})
+
+        # Non-owner still gets 403 Forbidden BEFORE touching child_favorite_words
+        with self.assertRaises(HTTPException) as forbidden_ctx:
+            await svc.list_notebook(ids["parent_b"], ids["child_a_g1"], limit=20)
+        self.assertEqual(forbidden_ctx.exception.status_code, 403)
+
+        # Owner gets clean 200-equivalent empty list after rollback
+        empty_res = await svc.list_notebook(ids["parent_a"], ids["child_a_g1"], limit=20)
+        self.assertTrue(db.rolled_back)
+        self.assertEqual(empty_res.total, 0)
+        self.assertEqual(empty_res.items, [])
+        self.assertEqual(empty_res.storytelling_words, [])
+
 
 if __name__ == "__main__":
     unittest.main()

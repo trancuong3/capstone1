@@ -367,6 +367,10 @@ const safeBackendMessageKeys: Record<string, string> = {
 };
 
 const safeFlow2BackendMessages: Readonly<Record<string, string>> = {
+  CHILD_SAFETY_REJECTED:
+    "Từ ngữ hoặc chủ đề gợi ý chưa phù hợp với tiêu chuẩn an toàn trẻ em tiểu học. Ba mẹ vui lòng chỉnh lại nhé.",
+  MICRO_STORY_DAILY_QUOTA_EXCEEDED:
+    "Hôm nay bé đã tạo đủ số truyện tranh mini miễn phí. Ba mẹ hãy cùng bé mở đọc các cuốn trong Sách của tôi và quay lại vào ngày mai nhé!",
   BOOK_BLOCKED_BY_CHILD_SAFETY:
     "Sách này hiện bị chặn theo chính sách an toàn trẻ em nên chưa thể mở đọc.",
   CONTENT_NOT_READY:

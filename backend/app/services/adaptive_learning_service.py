@@ -307,11 +307,8 @@ def compute_spaced_difficult_words(
 
         # Target spaced interval grows with mastered repetitions: 1d -> 3d -> 7d.
         target_interval = 1 if correct == 0 else (3 if correct == 1 else 7)
-        due_bonus = (
-            1.5
-            if (not mastered or days_since is None or days_since >= target_interval)
-            else 0.5
-        )
+        is_due = bool(not mastered or days_since is None or days_since >= target_interval)
+        due_bonus = 1.5 if is_due else 0.5
         error_weight = 1.0 + incorrect * 0.8 - correct * 0.35
         priority = round(max(0.1, error_weight * due_bonus), 2)
 
@@ -338,10 +335,13 @@ def compute_spaced_difficult_words(
                 reason_vi=reason_vi,
                 phonics_category=phonics_cat,
                 phonics_label_vi=phonics_label,
+                is_due=is_due,
             )
         )
 
-    ranked.sort(key=lambda item: (-item.priority_score, item.practice_count, item.normalized_word))
+    ranked.sort(
+        key=lambda item: (not item.is_due, -item.priority_score, item.practice_count, item.normalized_word)
+    )
     return ranked[:limit]
 
 
@@ -628,7 +628,8 @@ class AdaptiveLearningService:
         teacher_gender: str | None = None,
     ) -> list[CrossGameRecommendationRead]:
         plan_map = {p.game_key: p for p in plans}
-        focus_words = [w.display_text for w in spaced_words[:3]]
+        due_words = [w for w in spaced_words if getattr(w, "is_due", True)]
+        focus_words = [w.display_text for w in due_words[:3]]
         teacher_label = "Thầy giáo AI" if teacher_gender == "male" else "Cô giáo AI"
         counts = {
             "PICTURE_DESCRIPTION": picture_count,
@@ -808,6 +809,7 @@ class AdaptiveLearningService:
                 f"Chào {profile.child_alias}! Hôm nay mình cùng khám phá \"{primary.game_title_vi}\" nhé!"
             )
 
+        due_words = [w for w in profile.spaced_difficult_words if getattr(w, "is_due", True)]
         return EntertainmentRecommendationsRead(
             child_id=profile.child_id,
             child_alias=profile.child_alias,
@@ -815,7 +817,7 @@ class AdaptiveLearningService:
             mascot_greeting_vi=greeting,
             natural_break_reminder_vi=break_msg,
             today_activities_count=today_count,
-            focus_difficult_words=[w.display_text for w in profile.spaced_difficult_words[:5]],
+            focus_difficult_words=[w.display_text for w in due_words[:5]],
             primary_recommendation=primary,
             recommendations=profile.recommendations,
         )

@@ -79,9 +79,7 @@ export async function resolveOfflineReadingSessionFallback(options: {
           childId,
           candidate.bookId,
         );
-        if (
-          loaded?.pages.some((p) => p.page_id === options.initialPageId)
-        ) {
+        if (loaded?.pages.some((p) => p.page_id === options.initialPageId)) {
           targetBookId = candidate.bookId;
           break;
         }

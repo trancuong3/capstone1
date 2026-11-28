@@ -45,6 +45,7 @@ import {
   createMemoryGameService,
   type MemoryGameService,
 } from "@/lib/api/memory-game-service";
+import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import { isServiceError } from "@/lib/api/service-error";
 import {
   createSpeechService,
@@ -60,6 +61,11 @@ import {
   detectBrowserWasmSttSupport,
   getBrowserWasmSttClient,
 } from "@/lib/reading/browser-wasm-stt";
+import {
+  isConfirmedSilentVoiceCapture,
+  isServerSttConfirmedUnavailable,
+  refreshVoiceHealthQuietlyAfterSttFailure,
+} from "@/lib/reading/voice-capture-guard";
 import { EchoGuard } from "@/lib/reading/echo-guard";
 import { isInjectedTestSpeechRecognition } from "@/lib/reading/local-segment-speech-recognition";
 import { isAndroidNativeSpeechAvailable } from "@/lib/reading/native-speech-bridge";
@@ -283,6 +289,38 @@ export function MemoryGameScreen({
 
   const activeNotebook =
     notebookData && notebookData.child_id === childId ? notebookData : null;
+  const [fetchedDueFocusWords, setFetchedDueFocusWords] = useState<string[]>(
+    [],
+  );
+  const [ephemeralCreativeCleared, setEphemeralCreativeCleared] =
+    useState(false);
+
+  useEffect(() => {
+    if (!childId || urlFocusWords.length > 0) return;
+    const controller = new AbortController();
+    void createAdaptiveLearningService()
+      .getRecommendations(childId, teacherPersona.gender, {
+        signal: controller.signal,
+      })
+      .then((recs) => {
+        if (!controller.signal.aborted) {
+          setFetchedDueFocusWords(
+            (recs.focus_difficult_words ?? []).slice(0, 5),
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, teacherPersona.gender, urlFocusWords.length]);
+
+  const effectiveDueFocusWords = useMemo(
+    () =>
+      (urlFocusWords.length > 0 ? urlFocusWords : fetchedDueFocusWords).slice(
+        0,
+        5,
+      ),
+    [fetchedDueFocusWords, urlFocusWords],
+  );
   const notebookBonusWords = useMemo(() => {
     if (!activeNotebook) return [];
     const raw = activeNotebook.storytelling_words?.length
@@ -292,11 +330,26 @@ export function MemoryGameScreen({
   }, [activeNotebook]);
   const combinedFocusWords = useMemo(
     () =>
-      Array.from(new Set([...urlFocusWords, ...notebookBonusWords])).slice(
-        0,
-        6,
-      ),
-    [notebookBonusWords, urlFocusWords],
+      Array.from(
+        new Set([...effectiveDueFocusWords, ...notebookBonusWords]),
+      ).slice(0, 6),
+    [effectiveDueFocusWords, notebookBonusWords],
+  );
+
+  const speakEphemeralChallengeWord = useCallback(
+    (word: string) => {
+      if (!calmSound || !word.trim()) return;
+      speechPlayer.stop();
+      void speechPlayer
+        .play(word, {
+          ephemeral: true,
+          wordSample: true,
+          bypassSessionLock: true,
+          utteranceKind: "word_sample",
+        })
+        .catch(() => undefined);
+    },
+    [calmSound, speechPlayer],
   );
 
   // Catalog & history
@@ -657,6 +710,19 @@ export function MemoryGameScreen({
         if (controller.signal.aborted || !audioBlob || audioBlob.size === 0) {
           return;
         }
+        const captureQuality = recorder.getQuality?.();
+        if (isConfirmedSilentVoiceCapture(captureQuality)) {
+          if (!options?.fromAutopilot) {
+            setVoiceNotice(
+              t(
+                "memoryGame.quietVoicePrompt",
+                undefined,
+                "Cô chưa nghe thấy tiếng bé nói. Bé hãy đưa micro gần hơn và nói to rõ hơn nhé!",
+              ),
+            );
+          }
+          return;
+        }
         const keyterms = session
           ? Array.from(
               new Set([
@@ -672,14 +738,47 @@ export function MemoryGameScreen({
               .filter(Boolean)
               .slice(0, 18)
           : combinedFocusWords;
-        const sttRes = await speechService.transcribe(audioBlob, {
-          languageCode: "vi",
-          keyterms,
-          signal: controller.signal,
-        });
-        if (controller.signal.aborted) return;
-        const transcript = sttRes.text?.trim() ?? "";
-        if (!transcript) return;
+        let transcript = "";
+        if (!isServerSttConfirmedUnavailable()) {
+          try {
+            const sttRes = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted) return;
+            transcript = sttRes.text?.trim() ?? "";
+          } catch (sttError: unknown) {
+            if (controller.signal.aborted) return;
+            if (isServiceError(sttError) && sttError.status === 503) {
+              refreshVoiceHealthQuietlyAfterSttFailure();
+            }
+          }
+        }
+        if (!transcript && detectBrowserWasmSttSupport().supported) {
+          try {
+            const wasmRes = await getBrowserWasmSttClient().transcribeBlob(
+              audioBlob,
+              { timeoutMs: 12_000 },
+            );
+            if (controller.signal.aborted) return;
+            transcript = wasmRes.text.normalize("NFC").trim();
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
+        if (!transcript) {
+          if (!options?.fromAutopilot) {
+            setVoiceNotice(
+              t(
+                "memoryGame.quietVoicePrompt",
+                undefined,
+                "Cô chưa nghe rõ tiếng bé nói. Bé hãy đưa micro gần hơn hoặc gõ chữ nhé!",
+              ),
+            );
+          }
+          return;
+        }
         setVoiceNotice(null);
         const priorDraft =
           target === "RECALL"
@@ -1111,6 +1210,7 @@ export function MemoryGameScreen({
     stopMicCapture();
     stopAllTts();
     setIsStarting(true);
+    setEphemeralCreativeCleared(false);
     setActionError(null);
     setActiveHint(null);
     setPeekNotice(null);
@@ -1310,6 +1410,7 @@ export function MemoryGameScreen({
       });
       setSession(result.session);
       setCreativeEvaluation(result.attempt.evaluation);
+      setEphemeralCreativeCleared(true);
       setStage("SUMMARY");
       if (
         effectiveMode === "VOICE" &&
@@ -1358,6 +1459,7 @@ export function MemoryGameScreen({
     setActiveHint(null);
     setRecallEvaluation(null);
     setCreativeEvaluation(null);
+    setEphemeralCreativeCleared(true);
     setFocusedObjectId(null);
     setActionError(null);
   };
@@ -2740,6 +2842,41 @@ export function MemoryGameScreen({
                 )}
               </Button>
             </div>
+
+            {effectiveDueFocusWords.length > 0 && !ephemeralCreativeCleared ? (
+              <div
+                className="flex flex-col gap-2 rounded-control border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-purple/40 px-4 py-3"
+                data-testid="memory-ephemeral-focus-bar"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold text-amber-950">
+                    {t("memoryGame.ephemeralFocusBarTitle")}
+                  </span>
+                  <span className="text-xs font-semibold text-muted">
+                    {t("memoryGame.ephemeralFocusBarHint")}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {effectiveDueFocusWords.map((word) => (
+                    <button
+                      className="viread-learning-content inline-flex min-h-9 items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-extrabold text-amber-950 transition hover:bg-amber-100"
+                      data-testid={`memory-ephemeral-word-${word}`}
+                      dir="ltr"
+                      key={word}
+                      lang="vi"
+                      onClick={() => speakEphemeralChallengeWord(word)}
+                      type="button"
+                    >
+                      <Volume2
+                        aria-hidden="true"
+                        className="size-3.5 text-amber-700"
+                      />
+                      ⭐ {word}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {creativeMagicWords.length > 0 ? (
               <div

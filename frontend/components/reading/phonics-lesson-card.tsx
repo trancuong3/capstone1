@@ -43,6 +43,12 @@ export interface PhonicsLessonCardProps {
   readonly isListeningRetry?: boolean;
   readonly statusHint?: string | null;
   readonly compact?: boolean;
+  /** True right after phonics playback completes and the card is about to auto-hide. */
+  readonly isAutoHiding?: boolean;
+  /** Duration of the gentle auto-hide countdown bar in ms. */
+  readonly autoHideDurationMs?: number;
+  /** Called when the child actively interacts (e.g., opens Meaning tab or notebook) so auto-hide pauses. */
+  readonly onUserInteract?: () => void;
   readonly onPlayWord?: () => void;
   readonly onPlayPhonics?: () => void;
   readonly onStopAudio?: () => void;
@@ -70,6 +76,9 @@ export function PhonicsLessonCard({
   isListeningRetry = false,
   statusHint = null,
   compact = false,
+  isAutoHiding = false,
+  autoHideDurationMs = 1400,
+  onUserInteract,
   onPlayWord,
   onPlayPhonics,
   onStopAudio,

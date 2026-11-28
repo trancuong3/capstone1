@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -73,6 +73,7 @@ class SpacedDifficultWordRead(BaseModel):
     reason_vi: str
     phonics_category: str = "general"
     phonics_label_vi: str = "Từ cần ôn"
+    is_due: bool = True
 
 
 class CrossGameRecommendationRead(BaseModel):
@@ -276,3 +277,15 @@ class DailyFiveMinuteTrainCompleteResponse(BaseModel):
     celebration_title_vi: str
     natural_break_cue_vi: str
     completed_at: datetime
+
+
+class WarmupMicroStoryRead(BaseModel):
+    child_id: UUID
+    local_date: date
+    has_due_words: bool = False
+    target_words: list[str] = Field(default_factory=list)
+    title_vi: str
+    sentences: list[str] = Field(default_factory=list)
+    full_text: str
+    source: Literal["AI", "RULE_BASED"] = "RULE_BASED"
+    cached: bool = False

@@ -144,7 +144,7 @@ export function createMicroStoryService(): MicroStoryService {
         {
           method: "POST",
           body: input,
-          timeoutMs: 60_000,
+          timeoutMs: 90_000,
         },
       );
     },

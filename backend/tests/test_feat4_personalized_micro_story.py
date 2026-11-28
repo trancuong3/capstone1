@@ -42,6 +42,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 import httpx
 from PIL import Image
+from sqlalchemy.exc import IntegrityError
 
 from app.api.deps import get_current_parent_id, get_db
 from app.api.routes import parent_private_book as parent_private_book_route
@@ -73,8 +74,12 @@ from test_durable_workflows_and_router import (  # noqa: E402
 )
 
 
+_ALLOWED_READING_SESSION_STATES = {"IN_PROGRESS", "PAUSED", "COMPLETED", "ABORTED"}
+_ALLOWED_COMPREHENSION_QUESTION_TYPES = {"FACTUAL", "CLOZE", "VOCABULARY"}
+
+
 class MicroStoryFakeSession(FakeStudioAsyncSession):
-    """Extends FakeStudioAsyncSession with flush(objs), refresh(obj), and multi-table queries."""
+    """Extends FakeStudioAsyncSession with flush(objs), refresh(obj), CHECK constraints, and multi-table queries."""
 
     def __init__(self, state: StudioDbState):
         super().__init__(state)
@@ -89,18 +94,48 @@ class MicroStoryFakeSession(FakeStudioAsyncSession):
         ):
             self.state.tables.setdefault(model_cls, [])
 
+    @staticmethod
+    def _validate_check_constraints(obj: Any) -> None:
+        if isinstance(obj, Book):
+            if obj.Name is not None and not str(obj.Name).strip():
+                raise IntegrityError(
+                    "books_name_not_blank",
+                    None,
+                    RuntimeError("CHECK constraint failed: books_name_not_blank"),
+                )
+        elif isinstance(obj, ReadingSession):
+            if obj.State not in _ALLOWED_READING_SESSION_STATES:
+                raise IntegrityError(
+                    "readingsessions_state_check",
+                    None,
+                    RuntimeError(
+                        f"CHECK constraint failed: readingsessions_state_check ({obj.State!r})"
+                    ),
+                )
+        elif isinstance(obj, ComprehensionQuestion):
+            if obj.Type not in _ALLOWED_COMPREHENSION_QUESTION_TYPES:
+                raise IntegrityError(
+                    "comprehensionquestions_type_check",
+                    None,
+                    RuntimeError(
+                        f"CHECK constraint failed: comprehensionquestions_type_check ({obj.Type!r})"
+                    ),
+                )
+
     async def flush(self, objects: Any = None) -> None:
-        _ = objects
+        targets = list(objects) if objects is not None else list(self._pending_adds)
+        for obj in targets:
+            self._validate_check_constraints(obj)
         await super().flush()
 
     async def refresh(self, obj: Any) -> None:
         _ = obj
 
     async def rollback(self) -> None:
-        return None
+        await super().rollback()
 
     async def commit(self) -> None:
-        self._pending_adds.clear()
+        await super().commit()
 
     async def execute(self, query: Any) -> Any:
         col_descs = getattr(query, "column_descriptions", None) or []
@@ -429,6 +464,12 @@ class TestFeat4PersonalizedMicroStory(unittest.IsolatedAsyncioTestCase):
             q for q in state.tables[ComprehensionQuestion] if q.SessionId == result.seeded_session_id
         ]
         self.assertEqual(len(comp_rows), len(result.comprehension_questions))
+        self.assertTrue(all(q.Type in {"FACTUAL", "CLOZE", "VOCABULARY"} for q in comp_rows))
+        self.assertIn("VOCABULARY", {q.Type for q in comp_rows})
+
+        session_rows = [s for s in state.tables[ReadingSession] if s.Id == result.seeded_session_id]
+        self.assertEqual(len(session_rows), 1)
+        self.assertEqual(session_rows[0].State, "IN_PROGRESS")
 
         svc_g4 = PersonalizedMicroStoryService(session, ai_router=ai_router, env=router_env)
         res_g4 = await svc_g4.generate_micro_story(
@@ -648,6 +689,95 @@ class TestFeat4PersonalizedMicroStory(unittest.IsolatedAsyncioTestCase):
 
         actor_ref["actor_id"] = student_actor
         self.assertEqual(client.get(f"/micro-stories/children/{child_a1}/quota").status_code, 403)
+
+    async def test_db_failure_during_persistence_is_atomic_rolls_back_book_quota_and_storage(
+        self,
+    ) -> None:
+        state = StudioDbState()
+        session = MicroStoryFakeSession(state)
+        parent_a, _parent_b, _student, child_g1, _child_g4 = _seed_household(state)
+
+        router_env = {
+            "SMART_AI_IMAGE_GEN_ENABLED": "false",
+            "LOCAL_OCR_ENABLED": "false",
+            "OCR_CLOUD_CORRECTION_ENABLED": "false",
+        }
+        svc = PersonalizedMicroStoryService(
+            session,
+            ai_router=AiCapabilityRouter(env=router_env),
+            env=router_env,
+        )
+
+        orig_flush = session.flush
+
+        async def _fail_on_session_flush(objects: Any = None) -> None:
+            if objects and any(isinstance(obj, ReadingSession) for obj in objects):
+                raise IntegrityError(
+                    "simulated_session_failure",
+                    None,
+                    RuntimeError("simulated DB failure during ReadingSession flush"),
+                )
+            await orig_flush(objects)
+
+        session.flush = _fail_on_session_flush  # type: ignore[method-assign]
+
+        with self.assertRaises(IntegrityError):
+            await svc.generate_micro_story(
+                parent_a,
+                child_g1,
+                MicroStoryGenerateRequest(selected_words=["lung linh", "nắng sớm", "chim sẻ"]),
+            )
+
+        self.assertEqual(len(state.tables[Book]), 0)
+        self.assertEqual(len(state.tables[BookPage]), 0)
+        self.assertEqual(len(state.tables[PageRevision]), 0)
+        self.assertEqual(len(state.tables[ReadingSession]), 0)
+        self.assertEqual(len(state.tables[ComprehensionQuestion]), 0)
+        quota_after_failure = await svc.get_quota(parent_a, child_g1)
+        self.assertEqual(quota_after_failure.used_today, 0)
+        self.assertEqual(list(Path(self._tmp_dir.name).rglob("*.png")), [])
+
+    async def test_llm_malformed_json_maps_to_invalid_output_and_falls_back_cleanly(self) -> None:
+        state = StudioDbState()
+        session = MicroStoryFakeSession(state)
+        parent_a, _parent_b, _student, child_g1, _child_g4 = _seed_household(state)
+
+        router_env = {
+            "SMART_AI_IMAGE_GEN_ENABLED": "false",
+            "LOCAL_OCR_ENABLED": "false",
+            "OCR_CLOUD_CORRECTION_ENABLED": "false",
+            "GEMINI_API_KEY": "test-gemini-key",
+        }
+        ai_router = AiCapabilityRouter(env=router_env)
+
+        async def _bad_json_transport(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"candidates": [{"content": {"parts": [{"text": "{not-valid-json"}]}}]},
+            )
+
+        orig_route = ai_router.route_and_execute
+
+        async def _route_with_bad_json(capability, fn, **kwargs):
+            async def _wrapped(provider, timeout_s):
+                with patch("app.services.personalized_micro_story_service.httpx.AsyncClient") as mock_cls:
+                    mock_cls.return_value = httpx.AsyncClient(
+                        transport=httpx.MockTransport(_bad_json_transport)
+                    )
+                    return await fn(provider, timeout_s)
+
+            return await orig_route(capability, _wrapped, **kwargs)
+
+        ai_router.route_and_execute = _route_with_bad_json  # type: ignore[method-assign]
+
+        svc = PersonalizedMicroStoryService(session, ai_router=ai_router, env=router_env)
+        res = await svc.generate_micro_story(
+            parent_a,
+            child_g1,
+            MicroStoryGenerateRequest(selected_words=["lung linh", "nắng sớm", "chim sẻ"]),
+        )
+        self.assertEqual(res.story_provider, "deterministic_wholesome_vi")
+        self.assertEqual(len(res.pages), 4)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ import { ReadingVoiceSettings } from "@/components/reading/reading-voice-setting
 import { ComprehensionQuestion } from "@/components/reading/comprehension-question";
 import { SessionComplete } from "@/components/reading/session-complete";
 import { DifficultWordPracticePanel } from "@/components/reports/difficult-word-practice-panel";
-import { ReadingServicesProvider } from "@/hooks/use-reading-services";
 import { createSpeechService } from "@/lib/api/speech-service";
 import {
   applyGlobalTeacherVoiceSelection,
@@ -126,7 +125,7 @@ vi.mock("@/hooks/use-speech-player", () => ({
 vi.mock("@/lib/supabase/client", () => ({
   createBrowserSupabaseClient: () => ({
     auth: {
-      getSession: vi.fn().mockResolvedValue({
+      getSession: async () => ({
         data: {
           session: {
             access_token: "fake-test-jwt-token",
@@ -209,6 +208,8 @@ beforeEach(() => {
 
 afterEach(() => {
   resetVoiceEngineStatus();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -1415,6 +1416,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
         },
       } as unknown as ReturnType<typeof reportServicesMod.useReportServices>);
 
+    let unmountPanel: (() => void) | null = null;
     try {
       const bookId = "abababab-abab-4bab-8bab-abababababab";
       const { unmount } = render(
@@ -1447,6 +1449,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
           words={[]}
         />,
       );
+      unmountPanel = unmount;
 
       expect(setCacheContextSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1558,8 +1561,8 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
 
       fetchSpy.mockRestore();
       vi.unstubAllEnvs();
-      unmount();
     } finally {
+      unmountPanel?.();
       delete (speechPlayerMock as { setCacheContext?: unknown })
         .setCacheContext;
       reportSpy.mockRestore();
@@ -2017,6 +2020,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
   });
 
   it("persists pending voiceSwitched across reload and auto-resyncs 409 SESSION_VOICE_LOCKED when resuming a server-locked session after a global Dashboard switch", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -2066,10 +2070,13 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
 
     fetchSpy
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ detail: { code: "SESSION_VOICE_LOCKED" } }), {
-          status: 409,
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ detail: { code: "SESSION_VOICE_LOCKED" } }),
+          {
+            status: 409,
+            headers: { "content-type": "application/json" },
+          },
+        ),
       )
       .mockResolvedValueOnce(
         new Response(new Uint8Array([9, 8, 7, 6]), {
@@ -2093,26 +2100,29 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
   });
 
   it("strips synthetic game_* and practice_* client session IDs across services and keeps region tabs unlocked in ReadingVoiceSettings", async () => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://127.0.0.1:8000");
     const user = userEvent.setup();
-    const fetchSpy = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.includes("/text-to-speech/timed")) {
-        return new Response(
-          JSON.stringify({
-            audio_base64: btoa("RIFF"),
-            content_type: "audio/mpeg",
-            duration_seconds: 0.4,
-            words: [{ index: 0, start: 0, end: 0.4 }],
-            resolved_voice_id: "local_north_thien_minh",
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      return new Response(new Uint8Array([1, 2, 3]), {
-        status: 200,
-        headers: { "content-type": "audio/mpeg" },
+    const fetchSpy = vi
+      .fn()
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/text-to-speech/timed")) {
+          return new Response(
+            JSON.stringify({
+              audio_base64: btoa("RIFF"),
+              content_type: "audio/mpeg",
+              duration_seconds: 0.4,
+              words: [{ index: 0, start: 0, end: 0.4 }],
+              resolved_voice_id: "local_north_thien_minh",
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "audio/mpeg" },
+        });
       });
-    });
     vi.stubGlobal("fetch", fetchSpy);
 
     const actualStudioMod = await vi.importActual<
@@ -2157,10 +2167,7 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
     );
     const previewSpy = vi.fn().mockResolvedValue(undefined);
     render(
-      <ReadingVoiceSettings
-        onPreview={previewSpy}
-        onStopPreview={vi.fn()}
-      />,
+      <ReadingVoiceSettings onPreview={previewSpy} onStopPreview={vi.fn()} />,
     );
     await user.click(screen.getByRole("button", { name: "Giọng đọc" }));
     expect(
@@ -2233,17 +2240,15 @@ describe("AI Teacher Voice Selection & 100% System-Wide Synchronization", () => 
         getQuestion: vi.fn().mockReturnValue(new Promise(() => {})),
         submitAnswer: vi.fn(),
       },
-    } as unknown as React.ComponentProps<
-      typeof ReadingServicesProvider
-    >["value"];
+    } as unknown as React.ContextType<typeof AppServicesContext>;
     const { unmount } = render(
-      <ReadingServicesProvider value={comprehensionServices}>
+      <AppServicesContext.Provider value={comprehensionServices}>
         <ComprehensionQuestion
           child={CHILD_1}
           onComplete={vi.fn()}
           sessionId="quiz-session-leak-test"
         />
-      </ReadingServicesProvider>,
+      </AppServicesContext.Provider>,
     );
     expect(getActiveSessionVoiceLock()?.sessionId).toBe(
       "quiz-session-leak-test",

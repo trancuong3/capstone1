@@ -37,6 +37,7 @@ import {
   DEFAULT_LOCAL_VOICE_ID,
   getActiveSessionVoiceLock,
   getDefaultVoiceIdForRegionAndGender,
+  getEffectiveVoiceId,
   getVoicePolicyPreferences,
   GOOGLE_TTS_MODEL_VERSION,
   inferModelVersionForVoiceId,
@@ -116,6 +117,8 @@ export interface SpeechPlayOptions {
   pageRevisionId?: string | null;
   cacheScope?: TtsCacheScope | null;
   isPrivateBook?: boolean;
+  /** Ephemeral mode: skip all client/IndexedDB/server TTS caches ("chơi xong rồi xóa"). */
+  ephemeral?: boolean;
   onPlay?: (duration: number) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onWordChange?: (index: number) => void;
@@ -140,6 +143,7 @@ export interface WordTimedPlayOptions {
   pageRevisionId?: string | null;
   cacheScope?: TtsCacheScope | null;
   isPrivateBook?: boolean;
+  ephemeral?: boolean;
   onPlay?: () => void;
   /** -1 clears the cursor if text and OCR words cannot be safely mapped. */
   onWordChange?: (index: number) => void;
@@ -154,6 +158,7 @@ export interface PhonicsPlayOptions {
   pageRevisionId?: string | null;
   cacheScope?: TtsCacheScope | null;
   isPrivateBook?: boolean;
+  ephemeral?: boolean;
   onPlay?: (duration: number) => void;
   onStepChange?: (stepIndex: number, step: PhonicsLessonStep) => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
@@ -165,6 +170,7 @@ export interface TtsPlaybackCacheContext {
   readonly pageId?: string | null;
   readonly pageRevisionId?: string | null;
   readonly isPrivateBook?: boolean;
+  readonly ephemeral?: boolean;
   readonly bypassSessionLock?: boolean;
 }
 
@@ -1040,14 +1046,9 @@ export class TtsPlayback {
   private lastPreferencesVoiceKey: string | null = null;
 
   private computePreferencesVoiceKey(): string {
-    const activeLock = getActiveSessionVoiceLock();
-    const prefs = getSpeechPreferences();
     const policy = getVoicePolicyPreferences();
     const effectiveVoice =
-      activeLock?.voiceId ??
-      prefs.voiceId ??
-      REGION_DEFAULT_VOICE_ID[policy.region] ??
-      DEFAULT_LOCAL_VOICE_ID;
+      getActiveSessionVoiceLock()?.voiceId ?? getEffectiveVoiceId();
     return `${policy.providerMode}::${policy.allowGoogleTtsFallback}::${effectiveVoice}`;
   }
 
@@ -1111,6 +1112,7 @@ export class TtsPlayback {
       readonly pageRevisionId?: string | null;
       readonly cacheScope?: TtsCacheScope | null;
       readonly isPrivateBook?: boolean;
+      readonly ephemeral?: boolean;
       readonly wordSample?: boolean;
       readonly coaching?: boolean;
     },
@@ -1122,6 +1124,7 @@ export class TtsPlayback {
     readonly pageRevisionId?: string;
     readonly cacheScope?: TtsCacheScope;
     readonly isPrivateBook?: boolean;
+    readonly ephemeral?: boolean;
   };
   private resolveCacheMeta(
     options: {
@@ -1130,6 +1133,7 @@ export class TtsPlayback {
       readonly pageRevisionId?: string | null;
       readonly cacheScope?: TtsCacheScope | null;
       readonly isPrivateBook?: boolean;
+      readonly ephemeral?: boolean;
       readonly wordSample?: boolean;
       readonly coaching?: boolean;
     },
@@ -1140,6 +1144,7 @@ export class TtsPlayback {
     readonly pageId?: string;
     readonly pageRevisionId?: string;
     readonly cacheScope?: TtsCacheScope;
+    readonly ephemeral?: boolean;
   };
   private resolveCacheMeta(
     options: {
@@ -1148,6 +1153,7 @@ export class TtsPlayback {
       readonly pageRevisionId?: string | null;
       readonly cacheScope?: TtsCacheScope | null;
       readonly isPrivateBook?: boolean;
+      readonly ephemeral?: boolean;
       readonly wordSample?: boolean;
       readonly coaching?: boolean;
     },
@@ -1159,7 +1165,11 @@ export class TtsPlayback {
     readonly pageRevisionId?: string;
     readonly cacheScope?: TtsCacheScope;
     readonly isPrivateBook?: boolean;
+    readonly ephemeral?: boolean;
   } {
+    if (options.ephemeral || this.defaultCacheContext?.ephemeral) {
+      return { ephemeral: true };
+    }
     const bookId = options.bookId ?? this.defaultCacheContext?.bookId ?? null;
     const pageId = options.pageId ?? this.defaultCacheContext?.pageId ?? null;
     const pageRevisionId =
@@ -1199,13 +1209,6 @@ export class TtsPlayback {
       this.sessionDeviceTransport.clear();
       this.sessionServerAudioServed.clear();
     }
-    this.cache.clear();
-    this.cacheBytes = 0;
-    this.shortCache.clear();
-    this.shortCacheBytes = 0;
-    this.phonicsCache.clear();
-    this.phonicsCacheBytes = 0;
-    this.inFlightShortPrefetch.clear();
     clearPinnedBrowserVoices();
     this.setFallbackNotice(null);
     this.stop();
@@ -2145,11 +2148,16 @@ export class TtsPlayback {
       readonly speedScale?: number;
       readonly bypassSessionLock?: boolean;
       readonly cacheScope?: TtsCacheScope | null;
+      readonly ephemeral?: boolean;
       readonly signal?: AbortSignal;
     } = {},
   ): Promise<void> => {
     if (typeof this.speech.synthesize !== "function") return;
     if (options.signal?.aborted) return;
+    const isEphemeral = Boolean(
+      options.ephemeral || this.defaultCacheContext?.ephemeral,
+    );
+    if (isEphemeral) return;
     const wordSample = Boolean(options.wordSample);
     const spokenText = wordSample
       ? normalizeVietnameseWord(text)
@@ -2275,8 +2283,12 @@ export class TtsPlayback {
           this.auditUtterance(operation, kind, spokenText, served);
         };
 
+        const isEphemeral = Boolean(
+          options.ephemeral || this.defaultCacheContext?.ephemeral,
+        );
         const dynamicUncached = isDynamicUncachedPrompt(spokenText, options);
         const hasCacheTarget =
+          !isEphemeral &&
           !dynamicUncached &&
           Boolean(
             options.precomputedAudioUrl ||
@@ -2385,7 +2397,7 @@ export class TtsPlayback {
             ]);
           const shortKey = makeKey();
           const cachedShort =
-            audioFormat === undefined
+            !isEphemeral && audioFormat === undefined
               ? this.shortCache.get(shortKey)
               : undefined;
           if (cachedShort) {
@@ -2397,7 +2409,7 @@ export class TtsPlayback {
             };
           }
           const pendingPrefetch =
-            audioFormat === undefined
+            !isEphemeral && audioFormat === undefined
               ? this.inFlightShortPrefetch.get(shortKey)
               : undefined;
           if (pendingPrefetch) {
@@ -2417,15 +2429,17 @@ export class TtsPlayback {
             options.wordSample ? "CATALOG" : "COACHING",
             true,
           );
-          let resolveSharedInFlight:
-            | ((
-                val: {
-                  readonly audio: Blob;
-                  readonly usedFallbackVoice: boolean;
-                  readonly cachedSpeed: number | null;
-                } | null,
-              ) => void)
-            | null = null;
+          const sharedInFlightResolver: {
+            resolve:
+              | ((
+                  val: {
+                    readonly audio: Blob;
+                    readonly usedFallbackVoice: boolean;
+                    readonly cachedSpeed: number | null;
+                  } | null,
+                ) => void)
+              | null;
+          } = { resolve: null };
           let sharedInFlightPromise: Promise<{
             readonly audio: Blob;
             readonly usedFallbackVoice: boolean;
@@ -2433,7 +2447,7 @@ export class TtsPlayback {
           } | null> | null = null;
           if (audioFormat === undefined) {
             sharedInFlightPromise = new Promise((resolve) => {
-              resolveSharedInFlight = resolve;
+              sharedInFlightResolver.resolve = resolve;
             });
             this.inFlightShortPrefetch.set(shortKey, sharedInFlightPromise);
           }
@@ -2513,11 +2527,13 @@ export class TtsPlayback {
               usedFallbackVoice,
               cachedSpeed,
             };
-            this.cacheShort(resolvedKey, cachedEntry);
-            resolveSharedInFlight?.(
-              resolvedKey === shortKey ? cachedEntry : null,
+            if (!isEphemeral) {
+              this.cacheShort(resolvedKey, cachedEntry);
+            }
+            sharedInFlightResolver.resolve?.(
+              !isEphemeral && resolvedKey === shortKey ? cachedEntry : null,
             );
-            resolveSharedInFlight = null;
+            sharedInFlightResolver.resolve = null;
             return {
               audio: source,
               usedFallbackVoice,
@@ -2525,7 +2541,7 @@ export class TtsPlayback {
               key: resolvedKey,
             };
           } finally {
-            resolveSharedInFlight?.(null);
+            sharedInFlightResolver.resolve?.(null);
             if (
               sharedInFlightPromise &&
               this.inFlightShortPrefetch.get(shortKey) === sharedInFlightPromise
@@ -2794,16 +2810,21 @@ export class TtsPlayback {
           options.onEnded?.();
         };
 
-        const hasPhonicsCacheTarget = Boolean(
-          options.bookId ||
-          options.pageId ||
-          options.pageRevisionId ||
-          options.cacheScope === "CATALOG" ||
-          options.cacheScope === "COACHING" ||
-          this.defaultCacheContext?.bookId ||
-          this.defaultCacheContext?.pageId ||
-          this.defaultCacheContext?.pageRevisionId,
+        const isEphemeral = Boolean(
+          options.ephemeral || this.defaultCacheContext?.ephemeral,
         );
+        const hasPhonicsCacheTarget =
+          !isEphemeral &&
+          Boolean(
+            options.bookId ||
+            options.pageId ||
+            options.pageRevisionId ||
+            options.cacheScope === "CATALOG" ||
+            options.cacheScope === "COACHING" ||
+            this.defaultCacheContext?.bookId ||
+            this.defaultCacheContext?.pageId ||
+            this.defaultCacheContext?.pageRevisionId,
+          );
         if (
           this.isSessionPinnedToDeviceTts(operation) ||
           shouldSkipBackendTtsForBrowserFallback(
@@ -2868,7 +2889,9 @@ export class TtsPlayback {
                 word,
                 true,
               ]);
-              const cached = this.shortCache.get(stepKey);
+              const cached = isEphemeral
+                ? undefined
+                : this.shortCache.get(stepKey);
               if (cached) {
                 return {
                   audio: cached.audio,
@@ -2897,11 +2920,13 @@ export class TtsPlayback {
                 if (meta) {
                   setSynthesizedAudioMeta(blob, meta);
                 }
-                this.cacheShort(stepKey, {
-                  audio: blob,
-                  usedFallbackVoice: Boolean(meta?.usedFallbackVoice),
-                  cachedSpeed,
-                });
+                if (!isEphemeral) {
+                  this.cacheShort(stepKey, {
+                    audio: blob,
+                    usedFallbackVoice: Boolean(meta?.usedFallbackVoice),
+                    cachedSpeed,
+                  });
+                }
                 return { audio: blob, cachedSpeed, key: stepKey };
               } catch (err) {
                 this.ensure(operation);
@@ -3016,7 +3041,9 @@ export class TtsPlayback {
             options.cacheScope ?? "COACHING",
             true,
           );
-          let synthesized = this.phonicsCache.get(phonicsKey);
+          let synthesized = isEphemeral
+            ? undefined
+            : this.phonicsCache.get(phonicsKey);
           if (!synthesized) {
             try {
               synthesized = await this.wait(
@@ -3032,7 +3059,9 @@ export class TtsPlayback {
                 }),
               );
               this.ensure(operation);
-              this.cachePhonics(phonicsKey, synthesized);
+              if (!isEphemeral) {
+                this.cachePhonics(phonicsKey, synthesized);
+              }
             } catch (error) {
               this.ensure(operation);
               if (isAbort(error)) throw error;
@@ -3063,7 +3092,9 @@ export class TtsPlayback {
                       operation,
                       googleVoiceId,
                     );
-                    this.cachePhonics(makePhonicsKey(), synthesized);
+                    if (!isEphemeral) {
+                      this.cachePhonics(makePhonicsKey(), synthesized);
+                    }
                   } catch (googleError) {
                     this.ensure(operation);
                     if (isAbort(googleError)) throw googleError;
@@ -3095,7 +3126,9 @@ export class TtsPlayback {
                       stepText,
                       true,
                     ]);
-                    const cachedStep = this.shortCache.get(stepKey);
+                    const cachedStep = isEphemeral
+                      ? undefined
+                      : this.shortCache.get(stepKey);
                     let stepBlob = cachedStep?.audio ?? null;
                     let stepCachedSpeed = cachedStep?.cachedSpeed ?? null;
                     if (!stepBlob) {
@@ -3118,11 +3151,13 @@ export class TtsPlayback {
                         stepCachedSpeed =
                           getSynthesizedAudioMeta(stepBlob)?.cachedSpeed ??
                           null;
-                        this.cacheShort(stepKey, {
-                          audio: stepBlob,
-                          usedFallbackVoice: false,
-                          cachedSpeed: stepCachedSpeed,
-                        });
+                        if (!isEphemeral) {
+                          this.cacheShort(stepKey, {
+                            audio: stepBlob,
+                            usedFallbackVoice: false,
+                            cachedSpeed: stepCachedSpeed,
+                          });
+                        }
                       } catch (stepErr) {
                         this.ensure(operation);
                         if (isAbort(stepErr)) throw stepErr;
@@ -3292,7 +3327,9 @@ export class TtsPlayback {
               ) {
                 throw unavailable();
               }
-              this.cachePhonics(makePhonicsKey(), wavPhonics);
+              if (!isEphemeral) {
+                this.cachePhonics(makePhonicsKey(), wavPhonics);
+              }
               const wavPhonicsPlaybackRate = computeEffectivePlaybackRate(
                 operation.voice.speed,
                 wavPhonics.cachedSpeed ??
@@ -3338,7 +3375,9 @@ export class TtsPlayback {
             step.spokenText.normalize("NFC"),
             true,
           ]);
-          const cachedStep = this.shortCache.get(stepKey);
+          const cachedStep = isEphemeral
+            ? undefined
+            : this.shortCache.get(stepKey);
           let stepBlob = cachedStep?.audio ?? null;
           let stepCachedSpeed = cachedStep?.cachedSpeed ?? null;
           if (!stepBlob) {
@@ -3364,11 +3403,13 @@ export class TtsPlayback {
               this.ensure(operation);
               stepCachedSpeed =
                 getSynthesizedAudioMeta(stepBlob)?.cachedSpeed ?? null;
-              this.cacheShort(stepKey, {
-                audio: stepBlob,
-                usedFallbackVoice: false,
-                cachedSpeed: stepCachedSpeed,
-              });
+              if (!isEphemeral) {
+                this.cacheShort(stepKey, {
+                  audio: stepBlob,
+                  usedFallbackVoice: false,
+                  cachedSpeed: stepCachedSpeed,
+                });
+              }
             } catch (error) {
               this.ensure(operation);
               if (isAbort(error)) throw error;
@@ -3466,17 +3507,22 @@ export class TtsPlayback {
           Boolean(options.onWordChange) &&
           !options.precomputedWordTimings?.length;
 
-        const hasTimedCacheTarget = Boolean(
-          options.precomputedAudioUrl ||
-          options.bookId ||
-          options.pageId ||
-          options.pageRevisionId ||
-          options.cacheScope === "CATALOG" ||
-          options.cacheScope === "COACHING" ||
-          this.defaultCacheContext?.bookId ||
-          this.defaultCacheContext?.pageId ||
-          this.defaultCacheContext?.pageRevisionId,
+        const isEphemeral = Boolean(
+          options.ephemeral || this.defaultCacheContext?.ephemeral,
         );
+        const hasTimedCacheTarget =
+          !isEphemeral &&
+          Boolean(
+            options.precomputedAudioUrl ||
+            options.bookId ||
+            options.pageId ||
+            options.pageRevisionId ||
+            options.cacheScope === "CATALOG" ||
+            options.cacheScope === "COACHING" ||
+            this.defaultCacheContext?.bookId ||
+            this.defaultCacheContext?.pageId ||
+            this.defaultCacheContext?.pageRevisionId,
+          );
         let useBrowserFallback =
           this.isSessionPinnedToDeviceTts(operation) ||
           shouldSkipBackendTtsForBrowserFallback(
@@ -3580,7 +3626,7 @@ export class TtsPlayback {
           audioFormat?: TtsAudioFormat,
         ): Promise<TimedSpeech> => {
           const key = makeTimedKeyForWords(chunkWords);
-          if (audioFormat === undefined) {
+          if (!isEphemeral && audioFormat === undefined) {
             const cached = this.cache.get(key);
             if (cached) return cached;
           }
@@ -3637,7 +3683,9 @@ export class TtsPlayback {
           }
           this.ensure(operation);
           this.timedCooldownUntil = 0;
-          this.cacheTimed(makeTimedKeyForWords(chunkWords), timed);
+          if (!isEphemeral) {
+            this.cacheTimed(makeTimedKeyForWords(chunkWords), timed);
+          }
           return timed;
         };
 

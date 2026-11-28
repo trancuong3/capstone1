@@ -28,7 +28,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException, status
 import httpx
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Book, BookPage, ChildFavoriteWord, ChildProfile, WordGlossaryCache
@@ -953,7 +953,19 @@ class KidGlossaryService:
             )
             .order_by(ChildFavoriteWord.CreatedAt.desc())
         )
-        rows = list((await self.db.execute(stmt)).scalars().all())
+        try:
+            rows = list((await self.db.execute(stmt)).scalars().all())
+        except ProgrammingError as exc:
+            sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+            if sqlstate == "42P01" or "child_favorite_words" in str(exc).lower():
+                await self.db.rollback()
+                return VocabularyNotebookListResponse(
+                    child_id=child_id,
+                    total=0,
+                    storytelling_words=[],
+                    items=[],
+                )
+            raise
         visible_rows = rows[:safe_limit]
 
         # Prioritize least-practiced-in-games then newest saved words (up to 3) as storytelling bonus prompts.

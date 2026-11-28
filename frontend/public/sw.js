@@ -115,13 +115,15 @@ self.addEventListener("message", (event) => {
       ? `${OFFLINE_PACK_CACHE_PREFIX}${encodeURIComponent(parentId)}:`
       : OFFLINE_PACK_CACHE_PREFIX;
     event.waitUntil(
-      caches.keys().then((keys) =>
-        Promise.all(
-          keys
-            .filter((name) => name.startsWith(prefix))
-            .map((name) => caches.delete(name)),
+      caches
+        .keys()
+        .then((keys) =>
+          Promise.all(
+            keys
+              .filter((name) => name.startsWith(prefix))
+              .map((name) => caches.delete(name)),
+          ),
         ),
-      ),
     );
   }
 });
@@ -138,7 +140,9 @@ self.addEventListener("fetch", (event) => {
     return;
   }
   if (url.origin !== self.location.origin) return;
-  if (DENYLIST_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+  if (
+    DENYLIST_PATH_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))
+  ) {
     return;
   }
 

@@ -157,8 +157,12 @@ export interface SaveOfflineBookPackInput {
   readonly parentAccountId: string;
   readonly childProfileId: string;
   readonly manifest: OfflineReadingPackManifestDTO;
-  readonly pageImages?: Readonly<Record<string, Blob | Uint8Array | ArrayBuffer>>;
-  readonly pageTtsClips?: Readonly<Record<string, Blob | Uint8Array | ArrayBuffer>>;
+  readonly pageImages?: Readonly<
+    Record<string, Blob | Uint8Array | ArrayBuffer>
+  >;
+  readonly pageTtsClips?: Readonly<
+    Record<string, Blob | Uint8Array | ArrayBuffer>
+  >;
 }
 
 export interface DownloadOfflineBookPackOptions {
@@ -302,7 +306,10 @@ function openOfflinePackDb(): Promise<IDBDatabase | null> {
     };
     const timer = setTimeout(() => finish(null), IDB_TIMEOUT_MS);
     try {
-      const req = indexedDB.open(OFFLINE_PACK_IDB_NAME, OFFLINE_PACK_IDB_VERSION);
+      const req = indexedDB.open(
+        OFFLINE_PACK_IDB_NAME,
+        OFFLINE_PACK_IDB_VERSION,
+      );
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(PACKS_STORE)) {
@@ -402,7 +409,9 @@ export async function saveOfflineBookPack(
   const partitionKey = buildOfflinePartitionKey(parentId, childId);
   const partitionBookKey = buildPartitionBookKey(partitionKey, bookId);
   const blobRecords: StoredBlobRecord[] = [];
-  let totalBytes = new TextEncoder().encode(JSON.stringify(manifest)).byteLength;
+  let totalBytes = new TextEncoder().encode(
+    JSON.stringify(manifest),
+  ).byteLength;
   let hasCachedTts = false;
 
   for (const page of manifest.pages) {
@@ -997,7 +1006,7 @@ export async function getOfflineSessionDescriptor(
   });
 }
 
-const offlineReadingPackManifestSchema = z
+export const offlineReadingPackManifestSchema = z
   .object({
     manifest_version: z.number(),
     parent_account_id: z.string(),
@@ -1008,7 +1017,7 @@ const offlineReadingPackManifestSchema = z
     grade: z.number(),
     min_grade: z.number(),
     max_grade: z.number(),
-    visibility_scope: z.enum(["PUBLIC", "PARENT_PRIVATE"]),
+    visibility_scope: z.enum(["CATALOG", "PARENT_PRIVATE"]),
     cover_url: z.string().nullable().optional(),
     voice_id: z.string(),
     estimated_bytes: z.number(),

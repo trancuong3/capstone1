@@ -27,6 +27,7 @@ import {
   type MicroStoryTargetWordDTO,
 } from "@/lib/api/micro-story-service";
 import { isServiceError } from "@/lib/api/service-error";
+import { translateRuntime } from "@/lib/i18n/runtime";
 import { useMicroStoryTranslations } from "@/messages/features/micro_story";
 import type { ChildProfileDTO } from "@/types/child";
 
@@ -69,6 +70,16 @@ export function CreateMicroStoryModal({
   const [selectedChildId, setSelectedChildId] = useState<string>(
     explicitChild?.id ?? "",
   );
+  const [prevExplicitChildId, setPrevExplicitChildId] = useState<
+    string | undefined
+  >(explicitChild?.id);
+
+  if (explicitChild?.id !== prevExplicitChildId) {
+    setPrevExplicitChildId(explicitChild?.id);
+    if (explicitChild?.id) {
+      setSelectedChildId(explicitChild.id);
+    }
+  }
 
   const [preview, setPreview] = useState<MicroStoryPreviewDTO | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
@@ -327,7 +338,15 @@ export function CreateMicroStoryModal({
             }),
           );
         } else if (err.status === 422) {
-          setGenerateError(err.message || t("errorSafetyRejected"));
+          const genericMessage = translateRuntime("errors.generic");
+          const specificMessage = err.message.trim();
+          setGenerateError(
+            specificMessage &&
+              specificMessage !== genericMessage &&
+              specificMessage !== t("errorGeneric")
+              ? specificMessage
+              : t("errorSafetyRejected"),
+          );
         } else {
           setGenerateError(err.message || t("errorGeneric"));
         }

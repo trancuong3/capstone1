@@ -47,7 +47,6 @@ from app.policies.book_access import (
 )
 from app.repositories.adaptive_learning_repository import AdaptiveLearningRepository
 from app.repositories.parent_private_book_repository import ParentPrivateBookRepository
-from app.schemas.parent_private_book import ParentPrivateBookCreate
 from app.schemas.personalized_micro_story import (
     MicroStoryComprehensionItemRead,
     MicroStoryGenerateRequest,
@@ -164,6 +163,15 @@ _UNSAFE_STORY_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
 
 _VALID_VI_WORD_RE = re.compile(r"^[0-9A-Za-zÀ-ỹĐđ\s\-]{2,48}$", re.UNICODE)
 _PAGE_WORD_SPLIT_RE = re.compile(r"\S+", re.UNICODE)
+_VOCAB_QUESTION_RE = re.compile(r"\b(?:từ|nghĩa)\b", re.IGNORECASE | re.UNICODE)
+
+
+def _resolve_question_db_type(draft_q: DraftComprehensionQuestion) -> str:
+    """Map draft comprehension question to live DB `comprehensionquestions_type_check` enum."""
+    prompt_norm = unicodedata.normalize("NFC", draft_q.prompt or "").strip().lower()
+    if _VOCAB_QUESTION_RE.search(prompt_norm):
+        return "VOCABULARY"
+    return "FACTUAL"
 
 
 @dataclass(frozen=True)
@@ -956,9 +964,15 @@ class PersonalizedMicroStoryService:
                         kind=AiErrorKind.QUOTA_EXHAUSTED if resp.status_code == 429 else AiErrorKind.NETWORK_ERROR,
                         http_status=resp.status_code,
                     )
-                raw_text = extract_gemini_text(resp.json()) or ""
-                cleaned = strip_think_tags(raw_text).strip()
-                parsed = json.loads(cleaned)
+                try:
+                    raw_text = extract_gemini_text(resp.json()) or ""
+                    cleaned = strip_think_tags(raw_text).strip()
+                    parsed = json.loads(cleaned)
+                except (json.JSONDecodeError, ValueError, KeyError, IndexError, TypeError) as exc:
+                    raise AiProviderCallError(
+                        provider_id=provider.provider_id,
+                        kind=AiErrorKind.INVALID_OUTPUT,
+                    ) from exc
                 if not isinstance(parsed, dict):
                     raise AiProviderCallError(provider_id=provider.provider_id, kind=AiErrorKind.INVALID_OUTPUT)
                 return parsed
@@ -984,8 +998,14 @@ class PersonalizedMicroStoryService:
                         kind=AiErrorKind.QUOTA_EXHAUSTED if resp.status_code == 429 else AiErrorKind.NETWORK_ERROR,
                         http_status=resp.status_code,
                     )
-                content = resp.json()["choices"][0]["message"]["content"]
-                parsed = json.loads(strip_think_tags(str(content)).strip())
+                try:
+                    content = resp.json()["choices"][0]["message"]["content"]
+                    parsed = json.loads(strip_think_tags(str(content)).strip())
+                except (json.JSONDecodeError, ValueError, KeyError, IndexError, TypeError) as exc:
+                    raise AiProviderCallError(
+                        provider_id=provider.provider_id,
+                        kind=AiErrorKind.INVALID_OUTPUT,
+                    ) from exc
                 if not isinstance(parsed, dict):
                     raise AiProviderCallError(provider_id=provider.provider_id, kind=AiErrorKind.INVALID_OUTPUT)
                 return parsed
@@ -1182,9 +1202,8 @@ class PersonalizedMicroStoryService:
             f"{c.name} ({', '.join(c.visual_traits[:3])})"
             for c in style_bible.characters[:2]
         )
-        results: list[tuple[bytes, str, str, str, bool]] = []
 
-        for page in story.pages:
+        async def _generate_one_page(page: DraftMicroStoryPage) -> tuple[bytes, str, str, str, bool]:
             safe_scene = _sanitize_child_safe_prompt_hint(page.scene_description_en)
             prompt = (
                 f"{style_bible.prompt_prefix} "
@@ -1204,23 +1223,20 @@ class PersonalizedMicroStoryService:
                         seed=1000 + page.page_number,
                         tenant_scope=tenant_scope,
                         allow_cloud=allow_cloud_image,
-                        total_budget_seconds=20.0,
+                        total_budget_seconds=15.0,
                     )
                 )
                 fmt = detect_magic_image_format(img_res.image_bytes)
                 if fmt in {"PNG", "JPEG", "WEBP"}:
                     ext = "jpg" if fmt == "JPEG" else ("webp" if fmt == "WEBP" else "png")
                     mime = "image/jpeg" if fmt == "JPEG" else (f"image/{ext}")
-                    results.append(
-                        (
-                            img_res.image_bytes,
-                            mime,
-                            ext,
-                            img_res.provider_id,
-                            False,
-                        )
+                    return (
+                        img_res.image_bytes,
+                        mime,
+                        ext,
+                        img_res.provider_id,
+                        False,
                     )
-                    continue
                 logger.warning("Generated image bytes failed magic format check; using deterministic PNG fallback")
             except AiRoutingError as exc:
                 if exc.kind == AiErrorKind.UNSAFE_OUTPUT:
@@ -1242,17 +1258,17 @@ class PersonalizedMicroStoryService:
                 page_number=page.page_number,
                 style_bible=style_bible,
             )
-            results.append(
-                (
-                    png_bytes,
-                    "image/png",
-                    "png",
-                    "deterministic_illustrated_png",
-                    True,
-                )
+            return (
+                png_bytes,
+                "image/png",
+                "png",
+                "deterministic_illustrated_png",
+                True,
             )
 
-        return results
+        return list(
+            await asyncio.gather(*(_generate_one_page(page) for page in story.pages))
+        )
 
     async def _upload_private_page_image(
         self,
@@ -1365,63 +1381,70 @@ class PersonalizedMicroStoryService:
             allow_cloud_image=allow_cloud_image,
         )
 
-        # Phase 3: Re-check daily quota & persist PARENT_PRIVATE book + 4 pages + words + comprehension questions
+        # Phase 3: Upload 4 page images concurrently, then open ONE atomic DB transaction to persist
+        # Book + 4 committed pages/revisions/words + BookStyleBible + ReadingSession + Questions + AuditLog
         now = datetime.now(timezone.utc)
-        quota_recheck = await self.get_quota(actor_id, child_uuid, now_utc=now)
-        if quota_recheck.quota_exceeded:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail={
-                    "code": "MICRO_STORY_DAILY_QUOTA_EXCEEDED",
-                    "message": "Đã đạt giới hạn tạo truyện tranh mini trong ngày của bé.",
-                    "daily_limit": quota_recheck.daily_limit,
-                    "used_today": quota_recheck.used_today,
-                    "remaining_today": 0,
-                },
-            )
-
+        book_id = uuid4()
         source_note = (
             f"{micro_story_child_tag(child_uuid)} | Truyện tranh 4 trang ôn từ khó: "
             f"{', '.join(target_word_strings)}"
         )[:950]
-        created_summary = await self.private_book_service.create_book(
-            actor_id,
-            ParentPrivateBookCreate(
-                title=story.title[:200],
-                author=f"Truyện riêng của {child_alias}"[:150],
-                min_grade=child_grade,
-                max_grade=child_grade,
-                source_type="SELF_AUTHORED",
-                source_note=source_note,
-            ),
-        )
-        book_id = created_summary.id
 
         uploaded_paths: list[str] = []
         pre_uploaded_pages: list[tuple[UUID, str, bytes, str, str, bool, int, int]] = []
-        await self.db.rollback()
+
+        async def _upload_one(
+            ill: tuple[bytes, str, str, str, bool],
+        ) -> tuple[UUID, str, bytes, str, str, bool, int, int]:
+            img_bytes, mime_type, ext, prov_id, fb_used = ill
+            page_id = uuid4()
+            storage_path = f"private-books/{actor_id}/{book_id}/pages/{page_id}/rev-1.{ext}"
+            await self._upload_private_page_image(storage_path, img_bytes, mime_type)
+            uploaded_paths.append(storage_path)
+            with Image.open(BytesIO(img_bytes)) as pil_im:
+                w_px, h_px = pil_im.size
+            return (page_id, storage_path, img_bytes, mime_type, prov_id, fb_used, w_px, h_px)
 
         try:
-            for idx, (img_bytes, mime_type, ext, prov_id, fb_used) in enumerate(illustrations):
-                page_id = uuid4()
-                storage_path = f"private-books/{actor_id}/{book_id}/pages/{page_id}/rev-1.{ext}"
-                await self._upload_private_page_image(storage_path, img_bytes, mime_type)
-                uploaded_paths.append(storage_path)
-                with Image.open(BytesIO(img_bytes)) as pil_im:
-                    w_px, h_px = pil_im.size
-                pre_uploaded_pages.append(
-                    (page_id, storage_path, img_bytes, mime_type, prov_id, fb_used, w_px, h_px)
+            upload_results = await asyncio.gather(
+                *(_upload_one(ill) for ill in illustrations),
+                return_exceptions=True,
+            )
+            for res in upload_results:
+                if isinstance(res, BaseException):
+                    raise res
+                pre_uploaded_pages.append(res)
+
+            quota_recheck = await self.get_quota(actor_id, child_uuid, now_utc=now)
+            if quota_recheck.quota_exceeded:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "code": "MICRO_STORY_DAILY_QUOTA_EXCEEDED",
+                        "message": "Đã đạt giới hạn tạo truyện tranh mini trong ngày của bé.",
+                        "daily_limit": quota_recheck.daily_limit,
+                        "used_today": quota_recheck.used_today,
+                        "remaining_today": 0,
+                    },
                 )
 
-            book_row = await self.private_book_repo.get_owned_private_book(
-                book_id, actor_id, lock=True
+            book_row = Book(
+                Id=book_id,
+                Name=(story.title[:200].strip() or None),
+                Title=story.title[:200],
+                Author=f"Truyện riêng của {child_alias}"[:150],
+                MinGrade=child_grade,
+                MaxGrade=child_grade,
+                ExpectedPageCount=MICRO_STORY_PAGE_COUNT,
+                LifecycleStatus="ACTIVE",
+                CreatedBy=actor_id,
+                VisibilityScope=VISIBILITY_PARENT_PRIVATE,
+                OwnerParentId=actor_id,
+                ModerationStatus=MODERATION_ACTIVE,
+                SourceDeclaration=f"[SELF_AUTHORED] {source_note}"[:1000],
+                CreatedAt=now,
             )
-            if book_row is None:
-                raise HTTPException(status_code=404, detail="Resource not found")
-            book_row.ExpectedPageCount = MICRO_STORY_PAGE_COUNT
-            book_row.VisibilityScope = VISIBILITY_PARENT_PRIVATE
-            book_row.ModerationStatus = MODERATION_ACTIVE
-            book_row.LifecycleStatus = "ACTIVE"
+            await self.private_book_repo.create_private_book(book_row)
 
             target_words_meta = [w.model_dump(mode="json") for w in chosen_words]
             questions_meta = [
@@ -1537,7 +1560,7 @@ class PersonalizedMicroStoryService:
                 StartPageId=first_page.Id,
                 EndPageId=last_page.Id,
                 CurrentPageId=first_page.Id,
-                State="CREATED",
+                State="IN_PROGRESS",
                 Mode="MICRO_STORY_SEED",
                 ClientMeta={
                     "micro_story": True,
@@ -1573,7 +1596,7 @@ class PersonalizedMicroStoryService:
                     SessionId=seeded_session.Id,
                     PageId=q_page.Id,
                     PageRevisionId=q_rev.Id,
-                    Type="MULTIPLE_CHOICE",
+                    Type=_resolve_question_db_type(draft_q),
                     Prompt=draft_q.prompt,
                     ExpectedAnswer=draft_q.correct_answer,
                     AcceptedAnswers=[normalize_tutor_text(draft_q.correct_answer)],
@@ -1607,48 +1630,88 @@ class PersonalizedMicroStoryService:
                     "safety_status": safety_status,
                 },
             )
+
+            # Snapshot scalar IDs & storage paths into plain tuples before commit/release
+            seeded_session_id = seeded_session.Id
+            page_snapshots: list[tuple[UUID, int, UUID, str, list[str], list[int], str, bool]] = [
+                (
+                    cp.Id,
+                    int(cp.PageNumber),
+                    cr.Id,
+                    str(cp.ImagePath),
+                    list(matched_on_page),
+                    list(matched_indices),
+                    prov_id,
+                    fb_used,
+                )
+                for cp, cr, matched_on_page, matched_indices, prov_id, fb_used in committed_pages
+            ]
+            question_ids: list[UUID] = [q.Id for q in comp_rows]
+
             await self.db.commit()
         except Exception:
             await self.db.rollback()
-            if self._storage_upload_fn is None:
-                for p in uploaded_paths:
-                    try:
-                        await asyncio.to_thread(
+            if self._storage_upload_fn is None and uploaded_paths:
+                await asyncio.gather(
+                    *(
+                        asyncio.to_thread(
                             delete_object, p, bucket_name=SUPABASE_PRIVATE_BOOKS_BUCKET
                         )
-                    except Exception:
-                        pass
+                        for p in uploaded_paths
+                    ),
+                    return_exceptions=True,
+                )
             raise
 
         quota_after = await self.get_quota(actor_id, child_uuid, now_utc=now)
-        any_fallback = any(item[5] for item in committed_pages)
+        # Release DB read transaction/permit before Storage signed-URL generation
+        await self.db.rollback()
+
+        any_fallback = any(item[7] for item in page_snapshots)
         primary_ill_provider = next(
-            (item[4] for item in committed_pages if not item[5]),
-            committed_pages[0][4],
+            (item[6] for item in page_snapshots if not item[7]),
+            page_snapshots[0][6],
+        )
+
+        signed_urls = list(
+            await asyncio.gather(
+                *(
+                    asyncio.to_thread(
+                        private_page_image_url,
+                        book_id,
+                        page_id,
+                        revision_id=rev_id,
+                        base_url=base_url,
+                        storage_path=storage_path,
+                        owner_id=actor_id,
+                    )
+                    for page_id, _page_num, rev_id, storage_path, _, _, _, _ in page_snapshots
+                )
+            )
         )
 
         pages_dto: list[MicroStoryPageSummaryRead] = []
-        for idx, (cp, cr, matched_on_page, matched_indices, prov_id, fb_used) in enumerate(
-            committed_pages
-        ):
+        for idx, (
+            page_id,
+            page_num,
+            rev_id,
+            _storage_path,
+            matched_on_page,
+            matched_indices,
+            prov_id,
+            fb_used,
+        ) in enumerate(page_snapshots):
             p_text = story.pages[idx].text
             pages_dto.append(
                 MicroStoryPageSummaryRead(
-                    page_id=cp.Id,
-                    page_number=int(cp.PageNumber),
-                    revision_id=cr.Id,
+                    page_id=page_id,
+                    page_number=page_num,
+                    revision_id=rev_id,
                     text=p_text,
                     word_count=len(_PAGE_WORD_SPLIT_RE.findall(p_text)),
                     target_words_on_page=matched_on_page,
                     target_word_indices=matched_indices,
-                    image_url=private_page_image_url(
-                        book_id,
-                        cp.Id,
-                        revision_id=cr.Id,
-                        base_url=base_url,
-                        storage_path=cp.ImagePath,
-                        owner_id=actor_id,
-                    ),
+                    image_url=signed_urls[idx],
                     illustration_provider=prov_id,
                     illustration_fallback_used=fb_used,
                 )
@@ -1656,19 +1719,19 @@ class PersonalizedMicroStoryService:
 
         questions_dto = [
             MicroStoryComprehensionItemRead(
-                question_id=comp_rows[idx].Id,
+                question_id=question_ids[idx],
                 page_number=story.questions[idx].page_number,
                 prompt=story.questions[idx].prompt,
                 choices=list(story.questions[idx].choices),
                 correct_answer=story.questions[idx].correct_answer,
                 difficulty=story.questions[idx].difficulty,
             )
-            for idx in range(len(comp_rows))
+            for idx in range(len(question_ids))
         ]
 
         return MicroStoryGenerateResponse(
             book_id=book_id,
-            seeded_session_id=seeded_session.Id,
+            seeded_session_id=seeded_session_id,
             child_id=child_uuid,
             child_alias=child_alias,
             child_grade=child_grade,

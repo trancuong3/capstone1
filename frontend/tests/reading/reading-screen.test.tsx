@@ -3825,7 +3825,9 @@ describe("ReadingScreen presentation with typed test-local service responses", (
       await screen.findByRole("button", { name: "Dừng nghe thử" }),
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Nghe thử" })).toBeInTheDocument(),
+      expect(
+        screen.getByRole("button", { name: "Nghe thử" }),
+      ).toBeInTheDocument(),
     );
     expect(speechRecorderMock.start).not.toHaveBeenCalled();
   });

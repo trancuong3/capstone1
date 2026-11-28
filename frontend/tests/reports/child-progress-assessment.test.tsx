@@ -157,9 +157,12 @@ describe("AI progress assessment card", () => {
     expect(screen.getByText("+5 điểm so với kỳ trước")).toBeInTheDocument();
     expect(screen.getByText("76/100")).toBeInTheDocument();
     expect(screen.getByText("Chưa đủ dữ liệu")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /AI đang viết nhận xét/ }),
-    ).toBeDisabled();
+    const writingButton = screen.getByRole("button", {
+      name: /AI đang viết nhận xét/,
+    });
+    expect(writingButton).toBeDisabled();
+    // Button already renders a loading spinner; RefreshCw must not render a second SVG icon.
+    expect(writingButton.querySelectorAll("svg")).toHaveLength(1);
     expect(service.generate).toHaveBeenCalledWith(CHILD_ID, 30, {
       signal: expect.any(AbortSignal),
     });
@@ -167,9 +170,11 @@ describe("AI progress assessment card", () => {
     resolveAi(aiVersion());
     expect(await screen.findByText("AI: bé đang tiến bộ")).toBeInTheDocument();
     expect(screen.getByText("Nhận xét do AI viết")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Nhờ AI nhận xét lại" }),
-    ).toBeEnabled();
+    const refreshButton = screen.getByRole("button", {
+      name: "Nhờ AI nhận xét lại",
+    });
+    expect(refreshButton).toBeEnabled();
+    expect(refreshButton.querySelectorAll("svg")).toHaveLength(1);
   });
 
   it("shows weaknesses, what to do for parents and child, and practice words", async () => {
@@ -389,6 +394,35 @@ describe("AI progress assessment card", () => {
 
     view.unmount();
     expect(secondRefreshSignal?.aborted).toBe(true);
+  });
+
+  it("renders the weekly chart when short sessions round to 0 minutes", async () => {
+    setup({
+      get: vi.fn().mockResolvedValue({
+        ...aiVersion(),
+        weekly: [
+          {
+            week_start: "2026-10-11",
+            sessions: 0,
+            minutes: 0,
+            accuracy_pct: null,
+          },
+          {
+            week_start: "2026-10-18",
+            sessions: 1,
+            minutes: 0,
+            accuracy_pct: 91.6,
+          },
+        ],
+      }),
+      generate: vi.fn(),
+    });
+
+    expect(
+      await screen.findByText("Thời gian đọc theo tuần"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("92%")).toBeInTheDocument();
+    expect(screen.getAllByText("0p")).toHaveLength(2);
   });
 
   it("offers a retry when the scores cannot be loaded", async () => {

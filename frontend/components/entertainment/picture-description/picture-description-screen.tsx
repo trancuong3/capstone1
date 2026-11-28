@@ -69,6 +69,7 @@ import { useSpeechRecorder } from "@/hooks/use-speech-recorder";
 import { useTeacherPersona } from "@/hooks/use-teacher-persona";
 import { useValidatedSelectedChild } from "@/hooks/use-validated-selected-child";
 import { isServiceError } from "@/lib/api/service-error";
+import { createAdaptiveLearningService } from "@/lib/api/adaptive-learning-service";
 import {
   createSpeechService,
   type SpeechService,
@@ -89,6 +90,11 @@ import {
   releaseSessionVoiceLock,
 } from "@/lib/reading/session-voice-lock";
 import { adaptTextToTeacherPersona } from "@/lib/reading/voice-persona";
+import {
+  isConfirmedSilentVoiceCapture,
+  isServerSttConfirmedUnavailable,
+  refreshVoiceHealthQuietlyAfterSttFailure,
+} from "@/lib/reading/voice-capture-guard";
 import { preloadReadingVoiceEngines } from "@/lib/reading/voice-preloader";
 import { createCountdownSound } from "@/lib/karaoke/countdown-sound";
 import { cn } from "@/lib/utils/cn";
@@ -603,6 +609,37 @@ export function PictureDescriptionScreen({
 
   const activeNotebook =
     notebookData && notebookData.child_id === childId ? notebookData : null;
+  const [fetchedDueFocusWords, setFetchedDueFocusWords] = useState<string[]>(
+    [],
+  );
+  const [ephemeralFocusCleared, setEphemeralFocusCleared] = useState(false);
+
+  useEffect(() => {
+    if (!childId || urlFocusWords.length > 0) return;
+    const controller = new AbortController();
+    void createAdaptiveLearningService()
+      .getRecommendations(childId, teacherPersona.gender, {
+        signal: controller.signal,
+      })
+      .then((recs) => {
+        if (!controller.signal.aborted) {
+          setFetchedDueFocusWords(
+            (recs.focus_difficult_words ?? []).slice(0, 5),
+          );
+        }
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [childId, teacherPersona.gender, urlFocusWords.length]);
+
+  const effectiveDueFocusWords = useMemo(
+    () =>
+      (urlFocusWords.length > 0 ? urlFocusWords : fetchedDueFocusWords).slice(
+        0,
+        5,
+      ),
+    [fetchedDueFocusWords, urlFocusWords],
+  );
   const notebookBonusWords = useMemo(() => {
     if (!activeNotebook) return [];
     const raw = activeNotebook.storytelling_words?.length
@@ -612,11 +649,27 @@ export function PictureDescriptionScreen({
   }, [activeNotebook]);
   const combinedFocusWords = useMemo(
     () =>
-      Array.from(new Set([...urlFocusWords, ...notebookBonusWords])).slice(
-        0,
-        6,
-      ),
-    [notebookBonusWords, urlFocusWords],
+      Array.from(
+        new Set([...effectiveDueFocusWords, ...notebookBonusWords]),
+      ).slice(0, 6),
+    [effectiveDueFocusWords, notebookBonusWords],
+  );
+
+  const speakEphemeralFocusWord = useCallback(
+    (word: string) => {
+      if (!calmSound || !word.trim()) return;
+      speechPlayer.stop();
+      void speechPlayer
+        .play(word, {
+          ephemeral: true,
+          wordSample: true,
+          speedScale: 0.9,
+          bypassSessionLock: true,
+          utteranceKind: "word_sample",
+        })
+        .catch(() => undefined);
+    },
+    [calmSound, speechPlayer],
   );
 
   useEffect(() => {
@@ -1066,6 +1119,7 @@ export function PictureDescriptionScreen({
     requestControllerRef.current = controller;
 
     setActionError(null);
+    setEphemeralFocusCleared(false);
     setIsAnalyzing(true);
     try {
       const loaded = await pictureService.getSession(
@@ -1095,6 +1149,7 @@ export function PictureDescriptionScreen({
     requestControllerRef.current = controller;
 
     setActionError(null);
+    setEphemeralFocusCleared(false);
     setIsAnalyzing(true);
     try {
       const created = await pictureService.createSession(
@@ -1122,6 +1177,7 @@ export function PictureDescriptionScreen({
   };
 
   const handleStartSample = async (sample: PictureSampleItemDTO) => {
+    setEphemeralFocusCleared(false);
     const existing = sampleSessionMap.get(sample.sample_key);
     if (existing) {
       const targetTab: PracticeTab =
@@ -1145,6 +1201,7 @@ export function PictureDescriptionScreen({
     requestControllerRef.current = controller;
 
     setActionError(null);
+    setEphemeralFocusCleared(false);
     setIsAnalyzing(true);
     try {
       const created = await pictureService.createSession(
@@ -1441,12 +1498,30 @@ export function PictureDescriptionScreen({
       usingExternalNativeSttRef.current = false;
       const audioBlob = usedExternalNative ? null : await recorder.stop();
       if (isStaleCapture()) return;
+      const captureQuality = usedExternalNative
+        ? undefined
+        : recorder.getQuality?.();
+      const silentCapture = isConfirmedSilentVoiceCapture(captureQuality);
       const browserFallback = collapseDuplicateSpeech(
         collectorRef.current.getTranscript() || liveSnapshot,
       );
       let sttTranscript: string | null = null;
 
-      if (audioBlob && audioBlob.size > 0) {
+      if (silentCapture && !browserFallback) {
+        setVoiceMessage(
+          adaptTextToTeacherPersona(
+            t(
+              "pictureDescription.quietVoicePrompt",
+              undefined,
+              "Cô chưa nghe thấy tiếng bé nói. Bé hãy đưa micro gần hơn và nói to rõ hơn nhé!",
+            ),
+            getEffectiveTeacherPersona().gender,
+          ),
+        );
+        return;
+      }
+
+      if (audioBlob && audioBlob.size > 0 && !silentCapture) {
         const keyterms = session
           ? Array.from(
               new Set([
@@ -1459,17 +1534,22 @@ export function PictureDescriptionScreen({
               .filter(Boolean)
               .slice(0, 16)
           : [];
-        try {
-          const sttResult = await speechService.transcribe(audioBlob, {
-            languageCode: "vi",
-            keyterms,
-            signal: sttController.signal,
-          });
-          if (isStaleCapture()) return;
-          sttTranscript = sttResult.text?.trim() || null;
-        } catch {
-          if (isStaleCapture()) return;
-          sttTranscript = null;
+        if (!isServerSttConfirmedUnavailable()) {
+          try {
+            const sttResult = await speechService.transcribe(audioBlob, {
+              languageCode: "vi",
+              keyterms,
+              signal: sttController.signal,
+            });
+            if (isStaleCapture()) return;
+            sttTranscript = sttResult.text?.trim() || null;
+          } catch (sttError: unknown) {
+            if (isStaleCapture()) return;
+            if (isServiceError(sttError) && sttError.status === 503) {
+              refreshVoiceHealthQuietlyAfterSttFailure();
+            }
+            sttTranscript = null;
+          }
         }
         if (!sttTranscript && detectBrowserWasmSttSupport().supported) {
           try {
@@ -1818,6 +1898,7 @@ export function PictureDescriptionScreen({
                   sessionIdRef.current = null;
                   setShowHints(false);
                   setShowSampleSentences(false);
+                  setEphemeralFocusCleared(true);
                   setActiveFollowUpQuestion(null);
                   setPracticeTab("PRACTICE");
                   setSession(null);
@@ -2767,10 +2848,31 @@ export function PictureDescriptionScreen({
                       />
                     </>
                   ) : (
-                    <EmptyState
-                      description={t("pictureDescription.emptyBookPagesDesc")}
-                      title={t("pictureDescription.emptyBookPagesTitle")}
-                    />
+                    <div className="flex flex-col items-center gap-3">
+                      <EmptyState
+                        description={t("pictureDescription.emptyBookPagesDesc")}
+                        title={t("pictureDescription.emptyBookPagesTitle")}
+                      />
+                      {catalogState.catalog.samples.length > 0 ? (
+                        <Button
+                          className="sm:w-auto"
+                          data-testid="picture-empty-focus-bridge-cta"
+                          onClick={() => {
+                            setEphemeralFocusCleared(false);
+                            setActiveTab("SAMPLE");
+                            const firstSample = catalogState.catalog.samples[0];
+                            if (firstSample) {
+                              void handleCreateSampleSession(firstSample);
+                            }
+                          }}
+                          size="compact"
+                          type="button"
+                        >
+                          <Sparkles aria-hidden="true" className="size-4" />
+                          {t("pictureDescription.emptyBookPagesBridgeCta")}
+                        </Button>
+                      ) : null}
+                    </div>
                   )
                 ) : null}
               </div>
@@ -3076,6 +3178,53 @@ export function PictureDescriptionScreen({
                         ))}
                       </div>
                     ) : null}
+                  </section>
+                ) : null}
+
+                {effectiveDueFocusWords.length > 0 && !ephemeralFocusCleared ? (
+                  <section
+                    className="rounded-card border-2 border-amber-300 bg-gradient-to-r from-amber-50 via-white to-sky/50 p-4 shadow-2xs"
+                    data-testid="picture-ephemeral-focus-bar"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="flex items-center gap-1.5 text-sm font-extrabold text-amber-950">
+                        <Sparkles
+                          aria-hidden="true"
+                          className="size-4 text-amber-600"
+                        />
+                        {t("pictureDescription.ephemeralFocusBarTitle")}
+                      </p>
+                      <button
+                        className="text-xs font-bold text-muted underline hover:text-ink"
+                        data-testid="picture-ephemeral-focus-dismiss"
+                        onClick={() => setEphemeralFocusCleared(true)}
+                        type="button"
+                      >
+                        {t("hub.onboardingClose")}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs font-semibold text-muted">
+                      {t("pictureDescription.ephemeralFocusBarHint")}
+                    </p>
+                    <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                      {effectiveDueFocusWords.map((word) => (
+                        <button
+                          className="viread-learning-content inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-full border border-amber-300 bg-white px-3.5 py-1 text-xs font-extrabold text-amber-950 shadow-2xs transition hover:border-primary hover:bg-amber-100"
+                          data-testid={`picture-ephemeral-word-${word}`}
+                          dir="ltr"
+                          key={word}
+                          lang="vi"
+                          onClick={() => speakEphemeralFocusWord(word)}
+                          type="button"
+                        >
+                          <Volume2
+                            aria-hidden="true"
+                            className="size-3.5 text-amber-700"
+                          />
+                          ⭐ {word}
+                        </button>
+                      ))}
+                    </div>
                   </section>
                 ) : null}
 

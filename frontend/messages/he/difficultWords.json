@@ -172,5 +172,25 @@
   "runtime": {
     "practiceOpened": "נפתח תרגול מס׳ #{attempt} למילה \"{word}\".",
     "unknownBookSource": "מקור הספר לא צוין"
+  },
+  "minimalPairSandbox": {
+    "eyebrow": "חימום פונטי של 60 שניות",
+    "title": "מעבדת זוגות מינימליים ומראת טונים",
+    "subtitle": "מסייע ל-{alias} להבחין בין טונים וצלילים דומים בקריאה.",
+    "openButton": "פתיחת תרגול 60 שניות",
+    "collapseButton": "צמצום",
+    "unavailableHint": "לא ניתן לטעון כעת את תרגילי הזוגות המינימליים.",
+    "pairCounter": "זוג {current}/{total}",
+    "listenWord": "האזנה",
+    "speakWord": "ניסיון קריאה",
+    "listening": "מקשיב...",
+    "spokenMatch": "נהדר! הגייה ברורה ומדויקת של מילת היעד!",
+    "spokenContrast": "נשמע קרוב ל-\"{heard}\" — האזינו לדוגמה ונסו לאט!",
+    "spokenRetry": "עדיין לא נשמע בבירור. התקרבו למיקרופון וקראו לאט!",
+    "earChallengeButton": "חידון שמיעה",
+    "earCorrect": "נכון מאוד! שמיעה מצוינת!",
+    "earRetry": "כמעט! האזינו שוב ונסו!",
+    "nextPairButton": "הזוג הבא",
+    "nonClinicalDisclaimer": "תרגול תומך קריאה על בסיס זיהוי דיבור אוטומטי (אינו אבחון רפואי או קלינאות תקשורת)."
   }
 }

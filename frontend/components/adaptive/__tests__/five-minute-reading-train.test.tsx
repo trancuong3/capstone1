@@ -129,12 +129,17 @@ function createMockAdaptiveService(
       return response;
     });
 
-  const service: AdaptiveLearningService = {
+  const service = {
     getRecommendations: vi.fn(),
     getParentAnalytics: vi.fn(),
     getDailyFiveMinuteTrain,
     completeDailyFiveMinuteTrain,
-  };
+    getWarmupStory: vi.fn(),
+    createMagicWordQuest: vi.fn(),
+    completeMagicWordQuest: vi.fn(),
+    createMagicRhythmChant: vi.fn(),
+    completeMagicRhythmChant: vi.fn(),
+  } satisfies Partial<AdaptiveLearningService> as AdaptiveLearningService;
   return { service, getDailyFiveMinuteTrain, completeDailyFiveMinuteTrain };
 }
 

@@ -333,4 +333,140 @@ describe("CreateMicroStoryModal", () => {
       expect(screen.getByTestId("generate-micro-story-submit")).toBeDisabled();
     });
   });
+
+  it("displays child-safety message when 422 CHILD_SAFETY_REJECTED is returned", async () => {
+    const safetyMessage =
+      "Từ ngữ hoặc chủ đề gợi ý chưa phù hợp với tiêu chuẩn an toàn trẻ em tiểu học. Ba mẹ vui lòng chỉnh lại nhé.";
+    const service: MicroStoryService = {
+      getQuota: vi.fn(),
+      previewWords: vi.fn().mockResolvedValue(makePreviewPayload()),
+      generateStory: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new ServiceError({
+            code: "VALIDATION_ERROR",
+            message: safetyMessage,
+            status: 422,
+            request_id: "req-422-safety",
+            retryable: false,
+          }),
+        )
+        .mockRejectedValueOnce(
+          new ServiceError({
+            code: "VALIDATION_ERROR",
+            message: "Có lỗi xảy ra. Vui lòng thử lại sau.",
+            status: 422,
+            request_id: "req-422-generic",
+            retryable: false,
+          }),
+        ),
+    };
+
+    render(
+      <CreateMicroStoryModal
+        child={SAMPLE_CHILD}
+        isOpen
+        onClose={vi.fn()}
+        service={service}
+      />,
+    );
+
+    const submitBtn = await screen.findByTestId("generate-micro-story-submit");
+    fireEvent.click(submitBtn);
+
+    expect(await screen.findByText(safetyMessage)).toBeInTheDocument();
+
+    // Generic 422 message falls back to localized errorSafetyRejected
+    fireEvent.click(screen.getByTestId("generate-micro-story-submit"));
+    await waitFor(() => {
+      expect(service.generateStory).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText(safetyMessage)).toBeInTheDocument();
+  });
+
+  it("submits custom word and theme hint cleanly and syncs when child prop changes", async () => {
+    const secondChild: ChildProfileDTO = {
+      ...SAMPLE_CHILD,
+      id: "child-minh-2",
+      alias: "Bé Minh",
+      grade: 3,
+    };
+
+    const previewWords = vi
+      .fn()
+      .mockResolvedValueOnce(makePreviewPayload())
+      .mockResolvedValueOnce(
+        makePreviewPayload({
+          child_id: secondChild.id,
+          child_alias: secondChild.alias,
+          child_grade: secondChild.grade,
+        }),
+      );
+
+    const generateStory = vi.fn().mockResolvedValue(makeCreatedResponse());
+    const service: MicroStoryService = {
+      getQuota: vi.fn(),
+      previewWords,
+      generateStory,
+    };
+
+    const { rerender } = render(
+      <CreateMicroStoryModal
+        child={SAMPLE_CHILD}
+        childrenProfiles={[SAMPLE_CHILD, secondChild]}
+        isOpen
+        onClose={vi.fn()}
+        service={service}
+      />,
+    );
+
+    await screen.findByTestId("micro-story-quota-badge");
+
+    // Switching explicit child prop updates active child & triggers new preview
+    rerender(
+      <CreateMicroStoryModal
+        child={secondChild}
+        childrenProfiles={[SAMPLE_CHILD, secondChild]}
+        isOpen
+        onClose={vi.fn()}
+        service={service}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(previewWords).toHaveBeenCalledWith(
+        secondChild.id,
+        expect.any(AbortSignal),
+      );
+    });
+
+    // Add a custom word (replaces last default when 5 words would be exceeded -> stays <= 5)
+    const customInput = screen.getByLabelText(/Thêm từ muốn bé luyện đọc/i);
+    fireEvent.change(customInput, { target: { value: "óng ánh" } });
+    fireEvent.click(screen.getByRole("button", { name: /Thêm từ/i }));
+
+    const themeInput = screen.getByLabelText(/Chủ đề câu chuyện yêu thích/i);
+    fireEvent.change(themeInput, {
+      target: { value: "  Buổi sáng bên hồ sen  " },
+    });
+
+    fireEvent.click(screen.getByTestId("generate-micro-story-submit"));
+
+    await waitFor(() => {
+      expect(generateStory).toHaveBeenCalledWith(secondChild.id, {
+        selected_words: [
+          "lung linh",
+          "xinh xắn",
+          "rộn ràng",
+          "chim sẻ",
+          "óng ánh",
+        ],
+        theme_hint: "Buổi sáng bên hồ sen",
+      });
+    });
+
+    expect(
+      await screen.findByTestId("open-created-micro-story-link"),
+    ).toBeInTheDocument();
+  });
 });
